@@ -76,6 +76,7 @@ def gemm_spec(
     wave_size,
     cshuffle_no_alias=False,
     dtype="fp16",
+    c_dtype=None,
     **trait,
 ):
     from rocke.instances.common.gemm_universal import (
@@ -108,7 +109,7 @@ def gemm_spec(
         data=(
             DataSpec("fp64", "fp64", "fp64", "fp64")
             if dtype == "fp64"
-            else DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16")
+            else DataSpec(dtype_a=dtype, dtype_b=dtype, dtype_c=c_dtype or dtype)
         ),
         wave_size=wave_size,
     )
@@ -2064,6 +2065,77 @@ def cases():
                 lds_swizzle=True,
                 lds_db_allow_1wg=True,
                 lds_store_after_mma=True,
+                group_m=4,
+                k_stagger=8,
+                k_stagger_step=4,
+                pad_m=False,
+                pad_n=False,
+                pad_k=False,
+            ),
+        )
+    # Prepared global reads: the two-path kernel and the full-width one.
+    for addressing in ("auto", "global64"):
+        tag = f"t128x128x32_compv4_swz_addr_{addressing}"
+        add(
+            "gemm",
+            f"gemm/gfx1201/{tag}",
+            "gfx1201",
+            build_gemm(
+                f"irhash_gemm_1201_{tag}",
+                "gfx1201",
+                128,
+                128,
+                32,
+                2,
+                2,
+                16,
+                16,
+                16,
+                "compv4",
+                "default",
+                32,
+                lds_swizzle=True,
+                lds_store_after_mma=True,
+                group_m=4,
+                k_stagger=8,
+                k_stagger_step=4,
+                global_addressing=addressing,
+                pad_m=False,
+                pad_n=False,
+                pad_k=False,
+            ),
+        )
+    # The direct-A pipeline: with and without B read-ahead, the one-K-atom
+    # tile, BF16 inputs and the unrounded FP32 output.
+    for tm, tn, tk, wm, dtype, c_dtype in (
+        (128, 64, 64, 4, "fp16", None),
+        (128, 96, 64, 4, "fp16", None),
+        (64, 32, 16, 2, "fp16", None),
+        (128, 64, 64, 4, "bf16", None),
+        (128, 64, 64, 4, "bf16", "fp32"),
+    ):
+        tag = f"t{tm}x{tn}x{tk}_direct_a_{dtype}" + (f"_c{c_dtype}" if c_dtype else "")
+        add(
+            "gemm",
+            f"gemm/gfx1201/{tag}",
+            "gfx1201",
+            build_gemm(
+                f"irhash_gemm_1201_{tag}",
+                "gfx1201",
+                tm,
+                tn,
+                tk,
+                wm,
+                1,
+                16,
+                16,
+                16,
+                "direct_a",
+                "default",
+                32,
+                dtype=dtype,
+                c_dtype=c_dtype,
+                lds_swizzle=True,
                 group_m=4,
                 k_stagger=8,
                 k_stagger_step=4,

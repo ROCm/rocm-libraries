@@ -223,18 +223,55 @@ class TestGfx1201Compv4Dispatch(unittest.TestCase):
     def _pick(self, shape, **selectors):
         return dispatch_gemm_fp16(GemmRequest(*shape, arch="gfx1201", **selectors))
 
+    def test_direct_a_classes_choose_their_tiles(self):
+        cases = (
+            ((512, 512, 512), "gfx1201_direct_a_small", (64, 64, 64), 4),
+            ((8192, 128, 2048), "gfx1201_direct_a_tall", (128, 64, 64), 8),
+            ((2048, 6144, 2560), "gfx1201_direct_a_wide96", (128, 96, 64), 4),
+            ((768, 1536, 2048), "gfx1201_direct_a_wide96", (128, 96, 64), 4),
+            ((4096, 4096, 4096), "gfx1201_direct_a_default", (128, 64, 64), 4),
+            ((128, 8192, 2048), "gfx1201_direct_a_default", (128, 64, 64), 4),
+        )
+        for shape, spec_id, tile, group in cases:
+            with self.subTest(shape=shape):
+                result = self._pick(shape)
+                spec = result.spec
+                self.assertEqual(result.candidate.spec_id, spec_id)
+                self.assertEqual(
+                    (spec.tile.tile_m, spec.tile.tile_n, spec.tile.tile_k), tile
+                )
+                self.assertEqual(spec.trait.group_m, group)
+                self.assertEqual(is_valid_spec(spec, "gfx1201"), (True, "ok"))
+
+    def test_direct_a_takes_partial_m_and_n_tiles(self):
+        for shape, grid in (
+            ((1000, 1000, 1024), (16, 8, 1)),
+            ((3000, 1500, 2048), (24, 24, 1)),
+        ):
+            with self.subTest(shape=shape):
+                result = self._pick(shape)
+                self.assertEqual(result.spec.trait.pipeline, "direct_a")
+                self.assertEqual(tuple(result.grid), grid)
+
+    def test_direct_a_refuses_what_it_measured_slower_or_cannot_address(self):
+        # Short K loops, 16 KiB row strides, the smallest outputs, K that is
+        # not whole 64-wide tiles, and a C span of 2 GiB or more.
+        for shape in (
+            (1024, 1024, 128),
+            (2048, 2048, 8192),
+            (256, 256, 1024),
+            (2048, 2048, 1040),
+            (46336, 46336, 256),
+        ):
+            with self.subTest(shape=shape):
+                self.assertEqual(self._pick(shape).spec.trait.pipeline, "compv4")
+
     def test_output_bands_and_reduction_bands_choose_legal_tiles(self):
         cases = (
-            ((128, 6144, 1024), (64, 64, 64), False, 4, 8),
-            ((128, 6272, 1024), (128, 128, 64), True, 8, 0),
-            ((1024, 1024, 512), (128, 128, 64), True, 4, 8),
-            ((1024, 1024, 1024), (128, 128, 64), True, 8, 0),
-            ((128, 8192, 2048), (128, 128, 64), True, 4, 8),
-            ((1152, 1024, 1024), (128, 128, 32), False, 4, 8),
-            ((2048, 2560, 6144), (256, 128, 32), True, 4, 8),
-            ((2048, 6144, 2560), (128, 256, 32), True, 8, 0),
-            ((2304, 2304, 2048), (128, 128, 32), False, 4, 8),
-            ((4096, 4096, 4096), (128, 128, 32), False, 4, 8),
+            ((128, 6144, 128), (64, 64, 64), False, 4, 8),
+            ((1024, 1024, 192), (128, 128, 64), True, 4, 8),
+            ((1152, 1024, 192), (128, 128, 32), False, 4, 8),
+            ((4096, 4096, 8192), (128, 128, 64), True, 8, 0),
         )
         for shape, tile, one_wg, group, stagger in cases:
             with self.subTest(shape=shape):
@@ -269,11 +306,33 @@ class TestGfx1201Compv4Dispatch(unittest.TestCase):
                 self.assertEqual(is_valid_spec(spec, "gfx1201"), (True, "ok"))
 
     def test_long_row_stride_band_does_not_include_neighboring_k(self):
-        for k, tile in ((8128, 128), (8192, 64), (8256, 128), (16384, 64)):
+        # A 16 KiB row stride takes the K-64 LDS tile; its neighbours stay direct.
+        for k, pipeline in (
+            (8128, "direct_a"),
+            (8192, "compv4"),
+            (8256, "direct_a"),
+            (16384, "compv4"),
+        ):
             with self.subTest(k=k):
                 spec = self._pick((2048, 2048, k)).spec
-                self.assertEqual(spec.tile.tile_m, tile)
+                self.assertEqual(spec.trait.pipeline, pipeline)
+                self.assertEqual(spec.tile.tile_k, 64)
                 self.assertEqual(is_valid_spec(spec, "gfx1201"), (True, "ok"))
+
+    def test_long_row_stride_never_takes_a_k32_tile(self):
+        for shape, spec_id in (
+            ((4096, 4096, 8192), "gfx1201_compv4_long_stride"),
+            ((1024, 1024, 8192), "gfx1201_compv4_long_stride_medium"),
+            ((1024, 1088, 16384), "gfx1201_compv4_long_stride_small_grouped"),
+            ((576, 576, 8192), "gfx1201_compv4_long_stride_small_grouped"),
+            ((512, 512, 8192), "gfx1201_compv4_long_stride_small"),
+            ((192, 192, 8192), "gfx1201_compv4_long_stride_small"),
+        ):
+            with self.subTest(shape=shape):
+                result = self._pick(shape)
+                self.assertEqual(result.candidate.spec_id, spec_id)
+                self.assertEqual(result.spec.trait.pipeline, "compv4")
+                self.assertEqual(result.spec.tile.tile_k, 64)
 
     def test_one_step_reductions_keep_legacy_selection(self):
         for shape, pin in (
@@ -298,13 +357,54 @@ class TestGfx1201Compv4Dispatch(unittest.TestCase):
                 self.assertEqual(spec.trait.pipeline, "mem")
                 self.assertFalse(spec.trait.lds_db_allow_1wg)
 
+    def test_pinning_the_selected_candidate_reproduces_its_kernel(self):
+        """A replay or sweep that pins the candidate auto dispatch chose must
+        build the same kernel, prepared-read addressing included."""
+        for shape in ((512, 512, 512), (1024, 1024, 192), (2048, 6144, 2560)):
+            with self.subTest(shape=shape):
+                auto = self._pick(shape)
+                pinned = self._pick(
+                    shape,
+                    algorithm=auto.candidate.algorithm,
+                    spec_id=auto.candidate.spec_id,
+                )
+                self.assertEqual(pinned.kernel_id.spec_hash, auto.kernel_id.spec_hash)
+
+    def test_candidates_measured_slower_with_prepared_reads_keep_legacy(self):
+        for shape, spec_id in (
+            ((2048, 2048, 1040), "gfx1201_compv4_k16"),
+            ((1024, 1024, 32), "gfx1201_compv4_short_k32"),
+        ):
+            with self.subTest(shape=shape):
+                picked = self._pick(shape)
+                self.assertEqual(picked.candidate.spec_id, spec_id)
+                self.assertEqual(picked.spec.trait.global_addressing, "legacy")
+
     def test_pin_cannot_bypass_shape_or_dtype_constraints(self):
         with self.assertRaises(ValueError):
             self._pick((512, 512, 512), spec_id="gfx1201_compv4_medium")
         with self.assertRaises(ValueError):
             self._pick((1024, 1024, 1024), dtype="bf16")
         with self.assertRaises(ValueError):
-            self._pick((130, 128, 32))
+            self._pick((130, 128, 24))
+
+    def test_m_and_n_no_tile_divides_still_dispatch(self):
+        for shape, spec_id, grid in (
+            ((300, 400, 640), "gfx1201_direct_a_any", (7, 5, 1)),
+            ((130, 128, 32), "gfx1201_direct_a_any_k16", (4, 3, 1)),
+            ((77, 33, 16), "gfx1201_direct_a_any_k16", (2, 2, 1)),
+        ):
+            with self.subTest(shape=shape):
+                result = self._pick(shape)
+                self.assertEqual(result.candidate.spec_id, spec_id)
+                self.assertEqual(tuple(result.grid), grid)
+                self.assertEqual(is_valid_spec(result.spec, "gfx1201"), (True, "ok"))
+
+    def test_last_resort_does_not_displace_a_tile_that_divides(self):
+        self.assertEqual(self._pick((96, 96, 16)).candidate.spec_id, "rdna_wmma_32x32")
+        self.assertEqual(
+            self._pick((256, 256, 1024)).candidate.spec_id, "gfx1201_compv4_small"
+        )
 
     def test_other_targets_and_bf16_keep_their_selections(self):
         from rocke.dispatch import dispatch_gemm_bf16
@@ -317,10 +417,18 @@ class TestGfx1201Compv4Dispatch(unittest.TestCase):
             with self.subTest(arch=arch):
                 result = dispatch_gemm_fp16(GemmRequest(512, 512, 512, arch=arch))
                 self.assertEqual(result.candidate.spec_id, expected)
-        result = dispatch_gemm_bf16(
-            GemmRequest(512, 512, 512, arch="gfx1201", dtype="bf16")
-        )
-        self.assertEqual(result.candidate.spec_id, "rdna_wmma_default")
+        # BF16 on gfx1201 has no compv4 palette: direct-A classes, else mem.
+        for shape, expected in (
+            ((512, 512, 512), "gfx1201_direct_a_small"),
+            ((128, 128, 64), "rdna_wmma_default"),
+            ((2048, 2048, 8192), "rdna_wmma_default"),
+        ):
+            with self.subTest(bf16=shape):
+                result = dispatch_gemm_bf16(
+                    GemmRequest(*shape, arch="gfx1201", dtype="bf16")
+                )
+                self.assertEqual(result.candidate.spec_id, expected)
+                self.assertEqual(result.spec.data.dtype_a, "bf16")
         for candidate in gemm_fp16_candidates():
             if not candidate.spec_id.startswith("gfx1201_compv4"):
                 continue

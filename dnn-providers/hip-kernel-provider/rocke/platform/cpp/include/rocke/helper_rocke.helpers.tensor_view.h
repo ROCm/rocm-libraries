@@ -140,6 +140,13 @@ rocke_value_t* rocke_tensor_descriptor_offset(rocke_ir_builder_t* b,
                                               rocke_value_t* const* indices,
                                               int num_indices);
 
+/* Signed full-width element offset; extends operands BEFORE multiply/add.
+ * Existing descriptor layout and rocke_tensor_descriptor_offset are unchanged. */
+rocke_value_t* rocke_tensor_descriptor_offset_i64(rocke_ir_builder_t* b,
+                                                  const rocke_tensor_descriptor_t* d,
+                                                  rocke_value_t* const* indices,
+                                                  int num_indices);
+
 /* ------------------------------------------------------------- BufferResource */
 
 /* Python ``BufferResource``: an AMDGPU 128-bit buffer-resource descriptor used

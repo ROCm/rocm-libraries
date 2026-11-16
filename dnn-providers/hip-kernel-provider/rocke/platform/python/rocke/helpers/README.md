@@ -200,6 +200,42 @@ silent OOB read/write — no software masking needed. The
 `BufferResource` and raises `TypeError` when the view is not in
 buffer space.
 
+#### Prepared global reads (`rocke.helpers.global_read`)
+
+For a loop that reads complete, in-bounds vectors from global tensors at a
+fixed per-lane coordinate plus a moving one (a GEMM K loop, a sliding window).
+Describe each input's real extents, emit the loop body through
+`emit_global_read_paths`, bind the invariant coordinate once, and load at
+coordinate deltas inside the loop:
+
+```python
+view = make_global_view(A, shape=(1, 1), dtype=F16, strides=(K, 1))
+
+def body(plans):
+    cursor = plans[0].bind(b, (row, col))        # outside the loop
+    with b.scf_for(zero, K, step) as k:
+        vec = cursor.load_vec(b, (zero, k), n=8)  # inside it
+
+emit_global_read_paths(b, [GlobalReadSpec(view, (M, K))], body)
+```
+
+| API | Purpose |
+| --- | --- |
+| `GlobalReadSpec(view, extents)` | A global `TensorView` plus the extents actually read (ints or SSA values) |
+| `emit_global_read_paths(b, specs, body, addressing="auto")` | Emits `body(plans)` once per addressing path |
+| `GlobalReadPlan.bind(b, indices)` | Caches the invariant address of one lane/vector |
+| `GlobalReadCursor.load_vec(b, deltas, n)` / `load_scalar(b, deltas)` | Load at descriptor-coordinate deltas from the bound coordinate |
+| `TensorDescriptor.offset_i64(b, indices)` | Flat element offset with operands widened before every product |
+
+`addressing="auto"` picks bounded buffer loads when every input's byte span
+fits a signed 32-bit offset and all of its metadata is provably the same for
+the whole workgroup; otherwise it uses full-width global addressing. The choice
+is one workgroup-uniform branch around the whole body, never a branch per load,
+so `body` is emitted twice and must not declare kernel parameters or allocate
+LDS. `addressing="global64"` emits the full-width path alone. There is no
+forced buffer mode. This is not a masking API: for padded or out-of-range
+reads use the buffer views above.
+
 CK Tile parity (which C++ name maps to which Python helper):
 
 | CK Tile C++ | DSL helper |

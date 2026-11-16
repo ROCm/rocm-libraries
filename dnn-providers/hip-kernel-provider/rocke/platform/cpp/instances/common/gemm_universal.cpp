@@ -22,6 +22,8 @@
 #include <stdio.h> /* snprintf (C++ build: not pulled in transitively) */
 #include <stdlib.h>
 #include <string.h>
+#include <string>
+#include <vector>
 
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/instance_gemm_universal.h"
@@ -811,6 +813,7 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
                                              c_per_lane,
                                              NULL,
                                              NULL,
+                                             false,
                                              false);
         }
         rocke_b_region_leave(b);
@@ -949,6 +952,7 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
                                              c_per_lane,
                                              NULL,
                                              NULL,
+                                             false,
                                              false);
         }
         rocke_b_region_leave(b);
@@ -956,6 +960,554 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
 
     rocke_b_ret(b);
     return b->kernel;
+}
+
+/* ===================================================================== *
+ *  rocke_build_direct_a_gemm -- port of gemm_direct_a.py ::
+ *  build_direct_a_gemm. Every statement is in the Python's emission order;
+ *  nested Python calls are bound to temporaries so C++ argument evaluation
+ *  order cannot reorder the SSA ids.
+ * ===================================================================== */
+typedef struct rocke_direct_a_ctx
+{
+    rocke_ir_builder_t* b;
+    const rocke_gemm_universal_spec_t* spec;
+    const rocke_mmaop_t* op;
+    int mm, nn, nk, slots;
+    bool local_prefetch;
+    bool c_f32;
+    const rocke_type_t* ab_type;
+    const rocke_type_t* c_type;
+    rocke_value_t *zero, *two, *c_bytes, *M, *N, *K;
+    rocke_value_t *a_rsrc, *b_rsrc, *c_rsrc, *b_smem;
+    rocke_value_t *b_k, *b_col, *stagger, *oob;
+    std::vector<rocke_value_t*> a_base, b_base, b_dest_row, b_dest_col;
+} rocke_direct_a_ctx_t;
+
+static rocke_value_t*
+    rocke_direct_a_swizzle(rocke_direct_a_ctx_t* c, rocke_value_t* col, rocke_value_t* row)
+{
+    rocke_ir_builder_t* b = c->b;
+    if(!c->spec->trait.lds_swizzle)
+    {
+        return col;
+    }
+    rocke_value_t* c_slots = rocke_b_const_i32(b, c->slots);
+    rocke_value_t* slot = rocke_b_mod(b, row, c_slots);
+    rocke_value_t* c3 = rocke_b_const_i32(b, 3);
+    rocke_value_t* shifted = rocke_b_shl(b, slot, c3);
+    return rocke_b_xor(b, col, shifted);
+}
+
+static rocke_value_t* rocke_direct_a_k_tile(rocke_direct_a_ctx_t* c, rocke_value_t* k)
+{
+    rocke_ir_builder_t* b = c->b;
+    if(c->stagger == NULL)
+    {
+        return k;
+    }
+    rocke_value_t* shifted = rocke_b_add(b, k, c->stagger);
+    rocke_value_t* wraps = rocke_b_cmp_ge(b, shifted, c->K);
+    rocke_value_t* wrapped = rocke_b_sub(b, shifted, c->K);
+    return rocke_b_select(b, wraps, wrapped, shifted);
+}
+
+static std::vector<rocke_value_t*> rocke_direct_a_load(rocke_direct_a_ctx_t* c,
+                                                       rocke_value_t* rsrc,
+                                                       const std::vector<rocke_value_t*>& bases,
+                                                       rocke_value_t* k)
+{
+    rocke_ir_builder_t* b = c->b;
+    std::vector<rocke_value_t*> out;
+    rocke_value_t* k_bytes = rocke_b_mul(b, k, c->two);
+    for(rocke_value_t* base : bases)
+    {
+        out.push_back(rocke_b_buffer_load_vN(b, rsrc, base, k_bytes, c->ab_type, 8));
+    }
+    return out;
+}
+
+static void rocke_direct_a_store_b(rocke_direct_a_ctx_t* c,
+                                   const std::vector<rocke_value_t*>& values)
+{
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        rocke_value_t* indices[2] = {c->b_dest_row[i], c->b_dest_col[i]};
+        rocke_b_smem_store_vN(c->b, c->b_smem, indices, 2, values[i], 8);
+    }
+}
+
+static std::vector<rocke_value_t*> rocke_direct_a_read_b(rocke_direct_a_ctx_t* c, int kk)
+{
+    rocke_ir_builder_t* b = c->b;
+    const rocke_gemm_tile_spec_t* t = &c->spec->tile;
+    std::vector<rocke_value_t*> out;
+    for(int ni = 0; ni < c->nn; ++ni)
+    {
+        rocke_value_t* c_row = rocke_b_const_i32(b, ni * t->warp_tile_n);
+        rocke_value_t* row = rocke_b_add(b, c_row, c->b_col);
+        rocke_value_t* c_k = rocke_b_const_i32(b, kk * t->warp_tile_k);
+        rocke_value_t* k = rocke_b_add(b, c->b_k, c_k);
+        rocke_value_t* col = rocke_direct_a_swizzle(c, k, row);
+        rocke_value_t* indices[2] = {row, col};
+        out.push_back(rocke_b_smem_load_vN(b, c->b_smem, indices, 2, c->ab_type, 8));
+    }
+    return out;
+}
+
+/* compute(a_fragments, accs, overwrite): `pending` non-NULL is the Python
+ * overwrite callback (sync, then store the next B tile). */
+static std::vector<rocke_value_t*>
+    rocke_direct_a_compute(rocke_direct_a_ctx_t* c,
+                           rocke_value_t* const* a_fragments,
+                           rocke_value_t* const* accs,
+                           const std::vector<rocke_value_t*>* pending)
+{
+    rocke_ir_builder_t* b = c->b;
+    std::vector<rocke_value_t*> out(accs, accs + c->mm * c->nn);
+    std::vector<rocke_value_t*> current, following;
+    if(c->local_prefetch)
+    {
+        current = rocke_direct_a_read_b(c, 0);
+    }
+    for(int kk = 0; kk < c->nk; ++kk)
+    {
+        std::vector<rocke_value_t*> bb = c->local_prefetch ? current : rocke_direct_a_read_b(c, kk);
+        following.clear();
+        if(c->local_prefetch && kk + 1 < c->nk)
+        {
+            following = rocke_direct_a_read_b(c, kk + 1);
+            rocke_b_sched_barrier(b, 0);
+        }
+        if(pending != NULL && kk == c->nk - 1)
+        {
+            rocke_b_sched_barrier(b, 0);
+            rocke_b_sync_fence(b, "compiler");
+            rocke_direct_a_store_b(c, *pending);
+            rocke_b_sched_barrier(b, 0);
+        }
+        for(int mi = 0; mi < c->mm; ++mi)
+        {
+            for(int ni = 0; ni < c->nn; ++ni)
+            {
+                const int index = mi * c->nn + ni;
+                out[index] = rocke_gemm_emit_mma(
+                    b, c->op, a_fragments[kk * c->mm + mi], bb[ni], out[index]);
+            }
+        }
+        if(c->local_prefetch)
+        {
+            rocke_b_sched_barrier(b, 0);
+            current = following;
+        }
+    }
+    return out;
+}
+
+/* The accumulator scatter: each slot's (row, col) comes from the op's C
+ * layout; a cell outside C gets an out-of-range byte offset, which the buffer
+ * store drops. */
+static void rocke_direct_a_scatter(rocke_direct_a_ctx_t* c,
+                                   rocke_value_t* lane,
+                                   const std::vector<rocke_value_t*>& result,
+                                   rocke_value_t* m_base,
+                                   rocke_value_t* block_n,
+                                   int c_len)
+{
+    rocke_ir_builder_t* b = c->b;
+    const rocke_gemm_tile_spec_t* t = &c->spec->tile;
+    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(c->op, b);
+    const bool bf16 = c->c_type == rocke_bf16();
+    int flat = 0;
+    for(int mi = 0; mi < c->mm; ++mi)
+    {
+        rocke_value_t* c_mi = rocke_b_const_i32(b, mi * t->warp_tile_m);
+        rocke_value_t* atom_m = rocke_b_add(b, m_base, c_mi);
+        for(int ni = 0; ni < c->nn; ++ni)
+        {
+            rocke_value_t* acc = result[(size_t)flat++];
+            rocke_value_t* c_ni = rocke_b_const_i32(b, ni * t->warp_tile_n);
+            rocke_value_t* atom_n = rocke_b_add(b, block_n, c_ni);
+            rocke_value_t* values = c->c_f32 ? acc : rocke_b_vec_cast_f32_to(b, acc, c->c_type);
+            for(int slot = 0; slot < c_len; ++slot)
+            {
+                rocke_value_t *row_in_atom, *col_in_atom;
+                rocke_arch_layout_map_coord(c_map, b, lane, slot, &row_in_atom, &col_in_atom);
+                rocke_value_t* row = rocke_b_add(b, atom_m, row_in_atom);
+                rocke_value_t* col = rocke_b_add(b, atom_n, col_in_atom);
+                rocke_value_t* row_in = rocke_b_cmp_lt(b, row, c->M);
+                rocke_value_t* col_in = rocke_b_cmp_lt(b, col, c->N);
+                rocke_value_t* inside = rocke_b_land(b, row_in, col_in);
+                rocke_value_t* row_off = rocke_b_mul(b, row, c->N);
+                rocke_value_t* elem = rocke_b_add(b, row_off, col);
+                rocke_value_t* offset = rocke_b_mul(b, elem, c->c_bytes);
+                rocke_value_t* voffset = rocke_b_select(b, inside, offset, c->oob);
+                rocke_value_t* value = rocke_b_vec_extract(b, values, slot);
+                if(c->c_f32)
+                {
+                    rocke_b_buffer_store_f32(b, c->c_rsrc, voffset, c->zero, value);
+                }
+                else if(bf16)
+                {
+                    rocke_b_buffer_store_bf16(b, c->c_rsrc, voffset, c->zero, value);
+                }
+                else
+                {
+                    rocke_b_buffer_store_f16(b, c->c_rsrc, voffset, c->zero, value);
+                }
+            }
+        }
+    }
+}
+
+/* step(progress, a_current, accs): one K tile -- fetch the next tile, then
+ * compute the current one. */
+static void rocke_direct_a_step(rocke_direct_a_ctx_t* c,
+                                rocke_value_t* bk,
+                                rocke_value_t* progress,
+                                rocke_value_t* const* a_current,
+                                rocke_value_t* const* accs,
+                                std::vector<rocke_value_t*>* next_a,
+                                std::vector<rocke_value_t*>* updated)
+{
+    rocke_ir_builder_t* b = c->b;
+    rocke_value_t* next_progress = rocke_b_add(b, progress, bk);
+    rocke_value_t* next_k = rocke_direct_a_k_tile(c, next_progress);
+    /* Publish this tile's B before any wave reads it. */
+    rocke_b_sync_fence(b, "compiler");
+    *next_a = rocke_direct_a_load(c, c->a_rsrc, c->a_base, next_k);
+    std::vector<rocke_value_t*> pending = rocke_direct_a_load(c, c->b_rsrc, c->b_base, next_k);
+    rocke_b_sched_barrier(b, 0);
+    *updated = rocke_direct_a_compute(c, a_current, accs, &pending);
+    rocke_b_sched_barrier(b, 0);
+}
+
+rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
+                                              const rocke_gemm_universal_spec_t* spec,
+                                              const char* arch)
+{
+    char reason[ROCKE_ERR_MSG_CAP];
+    if(b == NULL || spec == NULL)
+    {
+        return NULL;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx1201";
+    }
+    if(!rocke_gemm_universal_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    {
+        rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
+        return NULL;
+    }
+    const rocke_gemm_tile_spec_t* t = &spec->tile;
+    const rocke_gemm_trait_spec_t* tr = &spec->trait;
+    rocke_direct_a_ctx_t c;
+    c.b = b;
+    c.spec = spec;
+    c.op = rocke_gemm_resolve_mma_op(spec, arch, rocke_archtarget_from_gfx(arch));
+    int a_len = 0, b_len = 0, c_len = 0;
+    rocke_gemm_atom_frag_lengths(c.op, &a_len, &b_len, &c_len);
+    c.mm = rocke_gemm_tile_mfmas_per_warp_m(t);
+    c.nn = rocke_gemm_tile_mfmas_per_warp_n(t);
+    c.nk = rocke_gemm_tile_k_atoms_per_tile_k(t);
+    c.local_prefetch = rocke_gemm_direct_a_local_prefetch(spec);
+    c.stagger = NULL;
+
+    {
+        char name[1024];
+        if(rocke_gemm_universal_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "build_direct_a_gemm: kernel_name() overflow");
+            return NULL;
+        }
+        b->kernel->name = rocke_arena_strdup(&b->arena, name);
+        if(b->kernel->name == NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_OOM, "build_direct_a_gemm: kernel name OOM");
+            return NULL;
+        }
+    }
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
+    if(tr->waves_per_eu_set)
+    {
+        rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", tr->waves_per_eu);
+    }
+
+    c.ab_type = strcmp(spec->data.dtype_a, "bf16") == 0 ? rocke_bf16() : rocke_f16();
+    c.c_f32 = strcmp(spec->data.dtype_c, "fp32") == 0 || strcmp(spec->data.dtype_c, "f32") == 0;
+    c.c_type = c.c_f32 ? rocke_f32() : c.ab_type;
+    rocke_value_t *A, *Bp, *C;
+    {
+        rocke_param_opts_t opts;
+        const rocke_type_t* ptr_f16 = rocke_ptr_type(b, c.ab_type, "global");
+        const rocke_type_t* ptr_c = rocke_ptr_type(b, c.c_type, "global");
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        A = rocke_b_param(b, "A", ptr_f16, &opts);
+        Bp = rocke_b_param(b, "B", ptr_f16, &opts);
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        C = rocke_b_param(b, "C", ptr_c, &opts);
+        c.M = rocke_b_param(b, "M", rocke_i32(), NULL);
+        c.N = rocke_b_param(b, "N", rocke_i32(), NULL);
+        c.K = rocke_b_param(b, "K", rocke_i32(), NULL);
+    }
+
+    c.zero = rocke_b_const_i32(b, 0);
+    c.two = rocke_b_const_i32(b, 2);
+    c.c_bytes = rocke_b_const_i32(b, c.c_f32 ? 4 : 2);
+    rocke_value_t* bk = rocke_b_const_i32(b, t->tile_k);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* c_wave = rocke_b_const_i32(b, spec->wave_size);
+    rocke_value_t* wave = rocke_b_div(b, tid, c_wave);
+    rocke_value_t* c_wave2 = rocke_b_const_i32(b, spec->wave_size);
+    rocke_value_t* lane = rocke_b_mod(b, tid, c_wave2);
+    rocke_value_t* c_warp_rows = rocke_b_const_i32(b, c.mm * t->warp_tile_m);
+    rocke_value_t* warp_m = rocke_b_mul(b, wave, c_warp_rows);
+
+    /* Whole and partial tiles: the grid is ceil(extent / tile). */
+    rocke_value_t* c_tn1 = rocke_b_const_i32(b, t->tile_n - 1);
+    rocke_value_t* n_up = rocke_b_add(b, c.N, c_tn1);
+    rocke_value_t* c_tn = rocke_b_const_i32(b, t->tile_n);
+    rocke_value_t* n_tiles = rocke_b_div(b, n_up, c_tn);
+    rocke_value_t* bid_y = rocke_b_block_id_y(b);
+    rocke_value_t* wg_row = rocke_b_mul(b, bid_y, n_tiles);
+    rocke_value_t* bid_x = rocke_b_block_id_x(b);
+    rocke_value_t* flat_wg = rocke_b_add(b, wg_row, bid_x);
+    rocke_value_t *pid_m, *pid_n;
+    if(tr->group_m != 0)
+    {
+        rocke_value_t* c_tm1 = rocke_b_const_i32(b, t->tile_m - 1);
+        rocke_value_t* m_up = rocke_b_add(b, c.M, c_tm1);
+        rocke_value_t* c_tm = rocke_b_const_i32(b, t->tile_m);
+        rocke_value_t* m_tiles = rocke_b_div(b, m_up, c_tm);
+        rocke_super_tile_swizzle_result_t raster
+            = rocke_super_tile_swizzle_dynamic(b, flat_wg, m_tiles, n_tiles, tr->group_m);
+        pid_m = raster.row;
+        pid_n = raster.col;
+    }
+    else
+    {
+        pid_m = rocke_b_block_id_y(b);
+        pid_n = rocke_b_block_id_x(b);
+    }
+    rocke_value_t* c_tile_m = rocke_b_const_i32(b, t->tile_m);
+    rocke_value_t* block_m_raw = rocke_b_mul(b, pid_m, c_tile_m);
+    rocke_value_t* block_m = rocke_b_to_sgpr_u32(b, block_m_raw);
+    rocke_value_t* c_tile_n = rocke_b_const_i32(b, t->tile_n);
+    rocke_value_t* block_n_raw = rocke_b_mul(b, pid_n, c_tile_n);
+    rocke_value_t* block_n = rocke_b_to_sgpr_u32(b, block_n_raw);
+
+    /* Bounded resources. The launch contract keeps every byte count in i32. */
+    rocke_value_t* a_elems = rocke_b_mul(b, c.M, c.K);
+    rocke_value_t* a_bytes = rocke_b_mul(b, a_elems, c.two);
+    c.a_rsrc = rocke_b_buffer_rsrc(b, A, a_bytes);
+    rocke_value_t* b_elems = rocke_b_mul(b, c.N, c.K);
+    rocke_value_t* b_bytes = rocke_b_mul(b, b_elems, c.two);
+    c.b_rsrc = rocke_b_buffer_rsrc(b, Bp, b_bytes);
+    rocke_value_t* c_elems = rocke_b_mul(b, c.M, c.N);
+    rocke_value_t* c_span = rocke_b_mul(b, c_elems, c.c_bytes);
+    c.c_rsrc = rocke_b_buffer_rsrc(b, C, c_span);
+
+    rocke_value_t *a_row, *a_k;
+    rocke_arch_layout_map_coord(rocke_mmaop_a_layout(c.op, b), b, lane, 0, &a_row, &a_k);
+    rocke_arch_layout_map_coord(rocke_mmaop_b_layout(c.op, b), b, lane, 0, &c.b_k, &c.b_col);
+
+    /* Loop-invariant byte offsets of this lane's A fragments. */
+    for(int kk = 0; kk < c.nk; ++kk)
+    {
+        for(int mi = 0; mi < c.mm; ++mi)
+        {
+            rocke_value_t* wave_row = rocke_b_add(b, block_m, warp_m);
+            rocke_value_t* c_mi = rocke_b_const_i32(b, mi * t->warp_tile_m);
+            rocke_value_t* atom_row = rocke_b_add(b, wave_row, c_mi);
+            rocke_value_t* row = rocke_b_add(b, atom_row, a_row);
+            rocke_value_t* c_kk = rocke_b_const_i32(b, kk * t->warp_tile_k);
+            rocke_value_t* col = rocke_b_add(b, a_k, c_kk);
+            rocke_value_t* row_off = rocke_b_mul(b, row, c.K);
+            rocke_value_t* elem = rocke_b_add(b, row_off, col);
+            c.a_base.push_back(rocke_b_mul(b, elem, c.two));
+        }
+    }
+
+    /* This thread's share of the B tile copy: 8-element vectors, row-major. */
+    c.slots = t->tile_k / 8;
+    {
+        int shape[2] = {t->tile_n, t->tile_k};
+        c.b_smem = rocke_b_smem_alloc(b, c.ab_type, shape, 2, "B_smem");
+    }
+    const int b_vectors = t->tile_n * t->tile_k / (8 * spec->block_size);
+    for(int e = 0; e < b_vectors; ++e)
+    {
+        rocke_value_t* c_e = rocke_b_const_i32(b, e * spec->block_size);
+        rocke_value_t* vi = rocke_b_add(b, c_e, tid);
+        rocke_value_t* c_slots = rocke_b_const_i32(b, c.slots);
+        rocke_value_t* row = rocke_b_div(b, vi, c_slots);
+        rocke_value_t* c_slots2 = rocke_b_const_i32(b, c.slots);
+        rocke_value_t* slot = rocke_b_mod(b, vi, c_slots2);
+        rocke_value_t* c8 = rocke_b_const_i32(b, 8);
+        rocke_value_t* col = rocke_b_mul(b, slot, c8);
+        rocke_value_t* global_row = rocke_b_add(b, block_n, row);
+        rocke_value_t* row_off = rocke_b_mul(b, global_row, c.K);
+        rocke_value_t* elem = rocke_b_add(b, row_off, col);
+        c.b_base.push_back(rocke_b_mul(b, elem, c.two));
+        c.b_dest_row.push_back(row);
+        c.b_dest_col.push_back(rocke_direct_a_swizzle(&c, col, row));
+    }
+
+    if(tr->k_stagger != 0)
+    {
+        rocke_value_t* c_kst = rocke_b_const_i32(b, tr->k_stagger);
+        rocke_value_t* phase = rocke_b_mod(b, flat_wg, c_kst);
+        rocke_value_t* c_step = rocke_b_const_i32(b, tr->k_stagger_step * t->tile_k);
+        rocke_value_t* shift = rocke_b_mul(b, phase, c_step);
+        rocke_value_t* wrapped = rocke_b_mod(b, shift, c.K);
+        c.stagger = rocke_b_to_sgpr_u32(b, wrapped);
+    }
+
+    rocke_value_t* first_k = rocke_direct_a_k_tile(&c, c.zero);
+    std::vector<rocke_value_t*> first_a = rocke_direct_a_load(&c, c.a_rsrc, c.a_base, first_k);
+    {
+        std::vector<rocke_value_t*> first_b = rocke_direct_a_load(&c, c.b_rsrc, c.b_base, first_k);
+        rocke_direct_a_store_b(&c, first_b);
+    }
+    rocke_value_t* acc_init = rocke_gemm_emit_zero_acc_op(b, c.op);
+    const int a_count = (int)first_a.size();
+    const int acc_count = c.mm * c.nn;
+    std::vector<std::string> names;
+    std::vector<rocke_iter_arg_t> args((size_t)(a_count + acc_count));
+    names.reserve(2 * args.size());
+    for(int i = 0; i < a_count; ++i)
+    {
+        names.push_back("a_" + std::to_string(i));
+        args[(size_t)i].name = names.back().c_str();
+        args[(size_t)i].init = first_a[(size_t)i];
+    }
+    for(int i = 0; i < acc_count; ++i)
+    {
+        names.push_back("acc_" + std::to_string(i));
+        args[(size_t)(a_count + i)].name = names.back().c_str();
+        args[(size_t)(a_count + i)].init = acc_init;
+    }
+
+    /* Two K tiles per iteration, so the back edge needs no register copies;
+     * a one-tile loop covers an odd remainder. */
+    rocke_value_t* two_bk = rocke_b_const_i32(b, 2 * t->tile_k);
+    rocke_value_t* span = rocke_b_sub(b, c.K, bk);
+    rocke_value_t* pairs = rocke_b_div(b, span, two_bk);
+    rocke_value_t* paired = rocke_b_mul(b, pairs, two_bk);
+    rocke_for_t loop = rocke_b_scf_for_iter(
+        b, c.zero, paired, two_bk, args.data(), (int)args.size(), "k_progress", false, false);
+    if(!rocke_ir_builder_ok(b))
+    {
+        return NULL;
+    }
+    rocke_b_region_enter(b, loop.body);
+    {
+        std::vector<rocke_value_t*> a_1, acc_1, a_2, acc_2;
+        rocke_direct_a_step(
+            &c, bk, loop.iv, loop.iter_vars, loop.iter_vars + a_count, &a_1, &acc_1);
+        rocke_value_t* second = rocke_b_add(b, loop.iv, bk);
+        rocke_direct_a_step(&c, bk, second, a_1.data(), acc_1.data(), &a_2, &acc_2);
+        std::vector<rocke_value_t*> yielded(a_2);
+        yielded.insert(yielded.end(), acc_2.begin(), acc_2.end());
+        rocke_b_scf_yield(b, yielded.data(), (int)yielded.size());
+    }
+    rocke_b_region_leave(b);
+    if(!rocke_ir_builder_ok(b))
+    {
+        return NULL;
+    }
+    std::vector<rocke_iter_arg_t> tail_args(args.size());
+    for(int i = 0; i < a_count; ++i)
+    {
+        names.push_back("a_tail_" + std::to_string(i));
+        tail_args[(size_t)i].name = names.back().c_str();
+        tail_args[(size_t)i].init = loop.op->results[i];
+    }
+    for(int i = 0; i < acc_count; ++i)
+    {
+        names.push_back("acc_tail_" + std::to_string(i));
+        tail_args[(size_t)(a_count + i)].name = names.back().c_str();
+        tail_args[(size_t)(a_count + i)].init = loop.op->results[a_count + i];
+    }
+    loop = rocke_b_scf_for_iter(
+        b, paired, span, bk, tail_args.data(), (int)tail_args.size(), "k_tail", false, false);
+    if(!rocke_ir_builder_ok(b))
+    {
+        return NULL;
+    }
+    rocke_b_region_enter(b, loop.body);
+    {
+        std::vector<rocke_value_t*> a_1, acc_1;
+        rocke_direct_a_step(
+            &c, bk, loop.iv, loop.iter_vars, loop.iter_vars + a_count, &a_1, &acc_1);
+        std::vector<rocke_value_t*> yielded(a_1);
+        yielded.insert(yielded.end(), acc_1.begin(), acc_1.end());
+        rocke_b_scf_yield(b, yielded.data(), (int)yielded.size());
+    }
+    rocke_b_region_leave(b);
+    if(!rocke_ir_builder_ok(b))
+    {
+        return NULL;
+    }
+    rocke_b_sync_fence(b, "compiler");
+    std::vector<rocke_value_t*> result
+        = rocke_direct_a_compute(&c, loop.op->results, loop.op->results + a_count, NULL);
+
+    c.oob = rocke_b_const_i32(b, -1);
+    rocke_value_t* m_base = rocke_b_add(b, block_m, warp_m);
+    rocke_direct_a_scatter(&c, lane, result, m_base, block_n, c_len);
+    return b->kernel;
+}
+
+/* The resolved helper plans remain alive throughout this callback. Bind each
+ * invariant lane/vector origin before the K loop, then emit the entire body
+ * (including its publication barriers and epilogue) in the selected path. */
+static void rocke_gemm_emit_global_read_body(rocke_ir_builder_t* b,
+                                             const rocke_global_read_plan_t* plans,
+                                             int count,
+                                             void* user)
+{
+    rocke_gemm_build_ctx_t* ctx = (rocke_gemm_build_ctx_t*)user;
+    int offset = 0;
+    (void)count; /* the caller always supplies the A and B specs */
+    for(int operand = 0; operand < 2; ++operand)
+    {
+        const int vectors = operand == 0 ? ctx->a_vecs_per_thread : ctx->b_vecs_per_thread;
+        rocke_value_t* block_off = operand == 0 ? ctx->block_m_off : ctx->block_n_off;
+        for(int e = 0; e < vectors; ++e)
+        {
+            rocke_gemm_global_read_t* read = &ctx->global_read[offset + e];
+            rocke_value_t* c_e = rocke_b_const_i32(b, e);
+            rocke_value_t* vec_base = rocke_b_mul(b, c_e, ctx->c_threads);
+            rocke_value_t* vec_idx = rocke_b_add(b, vec_base, ctx->tid);
+            read->row = rocke_b_div(b, vec_idx, ctx->c_block_k_div_vec);
+            rocke_value_t* col_v = rocke_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
+            read->col = ctx->load_vec > 1 ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
+            rocke_value_t* global_row = rocke_b_add(b, block_off, read->row);
+            rocke_value_t* indices[3] = {ctx->c0, global_row, read->col};
+            if(rocke_global_read_bind(b, &read->cursor, &plans[operand], indices, 3) != ROCKE_OK)
+                return;
+        }
+        offset += vectors;
+    }
+    /* C's span is part of the guard, so the buffer path may keep 32-bit C
+     * offsets; only the full-width path pays for wide ones. */
+    ctx->wide_c_offsets = strcmp(plans[2].addressing, "buffer") != 0;
+    ctx->num_for_results = 0;
+    rocke_gemm_emit_compute_and_epilogue(ctx);
 }
 
 /* ===================================================================== *
@@ -983,6 +1535,14 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         arch = "gfx950";
     }
 
+    const bool global_reads = spec->trait.global_addressing != NULL
+                              && strcmp(spec->trait.global_addressing, "legacy") != 0;
+    if(global_reads && !rocke_gemm_universal_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    {
+        rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
+        return NULL;
+    }
+
     /* wsp3 lives in a separate emitter (gemm_wsp3.py). The C port of that
      * emitter is a peer module; route to it here for parity. */
     if(spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "wsp3") == 0)
@@ -990,8 +1550,14 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         return rocke_build_wsp3_gemm(b, spec, arch);
     }
 
+    /* gemm_direct_a.py: the gfx1201 direct-A WMMA pipeline. */
+    if(spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "direct_a") == 0)
+    {
+        return rocke_build_direct_a_gemm(b, spec, arch);
+    }
+
     /* is_valid_spec(spec, arch). Python raises ValueError on reject. */
-    if(!rocke_gemm_universal_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    if(!global_reads && !rocke_gemm_universal_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
         return NULL;
     }
@@ -1001,6 +1567,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.spec = spec;
     ctx.arch = arch;
     ctx.target = rocke_archtarget_from_gfx(arch);
+    ctx.global_reads = global_reads;
 
     ctx.op = rocke_gemm_resolve_mma_op(spec, arch, ctx.target);
     if(ctx.op == NULL)
@@ -1408,6 +1975,15 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.b_vec_total = ctx.b_total / ctx.load_vec;
     ctx.a_vecs_per_thread = ctx.a_vec_total / ctx.threads;
     ctx.b_vecs_per_thread = ctx.b_vec_total / ctx.threads;
+    if(ctx.global_reads
+       && ctx.a_vecs_per_thread + ctx.b_vecs_per_thread > ROCKE_GEMM_MAX_GLOBAL_READS)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_addressing exceeds %d prepared vectors per thread",
+                        ROCKE_GEMM_MAX_GLOBAL_READS);
+        return NULL;
+    }
     ctx.c_threads = rocke_b_const_i32(b, ctx.threads);
     ctx.c_load_vec = rocke_b_const_i32(b, ctx.load_vec);
     ctx.c_block_k_div_vec = rocke_b_const_i32(b, ctx.block_k / ctx.load_vec);
@@ -1541,7 +2117,25 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.num_for_results = 0;
 
     /* ---- dispatch: emit_compute_and_epilogue, optionally under the gate -- */
-    if(ctx.do_work_cond == NULL)
+    if(ctx.global_reads)
+    {
+        rocke_stride_t a_extents[3]
+            = {rocke_stride_imm(1), rocke_stride_value(ctx.M), rocke_stride_value(ctx.K)};
+        rocke_stride_t b_extents[3]
+            = {rocke_stride_imm(1), rocke_stride_value(ctx.N), rocke_stride_value(ctx.K)};
+        int c_shape[3] = {1, 1, 1};
+        rocke_stride_t c_strides[3]
+            = {rocke_stride_imm(1), rocke_stride_value(ctx.N), rocke_stride_imm(1)};
+        rocke_stride_t c_extents[3]
+            = {rocke_stride_imm(1), rocke_stride_value(ctx.M), rocke_stride_value(ctx.N)};
+        rocke_tensor_view_t c_view;
+        rocke_make_global_view(&c_view, ctx.C, c_shape, 3, ctx.storage_dtype, c_strides);
+        rocke_global_read_spec_t reads[3]
+            = {{&ctx.a_view, a_extents, 3}, {&ctx.b_view, b_extents, 3}, {&c_view, c_extents, 3}};
+        rocke_emit_global_read_paths(
+            b, reads, 3, rocke_gemm_emit_global_read_body, &ctx, spec->trait.global_addressing);
+    }
+    else if(ctx.do_work_cond == NULL)
     {
         rocke_gemm_emit_compute_and_epilogue(&ctx);
     }

@@ -868,6 +868,60 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1201",
         )
+    if idx in _GFX1201_PREPARED_READ_CONFIGS:
+        # Prepared global reads: invariant A/B coordinates bound once outside
+        # the K loop, one workgroup-uniform buffer/global64 selection (auto) or
+        # the full-width path alone (global64), and wide C offsets.
+        tm, tn, tk, wm, wn, one_wg, addressing = _GFX1201_PREPARED_READ_CONFIGS[idx]
+        return (
+            UniversalGemmSpec(
+                name=f"test_gfx1201_compv4_reads_{tm}x{tn}x{tk}",
+                tile=TileSpec(tm, tn, tk, wm, wn, 1, 16, 16, 16),
+                trait=TraitSpec(
+                    pipeline="compv4",
+                    scheduler="intrawave",
+                    epilogue="default",
+                    lds_swizzle=True,
+                    lds_store_after_mma=True,
+                    group_m=4,
+                    k_stagger=8,
+                    k_stagger_step=4,
+                    lds_db_allow_1wg=one_wg,
+                    global_addressing=addressing,
+                ),
+                data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+                wave_size=32,
+                block_size=32 * wm * wn,
+                batched=False,
+            ),
+            "gfx1201",
+        )
+    if idx in _GFX1201_DIRECT_A_CONFIGS:
+        # direct_a: A fragments straight from global memory, B through one LDS
+        # buffer, bounded buffer loads and stores with partial M/N tiles.
+        tm, tn, tk, wm, swizzle, group_m, k_stagger, k_stagger_step, ab, c = (
+            _GFX1201_DIRECT_A_CONFIGS[idx]
+        )
+        return (
+            UniversalGemmSpec(
+                name=f"test_gfx1201_direct_a_{tm}x{tn}x{tk}",
+                tile=TileSpec(tm, tn, tk, wm, 1, 1, 16, 16, 16),
+                trait=TraitSpec(
+                    pipeline="direct_a",
+                    scheduler="intrawave",
+                    epilogue="default",
+                    lds_swizzle=swizzle,
+                    group_m=group_m,
+                    k_stagger=k_stagger,
+                    k_stagger_step=k_stagger_step,
+                ),
+                data=DataSpec(dtype_a=ab, dtype_b=ab, dtype_c=c),
+                wave_size=32,
+                block_size=32 * wm,
+                batched=False,
+            ),
+            "gfx1201",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -919,12 +973,32 @@ _GFX1201_DB1WG_CONFIGS = {
     40: (128, 256, 32, 2, 4),
 }
 
+# idx -> (tile_m, tile_n, tile_k, warp_m, warp_n, one_wg, global_addressing).
+_GFX1201_PREPARED_READ_CONFIGS = {
+    41: (128, 128, 32, 2, 2, False, "auto"),
+    42: (64, 64, 64, 2, 2, False, "auto"),
+    43: (128, 128, 64, 2, 4, True, "auto"),
+    44: (128, 128, 32, 2, 2, False, "global64"),
+}
+
+# idx -> (tile_m, tile_n, tile_k, warp_m, lds_swizzle, group_m, k_stagger,
+#         k_stagger_step, A/B dtype, C dtype).
+_GFX1201_DIRECT_A_CONFIGS = {
+    45: (128, 64, 64, 4, True, 4, 8, 4, "fp16", "fp16"),
+    46: (128, 96, 64, 4, True, 4, 8, 4, "fp16", "fp16"),
+    47: (64, 64, 64, 4, True, 8, 0, 1, "fp16", "fp16"),
+    48: (64, 32, 32, 2, False, 0, 4, 1, "fp16", "fp16"),
+    49: (128, 64, 64, 4, True, 4, 8, 4, "bf16", "bf16"),
+    50: (128, 64, 64, 4, True, 4, 8, 4, "fp16", "fp32"),
+    51: (128, 96, 64, 4, True, 4, 8, 4, "bf16", "fp32"),
+}
+
 
 def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..40>\n",
+        usage="usage: gemm_emit.py <config_index 0..51>\n",
     )
 
 

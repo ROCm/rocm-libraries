@@ -351,6 +351,7 @@ typedef struct gemm_default_store_user
     rocke_value_t* N;
     rocke_value_t* C;
     rocke_value_t* batch_off_c;
+    const rocke_tensor_descriptor_t* wide_c_desc;
     void* fused_epilogue; /* opaque (NULL = matmul-only) */
     bool fused_is_mde; /* fused_epilogue is a _MultiDEpilogue base */
     bool pad_m;
@@ -389,6 +390,22 @@ static void gemm_default_store_masked(gemm_default_store_user_t* u,
     }
 }
 
+static rocke_value_t*
+    gemm_default_c_offset(gemm_default_store_user_t* u, rocke_value_t* c_m, rocke_value_t* c_n)
+{
+    rocke_ir_builder_t* b = u->b;
+    if(u->wide_c_desc != NULL)
+    {
+        rocke_value_t* batch = u->batch_off_c != NULL ? u->batch_off_c : rocke_b_const_i32(b, 0);
+        rocke_value_t* indices[3] = {batch, c_m, c_n};
+        return rocke_tensor_descriptor_offset_i64(b, u->wide_c_desc, indices, 3);
+    }
+    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, c_m, u->N), c_n);
+    if(u->batch_off_c != NULL)
+        c_off = rocke_b_add(b, u->batch_off_c, c_off);
+    return c_off;
+}
+
 /* _store_cell(c_m, c_n, acc_h, i): the per-cell callback for the MFMA scatter. */
 static void gemm_default_store_cell(rocke_ir_builder_t* b,
                                     rocke_value_t* c_m,
@@ -398,10 +415,8 @@ static void gemm_default_store_cell(rocke_ir_builder_t* b,
                                     void* user)
 {
     gemm_default_store_user_t* u = (gemm_default_store_user_t*)user;
-    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, c_m, u->N), c_n);
+    rocke_value_t* c_off = gemm_default_c_offset(u, c_m, c_n);
     rocke_value_t* h;
-    if(u->batch_off_c != NULL)
-        c_off = rocke_b_add(b, u->batch_off_c, c_off);
     h = rocke_b_vec_extract(b, acc_h, i);
     if(u->fused_epilogue != NULL)
     {
@@ -427,7 +442,8 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       int c_per_lane,
                                       rocke_value_t* batch_off_c,
                                       void* fused_epilogue,
-                                      bool fused_is_mde)
+                                      bool fused_is_mde,
+                                      bool wide_c)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     const rocke_type_t* storage_dtype = gemm_c_storage_dtype(b, spec);
@@ -437,10 +453,21 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
     bool pad_n = spec->trait.pad_n;
     rocke_value_t* warp_m_off;
     rocke_value_t* warp_n_off;
+    rocke_tensor_descriptor_t wide_c_desc;
+    const rocke_tensor_descriptor_t* c_desc = NULL;
 
     (void)num_accs;
     if(!rocke_ir_builder_ok(b))
         return;
+
+    if(op->family != NULL && strcmp(op->family, "wmma") == 0 && wide_c)
+    {
+        int shape[3] = {1, 1, 1};
+        rocke_stride_t strides[3]
+            = {rocke_stride_imm(1), rocke_stride_value(N), rocke_stride_imm(1)};
+        rocke_tensor_descriptor_with_strides(&wide_c_desc, shape, strides, 3, storage_dtype);
+        c_desc = &wide_c_desc;
+    }
 
     warp_m_off = rocke_b_mul(b, warp_m_idx, rocke_b_const_i32(b, mfmas_m * t->warp_tile_m));
     warp_n_off = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * t->warp_tile_n));
@@ -467,6 +494,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         u.N = N;
         u.C = C;
         u.batch_off_c = batch_off_c;
+        u.wide_c_desc = c_desc;
         u.fused_epilogue = fused_epilogue;
         u.fused_is_mde = fused_is_mde;
         u.pad_m = pad_m;
@@ -498,9 +526,20 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                     rocke_layout_map_coord(c_map, b, lane, i, &row_in_atom, &col_in_atom);
                     c_m = rocke_b_add(b, atom_m, row_in_atom);
                     c_n = rocke_b_add(b, atom_n, col_in_atom);
-                    c_off = rocke_b_add(b, rocke_b_mul(b, c_m, N), c_n);
-                    if(batch_off_c != NULL)
-                        c_off = rocke_b_add(b, batch_off_c, c_off);
+                    if(u.wide_c_desc != NULL)
+                    {
+                        /* The store's index operand lowers as i32, so a wide
+                         * offset goes into the pointer instead. */
+                        rocke_value_t* c_wide = gemm_default_c_offset(&u, c_m, c_n);
+                        rocke_value_t* scale = rocke_b_const_i64(b, u.elem_bytes);
+                        rocke_value_t* c_bytes = rocke_b_mul(b, c_wide, scale);
+                        rocke_value_t* c_ptr = rocke_b_global_ptr_offset(b, C, c_bytes);
+                        h = rocke_b_vec_extract(b, acc_h, i);
+                        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+                        rocke_b_global_store(b, c_ptr, zero, h, u.elem_bytes);
+                        continue;
+                    }
+                    c_off = gemm_default_c_offset(&u, c_m, c_n);
                     h = rocke_b_vec_extract(b, acc_h, i);
                     if(fused_epilogue != NULL)
                     {
@@ -526,6 +565,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         u.N = N;
         u.C = C;
         u.batch_off_c = batch_off_c;
+        u.wide_c_desc = c_desc;
         u.fused_epilogue = fused_epilogue;
         u.fused_is_mde = fused_is_mde;
         u.pad_m = pad_m;
@@ -1067,6 +1107,7 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
                                          ctx->c_per_lane,
                                          ctx->batch_off_c,
                                          fused_ep,
-                                         fused_is_mde);
+                                         fused_is_mde,
+                                         ctx->wide_c_offsets);
     }
 }

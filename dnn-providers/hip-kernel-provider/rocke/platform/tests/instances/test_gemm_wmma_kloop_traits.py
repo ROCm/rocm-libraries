@@ -391,5 +391,83 @@ class TestOneWorkgroupLdsPolicy(unittest.TestCase):
                     )
 
 
+_READS_REASON = "global_addressing needs unpadded nonbatched gfx1201 FP16 RCR"
+
+
+def _reads_gate_cases():
+    """(label, spec, arch, expected reason fragment or None when admitted)."""
+    for mode in ("auto", "global64"):
+        yield f"{mode} plain", _spec(global_addressing=mode), ARCH, None
+        yield f"{mode} all traits", _spec(global_addressing=mode, **_ON), ARCH, None
+        yield f"{mode} one workgroup", _db1wg_spec(
+            global_addressing=mode, **_ON
+        ), ARCH, None
+    yield "unknown mode", _spec(global_addressing="buffer"), ARCH, "must be legacy"
+    yield "empty mode", _spec(global_addressing=""), ARCH, "must be legacy"
+    yield "mem", _spec(pipeline="mem", global_addressing="auto"), ARCH, _READS_REASON
+    yield "pad_k", _spec(pad_k=True, global_addressing="auto"), ARCH, _READS_REASON
+    yield "wsp3", _spec(pipeline="wsp3", global_addressing="auto"), ARCH, _READS_REASON
+    bf16 = _spec(global_addressing="auto")
+    bf16 = replace(
+        bf16, data=replace(bf16.data, dtype_a="bf16", dtype_b="bf16", dtype_c="bf16")
+    )
+    yield "bf16", bf16, ARCH, _READS_REASON
+    yield "batched", replace(
+        _spec(global_addressing="auto"), batched=True
+    ), ARCH, _READS_REASON
+    yield "MFMA", _mfma_spec(global_addressing="auto"), "gfx950", _READS_REASON
+
+
+@arch_specific((ARCH,), reason="prepared global reads are admitted on gfx1201 only")
+class TestPreparedGlobalReads(unittest.TestCase):
+    def test_gates(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for label, spec, arch, reason in _reads_gate_cases():
+            with self.subTest(label):
+                ok, why = is_valid_spec(spec, arch=arch)
+                if reason is None:
+                    self.assertEqual((ok, why), (True, "ok"))
+                else:
+                    self.assertFalse(ok)
+                    self.assertIn(reason, why)
+
+    def test_build_refuses_what_the_gate_refuses(self):
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        # wsp3 is routed to its own emitter before the ordinary gate runs.
+        with self.assertRaisesRegex(ValueError, _READS_REASON):
+            build_universal_gemm(
+                _spec(pipeline="wsp3", global_addressing="auto"), arch=ARCH
+            )
+
+    def test_each_mode_has_its_own_name_and_kernel(self):
+        specs = {
+            m: _spec(global_addressing=m, **_ON) for m in ("legacy", "auto", "global64")
+        }
+        self.assertEqual(len({s.kernel_name() for s in specs.values()}), 3)
+        self.assertEqual(len({_lower(s) for s in specs.values()}), 3)
+
+    def test_native_validity_and_ir_agree(self):
+        try:
+            import rocke_engine
+        except ImportError as e:
+            self.skipTest(f"rocke_engine C++ binding not importable: {e}")
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for label, spec, arch, _ in _reads_gate_cases():
+            with self.subTest(label):
+                payload = universal_gemm_spec_to_dict(spec)
+                valid = is_valid_spec(spec, arch=arch)
+                self.assertEqual(
+                    tuple(rocke_engine.gemm_is_valid(payload, arch)), valid
+                )
+                if valid[0]:
+                    self.assertEqual(
+                        rocke_engine.gemm_lower_llvm(payload, arch), _lower(spec, arch)
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -57,14 +57,20 @@ GEMM_GFX1201_MNK = (
     (256, 256, 32),
     (1024, 1024, 1024),
     (128, 8192, 2048),
+    (8192, 128, 2048),
+    (300, 400, 640),
+    (130, 128, 32),
+    (1024, 1024, 192),
     (2048, 2048, 8192),
+    (1024, 1024, 8192),
+    (192, 192, 8192),
     (2048, 2560, 6144),
     (2048, 6144, 2560),
 )
 
 
 def _gemm_reqs(arch, spec_id, dtype):
-    if arch == "gfx1201" and dtype == "fp16":
+    if arch == "gfx1201" and dtype in ("fp16", "bf16"):
         for m, n, k in GEMM_GFX1201_MNK:
             yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
     for m, n, k in (GEMM_MNK, GEMM_DECODE_MNK):
