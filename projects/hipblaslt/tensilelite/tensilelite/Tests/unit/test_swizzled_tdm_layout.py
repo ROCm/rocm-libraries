@@ -1,0 +1,206 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Property test of the swizzled-TDM geometry (Components/SwizzledTdmLayout.py).
+
+The kernel writer takes its swizzled-TDM constants and offsets from
+SwizzledTdmGeometry. This test checks that geometry end to end against an
+independent reference, written here without it:
+
+* host layout -- the client's pre-swizzle of an operand (per batch,
+  [nO, kO, kM, nI, kI] with the free dim padded to MI rows and K to swzK);
+* TDM -- a 2-D copy of tile0 x tile1 from (base, stride0) that zero-fills past
+  (dim0, dim1), written to LDS row by row (row step = tile0, or the iterate-mode
+  LDS increment); descriptor units are elements of max(1, bpe) bytes, and a read
+  past the operand buffer returns foreign bytes;
+* WMMA operand -- lane L of a 16-row operand holds row L % 16, and K bytes
+  r*32 + (L // 16)*16 + [0, 16) of its r-th 16-byte read; with VectorWidth vw,
+  tile nt = vIdx*vw + eIdx of wave w covers free index
+  (vIdx*vw*numWaves + w*vw)*MI + vw*(L % MI) + eIdx.
+
+Everything is modelled in bytes, so F4 (two elements per byte) needs no special
+case. A workgroup is simulated through every K iteration including the tail,
+for every wave and lane: each 16-byte read must return exactly the operand bytes
+the WMMA expects (zero past K or the free size) and must only touch written LDS.
+"""
+
+import pytest
+
+from tensilelite.Components.SwizzledTdmLayout import SwizzledTdmGeometry
+from tensilelite.Components.TDMFuse import tdmWaveComponents
+from tensilelite.Tests.unit import swizzled_tdm_helpers as H
+from tensilelite.Tests.unit.test_halfplr_streamk_rejects import _gp_gfx1250  # noqa: F401
+
+pytestmark = pytest.mark.unit
+
+ZERO = None   # tag of a zero byte (host padding or TDM zero-fill)
+GARBAGE = "past-the-buffer"   # a TDM read beyond the operand buffer (another batch / unmapped memory)
+
+
+# ---------------------------------------------------------------- independent reference
+def host_bytes(sizeFree, sizeK, mi, wave, bpe):
+    """Pre-swizzled host buffer (one batch) as a list of byte tags (free, kByte) or ZERO."""
+    kb = int(sizeK * bpe)                      # K in bytes
+    kBlocks = -(-kb // 32)                     # 32-byte swizzle blocks (two 16-byte kI blocks)
+    rows = -(-sizeFree // mi) * mi
+    kmid = wave // mi
+    buf = [ZERO] * (rows * kBlocks * 32)
+    for f in range(sizeFree):
+        nO, nI = divmod(f, mi)
+        for k in range(kb):
+            kO, rem = divmod(k, 32)
+            kM, kI = divmod(rem, 16)
+            off = ((nO * kBlocks + kO) * kmid + kM) * mi * 16 + nI * 16 + kI
+            buf[off] = (f, k)
+    return buf
+
+
+def tdm_copy(lds, host, base, stride0, dim0, dim1, tile0, tile1, ldsBase, ldsRowStep):
+    """2-D TDM copy (bytes): zero-fill outside (dim0, dim1)."""
+    for j in range(tile1):
+        for c in range(tile0):
+            src = base + j * stride0 + c
+            if c < dim0 and j < dim1:
+                val = host[src] if src < len(host) else GARBAGE
+            else:
+                val = ZERO
+            lds[ldsBase + j * ldsRowStep + c] = val
+
+
+def expected_tag(f, k, sizeFree, sizeKBytes):
+    return (f, k) if (f < sizeFree and k < sizeKBytes) else ZERO
+
+
+# ---------------------------------------------------------------- simulation of one operand
+def simulate(sol, tc, sizeFree, sizeK, wg):
+    g = SwizzledTdmGeometry.fromKernel(sol, tc)
+    bpe = g.bpe
+    unitBytes = max(1, bpe)                     # TDM data_size is at least one byte (F4 is described in bytes)
+    mi, du = g.mi, g.depthU
+    host = host_bytes(sizeFree, sizeK, mi, g.wave, bpe)
+    kb = int(sizeK * bpe)
+    numComp = tdmWaveComponents(sol, tc)[0] if sol["NumWaves"] > 1 else 1
+    rowsPerComp, replicate = g.compRows(numComp)
+    tile1 = 1 if g.padElems else rowsPerComp      # iterate mode issues one nO tile per step
+    issues = rowsPerComp if g.padElems else 1
+    seg = sol["LDSSegInterleaveOffsets"] if sol["LDSSegmentInterleave"] == 1 else {}
+    ldsBase = seg.get("ldsBase" + tc, sol["LdsOffset" + tc])
+    writeStride = seg.get("writeStrideBytes")
+
+    numIter, rem = divmod(sizeK, du)
+    iters = [(i, False) for i in range(numIter)] + ([(numIter, True)] if rem else [])
+    miK = sol["MatrixInstK"]
+    tile01 = 0 if tc == "A" else 1
+    wgM, wgN = sol["MIWaveGroup"]
+    brot = tc == "B" and sol.get("LDSSegmentBRotate")
+    spans = bool(seg) and g.vw * mi >= g.macroTile // numComp and not seg.get("bBaseline")
+    compNO = None
+    if seg and not spans and g.waveTile // g.vw > 1:
+        compNO = g.nORows // numComp
+    windows = seg.get("readAddressWindows" + tc)
+    readStride = seg.get("readStrideBytes" + tc, writeStride)
+
+    checked = 0
+    for kIter, tail in iters:
+        lds = {}
+        for comp in range(numComp):
+            base = (wg * g.tileStrideBytes(sizeK) + g.compGlobalOffsetBytes(comp, sizeK, numComp)
+                    + kIter * g.kIterBytes())
+            dim0 = (g.descTailDim0(sizeK) if tail else g.descTile0()) * unitBytes
+            dim1 = g.remainingRows(sizeFree, wg, comp, 0 if replicate else rowsPerComp)
+            compLds = ldsBase + (comp * writeStride if seg else g.compLdsOffsetBytes(comp, numComp))
+            rowStep = g.iterLdsIncBytes() if g.padElems else int(g.descTile0() * unitBytes)
+            for it in range(issues):
+                tdm_copy(lds, host, base + it * int(g.descStride0(sizeK) * unitBytes),
+                         int(g.descStride0(sizeK) * unitBytes), int(dim0), dim1 - it,
+                         int(g.descTile0() * unitBytes), tile1, compLds + it * rowStep, rowStep)
+        kSteps = -(-rem // miK) if tail else du // miK
+        for wM in range(wgM):
+            for wN in range(wgN):
+                w = wM if tile01 == 0 else wN
+                pair = (wM + wgM * wN) & 1
+                for lane in range(g.wave):
+                    if spans:
+                        baseBytes = g.padBaseBytes(int(g.laneBase(lane) * bpe)) + w * writeStride
+                    else:
+                        baseBytes = g.padBaseBytes(int((g.laneBase(lane) + g.waveBase(w)) * bpe))
+                    regs = [0] * 2
+                    if brot:
+                        regs[0] = pair * writeStride
+                        regs[1] = regs[0] + writeStride - readStride % 65536 - pair * 2 * writeStride
+                    elif windows is not None:
+                        regs = [wi * 65536 for wi in windows]
+                    else:
+                        regs = [i * 65536 for i in range(4)]
+                    kMl, nIdx = divmod(lane, mi)
+                    for u in range(kSteps):
+                        for nt in range(g.waveTile):
+                            for r in range(g.numKChunk):
+                                comp, imm = g.readOffsetElems(nt, r, compNO)
+                                offBytes = (comp * readStride if compNO is not None else 0) \
+                                    + int((imm + u * g.kStepPerMI) * bpe)
+                                regIdx, immB = g.selectReadRegister(offBytes, windows)
+                                addr = ldsBase + baseBytes + regs[regIdx] + immB
+                                ntE = (nt + g.waveTile // 2) % g.waveTile if (brot and pair) else nt
+                                vIdx, eIdx = divmod(ntE, g.vw)
+                                f = wg * g.macroTile + (vIdx * g.vw * g.numWaves + w * g.vw) * mi \
+                                    + g.vw * nIdx + eIdx
+                                k0 = kIter * int(du * bpe) + u * int(miK * bpe) + r * 32 + kMl * 16
+                                for b in range(16):
+                                    a = addr + b
+                                    assert a in lds, ("%s: read of unwritten LDS byte %d (kIter=%d tail=%s wave=(%d,%d) "
+                                                      "lane=%d nt=%d r=%d u=%d)" % (tc, a, kIter, tail, wM, wN, lane, nt, r, u))
+                                    want = expected_tag(f, k0 + b, sizeFree, kb)
+                                    assert lds[a] == want, (
+                                        "%s: kIter=%d tail=%s wave=(%d,%d) lane=%d nt=%d r=%d u=%d byte=%d: read %s, "
+                                        "WMMA expects %s" % (tc, kIter, tail, wM, wN, lane, nt, r, u, b, lds[a], want))
+                                checked += 16
+    return checked
+
+
+def _c(name, side, dtype, wt=(2, 2), wg=(2, 2), sizes=None, **fork):
+    return pytest.param(dict(side=side, dtype=dtype, wt=wt, wg=wg, sizes=sizes, fork=fork), id=name)
+
+
+# (sizeM, sizeN, K): K covers full iterations plus a tail that is not a multiple of swzK
+CASES = [
+    _c("B_f8", "B", "f8"), _c("A_f8", "A", "f8"), _c("AB_f8", "AB", "f8"),
+    _c("B_bf16", "B", "bf16"), _c("A_bf16", "A", "bf16"), _c("B_f16", "B", "f16"),
+    _c("B_i8", "B", "i8"), _c("B_f4", "B", "f4"), _c("A_f4", "A", "f4"), _c("B_mxf8", "B", "mxf8"),
+    _c("B_f8_vwb2_pad", "B", "f8", VectorWidthB=2), _c("A_f8_vwa2_pad", "A", "f8", VectorWidthA=2),
+    _c("B_f8_wt44_vwb4", "B", "f8", wt=(4, 4), VectorWidthB=4),
+    _c("B_f8_wt44_vwb2", "B", "f8", wt=(4, 4), VectorWidthB=2),
+    _c("B_f4_vwb2_pad", "B", "f4", VectorWidthB=2), _c("B_bf16_vwb2", "B", "bf16", VectorWidthB=2),
+    _c("B_f8_du128", "B", "f8", DepthU=128), _c("B_f8_du512", "B", "f8", DepthU=512),
+    _c("B_f8_wg41_n16", "B", "f8", wt=(1, 1), wg=(4, 1)),
+    _c("A_f8_wg14_m16", "A", "f8", wt=(1, 1), wg=(1, 4)),
+    _c("B_f8_wg41_mt128x16", "B", "f8", wt=(2, 1), wg=(4, 1)),
+    _c("B_f8_lsi_span", "B", "f8", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("B_f8_lsi_vidx", "B", "f8", wt=(2, 4), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("B_f8_lsi_vidx_brot", "B", "f8", wt=(2, 4), VectorWidthA=2, VectorWidthB=2,
+       LDSSegmentInterleave=1, LDSSegmentBRotate=1),
+    _c("B_f8_lsi_wt8", "B", "f8", wt=(2, 8), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("A_f8_lsi", "A", "f8", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("A_f8_lsi_wt4", "A", "f8", wt=(4, 2), VectorWidthA=4, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("AB_f8_lsi", "AB", "f8", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("A_bf16_lsi_window", "A", "bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1, TDMIterateMode=1),
+    _c("B_bf16_lsi_window", "B", "bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1, TDMIterateMode=1),
+    _c("B_bf16_lsi_window_brot", "B", "bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1,
+       LDSSegmentBRotate=1, TDMIterateMode=1),
+]
+
+
+@pytest.mark.parametrize("cfg", CASES)
+def test_swizzled_tdm_layout(_gp_gfx1250, gfx1250_iim, assembler, cfg):
+    params = H.swizzled_params(gfx1250_iim, cfg["side"], cfg["dtype"], wt=cfg["wt"], wg=cfg["wg"], **cfg["fork"])
+    sol = H.derive(params, assembler, gfx1250_iim)
+    assert sol["Valid"], "configuration rejected"
+    du = sol["DepthU"]
+    swzK = SwizzledTdmGeometry.fromKernel(sol, "B" if cfg["side"] != "A" else "A").swzK
+    sizeK = 2 * du + du // 2 + swzK // 2 + 2           # two full iterations + a tail not a swzK multiple
+    for tc in ("A", "B"):
+        if not sol["ProblemType"]["SwizzleTensor" + tc]:
+            continue
+        mt = sol["MacroTile%u" % (0 if tc == "A" else 1)]
+        sizeFree = mt + mt // 2 + 3                     # second macro-tile is partial
+        for wg in (0, 1):
+            assert simulate(sol, tc, sizeFree, sizeK, wg) > 0
