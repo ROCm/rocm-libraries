@@ -410,12 +410,20 @@ std::vector<float> generateData(T                           dgen,
 
     // The K-major reference covers the generator's stride * cols buffer, whose scales the
     // generator counts per whole run of sizes[0] elements; past the last whole run there are none.
-    if(integerExact && isMatrixA == isTranspose && strides[1] * sizes[1] % sizes[0] != 0)
-        throw std::runtime_error(
-            "integer_exact MX data requires the stride times the columns to be a multiple of "
-            "the rows, got stride "
-            + std::to_string(strides[1]) + ", " + std::to_string(sizes[1]) + " columns and "
-            + std::to_string(sizes[0]) + " rows");
+    // sizes[0] is the divisor below. A zero row count is SIGFPE, and the generator would have
+    // rejected a non-positive size with invalid_argument before writing. Check that first.
+    if(integerExact && isMatrixA == isTranspose)
+    {
+        if(sizes[0] == 0 || sizes[1] == 0)
+            throw std::invalid_argument(
+                "Invalid dimensions: dimension sizes must be greater than 0.");
+        if(strides[1] * sizes[1] % sizes[0] != 0)
+            throw std::runtime_error(
+                "integer_exact MX data requires the stride times the columns to be a multiple of "
+                "the rows, got stride "
+                + std::to_string(strides[1]) + ", " + std::to_string(sizes[1]) + " columns and "
+                + std::to_string(sizes[0]) + " rows");
+    }
 
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);

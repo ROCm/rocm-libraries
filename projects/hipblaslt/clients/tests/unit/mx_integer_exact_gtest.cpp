@@ -250,6 +250,39 @@ TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionKeepsTheLayout)
             }
 }
 
+// Zero rows are invalid input. The padded-layout guard divides by the row count, so the
+// positive-size check has to come first: this request used to throw std::invalid_argument, and
+// it must still throw that without writing the caller's buffers. Both K-major layouts
+// (transposed A and non-transposed B). An invalid-input path, not a valid GEMM.
+TEST(HostUnitMXIntegerExact, smoke_ZeroRowsAreRefused)
+{
+    const uint64_t rows = 0, cols = 4, stride = 1;
+    for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2})
+        for(bool isMatrixA : {true, false})
+        {
+            std::vector<uint8_t> data(stride * cols, 0xA5);
+            std::vector<uint8_t> scale(stride * cols / 32 + 64, 0xA5);
+            EXPECT_THROW(generateMXInput(type,
+                                         HIP_R_8U,
+                                         data.data(),
+                                         scale.data(),
+                                         rows,
+                                         cols,
+                                         stride,
+                                         /*isTranspose=*/isMatrixA,
+                                         isMatrixA ? 32 : 1,
+                                         isMatrixA ? 1 : 32,
+                                         isMatrixA,
+                                         MXScaleLayout::None,
+                                         "integer_exact"),
+                         std::invalid_argument)
+                << "type " << int(type) << " isMatrixA=" << isMatrixA;
+            EXPECT_TRUE(std::all_of(data.begin(), data.end(), [](uint8_t b) { return b == 0xA5; }));
+            EXPECT_TRUE(
+                std::all_of(scale.begin(), scale.end(), [](uint8_t b) { return b == 0xA5; }));
+        }
+}
+
 // When stride * cols is not a multiple of rows, the generator has no scales for the elements
 // past its last whole run of rows, so integer_exact refuses the shape before writing.
 TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionWithoutWholeRunsIsRefused)

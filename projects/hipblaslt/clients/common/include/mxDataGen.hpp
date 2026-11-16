@@ -54,8 +54,10 @@ constexpr int64_t integerExactMXSumBound(int64_t K)
 
 // integer_exact supports fp8 and fp6 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
-// With K along the stored rows, its reference covers all stride * col elements the generator
-// writes, and stride * col must be a multiple of row, or it throws before writing.
+// With K along the stored rows, a non-positive row or column throws std::invalid_argument
+// before writing: the row count divides the padded-layout check. Otherwise the reference
+// covers all stride * col elements the generator writes, and stride * col must be a multiple
+// of row, or it throws before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,
