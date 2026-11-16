@@ -43,7 +43,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - CustomKernel:
-          - name: "wvSplitK_vllm_bf16_tn_bias_n1_y1u4"
+          - name: "wvSplitK_vllm_bf16_tn_n1_y1u4"
             args: [ { type: int32, semantic: SizeSum },
                     { type: int32, semantic: SizeFree0 },
                     { type: address, semantic: AddressA },
@@ -63,7 +63,7 @@ BenchmarkProblems:
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
             uniformSummationOrder: true
-          - name: "wvSplitK_vllm_bf16_tn_bias_n1_y1u2"
+          - name: "wvSplitK_vllm_bf16_tn_n1_y1u2"
             args: [ { type: int32, semantic: SizeSum },
                     { type: int32, semantic: SizeFree0 },
                     { type: address, semantic: AddressA },

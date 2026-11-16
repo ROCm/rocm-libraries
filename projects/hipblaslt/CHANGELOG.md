@@ -15,7 +15,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Optimized
 
-* Improved gfx950 performance of skinny BF16 and FP16 TN GEMMs with one to five tokens and a bias vector of D's type (`F.linear` with a bias) by routing them to bias-epilogue variants of the vLLM wave-split-K custom kernels.
+* Improved gfx950 performance of skinny BF16 and FP16 TN GEMMs with one to five tokens and a bias vector of D's type (`F.linear` with a bias) by adding a bias epilogue to the vLLM wave-split-K custom kernels and routing them there.
 
 ### Resolved issues
 

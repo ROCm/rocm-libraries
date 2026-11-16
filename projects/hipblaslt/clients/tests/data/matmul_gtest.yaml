@@ -143,8 +143,8 @@ Tests:
   batch_count: 1
 
 # The same shapes with the bias epilogue. A bias of D's type reaches the vLLM
-# wvSplitK bias kernels on gfx950; an f32 bias, an activation or a scale-alpha
-# vector must fall through to other kernels.
+# wvSplitK kernels' bias epilogue on gfx950; an f32 bias, an activation or a
+# scale-alpha vector must fall through to other kernels.
 - name: matmul_skinny_bf16_tn_bias
   category: pre_checkin
   function:

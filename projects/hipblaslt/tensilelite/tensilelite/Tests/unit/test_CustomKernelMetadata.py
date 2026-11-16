@@ -1452,7 +1452,8 @@ _VLLM_WVSPLITK = [
 ]
 _VLLM_WVSPLITK_NAMES = [f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}" for dt, n, tile in _VLLM_WVSPLITK]
 
-# Their bias-epilogue variants that library logic picks.
+# The ones that also add hipBLASLt's bias vector: the tiles the bias library
+# logic picks. A null bias address adds nothing, so plain GEMMs run them too.
 _VLLM_WVSPLITK_BIAS = [
     *[("bf16", n, tile) for n in (1, 2, 3) for tile in ("y1u4", "y1u2")],
     *[("bf16", 4, tile) for tile in ("y1u4", "y1u2", "y3u2")],
@@ -1460,7 +1461,7 @@ _VLLM_WVSPLITK_BIAS = [
     *[("f16", n, tile) for n in (1, 2, 3) for tile in ("y1u4", "y1u2")],
     *[("f16", n, tile) for n in (4, 5) for tile in ("y1u4", "y1u2", "y3u2")],
 ]
-_VLLM_WVSPLITK_BIAS_NAMES = [f"wvSplitK_vllm_{dt}_tn_bias_n{n}_{tile}" for dt, n, tile in _VLLM_WVSPLITK_BIAS]
+_VLLM_WVSPLITK_BIAS_NAMES = [f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}" for dt, n, tile in _VLLM_WVSPLITK_BIAS]
 
 _SKINNY_TN_ARGS = [
     "SizeSum",
@@ -1483,7 +1484,7 @@ _SKINNY_TN_ARGS = [
 _WVSPLTK_NAMES = ["wvSpltK_bf16_tn_m1", "wvSpltK_bf16_tn_m2", "wvSpltK_bf16_tn_m4"]
 
 
-@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES, *_VLLM_WVSPLITK_BIAS_NAMES])
+@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES])
 def test_wvspltk_code_object_version_matches_library_build(name):
     """Library logic references these kernels, so TensileCreateLibrary links each
     into one code object with Tensile's kernels, which hipBLASLt assembles at its
@@ -1556,17 +1557,15 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
 @pytest.mark.parametrize("dt,n,tile", _VLLM_WVSPLITK)
 def test_vllm_wvsplitk_shipped_config(dt, n, tile):
     """Same layout and arguments as wvSpltK, with n fixed per kernel. Tokens that
-    fit LDS are staged once, otherwise K is staged in chunks, so K has no bound."""
-    _check_skinny_tn_config(f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}", {"bf16": "b", "f16": "h"}[dt], {1: n, 2: 1})
-
-
-@pytest.mark.parametrize("dt,n,tile", _VLLM_WVSPLITK_BIAS)
-def test_vllm_wvsplitk_bias_shipped_config(dt, n, tile):
-    """The same kernels with the bias added to each row of D, its address
-    appended to the args. The bias kernels accept no activation or scale vector,
-    and hipBLASLt only gives them a bias of D's type."""
+    fit LDS are staged once, otherwise K is staged in chunks, so K has no bound.
+    The kernels with a bias epilogue also add a bias of D's type to each row of
+    D, its address appended to the args; they accept no activation or scale
+    vector."""
     _check_skinny_tn_config(
-        f"wvSplitK_vllm_{dt}_tn_bias_n{n}_{tile}", {"bf16": "b", "f16": "h"}[dt], {1: n, 2: 1}, bias=True
+        f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}",
+        {"bf16": "b", "f16": "h"}[dt],
+        {1: n, 2: 1},
+        bias=(dt, n, tile) in _VLLM_WVSPLITK_BIAS,
     )
 
 
@@ -1653,14 +1652,17 @@ _PLAIN_RANGE = {
 )
 def test_skinny_tn_range_logic(rel, dataType, kernels, bias):
     """hipBLASLt reaches the skinny TN kernels through these Range files. A custom
-    kernel takes the logic file's problem type. The plain kernels support no
-    bias, activation or scale vector, so their type must be plain GEMM in the
-    kernels' data type; the bias kernels' type adds only a bias of D's type.
-    Types are compared after TensileLite fills in defaults, since a logic file
-    may write a default out or leave it implicit. Keys are [m_min, m_max, n_min,
-    n_max, batch_min, batch_max, K_min, K_max], -1 unbounded. hipBLASLt takes
-    the first row containing the problem, so the rows must not overlap, and each
-    must sit inside its kernel's predicates.
+    kernel takes the logic file's problem type. The kernels support no
+    activation or scale vector, so the plain files' type must be plain GEMM in
+    the kernels' data type, and the bias files' type adds only a bias of D's
+    type. The kernels with a bias epilogue serve both: a plain GEMM passes a
+    null bias address, which adds nothing. Types are compared after TensileLite
+    fills in defaults, since a logic file may write a default out or leave it
+    implicit. Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max, K_min,
+    K_max], -1 unbounded. hipBLASLt takes the first row containing the problem,
+    so the rows must not overlap, and each must sit inside its kernel's
+    predicates. Each solution lists its kernel's arguments, the bias address
+    included.
 
     The BF16 file must also share the placeholder of the shipped plain-GEMM
     Equality file beside it. That is a fact about two corpus files, so
@@ -1687,13 +1689,17 @@ def test_skinny_tn_range_logic(rel, dataType, kernels, bias):
     if bias:
         # A problem without a bias also matches the bias type. hipBLASLt searches
         # the plain-GEMM file first, so rows inside its rows keep those problems
-        # off the bias kernels.
+        # on the plain-GEMM rows.
         with open(require_logic_file(_PLAIN_RANGE[dataType])) as f:
             plainRows = [key for key, _ in yaml.safe_load(f)["ExactLogic"]]
         for key, name in rows:
             assert _box_covered(key, plainRows), (key, name)
 
     ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
+    semantics = lambda ck: [a["semantic"] for a in ck["args"]]
+    for s in doc["Solutions"]:
+        config = getCustomKernelConfig(s["CustomKernel"]["name"], {}, ck_root)
+        assert semantics(s["CustomKernel"]) == semantics(config["CustomKernel"]), s["CustomKernel"]["name"]
     for key, name in rows:
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):

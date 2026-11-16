@@ -286,6 +286,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n1_y1u2
@@ -369,6 +370,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n1_y1u4
@@ -535,6 +537,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n2_y1u2
@@ -618,6 +621,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n2_y1u4
@@ -784,6 +788,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n3_y1u2
@@ -867,6 +872,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n3_y1u4
@@ -1033,6 +1039,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n4_y1u2
@@ -1116,6 +1123,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n4_y1u4
@@ -1199,6 +1207,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n4_y3u2
@@ -1282,6 +1291,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n5_y1u2
@@ -1365,6 +1375,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n5_y1u4
@@ -1448,6 +1459,7 @@ Solutions:
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: StrideC0}
     - {type: int32, semantic: StrideD0}
+    - {type: address, semantic: AddressBias}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
     name: wvSplitK_vllm_f16_tn_n5_y3u2

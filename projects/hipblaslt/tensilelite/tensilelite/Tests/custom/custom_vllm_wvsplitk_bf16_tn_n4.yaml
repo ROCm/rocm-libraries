@@ -54,7 +54,8 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha },
                     { type: float32, semantic: Beta },
                     { type: int32, semantic: StrideC0 },
-                    { type: int32, semantic: StrideD0 } ]
+                    { type: int32, semantic: StrideD0 },
+                    { type: address, semantic: AddressBias } ]
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
@@ -73,7 +74,8 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha },
                     { type: float32, semantic: Beta },
                     { type: int32, semantic: StrideC0 },
-                    { type: int32, semantic: StrideD0 } ]
+                    { type: int32, semantic: StrideD0 },
+                    { type: address, semantic: AddressBias } ]
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
@@ -92,7 +94,8 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha },
                     { type: float32, semantic: Beta },
                     { type: int32, semantic: StrideC0 },
-                    { type: int32, semantic: StrideD0 } ]
+                    { type: int32, semantic: StrideD0 },
+                    { type: address, semantic: AddressBias } ]
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
