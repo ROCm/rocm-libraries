@@ -93,6 +93,24 @@ static std::string getKernelNameKey(const std::string& archId,
     return kernelNameKey;
 }
 
+// The registry mask ordinal of the forward kernel for a graph whose band classifies as
+// maskType. AITER v0.1.29 mha_fwd.cu get_cfg_mask_type() runs a top-left causal mask
+// on the bottom-right causal (mask 2) kernels when seqlen_q == seqlen_k, where the two
+// masks agree; the registry has no top-left causal rows. Group mode keeps the top-left
+// ordinal: its per-batch lengths can differ even when the maximum lengths are equal.
+static plan_utils::MaskType fwdKernelMaskType(plan_utils::MaskType maskType,
+                                              int64_t seqLenQ,
+                                              int64_t seqLenKv,
+                                              BatchMode mode)
+{
+    if(maskType == plan_utils::MaskType::TOP_LEFT_CAUSAL && seqLenQ == seqLenKv
+       && mode == BatchMode::BATCH)
+    {
+        return plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL;
+    }
+    return maskType;
+}
+
 static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType qType,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType kType,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType vType,
@@ -803,20 +821,17 @@ bool SdpaFwdPlanBuilder::isApplicable(
             = plan_utils::makeCoveringBoundsUnbound(plan_utils::resolveDiagonalBand(attrs),
                                                     qTensor->dims()->Get(2),
                                                     kTensor->dims()->Get(2));
-        maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
+        maskType = fwdKernelMaskType(
+            plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+            qTensor->dims()->Get(2),
+            kTensor->dims()->Get(2),
+            batchMode);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
         HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
         return false;
     }
-
-    // The current causal kernel binaries do not compute LSE stats correctly
-    // when s_lse=1 is set at runtime. Decline causal+stats until the upstream
-    // ASM kernels support this combination.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        hasStats && maskType != plan_utils::MaskType::NO_MASK,
-        "stats (LSE) output is not supported with causal masks on the current ASM kernels");
 
     auto key = getKernelNameKey(deviceString,
                                 dataTypeId,
@@ -1028,12 +1043,6 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    // Classify on the graph dims, exactly as isApplicable does. Passing the
-    // narrowed unsigned locals instead would let the two sites resolve
-    // different mask types for the same graph.
-    const auto band = plan_utils::makeCoveringBoundsUnbound(
-        plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kDims->Get(2));
-    params.maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 
     const auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
@@ -1060,6 +1069,17 @@ void SdpaFwdPlanBuilder::buildPlan(
         params.group = SdpaFwdGroupModeParams{qTensor->ragged_offset_tensor_uid().value(),
                                               kTensor->ragged_offset_tensor_uid().value()};
     }
+
+    // Classify on the graph dims, exactly as isApplicable does. Passing the
+    // narrowed unsigned locals instead would let the two sites resolve
+    // different mask types for the same graph.
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kDims->Get(2));
+    params.maskType = fwdKernelMaskType(
+        plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+        qDims->Get(2),
+        kDims->Get(2),
+        batchMode);
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;

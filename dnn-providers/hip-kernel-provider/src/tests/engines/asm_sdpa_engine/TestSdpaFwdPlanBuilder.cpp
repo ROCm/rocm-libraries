@@ -268,6 +268,9 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         GTEST_SKIP();
     }
 
+    // causal_mask is top-left. At S_q == S_kv gfx942 serves it with the bottom-right causal
+    // batch kernels, stats included; gfx950 has causal kernels for group mode only.
+    const bool servesBatchCausal = deviceString == "gfx942";
     const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
         {GraphTest{createSdpaFwdGraph(), "Valid test with q head dim 128"}, true},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 192}), "Valid test with q head dim 192"}, true},
@@ -329,6 +332,30 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       true),
                    "causal_mask = true"},
+         servesBatchCausal},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      true,
+                                      true,
+                                      false,
+                                      false,
+                                      true),
+                   "causal_mask = true, withStats = true"},
+         servesBatchCausal},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 512, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      true,
+                                      false,
+                                      false,
+                                      false,
+                                      true),
+                   "causal_mask = true (top-left) with S_q != S_kv"},
          false},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
