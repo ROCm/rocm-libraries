@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # A reduced TensileLite benchmark for rocjitsu_race_smoke.py: one f32 NT GEMM
 # using MFMA with A read directly to VGPRs.
 GlobalParameters:

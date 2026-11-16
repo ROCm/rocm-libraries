@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import subprocess
 import sys
 import tempfile
 import time
@@ -48,6 +49,79 @@ class WorkloadFailuresTest(unittest.TestCase):
         output = DISPATCH + MFMA
         self.assertEqual(smoke.workload_failures(3, output), ["exited with status 3"])
         self.assertEqual(smoke.workload_failures(None, output), ["timed out"])
+
+
+class RunnerTest(unittest.TestCase):
+    def test_benchmark_verification_failure_fails_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write(relative, contents):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents)
+                path.chmod(0o755)
+
+            write("share/rocjitsu/configs/gfx942_cdna3_kmd.json", "{}")
+            for path in (
+                "bin/amdclang++",
+                "lib/llvm/lib/libomp.so",
+                "libexec/hipblaslt/tensilelite/tensilelite-client",
+            ):
+                write(path, "")
+            write(
+                "share/hipblaslt/tensilelite/tensilelite/bin/Tensile",
+                "print(',PASSED,')\n",
+            )
+            write(
+                "bin/rocjitsu",
+                f"#!{sys.executable}\n"
+                "import os, sys\n"
+                "if '--version' in sys.argv:\n"
+                "    sys.exit(0)\n"
+                f"print({DISPATCH + MFMA!r}, flush=True)\n"
+                "cmd = sys.argv[sys.argv.index('--') + 1:]\n"
+                "os.execv(cmd[0], cmd)\n",
+            )
+            for mismatch in (False, True):
+                with self.subTest(mismatch=mismatch):
+                    # Model verification_exit_code in hipblaslt_bench_options.cpp:
+                    # a failed comparison changes the exit status only in strict mode.
+                    write(
+                        "bin/hipblaslt-bench",
+                        f"#!{sys.executable}\n"
+                        "import sys\n"
+                        f"print('verification failures: {int(mismatch)}')\n"
+                        f"sys.exit(2 if {mismatch} and '--verify_strict' in sys.argv else 0)\n",
+                    )
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(Path(smoke.__file__)),
+                            "--rocm-path",
+                            str(root),
+                            "--amdgpu-families",
+                            "gfx94X-dcgpu",
+                            "--report-dir",
+                            str(root / "reports"),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(result.returncode, int(mismatch), result.stderr)
+                    self.assertIn(
+                        f"verification failures: {int(mismatch)}", result.stdout
+                    )
+                    self.assertIn(",PASSED,", result.stdout)
+                    if mismatch:
+                        self.assertEqual(
+                            result.stderr,
+                            "error: hipblaslt-bench: exited with status 2\n",
+                        )
+                        self.assertNotIn("rocjitsu race checks passed", result.stdout)
+                    else:
+                        self.assertIn("rocjitsu race checks passed", result.stdout)
 
 
 class RunWithTimeoutTest(unittest.TestCase):
