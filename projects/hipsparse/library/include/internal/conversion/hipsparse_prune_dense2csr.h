@@ -79,6 +79,7 @@ extern "C" {
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseSpruneDense2csrNnz(), hipsparseDpruneDense2csrNnz(),
 *                     hipsparseSpruneDense2csr(), and hipsparseDpruneDense2csr().
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -150,6 +151,7 @@ hipsparseStatus_t hipsparseSpruneDense2csr_bufferSize(hipsparseHandle_t         
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseSpruneDense2csrNnz(), hipsparseDpruneDense2csrNnz(),
 *                     hipsparseSpruneDense2csr(), and hipsparseDpruneDense2csr().
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -223,6 +225,7 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSize(hipsparseHandle_t         
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseSpruneDense2csrNnz(), hipsparseDpruneDense2csrNnz(),
 *                     hipsparseSpruneDense2csr(), and hipsparseDpruneDense2csr().
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -295,6 +298,7 @@ hipsparseStatus_t hipsparseSpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseSpruneDense2csrNnz(), hipsparseDpruneDense2csrNnz(),
 *                     hipsparseSpruneDense2csr(), and hipsparseDpruneDense2csr().
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.

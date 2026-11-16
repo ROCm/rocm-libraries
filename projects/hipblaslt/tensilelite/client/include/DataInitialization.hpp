@@ -42,6 +42,7 @@
 #include <random>
 
 #include "RunListener.hpp"
+#include "TimingInstrumentation.hpp"
 
 namespace TensileLite
 {
@@ -386,6 +387,8 @@ namespace TensileLite
                 {
                     if(m_elementsToValidate)
                     {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_fast_reset_output",
+                                                           "gpu_input_prep_fast_reset_output"));
                         resetOutput(m_gpuPtrs,
                                     m_gpuBatchPtrs,
                                     m_maxElements,
@@ -397,26 +400,48 @@ namespace TensileLite
                 }
                 else
                 {
+                    // This slow path is taken on every call when bounds checking is enabled
+                    // (m_curBoundsCheck != Disable), or for problem-dependent data / swizzles.
+                    {
+                        ScopedTimer slowPathMarker(gpuInputCategory("gpu_input_reset_slow_path",
+                                                                    "gpu_input_prep_slow_path"));
+                    }
                     // Update CPU Inputs if prepareGPUInputs is not called.
                     if(m_cpuPtrs.empty() && m_problemDependentData && !m_cpuInputsReadyForProblem)
                     {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_init_cpu_inputs",
+                                                           "gpu_input_prep_init_cpu_inputs"));
                         initializeCPUInputs(problem);
                         m_cpuInputsReadyForProblem = m_currentSolution != nullptr;
                     }
                     if(m_problemDependentData)
+                    {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_valid_to_gpu",
+                                                           "gpu_input_prep_copy_valid_to_gpu"));
                         copyValidToGPUBuffer(problem);
+                    }
                     if(needSwizzle || needMXSwizzle)
+                    {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_swizzled",
+                                                           "gpu_input_prep_copy_swizzled"));
                         copySwizzledToGPUBuffer(problem);
+                    }
 
                     // gpu to gpu
-                    copyInputs(m_gpuPtrs,
-                               m_gpuBatchPtrs,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               problem,
-                               hipMemcpyDeviceToDevice);
+                    {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_inputs_d2d",
+                                                           "gpu_input_prep_copy_inputs_d2d"));
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   problem,
+                                   hipMemcpyDeviceToDevice);
+                    }
                     if(m_rotatingMode == 1 && m_rotatingBuffer > 0)
                     {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_rotating_init",
+                                                           "gpu_input_prep_rotating_init"));
                         auto mem = m_rm->getRotatingMemory();
                         // init mode 1 rotating data
                         for(size_t j = 1; j < mem.size(); j++)
@@ -437,12 +462,24 @@ namespace TensileLite
                     }
                     m_gpuInit = true;
                 }
-                initializeGPUBatchedInputs(problem);
+                {
+                    ScopedTimer timer(gpuInputCategory("gpu_input_reset_batched_inputs",
+                                                       "gpu_input_prep_batched_inputs"));
+                    initializeGPUBatchedInputs(problem);
+                }
 
                 if(m_cpuPtrs.empty())
+                {
+                    ScopedTimer timer(gpuInputCategory("gpu_input_reset_constant_inputs",
+                                                       "gpu_input_prep_constant_inputs"));
                     initializeConstantInputs(problem);
+                }
 
-                m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                {
+                    ScopedTimer timer(gpuInputCategory("gpu_input_reset_convert_to_inputs",
+                                                       "gpu_input_prep_convert_to_inputs"));
+                    m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                }
                 return m_cachedGPUInputs;
             }
 
@@ -931,24 +968,41 @@ namespace TensileLite
                 // Re-init MX inputs for solution-dependent HostPreSwizzle. The
                 // swizzled scale layout only depends on the solution's MFMA K,
                 // so consecutive solutions sharing it reuse the uploaded data.
-                if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
-                   && !m_gpuPtrs.empty()
-                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem, m_currentSolution)
-                   && static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2])
-                          != m_mxPreswizzleMiK)
+                bool needsMXReinit = false;
+                {
+                    ScopedTimer timer("pre_solution_mx_check");
+                    needsMXReinit
+                        = m_currentSolution != nullptr && m_currentGemmProblem != nullptr
+                          && !m_gpuPtrs.empty()
+                          && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
+                                                                m_currentSolution)
+                          && static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2])
+                                 != m_mxPreswizzleMiK;
+                }
+                if(needsMXReinit)
                 {
                     ScopedDevice device(m_deviceId);
                     m_mxPreswizzleMiK
                         = static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2]);
-                    initializeMXData(*m_currentGemmProblem);
-                    copyValidToGPUBuffer(*m_currentGemmProblem);
-                    copyInputs(m_gpuPtrs,
-                               m_gpuBatchPtrs,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               *m_currentGemmProblem,
-                               hipMemcpyDeviceToDevice);
+                    {
+                        ScopedTimer timer("pre_solution_mx_init_data");
+                        initializeMXData(*m_currentGemmProblem);
+                    }
+                    {
+                        ScopedTimer timer("pre_solution_mx_copy_valid_to_gpu");
+                        copyValidToGPUBuffer(*m_currentGemmProblem);
+                    }
+                    {
+                        ScopedTimer timer("pre_solution_mx_copy_inputs_d2d");
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   *m_currentGemmProblem,
+                                   hipMemcpyDeviceToDevice);
+                    }
                     // Sync CPU current buffers so the reference matches GPU data.
+                    ScopedTimer cpuSyncTimer("pre_solution_mx_cpu_sync");
                     for(int ti : {ContractionProblemGemm::TENSOR::A,
                                   ContractionProblemGemm::TENSOR::B,
                                   ContractionProblemGemm::TENSOR::MXSA,
@@ -3300,9 +3354,10 @@ namespace TensileLite
             rocm_random_common<BFloat16>::signsig_exp(FP_PARAM<BFloat16>::UINT_T signsig,
                                                       FP_PARAM<BFloat16>::UINT_T exp)
         {
-            FP_PARAM<BFloat16>::UINT_T u;
-            u = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
-            return static_cast<BFloat16>(u);
+            // Store u as the raw bits; static_cast<BFloat16>(u) would convert it as a number.
+            BFloat16 r;
+            r.data = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
+            return r;
         }
 
         template <typename T, int LOW_EXP, int HIGH_EXP>

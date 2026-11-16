@@ -289,6 +289,44 @@ jobs:
             echo "the packaged test list is missing the harness with MIOPEN_ENABLE_HIPDNN_WRAPPER on"
             exit 1
           }
+          # Tier labels are set only inside the flag's block, so a wrapper check registered
+          # outside it would have none, TheRock would never select it, and nothing else
+          # would notice.
+          listing=$(ctest --test-dir parity-off -N -R '^(wrapper_abi_check|forwarding_failure_modes)')
+          printf '%s\n' "$listing" | grep -q '^Total Tests: 0$' || {
+            echo "the wrapper-off tree registers a wrapper check"
+            printf '%s\n' "$listing"
+            exit 1
+          }
+          if grep -Eq '^add_test\((wrapper_abi_check|forwarding_failure_modes)' "parity-off/$packaged"; then
+            echo "the packaged test list registers a wrapper check without MIOPEN_ENABLE_HIPDNN_WRAPPER"
+            exit 1
+          fi
+
+      # TheRock's GPU jobs select the wrapper checks with `-L ^<tier>$ -L ^ex_gpu_<arch>$`.
+      # Dropping the per-architecture entries leaves every other check green, so compare
+      # them against the labels the shared parser derives from test_categories.yaml (the
+      # architectures that have an enabled suite), in the wrapper-on tree and in the
+      # packaged list.
+      - name: Wrapper checks are registered for every architecture with an enabled suite
+        if: matrix.job_id == 'no-ck-build'
+        run: |
+          labels=$(python3 projects/miopen/test/gtest/forwarding_parity_gpu_labels.py \
+            shared/ctest/parse_test_categories.py \
+            projects/miopen/test/gtest/test_categories.yaml)
+          python3 projects/miopen/test/gtest/check_wrapper_registration.py \
+            --labels "$labels" \
+            --ctest-dir parity-on \
+            --packaged parity-on/test/gtest/install_CTestTestfile.cmake
+
+      # The wrapper script tests are one CTest entry that needs no build, so the
+      # configure-only tree is enough. Running them here catches a script change without
+      # the manually dispatched flag-on workflow.
+      # --no-tests=error: ctest exits 0 when -R matches nothing.
+      - name: Wrapper script tests
+        if: matrix.job_id == 'no-ck-build'
+        run: |
+          ctest --test-dir parity-on -R '^test_forwarding_parity_scripts$' --no-tests=error --output-on-failure
 
       # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
       # exported public C API symbol set, and no _impl symbol leakage. This is a

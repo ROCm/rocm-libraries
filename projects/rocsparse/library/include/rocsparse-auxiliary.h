@@ -2217,8 +2217,8 @@ rocsparse_status rocsparse_spildlt0_descr_destroy(rocsparse_handle         handl
  *  -     \ref rocsparse_spildlt0_input_analysis_policy is \ref rocsparse_analysis_policy. It can only be set before applying any phase.
  *  -     \ref rocsparse_spildlt0_input_singularity_tolerance is a device/host double pointer. Its device mode is determined from the \ref rocsparse_handle.
  *  -     \ref rocsparse_spildlt0_input_boost_enable is an \p int32_t.
- *  -     \ref rocsparse_spildlt0_input_boost_value is a pointer to a scalar of value type A. Its device mode is determined from the \ref rocsparse_handle.
- *  -     \ref rocsparse_spildlt0_input_boost_tolerance is a double pointer. Its device mode is determined from the \ref rocsparse_handle.
+ *  -     \ref rocsparse_spildlt0_input_boost_value is a pointer to a scalar of value type A. Its device mode is determined from the \ref rocsparse_handle. With the numeric boost enabled, a pivot \f$D_i\f$ with \f$|D_i|\f$ at most the boost tolerance is replaced by the modulus of the boost value with the sign of \f$D_i\f$ (positive if \f$D_i = 0\f$), so the boost keeps the inertia of A. \f$D\f$ is real, so only the real part of a complex boost value is used.
+ *  -     \ref rocsparse_spildlt0_input_boost_tolerance is a pointer to a real tolerance: a \p double pointer, or a \p float pointer when \p input_size_in_bytes is \p sizeof(float). The type is taken from \p input_size_in_bytes only, so a complex tolerance is not supported and a \p rocsparse_float_complex pointer would be read as a \p double. Its device mode is determined from the \ref rocsparse_handle.
  *  -     \ref rocsparse_spildlt0_input_diag is an \b optional device pointer (void*) to a dense array in device memory of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ (\p m entries per batch, batch \p b at offset \p b * \p m).
  *        \f$D\f$ is always real, even for complex matrices, so for \p s and \p c variants this is \p float* and for \p d and \p z variants this is \p double*.
  *        It is optional: \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor and can be read back from there after \ref rocsparse_spildlt0_stage_compute. If set, it must be set before calling \ref rocsparse_spildlt0 with stage \ref rocsparse_spildlt0_stage_compute.
@@ -2240,7 +2240,7 @@ rocsparse_status rocsparse_spildlt0_descr_destroy(rocsparse_handle         handl
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
  *  \retval rocsparse_status_invalid_value if \p input is invalid.
- *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ *  \retval rocsparse_status_invalid_size if \p input_size_in_bytes is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spildlt0_set_input(rocsparse_handle         handle,

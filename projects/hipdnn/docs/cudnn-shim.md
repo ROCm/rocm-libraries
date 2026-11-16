@@ -4,7 +4,7 @@ Header-only layer that exposes the NVIDIA cuDNN frontend (FE) v9 graph API and t
 
 - Source compatible, not ABI compatible. Consumers recompile.
 - v9 graph API and v0.x builders. The raw cuDNN backend descriptor C API is not provided; `cudnnBackendExecute` is.
-- C++ only. No Python bindings.
+- C++ only. For `cudnn.pygraph` code, see the [cuDNN-style Python API](../python/README.md#cudnn-style-api).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
@@ -81,7 +81,7 @@ Details: [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md).
 | Area | Shim behavior |
 |---|---|
 | Heuristic modes | Every `HeurMode_t` is accepted. In the v9 graph API, `A` and `B` select hipDNN's prediction policies, and `OPENSOURCE` logs a warning once per process and runs hipDNN's fallback engine selection. The v0.x builders rank by the same policies for `A`, `B` and `INSTANT` (as `A`), but return the engines fallback selection finds, each with its default configuration. |
-| Numerical-note filters | Mostly ignored with a warning. `deselect_numeric_notes(NONDETERMINISTIC)` keeps only engines that claim determinism. `deselect_numeric_notes` with `DOWN_CONVERT_INPUTS` or `REDUCED_PRECISION_REDUCTION`, and `select_numeric_notes(STRICT_NAN_PROP)`, record `GRAPH_NOT_SUPPORTED`. |
+| Numerical-note filters | Mostly ignored with a warning. `select_numeric_notes(NONDETERMINISTIC)` and `deselect_numeric_notes(NONDETERMINISTIC)` filter engines by their reported numerical notes; deselect keeps only engines that claim determinism. `deselect_numeric_notes` with `DOWN_CONVERT_INPUTS` or `REDUCED_PRECISION_REDUCTION`, and `select_numeric_notes(STRICT_NAN_PROP)`, record `GRAPH_NOT_SUPPORTED`. |
 | Behavior-note filters | hipDNN notes filter engines. cuDNN-only notes: `deselect` is ignored with a warning, `select` records `GRAPH_NOT_SUPPORTED`. |
 | Engine filters | Applied after plan creation. `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan; if none survives, plan creation, `check_support()`, and plan builds return `GRAPH_NOT_SUPPORTED`. |
 | Plan build fallback | `build_plans(HEURISTICS_CHOICE)` falls back on any plan-build failure: it logs a WARN for each failed plan and tries the other ranked plans, scanning the ranked list from the top. If no plan builds, it returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` listing each attempted engine's failure. An active plan that builds but is over the workspace limit is an error, not skipped. When the shim's own filters bar the active plan, the shim retargets with `build_plan_at_index`, which does not walk the fallback: if the retarget target fails to build, its error is returned. |
