@@ -79,8 +79,9 @@ const char* modeName(VerificationMode mode)
 // reference's output of the comparison to <dir>/<test name>/ as raw element-space bytes plus a
 // manifest.json (role, uid, dims, strides, element size, file). Lets an offline tool grade the same
 // tensors with another tolerance rule (see the sdpa_conformance comparison in the gauntlet notes).
-template <class Inputs, class Engine, class Expected, class Uids>
+template <class Wrapper, class Inputs, class Engine, class Expected, class Uids>
 void dumpComparisonTensors(const std::string& testName,
+                           const Wrapper& wrapper,
                            Inputs& inputs,
                            Engine& engineOutputs,
                            const Expected& expectedFor,
@@ -110,9 +111,17 @@ void dumpComparisonTensors(const std::string& testName,
         std::ofstream out(dir / file, std::ios::binary);
         out.write(static_cast<const char*>(t.rawHostData()),
                   static_cast<std::streamsize>(t.elementSpace() * t.elementSize()));
+        std::string name;
+        const auto& tensorMap = wrapper.getTensorMap();
+        const auto found = tensorMap.find(uid);
+        if(std::string(role) != "philox_mask" && found != tensorMap.end()
+           && found->second->name() != nullptr)
+        {
+            name = found->second->name()->str();
+        }
         manifest << (first ? "" : ",") << "{\"role\":\"" << role << "\",\"uid\":" << uid
-                 << ",\"elem\":" << t.elementSize() << ",\"space\":" << t.elementSpace()
-                 << ",\"file\":\"" << file << "\",\"dims\":[";
+                 << ",\"name\":\"" << name << "\",\"elem\":" << t.elementSize()
+                 << ",\"space\":" << t.elementSpace() << ",\"file\":\"" << file << "\",\"dims\":[";
         first = false;
         for(size_t i = 0; i < t.dims().size(); ++i)
         {
@@ -1940,6 +1949,7 @@ VerificationOutcome
     {
         const auto* philox = philoxReference();
         dumpComparisonTensors(currentTestName(),
+                              wrapper,
                               _inputs,
                               engineOutputs,
                               expectedFor,
