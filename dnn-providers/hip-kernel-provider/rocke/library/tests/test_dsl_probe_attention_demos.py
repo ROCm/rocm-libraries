@@ -10,8 +10,8 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from rocke.assets import dsl_docs_dir
 from rocke.core.ir import KernelDef
+from rocke.tests.source_tree import require_dsl_docs
 
 _PROBE_MODULES = (
     "probe_occupancy",
@@ -32,9 +32,7 @@ def demos():
         / "common"
         / "dsl_probe_attention_demos.py"
     )
-    probe_dir = dsl_docs_dir() / "optimization" / "utilities" / "tools" / "dsl_probes"
-    if not all((probe_dir / f"{name}.py").is_file() for name in _PROBE_MODULES):
-        pytest.skip(f"attention CLI probe source assets unavailable: {probe_dir}")
+    require_dsl_docs()  # the driver imports its probes from the dsl_docs tree
     saved_path = sys.path[:]
     saved_modules = {
         name: sys.modules[name] for name in _PROBE_MODULES if name in sys.modules

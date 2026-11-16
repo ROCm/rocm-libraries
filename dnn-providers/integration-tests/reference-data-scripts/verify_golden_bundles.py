@@ -13,9 +13,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "migration-scripts"))
+from bundle_utils import (  # noqa: E402
+    ABSENT_TENSORS_KEY,
+    UNRESOLVED,
+    absent_case_problems,
+    walk_dotted_path,
+)
+
 ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
 BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
+REFERENCE_DISABLE_FLAGS = ("no_cpu_reference", "no_gpu_reference")
+BOOLEAN_METADATA_FLAGS = (*REFERENCE_DISABLE_FLAGS, "expected_rejection")
 
 MIN_TIERED_BUNDLE_SEGMENTS = 6
 
@@ -27,6 +37,12 @@ ADVISORY_LAYOUT_ERROR = (
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{case\.([A-Za-z0-9_.]+)\}$")
 TEMPLATE_TENSOR_FIELDS = ("dims", "strides", "data_type")
+# Fields a template tensor may also carry, as a literal or a placeholder: the ragged
+# binding that sizes the tensor's payload (RFC 0014).
+OPTIONAL_TEMPLATE_TENSOR_FIELDS = (
+    "ragged_offset_tensor_uid",
+    "ragged_offset_multiplier",
+)
 
 # Node types whose real hipDNN JSON schema declares output tensor uids as flat
 # scalar fields directly on the node, instead of nesting them under an `outputs`
@@ -46,6 +62,40 @@ FLAT_OUTPUT_UID_FIELDS: dict[str, tuple[str, ...]] = {
 SDPA_STATS_UID_FIELDS: dict[str, tuple[str, str]] = {
     "SdpaAttributes": ("outputs", "stats_tensor_uid"),
     "SdpaBackwardAttributes": ("inputs", "stats_tensor_uid"),
+}
+
+# The SDPA tensors whose ragged batches take their lengths from a node's seq_len
+# (RFC 0014), per node type: seq_len field (in `inputs`) -> the (uid map, field) of each
+# tensor it sizes. A node without the seq_len leaves these tensors to offset deltas.
+SDPA_RAGGED_LENGTH_ROLES: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
+    "SdpaAttributes": {
+        "seq_len_q_tensor_uid": (
+            ("inputs", "q_tensor_uid"),
+            ("outputs", "o_tensor_uid"),
+            ("outputs", "stats_tensor_uid"),
+            ("outputs", "max_tensor_uid"),
+            ("outputs", "sum_exp_tensor_uid"),
+        ),
+        "seq_len_kv_tensor_uid": (
+            ("inputs", "k_tensor_uid"),
+            ("inputs", "v_tensor_uid"),
+        ),
+    },
+    "SdpaBackwardAttributes": {
+        "seq_len_q_tensor_uid": (
+            ("inputs", "q_tensor_uid"),
+            ("inputs", "o_tensor_uid"),
+            ("inputs", "do_tensor_uid"),
+            ("outputs", "dq_tensor_uid"),
+            ("inputs", "stats_tensor_uid"),
+        ),
+        "seq_len_kv_tensor_uid": (
+            ("inputs", "k_tensor_uid"),
+            ("inputs", "v_tensor_uid"),
+            ("outputs", "dk_tensor_uid"),
+            ("outputs", "dv_tensor_uid"),
+        ),
+    },
 }
 
 
@@ -374,6 +424,9 @@ def validate_metadata_fields(
             result.error(
                 path, f"{prefix}{key} is required and must be a non-empty string"
             )
+    for key in BOOLEAN_METADATA_FLAGS:
+        if key in metadata and not isinstance(metadata[key], bool):
+            result.error(path, f"{prefix}{key} must be a boolean")
 
     direction = metadata.get("direction")
     if direction is not None and direction not in ("forward", "backward"):
@@ -403,6 +456,70 @@ def validate_metadata_fields(
         result.error(path, f"{prefix}reference_strategy must be a non-empty string")
 
 
+def validate_reference_flags_require_golden(
+    metadata: dict,
+    golden_declared: bool,
+    path: Path,
+    result: VerificationResult,
+    prefix: str = "",
+) -> None:
+    # An expected rejection ignores the reference flags: nothing is ever compared.
+    if metadata.get("expected_rejection") is True:
+        return
+    if (
+        all(metadata.get(key) is True for key in REFERENCE_DISABLE_FLAGS)
+        and not golden_declared
+    ):
+        result.error(
+            path,
+            f"{prefix}disables both references (no_cpu_reference and "
+            "no_gpu_reference) but declares no golden data; add golden data or "
+            "enable a reference",
+        )
+
+
+def validate_expected_rejection_has_no_golden(
+    metadata: dict,
+    golden_declared: bool,
+    path: Path,
+    result: VerificationResult,
+    prefix: str = "",
+) -> None:
+    if metadata.get("expected_rejection") is True and golden_declared:
+        result.error(
+            path,
+            f"{prefix}is an expected_rejection bundle but declares golden data; "
+            "it is never executed, so there is nothing to compare against",
+        )
+
+
+def single_graph_golden_declared(directory: Path, stem: str) -> bool:
+    """Mirror the C++ loader: the `.tensors.dvc` pointer, or a blob for every output.
+
+    Input-only or partial output blobs do not declare golden data. A graph that
+    cannot be read declares only through its pointer (the graph check reports it).
+    """
+    if (directory / f"{stem}.tensors.dvc").is_file():
+        return True
+    try:
+        graph = json.loads((directory / f"{stem}.json").read_text())
+        nodes = graph["nodes"]
+        virtual = {
+            tensor["uid"]
+            for tensor in graph["tensors"]
+            if isinstance(tensor, dict) and tensor.get("virtual") is True
+        }
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if not isinstance(nodes, list):
+        return False
+    output_uids = extract_output_tensor_uids(nodes, directory, VerificationResult())
+    output_uids -= virtual
+    return bool(output_uids) and all(
+        (directory / f"{stem}.tensor{uid}.bin").is_file() for uid in output_uids
+    )
+
+
 def validate_metadata(path: Path, result: VerificationResult) -> None:
     try:
         metadata = json.loads(path.read_text())
@@ -415,6 +532,14 @@ def validate_metadata(path: Path, result: VerificationResult) -> None:
         return
 
     validate_metadata_fields(metadata, path, result, base_dir=path.parent)
+
+    if path.name.endswith(".meta.json") and path.name != "meta.json":
+        stem = path.name[: -len(".meta.json")]
+        golden_declared = single_graph_golden_declared(path.parent, stem)
+        validate_reference_flags_require_golden(metadata, golden_declared, path, result)
+        validate_expected_rejection_has_no_golden(
+            metadata, golden_declared, path, result
+        )
 
 
 def is_integer(value: object) -> bool:
@@ -523,6 +648,33 @@ def extract_sdpa_stats_tensor_uids(nodes: list[object]) -> set[int]:
     return stats_tensor_uids
 
 
+def extract_ragged_length_uids(nodes: list[object]) -> dict[int, int]:
+    """Ragged tensor uid -> the uid of the seq_len tensor that sizes its batches.
+    Raises ValueError when a ragged tensor is bound to two different seq_len tensors."""
+    length_uids: dict[int, int] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        roles = SDPA_RAGGED_LENGTH_ROLES.get(node.get("type"))
+        inputs = node.get("inputs")
+        if roles is None or not isinstance(inputs, dict):
+            continue
+        for length_field, tensors in roles.items():
+            length_uid = inputs.get(length_field)
+            if not is_integer(length_uid):
+                continue
+            for uid_map_name, field_name in tensors:
+                uid_map = node.get(uid_map_name)
+                if isinstance(uid_map, dict) and is_integer(uid_map.get(field_name)):
+                    ragged_uid = uid_map[field_name]
+                    if length_uids.setdefault(ragged_uid, length_uid) != length_uid:
+                        raise ValueError(
+                            f"ragged tensor {ragged_uid} is bound to two seq_len "
+                            f"tensors, {length_uids[ragged_uid]} and {length_uid}"
+                        )
+    return length_uids
+
+
 def iter_float_values(dtype_key: str, data: bytes):
     """Decoded values of a float tensor payload; nothing for other dtypes."""
     if dtype_key in {"float", "float32", "fp32"}:
@@ -605,15 +757,14 @@ def find_infinite_index(dtype_key: str, data: bytes) -> int | None:
     return None
 
 
-def read_last_ragged_offset(offset_path: Path, offset_format: str) -> int:
-    data = offset_path.read_bytes()
-    width = struct.calcsize(offset_format)
+def read_ragged_values(path: Path, value_format: str) -> list[int]:
+    data = path.read_bytes()
+    width = struct.calcsize(value_format)
     if not data or len(data) % width != 0:
         raise ValueError(
-            f"offset tensor has {len(data)} bytes, not a non-empty multiple of {width}"
+            f"tensor has {len(data)} bytes, not a non-empty multiple of {width}"
         )
-    (last_offset,) = struct.unpack_from(offset_format, data, len(data) - width)
-    return last_offset
+    return [value for (value,) in struct.iter_unpack(value_format, data)]
 
 
 def report_missing_tensor_file(
@@ -637,51 +788,237 @@ def report_missing_tensor_file(
         )
 
 
-def ragged_element_count(
+def ragged_element_space(
+    dims: list[int],
+    strides: list[int],
+    multiplier: int,
+    offsets: list[int],
+    lengths: list[int] | None,
+) -> int:
+    """elementSpace of a ragged tensor (RFC 0014 §4.5): 1 + sum over the non-batch
+    axes of (extent - 1) * stride, with maxRow + 1 (the furthest row any sequence
+    addresses, plus one) as the sequence axis extent; 0 when no sequence has a row or
+    a non-sequence axis has extent 0. Batch b starts at
+    offsets[b] * multiplier and holds lengths[b] token rows; without lengths the
+    offsets must be monotonic and the blocks give the lengths. Raises ValueError
+    naming the violated rule."""
+    batches, s_max, seq_stride = dims[0], dims[2], strides[2]
+    if seq_stride <= 0 or any(stride < 0 for stride in strides[1:]):
+        raise ValueError(
+            "ragged strides must be non-negative with a positive sequence stride; "
+            "the batch-axis stride is unused "
+            f"(negative-stride rule; got {strides})"
+        )
+    if len(offsets) != batches + 1:
+        raise ValueError(
+            f"ragged_offset tensor holds {len(offsets)} values; it must hold exactly "
+            f"B+1 = {batches + 1} (offset-count rule)"
+        )
+    if lengths is not None and len(lengths) != batches:
+        raise ValueError(
+            f"seq_len tensor holds {len(lengths)} values; it must hold exactly "
+            f"B = {batches} (seq_len-count rule)"
+        )
+    origins = [offset * multiplier for offset in offsets]
+    if lengths is not None:
+        origins = origins[:batches]
+    if any(origin < 0 or origin % seq_stride for origin in origins):
+        raise ValueError(
+            f"origins {origins} are not whole tokens >= 0 of {seq_stride} elements "
+            "(whole-token origin rule)"
+        )
+    if lengths is None:
+        if any(later < earlier for earlier, later in zip(origins, origins[1:])):
+            raise ValueError(
+                f"offsets {origins} are not monotonic without seq_len (monotonic rule)"
+            )
+        lengths = [
+            min((later - earlier) // seq_stride, s_max)
+            for earlier, later in zip(origins, origins[1:])
+        ]
+    if any(length < 0 or length > s_max for length in lengths):
+        raise ValueError(
+            f"lengths {lengths} must lie in [0, S_max = {s_max}] (length range rule)"
+        )
+    live = sorted(
+        (origin // seq_stride, length)
+        for origin, length in zip(origins, lengths)
+        if length > 0
+    )
+    if not live:
+        return 0
+    for (start, length), (next_start, _) in zip(live, live[1:]):
+        if next_start < start + length:
+            raise ValueError(
+                f"ragged sequences overlap: rows from {next_start} start inside rows "
+                f"{start}..{start + length - 1} (overlap rule)"
+            )
+    if 0 in (dims[1], dims[3]):
+        return 0
+    max_row = max(start + length - 1 for start, length in live)
+    span = 1
+    for stride, extent in sorted(
+        (strides[axis], extent)
+        for axis, extent in ((2, max_row + 1), (1, dims[1]), (3, dims[3]))
+        if extent > 1 and strides[axis] > 0
+    ):
+        if stride < span:
+            raise ValueError(
+                f"ragged strides {strides} alias: stride {stride} is below the span "
+                f"{span} of the axes under it (sorted-stride rule)"
+            )
+        span += (extent - 1) * stride
+    return (
+        1
+        + max_row * seq_stride
+        + (dims[1] - 1) * strides[1]
+        + (dims[3] - 1) * strides[3]
+    )
+
+
+def read_ragged_tensor_values(
+    uid: int,
+    owner_uid: int,
+    role: str,
+    count: int,
+    count_label: str,
+    tensor_specs: dict[int, dict[str, object]],
+    tensor_path_for: Callable[[int], Path],
+    bundle_has_manifest: bool,
+    require_data: bool,
+    result: VerificationResult,
+) -> list[int] | None:
+    """Integer values of the offset or seq_len tensor `uid` of ragged tensor
+    `owner_uid`, or None if unknown. The tensor must have shape [count, 1, 1, 1];
+    `count_label` is that count as written in the message (B + 1 or B)."""
+    spec = tensor_specs.get(uid)
+    if spec is None:
+        result.error(
+            tensor_path_for(owner_uid),
+            f"{role} {uid} is not a declared tensor",
+            owner_uid,
+        )
+        return None
+    if len(spec["dims"]) != 4:
+        result.error(
+            tensor_path_for(owner_uid),
+            f"{role} {uid} must be rank 4 (has dims {spec['dims']})",
+            owner_uid,
+        )
+        return None
+    if list(spec["dims"]) != [count, 1, 1, 1]:
+        result.error(
+            tensor_path_for(owner_uid),
+            f"{role} {uid} must have shape [{count_label}, 1, 1, 1] "
+            f"(has dims {spec['dims']})",
+            owner_uid,
+        )
+        return None
+    data_type = spec["data_type"]
+    value_format = RAGGED_OFFSET_FORMATS.get(data_type.lower())
+    if value_format is None:
+        result.error(
+            tensor_path_for(owner_uid),
+            f"{role} {uid} has data_type '{data_type}'; expected int32 or int64",
+            owner_uid,
+        )
+        return None
+    path = tensor_path_for(uid)
+    if not path.exists():
+        report_missing_tensor_file(path, uid, bundle_has_manifest, require_data, result)
+        return None
+    try:
+        values = read_ragged_values(path, value_format)
+    except (OSError, ValueError) as error:
+        result.error(path, f"could not read {role} values: {error}", uid)
+        return None
+    # Value i sits at element i * strides[0]; the file spans the tensor's element space.
+    stride = spec["strides"][0]
+    if count > 1 and stride < 1:
+        result.error(
+            path,
+            f"{role} {uid} must have a positive batch stride (has {stride})",
+            uid,
+        )
+        return None
+    if stride > 1:
+        span = 1 + (count - 1) * stride
+        if len(values) != span:
+            result.error(
+                path,
+                f"{role} {uid} file holds {len(values)} values but its batch "
+                f"stride {stride} spans {span}",
+                uid,
+            )
+            return None
+        values = values[::stride]
+    return values
+
+
+def ragged_tensor_element_space(
     tensor_spec: dict[str, object],
     tensor_specs: dict[int, dict[str, object]],
+    length_uids: dict[int, int],
     tensor_path_for: Callable[[int], Path],
     bundle_has_manifest: bool,
     require_data: bool,
     uid: int,
     result: VerificationResult,
 ) -> int | None:
-    """Packed element count offsets[-1] * multiplier (RFC 0014), or None if unknown."""
+    """The RFC 0014 §4.5 elementSpace of a ragged tensor from its offset tensor and,
+    when its SDPA node names the role's seq_len, that tensor's lengths; None if it
+    cannot be determined."""
+    if len(tensor_spec["dims"]) != 4 or len(tensor_spec["strides"]) != 4:
+        result.error(
+            tensor_path_for(uid),
+            "invalid ragged layout: ragged tensors must have rank 4 "
+            f"(got dims {tensor_spec['dims']}, strides {tensor_spec['strides']})",
+            uid,
+        )
+        return None
     offset_uid = tensor_spec["ragged_offset_tensor_uid"]
-    offset_spec = tensor_specs.get(offset_uid)
-    if offset_spec is None:
-        result.error(
-            tensor_path_for(uid),
-            f"ragged_offset_tensor_uid {offset_uid} is not a declared tensor",
+    offsets = read_ragged_tensor_values(
+        offset_uid,
+        uid,
+        "ragged_offset_tensor_uid",
+        tensor_spec["dims"][0] + 1,
+        "B + 1",
+        tensor_specs,
+        tensor_path_for,
+        bundle_has_manifest,
+        require_data,
+        result,
+    )
+    if offsets is None:
+        return None
+    lengths = None
+    length_uid = length_uids.get(uid)
+    if length_uid is not None:
+        lengths = read_ragged_tensor_values(
+            length_uid,
             uid,
+            "seq_len_tensor_uid",
+            tensor_spec["dims"][0],
+            "B",
+            tensor_specs,
+            tensor_path_for,
+            bundle_has_manifest,
+            require_data,
+            result,
         )
-        return None
-
-    offset_data_type = offset_spec["data_type"]
-    offset_format = RAGGED_OFFSET_FORMATS.get(offset_data_type.lower())
-    if offset_format is None:
-        result.error(
-            tensor_path_for(uid),
-            f"ragged offset tensor uid {offset_uid} has data_type "
-            f"'{offset_data_type}'; expected int32 or int64",
-            uid,
-        )
-        return None
-
-    offset_path = tensor_path_for(offset_uid)
-    if not offset_path.exists():
-        report_missing_tensor_file(
-            offset_path, offset_uid, bundle_has_manifest, require_data, result
-        )
-        return None
-
+        if lengths is None:
+            return None
     try:
-        last_offset = read_last_ragged_offset(offset_path, offset_format)
-    except (OSError, ValueError) as error:
-        result.error(offset_path, f"could not read ragged offsets: {error}", offset_uid)
+        return ragged_element_space(
+            tensor_spec["dims"],
+            tensor_spec["strides"],
+            tensor_spec.get("ragged_offset_multiplier", 1),
+            offsets,
+            lengths,
+        )
+    except ValueError as error:
+        result.error(tensor_path_for(uid), f"invalid ragged layout: {error}", uid)
         return None
-
-    return last_offset * tensor_spec.get("ragged_offset_multiplier", 1)
 
 
 def sanitize_gtest_name(value: str) -> str:
@@ -705,8 +1042,10 @@ def validate_tensor_payloads(
     report_path: Path,
     result: VerificationResult,
     stats_tensor_uids: set[int] | None = None,
+    length_uids: dict[int, int] | None = None,
 ) -> None:
     stats_tensor_uids = stats_tensor_uids or set()
+    length_uids = length_uids or {}
     for uid, tensor_spec in tensor_specs.items():
         dims = tensor_spec["dims"]
         strides = tensor_spec["strides"]
@@ -737,9 +1076,10 @@ def validate_tensor_payloads(
 
         is_ragged = tensor_spec.get("ragged_offset_tensor_uid") is not None
         if is_ragged:
-            element_count = ragged_element_count(
+            element_count = ragged_tensor_element_space(
                 tensor_spec,
                 tensor_specs,
+                length_uids,
                 tensor_path_for,
                 bundle_has_manifest,
                 require_data,
@@ -748,7 +1088,7 @@ def validate_tensor_payloads(
             )
             if element_count is None:
                 continue
-            size_basis = f"ragged element count={element_count}"
+            size_basis = f"ragged elementSpace={element_count}"
         else:
             element_count = element_space(dims, strides)
             size_basis = f"element_space={element_count}"
@@ -1001,6 +1341,12 @@ def validate_graph_bundle(
             "ragged_offset_multiplier": ragged_offset_multiplier,
         }
 
+    try:
+        length_uids = extract_ragged_length_uids(nodes)
+    except ValueError as error:
+        result.error(path, f"invalid ragged seq_len binding: {error}")
+        return
+
     bundle_has_manifest = bundle_has_tensor_manifest(path)
     base_path = path.with_suffix("")
     validate_tensor_payloads(
@@ -1012,6 +1358,7 @@ def validate_graph_bundle(
         path,
         result,
         extract_sdpa_stats_tensor_uids(nodes),
+        length_uids,
     )
 
     for output_tensor_uid in output_tensor_uids:
@@ -1027,6 +1374,11 @@ def extract_placeholder(value: object) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def first_path_token(path: str) -> str:
+    """The first dotted component of a placeholder path: ``a.b`` -> ``a``."""
+    return path.split(".", 1)[0]
 
 
 def collect_placeholders(
@@ -1075,8 +1427,10 @@ def parse_template_tensors(
 
         placeholder_fields: set[str] = set()
         literal_spec: dict[str, object] = {}
-        for field_name in TEMPLATE_TENSOR_FIELDS:
+        for field_name in TEMPLATE_TENSOR_FIELDS + OPTIONAL_TEMPLATE_TENSOR_FIELDS:
             field_value = tensor.get(field_name)
+            if field_value is None and field_name in OPTIONAL_TEMPLATE_TENSOR_FIELDS:
+                continue
             placeholder = extract_placeholder(field_value)
             if placeholder is not None:
                 if placeholder != field_name:
@@ -1103,6 +1457,7 @@ def resolve_case_tensor_specs(
     sweep_path: Path,
     case_label: str,
     result: VerificationResult,
+    absent_uids: set[int] = frozenset(),
 ) -> dict[int, dict[str, object]]:
     if not isinstance(case_tensors, list):
         result.error(
@@ -1142,9 +1497,12 @@ def resolve_case_tensor_specs(
             )
             continue
 
+        if uid in absent_uids:
+            continue
+
         required_fields = tensor_placeholder_fields.get(uid, set())
         spec: dict[str, object] = dict(literal_tensor_specs.get(uid, {}))
-        for field_name in TEMPLATE_TENSOR_FIELDS:
+        for field_name in TEMPLATE_TENSOR_FIELDS + OPTIONAL_TEMPLATE_TENSOR_FIELDS:
             if field_name in required_fields:
                 if field_name not in tensor:
                     result.error(
@@ -1163,7 +1521,7 @@ def resolve_case_tensor_specs(
 
         case_tensor_specs[uid] = spec
 
-    missing_uids = template_tensor_uids - set(case_tensor_specs)
+    missing_uids = template_tensor_uids - absent_uids - set(case_tensor_specs)
     if missing_uids:
         result.error(
             sweep_path,
@@ -1237,6 +1595,16 @@ def validate_case_tensor_shapes(
             "strides": strides,
             "data_type": data_type,
         }
+        for field_name in OPTIONAL_TEMPLATE_TENSOR_FIELDS:
+            if spec.get(field_name) is not None:
+                validated_specs[uid][field_name] = spec[field_name]
+        multiplier = spec.get("ragged_offset_multiplier", 1)
+        if not is_integer(multiplier) or multiplier < 1:
+            result.error(
+                sweep_path,
+                f"case '{case_label}' ragged_offset_multiplier must be an integer >= 1",
+                uid,
+            )
 
     return validated_specs
 
@@ -1257,6 +1625,9 @@ def validate_sweep_case(
     require_data: bool,
     result: VerificationResult,
     stats_tensor_uids: set[int] | None = None,
+    length_uids: dict[int, int] | None = None,
+    absent_uids: set[int] = frozenset(),
+    tensor_scoped_fields: set[tuple[int, str]] | None = None,
 ) -> None:
     if not isinstance(case, dict):
         result.error(sweep_path, f"case {index} is not an object")
@@ -1285,16 +1656,51 @@ def validate_sweep_case(
         )
         values = {}
 
+    # An absent tensor leaves the template before placeholder expansion, so its
+    # placeholders need no values.
+    tensor_scoped_fields = {
+        (uid, f) for uid, f in tensor_scoped_fields or () if uid not in absent_uids
+    }
+
     for field_name in sorted(scalar_fields):
-        if field_name not in values:
+        if first_path_token(field_name) not in values:
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",
             )
+    # A placeholder on a tensor's own template object resolves the way the C++
+    # loader's resolvePlaceholder() does: first by walking the full (possibly
+    # dotted) path through that tensor's own values.tensors[] entry, then -- if
+    # that walk fails -- by walking the same path through the top-level values
+    # instead. There is no restriction on which field names may be looked up
+    # per-tensor.
+    raw_case_tensors = {}
+    if isinstance(values.get("tensors"), list):
+        for tensor in values["tensors"]:
+            if isinstance(tensor, dict) and is_integer(tensor.get("uid")):
+                raw_case_tensors.setdefault(tensor["uid"], tensor)
+    for uid, field_name in sorted(tensor_scoped_fields):
+        tensor_entry = raw_case_tensors.get(uid)
+        resolved = (
+            walk_dotted_path(tensor_entry, field_name)
+            if tensor_entry is not None
+            else UNRESOLVED
+        )
+        if resolved is UNRESOLVED:
+            resolved = walk_dotted_path(values, field_name)
+        if resolved is UNRESOLVED:
+            result.error(
+                sweep_path,
+                f"case '{case_label}' is missing placeholder value for '{field_name}'",
+                uid,
+            )
+    used_keys = {first_path_token(f) for f in scalar_fields} | {
+        first_path_token(f) for _, f in tensor_scoped_fields
+    }
     for key in values:
         if key in ("tensors", "attributes"):
             continue
-        if key not in scalar_fields:
+        if key not in used_keys:
             result.warning(
                 sweep_path, f"case '{case_label}' has unused values entry '{key}'"
             )
@@ -1328,6 +1734,7 @@ def validate_sweep_case(
         sweep_path,
         case_label,
         result,
+        absent_uids,
     )
     validated_specs = validate_case_tensor_shapes(
         case_tensor_specs, sweep_path, case_label, result
@@ -1378,6 +1785,27 @@ def validate_sweep_case(
                 else:
                     golden_dir = golden_path.parent
 
+    if isinstance(metadata, dict):
+        golden_path_declared = (
+            isinstance(golden, dict)
+            and isinstance(golden.get("path"), str)
+            and bool(golden["path"])
+        )
+        validate_reference_flags_require_golden(
+            metadata,
+            golden_path_declared,
+            sweep_path,
+            result,
+            prefix=f"case '{case_label}' ",
+        )
+        validate_expected_rejection_has_no_golden(
+            metadata,
+            golden_path_declared,
+            sweep_path,
+            result,
+            prefix=f"case '{case_label}' ",
+        )
+
     if case_id is not None:
         advisory = derive_sweep_advisory(sweep_path, case_id, result, default_tier)
         if advisory is not None:
@@ -1395,6 +1823,7 @@ def validate_sweep_case(
             sweep_path,
             result,
             stats_tensor_uids,
+            length_uids,
         )
 
 
@@ -1437,6 +1866,11 @@ def validate_sweep_bundle(
 
     output_tensor_uids = extract_output_tensor_uids(nodes, template_path, result)
     stats_tensor_uids = extract_sdpa_stats_tensor_uids(nodes)
+    try:
+        length_uids = extract_ragged_length_uids(nodes)
+    except ValueError as error:
+        result.error(template_path, f"invalid ragged seq_len binding: {error}")
+        return
     tensor_placeholder_fields, literal_tensor_specs = parse_template_tensors(
         tensors, template_path, result
     )
@@ -1449,10 +1883,19 @@ def validate_sweep_bundle(
         if key in ("tensors", "nodes"):
             continue
         collect_placeholders(value, scalar_fields, attribute_fields)
+    tensor_scoped_fields: set[tuple[int, str]] = set()
+    for tensor in tensors:
+        if not isinstance(tensor, dict) or not is_integer(tensor.get("uid")):
+            continue
+        fields: set[str] = set()
+        for key, value in tensor.items():
+            if key not in TEMPLATE_TENSOR_FIELDS:
+                collect_placeholders(value, fields, attribute_fields)
+        tensor_scoped_fields.update((tensor["uid"], f) for f in fields)
 
     version = sweep.get("version")
-    if not is_integer(version) or version < 1:
-        result.error(sweep_path, "version is required and must be a positive integer")
+    if not is_integer(version) or version not in (1, 2):
+        result.error(sweep_path, "version is required and must be 1 or 2")
 
     cases = sweep.get("cases")
     if not isinstance(cases, list) or not cases:
@@ -1463,6 +1906,19 @@ def validate_sweep_bundle(
     seen_case_ids: set[str] = set()
 
     for index, case in enumerate(cases):
+        absent_uids: set[int] = set()
+        if isinstance(case, dict) and ABSENT_TENSORS_KEY in case:
+            case_id = case.get("id")
+            case_label = (
+                case_id if isinstance(case_id, str) and case_id else f"#{index}"
+            )
+            for problem in absent_case_problems(sweep, template, case):
+                result.error(
+                    sweep_path, f"case '{case_label}' absent_tensors: {problem}"
+                )
+            absent = case[ABSENT_TENSORS_KEY]
+            if isinstance(absent, list):
+                absent_uids = {uid for uid in absent if is_integer(uid)}
         validate_sweep_case(
             case,
             index,
@@ -1479,6 +1935,9 @@ def validate_sweep_bundle(
             require_data,
             result,
             stats_tensor_uids,
+            length_uids,
+            absent_uids,
+            tensor_scoped_fields,
         )
 
 

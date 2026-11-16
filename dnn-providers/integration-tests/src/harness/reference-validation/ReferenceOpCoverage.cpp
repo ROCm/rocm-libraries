@@ -116,6 +116,14 @@ bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, s
 constexpr std::string_view K_CPU_TIER_PREFIX = "quick_";
 constexpr int64_t K_CPU_MAX_WORKING_SET_ELEMENTS = int64_t{4} * 1024 * 1024;
 
+// Backward is capped on its own axis because its cost does not follow the forward cap: the
+// scalar backward needs seconds to tens of seconds at a 256x128 head (8.4M MACs per Q*K^T
+// pass) while the 64-row shapes below 3.2M finish in about a second or less, so the 4M
+// element cap above would admit every one of them. The threshold sits between those two
+// clusters. Measured on a loaded CI runner, so only the gap, not the absolute times, is
+// meaningful.
+constexpr int64_t K_CPU_MAX_SDPA_BWD_MACS = int64_t{4} * 1024 * 1024;
+
 namespace
 {
 
@@ -134,10 +142,9 @@ int64_t elementCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttribute
     return elements;
 }
 
-// Both caps apply to Sdpa only, so a graph with no Sdpa node is affordable by
-// construction. Batchnorm and the other CPU-covered ops are cheap at every
-// checked-in shape, and gating them would trade real coverage for no measurable
-// time.
+// Both caps apply to Sdpa forward and backward only, so a graph with no Sdpa node is
+// affordable by construction. Batchnorm and the other CPU-covered ops are cheap at every
+// checked-in shape, and gating them would trade real coverage for no measurable time.
 bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
                                       const void* graphBuffer,
                                       size_t size)
@@ -148,10 +155,18 @@ bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
             graphBuffer, size);
         const auto& tensorMap = graph.getTensorMap();
 
+        const auto lookup = [&tensorMap](int64_t uid) {
+            const auto it = tensorMap.find(uid);
+            return it == tensorMap.end() ? nullptr : it->second;
+        };
+
         for(uint32_t i = 0; i < graph.nodeCount(); ++i)
         {
             const auto& node = graph.getNode(i);
-            if(node.attributes_type() != NodeAttributes::SdpaAttributes)
+            const bool isForward = node.attributes_type() == NodeAttributes::SdpaAttributes;
+            const bool isBackward
+                = node.attributes_type() == NodeAttributes::SdpaBackwardAttributes;
+            if(!isForward && !isBackward)
             {
                 continue;
             }
@@ -161,20 +176,38 @@ bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
                 return false;
             }
 
-            const auto* attributes = node.attributes_as_SdpaAttributes();
+            if(isForward)
+            {
+                const auto* attributes = node.attributes_as_SdpaAttributes();
+                if(attributes == nullptr)
+                {
+                    continue;
+                }
+
+                const int64_t working = std::max(elementCount(lookup(attributes->q_tensor_uid())),
+                                                 elementCount(lookup(attributes->k_tensor_uid())));
+                if(working > K_CPU_MAX_WORKING_SET_ELEMENTS)
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            const auto* attributes = node.attributes_as_SdpaBackwardAttributes();
             if(attributes == nullptr)
             {
                 continue;
             }
 
-            const auto lookup = [&tensorMap](int64_t uid) {
-                const auto it = tensorMap.find(uid);
-                return it == tensorMap.end() ? nullptr : it->second;
-            };
-
-            const int64_t working = std::max(elementCount(lookup(attributes->q_tensor_uid())),
-                                             elementCount(lookup(attributes->k_tensor_uid())));
-            if(working > K_CPU_MAX_WORKING_SET_ELEMENTS)
+            // Q is [B, H, Sq, D] and K is [B, Hkv, Skv, D], so Q's element count times Skv is
+            // the multiply-accumulate count of one Q*K^T pass (B * H * Sq * Skv * D).
+            const auto* k = lookup(attributes->k_tensor_uid());
+            if(k == nullptr || k->dims() == nullptr || k->dims()->size() < 2)
+            {
+                continue;
+            }
+            const int64_t seqKv = (*k->dims())[k->dims()->size() - 2];
+            if(elementCount(lookup(attributes->q_tensor_uid())) * seqKv > K_CPU_MAX_SDPA_BWD_MACS)
             {
                 return false;
             }

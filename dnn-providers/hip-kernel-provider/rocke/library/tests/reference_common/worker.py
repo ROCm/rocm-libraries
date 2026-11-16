@@ -45,10 +45,28 @@ class WorkerOperation:
     replay_values: Callable[[dict, dict, Any], dict]
 
 
+def source_variant(request: dict) -> str:
+    """The variant whose adapter a source-mode request runs.
+
+    The harness resolves the variant before it writes the request, so a
+    missing or unnamed one is rejected rather than read as the processor's only
+    variant.
+    """
+    variant = request["variant"]
+    if not isinstance(variant, str):
+        raise ValueError(f"source request names no reference variant: {variant!r}")
+    return variant
+
+
 def run_case(
     operation: WorkerOperation, target: ModuleType, request: dict, output: Path
 ) -> None:
-    """Execute a single declared case, poisoning every output before each run."""
+    """Execute a single declared case, poisoning every output before each run.
+
+    In source mode ``target`` is the requested variant's adapter. Replay reads
+    only its ``NAME``, so the operation's worker may pass the processor's
+    package instead.
+    """
     import rocke
     from rocke.runtime import DeviceMem, KernelLauncher, LaunchConfig, Runtime
     from rocke.runtime.hip_module import get_device_target_id

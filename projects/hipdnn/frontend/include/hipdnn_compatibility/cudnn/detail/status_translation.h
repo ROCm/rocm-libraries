@@ -8,6 +8,7 @@
 #include <hipdnn_backend.h>
 
 #include <hipdnn_compatibility/cudnn/cudnn_status.h>
+#include <hipdnn_frontend/Error.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {
@@ -43,6 +44,21 @@ inline cudnnStatus_t toCudnnStatus(hipdnnStatus_t status)
     case HIPDNN_STATUS_PLUGIN_ERROR:
     default:
         return CUDNN_STATUS_INTERNAL_ERROR;
+    }
+}
+
+// The frontend collapses every backend status into HIPDNN_BACKEND_ERROR, so
+// only "no engine accepts the graph" keeps a distinct cuDNN status.
+constexpr cudnnStatus_t toCudnnStatus(hipdnn_frontend::ErrorCode code) noexcept
+{
+    switch(code)
+    {
+    case hipdnn_frontend::ErrorCode::OK:
+        return CUDNN_STATUS_SUCCESS;
+    case hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED:
+        return CUDNN_STATUS_NOT_SUPPORTED;
+    default:
+        return CUDNN_STATUS_BAD_PARAM;
     }
 }
 

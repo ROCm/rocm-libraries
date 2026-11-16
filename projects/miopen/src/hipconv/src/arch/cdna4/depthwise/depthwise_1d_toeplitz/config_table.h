@@ -2,6 +2,8 @@
 
 #include "hipconv/conv_params.hpp"
 
+#include "../filter_buckets.h"
+
 #include <array>
 #include <cstddef>
 
@@ -52,6 +54,9 @@ constexpr bool tf32_wave_ok(int kh, int w)
     // fold its involution (B = 5 > S = 4). C4 = 24 takes the MASK = 7 branch at B = 3.
     if(w >= 16)
         return false;
+    // Past kh 25 the split weights plus the kh-deep ring spill at any width.
+    if(kh > depthwise_filters::tf32_max_col_kh)
+        return false;
     if(kh >= 9)
         return w <= 4;
     if(kh >= 7)
@@ -79,6 +84,20 @@ constexpr bool tf32_wave_ok(int kh, int w)
 // reads the shape, which is what get_weighted_throughput_index is for; the family reports a
 // flat 1 today, so this order is the whole selection story.
 constexpr auto wave_order = std::array{4, 8, 2, 12, 16, 1};
+
+// conv3d rungs, read off the compiled asm like wave_ok: a tile holds kd taps of weights, so
+// past 3x3x3 only rungs of at most 4 waves (2 for tf32) stay out of scratch, and the largest
+// plane filter that does shrinks as kd grows. The narrow rung is a single wave.
+constexpr bool conv3d_wave_ok(int kh, int kd, int w, int elem_bytes)
+{
+    if(elem_bytes == 2)
+        return kh <= (kd <= 3 ? 11 : 7) && (kh * kd <= 9 || w <= 4);
+    return kh <= (kd <= 5 ? 7 : 5) && w <= (kh * kd <= 9 ? 4 : 2);
+}
+constexpr bool conv3d_narrow_ok(int kh, int kd, int elem_bytes)
+{
+    return kh <= (elem_bytes == 2 && kd <= 3 ? 9 : 7);
+}
 
 struct Config
 {
@@ -108,6 +127,8 @@ struct Config
     // apart at launch), 4 is tf32. A config knob rather than a launch branch because the LDS
     // geometry and the register budget both scale with it.
     int elem_bytes = 2;
+    // Depth taps per output plane: 1 for conv2d, else the largest kd served.
+    int kd = 1;
 
     constexpr int block_c() const { return group_size * waves_per_wg; }
     constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
@@ -136,6 +157,8 @@ struct Config
 // applies rather than the 160 KiB a dynamic allocation could opt into.
 constexpr int kMaxSharedBytes = 64 * 1024;
 
+using namespace depthwise_filters;
+
 // Generated config set: for every filter size, element width and (stride, dilation,
 // direction) family, the wide (C % 8 == 0) wave ladder plus one narrow entry.
 //
@@ -160,7 +183,6 @@ constexpr void enumerate_configs(Emit&& emit)
         Direction direction;
     };
 
-    constexpr auto filters  = std::array{3, 5, 7, 9, 11};
     constexpr auto variants = std::array<Variant, 4>{{
         {1, 1, Direction::Fprop}, // stride-1 fprop
         {2, 1, Direction::Fprop}, // stride-2 fprop
@@ -206,15 +228,16 @@ constexpr void enumerate_configs(Emit&& emit)
             return eb == 4 ? tf32_wave_ok(kh, w) : wave_ok(kh, w);
         };
         // Wide (C % 8 == 0): coalesced uint4 path, full wave ladder.
-        for(int kh : filters)
+        for(const auto& fs : filter_shapes)
             for(const auto& v : variants)
                 for(int w : wave_order)
                 {
-                    if(!ok(kh, w))
+                    if(!ok(fs.kh, w) || (is_one_d(fs) && w > 4) ||
+                       (is_fallback(fs) && w != 4 && w != 1))
                         continue;
                     const auto c = with_depth(Config{.waves_per_wg = w,
-                                                     .kh           = kh,
-                                                     .kw           = kh,
+                                                     .kh           = fs.kh,
+                                                     .kw           = fs.kw,
                                                      .stride       = v.stride,
                                                      .dilation     = v.dilation,
                                                      .direction    = v.direction,
@@ -224,32 +247,33 @@ constexpr void enumerate_configs(Emit&& emit)
                 }
         // Narrow (C % 8 != 0): one 8-channel group per workgroup, per-channel transfers,
         // masked past C.
-        for(int kh : filters)
+        for(const auto& fs : filter_shapes)
             for(const auto& v : variants)
-                emit(Config{.waves_per_wg = 1,
-                            .kh           = kh,
-                            .kw           = kh,
-                            .stride       = v.stride,
-                            .dilation     = v.dilation,
-                            .direction    = v.direction,
-                            .narrow_c     = true,
-                            // Single-wave (64-thread) fallback caps at 256 VGPRs; large
-                            // filters need double- not triple-buffering to keep the input
-                            // ring's in-flight rows out of scratch. tf32 reaches that sooner
-                            // still, its operands being twice as wide.
-                            .lds_buffers = (kh >= 5 || eb == 4) ? 2 : 3,
-                            .elem_bytes  = eb});
+                if(eb == 2 || fs.kh <= depthwise_filters::tf32_max_col_kh)
+                    emit(Config{.waves_per_wg = 1,
+                                .kh           = fs.kh,
+                                .kw           = fs.kw,
+                                .stride       = v.stride,
+                                .dilation     = v.dilation,
+                                .direction    = v.direction,
+                                .narrow_c     = true,
+                                // Single-wave (64-thread) fallback caps at 256 VGPRs; large
+                                // filters need double- not triple-buffering to keep the input
+                                // ring's in-flight rows out of scratch. tf32 reaches that sooner
+                                // still, its operands being twice as wide.
+                                .lds_buffers = (fs.kh >= 5 || fs.kw >= 5 || eb == 4) ? 2 : 3,
+                                .elem_bytes  = eb});
         // Batch-folded (F in wfolds) wide stride-1 ladders (fprop + dgrad).
-        for(int kh : filters)
+        for(const auto& fs : filter_shapes)
             for(const auto& v : wfold_variants)
                 for(int f : wfolds)
                     for(int w : wave_order)
                     {
-                        if(!ok(kh, w))
+                        if(is_one_d(fs) || !ok(fs.kh, w))
                             continue;
                         const auto c = with_depth(Config{.waves_per_wg = w,
-                                                         .kh           = kh,
-                                                         .kw           = kh,
+                                                         .kh           = fs.kh,
+                                                         .kw           = fs.kw,
                                                          .stride       = v.stride,
                                                          .dilation     = v.dilation,
                                                          .direction    = v.direction,
@@ -259,6 +283,44 @@ constexpr void enumerate_configs(Emit&& emit)
                             emit(c);
                     }
     }
+    // conv3d: odd square plane filters with a tap capacity of 3, 5 or 7 (depth_tap_capacity),
+    // after the conv2d families so their order is unchanged. A tile holds kd x the weights,
+    // so the ladder is narrower.
+    for(int kd : std::array{3, 5, 7})
+        for(int eb : widths)
+            for(int k : square_sizes)
+            {
+                for(const auto& v : variants)
+                    for(int f : std::array{1, 2, 4})
+                        for(int w : std::array{4, 8, 2, 1})
+                        {
+                            if(!conv3d_wave_ok(k, kd, w, eb))
+                                continue;
+                            const auto c = with_depth(Config{.waves_per_wg = w,
+                                                             .kh           = k,
+                                                             .kw           = k,
+                                                             .stride       = v.stride,
+                                                             .dilation     = v.dilation,
+                                                             .direction    = v.direction,
+                                                             .w_fold       = f,
+                                                             .elem_bytes   = eb,
+                                                             .kd           = kd});
+                            if(c.lds_buffers > 0)
+                                emit(c);
+                        }
+                for(const auto& v : variants)
+                    if(conv3d_narrow_ok(k, kd, eb))
+                        emit(Config{.waves_per_wg = 1,
+                                    .kh           = k,
+                                    .kw           = k,
+                                    .stride       = v.stride,
+                                    .dilation     = v.dilation,
+                                    .direction    = v.direction,
+                                    .narrow_c     = true,
+                                    .lds_buffers  = (k >= 5 || eb == 4) ? 2 : 3,
+                                    .elem_bytes   = eb,
+                                    .kd           = kd});
+            }
 }
 
 constexpr std::size_t num_dw_configs()

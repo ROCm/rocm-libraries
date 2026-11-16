@@ -124,15 +124,15 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
         return errorCode;
     }
 
-    float alphaF;
+    double alphaD{};
     if(alpha != nullptr)
     {
-        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+        alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    float gammaF;
+    double gammaD{};
     if(gamma != nullptr)
     {
-        gammaF = hiptensor::readVal<float>(gamma, hiptensor::convertToComputeType(typeScalar));
+        gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
     autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
@@ -145,7 +145,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
     {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
         solutions       = instances->query(
-            {alphaF, gammaF},
+            {alphaD, gammaD},
             descA->mLengths,
             {descA->mType, descC->mType},
             {descD->mType},
@@ -158,7 +158,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
     bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs({alphaF, gammaF},
+        canRun = pSolution->initArgs({alphaD, gammaD},
                                      {descA->mLengths, descC->mLengths},
                                      {descA->mStrides, descC->mStrides},
                                      {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),

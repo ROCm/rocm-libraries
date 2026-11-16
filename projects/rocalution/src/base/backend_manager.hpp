@@ -65,7 +65,7 @@ namespace rocalution
         int OpenMP_threads;
         /** \brief OpenMP threads before ROCALUTION init */
         int OpenMP_def_threads;
-        /** \brief OpenMP nested before ROCALUTION init */
+        /** \brief OpenMP max active levels (nested flag on Windows) before ROCALUTION init */
         int OpenMP_def_nested;
         /** \brief Host affinity (true-yes/false-no) */
         bool OpenMP_affinity;
@@ -142,6 +142,10 @@ namespace rocalution
   *   function has to be called before init_rocalution().
   * - set_omp_threads_rocalution() sets the number of OpenMP threads. This function has
   *   to be called after init_rocalution().
+  *
+  * \p init_rocalution disables nested OpenMP parallelism by lowering the maximum number
+  * of active parallel levels to 1, if it is higher. stop_rocalution() restores the
+  * previous number of OpenMP threads and maximum number of active parallel levels.
   *
   * @param[in]
   * rank            specifies MPI rank when multi-node environment

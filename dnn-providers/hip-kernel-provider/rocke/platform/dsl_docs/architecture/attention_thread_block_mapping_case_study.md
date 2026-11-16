@@ -566,7 +566,10 @@ unchanged) and both gfx950 `B ≤ 4` worst shapes. Every other entry excludes 0.
   That would close most of the gap in §5 and reach varlen, which only has a
   non-persistent path.
 - **Unify gfx950's persistent and non-persistent bodies if possible,** as gfx942 already does.
-- **Runtime-shape persistent decodes.** Today they bake `NQB`.
+- **Runtime-shape persistent decodes.** Done for every order but `gqa_pair` and
+  `gqa_pair_2phase`, whose CTA count is a formula of the shape: both arches' persistent
+  bodies read the shape at runtime and decode through host-computed fast-division
+  pairs.
 - **GQA packing:** put a kv head's G query heads in one tile, so K/V reuse no longer
   depends on the cache.
 - **Retire `interleave`, and consider retiring `gqa_pair*`** if broader benchmarks

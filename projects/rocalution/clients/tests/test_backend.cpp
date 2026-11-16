@@ -91,6 +91,17 @@ TEST(backend_disable_accelerator_after_stop, backend)
     testing_backend_disable_accelerator_after_stop();
 }
 
+// Host-only and cheap: run in every tier, including the emulation tiers used by CI
+TEST(backend_omp_parallel_region, backend)
+{
+    testing_backend_omp_parallel_region();
+}
+
+TEST(backend_omp_restore_state, backend)
+{
+    testing_backend_omp_restore_state();
+}
+
 TEST_P(parameterized_backend, backend)
 {
     Arguments arg = setup_backend_arguments(GetParam());

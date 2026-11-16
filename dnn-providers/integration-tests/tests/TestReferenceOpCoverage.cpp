@@ -35,6 +35,7 @@ using hipdnn_integration_tests::bundle::referenceShapeIsAffordable;
 using hipdnn_integration_tests::bundle::referenceSupportedOps;
 using hipdnn_integration_tests::bundle::uncoveredNodeTypes;
 using hipdnn_integration_tests::bundle::fixtures::buildBatchnormGraph;
+using hipdnn_integration_tests::bundle::fixtures::buildSdpaBackwardGraph;
 using hipdnn_integration_tests::bundle::fixtures::buildSdpaGraph;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -173,8 +174,9 @@ TEST(TestReferenceOpCoverage, Fp8BundlesAreNotListedAsGaps)
 }
 
 // Both references run every BSHD forward bundle: ragged (native ragged plans), paged and ragged Q
-// over paged K/V (the dense plan and the ragged-as-dense rewrite), with or without sinks. So
-// neither may list them: a gap entry would stop validating them against golden data. The ids
+// over paged K/V (the dense plan and the ragged-as-dense rewrite), with or without sinks, and
+// dense graphs with a stats (LSE) output. So neither may list them: a gap entry would stop
+// validating them against golden data. The ids
 // come from discovering the bundles the build copies next to the test binary, so the expected
 // list must name exactly the registered BSHD bundles.
 TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
@@ -206,6 +208,8 @@ TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
         "quick_SdpaFwd_bshd_fp16_hd64_causal_paged_SpecDecode.SpecDecode",
         "quick_SdpaFwd_bshd_fp16_hd64_causal_paged_sinks_Decode.Decode",
         "quick_SdpaFwd_bshd_fp16_hd64_window_ragged_paged_Mixed.Mixed",
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_gqa_stats_Small.Small",
+        "quick_SdpaFwd_bshd_fp16_hd64_nomask_stats_Small.Small",
     };
     EXPECT_EQ(discovered, expected);
 
@@ -277,6 +281,38 @@ TEST(TestReferenceOpCoverage, CpuSdpaIsLimitedByWorkingSet)
         ReferenceExecutorType::CPU, "quick_SdpaFwd_x.Small", smallGraph.data(), smallGraph.size()));
     EXPECT_FALSE(referenceShapeIsAffordable(
         ReferenceExecutorType::CPU, "quick_SdpaFwd_x.Small", hugeGraph.data(), hugeGraph.size()));
+}
+
+// The scalar CPU backward costs far more than the forward at the same element count, so it
+// has its own cap in multiply-accumulates. The two shapes are the checked-in quick
+// SdpaBackward bundles on either side of it: the 64-row padded/GQA bundles (about a
+// second) and the 256x128 head bundles (tens of seconds each, enough together to time out
+// the whole quick suite).
+TEST(TestReferenceOpCoverage, CpuSdpaBackwardIsLimitedByCost)
+{
+    const auto cheap = buildSdpaBackwardGraph(2, 4, 64, 96, 64);
+    const auto costly = buildSdpaBackwardGraph(1, 1, 256, 256, 128);
+
+    EXPECT_TRUE(referenceShapeIsAffordable(
+        ReferenceExecutorType::CPU, "quick_SdpaBackward_x.Small", cheap.data(), cheap.size()));
+    EXPECT_FALSE(referenceShapeIsAffordable(
+        ReferenceExecutorType::CPU, "quick_SdpaBackward_x.Small", costly.data(), costly.size()));
+}
+
+TEST(TestReferenceOpCoverage, CpuSdpaBackwardIsLimitedToQuickTier)
+{
+    const auto cheap = buildSdpaBackwardGraph(2, 4, 64, 96, 64);
+
+    EXPECT_FALSE(referenceShapeIsAffordable(
+        ReferenceExecutorType::CPU, "standard_SdpaBackward_x.Small", cheap.data(), cheap.size()));
+}
+
+TEST(TestReferenceOpCoverage, SdpaBackwardCostGateIsCpuOnly)
+{
+    const auto costly = buildSdpaBackwardGraph(1, 1, 256, 256, 128);
+
+    EXPECT_TRUE(referenceShapeIsAffordable(
+        ReferenceExecutorType::GPU, "quick_SdpaBackward_x.Small", costly.data(), costly.size()));
 }
 
 // The gate is CPU-only: the GPU reference runs every one of these in milliseconds

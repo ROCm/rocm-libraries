@@ -230,14 +230,8 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     /// Conservative one-shot shift: an UPPER BOUND on the bytes inserted BEFORE the
     /// boundary (cover <=52 + ladder <=~244). Adding it to the pre-insertion boundary offset makes
     /// the computed coverN never under-cover (over-cover <= 1 block), with NO fixed-point
-    /// iteration. +16 where the XNACK wait is emitted: up to 4 pre-boundary s_wait_xcnt 0 (1 cover
-    /// burst + 3 ladder arms, all laid out before the CP boundary) x 4 B. Without it this is 320,
-    /// the same arithmetic as before the wait existed (the +16 stays within the same 4 KiB floor
-    /// bucket except in the rare boundary-straddle case, where the extra block is genuinely
-    /// needed).
-    static int64_t cpCoverInsertUpperBoundBytes(bool emitXnackWait) {
-        return 320 + (emitXnackWait ? 4 * kSwPrefetchXnackWaitBytes : 0);
-    }
+    /// iteration.
+    static constexpr int64_t kCpCoverInsertUpperBoundBytes = 320;
     /// Target label anchored (post-insertion) at the final-layout CP boundary (offset <= P(0)).
     static constexpr const char* kCpBoundaryLabel = "label_SW_PrefetchAbs_CpBoundary";
 
@@ -331,10 +325,10 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     /// resident (<= P(0)); else the INCLUSIVE hint count `floor((boundary + INSERT_UB -
     /// P0)/4096)+1` (conservative one-shot: no iteration, never under-covers), clamped to `budget -
     /// armFloor`.
-    static int computeCoverN(int64_t boundary, bool emitXnackWait) {
+    static int computeCoverN(int64_t boundary) {
         // kCpWindowBytes >= 0, so `boundary <= kCpWindowBytes` already covers negatives.
         if (boundary <= kCpWindowBytes) return 0;
-        const int64_t gap = boundary + cpCoverInsertUpperBoundBytes(emitXnackWait) - kCpWindowBytes;
+        const int64_t gap = boundary + kCpCoverInsertUpperBoundBytes - kCpWindowBytes;
         int raw = static_cast<int>(gap / kSwPrefetchSpacingBytes) + 1;  // floor+1 (gap > 0)
         const int maxCover = kPostCpHintBudget - kCpBoundaryArmFloor;   // = 4
         if (raw < 0) raw = 0;
@@ -489,11 +483,8 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         // boundary (label_TailLoopBegin* / OptNLL_End / shallowest GW_*>P0). `armN` (below, once we
         // know the cover will actually emit) then splits the 8-block post-CP I-cache budget as
         // coverN + armN <= 8 (armFloor=4). coverN==0 => no cover emitted.
-        // XNACK replay is what the drain before each burst guards against; where the driver has
-        // it off there is nothing to replay and nothing to pay for.
-        const bool emitXnackWait = passCtx.getAsmCapsConfig().enableXnackReplay;
         const int64_t coverBoundary = computeCoverBoundary(labelOff);
-        const int coverN = computeCoverN(coverBoundary, emitXnackWait);
+        const int coverN = computeCoverN(coverBoundary);
 
         // Stream-K bails BOTH the ladder and the CP cover: its abs base triple is NOT reserved
         // to label_MultiGemmEnd (the Tensile checkIn is immediate for Stream-K), so emitting
@@ -539,8 +530,6 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         const HwInstDesc* dAddU = getMCIDByUOp(GFX::s_add_u32, archId);
         const HwInstDesc* dAddC = getMCIDByUOp(GFX::s_addc_u32, archId);
         const HwInstDesc* dPf = getMCIDByUOp(GFX::s_prefetch_inst, archId);
-        // XNACK safety wait; optional (toggle + arch), so NOT part of the cover/ladder opcode gate.
-        const HwInstDesc* dXcnt = getMCIDByUOp(GFX::s_wait_xcnt, archId);
         const bool coverOpcodesOk = dGetpc && dAddI && dAddU && dAddC && dPf;
         const bool ladderOpcodesOk = coverOpcodesOk && dAnd && dMov && dCmp && dBr0 && dBr;
         const bool emitCover = wantCover && coverOpcodesOk;
@@ -662,15 +651,8 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             a2->addDestReg(StinkyRegister("s", hi, 1));
             a2->addSrcReg(StinkyRegister("s", hi, 1));
             a2->addSrcReg(StinkyRegister(0));
-            // XNACK safety: one s_wait_xcnt 0 before this burst's contiguous prefetch group.
-            // emitBurst is shared by the CP cover + all 3 ladder arms + the fallback, so this one
-            // spot gates every group. No-op where XNACK replay is off or the opcode is
-            // unavailable; the bytes of the pre-boundary waits are bounded by
-            // cpCoverInsertUpperBoundBytes().
-            if (emitXnackWait && dXcnt != nullptr) {
-                StinkyInstruction* w = ins(dXcnt);
-                w->addSrcReg(StinkyRegister(0));  // xcnt = 0
-            }
+            // The scalar getpc/add setup is a non-memory boundary before the prefetch burst, so no
+            // explicit XCNT drain is needed here.
             for (int k = 0; k < n; ++k) {
                 StinkyInstruction* p = ins(dPf);
                 p->addSrcReg(StinkyRegister("s", lo, 2));

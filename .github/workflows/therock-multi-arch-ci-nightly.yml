@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a.
+# TheRock ref: pinned to ROCm/TheRock commit c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827.
 
 on:
   schedule:
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows).
@@ -47,7 +47,7 @@ jobs:
       prebuilt_stages: ''
       baseline_run_id: ''
       repository: ROCm/TheRock
-      ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+      ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
       # event_name tells TheRock this is a schedule/workflow_dispatch run with no
       # meaningful diff, so it always runs CI. Without it, TheRock falls back to
       # `git diff HEAD^` against a depth-1 checkout, which fails.
@@ -91,7 +91,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -104,7 +104,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+      ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
     permissions:
       contents: read
       id-token: write
@@ -117,21 +117,50 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      rocm_msi_package_version: ${{ needs.setup.outputs.rocm_msi_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+      ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
     permissions:
       contents: read
       id-token: write
+
+  rocjitsu_gemm_race_checks:
+    name: rocjitsu GEMM race checks (${{ matrix.amdgpu_families }})
+    needs: [setup, linux_build_and_test]
+    # One CPU-emulation job per GPU target. Each entry must be a family that
+    # setup's linux_amdgpu_families builds, and the target needs a workload
+    # profile in projects/hipblaslt/clients/scripts/rocjitsu.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - amdgpu_families: gfx950-dcgpu
+            amdgpu_targets: gfx950
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ needs.setup.outputs.ref }}
+      build_runs_on: ${{ fromJSON(needs.setup.outputs.linux_build_config).build_runs_on_medium }}
+      amdgpu_families: ${{ matrix.amdgpu_families }}
+      amdgpu_targets: ${{ matrix.amdgpu_targets }}
+      workload: random-gemms
+      workers: 8
+      random_gemm_count: 100
+      random_gemm_seed: 0
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
@@ -146,7 +175,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+          ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

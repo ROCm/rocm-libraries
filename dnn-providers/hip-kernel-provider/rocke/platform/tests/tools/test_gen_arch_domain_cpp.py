@@ -118,6 +118,76 @@ def test_the_generated_table_is_the_python_readers_negative_cells(gen) -> None:
     assert _parse(gen.render(gen.load_domain())) == _python_view()
 
 
+_REJECTED = re.compile(rf"^    \{{{_STR}, {_STR}\}},$", re.MULTILINE)
+_REJECTED_ARRAY = re.compile(
+    r"^const rejected_processor_t ROCKE_ARCH_DOMAIN_REJECTED_PROCESSORS\[\] = \{$"
+    r"(.*?)^\};$",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _parse_rejected(text: str) -> set[tuple[str, str]]:
+    """The generated (flavor, processor) rejections read back from the text."""
+    (body,) = _REJECTED_ARRAY.findall(text)
+    return {
+        (_c_unescape(flavor), _c_unescape(processor))
+        for flavor, processor in _REJECTED.findall(body)
+    }
+
+
+def test_the_generated_rejections_are_the_python_readers(gen) -> None:
+    """``rocke_compiler_target_for_flavor`` reads these, so a column that is
+    regenerated reaches the C++ engine with no hand edit."""
+    expected = set()
+    for flavor in arch_domain.committed_flavors():
+        table = arch_domain.load(flavor)
+        for processor in table.processors():
+            if table.accepts_processor(processor) is False:
+                expected.add((flavor, processor))
+    assert expected, "no committed column rejects a processor; the check is vacuous"
+    assert _parse_rejected(gen.render(gen.load_domain())) == expected
+
+
+def test_only_a_recorded_rejection_is_emitted(gen) -> None:
+    """An accepted processor and one the column has no answer for both compile
+    as themselves, so neither is emitted."""
+    answers = {"gfx_no": False, "gfx_yes": True}
+    table = SimpleNamespace(
+        processors=lambda: ("gfx_no", "gfx_yes", "gfx_unprobed"),
+        accepts_processor=answers.get,
+        keys=lambda: (),
+        arches=lambda key: (),
+    )
+    fake = SimpleNamespace(
+        committed_flavors=lambda: ("llvm99",),
+        load=lambda flavor: table,
+        is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
+    )
+    assert _parse_rejected(gen.render(fake)) == {("llvm99", "gfx_no")}
+
+
+def test_a_column_whose_answer_is_not_a_boolean_stops_generation(gen) -> None:
+    """``{"accepted": "false"}`` stops the build's generator instead of being
+    read as acceptance and dropped from the C++ table: the generator reads the
+    column through the Python reader, which refuses it."""
+    doc = {
+        "schema": arch_domain.SCHEMA,
+        "keys": {},
+        "processors": {"gfx1154": {"accepted": "false"}},
+    }
+    fake = SimpleNamespace(
+        committed_flavors=lambda: ("llvm99",),
+        load=lambda flavor: arch_domain.ArchDomain(flavor, doc),
+        is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
+    )
+    with pytest.raises(ValueError, match=r"records processor 'gfx1154' as"):
+        gen.render(fake)
+
+
 def test_generation_is_deterministic(gen) -> None:
     """CMake reruns the generator on every input change; output that varied run
     to run would rebuild the engine for nothing and defeat any later diff."""
@@ -129,6 +199,7 @@ def test_the_generator_reads_through_the_python_reader(gen) -> None:
     """The policy is decided once, in Python: a cell is emitted exactly when
     ``is_negative`` says so, whatever its status string is."""
     table = SimpleNamespace(
+        processors=lambda: (),
         keys=lambda: ("k.one", "k.two"),
         arches=lambda key: ("gfx942",),
         lookup=lambda key, arch: SimpleNamespace(status=key, evidence="e"),
@@ -149,7 +220,9 @@ def test_only_aliases_the_loader_would_follow_are_emitted(gen) -> None:
     """C++ applies the same own-column and committed-source precedence as Python."""
     fake = SimpleNamespace(
         committed_flavors=lambda: ("llvm98", "llvm99"),
-        load=lambda flavor: SimpleNamespace(keys=lambda: (), arches=lambda key: ()),
+        load=lambda flavor: SimpleNamespace(
+            keys=lambda: (), arches=lambda key: (), processors=lambda: ()
+        ),
         is_negative=lambda status: True,
         is_waived=lambda key, arch, flavor: False,
         DEFAULT_MODE="warn",
@@ -171,7 +244,9 @@ def test_an_empty_column_is_a_null_entry_not_an_empty_array(gen) -> None:
     negative cell is normal -- every probe could come back ``ok``."""
     fake = SimpleNamespace(
         committed_flavors=lambda: ("llvm99",),
-        load=lambda flavor: SimpleNamespace(keys=lambda: (), arches=lambda key: ()),
+        load=lambda flavor: SimpleNamespace(
+            keys=lambda: (), arches=lambda key: (), processors=lambda: ()
+        ),
         is_negative=lambda status: True,
         is_waived=lambda key, arch, flavor: False,
         DEFAULT_MODE="warn",
@@ -185,6 +260,7 @@ def test_a_non_ascii_key_is_refused(gen) -> None:
     """The C++ lookup binary-searches with strcmp, which only agrees with
     Python's sort order on ASCII; a table sorted otherwise would miss cells."""
     table = SimpleNamespace(
+        processors=lambda: (),
         keys=lambda: ("kéy",),
         arches=lambda key: ("gfx942",),
         lookup=lambda key, arch: SimpleNamespace(status="arch_absent", evidence=""),
@@ -200,10 +276,47 @@ def test_a_non_ascii_key_is_refused(gen) -> None:
         gen.render(fake)
 
 
+def test_a_non_ascii_processor_is_refused(gen) -> None:
+    """The C++ processor lookup compares bytes, which only agrees with
+    Python's sort order on ASCII, so a rejected non-ASCII name is refused."""
+    table = SimpleNamespace(
+        processors=lambda: ("gfxé",),
+        accepts_processor=lambda processor: False,
+        keys=lambda: (),
+        arches=lambda key: (),
+    )
+    fake = SimpleNamespace(
+        committed_flavors=lambda: ("llvm99",),
+        load=lambda flavor: table,
+        is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
+    )
+    with pytest.raises(ValueError, match=r"llvm99: non-ASCII processor 'gfxé'"):
+        gen.render(fake)
+
+
+def test_a_missing_column_is_refused(gen) -> None:
+    """A flavor listed as committed but with no column means the data and the
+    list disagree; the generator stops rather than emit an empty table."""
+    fake = SimpleNamespace(
+        committed_flavors=lambda: ("llvm99",),
+        load=lambda flavor: None,
+        is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
+    )
+    with pytest.raises(
+        RuntimeError, match="no committed arch-domain column for llvm99"
+    ):
+        gen.render(fake)
+
+
 def test_a_waiver_reaches_the_cpp_table(gen) -> None:
     """The C++ engine decides waived-or-refused from this flag alone, so it has
     to be ``domain.is_waived`` for that exact cell, not for the key."""
     table = SimpleNamespace(
+        processors=lambda: (),
         keys=lambda: ("k",),
         arches=lambda key: ("gfx942", "gfx950"),
         lookup=lambda key, arch: SimpleNamespace(status="arch_absent", evidence=""),
@@ -230,7 +343,9 @@ def test_the_default_mode_is_generated_from_python(gen) -> None:
     for mode in ("warn", "error"):
         fake = SimpleNamespace(
             committed_flavors=lambda: ("llvm99",),
-            load=lambda flavor: SimpleNamespace(keys=lambda: (), arches=lambda key: ()),
+            load=lambda flavor: SimpleNamespace(
+                keys=lambda: (), arches=lambda key: (), processors=lambda: ()
+            ),
             is_negative=lambda status: True,
             is_waived=lambda key, arch, flavor: False,
             DEFAULT_MODE=mode,

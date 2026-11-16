@@ -83,6 +83,7 @@ SCRIPTS = {
     "compare": "benchmark_conv_compare.py",
     "direct": "benchmark_direct_conv.py",
     "implicit": "benchmark_implicit_gemm_conv.py",
+    "winograd": "benchmark_winograd_aot.py",
 }
 
 #: Shards per card when ``--shards`` is not given. See the module docstring:
@@ -376,7 +377,7 @@ def make_parser() -> argparse.ArgumentParser:
         "--script",
         choices=sorted(SCRIPTS),
         default="compare",
-        help="benchmark to run in each shard (default: compare, both engines)",
+        help="benchmark to run in each shard (default: compare, every engine)",
     )
     ap.add_argument(
         "--log-dir",
@@ -569,9 +570,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ]
     if args.script == "compare":
         # Each shard ran benchmark_conv_compare.py, whose own --results is
-        # already a merged row (both engines, winner, MIOpenDriver command):
-        # case_results.merge() expects the raw per-engine rows the "direct"
-        # and "implicit" scripts write, so handing it these would see no
+        # already a merged row (every engine, winner, MIOpenDriver command):
+        # case_results.merge() expects the raw per-engine rows the "direct",
+        # "implicit" and "winograd" scripts write, so handing it these would see no
         # "engine" field on any row and silently drop them all. A fresh row
         # replaces a carried one of the same key -- resume only reaches this
         # case again because --skip-measured did not cover it.

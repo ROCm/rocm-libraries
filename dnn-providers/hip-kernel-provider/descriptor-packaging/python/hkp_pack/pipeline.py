@@ -714,6 +714,33 @@ def _write_bytes_at(base, rel_dir, name, data):
     _dest_at(base, rel_dir, name).write_bytes(data)
 
 
+# Beside each packed arch tree's root, written only when the pack left a UHD out for an
+# un-pulled model. The extension is deliberately not `.json`: the descriptor loader and
+# validator warn about a `.json` that names no descriptor type, and this is not one.
+UNPULLED_RECORD = "hkp-unpulled-models.record"
+UNPULLED_RECORD_VERSION = "1.0"
+
+
+def _write_unpulled_record(flat, results):
+    """Name every UHD left out for an un-pulled model in each packed arch tree.
+
+    A census told "this model is absent" must be able to tell a model left out on
+    purpose from a UHD or model the packer lost; only this record says which. Nothing
+    is written when nothing was skipped, so its presence is itself the signal.
+    """
+    if not flat.unpulled_models:
+        return
+    text = json.dumps(
+        {"version": UNPULLED_RECORD_VERSION, "unpulled_models": flat.unpulled_models},
+        indent=2,
+    )
+    for result in results.values():
+        if not result.skipped:
+            (Path(result.out_dir) / UNPULLED_RECORD).write_text(
+                text + "\n", encoding="utf-8"
+            )
+
+
 def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
 
@@ -868,7 +895,7 @@ def _agreement_inputs(flat, arch):
                 f"KDP {kdp.path.name}: engine '{engine_id}' resolves to no descriptor"
             )
         engine = generics[canonical_id(engine_id)].doc
-        kmd_id = engine.get("metadata")
+        kmd_id = agreement.pack_kmd_reference(engine, kdp.doc, f"KDP {kdp.path.name}")
         kmd_desc = generics.get(canonical_id(kmd_id))
         if kmd_desc is None or kmd_desc.type != "kmd":
             raise HkpPackError(
@@ -2137,6 +2164,7 @@ def run_pipeline(
     source_label=None,
     exclude_folders=(),
     disabled_kinds=(),
+    require_dvc=False,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -2157,10 +2185,14 @@ def run_pipeline(
     `generic_targets_json` is the generic target table; generic passes are
     merged into member folders (descriptor-packaging/README.md).
 
-    `exclude_folders` names top-level child folders of the root this build does
-    not pack, and `disabled_kinds` the kernel_source kinds it has no producer for;
+    `exclude_folders` names folders of the root this build does not pack (a
+    top-level family folder or a `/`-separated bundle path), and `disabled_kinds`
+    the kernel_source kinds it has no producer for;
     both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
     nothing downstream sees them.
+
+    `require_dvc` makes a model file that is absent but tracked by a DVC pointer an
+    error; otherwise its UHD is left out with a warning (load_flat_input).
     """
     out_root = Path(out_root)
     results = {}
@@ -2175,6 +2207,7 @@ def run_pipeline(
         log=log,
         exclude_folders=exclude_folders,
         disabled_kinds=disabled_kinds,
+        require_dvc=require_dvc,
     )
 
     if inter_root is None:
@@ -2312,6 +2345,8 @@ def run_pipeline(
                     (() if previous is None else previous.generic_kpack_paths) + copied
                 ),
             )
+
+    _write_unpulled_record(flat, results)
 
     if failures:
         # Non-zero exit with partial output: the build fails loudly, but a
