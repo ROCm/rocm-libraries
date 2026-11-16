@@ -27,6 +27,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -675,6 +676,14 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const auto& info) { return info.param.name; });
 
 } // namespace fused_mfma
+
+// Opt-in: each config's time with and without a fused epilogue (shapes in $DW_MFMA_EPI_TIMING).
+TEST(TestGpuConvDepthwiseMfmaFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), "DW_MFMA_EPI_TIMING");
+}
 
 } // namespace
 
