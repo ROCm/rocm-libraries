@@ -116,7 +116,7 @@ a matching remote GPU before marking kernel work done.
 - [ ] **Placed in CI.** Each new or moved test runs in a CTest entry at the tier
       that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
       gives (standard by default, quick only for smoke), within its budgets. The
-      pull request states the tier and the measured cost.
+      pull request states the tier and the budgets it meets.
 - [ ] **[`run_checks.py`](#run-the-checks) green** on the platforms in the
       [testing matrix](#local-testing-matrix-platforms).
 - [ ] **Correctness before speed.** The numeric harness passes within tolerance
