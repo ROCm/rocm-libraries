@@ -3609,6 +3609,13 @@ struct FmhaFwdKernel
                     return 0.f;
             }();
 
+            // the pipelines whose operator() takes (soft_cap, soft_cap_rcp[, randval window,
+            // dropout]) after the common arguments; any other one on this path has neither
+            constexpr bool kTakesTdmSoftCapDropout = kPipelineName == "qr_tdm" ||
+                                                     kPipelineName == "qr_tdm_pingpong" ||
+                                                     kPipelineName == "qr_tdm_sched";
+            static_assert(kTakesTdmSoftCapDropout || !(kHasLogitsSoftCap || kHasDropout),
+                          "this pipeline takes no logits soft cap or dropout arguments");
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kMergeNumHeadGroupsSeqLenQ)
                 {
@@ -3693,13 +3700,13 @@ struct FmhaFwdKernel
                 else if constexpr(kTakesTdmDescales && kFoldedQScale)
                     return FmhaPipeline{}(
                         static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, v_descale);
-                else if constexpr(kHasDropout)
+                else if constexpr(kTakesTdmSoftCapDropout && kHasDropout)
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...,
                                           tdm_soft_cap,
                                           tdm_soft_cap_rcp,
                                           tdm_randval_dram_window,
                                           tdm_dropout);
-                else if constexpr(kHasLogitsSoftCap)
+                else if constexpr(kTakesTdmSoftCapDropout && kHasLogitsSoftCap)
                     return FmhaPipeline{}(
                         static_cast<decltype(args)&&>(args)..., tdm_soft_cap, tdm_soft_cap_rcp);
                 else
