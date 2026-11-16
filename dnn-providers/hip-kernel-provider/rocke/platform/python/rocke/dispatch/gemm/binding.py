@@ -4,9 +4,10 @@
 """Host-side problem bindings for the RCR UniversalGemm families.
 
 One binding serves fp16 and bf16: the two families share an args signature
-(``A, B, C, M, N, K``) and an RCR reference (``C = A @ B.T``), differing only
-in element encoding. Keeping them together means a change to the calling
-convention cannot land for one dtype and miss the other.
+(``A, B, C, M, N, K``, then ``lda, ldb`` for a kernel that takes row strides)
+and an RCR reference (``C = A @ B.T``), differing only in element encoding.
+Keeping them together means a change to the calling convention cannot land
+for one dtype and miss the other.
 
 The launch geometry is taken from the :class:`DispatchResult` rather than
 recomputed from tile fields. The legacy manifest runner re-derives it from
@@ -44,6 +45,10 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
 
     req = result.request
     M, N, K = int(req.M), int(req.N), int(req.K)
+    lda, ldb = req.row_strides()
+    takes_strides = bool(result.spec.trait.row_strides)
+    if not takes_strides and not req.packed():
+        raise ValueError("the selected kernel reads packed A and B (row stride K)")
 
     # Small integers are exact in both encodings, so the reference is limited
     # by the output rounding and the device's accumulate order, not by the
@@ -52,17 +57,25 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
     a_int = rng.integers(-5, 6, size=(M, K), dtype=np.int16)
     b_int = rng.integers(-5, 6, size=(N, K), dtype=np.int16)
 
+    def strided(values, stride):
+        """``values`` in rows of ``stride`` elements; the padding is not zero,
+        so a kernel that reads it gets a wrong answer."""
+        out = np.full((values.shape[0], stride), 3, dtype=np.int16)
+        out[:, :K] = values
+        return out
+
+    a_rows, b_rows = strided(a_int, lda), strided(b_int, ldb)
     if dtype == "fp16":
-        a_host = a_int.astype(np.float16)
-        b_host = b_int.astype(np.float16)
+        a_host = a_rows.astype(np.float16)
+        b_host = b_rows.astype(np.float16)
         c_host = np.empty((M, N), dtype=np.float16)
 
         def decode(buf):
             return buf.astype(np.float32)
 
     else:
-        a_host = f32_to_bf16(a_int.astype(np.float32))
-        b_host = f32_to_bf16(b_int.astype(np.float32))
+        a_host = f32_to_bf16(a_rows.astype(np.float32))
+        b_host = f32_to_bf16(b_rows.astype(np.float32))
         c_host = np.empty((M, N), dtype=np.uint16)
 
         def decode(buf):
@@ -75,10 +88,10 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
         rt.memcpy_h2d(a_dev, as_u8_buffer(a_host), nbytes(a_host))
         rt.memcpy_h2d(b_dev, as_u8_buffer(b_host), nbytes(b_host))
         rt.memset(c_dev, 0, nbytes(c_host))
-        return (
-            struct.pack("<QQQiii", a_dev, b_dev, c_dev, M, N, K),
-            (a_dev, b_dev, c_dev),
-        )
+        args = struct.pack("<QQQiii", a_dev, b_dev, c_dev, M, N, K)
+        if takes_strides:
+            args += struct.pack("<ii", lda, ldb)
+        return args, (a_dev, b_dev, c_dev)
 
     def check(rt: Any, ptrs: Tuple[int, ...]) -> Tuple[float, int, int]:
         if not verify:

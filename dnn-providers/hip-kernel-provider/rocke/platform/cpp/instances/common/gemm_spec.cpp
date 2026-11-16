@@ -219,6 +219,7 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.k_stagger_step = 1;
     s.trait.lds_db_allow_1wg = false;
     s.trait.global_addressing = "legacy";
+    s.trait.row_strides = false;
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -267,7 +268,9 @@ void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec)
  *                 f"gm{group_m}": group_m > 0,
  *                 f"kst{k_stagger}x{k_stagger_step}": k_stagger > 0,
  *                 f"c{dtype_c}": dtype_c != dtype_a,
- *                 "db1wg": lds_db_allow_1wg})
+ *                 "db1wg": lds_db_allow_1wg,
+ *                 f"addr_{global_addressing}": global_addressing != "legacy",
+ *                 "ld": row_strides})
  *
  *  Flag iteration order matters (CPython 3.7+ dict insertion order); we pass the
  *  same fixed order to rocke_kernel_name_join.
@@ -289,8 +292,8 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_gm[32];
     char part_kst[48];
     char part_addressing[48];
-    const char* flag_names[20];
-    int flag_on[20];
+    const char* flag_names[21];
+    int flag_on[21];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -354,6 +357,7 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     const char* addressing = tr->global_addressing ? tr->global_addressing : "legacy";
     snprintf(part_addressing, sizeof(part_addressing), "addr_%s", addressing);
     flag_names[19] = part_addressing;
+    flag_names[20] = "ld";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -378,9 +382,10 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
                       : 0;
     flag_on[18] = tr->lds_db_allow_1wg ? 1 : 0;
     flag_on[19] = strcmp(addressing, "legacy") != 0;
+    flag_on[20] = tr->row_strides ? 1 : 0;
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 20, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 21, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -875,8 +880,9 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
            || dtr->split_barrier || dtr->lds_k_pad != 0 || dtr->ab_load_elem_bytes_set
            || (dtr->global_addressing != NULL && strcmp(dtr->global_addressing, "legacy") != 0))
         {
-            CK_GEMM_REJECT("direct_a takes only group_m, k_stagger, lds_swizzle and waves_per_eu; "
-                           "partial M/N tiles and bounded addressing are built in");
+            CK_GEMM_REJECT("direct_a takes only group_m, k_stagger, lds_swizzle, row_strides and "
+                           "waves_per_eu; partial M/N tiles, the K tail and bounded addressing "
+                           "are built in");
         }
         if(dtr->group_m < 0 || dtr->k_stagger < 0 || dtr->k_stagger_step < 1)
         {
@@ -902,7 +908,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("the B tile exceeds the LDS capacity");
         }
-        if(rocke_gemm_direct_a_fragment_vgprs(spec, false) > 216)
+        if(rocke_gemm_direct_a_held_vgprs(spec, false) > 228)
         {
             CK_GEMM_REJECT("the tile's accumulators and fragments exceed the VGPR file");
         }
@@ -911,6 +917,10 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             snprintf(reason, reason_cap, "ok");
         }
         return true;
+    }
+    if(spec->trait.row_strides)
+    {
+        CK_GEMM_REJECT("row_strides needs the direct_a pipeline");
     }
 
     t = &spec->tile;
@@ -1444,9 +1454,40 @@ int rocke_gemm_direct_a_fragment_vgprs(const rocke_gemm_universal_spec_t* spec, 
     return 8 * mm * nn + 2 * 4 * mm * nk + 4 * nn * (local_prefetch ? 2 : 1);
 }
 
+/* gemm_direct_a.py :: _held_vgprs: the fragments, the next B tile's vectors a
+ * thread copies to LDS, and one offset per A load, B load and B store. */
+int rocke_gemm_direct_a_held_vgprs(const rocke_gemm_universal_spec_t* spec, bool local_prefetch)
+{
+    const int b_vectors = spec->tile.tile_n * spec->tile.tile_k / (8 * spec->block_size);
+    const int offsets = rocke_gemm_tile_mfmas_per_warp_m(&spec->tile)
+                            * rocke_gemm_tile_k_atoms_per_tile_k(&spec->tile)
+                        + 2 * b_vectors;
+    return rocke_gemm_direct_a_fragment_vgprs(spec, local_prefetch) + 4 * b_vectors + offsets;
+}
+
 bool rocke_gemm_direct_a_local_prefetch(const rocke_gemm_universal_spec_t* spec)
 {
-    return rocke_gemm_direct_a_fragment_vgprs(spec, true) <= 176;
+    return rocke_gemm_direct_a_fragment_vgprs(spec, true) <= 176
+           && rocke_gemm_direct_a_held_vgprs(spec, true) <= 228;
+}
+
+/* gemm_universal.py :: wmma_lds_swizzle_row_shift. 16-byte LDS accesses on
+ * gfx1201 are served eight lanes at a time and conflict modulo 128 bytes, so
+ * the XOR swizzle keys on the 128-byte window: row >> log2(128 / row_bytes).
+ * A row of 128 bytes or more, or one that does not divide 128, keys on the
+ * row itself. */
+int rocke_gemm_wmma_lds_swizzle_row_shift(int row_bytes)
+{
+    if(row_bytes <= 0 || row_bytes >= 128 || 128 % row_bytes != 0)
+    {
+        return 0;
+    }
+    int shift = 0;
+    for(int rows = 128 / row_bytes; rows > 1; rows >>= 1)
+    {
+        ++shift;
+    }
+    return shift;
 }
 
 /* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths mirror the Python module's

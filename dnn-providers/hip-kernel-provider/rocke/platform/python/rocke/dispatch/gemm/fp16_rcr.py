@@ -342,7 +342,7 @@ _GFX1201_SHORT = partial(
     _spec_gfx1201_compv4, tile=TileSpec(32, 32, 16, 1, 1, 1, 16, 16, 16)
 )
 
-_DIRECT_A = gfx1201_direct_a_candidates(
+_DIRECT_A, _DIRECT_A_FALLBACK = gfx1201_direct_a_candidates(
     dtype="fp16",
     family=_FAMILY,
     algorithm=_ALGORITHM,
@@ -369,7 +369,7 @@ GEMM_FP16_REGISTRY.extend(
             arches=_CDNA_MFMA_FP16,
         ),
         # The measured gfx1201 direct-A classes come first (see direct_a.py).
-        *_DIRECT_A[:4],
+        *_DIRECT_A,
         _make_candidate(
             name="universal_gemm_fp16_gfx1201_short_k32",
             spec_id="gfx1201_compv4_short_k32",
@@ -552,7 +552,7 @@ GEMM_FP16_REGISTRY.extend(
         ),
         # Last resort on gfx1201: M or N that no other tile divides. Partial
         # tiles make these correct for any M and N; they are not tuned.
-        *_DIRECT_A[4:],
+        _DIRECT_A_FALLBACK,
     )
 )
 

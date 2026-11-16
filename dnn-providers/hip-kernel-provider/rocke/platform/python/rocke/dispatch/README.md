@@ -82,27 +82,45 @@ first and falls back to the declared `compv4` palette, both in
 alongside `M`, `N`, and `K`, so coverage manifests carry the output-area bounds.
 Selection is a pure function of the request; it never probes a GPU or timings.
 
-A request is in the direct-A domain when K is a multiple of 64, at least 256
-and not a multiple of 8192, the output is above 2¹⁷ elements, and the A, B and
-C byte spans (M and N rounded up to whole tiles) are each below 2 GiB. M and N
-need not divide the tile: partial tiles are part of the pipeline. The classes
-are exclusive:
+A request is in the direct-A domain when K is a multiple of 16 and long
+enough for its output band, and the A, B and C byte spans (M and N rounded up
+to whole tiles) are each below 2 GiB. M and N need not divide the tile, and K
+need not be whole tiles: partial tiles are part of the pipeline. The classes
+are exclusive and are read top to bottom:
 
 | Class | Tile M×N×K / waves | Constraint |
 |---|---|---|
-| Small | 64×64×64 / 4×1 | output ≤ 2¹⁹ |
+| Micro | 16×16×128 / 1×1 | output ≤ 2¹⁶, K ≥ 64 |
+| Tiny | 32×32×128 / 2×1 | output ≤ 2¹⁷, K ≥ 64 |
+| Small, short K | 64×64×64 / 4×1 | output ≤ 2¹⁹, 48 ≤ K < 128 |
+| Small | 64×64×64 / 4×1, grouped-M 8 when M ≥ 8·N | K ≥ 128 and `ceil(M/128)·ceil(N/64)` in 1..48 or 65..80 |
 | Tall | 128×64×64 / 4×1, grouped-M 8 | M ≥ 8·N |
-| Wide 96 | 128×96×64 / 4×1 | N a multiple of 96, output ≥ 2²⁰ |
-| Default | 128×64×64 / 4×1 | everything else |
+| Wide 96 | 128×96×64 / 4×1 | K ≥ 10240 and output ≥ 3·2¹⁹, or N a multiple of 96 and output ≥ 2²⁰ |
+| Default | 128×64×64 / 4×1 | everything else with K ≥ 128 |
 
-All four use LDS swizzle, grouped-M 4 (8 for Tall) and stagger 8×4. The
-exclusions are measured: short K loops do not amortise the prologue, a 16 KiB
-row stride makes the 16 rows of one A fragment load collide, and the smallest
-outputs stay ahead on the compv4 small tile.
+All use LDS swizzle, grouped-M 4 unless noted, and stagger 8×1. The class
+edges are measured. Short K loops do not amortise the prologue. The 64×64 and
+128×64 tiles trade places with the number of 128×64 workgroups the output
+makes against the 64 compute units, not with the output size. From a long K
+on, the 128×64 tile falls behind on some row strides and the 96-wide one does
+not.
 
-When no other candidate's tile divides M and N, two last-resort direct-A
-candidates (64×64×64 for K a multiple of 64, then 64×32×16 for K a multiple of
-16) serve the request. They are correct for any M and N and are not tuned.
+A row stride that is a multiple of 8192 elements (16 KiB) makes the 16 rows
+of one A fragment load alias in the caches. Above the Tiny band such a
+request leaves the classes above: a packed request whose M and N are
+multiples of 64 goes to the long-stride compv4 band below, and every other
+one takes the Small tile up to 2¹⁹ outputs and the Wide 96 tile above. Both
+are slower than the same request at a stride that does not alias.
+
+`GemmRequest(lda=..., ldb=...)` gives the row strides of A and B in elements
+(0, the default, is packed). A request with a stride other than K is served
+only by direct-A, with the same tile and `row_strides` set; its kernel takes
+`(lda, ldb)` after K and the binding passes them. Padding a 16 KiB stride
+this way puts the request back in the measured classes.
+
+When no class and no other candidate's tile takes the request, the
+last-resort direct-A candidate (64×64×64) serves it. It is correct for any M
+and N with K a multiple of 16 and is not tuned.
 
 Outside that domain the ordered compv4 bands are:
 

@@ -90,14 +90,17 @@ def universal_gemm_arguments(
     n: int,
     k: int,
     sorted_ids: int | None = None,
+    lda: int | None = None,
+    ldb: int | None = None,
 ) -> bytes:
     """The kernel-argument bytes of ``spec``'s kernel on ``arch``.
 
     The parameters, their order and their types are the ones the builder
     declares; ``a``, ``b``, ``c`` and ``sorted_ids`` are device addresses. The
     values supplied are A, B, C, M, N and K, the per-batch element strides of
-    A, B and C (``M*K``, ``N*K``, ``M*N``), the sorted token ids and the slot
-    size (``M``), so each kernel gets the ones it declares.
+    A, B and C (``M*K``, ``N*K``, ``M*N``), the row strides of A and B in
+    elements (``lda``, ``ldb``; K when not given), the sorted token ids and
+    the slot size (``M``), so each kernel gets the ones it declares.
 
     Raises ``ValueError`` when ``sorted_ids`` is passed to a kernel that does
     not read sorted token ids, and when the kernel declares a parameter not
@@ -117,6 +120,8 @@ def universal_gemm_arguments(
         "stride_b": n * k,
         "stride_c": m * n,
         "slot_size": m,
+        "lda": k if lda is None else lda,
+        "ldb": k if ldb is None else ldb,
     }
     reads_sorted_ids = _SORTED_IDS in declared
     if sorted_ids is not None and not reads_sorted_ids:
@@ -150,6 +155,7 @@ def launch_universal_gemm(
     b_device: np.ndarray | None = None,
     sorted_ids: np.ndarray | None = None,
     c: np.ndarray | None = None,
+    k: int | None = None,
 ) -> np.ndarray:
     """Build ``llvm_ir`` for ``arch``, run it on the current GPU and return C.
 
@@ -158,15 +164,19 @@ def launch_universal_gemm(
     layout (a preshuffled B). ``sorted_ids`` is the sorted token ids a kernel
     that skips inactive tiles reads, and is required exactly for such a kernel.
     ``c`` is C's initial contents; it defaults to
-    :func:`universal_gemm_nan_output`. The arguments are
+    :func:`universal_gemm_nan_output`. ``k`` is K for a kernel that takes row
+    strides: ``a`` is then ``M x lda`` and ``bt`` is ``N x ldb``, each row
+    holding its K elements first. The arguments are
     :func:`universal_gemm_arguments`, which refuses a kernel this launcher
     cannot feed.
     """
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir
     from rocke.runtime.hip_module import Runtime
 
-    *batch, m, k = a.shape
-    n = bt.shape[-2]
+    *batch, m, lda = a.shape
+    n, ldb = bt.shape[-2:]
+    if k is None:
+        k = lda
     batches = batch[0] if batch else 1
     if c is None:
         c = universal_gemm_nan_output(spec, (*batch, m, n))
@@ -200,6 +210,8 @@ def launch_universal_gemm(
             n=n,
             k=k,
             sorted_ids=ptrs[3] if sorted_ids is not None else None,
+            lda=lda,
+            ldb=ldb,
         )
         runtime.launch_blocking(
             module.get_function(spec.kernel_name()), grid, (spec.block_size, 1, 1), args

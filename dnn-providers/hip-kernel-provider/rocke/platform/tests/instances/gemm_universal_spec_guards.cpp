@@ -361,6 +361,64 @@ int main()
              s.tile.tile_n = 96;
          },
          nullptr},
+        {"direct_a with row strides",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.trait.row_strides = true;
+         },
+         nullptr},
+        {"direct_a, one wave 16x16x128",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.tile_m = 16;
+             s.tile.tile_n = 16;
+             s.tile.tile_k = 128;
+             s.tile.warp_m = 1;
+             s.block_size = 32;
+         },
+         nullptr},
+        {"direct_a, two waves 32x32x128",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.tile_m = 32;
+             s.tile.tile_n = 32;
+             s.tile.tile_k = 128;
+             s.tile.warp_m = 2;
+             s.block_size = 64;
+         },
+         nullptr},
+        {"direct_a one-wave tile whose pending B vectors spill",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.tile_m = 16;
+             s.tile.tile_n = 64;
+             s.tile.tile_k = 128;
+             s.tile.warp_m = 1;
+             s.block_size = 32;
+         },
+         "exceed the VGPR file"},
+        {"direct_a two-wave K-256 tile spills",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_direct_a_tile(s);
+             s.tile.tile_m = 32;
+             s.tile.tile_n = 32;
+             s.tile.tile_k = 256;
+             s.tile.warp_m = 2;
+             s.block_size = 64;
+         },
+         "exceed the VGPR file"},
+        {"row strides off direct_a",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_prepared_read_tile(s);
+             s.trait.row_strides = true;
+         },
+         "row_strides needs the direct_a pipeline"},
         {"direct_a off gfx1201",
          "gfx1151",
          gfx1201_direct_a_tile,
@@ -393,7 +451,7 @@ int main()
              gfx1201_direct_a_tile(s);
              s.trait.lds_store_after_mma = true;
          },
-         "direct_a takes only group_m, k_stagger, lds_swizzle and waves_per_eu"},
+         "direct_a takes only group_m, k_stagger, lds_swizzle, row_strides and"},
         {"direct_a tile beyond the register file",
          "gfx1201",
          [](Spec& s) {

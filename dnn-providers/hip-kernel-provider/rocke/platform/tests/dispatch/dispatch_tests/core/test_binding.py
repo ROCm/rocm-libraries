@@ -177,6 +177,26 @@ class TestGemmBinding(unittest.TestCase):
                 self.assertEqual((diff, bad), (0.0, 0))
                 self.assertEqual(total, req.M * req.N)
 
+    def test_row_strides_reach_the_arguments_and_the_buffers(self):
+        import numpy as np
+
+        req = GemmRequest(M=512, N=512, K=256, arch="gfx1201", lda=288, ldb=272)
+        binding = dispatch_gemm_fp16(req).bind(verify=True)
+        rt = FakeRuntime()
+        args, ptrs = binding.make_args(rt)
+        a, b, c, m, n, k, lda, ldb = struct.unpack("<QQQiiiii", args)
+        self.assertEqual((a, b, c), ptrs)
+        self.assertEqual((m, n, k, lda, ldb), (512, 512, 256, 288, 272))
+        self.assertEqual(len(rt.mem[a]), 2 * 512 * 288)
+        self.assertEqual(len(rt.mem[b]), 2 * 512 * 272)
+        # The reference is the product of the first K elements of each row,
+        # so the padding must hold something a correct kernel never reads.
+        rows = np.frombuffer(bytes(rt.mem[a]), dtype=np.float16).reshape(512, 288)
+        self.assertTrue((rows[:, 256:] != 0).all())
+        _write_reference_output(rt, binding, ptrs, req, "fp16")
+        _diff, bad, total = binding.check(rt, ptrs)
+        self.assertEqual((bad, total), (0, 512 * 512))
+
     def test_every_registered_gemm_candidate_can_bind(self):
         # Registration and launchability should not drift apart within a
         # family that has opted into binding.

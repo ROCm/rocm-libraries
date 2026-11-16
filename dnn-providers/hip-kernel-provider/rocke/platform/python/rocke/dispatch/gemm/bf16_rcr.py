@@ -284,7 +284,7 @@ _CDNA_DECODE_BF16 = ("gfx950",)
 # gfx1201 BF16 takes the direct-A classes measured for FP16 (direct_a.py); the
 # kernel differs only in the matrix atom. Requests outside them keep the mem
 # candidates; M or N that no tile divides take the last-resort direct-A ones.
-_DIRECT_A = gfx1201_direct_a_candidates(
+_DIRECT_A, _DIRECT_A_FALLBACK = gfx1201_direct_a_candidates(
     dtype="bf16",
     family=_FAMILY,
     algorithm=_ALGORITHM,
@@ -342,6 +342,7 @@ GEMM_BF16_REGISTRY.extend(
             shapes=(ShapeRange("M", max=_DECODE_M_MAX),),
         ),
         *_DIRECT_A,
+        _DIRECT_A_FALLBACK,
     )
 )
 
