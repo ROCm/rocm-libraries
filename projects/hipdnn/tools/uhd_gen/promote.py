@@ -23,6 +23,9 @@ from .artifact import (
     is_grouped_tree,
     linear_features_hash,
     load_linear_artifact,
+    load_mlp_artifact,
+    mlp_features_hash,
+    verify_mlp_artifact,
     verify_tree_artifact,
 )
 from .correctness import REASON, VERDICT, numerical_reason, numerical_verdict
@@ -62,11 +65,15 @@ _ADAPTERS = (
     "tree_data",
     "table",
     "linear_data",
+    "mlp_data",
     "onnx",
     "custom_library",
 )
 #: A model `hash`: the SHA-256 of the file it names, as UhdParser and the adapters spell it.
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+#: Adapters whose artifact records its training architectures, so an installed model of one
+#: may be replaced in place by an incoming model of another that serves the same slot.
+_ARCH_RECORDING_ADAPTERS = ("tree_data", "mlp_data")
 
 
 class PromoteError(ValueError):
@@ -412,7 +419,7 @@ def _opaque_plan(
         )
         # Overwrite the incumbent in place, keeping its artifact file name.
         plan.destination_descriptor = path
-        installed_descriptor["tree_data"][artifact_key] = payload
+        installed_descriptor[descriptor["adapter"]][artifact_key] = payload
         plan.copies[:] = (
             []
             if _same_file(artifact_path, incumbent_artifact)
@@ -423,6 +430,26 @@ def _opaque_plan(
             f"same metric ({metric}) and architectures"
         )
     return plan
+
+
+def _training_arches(adapter: str, artifact: Path) -> set[str]:
+    """The architectures a verified tree_data or mlp_data artifact records it was trained
+    for, or the OSError/ValueError its verification raises."""
+    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+
+    if adapter == "mlp_data":
+        from hipdnn_flatbuffers_sdk.data_objects.MlpModel import MlpModel as Model
+
+        data = verify_mlp_artifact(artifact, None)
+    else:
+        from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel as Model
+
+        data = verify_tree_artifact(artifact, None)
+    model = Model.GetRootAs(bytearray(data), 0)
+    return {
+        model.TrainingArches(index).decode("utf-8", "replace")
+        for index in range(model.TrainingArchesLength())
+    }
 
 
 def _same_slot_artifact(
@@ -449,32 +476,24 @@ def _same_slot_artifact(
 
     if _score_metric(installed) != metric:
         refuse(f"it estimates {_score_metric(installed) or 'no metric'}, not {metric}")
-    body = installed.get("tree_data")
+    kind = installed.get("adapter")
+    body = installed.get(kind) if isinstance(kind, str) else None
     payload = body.get("artifact") if isinstance(body, dict) else None
     if (
-        adapter != "tree_data"
-        or installed.get("adapter") != "tree_data"
+        adapter not in _ARCH_RECORDING_ADAPTERS
+        or kind not in _ARCH_RECORDING_ADAPTERS
         or not isinstance(payload, str)
     ):
         refuse(
-            "the installed and incoming models are not both tree_data models whose "
-            "training architectures can be read"
+            "the installed and incoming models are not both tree_data or mlp_data models "
+            "whose training architectures can be read"
         )
     artifact = path.parent / payload
     _contained(artifact, descriptor_tree, "installed artifact")
     try:
-        data = verify_tree_artifact(artifact, None)
+        trained = _training_arches(kind, artifact)
     except (OSError, ValueError) as error:
         refuse(f"its artifact cannot be read for its training architectures: {error}")
-    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
-
-    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel
-
-    model = GbdtModel.GetRootAs(bytearray(data), 0)
-    trained = {
-        model.TrainingArches(index).decode("utf-8", "replace")
-        for index in range(model.TrainingArchesLength())
-    }
     if not trained or not trained <= served:
         refuse(
             f"it was trained for {sorted(trained) or 'unrecorded architectures'}, "
@@ -570,6 +589,25 @@ def _verify_artifact(
     adapter = descriptor["adapter"]
     declared = descriptor[adapter].get("hash")
     try:
+        if adapter == "mlp_data":
+            _, artifact_metric = load_mlp_artifact(
+                artifact_path,
+                declared,
+                feature_count=len(descriptor["features_signature"]),
+            )
+            data = artifact_path.read_bytes()
+            recorded = mlp_features_hash(data)
+            if recorded != descriptor.get("features_hash"):
+                raise ValueError(
+                    f"{artifact_path}: artifact features_hash {recorded!r} differs from "
+                    f"the UHD's {descriptor.get('features_hash')!r}"
+                )
+            if artifact_metric != _score_metric(descriptor):
+                raise ValueError(
+                    f"{artifact_path}: the model predicts {artifact_metric!r} but the UHD "
+                    f"scores {_score_metric(descriptor)!r}"
+                )
+            return hashlib.sha256(data).hexdigest()
         if adapter == "linear_data":
             # The runtime checks num_features against the signature length, as for
             # tree_data, then the model's own bounds.
@@ -1221,6 +1259,7 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         "tree_data",
         "table",
         "linear_data",
+        "mlp_data",
         "onnx",
     ):
         if not isinstance(signature, list) or not signature:
@@ -1289,6 +1328,14 @@ def _validate_descriptor(document: dict, path: Path) -> None:
                 )
         elif score.get("calibrated") is True:
             raise PromoteError(f"{path}: a calibrated score must name its metric")
+    if adapter == "mlp_data":
+        # UhdParser refuses an mlp_data without the metric its artifact is checked against,
+        # or whose score is not the log the network predicts.
+        score = document.get("score", {})
+        if "metric" not in score or score.get("transform") != "log":
+            raise PromoteError(
+                f"{path}: mlp_data requires score.metric and score.transform log"
+            )
     if adapter == "linear_data":
         # A log slowdown against the catalog's best (RFC 0019 §7.5): UhdParser refuses any
         # declaration that calls it a physical, calibrated or inverted score.

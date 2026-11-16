@@ -4773,13 +4773,10 @@ namespace rocalution
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::Transpose(void)
     {
-        if(this->nnz_ > 0)
-        {
-            HIPAcceleratorMatrixCSR<ValueType> tmp(this->local_backend_);
+        HIPAcceleratorMatrixCSR<ValueType> tmp(this->local_backend_);
 
-            tmp.CopyFrom(*this);
-            tmp.Transpose(this);
-        }
+        tmp.CopyFrom(*this);
+        tmp.Transpose(this);
 
         return true;
     }
@@ -4794,11 +4791,11 @@ namespace rocalution
 
         assert(cast_T != NULL);
 
+        cast_T->Clear();
+        cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
+
         if(this->nnz_ > 0)
         {
-            cast_T->Clear();
-            cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
-
             size_t buffer_size;
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
