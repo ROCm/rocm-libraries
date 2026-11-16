@@ -82,6 +82,7 @@
     "global.store.async.from.lds.b64": "llvm.amdgcn.global.store.async.from.lds.b64",
     "global.store.async.from.lds.b8": "llvm.amdgcn.global.store.async.from.lds.b8",
     "iglp.opt": "llvm.amdgcn.iglp.opt",
+    "ldexp.f32.i32": "llvm.ldexp.f32.i32",
     "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8": "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8",
     "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8": "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8",
     "llvm.amdgcn.mfma.f32.16x16x8bf16": "llvm.amdgcn.mfma.f32.16x16x8bf16",
@@ -6738,6 +6739,80 @@
       }
     },
     "iglp.opt": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
+    "ldexp.f32.i32": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm24"

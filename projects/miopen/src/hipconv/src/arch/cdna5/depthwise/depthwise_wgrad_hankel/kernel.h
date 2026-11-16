@@ -38,7 +38,7 @@ using bunnies::TdmDesc;
 
 // Rows of H a workgroup owns. H is split until the grid is a couple of blocks a
 // CU, since unchunked a wave's serial TDM-to-WMMA chain overlaps with nothing.
-inline int chunk_rows(const Config& cfg, const ConvParams& par)
+inline int chunk_rows(const Config& cfg, const ConvParams& par, int cu_count)
 {
     const int floor_rows = cfg.min_rows_per_chunk;
     if(par.h <= 0 || par.n <= 0)
@@ -49,7 +49,7 @@ inline int chunk_rows(const Config& cfg, const ConvParams& par)
     const long long base_wgs = (long long)c_units * divup(par.q, cfg.q_per_wave()) * par.n;
     if(base_wgs <= 0)
         return floor_rows;
-    const long long target      = 2LL * cu_count();
+    const long long target      = 2LL * cu_count;
     const long long want_chunks = (target + base_wgs - 1) / base_wgs;
     const int chunks            = (int)std::min<long long>(par.h, std::max(1LL, want_chunks));
     return std::max(floor_rows, divup(par.h, chunks));
@@ -76,9 +76,9 @@ partition_workspace_size(const ConvParams& par, int rows_per_chunk, int q_per_wa
 }
 
 // fp32 roundings on the longest path from a product to one dW element.
-inline size_t accumulation_depth(const ConvParams& par, const Config& cfg)
+inline size_t accumulation_depth(const ConvParams& par, const Config& cfg, int cu_count)
 {
-    const int rows          = chunk_rows(cfg, par);
+    const int rows          = chunk_rows(cfg, par, cu_count);
     const size_t partitions = (size_t)divup(par.n, cfg.n_per_block) *
                               (size_t)divup(par.q, cfg.q_per_wave()) * (size_t)divup(par.h, rows);
     // Both reduce levels are serial from zero: ceil(P/W) - 1 per wave, then W - 1 across waves.
@@ -420,6 +420,7 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_depthwise_wgrad_hanke
 // than one.
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const Device& dev,
                  const ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -428,6 +429,7 @@ void launch_impl(const LaunchParams& lp,
                  hipStream_t stream)
 {
     const size_t dw_elems         = (size_t)par.k * par.kh * par.kw;
+    const int rows_per_chunk      = chunk_rows(cfg, par, dev.cu_count);
     const unsigned num_partitions = lp.grid.y * lp.grid.z;
     float* main_out =
         num_partitions > 1 ? static_cast<float*>(workspace) : static_cast<float*>(out);
@@ -447,8 +449,8 @@ void launch_impl(const LaunchParams& lp,
                 par.q,
                 par.pad_h,
                 par.pad_w,
-                chunk_rows(cfg, par),
-                divup(par.h, chunk_rows(cfg, par)),
+                rows_per_chunk,
+                divup(par.h, rows_per_chunk),
                 par.n);
     };
     // A pitch is the staged width or the C left past it, so both have to divide.
@@ -500,52 +502,53 @@ public:
 
     KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
-    bool is_applicable(const ConvParams& par) const override
+    bool is_applicable(const Device& dev, const ConvParams& par) const override
     {
-        if(!DepthwiseWgradConvKernel::is_applicable(par))
+        if(!DepthwiseWgradConvKernel::is_applicable(dev, par))
             return false;
         if(par.kh != par.kw)
             return false;
         if(partition_workspace_size(
-               par, chunk_rows(cfg_, par), cfg_.q_per_wave(), cfg_.n_per_block) ==
+               par, chunk_rows(cfg_, par, dev.cu_count), cfg_.q_per_wave(), cfg_.n_per_block) ==
            std::numeric_limits<size_t>::max())
             return false;
         return par.kh == 3 || par.kh == 5 || par.kh == 7 || par.kh == 9 || par.kh == 11;
     }
 
-    bool is_valid_config(const ConvParams& par) const override
+    bool is_valid_config(const Device& /*dev*/, const ConvParams& par) const override
     {
         return par.direction == cfg_.direction && par.kh == cfg_.kh && par.kw == cfg_.kw &&
                par.stride_h == cfg_.stride && par.stride_w == cfg_.stride;
     }
 
-    LaunchParams get_launch_params(const ConvParams& par) const override
+    LaunchParams get_launch_params(const Device& dev, const ConvParams& par) const override
     {
         LaunchParams lp;
         lp.grid                 = dim3(divup(par.c, min(par.c, cfg_.staged_channels())),
                        divup(par.q, cfg_.q_per_wave()),
-                       divup(par.n, cfg_.n_per_block) * divup(par.h, chunk_rows(cfg_, par)));
+                       divup(par.n, cfg_.n_per_block) *
+                           divup(par.h, chunk_rows(cfg_, par, dev.cu_count)));
         lp.block_size           = dim3(cfg_.block_size(), 1, 1);
         lp.dynamic_shared_bytes = stage_geometry(cfg_).block_bytes;
         return lp;
     }
 
-    size_t get_workspace_size(const ConvParams& par) const override
+    size_t get_workspace_size(const Device& dev, const ConvParams& par) const override
     {
         return partition_workspace_size(
-            par, chunk_rows(cfg_, par), cfg_.q_per_wave(), cfg_.n_per_block);
+            par, chunk_rows(cfg_, par, dev.cu_count), cfg_.q_per_wave(), cfg_.n_per_block);
     }
 
     // Which tile the shape gets: what the tile fills rather than what it stages,
     // widest dim0 first, then the grid it leaves a CU, then widest q.
-    float get_weighted_throughput_index(const ConvParams& par) const override
+    float get_weighted_throughput_index(const Device& dev, const ConvParams& par) const override
     {
         const int eff_c        = min(cfg_.staged_channels(), par.c);
         const int eff_q        = min(cfg_.q_per_wave(), par.q);
         const long long blocks = (long long)divup(par.c, min(par.c, cfg_.staged_channels())) *
                                  divup(par.q, cfg_.q_per_wave()) * divup(par.n, cfg_.n_per_block) *
-                                 divup(par.h, chunk_rows(cfg_, par));
-        const long long waves = blocks * cfg_.waves_per_wg / cu_count();
+                                 divup(par.h, chunk_rows(cfg_, par, dev.cu_count));
+        const long long waves = blocks * cfg_.waves_per_wg / dev.cu_count;
         const int filled      = (int)(waves < 16 ? waves : 16);
         return (float)(eff_c * 65536 - (cfg_.staged_channels() - eff_c) * 8192 + filled * 256 +
                        eff_q * 8 - (cfg_.q_per_wave() - eff_q));
@@ -553,9 +556,10 @@ public:
 
     // Supplies the blocked accumulation depth; the default would use all N*P*Q
     // products.
-    void get_tolerance(const ConvParams& par, float& atol, float& rtol) const override
+    void
+    get_tolerance(const Device& dev, const ConvParams& par, float& atol, float& rtol) const override
     {
-        get_mixed_precision_tolerance(par, accumulation_depth(par, cfg_), atol, rtol);
+        get_mixed_precision_tolerance(par, accumulation_depth(par, cfg_, dev.cu_count), atol, rtol);
     }
 
 private:

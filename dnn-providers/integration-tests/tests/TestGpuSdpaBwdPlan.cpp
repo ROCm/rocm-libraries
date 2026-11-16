@@ -2,7 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 // GPU SDPA backward plan: registry lookup, applicability, and a graph run through the GPU
-// reference executor compared with the CPU reference executor on the same graph.
+// reference executor compared with the CPU reference executor on the same graph. Dropout
+// probability 0 is no dropout (isSdpaZeroProbabilityDropout, shared with the CPU plans): the GPU
+// gradients are bit-identical to the same graph without dropout fields.
 
 #include <gtest/gtest.h>
 
@@ -39,7 +41,7 @@ namespace
 // Dims: Q/O/dO/dQ [1, H, Sq, 8]; K/V/dK/dV [1, H, Skv, 8] (H = 2, Sq = 5, Skv = 9 by default);
 // stats FLOAT [1, 2, 5] (rank 3, as in the checked-in bundles); bias / dBias [Sq, Skv]. UIDs: Q=1
 // K=2 V=3 O=4 dO=5 Stats=6 dQ=7 dK=8 dV=9 Bias=10 dBias=11 DropoutMask=12 DropoutScale=13
-// DropoutScaleInv=14 SeqLenQ=15 SeqLenKv=16 Scale=17.
+// DropoutScaleInv=14 SeqLenQ=15 SeqLenKv=16 Scale=17 Seed=18 Offset=19.
 struct RawBwdSpec
 {
     DataType io = DataType::BFLOAT16;
@@ -59,6 +61,8 @@ struct RawBwdSpec
     // TOP_LEFT instead of BOTTOM_RIGHT alignment (right bound 0 either way).
     bool topLeft = false;
     std::optional<float> dropout;
+    // INT64 one-element seed and offset tensors named by the node.
+    bool seedAndOffset = false;
     // Explicit dropout: FLOAT mask [1, H, Sq, Skv] and a one-element FLOAT dropout_scale.
     bool dropoutMask = false;
     std::optional<std::vector<int64_t>> dropoutScaleInvDims;
@@ -167,6 +171,13 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(const RawBwdSpec& spec)
         attrs.scale_tensor_uid = 17;
         add(17, "Scale", spec.scaleType, scaleStrides, scaleDims);
     }
+    if(spec.seedAndOffset)
+    {
+        attrs.seed_tensor_uid = 18;
+        attrs.offset_tensor_uid = 19;
+        add(18, "Seed", DataType::INT64, oneStrides, oneDims);
+        add(19, "Offset", DataType::INT64, oneStrides, oneDims);
+    }
 
     auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -268,6 +279,13 @@ TEST(TestGpuSdpaBwdPlanBuilder, ApplicabilityMirrorsCpuPlan)
          true},
         // Dropout: explicit mask only; dropout_scale_inv one FLOAT element, with the mask.
         {"Philox dropout", editedSpec([](RawBwdSpec& s) { s.dropout = 0.1F; }), false},
+        {"zero-probability dropout", editedSpec([](RawBwdSpec& s) { s.dropout = 0.0F; }), true},
+        {"zero-probability dropout with seed and offset",
+         editedSpec([](RawBwdSpec& s) {
+             s.dropout = 0.0F;
+             s.seedAndOffset = true;
+         }),
+         true},
         {"explicit dropout", editedSpec([](RawBwdSpec& s) { s.dropoutMask = true; }), true},
         {"explicit dropout + scale_inv",
          editedSpec([](RawBwdSpec& s) {
@@ -497,3 +515,106 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const ::testing::TestParamInfo<BwdExecutorCase>& info) {
                              return std::string(info.param.name);
                          });
+
+// Probability 0 drops no element: dQ, dK and dV equal the graph without dropout fields bit for
+// bit, whether the node names a seed and offset or not, and equal the CPU executor's.
+TEST(TestGpuSdpaBwdPlanZeroDropout, EqualsNoDropoutBitForBitAndTheCpuExecutor)
+{
+    SKIP_IF_NO_DEVICES();
+    constexpr int64_t HEAD_DIM = 8;
+    const auto spec = [](std::optional<float> dropout, bool seedAndOffset) {
+        RawBwdSpec s;
+        s.io = DataType::FLOAT;
+        s.bias = false;
+        s.dBias = false;
+        s.dropout = dropout;
+        s.seedAndOffset = seedAndOffset;
+        return s;
+    };
+    const std::vector<int64_t> qDims = {1, 2, 5, HEAD_DIM};
+    const std::vector<int64_t> kvDims = {1, 2, 9, HEAD_DIM};
+    struct Gradients
+    {
+        Gradients(const std::vector<int64_t>& qDims, const std::vector<int64_t>& kvDims)
+            : dQ(qDims)
+            , dK(kvDims)
+            , dV(kvDims)
+        {
+        }
+        Tensor<float> dQ;
+        Tensor<float> dK;
+        Tensor<float> dV;
+    };
+
+    const auto run = [&](const RawBwdSpec& s, bool gpu) {
+        Tensor<float> q(qDims);
+        Tensor<float> k(kvDims);
+        Tensor<float> v(kvDims);
+        Tensor<float> o(qDims);
+        Tensor<float> dO(qDims);
+        Tensor<float> stats(s.statsDims);
+        q.fillWithRandomValues(-1.0F, 1.0F, 61);
+        k.fillWithRandomValues(-1.0F, 1.0F, 62);
+        v.fillWithRandomValues(-1.0F, 1.0F, 63);
+        o.fillWithRandomValues(-1.0F, 1.0F, 64);
+        dO.fillWithRandomValues(-1.0F, 1.0F, 65);
+        stats.fillWithRandomValues(0.0F, 1.0F, 66);
+        Tensor<int64_t> seedTensor({1});
+        Tensor<int64_t> offsetTensor({1});
+        seedTensor.fillWithValue(99);
+        offsetTensor.fillWithValue(3);
+        Gradients out(qDims, kvDims);
+        const auto ptr = [gpu](auto& t) -> void* {
+            return gpu ? t.memory().deviceData() : t.memory().hostData();
+        };
+        std::unordered_map<int64_t, void*> pack{{1, ptr(q)},
+                                                {2, ptr(k)},
+                                                {3, ptr(v)},
+                                                {4, ptr(o)},
+                                                {5, ptr(dO)},
+                                                {6, ptr(stats)},
+                                                {7, ptr(out.dQ)},
+                                                {8, ptr(out.dK)},
+                                                {9, ptr(out.dV)}};
+        if(s.seedAndOffset)
+        {
+            pack[18] = ptr(seedTensor);
+            pack[19] = ptr(offsetTensor);
+        }
+        auto graph = makeRawSdpaBwdGraph(s);
+        if(gpu)
+        {
+            hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
+            EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+            executor.execute(graph.GetBufferPointer(), graph.GetSize(), pack);
+            for(auto* t : {&out.dQ, &out.dK, &out.dV})
+            {
+                t->memory().markDeviceModified();
+            }
+        }
+        else
+        {
+            hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor executor;
+            EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+            executor.execute(graph.GetBufferPointer(), graph.GetSize(), pack);
+        }
+        return out;
+    };
+
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> exact(0.0F, 0.0F);
+    auto noDropout = run(spec(std::nullopt, false), true);
+    for(const bool seedAndOffset : {true, false})
+    {
+        SCOPED_TRACE(std::string("seed and offset ") + (seedAndOffset ? "named" : "absent"));
+        auto zero = run(spec(0.0F, seedAndOffset), true);
+        EXPECT_TRUE(exact.allClose(noDropout.dQ, zero.dQ));
+        EXPECT_TRUE(exact.allClose(noDropout.dK, zero.dK));
+        EXPECT_TRUE(exact.allClose(noDropout.dV, zero.dV));
+    }
+
+    auto cpu = run(spec(0.0F, true), false);
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> loose(2e-4F, 2e-4F);
+    EXPECT_TRUE(loose.allClose(cpu.dQ, noDropout.dQ));
+    EXPECT_TRUE(loose.allClose(cpu.dK, noDropout.dK));
+    EXPECT_TRUE(loose.allClose(cpu.dV, noDropout.dV));
+}

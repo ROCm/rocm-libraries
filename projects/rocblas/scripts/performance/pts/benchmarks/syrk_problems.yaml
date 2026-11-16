@@ -15,5 +15,6 @@ Tests:
           transA: [ N ]
           alpha: 1
           beta: 1
-          iters: 10
+          iters: 100
+          cold_iters: 20
 ...
