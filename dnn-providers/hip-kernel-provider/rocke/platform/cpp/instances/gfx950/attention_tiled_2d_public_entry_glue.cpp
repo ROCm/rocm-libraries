@@ -46,9 +46,9 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* binary_search_seq_idx */
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* rocke__mfma_32x32_c_* */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join  */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, ROCKE_SPEC_FAIL */
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
-#include "rocke/helper_rocke.instances.common.attention_tiled_2d_rules.h" /* grouped-KV2 / early-V rules */
+#include "rocke/helper_rocke.instances.common.attention_tiled_2d_rules.h" /* shared tiled-2D spec rules */
 
 #include <math.h>
 #include <stdio.h>
@@ -380,6 +380,40 @@ bool rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(
         "not carry them");
 }
 
+bool rocke_gfx950_attention_tiled_2d_validate_post_init_rules(
+    const rocke_attention_tiled_2d_spec_t* spec, char* reason, size_t reason_cap)
+{
+    if(spec->use_mfma_32x32)
+    {
+        if(spec->block_m_per_warp != 32)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "use_mfma_32x32 requires one 32-row MFMA atom per warp - "
+                            "block_m_per_warp=%d, expected 32",
+                            spec->block_m_per_warp);
+        const int tile_size = rocke_attention_tiled_2d_spec_tile_size_eff(spec);
+        if(tile_size % 32 != 0)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "use_mfma_32x32 requires whole 32-row tiles - tile_size=%d "
+                            "(block_size when unset), expected a multiple of 32",
+                            tile_size);
+        if(spec->head_size % 16 != 0)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "use_mfma_32x32 requires whole 16-element head steps - "
+                            "head_size=%d, expected a multiple of 16",
+                            spec->head_size);
+    }
+    if(spec->use_transposed_qk_32x32 && !spec->use_mfma_32x32)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "use_transposed_qk_32x32 requires the 32x32 MFMA atom - "
+                        "use_mfma_32x32=False, expected True");
+    return rocke_attention_tiled_2d_validate_transposed_softmax_valu_opts(spec, reason, reason_cap)
+           && rocke_attention_tiled_2d_validate_grouped_kv2_and_early_v(spec, reason, reason_cap);
+}
+
 /* ===================================================================== *
  *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
  *
@@ -408,6 +442,14 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
      * anything is built. */
     if(!rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(b, spec))
         return false;
+
+    /* ---- the gfx950 spec's 32x32, transposed-softmax VALU, grouped-KV2 and
+     * early-V rules (Python __post_init__, which runs before the build gates). */
+    {
+        char reason[ROCKE_ERR_MSG_CAP];
+        if(!rocke_gfx950_attention_tiled_2d_validate_post_init_rules(spec, reason, sizeof(reason)))
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, reason);
+    }
 
     /* ---- require_tiled_attention_arch(arch) (Py748) ---- */
     if(!rocke_g950_require_tiled_attention_arch(b, arch))
@@ -470,13 +512,6 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     if(spec->lse_head_major && !spec->emit_lse)
     {
         rocke_g950_fail(b, ROCKE_ERR_VALUE, "lse_layout='head_major' requires emit_lse");
-    }
-    /* ---- grouped-KV2 softmax and early-V schedule rules (Python __post_init__,
-     * kernels.common.attention_tiled_2d_rules). */
-    {
-        char reason[ROCKE_ERR_MSG_CAP];
-        if(!rocke_attention_tiled_2d_validate_grouped_kv2_and_early_v(spec, reason, sizeof(reason)))
-            rocke_g950_fail(b, ROCKE_ERR_VALUE, reason);
     }
 
     /* ---- V-double-buffer / deep-ring / staggered-wait / q-reread.

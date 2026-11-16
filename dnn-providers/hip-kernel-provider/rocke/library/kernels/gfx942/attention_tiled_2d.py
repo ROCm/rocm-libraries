@@ -40,8 +40,11 @@ from typing import ClassVar, Optional, Tuple
 
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
-from kernels.common.attention_mask_type import band_mask_type
 from kernels.common._spec_checks import require_bool
+from kernels.common.attention_mask_type import band_mask_type
+from kernels.common.attention_tiled_2d_rules import (
+    validate_transposed_softmax_valu_opts,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -600,20 +603,6 @@ class UnifiedAttention2DTiledSpec:
                 f"(got {self.num_warps}); other values need new MFMA/launch "
                 f"distribution logic."
             )
-        if self.use_mfma_32x32:
-            if self.block_m_per_warp != 32:
-                raise ValueError(
-                    "use_mfma_32x32 requires block_m_per_warp=32: "
-                    "one 32-row MFMA atom per warp"
-                )
-            if self.tile_size_eff % 32 != 0:
-                raise ValueError(
-                    "use_mfma_32x32 requires tile_size to be a multiple of 32"
-                )
-            if self.head_size % 16 != 0:
-                raise ValueError(
-                    "use_mfma_32x32 requires head_size to be a multiple of 16"
-                )
         if self.use_mfma_32x32x8:
             # gfx942-legal 32x32x8 wide-fragment path. Same 32x32 C layout as
             # the (gfx950-only) 32x32x16 path, but K=8 per atom -- the atom IS
@@ -852,28 +841,9 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
         if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
             raise ValueError("use_mfma32_skip_legacy_qreg requires use_mfma_32x32")
-        if self.use_transposed_mask_limit:
-            if not (
-                (self.use_mfma_32x32 or self.use_mfma_32x32x8)
-                and self.use_transposed_qk_32x32
-                and self.use_transposed_scalar_state
-                and self.use_transposed_mask_once
-            ):
-                raise ValueError(
-                    "transposed softmax VALU opts require the R4_s1mask path"
-                )
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "transposed softmax VALU opts require no sliding window"
-                )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
-                raise ValueError(
-                    "transposed softmax VALU opts do not support softcap, ALiBi, or QQ bias"
-                )
-            if self.use_grouped_kv2_softmax:
-                raise ValueError(
-                    "transposed softmax VALU opts do not support grouped_kv2"
-                )
+        ok, reason = validate_transposed_softmax_valu_opts(self)
+        if not ok:
+            raise ValueError(reason)
         if self.use_fast_paged_kv_desc:
             if not (
                 self.dtype == "bf16"

@@ -35,6 +35,7 @@
 
 #include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
+#include "rocke/helper_rocke.instances.common.attention_tiled_2d_rules.h" /* shared tiled-2D spec rules */
 #include "rocke/ir.h"
 
 /* ------------------------------------------------------------- error latch */
@@ -631,6 +632,17 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         rocke_attn2d_set_err(
             b, ROCKE_ERR_VALUE, "use_mfma32_skip_legacy_qreg requires use_mfma_32x32");
         return false;
+    }
+
+    /* Transposed-softmax VALU opts: the rule both tiled-2D specs share. */
+    {
+        char reason[ROCKE_ERR_MSG_CAP];
+        if(!rocke_attention_tiled_2d_validate_transposed_softmax_valu_opts(
+               s, reason, sizeof(reason)))
+        {
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+            return false;
+        }
     }
 
     /* use_agpr_alloc_zero detailed pairing guard (mirrors Python

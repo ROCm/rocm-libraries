@@ -398,6 +398,18 @@ typedef struct rocke_gfx950_attn2d_build_ctx
 bool rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec);
 
+/* The gfx950 spec __post_init__ rules this C twin mirrors, in their Python
+ * relative order: the 32x32x16 atom geometry, use_transposed_qk_32x32 requiring
+ * that atom, then the shared transposed-softmax VALU and grouped-KV2 / early-V
+ * rules (helper_rocke.instances.common.attention_tiled_2d_rules.h). Not every
+ * __post_init__ rule is mirrored. The gfx950 tiled 2D build and the fastKV
+ * register-P build both run it before their own build checks, as Python runs
+ * __post_init__ before building. Returns true when the spec passes; otherwise
+ * false with the Python ValueError text in the caller-owned `reason`
+ * (rocke_spec_set_reason rules). */
+bool rocke_gfx950_attention_tiled_2d_validate_post_init_rules(
+    const rocke_attention_tiled_2d_spec_t* spec, char* reason, size_t reason_cap);
+
 /* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / build section.
  *  Each reads/writes only ctx (and the builder it carries) and emits IR in the

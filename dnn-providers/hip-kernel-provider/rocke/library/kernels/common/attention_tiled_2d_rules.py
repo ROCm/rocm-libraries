@@ -1,14 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Grouped-KV2 softmax and early-V schedule rules for tiled-2D attention specs.
+"""Spec rules the gfx942 and gfx950 tiled-2D attention specs share.
 
-The gfx950 ``UnifiedAttention2DTiledSpec`` runs these rules at construction.
-(The gfx942 spec refuses grouped-KV2 softmax and the fp8 K/V cache outright, so
-none of them can apply there.) The C++ twin,
-``rocke_attention_tiled_2d_validate_grouped_kv2_and_early_v`` in
-``instances/common/attention_tiled_2d_rules.cpp``, refuses with the same text
-for the C++ entries that build gfx950 specs.
+* :func:`validate_transposed_softmax_valu_opts` -- the transposed-softmax VALU
+  opts (``use_transposed_mask_limit``); both specs run it at construction.
+* :func:`validate_grouped_kv2_and_early_v` -- grouped-KV2 softmax and the
+  early-V schedule; the gfx950 spec runs it (the gfx942 spec refuses
+  grouped-KV2 softmax and the fp8 K/V cache outright, so none of it can apply
+  there).
+
+The C++ twins in ``instances/common/attention_tiled_2d_rules.cpp`` refuse with
+the same text.
 """
 
 from __future__ import annotations
@@ -16,13 +19,14 @@ from __future__ import annotations
 from typing import Protocol
 
 __all__ = [
-    "GroupedKv2SpecFields",
+    "TiledAttention2DRuleFields",
     "validate_grouped_kv2_and_early_v",
+    "validate_transposed_softmax_valu_opts",
 ]
 
 
-class GroupedKv2SpecFields(Protocol):
-    """The read-only spec fields the grouped-KV2 and early-V rules read."""
+class TiledAttention2DRuleFields(Protocol):
+    """The read-only spec fields the shared tiled-2D rules read."""
 
     @property
     def dtype(self) -> str: ...
@@ -57,9 +61,79 @@ class GroupedKv2SpecFields(Protocol):
     @property
     def use_early_v_schedule(self) -> bool: ...
 
+    @property
+    def use_transposed_scalar_state(self) -> bool: ...
+
+    @property
+    def use_transposed_mask_once(self) -> bool: ...
+
+    @property
+    def use_transposed_mask_limit(self) -> bool: ...
+
+
+def _unsupported_feature_refusal(
+    does_not_support: str, features: tuple[tuple[str, str, bool], ...]
+) -> tuple[bool, str]:
+    """Refuse the first enabled ``(feature, field name, enabled)``.
+
+    ``does_not_support`` is the message head, e.g. ``"... does not support"``.
+    """
+    for feature, field_name, enabled in features:
+        if enabled:
+            return False, (
+                f"{does_not_support} {feature} - {field_name}=True, expected False"
+            )
+    return True, ""
+
+
+def validate_transposed_softmax_valu_opts(
+    spec: TiledAttention2DRuleFields,
+) -> tuple[bool, str]:
+    """Admit a spec whose transposed-softmax VALU opts are on a path that has them.
+
+    Returns ``(True, "")``, or ``(False, reason)`` naming the first broken rule.
+    The VALU opts (``use_transposed_mask_limit``) run only on the R4_s1mask
+    path -- the transposed QK with the scalar state and mask-once knobs --
+    without a sliding window, softcap, ALiBi, QQ bias or grouped-KV2 softmax.
+    Each spec's own earlier rule already ties the transposed QK to its 32x32
+    MFMA atom, so the atom is not checked again here.
+    """
+    if not spec.use_transposed_mask_limit:
+        return True, ""
+    if not (
+        spec.use_transposed_qk_32x32
+        and spec.use_transposed_scalar_state
+        and spec.use_transposed_mask_once
+    ):
+        return False, (
+            "transposed softmax VALU opts require the R4_s1mask path - "
+            f"use_transposed_qk_32x32={spec.use_transposed_qk_32x32}, "
+            f"use_transposed_scalar_state={spec.use_transposed_scalar_state}, "
+            f"use_transposed_mask_once={spec.use_transposed_mask_once}, "
+            "expected all True"
+        )
+    if spec.sliding_window > 0:
+        return False, (
+            "transposed softmax VALU opts do not support a sliding window - "
+            f"sliding_window={spec.sliding_window}, expected 0"
+        )
+    return _unsupported_feature_refusal(
+        "transposed softmax VALU opts do not support",
+        (
+            ("softcap", "has_softcap", spec.has_softcap),
+            ("ALiBi", "use_alibi", spec.use_alibi),
+            ("QQ bias", "use_qq_bias", spec.use_qq_bias),
+            (
+                "grouped-KV2 softmax",
+                "use_grouped_kv2_softmax",
+                spec.use_grouped_kv2_softmax,
+            ),
+        ),
+    )
+
 
 def validate_grouped_kv2_and_early_v(
-    spec: GroupedKv2SpecFields,
+    spec: TiledAttention2DRuleFields,
 ) -> tuple[bool, str]:
     """Admit a spec whose grouped-KV2 and early-V knobs are supported together.
 
@@ -92,16 +166,16 @@ def validate_grouped_kv2_and_early_v(
                 "use_grouped_kv2_softmax v1 does not support a sliding window - "
                 f"sliding_window={spec.sliding_window}, expected 0"
             )
-        for feature, field_name, enabled in (
-            ("softcap", "has_softcap", spec.has_softcap),
-            ("ALiBi", "use_alibi", spec.use_alibi),
-            ("QQ bias", "use_qq_bias", spec.use_qq_bias),
-        ):
-            if enabled:
-                return False, (
-                    f"use_grouped_kv2_softmax v1 does not support {feature} - "
-                    f"{field_name}=True, expected False"
-                )
+        ok, reason = _unsupported_feature_refusal(
+            "use_grouped_kv2_softmax v1 does not support",
+            (
+                ("softcap", "has_softcap", spec.has_softcap),
+                ("ALiBi", "use_alibi", spec.use_alibi),
+                ("QQ bias", "use_qq_bias", spec.use_qq_bias),
+            ),
+        )
+        if not ok:
+            return ok, reason
         if spec.kv_storage_dtype is not None:
             return False, (
                 "use_grouped_kv2_softmax v1 does not support FP8 KV - "
