@@ -41,11 +41,11 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
     const auto solver = miopen::solver::conv::ConvHipConv{};
     ASSERT_TRUE(solver.IsApplicable(ctx, problem));
 
-    // The index a stored record selects, or -1 if it is rejected.
-    const auto load = [&](const std::string& stored) {
+    // The kernel a stored record selects, or nullptr if it is rejected.
+    const auto load = [&](const std::string& stored) -> void* {
         Config config;
         config.Deserialize(stored);
-        return solver.IsValidPerformanceConfig(ctx, problem, config) ? config.index : -1;
+        return solver.IsValidPerformanceConfig(ctx, problem, config) ? config.kernel : nullptr;
     };
 
     // IsValidPerformanceConfig sets config.descriptor from config.index.
@@ -63,11 +63,12 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
         EXPECT_NE(version, "unknown");
         const auto body = record.substr(colon + 1);
 
-        EXPECT_EQ(load(record), configs) << record;
-        EXPECT_EQ(load("v999.999:" + body), -1) << record;
-        EXPECT_EQ(load(version + "0:" + body), -1) << record;
-        EXPECT_EQ(load("unknown:" + body), -1) << record;
-        EXPECT_EQ(load(body), -1) << record;
+        ASSERT_NE(config.kernel, nullptr) << record;
+        EXPECT_EQ(load(record), config.kernel) << record;
+        EXPECT_EQ(load("v999.999:" + body), nullptr) << record;
+        EXPECT_EQ(load(version + "0:" + body), nullptr) << record;
+        EXPECT_EQ(load("unknown:" + body), nullptr) << record;
+        EXPECT_EQ(load(body), nullptr) << record;
     }
     // Config 0 alone would not catch a record resolving to the default config.
     EXPECT_GE(configs, 2);

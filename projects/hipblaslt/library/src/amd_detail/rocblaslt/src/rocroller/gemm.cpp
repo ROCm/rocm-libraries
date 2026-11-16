@@ -157,6 +157,11 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
         rv << "_WGM_";
     }
 
+    if(gemm->syncLDSQueueAtKLoop)
+    {
+        rv << "_LDSSYNC";
+    }
+
     return rv.str();
 }
 
@@ -590,7 +595,8 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
     std::string kernelName = genKernelName(gemm);
     auto context = Context::ForDefaultHipDevice(
         kernelName,
-        {{.scaleSkipPermlane = (gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3
+        {{.syncLDSQueueAtKLoopBoundaries = gemm->syncLDSQueueAtKLoop,
+          .scaleSkipPermlane = (gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3
                                 && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3)
                                    ? ScaleSkipPermlaneMode::PreSwizzleScaleGFX950
                                    : ScaleSkipPermlaneMode::None}});

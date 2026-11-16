@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for tensilelite.TensileBenchmarkCluster
+# Characterization tests for tensilelite.benchmark_cluster
 #
 # ADD-ONLY: pins the SLURM cluster-benchmark orchestrator. Subprocess/docker/
 # gzip/file-template work is stubbed at the module seams (subprocess, gzip,
@@ -18,7 +18,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.TensileBenchmarkCluster")
+M = importlib.import_module("tensilelite.benchmark_cluster")
 TBC = M.TensileBenchmarkCluster
 SLURM = M.BenchmarkImplSLURM
 

@@ -32,7 +32,7 @@ std::vector<TriageRow<NumNote>> numericalTriageTable()
         {NumNote::DOWN_CONVERT_INPUTS, NoteAction::WARN, NoteAction::RECORD_ERROR},
         {NumNote::REDUCED_PRECISION_REDUCTION, NoteAction::WARN, NoteAction::RECORD_ERROR},
         {NumNote::FFT, NoteAction::WARN, NoteAction::WARN},
-        {NumNote::NONDETERMINISTIC, NoteAction::WARN, NoteAction::MAP},
+        {NumNote::NONDETERMINISTIC, NoteAction::MAP, NoteAction::MAP},
         {NumNote::WINOGRAD, NoteAction::WARN, NoteAction::WARN},
         {NumNote::WINOGRAD_TILE_4x4, NoteAction::WARN, NoteAction::WARN},
         {NumNote::WINOGRAD_TILE_6x6, NoteAction::WARN, NoteAction::WARN},
@@ -52,14 +52,14 @@ TEST(TestCudnnShimNoteTriageTable, NumericalNoteDispositions)
     }
 }
 
-TEST(TestCudnnShimNoteTriageTable, OnlyDeselectNondeterministicMapsANumericalNote)
+TEST(TestCudnnShimNoteTriageTable, OnlyNondeterministicMapsANumericalNote)
 {
     for(const auto& row : numericalTriageTable())
     {
         SCOPED_TRACE(fe::detail::noteName(row.note));
-        EXPECT_NE(fe::detail::triageSelect(row.note), NoteAction::MAP);
-        EXPECT_EQ(fe::detail::triageDeselect(row.note) == NoteAction::MAP,
-                  row.note == NumNote::NONDETERMINISTIC);
+        const bool isNondeterministic = row.note == NumNote::NONDETERMINISTIC;
+        EXPECT_EQ(fe::detail::triageSelect(row.note) == NoteAction::MAP, isNondeterministic);
+        EXPECT_EQ(fe::detail::triageDeselect(row.note) == NoteAction::MAP, isNondeterministic);
     }
 }
 

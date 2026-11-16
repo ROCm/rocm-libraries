@@ -1,6 +1,6 @@
 # gfx942 bf16 D128 causal prefill: CFVST, K LDS double buffering, and V register prefetch
 
-This change implements opt-in K LDS Double Buffering and V register pre-fetching on the CFVST body of D128 bf16 persistent=true causal prefill attention gfx942 kernels. CFVST itself is already the D128 default for both dtypes (`use_cfvst=None` resolves on via `_use_cfvst`, since #14367); this change does not alter it. Both new levers are off by default.
+This change implements opt-in K LDS Double Buffering and V register pre-fetching on the CFVST body of D128 bf16 persistent=true causal prefill attention gfx942 kernels. CFVST itself is already the D128 default for both dtypes (`use_cfvst=None` resolves on via `default_use_cfvst`, since #14367); this change does not alter it. Both new levers are off by default.
 
 ## Problem
 

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 #
 # Coverage.py config used ONLY by the native-rocisa joblib/loky worker
-# subprocesses spawned by _native_rocisa_workers (TensileCreateLibrary/Run.py)
+# subprocesses spawned by _native_rocisa_workers (create_library/run.py)
 # during the coverage-unit tox lane. coverage.process_startup() (see
 # tensilelite/Tests/_cov_sitecustomize/sitecustomize.py) reads it via the
-# COVERAGE_PROCESS_START env var that Run.py exports to those workers only.
+# COVERAGE_PROCESS_START env var that create_library/run.py exports to those workers only.
 #
 # The main pytest process and its xdist workers are measured by pytest-cov with
 # pyproject.toml instead; this file only governs the extra worker processes so

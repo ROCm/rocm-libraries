@@ -29,7 +29,7 @@ The flag is `--cpu-only` and **requires `--gpu-targets`** (you must name the
 target arch to spoof). It is plumbed through an internal global, not the
 documented `--global-parameters` surface.
 
-- **CLI flag** — `tensilelite/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It sets
+- **CLI flag** — `tensilelite/run.py` (`--cpu-only`, `dest="cpuOnly"`). It sets
   `globalParameters["CpuOnly"]`. It does *not* set `CpuOnlyArch`; that keeps its
   default, and the primary path never reaches detection anyway because
   `--gpu-targets` supplies the architecture directly.
@@ -76,7 +76,7 @@ Consequences:
   perf-meaningless.
 
 For this reason `--cpu-only` must never *silently* drive a real `LibraryLogic`
-generation step. The seam itself enforces this structurally: `tensilelite.py`
+generation step. The seam itself enforces this structurally: `run.py`
 declines the efficiency-based (`UseEffLike`) frequency path — and therefore the
 real `LibraryLogic` winner-selection path — under `CpuOnly`, so synthetic perf
 is never consumed for tuning in the first place.

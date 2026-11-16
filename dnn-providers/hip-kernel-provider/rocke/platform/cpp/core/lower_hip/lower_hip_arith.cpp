@@ -232,11 +232,7 @@ static rocke_status_t rocke_h_op_arith_add(rocke_h_lowerer_t* lw, const rocke_op
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
-    const char* unsigned_t = rocke_h_unsigned_int_type(r->type);
-    if(!unsigned_t)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", r->type->name);
-    }
+    const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "arith.add", r->type->name);
     rocke_h_emitf(lw,
                   "%s %s = (int%s_t)((%s)%s + (%s)%s);",
                   rocke_h_type_to_hip(lw, r->type),
@@ -292,29 +288,30 @@ static rocke_status_t rocke_h_op_arith_mod(rocke_h_lowerer_t* lw, const rocke_op
 
 /* ----------------------------- arith: cmp / select ------------------------- */
 
-/* def _op_arith_cmp(self, op):
- *     pred = op.attrs.get("pred", "lt")
- *     c_op = {"lt":"<","le":"<=","gt":">","ge":">=","eq":"==","ne":"!="}[pred]
- *     a, b = op.operands
- *     self._emit(f"bool {_name(op.result)} = {_name(a)} {c_op} {_name(b)};") */
+/* def _op_arith_cmp(self, op): the pred is checked by the IR rule first
+ * (_int_cmp_pred_error, a ValueError: "ult" takes i32 or i64 operands); "ult"
+ * compares as unsigned at the operand's width, the others with
+ * {"lt":"<","le":"<=","gt":">","ge":">=","eq":"==","ne":"!="}[pred]. */
 static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     const char* c_op;
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
+    char pred_buf[128];
+    const char* pred_error = rocke_i_cmp_pred_error(&op->attrs, a->type, pred_buf, sizeof pred_buf);
+    if(pred_error)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", pred_error);
+    }
+    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     if(!pred)
     {
         pred = "lt";
     }
     if(strcmp(pred, "ult") == 0)
     {
-        const char* unsigned_t = rocke_h_unsigned_int_type(a->type);
-        if(!unsigned_t)
-        {
-            return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", a->type->name);
-        }
+        const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "arith.cmp", a->type->name);
         rocke_h_emitf(lw,
                       "bool %s = (%s)%s < (%s)%s;",
                       rocke_h_name(lw, r),
@@ -350,7 +347,9 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
     }
     else
     {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.cmp: unknown pred %s", pred);
+        /* Not reached: rocke_i_cmp_pred_error admits only the preds above and
+         * ult. Python's {...}[pred] lookup would raise KeyError(pred). */
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "'%s'", pred);
     }
     rocke_h_emitf(lw,
                   "bool %s = %s %s %s;",
@@ -498,18 +497,23 @@ static rocke_status_t rocke_h_op_arith_shl(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
-/* def _op_arith_lshr(self, op):
- *     a, b = op.operands
- *     self._emit(f"int {_name(op.result)} = "
- *                f"(int)((unsigned)({_name(a)}) >> {_name(b)});") */
+/* def _op_arith_lshr(self, op): r = (<T>)((<unsigned T>)a >> b). A logical
+ * shift in the operand's own width, as LLVM's lshr: a is read through the
+ * unsigned type of its width, so a negative i8 or i16 shifts in no sign bits
+ * and an i64 keeps its high word. */
 static rocke_status_t rocke_h_op_arith_lshr(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
+    const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "arith.lshr", r->type->name);
+    const char* result_t = rocke_h_type_to_hip(lw, r->type);
     rocke_h_emitf(lw,
-                  "int %s = (int)((unsigned)(%s) >> %s);",
+                  "%s %s = (%s)((%s)%s >> %s);",
+                  result_t,
                   rocke_h_name(lw, r),
+                  result_t,
+                  unsigned_t,
                   rocke_h_name(lw, a),
                   rocke_h_name(lw, b));
     return lw->status;

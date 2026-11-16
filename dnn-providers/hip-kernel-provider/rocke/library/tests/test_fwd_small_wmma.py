@@ -137,14 +137,14 @@ class TestSmallSpecs(unittest.TestCase):
         gate only covers the IR of specs both engines build)."""
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
             probe_problem,
         )
         from kernels.conv.direct_variants import make_direct_spec
-        from rocke.core.backend import (
+        from kernels.conv.engine_bridge import (
             conv_direct_fwd_smallc_wmma_spec_to_dict,
             conv_direct_fwd_smallk_wmma_spec_to_dict,
         )
@@ -230,8 +230,8 @@ class TestSmallSpecs(unittest.TestCase):
         missing, mistyped or partial problem raises."""
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import (
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import (
             conv_direct_fwd_smallc_wmma_spec_to_dict,
             conv_direct_fwd_smallk_wmma_spec_to_dict,
         )
@@ -299,31 +299,89 @@ class TestSmallSpecs(unittest.TestCase):
 _CACHE_ARCH = "gfx1250"
 
 
-def _wmma_fwd_cache(tmp_path):
-    """The wave32-only WMMA forward entries of the gfx1250 cache, each with a
-    placeholder binary (nothing is compiled)."""
+def _variant_jobs(dks, variant):
+    """Enumerate one forward family's AOT cells without walking every family."""
+    direction, caps_list = dks.DIRECT_CAPABILITIES[variant]
+    assert direction == "fwd"
+    return [
+        job
+        for caps in caps_list
+        for _, job in dks._caps_jobs(
+            _CACHE_ARCH, 32, variant, direction, caps, dks.DIRECT_DTYPE
+        )[1]
+        if job.identity.algorithm == variant
+    ]
+
+
+def _matches_spatial_capability(identity, problem):
+    """Whether the filter, padding, stride and dilation match ``problem``."""
+    return (
+        (identity.filter_h, identity.filter_w) == (problem.KH, problem.KW)
+        and (identity.pad_h, identity.pad_w) == (problem.PAD, problem.PAD_W)
+        and (identity.stride_h, identity.stride_w) == (problem.stride, problem.stride)
+        and (identity.dilation_h, identity.dilation_w) == (problem.dil_h, problem.dil_w)
+    )
+
+
+def _matches_baked_capability(identity, problem):
+    """Whether an identity independently matches every baked capability."""
+    return (
+        _matches_spatial_capability(identity, problem)
+        and identity.cpg in (0, problem.cpg)
+        and identity.kpg in (0, problem.kpg)
+    )
+
+
+def _wmma_fwd_cache(
+    tmp_path,
+    *,
+    target_variant,
+    requests_under_test,
+    excluded_variant,
+    exclusion_witness_request,
+):
+    """Build a focused on-disk cache for one small-C/K plan test.
+
+    The target rows are selected by an independent reading of the identity's
+    baked capability, not by ``KernelCache.supports_problem``. One spatially
+    matching row from the excluded family keeps that check non-vacuous.
+    """
     from benchmarks.common import direct_kernel_sweep as dks
     from benchmarks.common.kernel_cache import KernelCache
-    from kernels.conv.direct_variants import (
-        DIRECT_FWD_SMALLC_WMMA,
-        DIRECT_FWD_SMALLK_WMMA,
-        DIRECT_FWD_WMMA,
-    )
-    from rocke.core.arch import ArchTarget
 
-    families = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
+    target_jobs = [
+        job
+        for job in _variant_jobs(dks, target_variant)
+        if any(
+            _matches_baked_capability(job.identity, problem)
+            for problem in requests_under_test
+        )
+    ]
+    witness_jobs = [
+        job
+        for job in _variant_jobs(dks, excluded_variant)
+        if _matches_spatial_capability(job.identity, exclusion_witness_request)
+        and not _matches_baked_capability(job.identity, exclusion_witness_request)
+    ]
+    assert target_jobs and witness_jobs
+    witness_job = min(
+        witness_jobs,
+        key=lambda job: (job.identity.cpg, job.identity.kpg, job.identity.knobs),
+    )
+
     cache = KernelCache(tmp_path, _CACHE_ARCH)
-    for job in dks.enumerate_direct_jobs(
-        arch=_CACHE_ARCH,
-        target=ArchTarget.from_gfx(_CACHE_ARCH),
-        directions=("fwd",),
-    ):
-        if job.identity.algorithm in families:
-            # One placeholder per entry, so each keeps its own symbol.
-            label = job.identity.label()
-            meta = {"kernel_name": label, "spec_wave_size": 32}
-            cache.put(job.identity, label.encode(), meta)
+    for job in (*target_jobs, witness_job):
+        # One placeholder per entry, so each keeps its own symbol.
+        label = job.identity.label()
+        meta = {"kernel_name": label, "spec_wave_size": 32}
+        cache.put(job.identity, label.encode(), meta)
     return cache
+
+
+def _assert_family_not_considered(variant, plans, rejected):
+    """Assert capability matching excluded ``variant`` before re-validation."""
+    assert variant not in {plan.identity.algorithm for plan in plans}
+    assert variant not in {identity.algorithm for identity, _ in rejected}
 
 
 def _cpu_problem(N, H, W, C, K, KH, S, PAD):
@@ -391,28 +449,45 @@ def test_smallc_is_served_from_the_cache(tmp_path):
         DIRECT_FWD_SMALLK_WMMA,
     )
 
-    cache = _wmma_fwd_cache(tmp_path)
-    for problem in (
+    served_cases = (
         _cpu_problem(N=2, H=224, W=224, C=3, K=64, KH=7, S=2, PAD=3),
         _cpu_problem(N=3, H=64, W=96, C=4, K=32, KH=3, S=1, PAD=1),
         _cpu_problem(N=1, H=224, W=224, C=3, K=96, KH=4, S=4, PAD=0),
-    ):
+    )
+    tile_efficiency_case = _cpu_problem(N=1, H=12, W=12, C=3, K=64, KH=3, S=1, PAD=1)
+    unserved_by_target_cases = (
+        _cpu_problem(N=2, H=56, W=56, C=3, K=64, KH=5, S=1, PAD=2),
+        _cpu_problem(N=2, H=56, W=56, C=8, K=64, KH=3, S=1, PAD=1),
+    )
+    requests_under_test = (
+        *served_cases,
+        tile_efficiency_case,
+        *unserved_by_target_cases,
+    )
+    cache = _wmma_fwd_cache(
+        tmp_path,
+        target_variant=DIRECT_FWD_SMALLC_WMMA,
+        requests_under_test=requests_under_test,
+        excluded_variant=DIRECT_FWD_SMALLK_WMMA,
+        exclusion_witness_request=served_cases[1],
+    )
+    for problem in served_cases:
         plans, rejected = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
         mine = _check_small_plans(problem, DIRECT_FWD_SMALLC_WMMA, plans, rejected)
         assert {pl.identity.cpg for pl in mine} == {problem.cpg}
-        assert DIRECT_FWD_SMALLK_WMMA not in {pl.identity.algorithm for pl in plans}
+
+    # This request has the excluded family's spatial capability, but not its K.
+    plans, rejected = dks.direct_plans(cache, served_cases[1], "fwd", _CACHE_ARCH)
+    _assert_family_not_considered(DIRECT_FWD_SMALLK_WMMA, plans, rejected)
+
     # A tiny output: the filter rejects the knobs whose tiles are mostly
     # padding, and keeps the rest.
-    tiny = _cpu_problem(N=1, H=12, W=12, C=3, K=64, KH=3, S=1, PAD=1)
-    plans, rejected = dks.direct_plans(cache, tiny, "fwd", _CACHE_ARCH)
-    _check_small_plans(tiny, DIRECT_FWD_SMALLC_WMMA, plans, rejected)
+    plans, rejected = dks.direct_plans(cache, tile_efficiency_case, "fwd", _CACHE_ARCH)
+    _check_small_plans(tile_efficiency_case, DIRECT_FWD_SMALLC_WMMA, plans, rejected)
     assert any("tile efficiency" in why for _, why in rejected)
-    for problem in (
-        _cpu_problem(N=2, H=56, W=56, C=3, K=64, KH=5, S=1, PAD=2),
-        _cpu_problem(N=2, H=56, W=56, C=8, K=64, KH=3, S=1, PAD=1),
-    ):
-        plans, _ = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
-        assert DIRECT_FWD_SMALLC_WMMA not in {pl.identity.algorithm for pl in plans}
+    for problem in unserved_by_target_cases:
+        plans, rejected = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
+        _assert_family_not_considered(DIRECT_FWD_SMALLC_WMMA, plans, rejected)
 
 
 def test_smallk_is_served_from_the_cache(tmp_path):
@@ -425,21 +500,34 @@ def test_smallk_is_served_from_the_cache(tmp_path):
         DIRECT_FWD_SMALLK_WMMA,
     )
 
-    cache = _wmma_fwd_cache(tmp_path)
-    for problem in (
+    served_cases = (
         _cpu_problem(N=2, H=56, W=56, C=64, K=4, KH=3, S=1, PAD=1),
         _cpu_problem(N=1, H=100, W=60, C=192, K=4, KH=3, S=1, PAD=1),
-    ):
+    )
+    unserved_by_target_cases = (
+        _cpu_problem(N=2, H=56, W=56, C=64, K=8, KH=3, S=1, PAD=1),
+        _cpu_problem(N=2, H=56, W=56, C=64, K=4, KH=3, S=2, PAD=1),
+    )
+    requests_under_test = (*served_cases, *unserved_by_target_cases)
+    cache = _wmma_fwd_cache(
+        tmp_path,
+        target_variant=DIRECT_FWD_SMALLK_WMMA,
+        requests_under_test=requests_under_test,
+        excluded_variant=DIRECT_FWD_SMALLC_WMMA,
+        exclusion_witness_request=served_cases[0],
+    )
+    for problem in served_cases:
         plans, rejected = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
         mine = _check_small_plans(problem, DIRECT_FWD_SMALLK_WMMA, plans, rejected)
         assert {pl.identity.kpg for pl in mine} == {problem.kpg}
-        assert DIRECT_FWD_SMALLC_WMMA not in {pl.identity.algorithm for pl in plans}
-    for problem in (
-        _cpu_problem(N=2, H=56, W=56, C=64, K=8, KH=3, S=1, PAD=1),
-        _cpu_problem(N=2, H=56, W=56, C=64, K=4, KH=3, S=2, PAD=1),
-    ):
-        plans, _ = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
-        assert DIRECT_FWD_SMALLK_WMMA not in {pl.identity.algorithm for pl in plans}
+
+    # This request has the excluded family's spatial capability, but not its C.
+    plans, rejected = dks.direct_plans(cache, served_cases[0], "fwd", _CACHE_ARCH)
+    _assert_family_not_considered(DIRECT_FWD_SMALLC_WMMA, plans, rejected)
+
+    for problem in unserved_by_target_cases:
+        plans, rejected = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
+        _assert_family_not_considered(DIRECT_FWD_SMALLK_WMMA, plans, rejected)
 
 
 def _gpu_skip() -> str:

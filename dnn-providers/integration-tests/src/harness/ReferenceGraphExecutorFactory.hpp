@@ -15,9 +15,6 @@ class ReferenceGraphExecutorFactory
 {
 public:
     static std::unique_ptr<IReferenceGraphExecutor> create(ReferenceExecutorType type);
-
-    /// Convenience: create from TestConfig
-    static std::unique_ptr<IReferenceGraphExecutor> createFromConfig();
 };
 
 } // namespace hipdnn_integration_tests

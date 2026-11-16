@@ -184,6 +184,9 @@ class DgradPatchWmmaSpec:
         extra = self.problem.N if self.has_border() else 0
         return (self.main_blocks() + extra, 1, 1)
 
+    def launch_geometry(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        return self.grid(), (self.threads_per_block, 1, 1)
+
 
 def dgrad_patch_tile_efficiency(spec: DgradPatchWmmaSpec) -> float:
     p = spec.problem
