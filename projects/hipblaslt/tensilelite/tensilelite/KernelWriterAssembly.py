@@ -78,6 +78,7 @@ from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsK
   mxLraFreeShift, mxSegmentSplit
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
+from .Components import ScalarLoadB
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
 from .KernelWriterModules import *
@@ -112,6 +113,7 @@ from .KernelWriter import KernelWriter, ABMatrixInfo
 from .SolutionStructs.Naming import getKernelFileBase
 from .Toolchain.Component import Assembler
 
+import functools
 import rocisa.instruction as _rocisaInstr
 from .ir import ReadWriteInstruction as _RWInstruction, \
   SBarrierSignalIsFirst as _SBarrierSignalIsFirst, TensorLoadToLds as _TensorLoadToLds, \
@@ -253,6 +255,22 @@ class GlobalReadGprRecord:
 ################################################################################
 # Assembly Kernel
 ################################################################################
+def _noCodeForScalarLoadedTensor(emit):
+  """ScalarLoadB: B has no VGPR/LDS address state, so its address emitters produce no code.
+
+  The emitter still runs: several of them hand temporaries on to each other through tP and
+  the register pools, and that bookkeeping has to stay balanced.
+  """
+  @functools.wraps(emit)
+  def wrapper(self, kernel, *args, **kwargs):
+    module = emit(self, kernel, *args, **kwargs)
+    tP = next((a for a in reversed(args) if isinstance(a, dict) and "tensorChar" in a), None)
+    if tP is not None and self.isScalarLoaded(kernel, tP):
+      return Module("%s (ScalarLoadB)" % emit.__name__)
+    return module
+  return wrapper
+
+
 class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
@@ -827,6 +845,10 @@ class KernelWriterAssembly(KernelWriter):
     return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
 
   ########################################
+  def isScalarLoaded(self, kernel, tP) -> bool:
+    """ScalarLoadB: tensor B is read with scalar loads into SGPRs, not through VGPRs/LDS."""
+    return bool(kernel.get("ScalarLoadB")) and tP["tensorChar"] == "B"
+
   def strideRef(self, tc, dim):
     """
     Return sgpr with specified stride or define starting with const if constant.
@@ -1120,6 +1142,12 @@ class KernelWriterAssembly(KernelWriter):
     self.sgprPool.removeFromCheckOut(self.sgprs[name])
     return RegSet("s", "sgpr"+name, self.sgprs[name])
 
+  def _sgprAlias(self, alias, name, offset):
+    """Name one register of a multi-register SGPR. The alias resolves when it is defined, so it
+    is recorded: code that releases the SGPR for a while has to take the aliases down with it."""
+    self.states.sgprAliases.setdefault(name, []).append((alias, offset))
+    return RegSet("s", "sgpr"+alias, "sgpr"+name, offset)
+
   def _undefDirective(self, name):
     # RAP's first copy of the compute section holds its UNDEFs back so the peeled
     # second copy, which follows it in the file, can still see the symbols. The
@@ -1380,7 +1408,7 @@ class KernelWriterAssembly(KernelWriter):
 
       needFirstSgprOffset = kernel["DirectToLdsB"] and kernel["UseInstOffsetForGRO"]
       numberOfSgpr = self.states.b.numVgprGlobalReadOffsets if needFirstSgprOffset else (self.states.b.numVgprGlobalReadOffsets-1)
-      if numberOfSgpr > 0 and not kernel["enableTDMB"]:
+      if numberOfSgpr > 0 and not kernel["enableTDMB"] and not kernel.get("ScalarLoadB"):
         module.add(self.defineSgpr("ScalarGlobalReadOffsetB", numberOfSgpr))
 
       if kernel["ProblemType"]["MXBlockA"]:
@@ -2018,8 +2046,9 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["MXBlockA"]:
           module.add(RegSet("v", "vgprGlobalReadOffsetMXSA", \
               self.startVgprGlobalReadOffsetMXSA))
-        module.add(RegSet("v", "vgprGlobalReadOffsetB", \
-            self.startVgprGlobalReadOffsetB))
+        if not kernel.get("ScalarLoadB"):
+          module.add(RegSet("v", "vgprGlobalReadOffsetB", \
+              self.startVgprGlobalReadOffsetB))
         if kernel["ProblemType"]["MXBlockB"]:
           module.add(RegSet("v", "vgprGlobalReadOffsetMXSB", \
               self.startVgprGlobalReadOffsetMXSB))
@@ -2279,8 +2308,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         raise ValueError("unexpected index type in size assignments")
 
-      module.add(RegSet("s", "sgprSize%s"%(idxChar), \
-                  "sgprSizes%s"%idxType, idx))
+      module.add(self._sgprAlias("Size%s"%(idxChar), "Sizes%s"%idxType, idx))
 
     module.addSpaceLine()
     module.addComment0("Stride Assignments")
@@ -2293,8 +2321,7 @@ class KernelWriterAssembly(KernelWriter):
         else:
           if not kernel["ProblemType"]["UseInitialStridesCD"]:
             i = i-1
-          module.add(RegSet("s", "sgprStride%s%s"%(tc,idxChar), \
-                    "sgprStrides%s"%tc, i))
+          module.add(self._sgprAlias("Stride%s%s"%(tc,idxChar), "Strides%s"%tc, i))
 
     tcList = ["A", "B"]
     if kernel["ProblemType"]["Sparse"]:
@@ -2311,8 +2338,7 @@ class KernelWriterAssembly(KernelWriter):
         else:
           if not kernel["ProblemType"]["UseInitialStridesAB"]:
             i = i-1
-          module.add(RegSet("s", "sgprStride%s%s"%(tc,idxChar), \
-                    "sgprStrides%s"%tc, i))
+          module.add(self._sgprAlias("Stride%s%s"%(tc,idxChar), "Strides%s"%tc, i))
 
     module.addSpaceLine()
     module.add(ValueSet("MT0", kernel["MacroTile0"]))
@@ -2605,7 +2631,7 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
       module.add(PseudoRandomGenerator())
 
-    if not kernel["EnableMatrixInstruction"]:
+    if not kernel["EnableMatrixInstruction"] and not kernel.get("ScalarLoadB"):
       # Macro MAC
       PLR = kernel["PrefetchLocalRead"] \
         if kernel["PrefetchLocalRead"] < kernel["LoopIters"] \
@@ -4477,6 +4503,7 @@ class KernelWriterAssembly(KernelWriter):
   # Global Read Addresses: Tile Assignment A/B
   # global read addresses: tile offset assignment (message from .s)
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def graTileAssignment(self, kernel, tP):
     module = Module("graTileAssignment")
     tc = tP["tensorChar"]
@@ -4510,6 +4537,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Global Read Addresses: Unroll Assignment
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def graUnrollAssignment(self, kernel, tP):
     module = Module("graUnrollAssignment")
     # note groOffsetInMacroTile rolls these into SRD so don't change here:
@@ -4566,6 +4594,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Global Read Addresses: Tile Offsets A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def graTileOffsets(self, kernel, tP, margin=-1):
     module = Module("graTileOffsets")
     tc = tP["tensorChar"]
@@ -4715,6 +4744,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Global Read Addresses: Unroll Offsets A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def graUnrollOffsets(self, kernel, tP):
     module = Module("graUnrollOffsets")
     tc = tP["tensorChar"]
@@ -5031,6 +5061,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Global Read Addresses: Final Offsets A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def graFinalOffsets(self, kernel, tP):
     module = Module("graFinalOffsets")
     tc = tP["tensorChar"]
@@ -6837,6 +6868,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Write Addresses: Unroll Assignment A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def lwaUnrollAssignment(self, kernel, tP):
     module = Module("lwaUnrollAssignment")
     uReg = tP["gpr"]["uReg2"]# if kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1 else "uReg"]
@@ -6846,6 +6878,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Write Addresses: First Offset A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def lwaFirstOffset(self, kernel, tP):
     module = Module("lwaFirstOffset")
     tc = tP["tensorChar"]
@@ -7043,6 +7076,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Read Addresses: Final Offset A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def lraFinalOffset(self, kernel, tP):
     module = Module("lraFinalOffset")
 
@@ -7152,7 +7186,7 @@ class KernelWriterAssembly(KernelWriter):
             "LSU offset: lsuoffset = sgid*(MT%u+PAD)"%tile01))
           # module.add(SMovB32(dst=sgpr(tmpSgpr), src=mtAddPad*lsuStride, \
           #   comment="LSU offset: stride = lsuStride(%u)*(MT%u(%u) + PAD%u(%u))" % (lsuStride,tile01, kernel["MacroTile%u" % tile01], tile01, LdsPad)))
-          module.add(vectorStaticMultiply(vgpr(tP["gpr"]["lro"]), vgpr(tP["gpr"]["lro"]), kernel["VectorWidthB"], tmpSgprInfo, \
+          module.add(vectorStaticMultiply(vgpr(tP["gpr"]["lro"]), vgpr(tP["gpr"]["lro"]), kernel["VectorWidth%s" % tc], tmpSgprInfo, \
             "Final Offset: lr%sOffset * VW" % tc))
           module.add(VAddLShiftLeftU32(dst=finalVgpr, shiftHex=hex(log2(tP["bpe"])), src0=vgpr(sgid), src1=vgpr(tP["gpr"]["lro"]), \
             comment="Final Offset: add padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
@@ -7324,6 +7358,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Read Addresses: Declare Addresses A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def lraDeclareAddresses(self, kernel, tP):
     module = Module("lraDeclareAddresses")
     tc = tP["tensorChar"]
@@ -10895,7 +10930,9 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.do["MAC"]:
       imod.add(shiftK)
-      if self.states.asmCaps["HasVgprMSB"]:
+      # ScalarLoadB: the B operands differ per summation iteration, so the MACs cannot be a
+      # macro shared by all iterations of one PLR buffer.
+      if self.states.asmCaps["HasVgprMSB"] or kernel.get("ScalarLoadB"):
         component = Component.MAC.find(self)
         if not component:
           printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
@@ -12489,7 +12526,7 @@ class KernelWriterAssembly(KernelWriter):
       if "MX" in tPA and not tdmA:
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
     incCodeB = imod.add(Module("globalReadIncrementB"))
-    if tPB != None:
+    if tPB != None and not kernel.get("ScalarLoadB"):  # ScalarLoadB advances its own stream pointer
       if not tdmB:
         self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB, prefetchIndex)
       else:
@@ -13365,7 +13402,7 @@ class KernelWriterAssembly(KernelWriter):
     problemType = self.states.kernel["ProblemType"]
     numWaves: int = kernel["NumWaves"]
     imod = StructuredModule("globalReadDo%s_%u"%(tc,mode))
-    if not self.do["GlobalRead%s"%tP["tensorChar"]]:
+    if not self.do["GlobalRead%s"%tP["tensorChar"]] or self.isScalarLoaded(kernel, tP):
       return imod
 
     loopIdx = self.states.unrollIdx # TODO - does this handle multiple summation indices?
@@ -14096,6 +14133,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Write: Swap Offsets A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def localWriteSwapOffsets(self, kernel, internalPointerSwap, tP, prefetch=False, skipMetaSwap=False):
     tc = tP["tensorChar"]
     # TDM has its own swap path (tdmSwapLdsOffset); skip here for that case.
@@ -14216,6 +14254,7 @@ class KernelWriterAssembly(KernelWriter):
   # Local Write: Reset Offsets A/B
   # used for global-read + tail-loop to reset to writing in red
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def localWriteResetOffsets(self, kernel, internalPointerSwap, tP):
     tc = tP["tensorChar"]
     if not self.do["LocalWrite%s"%tc]: return Module("localWriteResetOffsets (no local write%s)"%tc)
@@ -14659,6 +14698,8 @@ class KernelWriterAssembly(KernelWriter):
     ti = rocIsa.getInstance()
     tc = tP["tensorChar"]
     imod = Module()
+    if self.isScalarLoaded(kernel, tP):
+      return imod
     isBpeInputLarger = True if tP["bpeGR"] > tP["bpe"] else False
 
     def localWriteBody(tP):
@@ -15219,6 +15260,7 @@ class KernelWriterAssembly(KernelWriter):
   # internalPointerSwap: swap internally tracked offsets - rather than
   #    emit specific instructions to do the pointer swap
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def localReadSwapOffsets(self, kernel, internalPointerSwap, tP):
     tc=tP["tensorChar"]
     if (not self.do["LocalRead%s"%tc]):
@@ -15308,6 +15350,7 @@ class KernelWriterAssembly(KernelWriter):
   # tP[localReadOffset] maintains running count of offsets
   # This is called from the tail loop to reset read offsets?
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def localReadResetOffsets(self, kernel, tP):
     tc = tP["tensorChar"]
     if not self.do["LocalRead%s"%tc]:
@@ -15385,6 +15428,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Read: Init Pointers A/B
   ##############################################################################
+  @_noCodeForScalarLoadedTensor
   def localReadInitPointers(self, kernel, tPA, tP):
     tc=tP["tensorChar"]
     if (not self.do["LocalRead%s"%tc]) or ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
@@ -15421,6 +15465,8 @@ class KernelWriterAssembly(KernelWriter):
   def localReadInc(self, kernel, iui, tP):
     tc = tP["tensorChar"]
     if (not self.do["LocalRead%s" % tc]) or ((tc in ("A", "MXSA", "B", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
+      return Module("localReadInc (Empty)")
+    if self.isScalarLoaded(kernel, tP):
       return Module("localReadInc (Empty)")
 
     module = Module("localReadInc")
@@ -15634,6 +15680,10 @@ class KernelWriterAssembly(KernelWriter):
       imod = Module("LocalReadDo%s_I%s" % (tP["tensorChar"], iui))
       pack = Module("pack%s_I%s" % (tP["tensorChar"], iui))
       return imod, pack
+
+    if self.isScalarLoaded(kernel, tP):
+      tc = tP["tensorChar"]
+      return Module("LocalReadDo%s_I%s" % (tc, iui)), Module("pack%s_I%s" % (tc, iui)), Module("packPre%s_I%s" % (tc, iui))
 
     component = Component.LocalRead.find(self)
     if component:

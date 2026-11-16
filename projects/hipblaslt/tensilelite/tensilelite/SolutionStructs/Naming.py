@@ -346,6 +346,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if not state.get("PrefetchGL2SAddr", False):
       requiredParametersTemp.discard("PrefetchGL2SAddr")
 
+    # ScalarLoadB=0 (B through LDS) is the default; naming it would rename every kernel.
+    if not state.get("ScalarLoadB", 0):
+      requiredParametersTemp.difference_update({"ScalarLoadB", "ScalarLoadBPrefetch"})
+
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":
         continue

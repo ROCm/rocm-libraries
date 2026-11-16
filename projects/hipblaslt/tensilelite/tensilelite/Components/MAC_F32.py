@@ -28,6 +28,7 @@ from rocisa.enum import DataTypeEnum
 from rocisa.instruction import VMacF32, SSetPrior, VDualFMACF32
 from ..Common.DataType import DataType
 from ..Component import MAC
+from . import ScalarLoadB
 
 class MAC_F32_Plain(MAC):
     """
@@ -49,6 +50,8 @@ class MAC_F32_Plain(MAC):
         # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs instead of single-issue
         # v_fmac_f32, ~doubling the FMA issue rate.  The parameter is validated/auto-disabled
         # in SolutionStructs to f32 source (non-MFMA) kernels on gfx11/gfx12.
+        if kernel["ScalarLoadB"]:
+            return self._callScalarB(module, writer, kernel, m)
         if kernel["UseDualFMAC"]:
             return self._callVopd(module, tPB, m, innerUnroll,
                                   kernel["ThreadTile0"], kernel["ThreadTile1"])
@@ -78,6 +81,30 @@ class MAC_F32_Plain(MAC):
 
         module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
 
+        return module
+
+    def _callScalarB(self, module, writer, kernel, m):
+        # ScalarLoadB: B is a wave-uniform SGPR operand (tile 1 is the B tile). With UseDualFMAC
+        # two rows of one column pair up: both halves share the scalar, the A operands are
+        # adjacent VGPRs (different banks) and the destinations differ in parity.
+        TT0, TT1 = kernel["ThreadTile0"], kernel["ThreadTile1"]
+        u = writer.states.scalarLoadBIter
+        dual = kernel["UseDualFMAC"]
+        # Rows in groups of four so that an A register is reused by consecutive instructions.
+        rowGroup = 4 if dual else 1
+        for i0 in range(0, TT0, rowGroup):
+            for j in range(TT1):
+                b = ScalarLoadB.operand(kernel, u, j)
+                for i in range(i0, min(i0 + rowGroup, TT0), 2 if dual else 1):
+                    c = vgpr("ValuC+%d" % (i + j * TT0))
+                    a = vgpr("ValuA_X%d_I0+%d" % (m, i))
+                    if dual and i + 1 < TT0:
+                        module.add(VDualFMACF32(dstX=c, src0X=b, src1X=a,
+                                                dstY=vgpr("ValuC+%d" % (i + 1 + j * TT0)), src0Y=b,
+                                                src1Y=vgpr("ValuA_X%d_I0+%d" % (m, i + 1)),
+                                                comment="VOPD dual-issue FMA, scalar B"))
+                    else:
+                        module.add(VMacF32(dst=c, src0=b, src1=a))
         return module
 
     def _callVopd(self, module, tPB, m, innerUnroll, TT0, TT1):
