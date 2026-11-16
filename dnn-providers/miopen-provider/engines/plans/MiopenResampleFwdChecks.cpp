@@ -331,6 +331,14 @@ ResampleFwdConfig resolve(const IGraph& opGraph)
 
     for(size_t i = 0; i < spatialRank; ++i)
     {
+        // Workaround for ALMIOPEN-3373 (see Workarounds.hpp): MIOpen computes each window's end in
+        // 32 bits, and the last one ends at the input extent plus the padding.
+        if(WORKAROUND_ALMIOPEN_3373_DECLINES_EXTENT(x.dims[i + 2], config.padding[i]))
+        {
+            decline("the input size plus the padding at spatial dimension " + std::to_string(i)
+                    + " exceeds INT_MAX, which MIOpen's pooling kernels cannot address");
+        }
+
         const auto paddedInput = x.dims[i + 2] + 2 * static_cast<int64_t>(config.padding[i]);
         if(paddedInput < config.window[i])
         {

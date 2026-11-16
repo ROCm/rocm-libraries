@@ -41,7 +41,9 @@
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include <cstdint>
 #include <exception>
+#include <limits>
 
 #define REJECT_IF_WORKAROUND_ISSUE_5409(handle)                                            \
     do                                                                                     \
@@ -78,14 +80,41 @@
 // pooling that requests an index with any non-zero padding. Without padding, or
 // without an index, no index can name a padded position.
 //
-// To remove after the fix: delete this section and its macro, its call site and
-// the `#include "Workarounds.hpp"` in engines/plans/MiopenResampleFwdChecks.cpp,
-// and the decline test tagged ALMIOPEN-3295 in
-// tests/engines/plans/TestMiopenResampleFwdChecks.cpp; drop the BFLOAT16 index
-// rule from the Resample Forward notes in docs/OperationSupport.md and
+// To remove after the fix: delete this section and its macro, its call site in
+// engines/plans/MiopenResampleFwdChecks.cpp (and that file's
+// `#include "Workarounds.hpp"` once no workaround there remains), and the decline
+// test tagged ALMIOPEN-3295 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
+// drop the BFLOAT16 index rule from the Resample Forward notes in
+// docs/OperationSupport.md and
 // projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
 // ALMIOPEN.3295` finds the code sites.
 // ----------------------------------------------------------------------------
 
 #define WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding) \
     ((dataType) == ::hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16 && (hasPadding))
+
+// ----------------------------------------------------------------------------
+// ALMIOPEN-3373 (internal Jira, not a GitHub issue) — MIOpen's pooling forward
+// kernels (MIOpenPoolingForwardNaive.cpp, and the tiled MIOpenPooling.cpp and
+// MIOpenPoolingND.cpp) compute each window's end, start + window, in signed
+// 32-bit arithmetic. The last window of a spatial dimension ends at input extent
+// + padding; above INT_MAX the end wraps negative, the clamp to the input is
+// lost and the kernel reads past X: a memory fault, or a wrong average.
+//
+// WORKAROUND_ALMIOPEN_3373_DECLINES_EXTENT(inputExtent, padding) is true for the
+// spatial dimensions the resample forward checks decline until the fix lands:
+// input extent + padding above INT_MAX. Every window end then fits in int.
+//
+// To remove after the fix: delete this section and its macro, its call site in
+// engines/plans/MiopenResampleFwdChecks.cpp (and that file's
+// `#include "Workarounds.hpp"` once no workaround there remains), and the tests
+// tagged ALMIOPEN-3373 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
+// drop the extent rule from the Resample Forward notes in
+// docs/OperationSupport.md and
+// projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
+// ALMIOPEN.3373` finds the code sites.
+// ----------------------------------------------------------------------------
+
+#define WORKAROUND_ALMIOPEN_3373_DECLINES_EXTENT(inputExtent, padding) \
+    (static_cast<int64_t>(inputExtent) + static_cast<int64_t>(padding) \
+     > static_cast<int64_t>(::std::numeric_limits<int>::max()))

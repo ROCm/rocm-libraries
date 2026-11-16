@@ -291,6 +291,26 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPaddingOneBelowWindow)
         ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL, {1, 1, 4, 4}, {3, 3}, {1, 1}, {2, 2}));
 }
 
+// Workaround for ALMIOPEN-3373 (see Workarounds.hpp): MIOpen's window ends overflow int once the
+// input size plus the padding exceeds INT_MAX. With an input of 2, an INT_MAX - 1 window and
+// stride and padding INT_MAX - 2 end the last window exactly at INT_MAX.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForInputPlusPaddingAtIntMax)
+{
+    const auto big = INT_MAX_VALUE;
+    expectAccepted(ResampleFwdGraphSpec::packed(
+        ResampleMode::MAXPOOL, {1, 2, 2, 2}, {big - 1, 1}, {big - 1, 1}, {big - 2, 0}));
+}
+
+// Workaround for ALMIOPEN-3373 (see Workarounds.hpp): one more padding, and an INT_MAX window and
+// stride, end the last window at INT_MAX + 1.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForInputPlusPaddingAboveIntMax)
+{
+    const auto big = INT_MAX_VALUE;
+    expectDeclined(ResampleFwdGraphSpec::packed(
+                       ResampleMode::MAXPOOL, {1, 2, 2, 2}, {big, 1}, {big, 1}, {big - 1, 0}),
+                   "plus the padding at spatial dimension 0 exceeds INT_MAX");
+}
+
 // For FP32 and FP16, MIOpen's max pooling does not select padded positions, as NEG_INF_PAD would
 // not, and its average pooling counts them as zero (BFLOAT16: ALMIOPEN-3295). Any other
 // padding_mode is only equivalent when no position is padded.
@@ -761,14 +781,15 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForChannelsLastGlobalPoolingTha
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForChannelsLastIntMaxWindowWithoutOverflow)
 {
-    // Padding INT_MAX - 1 lets an INT_MAX window and stride produce two outputs, so nothing is
-    // normalized and the tile estimate would overflow without the early stop.
+    // Padding INT_MAX - 2 is the most the ALMIOPEN-3373 decline allows with an input of 2. With an
+    // INT_MAX - 1 window and stride it gives two outputs, so nothing is normalized and the tile
+    // estimate would overflow without the early stop.
     const auto big = INT_MAX_VALUE;
     expectDeclined(tileSpec({1, 2, 2, 2},
-                            {big, 1},
-                            {big, 1},
+                            {big - 1, 1},
+                            {big - 1, 1},
                             true,
                             DataType::FLOAT,
-                            std::vector<int64_t>{big - 1, 0}),
+                            std::vector<int64_t>{big - 2, 0}),
                    TILE_LIMIT_REASON);
 }
