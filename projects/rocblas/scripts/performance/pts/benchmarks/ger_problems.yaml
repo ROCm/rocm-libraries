@@ -20,6 +20,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *double_buffered_loads_size_range
+    iters: 100
+    cold_iters: 20
 
   - name: ger_generic_bench
     category: bench
@@ -29,6 +31,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *generic_ger_size_range
+    iters: 100
+    cold_iters: 20
 
   - name: gerc_generic_bench
     category: bench
@@ -38,4 +42,6 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *generic_ger_size_range
+    iters: 100
+    cold_iters: 20
 ...

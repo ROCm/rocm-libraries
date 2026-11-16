@@ -30,6 +30,7 @@
 #include "rocsparse_csrildlt0_info.hpp"
 #include "rocsparse_floating_data_t.hpp"
 #include "rocsparse_grid.hpp"
+#include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -37,6 +38,7 @@ namespace rocsparse
     typedef rocsparse_status (*csrildlt0_kernel_launch_t)(rocsparse_handle         handle,
                                                           rocsparse_csrildlt0_info csrildlt0_info,
                                                           rocsparse_spmat_descr    A,
+                                                          const numeric_boost*     boost,
                                                           void*                    diag,
                                                           size_t                   buffer_size,
                                                           void*                    buffer);

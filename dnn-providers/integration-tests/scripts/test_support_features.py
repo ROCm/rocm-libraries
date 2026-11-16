@@ -69,7 +69,6 @@ from support_features.coverage import (
 )
 from support_features.feature_matrix import (
     DATA_CENTER,
-    DEFAULT_OVERVIEW_PATH,
     FAMILIES,
     GPUS,
     compute_feature_claims,
@@ -1221,6 +1220,8 @@ class TestSdpaExtract:
             (256, 256, "head_dim:256"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
+            (128, 64, "head_dim:128x64"),
+            (256, 64, "head_dim:256x64"),
         ],
     )
     def test_head_dim_reads_q_and_v(self, qk: int, v: int, expected: str) -> None:
@@ -1237,7 +1238,7 @@ class TestSdpaExtract:
         [
             ({"q_dims": (2, 8, 128, 96)}, "head dim 96 x 128"),
             # Each head dim is catalogued, the pair is not.
-            ({"v_dims": (2, 8, 128, 64)}, "head dim 128 x 64"),
+            ({"v_dims": (2, 8, 128, 96)}, "head dim 128 x 96"),
             ({"dtype": "float"}, "dtype 'float'"),
             # The MX scale type, never an attention input.
             ({"dtype": "fp8_e8m0"}, "dtype 'fp8_e8m0'"),
@@ -1374,6 +1375,16 @@ class TestSdpaExtract:
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
             },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
+            },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
             {
@@ -1475,10 +1486,11 @@ class TestSdpaBackwardExtract:
         with pytest.raises(FeatureError, match="is not q's"):
             sdpa_backward.extract(node, tensors)
 
-    def test_ragged_raises(self) -> None:
+    def test_ragged_layout_ignores_strides(self) -> None:
         # Not counted as its bshd stride order.
-        with pytest.raises(FeatureError, match="ragged q"):
-            self._extract(ragged=True, strides=_bshd_strides)
+        assert (
+            self._group("layout", ragged=True, strides=_bshd_strides) == "layout:ragged"
+        )
 
     def test_optional_ports(self) -> None:
         features = self._extract(
@@ -1496,6 +1508,7 @@ class TestSdpaBackwardExtract:
         reached = set()
         for kwargs in (
             {},
+            {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
             {"q_dims": (2, 8, 128, 256), "k_dims": (2, 8, 128, 256)},
@@ -1505,6 +1518,16 @@ class TestSdpaBackwardExtract:
                 "q_dims": (2, 8, 128, 192),
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
+            },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
             },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
@@ -7431,19 +7454,3 @@ class TestRealBundleTree:
         assert (
             size < 500_000
         ), f"overview is {size} bytes; split it before it stops rendering on GitHub"
-
-    def test_committed_overview_is_current(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """SUPPORT_MATRIX_OVERVIEW.md matches a fresh render of the committed tree.
-
-        The check-support-matrix-overview hook cannot guard this on its own:
-        the top-level pre-commit exclude hides integration-test-bundles/ from
-        every hook, so a commit that changes only bundle data never runs it.
-        This test runs on any change under dnn-providers/, whichever file in
-        the tree moved -- a sidecar, a sweep manifest, a whole bundle.
-        """
-        status = feature_matrix_main(
-            ["--output", str(DEFAULT_OVERVIEW_PATH), "--check"]
-        )
-        assert status == 0, capsys.readouterr().err

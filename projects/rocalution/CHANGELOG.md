@@ -12,12 +12,14 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
-* CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
+* CMake 3.21 or later is now required to build rocALUTION (previously 3.5).
 * `AS::Build()` and `RAS::Build()` now assert that there are no more blocks than rows. Before, such a split solved no rows, or with an overlap read before the first row.
 * `MultiColoredGS` and `MultiColoredSGS` now apply SOR and SSOR with the relaxation parameter given to `SetRelaxation()`, so relaxation values tuned for earlier versions need to be tuned again. Before, `MultiColoredGS` applied SOR with 1 / omega, and `MultiColoredSGS` with decomposition applied SSOR with 1 / omega up to a scalar factor.
 * Without decomposition, `MultiColoredSGS::SetRelaxation()` must now be called before `Build()`, and asserts otherwise. Before, the relaxation was ignored in this mode.
+* On Linux, the HIP library is now built with CMake's HIP language support instead of the `FindHIP` module and hipcc. The HIP compiler is `amdclang++` from `ROCM_PATH`, unless `CMAKE_HIP_COMPILER` or `HIPCXX` selects another one. The host sources can still be built with any C++ compiler. `GPU_TARGETS` sets the GPU architectures of the HIP sources.
 
 ### Removed
+* Removed the `USE_HIPCXX` option. CMake's HIP language support is now always used on Linux.
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
 
 ### Resolved issues
@@ -51,6 +53,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `AS` and `RAS` leaving the last rows in no block when the number of rows is not a multiple of the number of blocks, `AS` weighting the overlaps of a block between two others wrongly, and not clipping to the matrix a block whose overlap reaches before the first or past the last row. `AS` now weights each row by 1 / (number of blocks that hold it).
 * Fixed `MultiColoredGS` and `MultiColoredSGS` applying a wrong relaxation for `SetRelaxation()` values other than 1, and `MultiColoredSGS` without decomposition ignoring the relaxation.
 * Fixed `MultiColoredSGS::ReBuildNumeric()` crashing without decomposition, where it deleted the blocks that only the decomposition allocates. Without decomposition, it now also analyses the new triangular factors for the solves, and with decomposition it frees the permuted copy of the matrix as `Build()` does.
+* Fixed the host conversion of non-square matrices to DIA writing past the end of the values when the matrix has more rows than columns, for example in `LocalMatrix::ExtractSubMatrices()` and in the multicolored preconditioners. When the matrix has more columns than rows, `LocalMatrix::LeaveDataPtrDIA()` aborted on the result. The host now sizes the DIA values and decides whether the conversion succeeds as the accelerator does, so some non-square matrices that the host converted to DIA before now stay in CSR, with the fallback warning.
+* Fixed the host `LocalMatrix::Apply()` and `LocalMatrix::ApplyAdd()` of non-square DIA matrices ignoring the entries in the columns at or past the number of rows, and reading past the end of the input vector when the matrix has more rows than columns. They also skipped diagonals in the last rows, for square matrices too, when the offsets set with `LocalMatrix::SetDataPtrDIA()` were not in ascending order.
+* Fixed the conversion to DIA of matrices with more than 2^31 - 1 DIA entries, which overflowed the number of entries or the index into the values. These matrices now stay in CSR, with the fallback warning.
 
 ## (Unreleased) rocALUTION 4.1.1
 
