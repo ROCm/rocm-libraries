@@ -1,13 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-from rocisa.container import sgpr, SMEMModifiers
+from rocisa.container import sgpr, vgpr, SMEMModifiers, GLOBALModifiers, EXEC, VCC
 from rocisa.code import Label
 from rocisa.instruction import (
+    VAddU32, VAddCOU32, VAddCCOU32, VLShiftLeftB32, VCmpGtU32,
+    GlobalStoreB32, GlobalStoreB128,
     SMovB32, SMovB64, SLoadB64, SLoadB128,
-    SAddU32, SAddCU32, SSubU32, SSubBU32,
+    SAddU32, SAddCU32, SSubU32, SSubBU32, SMinU32,
     SAndB32, SLShiftRightB32,
-    SCmpEQU32, SCmpEQU64, SCmpLeU32, SCmpLtU32,
+    SCmpEQU32, SCmpEQU64, SCmpLeU32, SCmpLtU32, SCmpLgU32,
     SCBranchSCC0, SCBranchSCC1, SBranch,
     SWaitCnt, SSleep,
     SStoreB32, SStoreB64, SStoreB128, SAtomicCmpswapX2, SAtomicUmaxX2,
@@ -24,24 +26,32 @@ assert (SDMA_QUEUE_SIZE & (SDMA_QUEUE_SIZE - 1)) == 0, "ring size must be a powe
 # talks to, so the group base is computed once and every field is an immediate
 # offset off it. Signature.py builds the segment slots from this same tuple, so
 # the offsets below cannot drift from the layout.
-FUSED_A2A_PEER_FIELDS = ("flagPtr", "recvPtr", "queueBuf", "rptr", "wptr", "doorbell")
+FUSED_A2A_PEER_FIELDS = ("flagPtr", "bufPtr", "queueBuf", "rptr", "wptr", "doorbell")
 PEER_GROUP_BYTES      = len(FUSED_A2A_PEER_FIELDS) * 8
 
 OFF_flagPtr  = 8 * FUSED_A2A_PEER_FIELDS.index("flagPtr")   # flag array, indexed by source rank
-OFF_recvPtr  = 8 * FUSED_A2A_PEER_FIELDS.index("recvPtr")   # recv buffer
+OFF_bufPtr   = 8 * FUSED_A2A_PEER_FIELDS.index("bufPtr")    # GemmA2A recv buffer; A2AGemm peer B, own gathered
 OFF_queueBuf = 8 * FUSED_A2A_PEER_FIELDS.index("queueBuf")  # ring base
 OFF_rptr     = 8 * FUSED_A2A_PEER_FIELDS.index("rptr")      # hardware read pointer
 OFF_wptr     = 8 * FUSED_A2A_PEER_FIELDS.index("wptr")      # hardware write pointer
 OFF_doorbell = 8 * FUSED_A2A_PEER_FIELDS.index("doorbell")
 
 assert OFF_doorbell == OFF_wptr + 8, "submitPacket's x4 load needs wptr then doorbell"
-assert OFF_recvPtr == OFF_flagPtr + 8, "the SDMA loader's x4 needs flagPtr then recvPtr"
+assert OFF_wptr == OFF_rptr + 8, "emitSeedCursorsAndCache's x4 load needs rptr then wptr"
+assert OFF_bufPtr == OFF_flagPtr + 8, "the SDMA loader's x4 needs flagPtr then bufPtr"
 
 # Cursor pair, at the front of this device's counter buffer; the caller passes
 # the block base and its queue's byte offset (client/src/DeviceContext.cpp).
 CUR_cachedWptr    = 0  # producer reservation cursor (CAS target)
 CUR_committedWptr = 8  # commit-serialization cursor
 CURSOR_PAIR_BYTES = 16
+
+def peerLoad(groupImm, cls, dst, peerGroupS, fieldOff, comment):
+    """SLoad of one peer-group field: KernArgAddress + peerGroup + immediate."""
+    imm = groupImm + fieldOff
+    assert imm != 0, "peer-group load immediate must be nonzero"
+    return cls(dst=dst, base=sgpr("KernArgAddress", 2), soffset=sgpr(peerGroupS),
+               smem=SMEMModifiers(offset=imm), comment=comment)
 
 class SdmaRingEmitter:
     """Packet-independent SDMA ring producer, emitted as rocisa Modules.
@@ -54,7 +64,7 @@ class SdmaRingEmitter:
         and SOFFSET. cursorBase is 2-ALIGNED, and the pair it addresses is
         8-byte aligned in memory for the 64-bit atomics.
       * cachedHwReadIdx (2 SGPRs): the private room-check cache. The caller
-        seeds it ONCE at setup with emitRefreshCache(); this emitter refreshes
+        seeds it ONCE at setup with emitSeedCursorsAndCache(); this emitter refreshes
         it in-register and NEVER stores it back to memory.
     """
 
@@ -66,11 +76,7 @@ class SdmaRingEmitter:
         self.groupImm  = groupImm
 
     def _peerLoad(self, cls, dst, peerGroupS, fieldOff, comment):
-        """SLoad of one peer-group field: KernArgAddress + peerGroup + immediate."""
-        imm = self.groupImm + fieldOff
-        assert imm != 0, "peer-group load immediate must be nonzero"
-        return cls(dst=dst, base=sgpr("KernArgAddress", 2), soffset=sgpr(peerGroupS),
-                   smem=SMEMModifiers(offset=imm), comment=comment)
+        return peerLoad(self.groupImm, cls, dst, peerGroupS, fieldOff, comment)
 
     # ---- room check -------------------------------------------------------
 
@@ -99,8 +105,6 @@ class SdmaRingEmitter:
     def emitRefreshCache(self, module, w, peerGroupS, cachedHwReadIdxS):
         """cachedHwReadIdx = *rptr, re-read past the caches with glc.
 
-        Also how the caller seeds the cache at setup.
-
         Emits only s_load and s_waitcnt, neither of which writes SCC, so a room
         check on either side of this keeps its answer.
 
@@ -119,9 +123,11 @@ class SdmaRingEmitter:
 
     # ---- cursor lazy-init --------------------------------------------------
 
-    def emitLazyInitCursors(self, module, w, peerGroupS, cursorBaseS, cursorOffS):
+    def emitSeedCursorsAndCache(self, module, w, peerGroupS, cursorBaseS, cursorOffS,
+                                cachedHwReadIdxS):
         """Raise cachedWptr to at least the hardware write pointer, and
-        committedWptr too, but only when cachedWptr was below it.
+        committedWptr too, but only when cachedWptr was below it; seed
+        cachedHwReadIdx as emitRefreshCache does.
 
         MUST be emitted before the reserve loop: once a producer has reserved
         from a cursor that is too low, the damage is done.
@@ -131,17 +137,20 @@ class SdmaRingEmitter:
         """
         skipLabel = Label(w.labels.getNameInc("sdma_lazy_skip_commit"),
                           "LazyInit: cachedWptr already >= hwWptr, leave committedWptr")
-        wptrPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_wptrPtr", preventOverflow=False)
-        hwWptrS  = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_hwWptr", preventOverflow=False)
-        module.add(self._peerLoad(SLoadB64, sgpr(wptrPtrS, 2), peerGroupS, OFF_wptr,
-                                  "load wptr pointer"))
-        module.add(SWaitCnt(kmcnt=0, comment="wait wptr pointer load"))
-        module.add(SLoadB64(dst=sgpr(hwWptrS, 2), base=sgpr(wptrPtrS, 2),
+        ptrsS   = w.sgprPool.checkOutAligned(4, 4, tag="sdma_seed_ptrs", preventOverflow=False)
+        hwWptrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_seed_hwWptr", preventOverflow=False)
+        module.add(self._peerLoad(SLoadB128, sgpr(ptrsS, 4), peerGroupS, OFF_rptr,
+                                  "load rptr, wptr pointers"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait rptr, wptr pointer load"))
+        module.add(SLoadB64(dst=sgpr(hwWptrS, 2), base=sgpr(ptrsS + (OFF_wptr - OFF_rptr) // 4, 2),
                             soffset=hex(0), smem=SMEMModifiers(glc=True),
                             comment="hwWptr = *wptr (glc: past the caches)"))
-        module.add(SWaitCnt(kmcnt=0, comment="wait hwWptr load"))
-        # wptrPtrS is dead past the load above; it takes the pre-op cachedWptr.
-        oldS = wptrPtrS
+        module.add(SLoadB64(dst=sgpr(cachedHwReadIdxS, 2), base=sgpr(ptrsS, 2),
+                            soffset=hex(0), smem=SMEMModifiers(glc=True),
+                            comment="cachedHwReadIndex = hardware rptr"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait hwWptr, rptr loads"))
+        # ptrsS is dead past the loads above; it takes the pre-op cachedWptr.
+        oldS = ptrsS
         module.add(SMovB64(dst=sgpr(oldS, 2), src=sgpr(hwWptrS, 2), comment="SDATA in = hwWptr"))
         module.add(SAtomicUmaxX2(dst=sgpr(oldS, 2), base=sgpr(cursorBaseS, 2),
                                  soffset=sgpr(cursorOffS),
@@ -161,7 +170,20 @@ class SdmaRingEmitter:
         module.add(SWaitCnt(kmcnt=0, comment="committedWptr raised"))
         module.add(skipLabel)
         w.sgprPool.checkIn(hwWptrS)
-        w.sgprPool.checkIn(wptrPtrS)
+        w.sgprPool.checkIn(ptrsS)
+
+    @staticmethod
+    def emitClearCursors(module, w, cursorBaseS, regionBytes):
+        """Zero [0, regionBytes) at cursorBase."""
+        zeroS = w.sgprPool.checkOutAligned(4, 4, tag="fusedA2A_cursorZero", preventOverflow=False)
+        for i in range(4):
+            module.add(SMovB32(dst=sgpr(zeroS + i), src=0,
+                               comment="fused-A2A: zero pattern for the cursor region"))
+        for off in range(0, regionBytes, 16):
+            module.add(SStoreB128(src=sgpr(zeroS, 4), base=sgpr(cursorBaseS, 2), soffset=hex(off),
+                                  smem=SMEMModifiers(glc=True),
+                                  comment="fused-A2A: clear SDMA cursors [%d:%d)" % (off, off + 16)))
+        w.sgprPool.checkIn(zeroS)
 
     # ---- ReserveQueueSpace (CAS, NOT fetch_add) ----------------------------
 
@@ -169,7 +191,7 @@ class SdmaRingEmitter:
                               cachedHwReadIdxS, sizeInBytes, outCurS, outOffsetS):
         """Reserve `sizeInBytes` in the ring via a compare-exchange loop and
         compute the wrap-padding. outCurS (2 SGPRs) = reserved base index,
-        outOffsetS (1 SGPR) = pad bytes, sizeInBytes a compile-time immediate.
+        outOffsetS (1 SGPR) = pad bytes, sizeInBytes an immediate or an SGPR.
 
         MUST be CAS, not fetch_add: the wrap padding depends on the CURRENT
         cur_index, so computing the new index and claiming the slot have to be
@@ -409,14 +431,85 @@ class SdmaRingEmitter:
         module.add(SAddCU32(dst=sgpr(dstPairS + 1), src0=sgpr(queueBufPtrS + 1), src1=0,
                             comment="addr hi (carry)"))
 
+    # ---- vector placement ---------------------------------------------------
+
+    def emitLaneRingAddrV(self, module, w, dstV, queueBufV, pendingWptrS, laneOffV):
+        """dstV (2 VGPRs) = queueBuf + WrapIntoRing(pending) + laneOffV."""
+        wrapS = w.sgprPool.checkOut(1, tag="sdma_lane_wrap", preventOverflow=False)
+        module.add(SAndB32(dst=sgpr(wrapS), src0=sgpr(pendingWptrS + 0), src1=self.ringMask,
+                           comment="WrapIntoRing(pending)"))
+        module.add(VAddU32(dst=vgpr(dstV), src0=sgpr(wrapS), src1=vgpr(laneOffV),
+                           comment="+ WrapIntoRing(pending)"))
+        w.sgprPool.checkIn(wrapS)
+        module.add(VAddCOU32(dst=vgpr(dstV), dst1=VCC(), src0=vgpr(queueBufV), src1=vgpr(dstV),
+                             comment="ring address lo"))
+        module.add(VAddCCOU32(dst=vgpr(dstV + 1), dst1=VCC(), src0=0, src1=vgpr(queueBufV + 1),
+                              src2=VCC(), comment="ring address hi"))
+
+    @staticmethod
+    def emitStorePacketV(module, addrV, packetV, numDwords, firstDword=0):
+        """Store packet dwords [firstDword, numDwords) from packetV (4-aligned)
+        at addrV, per active lane. The caller separates the last store from any
+        VALU write of packetV by SNop(1)."""
+        i = firstDword
+        while i < numDwords:
+            width = 4 if numDwords - i >= 4 else 1
+            op = GlobalStoreB128 if width == 4 else GlobalStoreB32
+            module.add(op(vaddr=vgpr(addrV, 2), src=vgpr(packetV + i, width),
+                          saddr=vgpr("off", 1, False, False, True),
+                          modifier=GLOBALModifiers(offset=i * 4, glc=True, slc=True, isStore=True),
+                          comment="ring[addr + %d] = packet dword%s"
+                                  % (i, "" if width == 1 else "s %d..%d" % (i, i + width - 1))))
+            i += width
+
+    def emitPadV(self, module, w, queueBufV, pendingWptrS, offsetS, laneV, zeroV, waveSize):
+        """Write `offsetS` bytes of zero (NOPs) at WrapIntoRing(pending), one
+        dword per lane, and advance pending past them. Consumes offsetS."""
+        padLoop = Label(w.labels.getNameInc("sdma_pad_loop"), "zero-pad ring tail")
+        padDone = Label(w.labels.getNameInc("sdma_pad_done"), "padding done")
+        laneOffV = w.vgprPool.checkOut(1, tag="sdma_pad_laneOff")
+        addrV    = w.vgprPool.checkOutAligned(2, 2, tag="sdma_pad_addr")
+        stepS    = w.sgprPool.checkOut(1, tag="sdma_pad_step", preventOverflow=False)
+        module.add(SCmpEQU32(src0=sgpr(offsetS), src1=0, comment="no padding?"))
+        module.add(SCBranchSCC1(labelName=padDone.getLabelName(), comment="offset==0 -> skip pad"))
+        module.add(VLShiftLeftB32(dst=vgpr(laneOffV), shiftHex=2, src=vgpr(laneV),
+                                  comment="lane's dword"))
+        module.add(padLoop)
+        module.add(VCmpGtU32(dst=VCC(), src0=sgpr(offsetS), src1=vgpr(laneOffV),
+                             comment="lane's dword inside the padding?"))
+        module.add(SMovB64(dst=EXEC(), src=VCC(), comment="padding lanes"))
+        self.emitLaneRingAddrV(module, w, addrV, queueBufV, pendingWptrS, laneOffV)
+        module.add(GlobalStoreB32(vaddr=vgpr(addrV, 2), src=vgpr(zeroV),
+                                  saddr=vgpr("off", 1, False, False, True),
+                                  modifier=GLOBALModifiers(glc=True, slc=True, isStore=True),
+                                  comment="ring[wrap] = 0 padding NOP"))
+        module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
+        module.add(SMinU32(dst=sgpr(stepS), src0=sgpr(offsetS), src1=waveSize * 4,
+                           comment="padded bytes this pass"))
+        module.add(SAddU32(dst=sgpr(pendingWptrS + 0), src0=sgpr(pendingWptrS + 0), src1=sgpr(stepS),
+                           comment="pending += padded bytes"))
+        module.add(SAddCU32(dst=sgpr(pendingWptrS + 1), src0=sgpr(pendingWptrS + 1), src1=0,
+                            comment="pending hi carry"))
+        module.add(SSubU32(dst=sgpr(offsetS), src0=sgpr(offsetS), src1=sgpr(stepS),
+                           comment="padding left"))
+        module.add(SCmpLgU32(src0=sgpr(offsetS), src1=0, comment="more padding?"))
+        module.add(SCBranchSCC1(labelName=padLoop.getLabelName(), comment="next pass"))
+        module.add(padDone)
+        w.sgprPool.checkIn(stepS)
+        w.vgprPool.checkIn(addrV)
+        w.vgprPool.checkIn(laneOffV)
+
     # ---- submitPacket ------------------------------------------------------
 
-    def emitSubmitPacket(self, module, w, peerGroupS, cursorBaseS, cursorOffS, baseS, pendingWptrS):
+    def emitSubmitPacket(self, module, w, peerGroupS, cursorBaseS, cursorOffS, baseS, pendingWptrS,
+                         turnAtOrPast=False):
         """Serialize this producer's commit behind earlier reservations, then
         publish the packet.
 
         (1) spin until committedWptr == base (this producer's turn; earlier
             reservations commit in order), polling with s_load...glc.
+            With turnAtOrPast, until committedWptr >= base (required after
+            emitEarlyDoorbell).
         (2) Publish sequence (any bit wrong => timing hang):
               store wptr = pending        s_store_dwordx2 glc
               s_waitcnt lgkmcnt(0)
@@ -445,8 +538,6 @@ class SdmaRingEmitter:
         module.add(self._peerLoad(SLoadB128, sgpr(ptrsS, 4), peerGroupS, OFF_wptr,
                                   "load wptr / doorbell pointers"))
         module.add(SWaitCnt(kmcnt=0, comment="wait handle pointer load"))
-        wptrPtrS = ptrsS + (OFF_wptr     - OFF_wptr) // 4
-        dbPtrS   = ptrsS + (OFF_doorbell - OFF_wptr) // 4
 
         # --- (1) spin: committedWptr == base ---
         # 2-ALIGNED: this pair is the x2 destination of the poll below.
@@ -461,29 +552,20 @@ class SdmaRingEmitter:
                             smem=SMEMModifiers(glc=True, offset=CUR_committedWptr),
                             comment="poll committedWptr"))
         module.add(SWaitCnt(kmcnt=0, comment="wait committedWptr load"))
-        module.add(SCmpEQU64(src0=sgpr(pollS, 2), src1=sgpr(baseS, 2),
-                             comment="committedWptr == base?"))
-        module.add(SCBranchSCC0(labelName=spinLabel.getLabelName(), comment="not our turn -> spin"))
+        if turnAtOrPast:
+            self._emitBelowBase(module, pollS, baseS)
+            module.add(SCBranchSCC1(labelName=spinLabel.getLabelName(), comment="not our turn -> spin"))
+        else:
+            module.add(SCmpEQU64(src0=sgpr(pollS, 2), src1=sgpr(baseS, 2),
+                                 comment="committedWptr == base?"))
+            module.add(SCBranchSCC0(labelName=spinLabel.getLabelName(), comment="not our turn -> spin"))
         # The packet stores are scalar, so what has to drain here is lgkmcnt,
         # not vmcnt. Getting this counter wrong is a timing-only failure: the
         # doorbell would reach the engine ahead of the packet it announces.
         module.add(SWaitCnt(kmcnt=0, comment="ensure our packet stores are globally visible before wptr"))
 
-        # --- (2a) store wptr = pending ---
-        module.add(SStoreB64(
-            src=sgpr(pendingWptrS, 2), base=sgpr(wptrPtrS, 2), soffset=hex(0),
-            smem=SMEMModifiers(glc=True, isStore=True),
-            comment="store wptr = pending"))
-
-        # --- order the wptr store before the doorbell ---
-        module.add(SWaitCnt(kmcnt=0, comment="s_waitcnt lgkmcnt(0): wptr store visible before doorbell"))
-
-        # --- (2b) store doorbell = pending -> rings the engine ---
-        # An MMIO/BAR write, but no wider modifier than the other stores.
-        module.add(SStoreB64(
-            src=sgpr(pendingWptrS, 2), base=sgpr(dbPtrS, 2), soffset=hex(0),
-            smem=SMEMModifiers(glc=True, isStore=True),
-            comment="ring doorbell = pending"))
+        # --- (2a) store wptr = pending, (2b) ring the engine ---
+        self._emitPublishWptrDoorbell(module, ptrsS, pendingWptrS)
         module.add(SWaitCnt(kmcnt=0, comment="wait doorbell store issued"))
 
         # --- (2c) store committedWptr = pending -> unblocks next producer ---
@@ -496,3 +578,53 @@ class SdmaRingEmitter:
 
         w.sgprPool.checkIn(pollS)
         w.sgprPool.checkIn(ptrsS)
+
+    @staticmethod
+    def _emitPublishWptrDoorbell(module, ptrsS, pendingWptrS):
+        """Store wptr = pending, order it, then ring the doorbell at pending.
+
+        ptrsS is the x4 block holding wptr then doorbell, as loaded at OFF_wptr.
+        """
+        module.add(SStoreB64(
+            src=sgpr(pendingWptrS, 2), base=sgpr(ptrsS, 2), soffset=hex(0),
+            smem=SMEMModifiers(glc=True, isStore=True),
+            comment="store wptr = pending"))
+        module.add(SWaitCnt(kmcnt=0, comment="wptr store visible before doorbell"))
+        # An MMIO/BAR write, but no wider modifier than the other stores.
+        module.add(SStoreB64(
+            src=sgpr(pendingWptrS, 2), base=sgpr(ptrsS + (OFF_doorbell - OFF_wptr) // 4, 2),
+            soffset=hex(0), smem=SMEMModifiers(glc=True, isStore=True),
+            comment="ring doorbell = pending"))
+
+    @staticmethod
+    def _emitBelowBase(module, pollS, baseS):
+        """SCC = (poll < base), 64-bit unsigned; overwrites pollS."""
+        module.add(SSubU32(dst=sgpr(pollS), src0=sgpr(pollS), src1=sgpr(baseS),
+                           comment="committedWptr - base (lo)"))
+        module.add(SSubBU32(dst=sgpr(pollS + 1), src0=sgpr(pollS + 1), src1=sgpr(baseS + 1),
+                            comment="committedWptr - base (hi); SCC = committedWptr < base"))
+
+    def emitEarlyDoorbell(self, module, w, peerGroupS, cursorBaseS, cursorOffS, baseS, pendingWptrS,
+                          scratchS):
+        """Publish the packets placed so far without committing: store wptr and
+        ring the doorbell at pending, if committedWptr >= base; otherwise skip
+        both stores. The final emitSubmitPacket must pass turnAtOrPast.
+
+        scratchS: 6 dead SGPRs, 4-ALIGNED.
+        """
+        skipLabel = Label(w.labels.getNameInc("sdma_early_doorbell_skip"),
+                          "earlyDoorbell: an earlier reservation is unpublished")
+        assert scratchS % 4 == 0, "scratchS must be 4-aligned"
+        ptrsS = scratchS
+        pollS = scratchS + 4
+        module.add(self._peerLoad(SLoadB128, sgpr(ptrsS, 4), peerGroupS, OFF_wptr,
+                                  "load wptr / doorbell pointers (early)"))
+        module.add(SLoadB64(dst=sgpr(pollS, 2), base=sgpr(cursorBaseS, 2),
+                            soffset=sgpr(cursorOffS),
+                            smem=SMEMModifiers(glc=True, offset=CUR_committedWptr),
+                            comment="read committedWptr"))
+        module.add(SWaitCnt(kmcnt=0, comment="pointers, committedWptr and the placed packets"))
+        self._emitBelowBase(module, pollS, baseS)
+        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="not our turn -> skip"))
+        self._emitPublishWptrDoorbell(module, ptrsS, pendingWptrS)
+        module.add(skipLabel)
