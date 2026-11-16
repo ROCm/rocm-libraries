@@ -223,7 +223,7 @@ plain tests (`TEST`) such as `backend_init_order.backend`. Their `main` is
 `RUN_ALL_TESTS()` and accepts `--device <id>` and `--version`. The sources are
 `clients/tests/test_<component>.cpp`, with implementation headers in
 `clients/include/testing_<component>.hpp` and shared helpers in `clients/include/` (`utility.hpp`,
-`random.*`, `common.hpp`, `validate.hpp`).
+`random.*`, `common.hpp`).
 
 **What is not covered by the unit tests:** the multi-process paths of `GlobalMatrix`,
 `GlobalVector` and `ParallelManager`, which the MPI suites of `rocalution-test` cover. The
@@ -251,7 +251,7 @@ transfers and multi-node communication behave as expected.
 | Direct solvers | LU, QR, inversion |
 | Algebraic multigrid | pairwise AMG, Ruge–Stüben AMG, smoothed-aggregation (SA-AMG), unsmoothed-aggregation (UA-AMG) |
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
-| Structures (GPU) | `local_matrix` ops / conversions / multicoloring / itsolve / solve, `local_vector`, `local_stencil` |
+| Structures (GPU) | `local_matrix` ops / conversions / itsolve / solve, `local_vector`, `local_stencil` |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
 | MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup, and `ReBuildNumeric()` with host levels) |
 
@@ -300,7 +300,9 @@ running exhaustive size sweeps. The strategy prefers cross-backend correctness o
 suites skip in every TheRock tier, and they test operations that the unit tests now check against
 independent references. They are kept until a review of each suite confirms that the unit tests
 cover all of its checks. A suite that is covered is then deleted, not maintained next to the unit
-tests. The solver, preconditioner and AMG suites stay as the integration layer.
+tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
+`local_matrix_multicoloring` suites and the ItLUSolve case of `local_matrix_itsolve` have been
+deleted on that basis. The solver, preconditioner and AMG suites stay as the integration layer.
 
 ---
 

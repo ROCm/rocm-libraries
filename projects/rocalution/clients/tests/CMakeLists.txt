@@ -136,7 +136,6 @@ if(NOT WIN32)
 # Local structures - skip on Windows, as google test does not support union for death tests
   list(APPEND ROCALUTION_TEST_SOURCES
     test_local_matrix.cpp
-    test_local_matrix_multicoloring.cpp
     test_local_matrix_itsolve.cpp
     test_local_matrix_solve.cpp
     test_local_stencil.cpp

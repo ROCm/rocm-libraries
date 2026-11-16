@@ -33,24 +33,6 @@ static const int          local_matrix_solve_size[]      = {10, 17, 21};
 static const unsigned int local_matrix_solve_format[]    = {1};
 static const bool         local_matrix_solve_unit_diag[] = {false, true};
 
-class parameterized_local_matrix_itlusolve
-    : public testing::TestWithParam<local_matrix_gen_solve_tuple>
-{
-protected:
-    parameterized_local_matrix_itlusolve() {}
-    virtual ~parameterized_local_matrix_itlusolve() {}
-    virtual void SetUp() override
-    {
-        if(is_any_env_var_set({"ROCALUTION_EMULATION_SMOKE",
-                               "ROCALUTION_EMULATION_REGRESSION",
-                               "ROCALUTION_EMULATION_EXTENDED"}))
-        {
-            GTEST_SKIP();
-        }
-    }
-    virtual void TearDown() {}
-};
-
 class parameterized_local_matrix_itllsolve
     : public testing::TestWithParam<local_matrix_gen_solve_tuple>
 {
@@ -140,18 +122,6 @@ static Arguments setup_local_matrix_solve_arguments(local_matrix_tri_solve_tuple
     return arg;
 }
 
-TEST_P(parameterized_local_matrix_itlusolve, local_matrix_itlusolve_float)
-{
-    Arguments arg = setup_local_matrix_solve_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_itlusolve<float>(arg), true);
-}
-
-TEST_P(parameterized_local_matrix_itlusolve, local_matrix_itlusolve_double)
-{
-    Arguments arg = setup_local_matrix_solve_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_itlusolve<double>(arg), true);
-}
-
 TEST_P(parameterized_local_matrix_itllsolve, local_matrix_itllsolve_float)
 {
     Arguments arg = setup_local_matrix_solve_arguments(GetParam());
@@ -199,11 +169,6 @@ TEST_P(parameterized_local_matrix_itlusolve_separate, local_matrix_itlusolve_sep
     Arguments arg = setup_local_matrix_solve_arguments(GetParam());
     ASSERT_EQ(testing_local_matrix_itlusolve_separate<double>(arg), true);
 }
-
-INSTANTIATE_TEST_CASE_P(local_matrix_itsolve,
-                        parameterized_local_matrix_itlusolve,
-                        testing::Combine(testing::ValuesIn(local_matrix_solve_size),
-                                         testing::ValuesIn(local_matrix_solve_format)));
 
 INSTANTIATE_TEST_CASE_P(local_matrix_itsolve,
                         parameterized_local_matrix_itllsolve,
