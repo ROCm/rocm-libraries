@@ -94,9 +94,9 @@ BenchmarkProblems:
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
 
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
         - ClusterDim: [[4,4]]
+        - InitCIterWmma: [1]
+        - SwInstructionPrefetch: [1]
         - ClusterAIDMapping: [-2]
         - PrefetchGL2: [2]
         - StinkyTofuParameters:

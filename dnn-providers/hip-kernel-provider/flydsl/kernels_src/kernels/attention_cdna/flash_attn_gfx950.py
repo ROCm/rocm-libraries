@@ -97,6 +97,7 @@ def build_flash_attn_dualwave_swp_module(
     has_alibi=False,
     has_sink=False,
     _xcd_swizzle=False,
+    num_waves=8,
 ):
     """Build an DUALWAVE_SWP flash_attn launcher for D=64/128 bf16/f16 on gfx950.
 
@@ -110,16 +111,21 @@ def build_flash_attn_dualwave_swp_module(
     slope table; see the HAS_ALIBI block below.
     has_sink adds a per-head attention sink logit to the softmax denominator; see
     the HAS_SINK block below. The three are independent and may be combined, except
-    has_bias with has_sink or split-K (modification 28)."""
+    has_bias with has_sink or split-K (modification 28).
+    num_waves 4 serves head_dim 256 (modification 43): a 128-row block of 4 waves, one per
+    SIMD (waves_per_eu 1: the K/V tiles take 133 KiB of LDS), dense KV without a bias,
+    ALiBi, sink or split-K."""
     gpu_arch = get_hip_arch()
 
     if not gpu_arch.startswith("gfx950"):
         raise RuntimeError(
             f"flash_attn_dualwave_swp requires gfx950+ (uses ds_read_tr16_b64), got {gpu_arch}"
         )
-    if head_dim not in (64, 128):
+    # head_dim 256 runs 4 waves (modification 43); 64 and 128 upstream's 8.
+    if (head_dim, num_waves) not in ((64, 8), (128, 8), (256, 4)):
         raise RuntimeError(
-            f"flash_attn_dualwave_swp supports D=64 or D=128 only, got head_dim={head_dim}"
+            "flash_attn_dualwave_swp supports D=64 or D=128 on 8 waves and D=256 on 4, "
+            f"got head_dim={head_dim} on {num_waves}"
         )
     if dtype_str not in ("bf16", "f16"):
         raise RuntimeError(
@@ -153,6 +159,13 @@ def build_flash_attn_dualwave_swp_module(
         # fold and the split-K combine take it in log2 units, where a row the bias
         # masks at the dtype's lowest value overflows.
         raise ValueError("has_bias is not supported with has_sink or num_kv_splits > 1")
+    if num_waves != 8 and (
+        PAGED or SPLITK or HAS_BIAS or HAS_ALIBI or HAS_SINK or _xcd_swizzle
+    ):
+        raise ValueError(
+            "the 4-wave build takes dense KV without a bias, ALiBi, sink, split-K or XCD "
+            "swizzle"
+        )
 
     traits = _make_dualwave_swp_traits(
         num_heads,
@@ -174,10 +187,13 @@ def build_flash_attn_dualwave_swp_module(
         kv_vectorized=KV_VECTORIZED,
         return_lse=return_lse,
         xcd_swizzle=_xcd_swizzle,
+        num_waves=num_waves,
     )
     traits.BLOCK_N_OUT // traits.BLOCK_N
 
     _dualwave_swp_cache_tag = (traits.cache_tag, HAS_BIAS, HAS_ALIBI, HAS_SINK)
+    if num_waves != 8:
+        _dualwave_swp_cache_tag += (num_waves,)
 
     # Shared-memory layout: one 16B-aligned K/V region (K0/V0/K1/V1).
     _lds_elem_dtype = dtype_to_elem_type(traits.DTYPE_STR)

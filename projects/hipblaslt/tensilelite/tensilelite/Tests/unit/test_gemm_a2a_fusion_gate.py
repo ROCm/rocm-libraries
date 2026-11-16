@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tensilelite.TensileCreateLibrary.Run import _includeGemmA2AFusionProblemType
+from tensilelite.create_library.run import _includeGemmA2AFusionProblemType
 
 
 pytestmark = pytest.mark.unit
@@ -15,9 +15,10 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize(
     "problem_type,enabled,expected",
     [
-        ({"FusedGemmA2A": False}, False, True),
-        ({"FusedGemmA2A": True}, False, False),
-        ({"FusedGemmA2A": True}, True, True),
+        ({"FusedA2A": "Disabled"}, False, True),
+        ({"FusedA2A": "GemmA2A"}, False, False),
+        ({"FusedA2A": "A2AGemm"}, False, False),
+        ({"FusedA2A": "GemmA2A"}, True, True),
     ],
 )
 def test_gemm_a2a_logic_requires_explicit_enable(problem_type, enabled, expected):
@@ -50,13 +51,13 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
     still passed as a successful build.
     """
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.create_library.run as RunModule
 
     parsed = [
         LibraryIO.LibraryLogic(
             schedule="Aldebaran_Cijk_Ailk_Bljk_SB",
             architecture="gfx942",
-            problemType={"FusedGemmA2A": True},
+            problemType={"FusedA2A": "GemmA2A"},
             solutions=[],
             exactLogic=None,
             library=MagicMock(solutions={}, lazyLibraries={}),
@@ -84,15 +85,15 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
     assert any("filtered 1 logic files" in message for message in reported)
 
 
-@pytest.mark.parametrize("fused,expected", [(True, True), (False, False), (None, False)])
+@pytest.mark.parametrize("fused,expected", [("GemmA2A", True), ("A2AGemm", True), ("Disabled", False), (None, False)])
 def test_library_client_build_enables_fusion_for_fused_logic(tmp_path, fused, expected):
-    from tensilelite.ClientWriter import getBuildClientLibraryScript
+    from tensilelite.ClientWriter import getBuildClientLibraryArguments
 
     logic = tmp_path / "logic"
     logic.mkdir()
     if fused is not None:
         (logic / "gfx950_fused.yaml").write_text(
-            f"MinimumRequiredVersion: 5.0.0\nProblemType: {{FusedGemmA2A: {fused}}}\n"
+            f"MinimumRequiredVersion: 5.0.0\nProblemType: {{FusedA2A: {fused}}}\n"
         )
-    script = getBuildClientLibraryScript(str(tmp_path / "build"), str(logic), "amdclang++", "gfx950")
-    assert ("--enable-gemm-a2a-fusion" in script) is expected
+    args = getBuildClientLibraryArguments(str(tmp_path / "build"), str(logic), "amdclang++", "gfx950")
+    assert ("--enable-gemm-a2a-fusion" in args) is expected

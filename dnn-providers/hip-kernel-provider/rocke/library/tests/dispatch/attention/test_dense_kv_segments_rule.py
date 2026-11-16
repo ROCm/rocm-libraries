@@ -2,12 +2,17 @@
 # SPDX-License-Identifier: MIT
 """The dense short-chunk rule: KV-segment count for an underfilled default grid."""
 
+import importlib
 from dataclasses import replace
 
 import pytest
 
 import dispatch.attention as attention
-from dispatch.attention.dense_rules import dense_kv_segments, dense_wave_segments
+from dispatch.attention.dense_rules import (
+    dense_axes_for,
+    dense_kv_segments,
+    dense_wave_segments,
+)
 
 
 @pytest.mark.parametrize(
@@ -70,10 +75,6 @@ def test_gfx950_short_bottom_right_chunk_splits_kv(sq, sk, hq, block_m, segments
     assert (spec.block_m, spec.kv_segments) == (block_m, segments)
 
 
-def test_gfx950_split_is_off_with_sinks():
-    assert _gfx950_grid_spec(512, 8192, 32, use_sinks=True).kv_segments == 1
-
-
 def _gfx942_spec(sq, sk, hq, hkv=8, mask_type=2, num_cus=304, **over):
     req = attention.AttentionRequest(
         batch=1,
@@ -110,6 +111,62 @@ def test_gfx942_bottom_right_geometry(sq, sk, hq, block_m, persistent, segments)
         persistent,
         segments,
     )
+
+
+_ARCH_SPECS = [("gfx950", _gfx950_grid_spec), ("gfx942", _gfx942_spec)]
+
+
+def _supports(arch):
+    return importlib.import_module(
+        f"kernels.{arch}.attention_dense"
+    ).supports_attention_dense
+
+
+@pytest.mark.parametrize("feature", ["use_sinks", "emit_lse"])
+@pytest.mark.parametrize("arch,make", _ARCH_SPECS)
+def test_split_is_off_with_sinks_or_lse(arch, make, feature):
+    # The chunk splits without the feature; with it there is no segment rule
+    # (check_kv_segments), so the default keeps one segment and still builds.
+    assert make(512, 8192, 32).kv_segments > 1
+    spec = make(512, 8192, 32, **{feature: True})
+    assert spec.kv_segments == 1
+    ok, why = _supports(arch)(spec)
+    assert ok, why
+
+
+@pytest.mark.parametrize(
+    "barred",
+    [
+        {"persistent": True},
+        {"sliding_window": 128},
+        {"use_sinks": True},
+        {"emit_lse": True},
+    ],
+)
+@pytest.mark.parametrize("arch,make", _ARCH_SPECS)
+def test_kernel_and_tuning_scope_bar_the_same_splits(arch, make, barred):
+    # One rule (kv_split_admits) gates the kernel's admission and the knob's scope.
+    supports = _supports(arch)
+    split = replace(make(1024, 1024, 32), persistent=False, kv_segments=2)
+    assert supports(split)[0]
+    assert "kv_segments" in {a.name for a in dense_axes_for(split, arch)}
+    spec = replace(split, **barred)
+    assert supports(replace(spec, kv_segments=1))[0]
+    in_scope = "kv_segments" in {a.name for a in dense_axes_for(spec, arch)}
+    assert (supports(spec)[0], in_scope) == (False, False)
+
+
+@pytest.mark.parametrize("barred", [{"ragged": True}, {"varlen": True}])
+@pytest.mark.parametrize("arch,make", _ARCH_SPECS)
+def test_ragged_and_varlen_splits_are_barred(arch, make, barred):
+    # gfx942's supports() refuses these layouts on other grounds, so the shared rule
+    # (check_kv_segments) and the knob's scope are checked directly.
+    from kernels.common.attention_dense_kv_split import check_kv_segments
+
+    spec = replace(make(1024, 1024, 32), persistent=False, kv_segments=2, **barred)
+    assert check_kv_segments(replace(spec, kv_segments=1))[0]
+    assert not check_kv_segments(spec)[0]
+    assert "kv_segments" not in {a.name for a in dense_axes_for(spec, arch)}
 
 
 def test_gfx942_equal_length_keeps_default_geometry():
@@ -151,15 +208,9 @@ def test_gfx942_kv_split_stays_within_i32_workspace(hq, segments):
     assert spec.kv_segments == segments
 
 
-@pytest.mark.parametrize(
-    "arch,make", [("gfx950", _gfx950_grid_spec), ("gfx942", _gfx942_spec)]
-)
+@pytest.mark.parametrize("arch,make", _ARCH_SPECS)
 def test_supports_rejects_kv_segments_past_i32_workspace(arch, make):
-    import importlib
-
-    supports = importlib.import_module(
-        f"kernels.{arch}.attention_dense"
-    ).supports_attention_dense
+    supports = _supports(arch)
     spec = make(32768, 65536, 64, num_cus=100000)
     assert supports(replace(spec, kv_segments=4))[0]
     ok, why = supports(replace(spec, kv_segments=8))

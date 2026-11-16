@@ -1,4 +1,30 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_aiw": {
+      "gfx1201": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna": {
+      "gfx942": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna_decode": {
+      "gfx942": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_rdna": {
+      "gfx1201": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_rdna_decode": {
+      "gfx1201": [
+        "linux"
+      ]
+    }
+  },
   "version": 1
 }

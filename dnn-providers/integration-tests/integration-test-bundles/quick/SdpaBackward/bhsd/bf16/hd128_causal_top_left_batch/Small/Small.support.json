@@ -1,0 +1,18 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_merged": {
+      "gfx950": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_bwd_split": {
+      "gfx1100": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    }
+  },
+  "version": 1
+}

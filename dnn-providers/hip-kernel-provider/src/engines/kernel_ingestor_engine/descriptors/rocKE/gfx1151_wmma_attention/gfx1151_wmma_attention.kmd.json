@@ -38,6 +38,31 @@
     {
       "name": "dv_split",
       "type": "int"
+    },
+    {
+      "name": "layout",
+      "type": "string",
+      "default_value": "dense"
+    },
+    {
+      "name": "page_block_size",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "dense_q",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "seqused_q",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "sinks",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

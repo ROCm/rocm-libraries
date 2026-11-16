@@ -42,7 +42,9 @@ from ..dtypes import dtype_info
 from ..ir import I32, Op, Type, VectorType, type_bits
 from ..mma_operand import (
     MmaOperandRole,
+    _require_integer_vector_count,
     mma_operand_value,
+    mma_operand_needs_reinterpret,
     mma_result_needs_reinterpret,
 )
 
@@ -57,6 +59,22 @@ def _op_id(op: Op) -> str:
     from ..lower_llvm import _mma_op_id
 
     return _mma_op_id(op)
+
+
+def _operand_type(op: Op, role: MmaOperandRole) -> Type:
+    """Require a typed SSA operand before any form renders it."""
+    value = mma_operand_value(op, role)
+    if value is None or not isinstance(value.type, Type):
+        raise ValueError(f"MMA operand {role} of {_op_id(op)!r} must define an IR type")
+    return value.type
+
+
+def _result_type(op: Op) -> Type:
+    """Require a typed SSA result before a form emits its instruction."""
+    ty = op.results[0].type
+    if not isinstance(ty, Type):
+        raise ValueError(f"MMA result of {_op_id(op)!r} must define an IR type")
+    return ty
 
 
 @dataclass(frozen=True)
@@ -133,17 +151,35 @@ class AsIs(_Form):
     as :func:`~rocke.core.mma_operand.mma_result_needs_reinterpret` decides.
     """
 
+    def check_operand(self, lowerer, op: Op, role: MmaOperandRole) -> None:
+        """Validate the value without recording a declaration or emitting IR."""
+        mma_operand_needs_reinterpret(
+            _op_id(op),
+            role,
+            _operand_type(op, role),
+            self.register_type_at(lowerer._flavor),
+            lowerer._backend.arch,
+        )
+
     def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
         """Operand ``role`` of ``op`` as the register type; returns its LLVM name."""
+        self.check_operand(lowerer, op, role)
         return lowerer._mma_operand(op, role, self.register_type_at(lowerer._flavor))
+
+    def check_result(self, lowerer, op: Op) -> bool:
+        """Validate the result without declaring an intrinsic or emitting IR."""
+        return mma_result_needs_reinterpret(
+            _op_id(op),
+            _result_type(op),
+            self.register_type_at(lowerer._flavor),
+            lowerer._backend.arch,
+        )
 
     def emit_result(self, lowerer, op: Op, call: str) -> None:
         """Emit ``call`` and bind its value to ``op``'s result."""
         register = self.register_type_at(lowerer._flavor)
         result = op.results[0]
-        if not mma_result_needs_reinterpret(
-            _op_id(op), result.type, register, lowerer._backend.arch
-        ):
+        if not self.check_result(lowerer, op):
             lowerer._current().emit(f"  {result.name} = {call}")
             return
         returned = lowerer._fresh("mma_d")
@@ -186,12 +222,15 @@ class ZeroPadded(_Form):
                     f"{t.name}; it is 1 to {t.count} words"
                 )
 
-    def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
-        """Operand ``role`` of ``op`` widened to the register; returns its LLVM name."""
+    def check_operand(self, lowerer, op: Op, role: MmaOperandRole) -> None:
+        """Check format and complete payload width before any padding emits IR."""
         register = self.register_type_at(lowerer._flavor)
-        value = mma_operand_value(op, role)
-        payload = value.type
+        payload = _operand_type(op, role)
         words = self.payload_words
+        for kind, ty in (("operand", payload), ("register", register)):
+            _require_integer_vector_count(
+                f"MMA operand {role} of {_op_id(op)!r}", kind, ty
+            )
         if payload not in (VectorType(I32, words), register):
             raise ValueError(
                 f"MMA operand {role} of {_op_id(op)!r} is {payload.name}; the "
@@ -199,6 +238,14 @@ class ZeroPadded(_Form):
                 f"vec<i32x{words}>, or the whole {_llvm_type(register)} register "
                 "-- pass one of those"
             )
+
+    def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
+        """Operand ``role`` of ``op`` widened to the register; returns its LLVM name."""
+        self.check_operand(lowerer, op, role)
+        register = self.register_type_at(lowerer._flavor)
+        value = mma_operand_value(op, role)
+        payload = value.type
+        words = self.payload_words
         if payload.count == register.count:
             return lowerer._operand(value)
         width = register.count
@@ -238,22 +285,31 @@ class EvenHalves(_Form):
     def _logical(register: VectorType) -> VectorType:
         return VectorType(register.elem, register.count // 2)
 
-    def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
-        """Operand ``role`` of ``op`` spread into the even half-slots; returns its name."""
+    def check_operand(self, lowerer, op: Op, role: MmaOperandRole) -> None:
+        """Validate the complete logical input before any spreading emits IR."""
         register = self.register_type_at(lowerer._flavor)
         logical = self._logical(register)
-        value = mma_operand_value(op, role)
+        ty = _operand_type(op, role)
         if not (
-            isinstance(value.type, VectorType)
-            and value.type.count == logical.count
-            and type_bits(value.type.elem) == 16
+            isinstance(ty, VectorType)
+            and ty.count == logical.count
+            and type_bits(ty.elem) == 16
         ):
             raise ValueError(
-                f"MMA operand {role} of {_op_id(op)!r} is {value.type.name}; the "
+                f"MMA operand {role} of {_op_id(op)!r} is {ty.name}; the "
                 f"instruction keeps {logical.count} results in the even halves of "
                 f"{_llvm_type(register)} -- pass the {logical.count} logical "
                 "accumulator values"
             )
+        mma_operand_needs_reinterpret(
+            _op_id(op), role, ty, logical, lowerer._backend.arch
+        )
+
+    def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
+        """Operand ``role`` of ``op`` spread into the even half-slots; returns its name."""
+        self.check_operand(lowerer, op, role)
+        register = self.register_type_at(lowerer._flavor)
+        logical = self._logical(register)
         values = lowerer._mma_operand(op, role, logical)
         mask = ", ".join(f"i32 {i}, i32 {logical.count}" for i in range(logical.count))
         spread = lowerer._fresh("mma_spread")
@@ -263,24 +319,31 @@ class EvenHalves(_Form):
         )
         return spread
 
+    def check_result(self, lowerer, op: Op) -> bool:
+        """Validate the logical result before the call or a gather is emitted."""
+        register = self.register_type_at(lowerer._flavor)
+        logical = self._logical(register)
+        ty = _result_type(op)
+        if not (
+            isinstance(ty, VectorType)
+            and type_bits(ty) == type_bits(logical)
+            and ty.count == logical.count
+        ):
+            raise ValueError(
+                f"MMA result of {_op_id(op)!r} is {ty.name}; the instruction "
+                f"returns {logical.count} results in the even halves of "
+                f"{_llvm_type(register)}"
+            )
+        return mma_result_needs_reinterpret(
+            _op_id(op), ty, logical, lowerer._backend.arch
+        )
+
     def emit_result(self, lowerer, op: Op, call: str) -> None:
         """Emit ``call`` and gather its even half-slots into ``op``'s result."""
         register = self.register_type_at(lowerer._flavor)
         logical = self._logical(register)
         result = op.results[0]
-        if not (
-            isinstance(result.type, VectorType)
-            and type_bits(result.type) == type_bits(logical)
-            and result.type.count == logical.count
-        ):
-            raise ValueError(
-                f"MMA result of {_op_id(op)!r} is {result.type.name}; the instruction "
-                f"returns {logical.count} results in the even halves of "
-                f"{_llvm_type(register)}"
-            )
-        reinterpret = mma_result_needs_reinterpret(
-            _op_id(op), result.type, logical, lowerer._backend.arch
-        )
+        reinterpret = self.check_result(lowerer, op)
         returned = lowerer._fresh("mma_d")
         lowerer._current().emit(f"  {returned} = {call}")
         gathered = lowerer._fresh("mma_gather") if reinterpret else result.name

@@ -15,11 +15,12 @@ caches the probe), about 1.5 s for the first use of an ISA.
 Import from tests by bare module name (``from toolchain_test_helpers import ...``).
 That works because ``Tests/`` has no ``__init__.py``, so pytest's default
 ``prepend`` import mode inserts the ``Tests/`` directory into ``sys.path``; it
-does not work under ``--import-mode=importlib`` or outside pytest. (conftest.py
-only appends the tensilelite project root, which is what makes
-``tensilelite.Tests.rocisa_test_state`` importable by package path.) Import it
+does not work under ``--import-mode=importlib`` or outside pytest. Import it
 by this one name everywhere: a second import path would load a second copy of
-the module with its own caches.
+the module with its own caches. The same goes for the other shared test
+modules (``rocisa_test_state``, ``gpu_detection``): never import them as
+``tensilelite.Tests.…``. The tests also run against an installed ``tensilelite``
+wheel, which does not ship ``Tests``.
 """
 
 import copy
