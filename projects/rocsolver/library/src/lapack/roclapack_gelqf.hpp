@@ -79,7 +79,7 @@ void rocsolver_gelqf_getMemorySize(const rocblas_int m,
         // requirements for calling GELQ2 with sub blocks; for the last block, gelq2 may be called
         // with up to m - j_last rows where j_last = ceil((dim - SWITCHSIZE) / jb) * jb
         rocblas_int dim = std::min(m, n);
-        rocblas_int j_last = ((dim - GExQF_GExQ2_SWITCHSIZE + jb - 1) / jb) * jb;
+        rocblas_int j_last = roundup(dim - GExQF_GExQ2_SWITCHSIZE, jb);
         rocsolver_gelq2_getMemorySize<BATCHED, T>(std::max(jb, m - j_last), n, batch_count,
                                                   size_scalars, &w1, &s2, &s1);
         *size_Abyx_norms_trfact = std::max(s2, *size_Abyx_norms_trfact);
