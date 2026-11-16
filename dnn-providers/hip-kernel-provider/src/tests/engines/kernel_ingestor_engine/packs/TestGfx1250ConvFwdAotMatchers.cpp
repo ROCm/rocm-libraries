@@ -621,9 +621,6 @@ std::string catalogUuid(size_t index)
     return out.str();
 }
 
-// rocKE builds the spec of every WMMA family at its own wave size, 32, whatever wave_size
-// the identity spells, and so does the port: an instance of each family that serves a
-// golden problem still serves it when its identity says 64.
 // The engine's wave size is part of an instance, as gfx950's wave64 is of its own: a kernel
 // whose metadata names another wave size (one built for another target) serves nothing,
 // even where the same instance at wave 32 serves.

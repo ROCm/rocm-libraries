@@ -220,3 +220,37 @@ def test_sweep_hashes_names_identities_for_this_processs_flavor(
     assert any(i.is_direct for i in identities)
     assert any(not i.is_direct for i in identities)
     assert tool.sweep_hashes(dtype, 1, _ARCH) == {i.stable_hash() for i in identities}
+
+
+@pytest.mark.parametrize(
+    ("platform", "cpus", "jobs"),
+    [("win32", 96, 61), ("win32", 8, 8), ("linux", 96, 96)],
+)
+def test_the_default_jobs_stay_under_the_windows_worker_cap(
+    monkeypatch, platform, cpus, jobs
+):
+    """Windows' ProcessPoolExecutor refuses more than 61 workers, so the default worker
+    count is every CPU up to 61 there."""
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(os, "cpu_count", lambda: cpus)
+    assert tool._common.default_jobs() == jobs
+
+
+class _SweepReached(Exception):
+    pass
+
+
+def test_main_sweeps_with_the_default_jobs(tmp_path, catalog_flavor, monkeypatch):
+    """Without --jobs the sweep gets default_jobs()."""
+    seen = []
+
+    def sweep_hashes(dtype, sweep_jobs, arch):
+        seen.append(sweep_jobs)
+        raise _SweepReached
+
+    monkeypatch.setattr(tool._common, "default_jobs", lambda: 7)
+    monkeypatch.setattr(tool, "sweep_hashes", sweep_hashes)
+    argv = ["--arch", _ARCH, "--rocke-root", str(_ROCKE), "--output-dir", str(tmp_path)]
+    with pytest.raises(_SweepReached):
+        tool.main(argv)
+    assert seen == [7]

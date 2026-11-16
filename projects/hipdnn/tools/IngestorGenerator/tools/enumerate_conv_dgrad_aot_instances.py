@@ -44,7 +44,6 @@ from __future__ import annotations
 import argparse
 import collections
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -243,7 +242,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--jobs",
         type=int,
-        default=os.cpu_count() or 1,
+        default=_common.default_jobs(),
         help="Worker processes (default: %(default)s).",
     )
     args = parser.parse_args(argv)

@@ -252,3 +252,26 @@ def test_main_refuses_an_arch_the_adapter_does_not_package(tmp_path, capsys):
         tool.main(["--arch", "gfx942", "--output-dir", str(tmp_path)])
     assert "invalid choice: 'gfx942'" in capsys.readouterr().err
     assert not any(tmp_path.iterdir())
+
+
+class _SweepReached(Exception):
+    pass
+
+
+def test_main_sweeps_with_the_default_jobs(tmp_path, catalog, monkeypatch):
+    """Without --jobs the sweep gets default_jobs(), which stays under Windows' worker
+    cap."""
+    (flavor,) = {entry["llvm_flavor"] for entry in catalog}
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    seen = []
+
+    def sweep_hashes(dtype, sweep_jobs, arch):
+        seen.append(sweep_jobs)
+        raise _SweepReached
+
+    monkeypatch.setattr(tool._common, "default_jobs", lambda: 7)
+    monkeypatch.setattr(tool, "sweep_hashes", sweep_hashes)
+    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(tmp_path)]
+    with pytest.raises(_SweepReached):
+        tool.main(argv)
+    assert seen == [7]

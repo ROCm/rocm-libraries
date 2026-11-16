@@ -115,6 +115,20 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
         why = dw_fwd_wmma_reason(DwFwdWmmaSpec(problem=over_cap, block_h=1, w_fold=1))
         self.assertIsNotNone(why, "grid Z 65536 should be refused")
         self.assertIn("grid Z", why)
+        # Each factor counts: ceil(6/2)*ceil(43690/2) = 65535, and one more
+        # output row gives 3*21846 = 65538.
+        folded = DwFwdWmmaSpec(
+            problem=_problem(N=6, H=43690, W=1, C=8), block_h=2, w_fold=2
+        )
+        self.assertIsNone(
+            dw_fwd_wmma_reason(folded), "grid Z 3*21845 should be admitted"
+        )
+        folded = DwFwdWmmaSpec(
+            problem=_problem(N=6, H=43691, W=1, C=8), block_h=2, w_fold=2
+        )
+        self.assertIsNotNone(
+            dw_fwd_wmma_reason(folded), "grid Z 3*21846 should be refused"
+        )
 
     def test_engines_refuse_non_positive_extents(self):
         """A zero or negative extent is refused before any other rule, with

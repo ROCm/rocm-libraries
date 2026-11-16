@@ -592,6 +592,19 @@ static void test_dw_fwd_grid_z_boundary(void)
     CHECK(!rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
           "grid Z 65536 accepted");
     CHECK(strstr(reason, "grid Z") != NULL, "reason names grid Z: %s", reason);
+
+    /* Each factor counts: ceil(6 / 2) * ceil(43690 / 2) = 65535, and one more output row
+     * gives 3 * 21846 = 65538. */
+    s.problem.N = 6;
+    s.w_fold = 2;
+    s.block_h = 2;
+    s.problem.H = 43690;
+    CHECK(rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 3 * 21845 refused: %s",
+          reason);
+    s.problem.H = 43691;
+    CHECK(!rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 3 * 21846 accepted");
 }
 
 static void test_toeplitz_wmma_refusals(void)
