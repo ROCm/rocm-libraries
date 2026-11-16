@@ -811,16 +811,17 @@ TEST_F(CsrmvDefaultDispatch, preprocess_none_then_compute_transpose)
         handle, alternating(), o));
 }
 
-// nnz-split compute checks the analysed pointers, as adaptive compute does.
-TEST_F(CsrmvDefaultDispatch, switched_default_rejects_changed_pointers)
+// rocsparse_csr_set_pointers discards the analysis, so the compute that follows
+// it falls back to a kernel that needs none and the result is still correct.
+TEST_F(CsrmvDefaultDispatch, switched_default_after_set_pointers_without_preprocess)
 {
     Options o;
     o.repoint = true;
-    EXPECT_EQ(run_f32(handle, scattered_gap(), o).compute_status, rocsparse_status_invalid_pointer);
-    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_invalid_pointer);
+    EXPECT_EQ(run_f32(handle, scattered_gap(), o).compute_status, rocsparse_status_success);
+    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_success);
     o.alg         = rocsparse_spmv_alg_csr_nnzsplit;
     o.compute_alg = o.alg;
-    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_invalid_pointer);
+    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_success);
 }
 
 // An nnz-split analysis has no row blocks for an adaptive compute to launch.

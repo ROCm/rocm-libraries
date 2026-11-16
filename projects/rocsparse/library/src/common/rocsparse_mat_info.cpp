@@ -324,6 +324,27 @@ void _rocsparse_mat_info::set_coomv_info(rocsparse_coomv_info value)
     this->coomv_info = value;
 }
 
+void _rocsparse_mat_info::clear_spmv_info()
+{
+    if(this->csrmv_info != nullptr)
+    {
+        delete this->csrmv_info;
+        this->csrmv_info = nullptr;
+    }
+
+    if(this->bsrmv_info != nullptr)
+    {
+        delete this->bsrmv_info;
+        this->bsrmv_info = nullptr;
+    }
+
+    if(this->coomv_info != nullptr)
+    {
+        delete this->coomv_info;
+        this->coomv_info = nullptr;
+    }
+}
+
 void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
 {
     this->m_sorted_coo2csr_info = value;

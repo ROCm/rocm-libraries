@@ -163,6 +163,9 @@ public:
     void                 set_coomv_info(rocsparse_coomv_info value);
     rocsparse_coomv_info get_coomv_info();
 
+    // Destroys the csrmv, bsrmv and coomv info that SpMV keeps for the matrix.
+    void clear_spmv_info();
+
     void set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value);
     rocsparse::sorted_coo2csr_info_t* get_sorted_coo2csr_info();
 };

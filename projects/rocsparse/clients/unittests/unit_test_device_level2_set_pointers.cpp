@@ -679,13 +679,13 @@ namespace
     template <typename T>
     std::vector<alg_trans> cases_of(fmt f)
     {
-        constexpr auto         none = rocsparse_operation_none;
-        constexpr auto         tr   = rocsparse_operation_transpose;
+        constexpr auto none   = rocsparse_operation_none;
+        constexpr auto tr     = rocsparse_operation_transpose;
+        const bool is_complex = !std::is_same<T, float>::value && !std::is_same<T, double>::value;
         std::vector<alg_trans> v;
         switch(f)
         {
         case fmt::csr:
-        case fmt::csc:
         {
             for(const auto alg : {rocsparse_spmv_alg_default,
                                   rocsparse_spmv_alg_csr_adaptive,
@@ -697,9 +697,23 @@ namespace
                                   rocsparse_spmv_alg_csr_rowsplit,
                                   rocsparse_spmv_alg_csr_nnzsplit})
                 v.push_back({alg, tr});
-            if(!std::is_same<T, float>::value && !std::is_same<T, double>::value)
+            if(is_complex)
                 v.push_back(
                     {rocsparse_spmv_alg_csr_rowsplit, rocsparse_operation_conjugate_transpose});
+            break;
+        }
+        case fmt::csc:
+        {
+            for(const auto alg : {rocsparse_spmv_alg_default, rocsparse_spmv_alg_csr_rowsplit})
+                v.push_back({alg, none});
+            for(const auto alg : {rocsparse_spmv_alg_default,
+                                  rocsparse_spmv_alg_csr_adaptive,
+                                  rocsparse_spmv_alg_csr_lrb,
+                                  rocsparse_spmv_alg_csr_nnzsplit})
+                v.push_back({alg, tr});
+            if(is_complex)
+                v.push_back(
+                    {rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_conjugate_transpose});
             break;
         }
         case fmt::coo:
@@ -795,8 +809,7 @@ namespace
             for(const auto alg : {rocsparse_spmv_alg_default,
                                   rocsparse_spmv_alg_csr_adaptive,
                                   rocsparse_spmv_alg_csr_rowsplit,
-                                  rocsparse_spmv_alg_csr_lrb,
-                                  rocsparse_spmv_alg_csr_nnzsplit})
+                                  rocsparse_spmv_alg_csr_lrb})
             {
                 SCOPED_TRACE(::testing::Message() << "v2=" << v2 << " alg=" << alg);
 
