@@ -1640,6 +1640,14 @@ namespace rocalution
                     }
                 }
 
+                // Without couplings to distribute a_ik through, it is lumped into the
+                // diagonal
+                if(sum_l == zero)
+                {
+                    sum_n += val_ik;
+                    continue;
+                }
+
                 // Update sum over l with a_ik
                 sum_l = val_ik / sum_l;
 
@@ -1807,6 +1815,14 @@ namespace rocalution
                         }
                     }
 
+                    // Without couplings to distribute a_ik through, it is lumped into the
+                    // diagonal
+                    if(sum_l == zero)
+                    {
+                        sum_n += val_ik;
+                        continue;
+                    }
+
                     T val_ki = (T)0;
 
                     // Load the kth inner sum.
@@ -1882,8 +1898,10 @@ namespace rocalution
             a_ii_tilde += hip_shfl_xor(a_ii_tilde, i);
         }
 
-        // Precompute -1 / (a_ii_tilde + a_ii)
-        a_ii_tilde = static_cast<T>(-1) / (a_ii_tilde + val_ii);
+        // Precompute -1 / (a_ii_tilde + a_ii). A zero diagonal, for example after lumping a_ik
+        // into it, leaves the row without interpolation
+        a_ii_tilde += val_ii;
+        a_ii_tilde = a_ii_tilde == zero ? zero : static_cast<T>(-1) / a_ii_tilde;
 
         // Access into P
         J aj = csr_row_ptr_P[row];

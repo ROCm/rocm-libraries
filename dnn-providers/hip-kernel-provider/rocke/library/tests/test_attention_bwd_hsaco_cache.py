@@ -39,6 +39,7 @@ from benchmarks.common import attention_bwd_compile as bc
 from kernels.common import attention_bwd_cache as ac
 from kernels.common import attention_bwd_run as run_mod
 from kernels.common.attention_bwd_plan import attn_bwd_plan
+from rocke.tests import ctest_shard
 
 from . import _attention_bwd_prebuild as pb
 from . import run_device_shards as rds
@@ -722,6 +723,91 @@ def test_shard_parse_and_partition(monkeypatch):
     sel = list(items)
     rds.select_items(config, sel)
     assert len(sel) == len(items)
+
+
+def test_shard_functions_come_from_the_ctest_shard_plugin():
+    assert rds.SHARD_ENV == ctest_shard.SHARD_ENV
+    assert rds.parse_shard is ctest_shard.parse_shard
+    assert rds.shard_key is ctest_shard.shard_key
+    assert rds.shard_of is ctest_shard.shard_of
+    assert rds.select_items is ctest_shard.select_items
+
+
+def test_the_runner_maps_a_test_to_the_same_shard():
+    def item(nodeid, pid=None):
+        cs = types.SimpleNamespace(id=pid) if pid else None
+        return types.SimpleNamespace(nodeid=nodeid, callspec=cs)
+
+    sdpa = "tests/sdpa/test_sdpa_fwd.py"
+    conv = "tests/conv/test_conv_fwd.py"
+    plain = "tests/test_attention_bwd_hsaco_cache.py::test_shard_parse_and_partition"
+    golden = [
+        (
+            item(f"{sdpa}::test_forward[fp16-64]", "fp16-64"),
+            f"{sdpa}[fp16-64]",
+            (0, 0, 0, 4),
+        ),
+        (
+            item(f"{sdpa}::test_forward[bf16-128]", "bf16-128"),
+            f"{sdpa}[bf16-128]",
+            (1, 1, 3, 7),
+        ),
+        (
+            item(f"{conv}::test_conv[nhwc-3x3]", "nhwc-3x3"),
+            f"{conv}[nhwc-3x3]",
+            (1, 2, 1, 5),
+        ),
+        (item(plain), plain, (1, 1, 1, 1)),
+    ]
+    for it, key, shards in golden:
+        assert rds.shard_key(it) == key
+        assert tuple(rds.shard_of(key, n) for n in (2, 3, 4, 8)) == shards
+
+
+def test_conftest_leaves_the_shard_to_a_loaded_ctest_shard_plugin():
+    """With the plugin loaded, the conftest does not select: the plugin sees
+    the whole selection, so an empty shard passes after the split line.
+    Without the plugin, the conftest selects (exit 5)."""
+    target = str(Path(__file__))
+    name = "test_every_launch_stage_is_a_cache_stage"
+    base = ctest_shard.unsharded_environment()
+    package_root = Path(ctest_shard.__file__).resolve().parents[2]
+    base["PYTHONPATH"] = os.pathsep.join(
+        p for p in (str(package_root), base.get("PYTHONPATH", "")) if p
+    )
+
+    def pytest_run(*args, shard=None):
+        env = dict(base)
+        if shard is not None:
+            env[ctest_shard.SHARD_ENV] = shard
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", target]
+            + ["-k", name, *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+
+    listed = pytest_run("--collect-only", "-q")
+    assert listed.returncode == 0, listed.stdout + listed.stderr
+    (nodeid,) = [ln for ln in listed.stdout.splitlines() if ln.endswith(name)]
+    own = ctest_shard.shard_of(nodeid, 4)
+    plugin = ("-p", ctest_shard.PLUGIN_NAME)
+
+    run = pytest_run(*plugin, shard=f"{own}/4")
+    assert run.returncode == 0, run.stdout + run.stderr
+
+    other = f"{(own + 1) % 4}/4"
+    run = pytest_run(*plugin, shard=other)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert f"rocke-ctest-shard {other}: split " in run.stdout
+    assert " of 1; kept 0" in run.stdout
+    assert "no test of this entry falls in this shard" in run.stdout
+
+    run = pytest_run(shard=other)
+    assert run.returncode == pytest.ExitCode.NO_TESTS_COLLECTED, run.stdout
 
 
 def test_devices_and_shard_env():
