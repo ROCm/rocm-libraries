@@ -311,7 +311,8 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                                                             EDataType,
                                                             NumGroupsToMerge,
                                                             index_t,
-                                                            CTranspose>;
+                                                            CTranspose,
+                                                            true>;
 
     using ComputePtrOffset = ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>;
 
