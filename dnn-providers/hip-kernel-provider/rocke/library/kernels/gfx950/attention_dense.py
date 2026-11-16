@@ -86,8 +86,12 @@ from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 from typing import Optional, Tuple
 
-from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
-from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
+from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64, FP8E4M3
+from rocke.helpers.attention import (
+    mfma_32x32x16_for_dtype,
+    pv32_v_load_paired,
+    dequant_fp8x8_to_dtype,
+)
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from rocke.helpers.spec import align_up as _align_up
 from kernels.common.attention_dense_spec import (
@@ -96,6 +100,8 @@ from kernels.common.attention_dense_spec import (
     attention_dense_cache_key,
     check_dense_scale,
     check_dense_spec_preflight,
+    require_fp8_kv_scale,
+    require_ocp_fp8_kv,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -143,6 +149,11 @@ _DEFAULT_GFX950_LAYOUT = GFX950_DENSE_LAYOUTS["default"]
 #     from the inherited D<128 lds_k_group_pad so neither re-sweep moves the other.
 _DEFAULT_LDS_NUM_BUFFERS = 2
 _DEFAULT_LDS_K_ROW_PAD = 8
+
+# KV-cache storage formats this body can dequantize on load. ``None`` keeps the
+# KV at the compute ``dtype`` (2 bytes); ``"fp8e4m3"`` stores K/V as 1-byte
+# float8_e4m3fn in HBM and dequants to bf16/fp16 in the loader.
+_KV_STORAGE_DTYPES = frozenset({"fp8e4m3"})
 # lds_v_row_pad: bf16 elements of V-row padding for the transposed PV read
 #   (ds_read_b64_tr_b16). The transpose read has a stricter bank pattern than
 #   K's ds_read_b128, so it needs a LARGER pad than the K pad (8): a measured
@@ -208,6 +219,16 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # into this many contiguous chunks, one CTA each, merged by a combine kernel
     # (see kernels.common.attention_dense_kv_split). 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # KV-cache storage format. None keeps KV at the compute dtype; "fp8e4m3"
+    # reads 1-byte fp8 KV and dequants to dtype in the loader (Q stays dtype).
+    # Lives here, not on the shared spec: only this arch's loader decodes fp8,
+    # and the shared spec is the one the C++ engine mirrors.
+    kv_storage_dtype: str | None = field(default=None, kw_only=True)
+
+    @property
+    def kv_elem_bytes(self) -> int:
+        """1 byte per stored K/V element under fp8 KV, else the shared 2."""
+        return 1 if self.kv_storage_dtype == "fp8e4m3" else 2
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -309,6 +330,14 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if (
+            self.kv_storage_dtype is not None
+            and self.kv_storage_dtype not in _KV_STORAGE_DTYPES
+        ):
+            raise ValueError(
+                f"kv_storage_dtype must be None or one of "
+                f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
+            )
         if type(self.emit_lse) is not bool:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
@@ -335,6 +364,19 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError("right_bound > 0 is not supported with paged / varlen")
         if self.paged and not self.causal:
             raise ValueError("paged attention is causal-only")
+        if self.kv_storage_dtype == "fp8e4m3":
+            # First-cut fp8 KV lands on the default-grid, aligned contiguous builder.
+            # The sync-dequant loader uses a plain in-bounds global load, so ragged /
+            # varlen / paged (partial-tile or indirected KV) are follow-ups, as are
+            # the persistent-grid and paged paths.
+            if self.persistent:
+                raise ValueError("fp8 KV is not yet supported with persistent=True")
+            if self.paged:
+                raise ValueError("fp8 KV is not yet supported with paged KV")
+            if self.ragged:
+                raise ValueError("fp8 KV is not yet supported with ragged=True")
+            if self.varlen:
+                raise ValueError("fp8 KV is not yet supported with varlen=True")
         if self.causal_bottom_right:
             # The non-persistent contiguous builder is the only gfx950 path
             # that implements the compile-time shifted diagonal.
@@ -511,6 +553,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         # One runtime-shape binary serves every head count, so the symbol must not
         # claim an hq/kv -- mirrors _shape_name_parts dropping sq/sk.
         return () if self.runtime_shape else super()._head_name_parts()
+
+    def _kv_storage_name_parts(self) -> tuple[str, ...]:
+        return (f"kv{self.kv_storage_dtype}",) if self.kv_storage_dtype else ()
 
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         parts = list(super()._algorithm_name_parts())
@@ -731,6 +776,25 @@ def supports_attention_dense(
     ok, why = check_kv_segments(spec)
     if not ok:
         return False, why
+    if spec.kv_storage_dtype is not None:
+        # The fp8 loader streams KV in flat groups of 8 elems per thread, so the
+        # tile element count must divide evenly by threads*8. Without this gate
+        # the loader asserts at codegen (BN*D % (THREADS*8)). threads =
+        # num_waves*64.
+        threads = spec.num_waves * 64
+        if (spec.block_n * spec.head_size) % (threads * 8) != 0:
+            return False, (
+                f"fp8 dense requires block_n*head_size="
+                f"{spec.block_n * spec.head_size} divisible by threads*8="
+                f"{threads * 8} (block_n={spec.block_n}, "
+                f"head_size={spec.head_size}, num_waves={spec.num_waves})"
+            )
+        # fp8 KV dequant feeds a bf16 or fp16 MFMA (the base spec already limits
+        # dtype to those two). Sinks on dense are a separate ticket, and the fp8
+        # loader has no sink path yet, so gate that combination out here rather
+        # than silently admitting it.
+        if spec.use_sinks:
+            return False, "fp8 dense does not support attention sinks yet"
     return True, ""
 
 
@@ -814,6 +878,8 @@ def build_attention_dense(
     LAZY_RESCALE = spec.lazy_rescale
     LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
     use_sinks = spec.use_sinks
+    KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    kv_dtype = FP8E4M3 if KV_FP8 else dtype
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -845,15 +911,21 @@ def build_attention_dense(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
     )
     k = b.param(
-        "k_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "k_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     v = b.param(
-        "v_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "v_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     o = b.param(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    if KV_FP8:
+        # Per-tensor fp8 KV dequant scales, declared right after scale to fix their
+        # ABI position (mirrored in attention_dense_signature). Consumed by the fp8
+        # sync-dequant loader; absent from the bf16 ABI.
+        k_scale = b.param("k_scale", F32)
+        v_scale = b.param("v_scale", F32)
     # Problem shape as kernel params. Unconditional here: every spec reaching this
     # body takes them, so the base offsets below read params with no baked
     # alternative. Declared right after scale to fix their ABI position (mirrored in
@@ -1104,9 +1176,15 @@ def build_attention_dense(
     # branches bound DIFFERENT extents (the whole page cache, the end of this
     # workgroup's packed sequence, the contiguous batch*seqlen_kv rows), so this is
     # not the removable bookkeeping split that the batch/seqlen param declaration
-    # was. Paged stays first: the spec rejects paged varlen, and a page cache is
-    # addressed through block_tables, never through packed offsets.
-    if spec.paged:
+    # was. Paged stays first among those: the spec rejects paged varlen, and a page
+    # cache is addressed through block_tables, never through packed offsets. fp8
+    # leads the chain only because the spec rejects it with paged AND varlen, so it
+    # can never contend with either.
+    if KV_FP8:
+        # The fp8 sync-dequant loader reads K/V with plain in-bounds global loads
+        # (aligned KV only), so no bounds-checked buffer resource is built here.
+        k_rsrc = v_rsrc = None
+    elif spec.paged:
         # The paged bound is the WHOLE page cache. Pages are addressed through
         # block_tables at page_id*block_size, so any page id the table can name must
         # be in range -- batch*seqlen_kv is only the logical KV length of one
@@ -1266,10 +1344,60 @@ def build_attention_dense(
             v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
         )
 
+    THREADS = WAVES * 64
+
+    def _sync_fp8_load(ptr, lds, buf_val, tile_key0, scale_p, packed_k):
+        """Aligned fp8 KV: flat n=8 global load -> unfused-scale dequant -> bf16 LDS
+        store, into the same K_lds/V_lds layout the bf16 path fills. The global
+        load is unbounded, so OOB keys are clamped below (the pipeline
+        over-prefetches one tile past the last consumed KV tile)."""
+        total = BN * D
+        assert total % (THREADS * 8) == 0, (
+            f"fp8 sync loader: BN*D={total} must be divisible by THREADS*8="
+            f"{THREADS * 8}"
+        )
+        for it in range(total // (THREADS * 8)):
+            e0 = b.mul(b.add(b.const_i32(it * THREADS), tid), b.const_i32(8))
+            key = b.div(e0, b.const_i32(D))
+            d0 = b.mod(e0, b.const_i32(D))
+            # The software pipeline prefetches tile j+1 at the end of iter j; on the
+            # last iteration that tile can fall past seqlen_kv (its data is never
+            # consumed). Clamp OOB keys to row 0 so the unbounded global load stays
+            # in-bounds instead of faulting -- the bf16 path gets this for free from
+            # its bounds-checked buffer resource.
+            kv_row = b.add(tile_key0, key)
+            kv_row = b.select(b.cmp_lt(kv_row, seqlen_kv_p), kv_row, b.const_i32(0))
+            # _stride_k(), not the baked constant: on the runtime-shape path the
+            # head counts are kernargs, so two specs differing only in heads share
+            # a cache key and a symbol. Baking Hkv*D here made them lower to
+            # different IR under that one key, and the launcher cache then served
+            # whichever fp8 binary compiled first to both.
+            addr = b.add(
+                b.add(k_base, b.mul(kv_row, _stride_k())),
+                d0,
+            )
+            deq = dequant_fp8x8_to_dtype(
+                b, b.global_load_vN(ptr, addr, kv_dtype, 8), scale_p, dtype
+            )
+            if packed_k:
+                row = b.div(key, b.const_i32(K_GROUP))
+                col = b.add(b.mul(b.mod(key, b.const_i32(K_GROUP)), b.const_i32(D)), d0)
+            else:
+                row = key
+                col = d0
+            b.smem_store_vN(lds, [buf_val, row, col], deq, 8)
+
     def load_tile(buf_val, tile_idx):
         tk0 = b.mul(tile_idx, b.const_i32(BN))
-        async_load_k(K_lds_addr, buf_val, tk0)
-        async_load_v(V_lds_addr, buf_val, tk0)
+        if KV_FP8:
+            # Sync-dequant fp8: fill K_lds/V_lds with bf16, then drain the LDS stores
+            # so the following barrier publishes them before the compute reads.
+            _sync_fp8_load(k, K_lds, buf_val, tk0, k_scale, K_GROUP > 1)
+            _sync_fp8_load(v, V_lds, buf_val, tk0, v_scale, False)
+            b.s_waitcnt(lgkmcnt=0)
+        else:
+            async_load_k(K_lds_addr, buf_val, tk0)
+            async_load_v(V_lds_addr, buf_val, tk0)
 
     # ---- per-tile compute closures ----
 
@@ -3067,14 +3195,19 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
+    kv_ptr_dtype = spec.kv_storage_dtype or spec.dtype
     sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
+        .ptr("k_ptr", kv_ptr_dtype)
+        .ptr("v_ptr", kv_ptr_dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.kv_storage_dtype == "fp8e4m3":
+        # Mirrors the k_scale/v_scale params declared right after scale in
+        # build_attention_dense (fp8 KV only), ahead of the shape kernargs.
+        sig = sig.scalar("k_scale", "f32").scalar("v_scale", "f32")
     # Mirrors the scalar params declared right after scale in build_attention_dense.
     for field in _shape_kernarg_fields(spec):
         sig = sig.scalar(field, "i32")
@@ -3142,6 +3275,8 @@ def run_attention_dense_torch(
     v,
     out,
     scale: float,
+    k_scale: Optional[float] = None,
+    v_scale: Optional[float] = None,
     stream: int = 0,
     arch: str = "gfx950",
     cu_seqlens_q=None,
@@ -3218,6 +3353,15 @@ def run_attention_dense_torch(
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
     check_dense_scale(scale)
+    if spec.kv_storage_dtype == "fp8e4m3":
+        # Validate here too, not only in the dispatch binding: direct callers of
+        # this runner bypass that guard. Both call the same checker, so the two
+        # entry points cannot drift apart.
+        require_ocp_fp8_kv((("k", k), ("v", v)))
+        # Same checker the dispatch binding uses, so a direct caller of this
+        # runner gets the identical refusal rather than a second wording.
+        for name, s in (("k_scale", k_scale), ("v_scale", v_scale)):
+            require_fp8_kv_scale(name, s, "fp8 dense")
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
@@ -3347,6 +3491,9 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.kv_storage_dtype == "fp8e4m3":
+        vals["k_scale"] = float(k_scale)
+        vals["v_scale"] = float(v_scale)
     vals.update(attention_dense_runtime_args(spec))
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q

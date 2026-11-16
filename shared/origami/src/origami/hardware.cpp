@@ -4,6 +4,7 @@
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -79,7 +80,14 @@ hardware_t::hardware_t(architecture_t arch,
           compute_clock_ghz,
           constants.parallel_mi_cu,
           constants.mem_bw_per_wg_coefficients,
-          pci_chip_id) {}
+          pci_chip_id) {
+  // L2_capacity is one L2's capacity.  CDNA reports one XCD's L2.  On gfx1250 the XCDs of an
+  // AID share an L2 and HIP reports a 4 MiB placeholder, so the reported size is split over
+  // the L2 domains but at least the measured 96 MiB of one AID's L2 is used.
+  if (is_cdna5()) {
+    this->L2_capacity = std::max<size_t>(L2_capacity / num_l2_domains(), 96ull << 20);
+  }
+}
 
 hardware_t::hardware_t(hipDeviceProp_t properties, std::optional<int> pci_chip_id)
     : hardware_t(get_hardware_for_properties(properties, 0, pci_chip_id)) {}
