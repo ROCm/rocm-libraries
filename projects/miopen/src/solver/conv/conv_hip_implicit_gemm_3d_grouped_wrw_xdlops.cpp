@@ -215,25 +215,13 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
 #endif
 
     // Fallback to default initialization, computed once per process (DefaultConfigCache).
-    const bool ranked_defaults = !env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS);
-    const auto chosen          = DefaultConfigCache::Get().GetOrCompute(
-        DefaultConfigKey(
-            ConvHipImplicitGemm3DGroupWrwXdlops{}.SolverDbId(), ctx, problem, ranked_defaults),
-        [&]() -> std::optional<CachedDefaultConfig> {
-            InitValidKernels(problem);
-            if(valid_kernels.empty())
-                return std::nullopt;
-            if(ranked_defaults)
-                DefaultKernelFromList(ctx);
-            state.SetResult(index, split_k, k3DWrwSolverConfig.uses_split_k);
-            return CachedDefaultConfig{kernel_id, use_tf32};
-        });
-    if(chosen)
-    {
-        kernel_id = chosen->kernel_id;
-        use_tf32  = chosen->use_tf32;
-        split_k   = 1;
-    }
+    InitDefaultConfigFromCache(*this,
+                               state,
+                               ctx,
+                               problem,
+                               ConvHipImplicitGemm3DGroupWrwXdlops{}.SolverDbId(),
+                               !env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS),
+                               k3DWrwSolverConfig.uses_split_k);
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);

@@ -17,6 +17,7 @@
 
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -3944,6 +3945,15 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
 private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
+
+    template <class Config, class State>
+    friend void InitDefaultConfigFromCache(Config&,
+                                           State&,
+                                           const ExecutionContext&,
+                                           const miopen::conv::ProblemDescription&,
+                                           std::string_view,
+                                           bool,
+                                           bool);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -4225,6 +4235,15 @@ private:
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
+
+    template <class Config, class State>
+    friend void InitDefaultConfigFromCache(Config&,
+                                           State&,
+                                           const ExecutionContext&,
+                                           const miopen::conv::ProblemDescription&,
+                                           std::string_view,
+                                           bool,
+                                           bool);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final

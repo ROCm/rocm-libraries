@@ -108,6 +108,38 @@ private:
     CKProblemCache<std::unordered_map<std::string, Entry>> entries;
 };
 
+/// The default-configuration fallback of the CK grouped backward-weights HeuristicInit, through
+/// DefaultConfigCache. On a miss it builds cfg's valid-kernel list and picks the default from it
+/// (ranked, or the first entry); either way cfg ends with the cached kernel_id and use_tf32 and
+/// split_k = 1. The perf configs befriend it to reach InitValidKernels() and use_tf32.
+template <class Config, class State>
+void InitDefaultConfigFromCache(Config& cfg,
+                                State& state,
+                                const ExecutionContext& ctx,
+                                const miopen::conv::ProblemDescription& problem,
+                                std::string_view solver,
+                                bool ranked_defaults,
+                                bool uses_split_k)
+{
+    const auto chosen = DefaultConfigCache::Get().GetOrCompute(
+        DefaultConfigKey(solver, ctx, problem, ranked_defaults),
+        [&]() -> std::optional<CachedDefaultConfig> {
+            cfg.InitValidKernels(problem);
+            if(cfg.valid_kernels.empty())
+                return std::nullopt;
+            if(ranked_defaults)
+                cfg.DefaultKernelFromList(ctx);
+            state.SetResult(cfg.index, cfg.split_k, uses_split_k);
+            return CachedDefaultConfig{cfg.kernel_id, cfg.use_tf32};
+        });
+    if(chosen)
+    {
+        cfg.kernel_id = chosen->kernel_id;
+        cfg.use_tf32  = chosen->use_tf32;
+        cfg.split_k   = 1;
+    }
+}
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen
