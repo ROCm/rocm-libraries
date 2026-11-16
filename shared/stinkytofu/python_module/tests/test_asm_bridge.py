@@ -352,6 +352,32 @@ def test_emit_asm_supports_t00_descriptor_aliases_and_scalar_vcc_forms():
         assert expected in assembly
 
 
+def test_emit_asm_supports_fmha_softcap_and_dropout_vector_ops():
+    # v_tanh_f32 (attention logit softcap); v_xor_b32 and v_perm_b32 (Philox dropout RNG and its byte transpose).
+    assembly = _emit(
+        [
+            {"kind": "instruction", "mnemonic": "v_tanh_f32", "dst": [vgpr(1)],
+             "src": [vgpr(2)]},
+            {"kind": "instruction", "mnemonic": "v_xor_b32", "dst": [vgpr(3)],
+             "src": [vgpr(4), vgpr(5)]},
+            {"kind": "instruction", "mnemonic": "v_xor_b32", "dst": [vgpr(6)],
+             "src": [sgpr(7), vgpr(8)]},
+            {"kind": "instruction", "mnemonic": "v_perm_b32", "dst": [vgpr(9)],
+             "src": [vgpr(10), vgpr(11), sgpr(12)]},
+            {"kind": "instruction", "mnemonic": "v_perm_b32", "dst": [vgpr(13)],
+             "src": [vgpr(14), vgpr(15), Register(0x09090808)]},
+        ]
+    )
+    for expected in (
+        "v_tanh_f32 v1, v2",
+        "v_xor_b32 v3, v4, v5",
+        "v_xor_b32 v6, s7, v8",
+        "v_perm_b32 v9, v10, v11, s12",
+        "v_perm_b32 v13, v14, v15, 151586824",  # 0x09090808
+    ):
+        assert expected in assembly
+
+
 def test_emit_asm_uses_selected_primary_or_promoted_descriptor_fields():
     primary = _raw_emit_asm(
         "gfx1250",
