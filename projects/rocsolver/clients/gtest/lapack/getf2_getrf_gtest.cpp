@@ -78,9 +78,9 @@ const vector<int> large_n_size_range = {
 };
 
 // for weekly_lapack tests
-const vector<vector<int>> large_batch_size_range = {{3, 3, 0}, {129, 129, 0}};
+const vector<vector<int>> large_batch_size_range = {{3, 3, 0}, {64, 64, 0}, {129, 129, 0}};
 
-const vector<int> large_batch_n_size_range = {4};
+const vector<int> large_batch_n_size_range = {1, 4};
 
 Arguments getrf_setup_arguments(getrf_tuple tup)
 {
