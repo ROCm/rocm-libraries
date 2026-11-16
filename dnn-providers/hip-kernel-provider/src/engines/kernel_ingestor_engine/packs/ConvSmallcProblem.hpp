@@ -46,10 +46,12 @@ struct SmallcProblem
 };
 
 /// The problem @p context's graph describes in @p direction (FORWARD or BACKWARD_DATA), or
-/// nullopt.
+/// nullopt. With @p fusion EPILOGUE a forward graph may carry a pointwise epilogue
+/// (base.epilogue), which the kernel applies at its stores.
 std::optional<SmallcProblem>
     parseSmallcProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                       conv_naive::ConvDirection direction = conv_naive::ConvDirection::FORWARD);
+                       conv_naive::ConvDirection direction = conv_naive::ConvDirection::FORWARD,
+                       conv_naive::Fusion fusion = conv_naive::Fusion::NONE);
 
 /// A catalog config: compile-time filter geometry and tile, read from its metadata.
 struct Config

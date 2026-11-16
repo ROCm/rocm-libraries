@@ -94,6 +94,17 @@ end: butterfly-reduce acc over the lanes -> LDS sum over the waves in wave order
   - They compete under autotune with `CONV_DEPTHWISE_VALU_WRW`.
   - FWD/BWD have no dedicated depthwise set. Their `kb = cb = 1` fallback tiles also match depthwise (gfx906/gfx908 only), so autotune can also pick them for depthwise.
 
+## Fusion
+
+`CONV_GROUP_VALU_FWD` claims a forward convolution followed by a chain of pointwise nodes (the
+same menu as the other conv engines: scale, bias, relu family, gelu, gelu-tanh, swish / silu,
+sigmoid, tanh, elu, abs, softplus; per-channel and scalar operands) under its own engine id, with
+no extra catalog config. A wave owns KB output channels, so it loads their per-channel operands
+once, before its row loop, and applies the generated epilogue (`ConvEpilogue.h`) to each fp32 sum
+before the single rounding at the store, in both layouts and for masked columns. The prepare
+kernel is unchanged. Backward data and backward weights decline fused graphs. With no epilogue the
+kernel compiles to the same code as without fusion support.
+
 ## Strengths and weaknesses
 All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen in search mode, or with our other engines where stated. They are indicative.
 - **gfx906 wrw, ResNeXt (fp16, NCHW):**

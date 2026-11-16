@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 
@@ -42,6 +43,24 @@ inline void* operandAddress(void* base, const GemmOperand& operand)
 }
 
 /**
+ * @brief A fused convolution epilogue a backend applies in its own GEMM kernel: hipBLASLt's
+ *        native epilogues, set only on calls whose rows are the output channels (the bias is
+ *        a vector along m). Computed in fp32 before the GEMM's one rounding of d.
+ */
+struct NativeEpilogue
+{
+    /// The hipblasLtEpilogue_t value.
+    int mode = 0;
+    /// The activation's arguments (clamp bounds).
+    float act0 = 0.0F;
+    float act1 = 0.0F;
+    /// The per-channel bias vector; none without one.
+    std::optional<int64_t> biasUid;
+    hipdnn_flatbuffers_sdk::data_objects::DataType biasType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+};
+
+/**
  * @brief A strided-batched GEMM in BLAS (column-major) terms, independent of the library
  *        that executes it.
  *
@@ -68,6 +87,8 @@ struct GemmCall
     /// cannot. A permission, never a guarantee: nothing reports which ran. No effect on fp16 or
     /// bf16 operands.
     bool tf32 = false;
+    /// A fused epilogue the backend applies to d (hipBLASLt only); unset for every unfused call.
+    std::optional<NativeEpilogue> epilogue;
 };
 
 } // namespace hipblaslt_plugin

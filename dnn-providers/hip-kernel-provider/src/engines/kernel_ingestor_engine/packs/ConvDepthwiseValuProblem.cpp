@@ -146,13 +146,14 @@ std::optional<DepthwiseVariant> variantNamed(const std::string& name)
 
 std::optional<DepthwiseValuProblem>
     parseDepthwiseValuProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                              ConvDirection direction)
+                              ConvDirection direction,
+                              conv_naive::Fusion fusion)
 {
     if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA)
     {
         return std::nullopt;
     }
-    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    auto base = conv_naive::parseConvNaiveProblem(context, direction, fusion);
     if(!base.has_value())
     {
         return std::nullopt;

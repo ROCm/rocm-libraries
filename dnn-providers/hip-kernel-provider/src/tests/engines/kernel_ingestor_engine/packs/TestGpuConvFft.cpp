@@ -28,6 +28,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFftProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -547,6 +548,160 @@ TEST(TestConvFftCatalog, EveryConfigParsesAndNamesItsDirection)
             EXPECT_EQ(kernel.getStringMetadata("direction"), name);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): the output pass (and the depthwise single pass) applies
+// the chain to each point before its rounding. Every transform shape among the admitted configs
+// runs once; the transforms and products are unchanged.
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+struct FusedShape
+{
+    std::string name;
+    ConvShape shape;
+    long long workspaceCap = 0;
+};
+
+std::vector<FusedShape> fusedShapes()
+{
+    return {
+        {"Img14Nchw", conv(2, 24, 64, 1, {14, 14}, {5, 5}, {2, 2}, {1, 1}, false)},
+        {"Odd11x11Nhwc", conv(2, 8, 12, 1, {37, 41}, {11, 11}, {5, 5}, {1, 1}, true)},
+        {"Row1x31", conv(2, 16, 24, 1, {300}, {31}, {15}, {1}, false)},
+        {"Depthwise13x13", conv(2, 16, 16, 16, {40, 40}, {13, 13}, {6, 6}, {1, 1}, false)},
+        {"DepthwiseMult2Nhwc", conv(2, 8, 16, 8, {23, 27}, {9, 9}, {4, 4}, {1, 1}, true)},
+        {"Chunked5x5", conv(5, 8, 8, 1, {100, 100}, {5, 5}, {2, 2}, {1, 1}, false), 2 << 20},
+    };
+}
+
+template <typename T>
+void runFused(const FusedShape& fused, const std::vector<Step>& steps, Specials specials)
+{
+    const ScopedEnvironmentVariableSetter floor("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
+    const ScopedEnvironmentVariableSetter cap(
+        "HIP_KERNEL_PROVIDER_CONV_FFT_WORKSPACE_CAP",
+        fused.workspaceCap > 0 ? std::to_string(fused.workspaceCap) : "");
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), {"th", "tw"});
+    // The FFT's own error: about 8 log2(64 x 64) fp32 roundings of the largest output, which a
+    // reduction of n unit terms bounds by n.
+    const auto tolerance
+        = [](int64_t reduction) { return 96.0 * 1.2e-7 * static_cast<double>(reduction); };
+    EXPECT_GE(
+        conv_epilogue_test::checkFusedCase<T>(fused.shape, steps, runner, specials, tolerance), 1)
+        << "no catalog config serves this fused case";
+}
+
+class TestGpuConvFftFused : public ::testing::TestWithParam<std::tuple<FusedShape, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvFftFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()), std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvFftFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()), std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvFftFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> fusedChainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvFftFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(fusedChainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvFftFused,
+                         ::testing::Combine(::testing::Values(fusedShapes()[0], fusedShapes()[3]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvFftFusedSpecials : public ::testing::TestWithParam<FusedShape>
+{
+};
+
+TEST_P(TestGpuConvFftFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(
+        GetParam(), {conv_epilogue_test::bias(), conv_epilogue_test::relu()}, Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvFftFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        GetParam(),
+        {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+        Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvFftFusedSpecials,
+                         ::testing::Values(fusedShapes()[0], fusedShapes()[3]),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestConvFftFused, BackwardEnginesDeclineFusedGraphs)
+{
+    // A fused graph is forward: the backward-data and backward-weights graph matches refuse it,
+    // and so does every backward config's kernel match under the forward match's tokens.
+    const ScopedEnvironmentVariableSetter floor("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
+    auto shape = fusedShapes()[0].shape;
+    shape.dataType = DataType::FLOAT;
+    auto device = gfx950Properties();
+    device.multiProcessorCount = 256;
+    const GraphFixture fixture(
+        conv_epilogue_test::buildFusedGraph(conv_epilogue_test::fusedSpecFor(
+            shape, {conv_epilogue_test::bias(), conv_epilogue_test::relu()})),
+        device);
+    const auto bound = matchesGraph(packFor(ConvDirection::FORWARD), fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    for(const auto direction : {ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
+    {
+        EXPECT_FALSE(matchesGraph(packFor(direction), fixture.context()).has_value());
+        for(const auto& kernel : catalog(direction))
+        {
+            EXPECT_FALSE(matchesKernel(packFor(direction), fixture.context(), kernel, *bound))
+                << kernel.name;
+        }
+    }
+    // The bare convolution's forward match is unchanged by fusion: one config admits both.
+    int admitted = 0;
+    for(const auto& kernel : catalog(ConvDirection::FORWARD))
+    {
+        admitted
+            += matchesKernel(packFor(ConvDirection::FORWARD), fixture.context(), kernel, *bound)
+                   ? 1
+                   : 0;
+    }
+    EXPECT_GT(admitted, 0);
 }
 
 } // namespace

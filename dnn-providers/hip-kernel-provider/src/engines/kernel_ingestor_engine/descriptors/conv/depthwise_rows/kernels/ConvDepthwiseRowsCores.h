@@ -29,6 +29,7 @@
 #pragma once
 
 // Embedded headers are keyed by bare file name (src/cmake/KernelEmbedding.cmake).
+#include "ConvDepthwiseEpilogue.h"
 #include "ConvDepthwiseValuArgs.h"
 
 namespace conv_depthwise_rows
@@ -214,7 +215,7 @@ template <typename T, int KH, int KW, int TX, int TY, int RH, int RW, int LDS, b
 __device__ inline void rowsFwdNchw(const T* __restrict__ in,
                                    const T* __restrict__ wt,
                                    T* __restrict__ out,
-                                   const ConvDepthwiseValuArgs& a)
+                                   const ConvDepthwiseValuArgs& a DW_EPI_PARAM)
 {
     constexpr int THREADS = TX * TY;
     constexpr int BH = TY * RH;
@@ -352,6 +353,7 @@ __device__ inline void rowsFwdNchw(const T* __restrict__ in,
     }
 
     T* dst = out + static_cast<long>(plane) * a.ho * a.wo;
+    DW_EPI_DECL(dwEc, c, true)
 #pragma unroll
     for(int i = 0; i < RH; ++i)
     {
@@ -366,7 +368,8 @@ __device__ inline void rowsFwdNchw(const T* __restrict__ in,
             const int ox = ox0 + x0 + j * xs;
             if(ox < a.wo)
             {
-                dst[static_cast<long>(oy) * a.wo + ox] = rowsFromF32<T>(acc[i][j]);
+                dst[static_cast<long>(oy) * a.wo + ox]
+                    = rowsFromF32<T>(DW_EPI_APPLY(acc[i][j], dwEc));
             }
         }
     }
@@ -392,7 +395,7 @@ template <typename T, int KH, int KW, int BH, int RH, int MAXT, int LDS, bool FL
 __device__ inline void rowsFwdBandNchw(const T* __restrict__ in,
                                        const T* __restrict__ wt,
                                        T* __restrict__ out,
-                                       const ConvDepthwiseValuArgs& a)
+                                       const ConvDepthwiseValuArgs& a DW_EPI_PARAM)
 {
     static_assert(BH % RH == 0, "the row groups must divide the band");
     constexpr int G = BH / RH;
@@ -407,6 +410,7 @@ __device__ inline void rowsFwdBandNchw(const T* __restrict__ in,
     const int plane = blk / bands;
     const int band = blk - plane * bands;
     const int c = plane % a.c;
+    DW_EPI_DECL(dwEc, c, true)
     const int oy0 = band * BH;
     const int iy0 = oy0 * a.sh - a.ph;
     const int ix0 = -a.pw;
@@ -531,7 +535,7 @@ __device__ inline void rowsFwdBandNchw(const T* __restrict__ in,
             const int oy = oy0 + y0 + i * ys;
             if(oy < a.ho)
             {
-                dst[static_cast<long>(oy) * a.wo + x] = rowsFromF32<T>(acc[i]);
+                dst[static_cast<long>(oy) * a.wo + x] = rowsFromF32<T>(DW_EPI_APPLY(acc[i], dwEc));
             }
         }
     }

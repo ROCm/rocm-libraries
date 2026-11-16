@@ -23,6 +23,9 @@
 //                       output type, float (default CONV_GROUP_T)
 //   CONV_GROUP_P        three-bf16: 3 input and filter parts (default 1)
 //   K1_BUFFER           0 (the K1 header's buffer loads are not used here)
+//   CONV_EPI            1: a fused pointwise epilogue (ConvEpilogue.h) on the forward kernels'
+//                       output, applied before the single rounding; they then take ConvEpiArgs
+//                       as a second argument
 
 #ifndef K1_BUFFER
 #define K1_BUFFER 0
@@ -96,7 +99,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvGroupWrwReduce(K4WrwReduce
     k4WrwReduce<CONV_GROUP_T>(a);
 }
 #elif defined(CONV_GROUP_FMA) && CONV_GROUP_FMA
-extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4Args a)
+extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4Args a CONV_EPI_PARAM)
 {
     k4ConvFma<CONV_GROUP_T,
               CONV_GROUP_FT,
@@ -108,7 +111,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4Args a)
               CONV_GROUP_TH,
               CONV_GROUP_PX,
               CONV_GROUP_CB,
-              CONV_GROUP_CF>(a);
+              CONV_GROUP_CF>(a CONV_EPI_ARG);
 }
 #elif defined(CONV_GROUP_WIDE) && CONV_GROUP_WIDE && defined(CONV_GROUP_PF) && CONV_GROUP_PF
 extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
@@ -125,7 +128,8 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
                         CONV_GROUP_CF>(a);
 }
 #elif defined(CONV_GROUP_WIDE) && CONV_GROUP_WIDE
-extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
+extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE)
+    ConvGroup(K4Args a CONV_EPI_PARAM)
 {
     k4ConvMmaWide<CONV_GROUP_T,
                   CONV_GROUP_ATOM,
@@ -139,7 +143,7 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
                   CONV_GROUP_NBO,
                   CONV_GROUP_CF,
                   CONV_GROUP_TO,
-                  CONV_GROUP_P>(a);
+                  CONV_GROUP_P>(a CONV_EPI_ARG);
 }
 #elif defined(CONV_GROUP_PF) && CONV_GROUP_PF
 extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
@@ -155,7 +159,8 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
                     CONV_GROUP_CF>(a);
 }
 #else
-extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
+extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE)
+    ConvGroup(K4Args a CONV_EPI_PARAM)
 {
     k4ConvMma<CONV_GROUP_T,
               CONV_GROUP_ATOM,
@@ -166,7 +171,7 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
               CONV_GROUP_TH,
               CONV_GROUP_WP,
               CONV_GROUP_CB,
-              CONV_GROUP_CF>(a);
+              CONV_GROUP_CF>(a CONV_EPI_ARG);
 }
 #endif
 

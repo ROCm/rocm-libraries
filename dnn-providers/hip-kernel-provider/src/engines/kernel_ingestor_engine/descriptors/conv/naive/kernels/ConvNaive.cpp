@@ -11,8 +11,12 @@
 // Compiled by HIPRTC with -DCONV_NAIVE_TYPE=<float|_Float16|__bf16>, the element type of all
 // three tensors. Every shape is a runtime argument (ConvNaiveArgs.h), so one compile per
 // element type serves every problem.
+//
+// Forward applies a fused pointwise epilogue (ConvEpilogue.h) at its single store when compiled
+// with CONV_EPI 1; it serves every pattern the epilogue generator emits.
 
 // Embedded headers are keyed by bare file name (src/cmake/KernelEmbedding.cmake).
+#include "ConvEpilogue.h"
 #include "ConvNaiveArgs.h"
 
 #ifndef CONV_NAIVE_TYPE
@@ -56,8 +60,11 @@ __device__ inline long long threadStride()
 
 /// y[n, k, o] = sum over c in k's group and every tap f of x[n, c, o * stride - pad + f * dil]
 /// times w[k, c, f]. One thread per y element.
-extern "C" __global__ void ConvNaiveFwd(ConvNaiveArgs args)
+extern "C" __global__ void ConvNaiveFwd(ConvNaiveArgs args CONV_EPI_PARAM)
 {
+#if defined(CONV_EPI) && CONV_EPI
+    const ConvEpiGen epi = convEpiGen(epiArgs);
+#endif
     const auto* x = static_cast<const ElementType*>(args.x);
     const auto* w = static_cast<const ElementType*>(args.w);
     auto* y = static_cast<ElementType*>(args.y);
@@ -120,10 +127,17 @@ extern "C" __global__ void ConvNaiveFwd(ConvNaiveArgs args)
             }
         }
 
+#if defined(CONV_EPI) && CONV_EPI
+        const long long yOffset = n * args.yStrides[0] + k * args.yStrides[1]
+                                  + od * args.yStrides[2] + oh * args.yStrides[3]
+                                  + ow * args.yStrides[4];
+        store(y, yOffset, epi(accumulator, epi.chan(static_cast<int>(k), true), yOffset, true));
+#else
         store(y,
               n * args.yStrides[0] + k * args.yStrides[1] + od * args.yStrides[2]
                   + oh * args.yStrides[3] + ow * args.yStrides[4],
               accumulator);
+#endif
     }
 }
 

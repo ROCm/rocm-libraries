@@ -18,6 +18,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/ConvEpilogueFormulation.hpp"
 #include "common/ConvRepackFormulation.hpp"
 #include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvRepackPlan.hpp"
@@ -65,7 +66,8 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          bool splitReduction,
                                          ColumnLayout layout,
                                          NarrowPartials narrowPartials,
-                                         std::optional<size_t> maxBackwardWeightsRepackBytes)
+                                         std::optional<size_t> maxBackwardWeightsRepackBytes,
+                                         bool nativeEpilogue)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
@@ -74,6 +76,7 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
     , _layout(layout)
     , _narrowPartials(narrowPartials)
     , _maxBackwardWeightsRepackBytes(maxBackwardWeightsRepackBytes)
+    , _nativeEpilogue(nativeEpilogue)
 {
 }
 
@@ -128,16 +131,66 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
                 return std::nullopt;
             }
         }
+        // A fused graph: the epilogue in the GEMM, the plan's last pass or one more pass.
+        if(calls.has_value() && !problem->epilogue.empty())
+        {
+            return fuseEpilogue(*problem, std::move(*calls), _nativeEpilogue);
+        }
         return calls;
     }
     return std::nullopt;
+}
+
+std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::buildableCalls(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    auto calls = callsFor(opGraph, _layout, _splitReduction);
+    if(!calls.has_value() || calls->epilogueForm == EpilogueForm::NONE)
+    {
+        return calls;
+    }
+    // A fused plan writes y's result in fp32. A backend may have no algorithm for one layout's
+    // fp32-output GEMMs (hipBLASLt without a workspace, the deterministic engines) and one for
+    // another's: the first layout it can run serves the graph, as its unfused plan does.
+    const auto runs = [&](const ConvGemmPlanCalls& candidate) {
+        try
+        {
+            return planFor(handle, candidate) != nullptr;
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO("Fused explicit-GEMM layout not runnable: " << e.what());
+            return false;
+        }
+    };
+    if(runs(*calls))
+    {
+        return calls;
+    }
+    for(const auto layout : {ColumnLayout::STAGED_CHANNELS_LAST,
+                             ColumnLayout::CHANNELS_LAST,
+                             ColumnLayout::CHANNELS_FIRST,
+                             ColumnLayout::FOLLOW_Y})
+    {
+        if(layout == _layout)
+        {
+            continue;
+        }
+        auto other = callsFor(opGraph, layout, _splitReduction);
+        if(other.has_value() && runs(*other))
+        {
+            return other;
+        }
+    }
+    return calls;
 }
 
 bool ConvGemmPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto calls = callsFor(opGraph, _layout, _splitReduction);
+    auto calls = buildableCalls(handle, opGraph);
     if(!calls.has_value())
     {
         return false;
@@ -158,7 +211,7 @@ size_t ConvGemmPlanBuilder::getWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto calls = callsFor(opGraph, _layout, _splitReduction);
+    auto calls = buildableCalls(handle, opGraph);
     if(!calls.has_value())
     {
         return 0;
@@ -171,7 +224,7 @@ void ConvGemmPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    auto calls = callsFor(opGraph, _layout, _splitReduction);
+    auto calls = buildableCalls(handle, opGraph);
     if(!calls.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -208,7 +261,21 @@ void ConvGemmPlanBuilder::buildPlan(
                && std::find(seen.begin(), seen.end(), signature(*other)) == seen.end())
             {
                 seen.push_back(signature(*other));
-                candidates.push_back({name, planFor(handle, std::move(*other))});
+                if(other->epilogueForm == EpilogueForm::NONE)
+                {
+                    candidates.push_back({name, planFor(handle, std::move(*other))});
+                    continue;
+                }
+                // A fused layout the backend cannot run is not a candidate.
+                try
+                {
+                    candidates.push_back({name, planFor(handle, std::move(*other))});
+                }
+                catch(const std::exception& e)
+                {
+                    HIPDNN_PLUGIN_LOG_INFO("Fused explicit-GEMM candidate "
+                                           << name << " skipped: " << e.what());
+                }
             }
         }
         // A reduction split into enough fp32 partials to fill the GPU: the libraries' own
