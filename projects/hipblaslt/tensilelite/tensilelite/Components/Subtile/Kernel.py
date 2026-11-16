@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import math
+import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1402,6 +1403,23 @@ def _emitDualPeriodTailScalePhase(writer, kernel, unrollIdx, scaleTiA, scaleTiB)
   return module
 
 
+MXFP8_HALF_DISJOINT_ENV = "TENSILE_MXFP8_HALF_DISJOINT"
+
+
+def mxfp8HalfDisjointLds() -> bool:
+  """Base schedule of every dual-period MXFP8 main loop in this build.
+
+  TENSILE_MXFP8_HALF_DISJOINT=1 (the default) splits each body into
+  half-disjoint LDS read/write halves; 0 keeps the uniform PGR2 epoch cohorts.
+  It is read at codegen time and does not enter the kernel name, so one
+  library holds one strategy.
+  """
+  value = os.environ.get(MXFP8_HALF_DISJOINT_ENV, "1").strip()
+  if value not in ("0", "1"):
+    raise ValueError("%s must be 0 or 1, got %r" % (MXFP8_HALF_DISJOINT_ENV, value))
+  return value == "1"
+
+
 def mainLoop(writer, kernel):
   module = Module()
   tensorParametersA = writer.tPA
@@ -1540,6 +1558,7 @@ def mainLoop(writer, kernel):
       tailPartitionSizeM = 0
   if wider and not tailOwnTiles:
       candidates = wider
+  schedulerHalfDisjoint = schedulerPartitionPrefetch and mxfp8HalfDisjointLds()
   scheduler = None
   refusals = []
   for partSizeM, partSizeN in candidates:
@@ -1566,7 +1585,7 @@ def mainLoop(writer, kernel):
           prefetchNextPartition=schedulerPartitionPrefetch,
           uniformPgrEpoch=(schedulerPartitionPrefetch and schedulerPgr == 2),
           uniformEpochVmemCohortSize=5,
-          halfDisjointLds=schedulerPartitionPrefetch,
+          halfDisjointLds=schedulerHalfDisjoint,
           grLoadsPerAtom=grLoadsPerAtom,
           partitionOrder=schedulerPartitionOrder,
           grPlacement=grPlacement,
@@ -1591,7 +1610,7 @@ def mainLoop(writer, kernel):
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
-  # The dual-period main loop is only built half-disjoint.  Raising rejects the
+  # A half-disjoint dual-period main loop has no fallback.  Raising rejects the
   # kernel: getSourceFileString turns a RuntimeError into a codegen failure.
   if scheduler is None:
       raise RuntimeError(

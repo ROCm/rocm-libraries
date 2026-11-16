@@ -139,6 +139,27 @@ def test_plain_fp8_kernel_ignores_the_half_disjoint_plan(monkeypatch):
     assert _codegen_kernel(mx=False, mi=(16, 16, 128, 1, 1, 4, 4, 2, 2)).err == 0
 
 
+def test_half_disjoint_env_selects_the_base_schedule(monkeypatch):
+    from tensilelite.Components.Subtile.Kernel import (
+        MXFP8_HALF_DISJOINT_ENV, mxfp8HalfDisjointLds)
+    monkeypatch.delenv(MXFP8_HALF_DISJOINT_ENV, raising=False)
+    assert mxfp8HalfDisjointLds()
+    for value, expected in (("1", True), ("0", False), (" 0 ", False)):
+        monkeypatch.setenv(MXFP8_HALF_DISJOINT_ENV, value)
+        assert mxfp8HalfDisjointLds() is expected, value
+    for value in ("", "2", "yes", "off"):
+        monkeypatch.setenv(MXFP8_HALF_DISJOINT_ENV, value)
+        with pytest.raises(ValueError, match=MXFP8_HALF_DISJOINT_ENV):
+            mxfp8HalfDisjointLds()
+
+
+def test_uniform_epoch_build_ignores_a_refused_half_disjoint_plan(monkeypatch):
+    from tensilelite.Components.Subtile.Kernel import MXFP8_HALF_DISJOINT_ENV
+    monkeypatch.setenv(MXFP8_HALF_DISJOINT_ENV, "0")
+    _refuse_half_disjoint_plans(monkeypatch)
+    assert _codegen_kernel().err == 0
+
+
 def _mainloop_lines(src):
     """Return the steady-state mainloop body (label_LoopBeginL .. back-branch)."""
     lines = src.splitlines()
@@ -184,6 +205,21 @@ def dual_src():
 
 
 @pytest.fixture(scope="module")
+def uniform_src():
+    """The 8x4 kernel built on the uniform-epoch base schedule."""
+    from tensilelite.Components.Subtile.Kernel import MXFP8_HALF_DISJOINT_ENV
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(MXFP8_HALF_DISJOINT_ENV, "0")
+        return _emit_dual_period_kernel()
+
+
+@pytest.fixture(scope="module", params=["half-disjoint", "uniform-epoch"])
+def base_src(request, dual_src, uniform_src):
+    """The 8x4 kernel on each base schedule."""
+    return dual_src if request.param == "half-disjoint" else uniform_src
+
+
+@pytest.fixture(scope="module")
 def balanced_8x10():
     """The 8x10 kernel, with each balanced-read deferral recorded.
 
@@ -219,8 +255,28 @@ def any_src(request, dual_src, balanced_8x10):
     return dual_src if request.param == "8x4" else balanced_8x10[0]
 
 
-def test_six_scale_reads_per_epoch(dual_src):
-    body = _mainloop_lines(dual_src)
+def _body_sync(src):
+    """(barriers, vmcnt waits) of each main-loop body, C0 then C1."""
+    bodies, counts = _mainloop_lines(src), []
+    for cell in ("C0", "C1"):
+        start = next(i for i, ln in enumerate(bodies) if f"MAINLOOP_{cell} start" in ln)
+        end = next(i for i, ln in enumerate(bodies) if f"MAINLOOP_{cell} end" in ln)
+        code = [ln.split("//")[0].strip() for ln in bodies[start:end]]
+        counts.append((sum(c.startswith("s_barrier") for c in code),
+                       sum(c.startswith("s_waitcnt") and "vmcnt" in c for c in code)))
+    return counts
+
+
+def test_half_disjoint_bodies_open_each_half_with_a_vmem_wait_and_barrier(dual_src):
+    assert _body_sync(dual_src) == [(2, 2), (2, 2)]
+
+
+def test_uniform_epoch_bodies_keep_one_vmem_wait_and_three_barriers(uniform_src):
+    assert _body_sync(uniform_src) == [(3, 1), (3, 1)]
+
+
+def test_six_scale_reads_per_epoch(base_src):
+    body = _mainloop_lines(base_src)
     reads = [ln for ln in body if "ds_read" in ln and re.search(r"// S[AB] MT=", ln)]
     assert len(reads) == 6, (
         "expected exactly six scale ds_reads per 256-K epoch, got %d:\n%s"
@@ -235,8 +291,8 @@ def test_six_scale_reads_per_epoch(dual_src):
     assert all("MT=" in r for r in reads)
 
 
-def test_both_scale_phases_consumed(dual_src):
-    body = _mainloop_lines(dual_src)
+def test_both_scale_phases_consumed(base_src):
+    body = _mainloop_lines(base_src)
     mfmas = [ln for ln in body if "v_mfma_scale" in ln]
     phases = {}
     for ln in mfmas:
@@ -252,8 +308,8 @@ def test_both_scale_phases_consumed(dual_src):
             assert "op_sel_hi:[1,1]" in ln, "phase-1 MFMA missing hi byte-sel: %s" % ln
 
 
-def test_scale_cadence_once_per_epoch(dual_src):
-    body = "\n".join(_mainloop_lines(dual_src))
+def test_scale_cadence_once_per_epoch(base_src):
+    body = "\n".join(_mainloop_lines(base_src))
     # One SRD advance, one DTL load, one GR write-half swap and one LR read-half
     # swap for EACH of the two scale tensors (MXSA, MXSB) per 256-K epoch.
     assert body.count("Scale SRD update") == 2
@@ -424,15 +480,15 @@ def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(any_src):
         assert not shared or len(free) < sum(loaded), (c, shared, free, gaps)
 
 
-def test_vgpr_within_two_wave_slot_budget(dual_src):
-    m = re.search(r"\.vgpr_count:\s*(\d+)", dual_src)
+def test_vgpr_within_two_wave_slot_budget(base_src):
+    m = re.search(r"\.vgpr_count:\s*(\d+)", base_src)
     assert m, "could not find .vgpr_count in emitted assembly"
     vgpr = int(m.group(1))
     assert vgpr <= 128, (
         "architectural VGPR %d exceeds the two-wave-slot budget (128)" % vgpr)
 
 
-def test_odd_phase_tail_swaps_scale_write_half(dual_src):
+def test_odd_phase_tail_swaps_scale_write_half(base_src):
     """An odd residual re-enters mid-epoch, so the write half needs a step.
 
     The scale SRDs are already where the tail wants them -- the kernel seeds
@@ -440,14 +496,14 @@ def test_odd_phase_tail_swaps_scale_write_half(dual_src):
     only thing out of phase is which LDS half the tail's own scale load lands
     in.  Nothing here may touch Srd+0/+1/+2.
     """
-    align_start = dual_src.index(
+    align_start = base_src.index(
         "dual-period tail: test completed-DepthU parity for scale LDS")
-    align_end = dual_src.index("label_SubtileTailScalePhased:", align_start)
-    tail_start = dual_src.index("/* TAILLOOP */", align_end)
-    alignment = dual_src[align_start:align_end]
+    align_end = base_src.index("label_SubtileTailScalePhased:", align_start)
+    tail_start = base_src.index("/* TAILLOOP */", align_end)
+    alignment = base_src[align_start:align_end]
 
     parity_test = next(
-        ln for ln in dual_src.splitlines()
+        ln for ln in base_src.splitlines()
         if "dual-period tail: test completed-DepthU parity for scale LDS" in ln)
     assert parity_test.lstrip().startswith("s_bitcmp1_b32")
     assert re.search(r",\s*7(?:\s|//)", parity_test), parity_test
@@ -465,7 +521,7 @@ def test_odd_phase_tail_swaps_scale_write_half(dual_src):
     assert align_start < align_end < tail_start
 
 
-def test_preloop_seeds_one_scale_epoch(dual_src):
+def test_preloop_seeds_one_scale_epoch(base_src):
     """PGR2 seeds two data iterations but only the one epoch that covers them.
 
     A second scale prefetch would cover data the preloop never fetched, and
@@ -475,7 +531,7 @@ def test_preloop_seeds_one_scale_epoch(dual_src):
     advance-swap-load cadence from there.
     """
     preloop = []
-    for ln in dual_src.splitlines():
+    for ln in base_src.splitlines():
         if ln.strip() == "label_LoopBeginL:":
             break
         preloop.append(ln)
@@ -494,7 +550,7 @@ def test_preloop_seeds_one_scale_epoch(dual_src):
         % wait)
 
 
-def test_no_scale_local_read_in_preloop(dual_src):
+def test_no_scale_local_read_in_preloop(base_src):
     """The pre-loop prefetches data operands but not scales.
 
     Scale local reads are epoch-granular: the mainloop, NLL, NGLL and tail
@@ -503,7 +559,7 @@ def test_no_scale_local_read_in_preloop(dual_src):
     partition-granular and must still be there, feeding partition 0's MFMAs.
     """
     preloop = []
-    for ln in dual_src.splitlines():
+    for ln in base_src.splitlines():
         if ln.strip() == "label_LoopBeginL:":
             break
         preloop.append(ln)
@@ -515,14 +571,14 @@ def test_no_scale_local_read_in_preloop(dual_src):
     assert data_lr, "pre-loop lost its data operand prefetch"
 
 
-def test_loads_name_their_macro_tile(dual_src):
+def test_loads_name_their_macro_tile(base_src):
     """A, B, and scale loads name the macro-tile epoch they fill.
 
     PGR2 issues the current tile, the next tile, and the tile two ahead.
     The comment is the identity later physical passes use to tell those
     loads apart.  Opcodes and addresses are unchanged.
     """
-    src = dual_src
+    src = base_src
     assert re.search(r"// A MT=n ", src)
     assert re.search(r"// B MT=n ", src)
     assert re.search(r"// A MT=n\+1 ", src) or re.search(r"// B MT=n\+1 ", src)
