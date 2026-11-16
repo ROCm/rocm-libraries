@@ -723,3 +723,34 @@ def test_a_decorated_target_id_resolves_as_its_bare_arch(direction, target_id, p
         direction, problem, arch=target_id.split(":", 1)[0], **kw
     )
     assert resolve_conv_split_k(direction, problem, arch=target_id, **kw) == bare
+
+
+@pytest.mark.parametrize(
+    "arch, cus",
+    [
+        ("gfx1201", 64),
+        ("gfx1200", 32),
+        ("gfx12-generic", 64),
+        ("gfx1100", 96),
+        ("gfx11-generic", 96),
+    ],
+)
+def test_rdna_parts_size_the_wgrad_split_by_their_own_cus(arch, cus):
+    # One dW tile over a deep reduction: CK's formula fills waves_per_cu *
+    # num_cus workgroups. An RDNA part outside the table would be sized for
+    # the 256-CU default instead.
+    from kernels.common.conv_split_k import (
+        _ARCH_NUM_XCDS,
+        WGRAD_ASSUMED_WAVES_PER_CU,
+    )
+    from rocke.helpers.split_k import DEFAULT_NUM_CUS, num_cus
+
+    d = select_split_k_wgrad(
+        wg_M=64, wg_N=64, wg_K=1 << 20, tile_m=64, tile_n=64, tile_k=32, arch=arch
+    )
+    assert cus != DEFAULT_NUM_CUS
+    assert num_cus(arch) == cus
+    assert d.target_ctas == WGRAD_ASSUMED_WAVES_PER_CU * cus
+    assert d.split_k == WGRAD_ASSUMED_WAVES_PER_CU * cus
+    # One die: a grouped launch needs no XCD snap.
+    assert _ARCH_NUM_XCDS[arch] == 1

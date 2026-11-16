@@ -22,7 +22,7 @@
 
 from rocisa.code import Label, Module
 from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData
-from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
+from .ir import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
   VMovRelsD2B32, VMulF32, VMulF64, VMulLOU32, VMulPKF16
 from rocisa.functions import BranchIfNotZero

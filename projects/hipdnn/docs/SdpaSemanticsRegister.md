@@ -241,7 +241,8 @@ batch when `seq_len_q/kv` are set).
 ### SEM-015: Dropout
 
 - **Status:** Aligned (cuDNN's explicit-mask ("custom") dropout, CPU and GPU references; Philox dropout with
-  RNG_DUMP, forward). Philox dropout without RNG_DUMP is declined.
+  RNG_DUMP, forward; Philox dropout from seed and offset, served by the FlyDSL backward engines). In the forward, Philox
+  dropout without RNG_DUMP is declined by the references.
 - **cuDNN:** forward `O = (P ∘ M · s) V` with mask M `[B|1, H|1, Sq, Skv]` and `dropout_scale` s; Stats are the
   pre-dropout softmax's. Backward (composite lowering, `scaled_dot_product_flash_attention.h`):
   `D = rowsum(dO ∘ O) · dropout_scale_inv` (1 when absent), `dS = s · P ∘ (M ∘ dP − D)`, `dV = (P ∘ M · s)ᵀ dO`,
@@ -254,8 +255,8 @@ batch when `seq_len_q/kv` are set).
   (mutation: dropping the scale_inv factor fails dQ, dK and dBias).
 - **Philox dropout:** validated through RNG_DUMP. A forward graph with `dropout_probability`, seed,
   offset and an `rng_dump` output FLOAT `[B, H_q, Sq, Skv]` is accepted by the CPU and GPU forward references, which
-  read the engine's dumped keep mask as the explicit mask with scale `1/(1−p)`. Engines that claim Philox dropout must
-  support RNG_DUMP. Without RNG_DUMP the references decline (no exact oracle). The integration harness checks the
+  read the engine's dumped keep mask as the explicit mask with scale `1/(1−p)`. Forward engines that claim Philox
+  dropout must support RNG_DUMP; the backward node has no `rng_dump`. Without RNG_DUMP the forward references decline (no exact oracle). The integration harness checks the
   dumped mask (values in {0, 1}, keep rate within a 6-sigma binomial bound of `1−p`), copies it into the reference
   run and does not compare `rng_dump` itself (`harness/bundle/RngDumpHandoff.hpp`).
 - **Philox mask bits (hipDNN extension; cuDNN does not define them):** engines that implement Philox dropout
@@ -264,7 +265,12 @@ batch when `seq_len_q/kv` are set).
   the releases between are not checked. The generator is Philox4x32-10 keyed by
   the seed. Element (b, h, i, j) uses counter `offset + ((b·Hq + h)·Sq + i)·⌈Skv/4⌉ + ⌊j/4⌋` and word `j mod 4`.
   It is kept iff that word, read as int32, exceeds `int32(f32(p − 0.5)·2³²)`. Sq and Skv are the graph's declared
-  extents (`dims[2]` of Q and K), and h is the query head.
+  extents (`dims[2]` of Q and K), and h is the query head. The plane product `(b·Hq + h)·Sq·⌈Skv/4⌉` is computed in
+  64 bits, forward and backward. AOTriton's Triton kernels compute it in 32 bits, so its masks match only while
+  `(B·Hq − 1)·Sq·⌈Skv/4⌉ < 2³¹`.
+  - **Scope:** the contract binds every engine that serves Philox dropout, forward and backward. The FlyDSL backward
+    engines regenerate the mask from seed and offset, so their gradient is correct only when the forward drew its
+    mask under this contract. Seeded dropout follows this contract, not cuDNN's random stream.
   - **Padded or packed (ragged THD) storage:** `b` is the sequence's index, and `i`, `j` are positions within that
     sequence. They are not token indices in the packed buffer, and Sq and Skv stay the declared extents (the
     maxima), not the sequence's own lengths. This is AOTriton's varlen counter layout (`off_z`, `Max_seqlen_q/k`),
@@ -275,15 +281,22 @@ batch when `seq_len_q/kv` are set).
   - The references run a packed graph as its dense padded rewrite with the dump as the mask
     (`TestRaggedSdpaDensify.PhiloxDropoutThroughTheRewriteAppliesTheDenseDump`,
     `TestGpuRaggedSdpaDensify.PhiloxDropoutWithItsDumpMatchesCpu`).
-- **Probability 0 (Aligned, without `rng_dump`):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
+- **Probability 0 (forward Aligned, backward Diverges; without `rng_dump`):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
   explicit mask or `dropout_scale` drops nothing, so the CPU and GPU forward references compute it as no dropout
   (`isSdpaZeroProbabilityDropout`): bit-identical to the graph without dropout fields. A seed and an offset may be
   given or absent; they are not read, but a named one must be in the graph. Being no dropout, it also combines with
   cuDNN's sdpa_fp8 softmax / output scaling (SEM-024), which declines every other dropout form: O and the amax
-  outputs are bit-identical to the scaled graph without dropout. cudnn-frontend v1.24.0 does the same: a
+  outputs are bit-identical to the scaled graph without dropout. The forward matches cudnn-frontend v1.24.0: a
   probability of 0 builds no dropout (`scaled_dot_product_flash_attention.h:839-842`, backend 8.9.3 and later; the
   unified node sets dropout only for a probability other than 0, `:2449`). Pinned by
-  `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropout`. The backward references are unchanged.
+  `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropout`. The backward references treat the same form as no
+  dropout (`isSdpaZeroProbabilityDropout` on the backward attributes, which also requires `dropout_scale_inv` absent):
+  dQ, dK and dV are bit-identical to the graph without dropout fields. The decline of `dropout_probability`, seed and
+  offset in "hipDNN today" applies to a probability above 0 and to a seed or offset named without a probability.
+  Pinned by `TestSdpaBwdPlanZeroDropout` and `TestGpuSdpaBwdPlanZeroDropout`. The backward diverges from
+  cudnn-frontend v1.24.0, whose backward builds its RNG node from seed and offset whatever the probability
+  (`scaled_dot_product_flash_attention.h:1496-1512`), where hipDNN's backward reads neither at probability 0; it is
+  listed in [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md#sdpa-dropout-random-stream).
 
 ## Score modifiers (extensions and conventions)
 
@@ -431,6 +444,9 @@ batch when `seq_len_q/kv` are set).
   bits as zeros (`KeysNoRowSeesDoNotLeak`). The FlyDSL engines read no V at a key no row of their query block sees
   either, on every family, so NaN or infinity at a key no row sees reaches no output there too (hip-kernel-provider
   `flydsl/COVERAGE.md` §5.7; a non-finite V at a key some row of a tile sees still reaches that tile's other rows).
+  The FlyDSL backward engines (merged and split) behave the same: NaN or infinity in K, V or both at keys no row sees
+  (outside every row's window, past a batch's valid key length, the straddled tile included) leaves dQ, dK and dV
+  finite and equal to the reference, with dK and dV exactly 0 at those keys (`TestFlydslSdpaBwdRemovedKeys`).
 
 ### SEM-028: Ragged Q with `seq_len_kv` alone, non-paged K/V
 

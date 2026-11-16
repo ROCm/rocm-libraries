@@ -447,16 +447,12 @@ namespace
             return;
         }
 
-        SCOPED_TRACE("wide");
-        const Csr<T> wide = full<T>(6, 12);
-        if(f.id == rocalution::DIA && b == Backend::Host)
         {
-            KNOWN_BUG("csr_to_dia sizes the values by the smaller dimension, so LeaveDataPtrDIA "
-                      "aborts");
-            expect_in_child([&] { expect_leave_and_set(b, f, wide); });
-            return;
+            SCOPED_TRACE("wide");
+            expect_leave_and_set(b, f, full<T>(6, 12));
         }
-        expect_leave_and_set(b, f, wide);
+        SCOPED_TRACE("tall");
+        expect_leave_and_set(b, f, full<T>(12, 6));
     }
 }
 
@@ -1788,9 +1784,12 @@ TYPED_TEST(matrix_kernels_host_csritsv, matrix_without_entries)
     EXPECT_EQ(non_unit.y, untouched);
 
     // Every row lacks its diagonal, so the first zero pivot is row 0
-    KNOWN_BUG("without entries the non-unit solve returns before it looks for zero pivots and "
-              "reports none");
     EXPECT_EQ(non_unit.zero_pivot, 0);
+
+    // A non-unit solve without rows has no zero pivot
+    Itsv<T> no_rows = itsv(Csr<T>(0), c, std::vector<T>(), std::vector<T>());
+    EXPECT_TRUE(no_rows.status);
+    EXPECT_EQ(no_rows.zero_pivot, -1);
 }
 
 // Integer entries and a unit diagonal keep every iterate exact. The stored

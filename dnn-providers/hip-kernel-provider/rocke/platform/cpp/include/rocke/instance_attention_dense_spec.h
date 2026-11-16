@@ -169,7 +169,7 @@ typedef struct rocke_attention_dense_traits
     const char* const* nonpersist_decodes;
     size_t num_nonpersist_decodes;
     /* _supports_any_window_size(): a sliding_window that is not a multiple of
-     * block_n is valid. Added at the end (ROCKE_ABI_VERSION 18). */
+     * block_n is valid. Added at the end (ROCKE_ABI_VERSION 20). */
     bool supports_any_window_size;
 } rocke_attention_dense_traits_t;
 

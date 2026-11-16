@@ -714,13 +714,13 @@ TYPED_TEST(multigrid, cycles_match_the_dense_cycle)
            {"V of three levels with scaling", 3, options(Vcycle, 2, 1, true)},
            {"K", 4, options(Kcycle, 1, 1, false)},
            {"K on the first coarse level only", 4, options(Kcycle, 1, 1, false, false)},
-           {"K of two levels", 2, options(Kcycle, 1, 1, false)}};
-    // With four levels the first coarse level scales its correction too
-    const std::vector<CycleCase> coarse_scaling
-        = {{"V with scaling", 4, options(Vcycle, 1, 1, true)},
+           {"K of two levels", 2, options(Kcycle, 1, 1, false)},
+           // With four levels the first coarse level scales its correction too
+           {"V with scaling", 4, options(Vcycle, 1, 1, true)},
            {"K with scaling", 4, options(Kcycle, 1, 2, true)}};
 
-    const auto expect = [](const CycleCase& c) {
+    for(const CycleCase& c : cases)
+    {
         SCOPED_TRACE(c.name);
         UserSetup<T> s(TypeParam::backend, c.levels, c.options);
         s.mg.Build();
@@ -735,16 +735,6 @@ TYPED_TEST(multigrid, cycles_match_the_dense_cycle)
         EXPECT_EQ(s.mg.GetIterationCount(), 2);
         const T res = norm(residual(s.h.A[0], b, expected));
         EXPECT_TRUE(is_near(static_cast<T>(s.mg.GetCurrentResidual()), res, tol<T>()));
-    };
-
-    for(const CycleCase& c : cases)
-    {
-        expect(c);
-    }
-    KNOWN_BUG("coarse levels scale the correction by (b, e) / (Ae, e) instead of (r, e) / (Ae, e)");
-    for(const CycleCase& c : coarse_scaling)
-    {
-        expect(c);
     }
 }
 
@@ -818,9 +808,7 @@ TYPED_TEST(multigrid, zero_coarse_residual_gives_zero_coarse_correction)
 TYPED_TEST(multigrid, scaling_is_on_by_default_and_fixed_at_build)
 {
     using T = typename TypeParam::value_type;
-    // Three levels scale only the finest correction, which the coarse-level scaling bug
-    // leaves alone
-    UserSetup<T> s(TypeParam::backend, 3, CycleOptions(), false);
+    UserSetup<T> s(TypeParam::backend, 4, CycleOptions(), false);
     s.mg.Build();
 
     CycleOptions scaled;
@@ -846,10 +834,8 @@ TYPED_TEST(multigrid, preconditioner_applies_one_cycle_from_zero)
     for(unsigned int cycle : {rocalution::Vcycle, rocalution::Kcycle})
     {
         SCOPED_TRACE(cycle == rocalution::Vcycle ? "V" : "K");
-        // Three levels scale only the finest correction, which the coarse-level scaling
-        // bug leaves alone
         const CycleOptions o = options(cycle, 1, 1, true);
-        UserSetup<T>       s(TypeParam::backend, 3, o);
+        UserSetup<T>       s(TypeParam::backend, 4, o);
         s.mg.InitMaxIter(5);
 
         FixedPoint<T> outer;
@@ -972,9 +958,8 @@ TYPED_TEST_SUITE(multigrid_errors, HostOnly<RealTypes>, TypedName);
 
 TYPED_TEST(multigrid_backends, host_levels_run_the_coarsest_levels_on_the_host)
 {
-    using T = typename TypeParam::value_type;
-    // Without scaling, as the coarse levels scale the correction wrongly
-    const CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
+    using T              = typename TypeParam::value_type;
+    const CycleOptions o = options(rocalution::Kcycle, 1, 1, true);
     UserSetup<T>       s(Backend::Accelerator, 4, o);
     s.mg.Build();
     const Vec<T> b        = rhs<T>(15);
@@ -1903,15 +1888,9 @@ TYPED_TEST(multigrid_amg, scaling_and_formats_of_the_levels)
 {
     using T          = typename TypeParam::value_type;
     const Csr<T> ref = grid<T>(8, 8, 1.0, 1.0, true);
-    struct Result
-    {
-        std::string name;
-        Vec<T>      x;
-        Vec<T>      expected;
-    };
-    std::vector<Result> results;
     for(const AmgCase<T>& c : amg_classes<T>())
     {
+        Vec<T> csr_x;
         for(unsigned int format : {rocalution::CSR, rocalution::ELL})
         {
             const std::string name = c.name + ", " + rocalution::_matrix_format_names[format];
@@ -1930,22 +1909,19 @@ TYPED_TEST(multigrid_amg, scaling_and_formats_of_the_levels)
             const Hierarchy<T> h  = hierarchy_of(*m.amg, ref);
             const Vec<T>       b  = rhs<T>(ref.n);
             const Vec<T>       x0 = initial_guess<T>(ref.n);
-            results.push_back(
-                {name, solve(*m.amg, *m.A, b, x0, 2), cycled(DenseCycle<T>(h, o), b, x0, 2)});
+            const Vec<T>       x  = solve(*m.amg, *m.A, b, x0, 2);
+            expect_near(x, cycled(DenseCycle<T>(h, o), b, x0, 2), tol<T>());
 
             // The format of the levels does not change the cycle
-            if(format == rocalution::ELL)
+            if(format == rocalution::CSR)
             {
-                expect_near(results.back().x, results[results.size() - 2].x, tol<T>());
+                csr_x = x;
+            }
+            else
+            {
+                expect_near(x, csr_x, tol<T>());
             }
         }
-    }
-
-    KNOWN_BUG("coarse levels scale the correction by (b, e) / (Ae, e) instead of (r, e) / (Ae, e)");
-    for(const Result& r : results)
-    {
-        SCOPED_TRACE(r.name);
-        expect_near(r.x, r.expected, tol<T>());
     }
 }
 
@@ -2193,8 +2169,7 @@ TYPED_TEST(multigrid_backends, amg_levels_follow_the_moves_of_the_solver)
     for(const AmgCase<T>& c : amg_classes<T>())
     {
         SCOPED_TRACE(c.name);
-        // Without scaling, as the coarse levels scale the correction wrongly
-        CycleOptions o = options(rocalution::Kcycle, 1, 2, false);
+        CycleOptions o = options(rocalution::Kcycle, 1, 2, true);
         ManualAmg<T> m(Backend::Host, ref, c, 4);
         set_cycle(*m.amg, o);
 

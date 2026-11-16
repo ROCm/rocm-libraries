@@ -1,0 +1,127 @@
+# Integration test configuration for hipkernel:flydsl_sdpa_bwd_split and hipkernel:flydsl_sdpa_bwd_merged
+# (one file for both engines: CMakeLists.txt writes each engine's shard copy with its own header line)
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Tolerance Overrides --
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# The common suite's ToleranceResolver maps both SdpaAttributes and
+# SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (1e-2 for fp16 and bf16),
+# so SDPA backward gradients (dQ/dK/dV) get their own entries here.
+#
+# Generated sweep cases (their ids end in a tolerance class token) take the per-class
+# rows of the block below, as in ASM_SDPA_ENGINE.toml. The two rows before the block
+# cover the single-graph bundles (SdpaBackward/bhsd/{fp16,bf16}/..., whose test name is
+# the graph's file name and carries no class token) and the Golden suites
+# (quick_SdpaBackward_Golden_*, whose ids have no "." after the dtype token, so the fp16
+# row names them separately): the bf16 row equals the default (the Golden bf16 ids take
+# the default) and the fp16 row tightens it. They were calibrated against bundles that
+# derive O and the LSE from the forward, on gfx1100 (split engine only: merged has no
+# gfx11 objects; host input fill) and gfx950 (device and host input fill), with both
+# references: every case passes at fp16 2.5e-3 and bf16 5e-3 (bf16 dV differs by up to
+# 2 ulp from fp32 accumulation order); each value is one grid step above that. The leading "_" in "_fp16_" keeps it from also matching "bfp16_".
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*_fp16_*.*", "*_SdpaBackward_Golden_*.*_fp16_*"]
+atol = 5e-3
+rtol = 5e-3
+
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*_bf16_*.*"]
+atol = 1e-2
+rtol = 1e-2
+
+# BEGIN SdpaBackward tolerance classes, written by generate_sdpa_bwd_bundles.py --toml
+# Plan sdpa-bwd.md §6.1. Each SdpaBackward case id ends with its tolerance class token
+# after its dtype token, so every id matches exactly one row. The class follows from the
+# case's shape, band, scale and value domain and a NumPy estimate of max|ref| per
+# gradient: atol <= 0.1 x the smallest non-zero max|ref| (the guard), and a
+# same-precision kernel model passes with margin >= 2.5 against an FP32-accumulating
+# reference. rtol is two ulps of the dtype. Do not edit: rerun the generator.
+
+# class D, bf16: diffuse softmax
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_told"]
+atol = 0.0025
+rtol = 0.016
+
+# class D, fp16: diffuse softmax
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_told"]
+atol = 0.00075
+rtol = 0.004
+
+# class DL, bf16: diffuse softmax, long rows (bf16, Skv > 1024)
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_toldl"]
+atol = 0.0012
+rtol = 0.016
+
+# class P, bf16: peaked softmax: causal, narrow window, Sq > Skv bottom-right, long Sq accumulation
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolp"]
+atol = 0.012
+rtol = 0.016
+
+# class P, fp16: peaked softmax: causal, narrow window, Sq > Skv bottom-right, long Sq accumulation
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tolp"]
+atol = 0.003
+rtol = 0.004
+
+# class S, bf16: short query side, Sq <= 17 (decode-like); tiny dK, dV
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tols"]
+atol = 0.0003
+rtol = 0.016
+
+# class S, fp16: short query side, Sq <= 17 (decode-like); tiny dK, dV
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tols"]
+atol = 0.0002
+rtol = 0.004
+
+# class U, bf16: unscaled or high-spread logits (lambda >= 2): unset scale, scale ~1, peaked value domain
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolu"]
+atol = 0.025
+rtol = 0.016
+
+# class U, fp16: unscaled or high-spread logits (lambda >= 2): unset scale, scale ~1, peaked value domain
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tolu"]
+atol = 0.003
+rtol = 0.004
+
+# class K1, bf16: Skv <= 2: dQ and dK cancel to about 0 at Skv = 1; dV is a sum of dO rows
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolk1"]
+atol = 0.0003
+rtol = 0.016
+
+# class K1, fp16: Skv <= 2: dQ and dK cancel to about 0 at Skv = 1; dV is a sum of dO rows
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tolk1"]
+atol = 0.0003
+rtol = 0.004
+
+# class F32, fp32: fp32 IO; reported on ROCm/dnn-benchmarking#127: its SDPA backward corpus (81 gfx950 fp32 graphs) passes split at rtol 1e-5, atol 1e-6 against a PyTorch fp32 reference
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp32_*_tolf32"]
+atol = 1e-05
+rtol = 1e-05
+# END SdpaBackward tolerance classes
+
+# Class U bf16 for these kernels (after the block, so it takes precedence): |dS| reaches 3 to 4.5, and
+# rounding dS to bf16 before the dQ/dK MFMA moves a gradient element by up to 0.026 (model; up to 0.035
+# by the worst-case bound), above the class's 0.025. atol 4e-2, rtol 1.6e-2 (two bf16 ulps).
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolu"]
+atol = 4e-2
+rtol = 1.6e-2

@@ -1,4 +1,38 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "golden_1_1_128_128_bf16_causal",
+          "golden_1_1_128_128_bf16_nomask",
+          "golden_1_1_128_128_fp16_causal",
+          "golden_1_1_128_128_fp16_nomask"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "golden_1_1_128_128_bf16_causal",
+          "golden_1_1_128_128_bf16_nomask",
+          "golden_1_1_128_128_fp16_causal",
+          "golden_1_1_128_128_fp16_nomask"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

@@ -93,11 +93,26 @@ test_type = os.getenv("TEST_TYPE", "full")
 if AMDGPU_FAMILIES == "gfx1151" and platform == "windows":
     test_type = "quick"
 
+# Temporarily exclude managed buffer cases under ASAN until the allocator is fixed:
+# Tracking: ROCM-34263 and https://github.com/ROCm/rocm-systems/issues/15163
+# REMOVE once the ROCM-34263 fix is in CI and both Managed cases pass with
+# a clean ASAN exit. Review by 2026-12-15.
 test_filter = []
 if test_type == "quick":
-    test_filter.append("--gtest_filter=*smoke*")
+    if is_asan():
+        test_filter.append(
+            "--gtest_filter=*smoke*-*HipBufferTransferMemoryMode.*/Managed"
+        )
+    else:
+        test_filter.append("--gtest_filter=*smoke*")
 elif test_type == "standard":
-    test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
+    if is_asan():
+        test_filter.append(
+            "--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*:"
+            "*HipBufferTransferMemoryMode.*/Managed"
+        )
+    else:
+        test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
 
 # The tuning store's tests are a separate binary. They need no GPU and take well
 # under a second, so the first shard runs all of them, without gtest sharding.
