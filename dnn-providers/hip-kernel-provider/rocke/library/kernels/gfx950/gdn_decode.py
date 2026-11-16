@@ -144,6 +144,11 @@ __all__ = [
     "xcd_remap_applies",
     "stream_rows_applies",
     "interleave_cols_applies",
+    "ROW_LOADS",
+    "row_loads_applies",
+    "auto_late_row_inputs",
+    "late_row_inputs",
+    "row_loads_overrides",
 ]
 
 DType = Literal["f16", "bf16"]
@@ -219,6 +224,20 @@ _TEMPORAL = {"default": TemporalHint.DEFAULT, "streaming": TemporalHint.STREAMIN
 _HINT_TOKEN = {"streaming": "nt"}
 # Highest amdgpu-waves-per-eu value: a gfx950 SIMD holds at most 8 waves.
 _MAX_WAVES_PER_EU = 8
+# Where a single-wave fuse_conv kernel loads its rows' late inputs (the
+# ``row_loads`` knob): "auto" keeps auto_late_row_inputs' rule, "first" loads them
+# with the other inputs ahead of the math, "late" where each is first used.
+RowLoads = Literal["auto", "first", "late"]
+ROW_LOADS = get_args(RowLoads)
+# kernel_name() token of a forced order that differs from auto's ("rlf" / "rll").
+_ROW_LOADS_TOKEN = {"first": "rlf", "late": "rll"}
+
+
+def _is_row_loads(value: object) -> bool:
+    """Whether ``value`` is one of the three ``ROW_LOADS`` strings (a non-str
+    is not). The validator and ``kernel_name`` both use this, so a value the
+    validator refuses is exactly a value that gets a name of its own."""
+    return type(value) is str and value in ROW_LOADS
 
 
 def _state_ir_type(state_dtype: str):
@@ -323,11 +342,21 @@ def interleave_cols_applies(spec: "GdnDecodeSpec") -> bool:
     return not spec.simple and spec.state_dtype == "f32" and spec.warp_threads_k > 1
 
 
-def late_row_inputs(spec: "GdnDecodeSpec") -> bool:
-    """Whether the warp-tiled emitter loads each row's late inputs where the
-    parent order did instead of first (ALGORITHM.md §4.3, "One exception"):
-    each row's ``v`` conv inputs in the row loop, each state chunk at its
-    decay, and the per-lane ``out_gate`` / ``norm_weight`` at the norm.
+def row_loads_applies(spec: "GdnDecodeSpec") -> bool:
+    """``row_loads``: a single wave with ``fuse_conv``, the one kernel whose
+    rows' late inputs (each row's ``v`` conv inputs, each state chunk, the
+    per-lane ``out_gate`` / ``norm_weight``) have two load orders. Every other
+    warp-tiled kernel loads them first, and the reference path has no rows to
+    order."""
+    return not spec.simple and spec.fuse_conv and spec.num_warps == 1
+
+
+def auto_late_row_inputs(spec: "GdnDecodeSpec") -> bool:
+    """``row_loads="auto"``'s order: whether the warp-tiled emitter loads each
+    row's late inputs where the parent order did instead of first
+    (ALGORITHM.md §4.3, "One exception"): each row's ``v`` conv inputs in the
+    row loop, each state chunk at its decay, and the per-lane ``out_gate`` /
+    ``norm_weight`` at the norm.
 
     Only a single wave with ``fuse_conv`` takes the exception. It owns every
     V row of the head, and hoisting their ``v`` conv inputs together with the
@@ -339,10 +368,18 @@ def late_row_inputs(spec: "GdnDecodeSpec") -> bool:
     late order: at the other ``WTK``, at ``DK = DV = 256``, under a
     ``waves_per_eu`` floor and at the other head dims no test shows hoisting
     spill-free. That set (``DK == DV == 128``, ``WTK`` 4 or 8, no
-    ``waves_per_eu`` floor) is the tested spill envelope, not a workload
-    choice: widen it only together with the spill test.
+    ``waves_per_eu`` floor) is the tested spill envelope, not a timing
+    result: the order is chosen by a spill rule, and a forced ``row_loads``
+    is how the sweep tries the other one. For example ``(1, 16, 1)`` f32
+    ``conv_once`` specs stay on the spill-rule order; whether the other order
+    is better there is for the sweep tool to rank (the repo has no timing
+    record for it). Widening the set is a timing decision for the sweep tool,
+    and it also means extending the WTK set that the spill test
+    ``test_one_wave_conv_once_loads_first_without_a_new_spill`` hard-codes
+    (``wtk in (4, 8)`` in test_gdn_decode_fused.py), so the spill test covers
+    every tile the set admits.
     """
-    if not (spec.fuse_conv and spec.num_warps == 1):
+    if not row_loads_applies(spec):
         return False
     hoists = (
         spec.conv_once
@@ -410,6 +447,21 @@ def _state_row(b: IRBuilder, hv_i, row, spec: "GdnDecodeSpec"):
     return b.add(
         b.mul(hv_i, b.const_i32(spec.head_v_dim * DK)), b.mul(row, b.const_i32(DK))
     )
+
+
+def late_row_inputs(spec: "GdnDecodeSpec") -> bool:
+    """The order the emitter uses: ``row_loads`` where it applies and forces
+    one (``"late"`` / ``"first"``), else :func:`auto_late_row_inputs`."""
+    if spec.row_loads == "auto" or not row_loads_applies(spec):
+        return auto_late_row_inputs(spec)
+    return spec.row_loads == "late"
+
+
+def row_loads_overrides(spec: "GdnDecodeSpec") -> bool:
+    """Whether ``row_loads`` changes the emitted code: it applies and forces
+    the order ``auto`` does not choose. A forced order equal to auto's emits
+    auto's kernel, so it adds no name token either."""
+    return late_row_inputs(spec) != auto_late_row_inputs(spec)
 
 
 def _exp_f32(b: IRBuilder, x):
@@ -687,6 +739,11 @@ class GdnDecodeSpec:
     # it caps registers per lane accordingly. 0 leaves occupancy to the
     # compiler and emits no attribute.
     waves_per_eu: int = 0
+    # Single-wave fuse_conv only (row_loads_applies): where each row's late
+    # inputs load. "auto" is auto_late_row_inputs' rule; "first" / "late"
+    # force one order. A forced order equal to auto's is auto's kernel, and
+    # elsewhere the field changes no code.
+    row_loads: RowLoads = "auto"
     name: str = "rocke_gdn_decode"
 
     @property
@@ -775,6 +832,11 @@ class GdnDecodeSpec:
             )
         if self.waves_per_eu:
             parts += (f"wpe{self.waves_per_eu}",)
+        # A value outside ROW_LOADS (is_valid_spec refuses it) keeps a name of
+        # its own, like a bad hint, so it can never hit a launcher cached
+        # under auto's name.
+        if not _is_row_loads(self.row_loads):
+            parts += (f"rl{self.row_loads!r}",)
         return kernel_name_join(
             self.name,
             *parts,
@@ -790,6 +852,11 @@ class GdnDecodeSpec:
                 "co": self.conv_once,
                 "ngo": self.norm_gate_once,
                 "olds": self.out_lds,
+                # A forced order adds its token only where it is not auto's.
+                **{
+                    token: self.row_loads == order and row_loads_overrides(self)
+                    for order, token in _ROW_LOADS_TOKEN.items()
+                },
             },
         )
 
@@ -853,6 +920,11 @@ def _knob_error(spec: GdnDecodeSpec) -> Optional[str]:
         _value = getattr(spec, _field)
         if _value not in STATE_HINTS:
             return f"{_field} must be one of {STATE_HINTS}, got {_value!r}"
+    # Any order on any spec: a forced order builds and compiles wherever it
+    # applies. Where it spills more than auto's order is a performance
+    # question for the sweep, not a legality one (ALGORITHM.md §4.10).
+    if not _is_row_loads(spec.row_loads):
+        return f"row_loads must be one of {ROW_LOADS}, got {spec.row_loads!r}"
     if not 0 <= spec.waves_per_eu <= _MAX_WAVES_PER_EU:
         return (
             f"waves_per_eu must be in [0, {_MAX_WAVES_PER_EU}], "
@@ -1150,7 +1222,7 @@ class _Tile:
     S_SLOT: int  # bytes per state pool slot
     CST_SLOT: int  # bytes per conv-state pool slot; it carries the I/O dtype
     V_CHAN0: int  # first v channel of the packed [q | k | v] row: 2 * Hk * DK
-    LATE_ROW_INPUTS: bool  # late_row_inputs(spec)
+    LATE_ROW_INPUTS: bool  # late_row_inputs(spec): auto's rule or row_loads
     # the per-lane norm: neither out_lds nor norm_gate_once supplies the gate
     # and weight
     LANE_NORM: bool

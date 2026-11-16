@@ -135,7 +135,7 @@ _REQUIRED_ACCESSORS = ("getIntMetadata", "getStringMetadata")
 
 #: Helpers called as ``helper(<kernel>, <FIELD>)`` that decline the match when the
 #: field is absent: a catalog omitting it declines every candidate.
-_DECLINING_ACCESSORS = ("integerMetadata",)
+_DECLINING_ACCESSORS = ("integerMetadata", "stringMetadata")
 
 _CONST_DEF_RE = re.compile(r'constexpr\s+std::string_view\s+(\w+)\s*=\s*"([^"]*)"\s*;')
 _WRAPPER_LAMBDA_RE = re.compile(

@@ -133,8 +133,8 @@ Design, the full feature table for both references, and how they are tested:
 
 | Feature | Dense SDPA Forward | Ragged SDPA Forward | SDPA Backward |
 |---------|--------------------|---------------------|---------------|
-| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. | Required input |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Lengths come from `ragged_offset`; supplied seq_len tensors go through the dense rewrite (below) | Supported (same rules as dense forward) |
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or ragged with its own `INT32` `ragged_offset` in any layout the ragged container accepts (`[H, T]` or `[T, H]`), with Q's per-batch lengths | Required input |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Supported, both or neither: they bound the per-batch lengths. Without them each `ragged_offset` block, clamped to `S_max`, is the length | Supported (same rules as dense forward) |
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same | Same |
 | Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Through the dense rewrite | Supported |
 | Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Through the dense rewrite (same rule) | Not supported (the backward node has no `rng_dump`) |
@@ -143,7 +143,7 @@ Design, the full feature table for both references, and how they are tested:
 | Additive attention bias (`attn_mask`) | Supported | Through the dense rewrite | Supported |
 | Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K, V or both, each with its own block size; table width `ceil(max_seq_len_kv / block_size)`; an unset extent is inferred as cuDNN does (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) | - |
-| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Through the dense rewrite | - |
+| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported; the log-sum-exp `stats` include the sink | Through the dense rewrite | Not supported (the backward node has no sink input) |
 | Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported | Through the dense rewrite (below) | - |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
 | Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
@@ -158,16 +158,21 @@ with `BFP16` output or an output in the input's FP8 format; ragged
 FP8 forward for `FP8_E4M3` inputs with `BFP16` output.
 
 The ragged plan matches the GPU reference's ragged plan. It needs RFC-0014 tensors with logical
-`[B, H, S, D]` dims with token-major (BSHD) strides and an `INT32` `ragged_offset` aux on every
-primary. A node is keyed as ragged when any of its Q/K/V/O tensors has a `ragged_offset`. The ragged
-plan needs all four to be ragged, and the dense plan rejects any ragged tensor. So a partly ragged
-node is declined by both plans, and goes to the dense rewrite.
+`[B, H, S, D]` dims, an `INT32` `ragged_offset` aux on every primary, and strides the ragged container
+accepts: token-major, head-major, a padded token stride, and shifted or non-monotonic origins with
+`seq_len`. The container rejects layouts that alias. Applicability sees only graph attributes, not offset values: layouts that depend on the values are rejected when the tensor is built (bundle load), or with `std::invalid_argument` at execute for callers passing raw pointers. Per-batch lengths come from `seq_len_q/kv` when
+bound (both or neither; a `padding_mask` only with both, as `isSupportedSdpaPadding`), else from the
+`ragged_offset` blocks clamped to `S_max`. A node is keyed as ragged when any of its Q/K/V/O tensors
+has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense plan rejects any
+ragged tensor. So a partly ragged node is declined by both plans and left to the dense rewrite, which declines it too.
 
 Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
-rewrite (`RaggedSdpaDensify.hpp`): the packed tensors are unpacked into dense padded ones with the
-per-batch lengths as `seq_len_q/kv`, the dense plan runs, and the outputs are packed back. They
-therefore support everything the dense forward and backward columns list. Supplied `seq_len` tensors
-(cuDNN's ragged + padding form) must not exceed the packed lengths.
+rewrite when it accepts them (`RaggedSdpaDensify.hpp`): the packed tensors are unpacked into dense padded ones with the
+per-batch lengths (`seq_len` when supplied, else the offset blocks) as `seq_len_q/kv`, the dense plan
+runs, and the outputs are packed back. They therefore support everything the dense forward and
+backward columns list. The rewrite serves `Max` and `Sum_exp` (bound by `seq_len_q`), `INT64`
+offsets and ragged Q over non-ragged paged K/V. What it declines (for example a `ragged_offset` on
+paged K/V, a non-`INT32` `seq_len`) is listed in RFC 0014 §4.10; such a graph is unsupported.
 
 The semantics the references implement (cuDNN's), and every place where cuDNN, PyTorch, vLLM and
 FlashAttention-style kernels disagree, are recorded in the [SDPA semantics register](SdpaSemanticsRegister.md).

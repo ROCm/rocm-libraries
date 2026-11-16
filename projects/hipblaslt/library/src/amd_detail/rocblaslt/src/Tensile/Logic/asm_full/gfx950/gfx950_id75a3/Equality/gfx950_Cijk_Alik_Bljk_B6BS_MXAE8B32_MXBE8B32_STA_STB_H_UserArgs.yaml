@@ -1,0 +1,149 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+MinimumRequiredVersion: 5.0.0
+ScheduleName: gfx950
+ArchitectureName: gfx950
+CUCount: null
+DeviceNames: [Device 75a3]
+ProblemType:
+  Activation: false
+  ActivationComputeDataType: 0
+  ActivationNoGuard: false
+  ActivationType: none
+  AllowNoFreeDims: false
+  AssignedDerivedParameters: true
+  Batched: true
+  BetaOnlyUseBias: false
+  BiasDataTypeList: []
+  BiasSrc: D
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  DataType: 20
+  DataTypeA: 20
+  DataTypeAmaxD: 0
+  DataTypeB: 20
+  DataTypeE: 7
+  DataTypeMXSA: 22
+  DataTypeMXSB: 22
+  DestDataType: 7
+  F32XdlMathOp: 0
+  FusedGemmA2A: false
+  GateResidualDataTypeList: []
+  Gradient: false
+  GroupedGemm: false
+  HighPrecisionAccumulate: true
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index01MXSA: 0
+  Index01MXSB: 1
+  Index1: 1
+  IndexAssignmentsA: [3, 0, 2]
+  IndexAssignmentsB: [3, 1, 2]
+  IndexAssignmentsLD: [4, 5, 6, 7]
+  IndexAssignmentsMXSA: [3, 0, 2]
+  IndexAssignmentsMXSB: [3, 1, 2]
+  IndexAssignmentsMetadata: [3, 0, 2]
+  IndexUnroll: 3
+  IndexUnrollA: 0
+  IndexUnrollB: 0
+  IndexUnrollM: 0
+  IndexUnrollMXSA: 0
+  IndexUnrollMXSB: 0
+  IndicesBatch: [2]
+  IndicesFree: [0, 1]
+  IndicesSummation: [3]
+  MXBlockA: 32
+  MXBlockB: 32
+  MacDataTypeA: 20
+  MacDataTypeB: 20
+  MetadataLayout: 0
+  MirrorDimsA: []
+  MirrorDimsB: []
+  MirrorDimsMXSA: []
+  MirrorDimsMXSB: []
+  MirrorDimsMetadata: []
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  OutputAmaxD: false
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SetConstStrideBias: []
+  SetConstStrideGate: []
+  SilentHighPrecisionAccumulate: false
+  Sparse: 0
+  StochasticRounding: false
+  StridedBatched: true
+  SupportUserArgs: true
+  SwizzleTensorA: true
+  SwizzleTensorB: true
+  TLUA: false
+  TLUB: false
+  TLUMXSA: false
+  TLUMXSB: false
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: false
+  UseBeta: false
+  UseBias: 0
+  UseE: false
+  UseGateResidual: false
+  UseInitialStridesAB: false
+  UseInitialStridesCD: false
+  UseScaleAB: ''
+  UseScaleAlphaVec: 0
+  UseScaleCD: false
+  isMixMode: false
+Solutions:
+- SolutionIndex: 0
+  CustomKernelName: rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_4096x4096x65536_c0c1_k4b371438f4
+  KernelLanguage: Assembly
+  Valid: true
+  EnableMatrixInstruction: true
+  ISA: [9, 5, 0]
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstK: 128
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MIBlock: [16, 16, 128, 1, 1, 1]
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MIInputPerThread: 32
+  MXScaleFormat: HostPreSwizzle128x4
+- SolutionIndex: 1
+  CustomKernelName: rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_4096x4096x131584_c0c1
+  KernelLanguage: Assembly
+  Valid: true
+  EnableMatrixInstruction: true
+  ISA: [9, 5, 0]
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstK: 128
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MIBlock: [16, 16, 128, 1, 1, 1]
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MIInputPerThread: 32
+  MXScaleFormat: HostPreSwizzle128x4
+IndexOrder: [2, 3, 0, 1]
+ExactLogic:
+- - [4096, 4096, 1, 65536]
+  - [0, 4192210.0]
+- - [4096, 4096, 1, 131584]
+  - [1, 4033310.0]
+RangeLogic: null
+TileSelectionIndices: null
+PerfMetric: DeviceEfficiency
+LibraryType: Equality

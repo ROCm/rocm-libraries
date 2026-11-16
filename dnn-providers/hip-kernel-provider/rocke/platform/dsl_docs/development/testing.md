@@ -22,7 +22,9 @@ When adding or moving a native C++ test, edit its concern-owned fragment rather
 than `tests/CMakeLists.txt`. The ownership rules, same-directory-scope rationale,
 and before/after inventory comparison recipe are in
 [`tests/README.md`](../../tests/README.md#cmake-registration-ownership).
-Installed Python and library CTest entries remain in `platform/CMakeLists.txt`.
+Installed Python CTest entries remain in `platform/CMakeLists.txt`, which
+includes `library/tests/ctest_lists.cmake`; that file owns the installed library
+CTest entries.
 
 > The upstream `python/test/test_rocke_examples.py` end-to-end harness and the
 > `example/ck_tile/dsl/<N>_*/gen.py` generators are **not** part of rocKE (they

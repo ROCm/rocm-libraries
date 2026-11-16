@@ -56,6 +56,55 @@ TEST(TestTypes, BehaviorNoteFromBackend)
     }
 }
 
+TEST(TestTypes, NumericalNoteFromBackend)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE),
+              NumericalNote::TENSOR_CORE);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS),
+              NumericalNote::DOWN_CONVERT_INPUTS);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION),
+              NumericalNote::REDUCED_PRECISION_REDUCTION);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_FFT), NumericalNote::FFT);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC),
+              NumericalNote::NONDETERMINISTIC);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_WINOGRAD), NumericalNote::WINOGRAD);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4),
+              NumericalNote::WINOGRAD_TILE_4x4);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6),
+              NumericalNote::WINOGRAD_TILE_6x6);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13),
+              NumericalNote::WINOGRAD_TILE_13x13);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP),
+              NumericalNote::STRICT_NAN_PROP);
+
+    // TYPE_COUNT and values beyond it are not notes; the 0-based backend values
+    // must never alias onto the 1-based frontend enumerators.
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_TYPE_COUNT), std::nullopt);
+    EXPECT_EQ(fromHipdnnNumericalNote(HIPDNN_NUMERICAL_NOTE_TYPE_COUNT + 1), std::nullopt);
+    EXPECT_EQ(fromHipdnnNumericalNote(-1), std::nullopt);
+}
+
+TEST(TestTypes, IsKnownNumericalNote)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::TENSOR_CORE));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::DOWN_CONVERT_INPUTS));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::REDUCED_PRECISION_REDUCTION));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::FFT));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::NONDETERMINISTIC));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::WINOGRAD));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::WINOGRAD_TILE_4x4));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::WINOGRAD_TILE_6x6));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::WINOGRAD_TILE_13x13));
+    EXPECT_TRUE(isKnownNumericalNote(NumericalNote::STRICT_NAN_PROP));
+    EXPECT_FALSE(isKnownNumericalNote(NumericalNote::NOT_SET));
+    EXPECT_FALSE(isKnownNumericalNote(static_cast<NumericalNote>(11)));
+    EXPECT_FALSE(isKnownNumericalNote(static_cast<NumericalNote>(-1)));
+}
+
 TEST(TestTypes, IsKnownBehaviorNote)
 {
     using namespace hipdnn_frontend;

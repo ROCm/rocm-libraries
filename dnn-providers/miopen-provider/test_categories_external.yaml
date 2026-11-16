@@ -7,24 +7,29 @@
 # categories in test_categories.yaml. This file labels the *pre-registered*
 # (non-GTest) CTest tests that share this provider's check targets.
 #
-# The only such test today is the generated <project>_test_name_validation
-# meta-test (see dnn-providers/cmake/Tests.cmake
-# _create_test_name_validation_target_internal). Without an entry here it
-# carries no labels and is never selected by `ctest -L <tier>`, so it silently
-# drops out of every check target. Label it into the quick tier; the shared
-# parser's tier cascade (quick -> quick, standard, comprehensive, full) then
-# runs it in every cumulative check target, matching the pre-YAML behaviour
-# where the validation test carried the quick label.
+# These are:
+#   - the generated <project>_test_name_validation meta-test (see
+#     dnn-providers/cmake/Tests.cmake _create_test_name_validation_target_internal)
+#   - the external integration lane's --benchmark-reference smoke, which runs a
+#     few bundle tests with reference timing on and checks that a verified
+#     measurement is reported (see BENCHMARK_REFERENCE_SMOKE_FILTER in
+#     HipdnnIntegrationTestHelpers.cmake)
+# Without an entry here a pre-registered test carries no labels and is never
+# selected by `ctest -L <tier>`, so it silently drops out of every check target.
+# Label them into the quick tier; the shared parser's tier cascade
+# (quick -> quick, standard, comprehensive, full) then runs them in every
+# cumulative check target, matching the pre-YAML behaviour where the validation
+# test carried the quick label.
 #
-# The pattern is the exact CTest test name (miopen-provider_test_name_validation)
-# so it matches only the validation meta-test and never the
+# The patterns are exact CTest test names, so they never match the
 # external-integration-check target, which is categorised separately via
 # test_categories_integration.yaml.
 test_categories:
   quick:
-    description: "Pre-registered CTest meta-checks (test-name validation)"
+    description: "Pre-registered CTest checks (test-name validation, reference-timing smoke)"
     test_patterns:
       - "miopen-provider_test_name_validation"
+      - "miopen-provider-external-integration-check-benchmark-reference-smoke"
     labels:
       - "quick"
       - "pre-commit"

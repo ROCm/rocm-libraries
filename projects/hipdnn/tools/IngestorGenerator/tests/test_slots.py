@@ -830,6 +830,11 @@ REFUSALS = [
         r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
     ),
     (
+        "ws_token_false",
+        lambda raw: raw["engine"].update(shared_workspace=False),
+        r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
+    ),
+    (
         "slot_without_pack",
         _drop_prep_pack,
         r"slot 'prep' declares no packs",
@@ -839,11 +844,6 @@ REFUSALS = [
         "knob_not_declared_in_slot_kmd",
         lambda raw: raw["slots"][2].update(knobs=["block_m", "num_warps"]),
         r"slots\[dq\].knobs names 'num_warps', which no kmd_fields entry declares",
-    ),
-    (
-        "string_knob",
-        lambda raw: raw["slots"][1].update(knobs=["dtype"]),
-        r"slots\[dkdv\].knobs names 'dtype', declared in kmd_fields with type 'string'",
     ),
     (
         "duplicate_knob",
@@ -977,6 +977,11 @@ def test_an_unslotted_config_refuses_a_pack_slot_and_a_shared_workspace(
     shared = copy.deepcopy(raw)
     shared["engine"]["shared_workspace"] = "ws.bytes"
     path.write_text(yaml.safe_dump(shared), encoding="utf-8")
+    with pytest.raises(ConfigError, match=r"key 'shared_workspace' requires 'slots'"):
+        load_config(path)
+    falsey = copy.deepcopy(raw)
+    falsey["engine"]["shared_workspace"] = False
+    path.write_text(yaml.safe_dump(falsey), encoding="utf-8")
     with pytest.raises(ConfigError, match=r"key 'shared_workspace' requires 'slots'"):
         load_config(path)
 

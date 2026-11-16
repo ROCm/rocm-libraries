@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,8 +30,7 @@ message(STATUS "\t==>CMAKE_MODULE_PATH link            : ${CMAKE_MODULE_PATH}")
 message(STATUS "\t==>CMAKE_PREFIX_PATH link            : ${CMAKE_PREFIX_PATH}")
 message(STATUS "==============")
 message(STATUS "\t==>CMAKE_SYSTEM_NAME                 : ${CMAKE_SYSTEM_NAME}")
-message(STATUS "\t>>=HIP_ROOT_DIR                      : ${HIP_ROOT_DIR}")
-message(STATUS "\t==>CMAKE_CXX_COMPILER                : ${CMAKE_CXX_FLAGS}")
+message(STATUS "\t==>CMAKE_CXX_COMPILER                : ${CMAKE_CXX_COMPILER}")
 message(STATUS "\t==>CMAKE_CXX_COMPILER_VERSION        : ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "\t==>CMAKE_CXX_COMPILER debug          : ${CMAKE_CXX_FLAGS_DEBUG}")
 message(STATUS "\t==>CMAKE_CXX_COMPILER release        : ${CMAKE_CXX_FLAGS_RELEASE}")
@@ -49,7 +48,10 @@ message(STATUS "\t==>CMAKE_SHARED_LINKER_FLAGS_RELEASE : ${CMAKE_SHARED_LINKER_F
 message(STATUS "==============" )
 message(STATUS "\t==>SUPPORT_HIP                       : ${SUPPORT_HIP}")
 if(SUPPORT_HIP)
-  message(STATUS "\t\t-->HIP_VERSION               : ${HIP_VERSION}")
+  message(STATUS "\t\t-->hip_VERSION               : ${hip_VERSION}")
+  message(STATUS "\t\t-->CMAKE_HIP_COMPILER        : ${CMAKE_HIP_COMPILER}")
+  message(STATUS "\t\t-->CMAKE_HIP_FLAGS           : ${CMAKE_HIP_FLAGS}")
+  message(STATUS "\t\t-->GPU_TARGETS               : ${GPU_TARGETS}")
 endif()
 message(STATUS "\t==>SUPPORT_OMP                       : ${SUPPORT_OMP}")
 if(SUPPORT_OMP)
@@ -66,4 +68,3 @@ message(STATUS "\t==>BUILD_CLIENTS_TESTS               : ${BUILD_CLIENTS_TESTS}"
 message(STATUS "\t==>BUILD_CLIENTS_SAMPLES             : ${BUILD_CLIENTS_SAMPLES}")
 message(STATUS "==============" )
 message(STATUS "==========================================")
-message(STATUS "\t==>AMDGPU_TARGETS                    : ${AMDGPU_TARGETS}")

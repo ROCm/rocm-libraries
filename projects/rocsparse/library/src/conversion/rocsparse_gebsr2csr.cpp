@@ -25,6 +25,7 @@
 #include "internal/conversion/rocsparse_gebsr2csr.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_bsr2csr.hpp"
@@ -34,53 +35,64 @@
 
 #include "gebsr2csr_device.h"
 
-#define launch_gebsr2csr_block_per_row_1_32_kernel(block_size, brow_block_dim, bcol_block_dim) \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                        \
-        (rocsparse::                                                                           \
-             gebsr2csr_block_per_row_1_32_kernel<block_size, brow_block_dim, bcol_block_dim>), \
-        dim3(mb),                                                                              \
-        dim3(block_size),                                                                      \
-        0,                                                                                     \
-        stream,                                                                                \
-        dir,                                                                                   \
-        mb,                                                                                    \
-        nb,                                                                                    \
-        bsr_descr->base,                                                                       \
-        bsr_val,                                                                               \
-        bsr_row_ptr,                                                                           \
-        bsr_col_ind,                                                                           \
-        row_block_dim,                                                                         \
-        col_block_dim,                                                                         \
-        csr_descr->base,                                                                       \
-        csr_val,                                                                               \
-        csr_row_ptr,                                                                           \
-        csr_col_ind);
+#define launch_gebsr2csr_block_per_row_1_32_kernel(block_size, brow_block_dim, bcol_block_dim)  \
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                                \
+        handle, mb, block_size, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {      \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                 \
+                (rocsparse::gebsr2csr_block_per_row_1_32_kernel<block_size,                     \
+                                                                brow_block_dim,                 \
+                                                                bcol_block_dim,                 \
+                                                                decltype(grid_stride)::value>), \
+                dim3(grid),                                                                     \
+                dim3(block_size),                                                               \
+                0,                                                                              \
+                stream,                                                                         \
+                dir,                                                                            \
+                mb,                                                                             \
+                nb,                                                                             \
+                bsr_descr->base,                                                                \
+                bsr_val,                                                                        \
+                bsr_row_ptr,                                                                    \
+                bsr_col_ind,                                                                    \
+                row_block_dim,                                                                  \
+                col_block_dim,                                                                  \
+                csr_descr->base,                                                                \
+                csr_val,                                                                        \
+                csr_row_ptr,                                                                    \
+                csr_col_ind);                                                                   \
+            return rocsparse_status_success;                                                    \
+        }));
 
-#define launch_gebsr2csr_block_per_row_33_128_kernel(                                 \
-    block_size, brow_block_dim, bcol_block_dim, sub_row_block_dim, sub_col_block_dim) \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                               \
-        (rocsparse::gebsr2csr_block_per_row_33_128_kernel<block_size,                 \
-                                                          brow_block_dim,             \
-                                                          bcol_block_dim,             \
-                                                          sub_row_block_dim,          \
-                                                          sub_col_block_dim>),        \
-        dim3(mb),                                                                     \
-        dim3(block_size),                                                             \
-        0,                                                                            \
-        stream,                                                                       \
-        dir,                                                                          \
-        mb,                                                                           \
-        nb,                                                                           \
-        bsr_descr->base,                                                              \
-        bsr_val,                                                                      \
-        bsr_row_ptr,                                                                  \
-        bsr_col_ind,                                                                  \
-        row_block_dim,                                                                \
-        col_block_dim,                                                                \
-        csr_descr->base,                                                              \
-        csr_val,                                                                      \
-        csr_row_ptr,                                                                  \
-        csr_col_ind);
+#define launch_gebsr2csr_block_per_row_33_128_kernel(                                             \
+    block_size, brow_block_dim, bcol_block_dim, sub_row_block_dim, sub_col_block_dim)             \
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                                  \
+        handle, mb, block_size, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {        \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                   \
+                (rocsparse::gebsr2csr_block_per_row_33_128_kernel<block_size,                     \
+                                                                  brow_block_dim,                 \
+                                                                  bcol_block_dim,                 \
+                                                                  sub_row_block_dim,              \
+                                                                  sub_col_block_dim,              \
+                                                                  decltype(grid_stride)::value>), \
+                dim3(grid),                                                                       \
+                dim3(block_size),                                                                 \
+                0,                                                                                \
+                stream,                                                                           \
+                dir,                                                                              \
+                mb,                                                                               \
+                nb,                                                                               \
+                bsr_descr->base,                                                                  \
+                bsr_val,                                                                          \
+                bsr_row_ptr,                                                                      \
+                bsr_col_ind,                                                                      \
+                row_block_dim,                                                                    \
+                col_block_dim,                                                                    \
+                csr_descr->base,                                                                  \
+                csr_val,                                                                          \
+                csr_row_ptr,                                                                      \
+                csr_col_ind);                                                                     \
+            return rocsparse_status_success;                                                      \
+        }));
 
 namespace rocsparse
 {

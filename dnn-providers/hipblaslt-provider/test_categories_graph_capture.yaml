@@ -1,0 +1,57 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipblaslt-provider graph-capture lane categories.
+#
+# HIPBLASLT_ENGINE reports SUPPORTS_GRAPH_CAPTURE. Its graph-capture lane is pinned to it
+# via --test-engine and passes --graph-capture: every bundle test the engine verifies is
+# captured into a HIP graph, replayed, and checked again with the same oracle.
+#
+# The patterns name a few quick matmul bundle suites. The standard, comprehensive and full
+# tiers run the same short list; the lane stays out of quick and ffm-quick. Keep the
+# patterns in step with the graph-capture lane's GTEST_FILTER in CMakeLists.txt, which the
+# legacy-label build passes instead of this file.
+
+_graph_capture_patterns: &graph_capture_patterns
+  - "quick_Matmul_Default.*"
+  - "quick_MatmulPointwise_Default.*"
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  standard:
+    description: "Graph-capture replay of a few quick matmul bundle suites"
+    test_patterns: *graph_capture_patterns
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Graph-capture replay of a few quick matmul bundle suites"
+    test_patterns: *graph_capture_patterns
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Graph-capture replay of a few quick matmul bundle suites"
+    test_patterns: *graph_capture_patterns
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+# The tiers run the same list, so each gets the 600 s kill limit the other lanes' quick
+# tiers use.
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    standard: 600
+    comprehensive: 600
+    full: 600

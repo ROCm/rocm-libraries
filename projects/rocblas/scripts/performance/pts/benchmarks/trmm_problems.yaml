@@ -16,4 +16,6 @@ Tests:
     diag: [ N ]
     alpha: 1
     matrix_size: *m_equals_n_range
+    iters: 100
+    cold_iters: 20
 ...

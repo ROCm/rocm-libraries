@@ -8,7 +8,7 @@ Manually finding optimal configurations is impractical, so a set of tools in thi
 
 ## Provided tools
 
-The `rocprim/tuning` folder contains mostly tools and templates.  
+The `rocprim/tuning` folder contains mostly tools and templates.
 
 ### Tuner
 
@@ -42,7 +42,7 @@ Kernel Tuner depends on the following libraries:
 As an example, the following commands can be used to tune the device merge algorithm:
 
 ```sh
-# Change directory 
+# Change directory
 cd projects/rocprim/tuning
 
 # Activate virtual environment
@@ -64,6 +64,9 @@ pip3 install jinja2 kernel-tuner numpy
 
 Note that we have to explicitly tell it which specific GPU architecture we're generating the configs for, using `--map-gfx`.
 This is because this information is missing from the output of the tuning scripts.
+
+By default, unknown targets use the algorithm's default config (`*_config_params_base`).
+Pass `--default-tuning fastest` to make unknown targets use the tuned configs of the lowest tuned architecture instead.
 
 ## Migrating from old tuning infrastructure
 

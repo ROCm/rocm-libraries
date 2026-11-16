@@ -33,15 +33,10 @@
 # §4.2). Each carries metadata.expected_rejection: the engine must decline it,
 # and ASM_SDPA_ENGINE accepts it today, so it would fail every lane. Each entry
 # names its ticket; the pull request that adds the decline deletes it.
-#   prbu01, prbu03  O or dQ dims that differ from Q's: ALMIOPEN-3039 (#14684)
-#   prbu13          a dQ sequence stride below D (overlapping rows): ALMIOPEN-3038 (#14684)
 #   prbt04, prbt04n an O dtype that differs from Q's: ALMIOPEN-3050
 #   prbr05          dropout_scale_inv without a dropout mask: ALMIOPEN-3051
 _common_excludes: &common_excludes
   - "*DISABLED*"
-  - "*_SdpaBackward_*.prbu01_*"
-  - "*_SdpaBackward_*.prbu03_*"
-  - "*_SdpaBackward_*.prbu13_*"
   - "*_SdpaBackward_*.prbt04_*"
   - "*_SdpaBackward_*.prbt04n_*"
   - "*_SdpaBackward_*.prbr05_*"

@@ -10,7 +10,7 @@ import unittest
 
 from rocke.benchmark.perf import occupancy
 from rocke.core.arch import ArchTarget, known_arches
-from rocke.tests.llc import find_llvm_tool, llc_code_object, llc_occupancy
+from rocke.tests.llc import llc_code_object, llc_occupancy, require_amdgpu_llc
 
 # gfx908 register counts at the edges of every wave count, and the waves per SIMD
 # the compiler reports at each (separate 256-entry VGPR and AGPR files, steps of 4,
@@ -56,9 +56,7 @@ class TestGfx908RegisterFiles(unittest.TestCase):
         # Real code objects, with and without AGPRs: both the VGPR-file estimate
         # and the multi-limiter model read from the notes equal the wave count llc
         # reports for the same kernel.
-        llc = find_llvm_tool("llc")
-        if llc is None or find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+        llc = require_amdgpu_llc()
         for vgprs, agprs in _GFX908_REGISTER_USES:
             with self.subTest(vgprs=vgprs, agprs=agprs):
                 code_object = llc_code_object(

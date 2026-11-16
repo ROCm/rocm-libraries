@@ -8,8 +8,7 @@ class data_type
 {%- endblock %}
 
 {% block config_guard scoped %}
-    ({% if not type.data_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= {{ type.data_type.size }})
+    ({{ mk_type_trait_guard(type.data_type) }}(sizeof(data_type) <= {{ type.data_type.size }})
     {% if type.data_type.size_min > 0 %}&& (sizeof(data_type) > {{ type.data_type.size_min }}){% endif %})
 {%- endblock %}
 

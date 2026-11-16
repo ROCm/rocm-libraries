@@ -107,6 +107,21 @@ def test_gfx950_emits_mode_all_without_torch(tmp_path):
         assert bool(extra) == bool(r.get("varlen")), r
 
 
+def test_fp8_is_refused_with_emit_shapes(tmp_path):
+    """The trace schema carries one ``q_dtype`` and no KV-storage field, but
+    ``--dtype fp8`` means bf16 Q with fp8 K/V. ``"fp8"`` is in neither of
+    ``mine_shapes.normalise_dtype``'s spelling tables, so the consumer aborts on
+    it, and writing ``"bf16"`` instead would silently drop the fp8 requirement.
+    Only gfx950 offers the choice at all."""
+    out = tmp_path / "shapes.jsonl"
+
+    result = _run("gfx950", [], "--emit-shapes", str(out), "--dtype", "fp8")
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "--emit-shapes does not support --dtype fp8" in result.stderr
+    assert not out.exists()
+
+
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_an_unknown_argument_is_refused_with_emit_shapes(tmp_path, arch):
     """A typo'd filter must not quietly emit the default shape set."""
