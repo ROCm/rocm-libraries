@@ -107,7 +107,8 @@ inline int64_t epilogueOutputUid(size_t steps)
 template <typename T>
 ::flatbuffers::Optional<T> fbOptional(const std::optional<T>& value)
 {
-    return value.has_value() ? ::flatbuffers::Optional<T>(*value) : ::flatbuffers::nullopt;
+    return value.has_value() ? ::flatbuffers::Optional<T>(value.value_or(T{}))
+                             : ::flatbuffers::nullopt;
 }
 
 /// The forward convolution of @p shape, its y virtual of @p intermediate type, then @p steps.

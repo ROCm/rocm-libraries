@@ -25,7 +25,8 @@
     "swz",
     "dma",
     "fuse",
-    "large"
+    "large",
+    "patch"
   ],
   "behavior_notes": [
     "runtime_compilation"

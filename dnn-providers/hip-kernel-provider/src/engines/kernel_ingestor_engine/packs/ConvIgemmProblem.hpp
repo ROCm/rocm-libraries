@@ -80,6 +80,25 @@ IgemmProblem withoutFilterStaging(const IgemmProblem& problem);
 /// the filter do not allow it.
 std::optional<IgemmProblem> withFusedGroups(const IgemmProblem& problem, int64_t fuse);
 
+/**
+ * @brief @p problem as a patch config runs it, or nullopt where it is not a patch convolution.
+ *
+ * One group, and along width (forward) or every axis (backward data) a filter extent equal to
+ * the stride, no padding, unit dilation and an input extent the stride divides; at least one
+ * axis folded (a filter extent above one).
+ *
+ * Forward reads the channels-last input as W / S pixels of S C channels each and the K T R S C/g
+ * filter as K T R 1 (S C): the same bytes, so each filter row's taps become one contiguous run
+ * of the reduction and the vector loads span whole runs. The kernel is unchanged.
+ *
+ * Backward data runs dx[(n, od, oh, ow)][(t, r, s, c)] = sum_k dy[(n, od, oh, ow)][k]
+ * w[k][(t, r, s, c)] as one GEMM over dy's positions (a 1x1, unit-stride problem of T R S C
+ * columns) with the patch scatter in the epilogue (K1_PATCH): every dx element is written once,
+ * with no stride phases. The filter is read as given (direct-filter configs) or staged as
+ * [t][r][s][c][k] (reflected for true convolution).
+ */
+std::optional<IgemmProblem> withPatchView(const IgemmProblem& problem);
+
 /// Whether @p problem's output (forward y, backward data dx) is packed channels-first, so a
 /// channels-first-output config writes it in place of the staging transpose.
 bool outputChannelsFirst(const IgemmProblem& problem);
@@ -185,13 +204,16 @@ struct SplitPlan
 /// (device_units), keeping at least 64. A device that reports no units gets no split (the
 /// kernel match declines it). @p pack: 1 the config's k-steps span whole taps (tap packing), so
 /// a k-step covers bk / (reduction channels) taps; 2 the reduction runs flat (taps x channels in
-/// k-steps of bk).
+/// k-steps of bk). @p noSplit (patch configs): one launch whatever the fill; their GEMMs are
+/// microsecond-scale, so the reduce launch and the partials' round trip cost more than an
+/// under-filled grid.
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
                        int64_t bk,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
-                       int64_t pack = 0);
+                       int64_t pack = 0,
+                       bool noSplit = false);
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
 /// are fewer than bk and divide it.

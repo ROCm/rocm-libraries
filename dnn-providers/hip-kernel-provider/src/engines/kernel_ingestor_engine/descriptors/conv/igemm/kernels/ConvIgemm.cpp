@@ -20,8 +20,11 @@
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 //   K1_LARGE            1: 64-bit positions within an image (large-image configs, images past
 //                       2^31 - 1 pixels)
+//   K1_PATCH            1: patch configs (backward data's patch scatter); 2: the patch-tile
+//                       kernel (k1PatchMma, ConvIgemmPatch.h)
 
 #include "ConvIgemmCore.h"
+#include "ConvIgemmPatch.h"
 
 #ifndef CONV_IGEMM_XCD
 #define CONV_IGEMM_XCD 0
@@ -63,7 +66,18 @@
 extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPANCY
     ConvIgemm(K1Args a CONV_EPI_PARAM)
 {
-#if CONV_IGEMM_FMA
+#if K1_PATCH == 2
+    k1PatchMma<CONV_IGEMM_T,
+               CONV_IGEMM_ATOM,
+               CONV_IGEMM_BM,
+               CONV_IGEMM_BN,
+               CONV_IGEMM_BK,
+               CONV_IGEMM_WM,
+               CONV_IGEMM_WN,
+               CONV_IGEMM_VEC,
+               CONV_IGEMM_DIR,
+               CONV_IGEMM_WD>(a CONV_EPI_ARG);
+#elif CONV_IGEMM_FMA
     k1ConvFma<CONV_IGEMM_T,
               CONV_IGEMM_BM,
               CONV_IGEMM_BN,
