@@ -811,8 +811,8 @@ def _also_performance(m):
             ["spec_overrides", "no_such"],
         ),
         (
-            lambda m: m["enumerate"].update(spec_overrides={"num_segments": 2}),
-            ["spec_overrides", "num_segments", "performance"],
+            lambda m: m["enumerate"].update(spec_overrides={"hdim": 128}),
+            ["spec_overrides", "hdim", "feature"],
         ),
         (_override_and_neutral, ["spec_overrides", "neutral_fields", "num_seqs"]),
     ],
@@ -826,7 +826,7 @@ def _also_performance(m):
         "neutral-is-performance",
         "overrides-not-a-mapping",
         "overrides-unknown",
-        "overrides-is-performance",
+        "overrides-is-feature",
         "overrides-is-neutral",
     ],
 )
@@ -1355,3 +1355,141 @@ def test_manifest_heuristics_reach_the_generated_engine_and_its_ued(probe):
     catalog = build_ued(config, mint_ids(config))["sort_kernel_catalog"]
     assert list(catalog) == ["default", "gfx942"]
     assert catalog["gfx942"] == [model]
+
+
+# hold_fields / performance overrides: a section pins a performance field to one value (a
+# production stack the registry's sweep never combines) and the others hold it.
+
+
+def _conv_hold(tmp_path, monkeypatch, **enumerate_keys):
+    manifest = synth.conv_probe_manifest(synth.provider(tmp_path, monkeypatch))
+    manifest["reduction"]["fields"] = {
+        "feature": ["direction", "dtype", "arch"],
+        "performance": [{"name": "tile_m"}],
+        "ignored": ["tile_n", "tile_k"],
+    }
+    manifest["enumerate"].update(enumerate_keys)
+    return manifest
+
+
+def _tile_ms(manifest) -> list:
+    return [k["kernel_source"]["spec"]["tile_m"] for k in _kernels(manifest)]
+
+
+def test_a_performance_field_varies_unless_the_section_holds_it(tmp_path, monkeypatch):
+    manifest = _conv_hold(tmp_path, monkeypatch)
+    assert _tile_ms(manifest) == [64, 128, 64, 128, 64, 128, 64, 128]
+    manifest["enumerate"]["hold_fields"] = ["tile_m"]
+    assert _tile_ms(manifest) == [64, 64, 64, 64]
+
+
+def test_a_section_may_override_a_performance_field_it_also_holds(
+    tmp_path, monkeypatch
+):
+    """The override moves the section's default spec; holding then keeps every spec of the
+    section there, so the performance field is one value per section."""
+    manifest = _conv_hold(
+        tmp_path, monkeypatch, hold_fields=["tile_m"], spec_overrides={"tile_m": 128}
+    )
+    assert _tile_ms(manifest) == [128, 128, 128, 128]
+
+
+def test_an_also_section_inherits_hold_fields_and_pins_its_own_value(
+    tmp_path, monkeypatch
+):
+    """The production-stack pattern: the primary holds the performance field at its
+    default and an `also` section, inheriting the hold, overrides it to another value, so
+    every cell ships one kernel per value."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["spec_overrides"] = {"tile_m": 128}
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    assert _tile_ms(manifest) == [64] * 4 + [128] * 4
+
+
+def test_one_rule_admits_a_pinned_performance_field_and_a_feature_axis(
+    tmp_path, monkeypatch
+):
+    """The two things a section may pin in one manifest: `tile_m` (performance) in one
+    `also` section, and `tile_n` (feature) in another that no other section pins alike. A
+    feature field every section leaves alone, or pins alike, is still refused (see
+    test_an_override_every_section_pins_alike_is_no_feature_axis)."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    manifest["reduction"]["fields"] = {
+        "feature": ["direction", "dtype", "arch", "tile_n"],
+        "performance": [{"name": "tile_m"}],
+        "ignored": ["tile_k"],
+    }
+    pinned_performance = copy.deepcopy(manifest["enumerate"])
+    pinned_performance["spec_overrides"] = {"tile_m": 128}
+    pinned_feature = copy.deepcopy(manifest["enumerate"])
+    pinned_feature["spec_overrides"] = {"tile_n": 128}
+    manifest["enumerate"]["also"] = [pinned_performance, pinned_feature]
+    kernels = _kernels(manifest)
+    tiles = [
+        (k["kernel_source"]["spec"]["tile_m"], k["kernel_source"]["spec"]["tile_n"])
+        for k in kernels
+    ]
+    assert tiles == [(64, 64)] * 4 + [(128, 64)] * 4 + [(64, 128)] * 4
+    # The pinned performance field changes how a kernel runs, not what it serves, so the
+    # cell's one floor covers it; the feature override serves other graphs, so it has its own.
+    assert [bool(k.get("default")) for k in kernels] == (
+        [True] * 4 + [False] * 4 + [True] * 4
+    )
+
+
+def test_hold_fields_naming_a_field_the_spec_lacks_is_exit_2(
+    tmp_path, monkeypatch, capsys
+):
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "no_such" in err, err
+
+
+def test_registry_refuses_hold_fields_the_spec_lacks_when_it_reads_them(
+    tmp_path, monkeypatch
+):
+    """The names are checked as the section is read, not only once a full-space
+    enumeration reaches `select_full`, and in every `also` section."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+    manifest = _conv_hold(tmp_path / "also", monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["hold_fields"] = ["no_such"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+
+def test_hold_fields_on_a_slice_section_is_refused(probe, capsys):
+    """A slice section projects no performance field, so `hold_fields` there could hold
+    nothing: refused by name rather than ignored, as only `select_full` read it."""
+    probe.manifest["enumerate"]["hold_fields"] = ["tile_n"]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*'slice'"):
+        re_.Registry(probe.manifest)
+
+    assert _run_probe(probe) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "slice" in err, err
+
+
+def test_an_also_slice_section_must_not_inherit_hold_fields(tmp_path, monkeypatch):
+    """`hold_fields` is inherited by an `also` section; a slice one that inherits it is
+    refused too, and `hold_fields: []` opts that section out."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["space"] = "slice"
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(
+        re_.EnumerationError, match=r"an enumerate.also section sets hold_fields"
+    ):
+        re_.Registry(manifest)
+
+    section["hold_fields"] = []
+    re_.Registry(manifest)
