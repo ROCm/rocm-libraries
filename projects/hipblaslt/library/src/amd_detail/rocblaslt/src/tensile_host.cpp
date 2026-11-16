@@ -5845,10 +5845,9 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // A handwritten rocRoller Stream-K custom kernel has sizeMapping.isStreamK()
-    // == false -- its Stream-K nature lives in customKernel, not sizeMapping --
-    // so without this it would be handed the GSU region, which is shared across
-    // streams. Its flags are one int per workgroup, zeroed before and after each
-    // launch, and must be private to the stream.
+    // == false. Its Stream-K flags live on customKernel: one int per workgroup,
+    // zeroed before and after each launch, private to the stream. The GSU
+    // region is shared across streams.
     if(solution.customKernel.workspaceType
            == TensileLite::CustomWorkspaceType::RocRollerStreamK
        && solution.handwrittenCustomKernel())
@@ -6713,6 +6712,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     // Must precede the generic handler: a user-input rejection, not an internal
     // failure.
+    catch(const TensileLite::RocRollerStreamKDataParallelError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt::statusForRocRollerStreamKDataParallel(e);
+    }
     catch(const TensileLite::UniformSummationOrderError& e)
     {
         log_error(__func__, e.what());
@@ -7205,6 +7209,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
         }
         status = rocblaslt_status_success;
+    }
+    catch(const TensileLite::RocRollerStreamKDataParallelError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt::statusForRocRollerStreamKDataParallel(e);
     }
     catch(const TensileLite::UniformSummationOrderError& e)
     {
