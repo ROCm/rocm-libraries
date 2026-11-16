@@ -28,7 +28,13 @@ from codegen.cpp_symbol_map import (
     QSCALE_CHECK_MAP,
     QSCALE_MAP,
 )
-from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
+from codegen.utils import (
+    check_duplicates_and_paddings,
+    if_,
+    indent,
+    non_padding_key,
+    update_file,
+)
 
 DTYPE_BITS = {
     "fp32": 32,
@@ -712,6 +718,8 @@ def emits_kvscale_align(pipeline_tag: str, qscale: str) -> bool:
 class FmhaFwdApiPool:
     def __init__(self):
         self.pool = OrderedDict()
+        # the registered traits by non_padding_key(), for check_duplicates_and_paddings
+        self.by_key = {}
 
     def register_traits(self, trait: FmhaFwdApiTrait) -> None:
         hdim = trait.hdim, trait.bn1
@@ -720,8 +728,10 @@ class FmhaFwdApiPool:
             .setdefault(trait.dtype, OrderedDict())
             .setdefault(hdim, [])
         )
-        check_duplicates_and_paddings(ts, trait)
-        ts.append(copy.copy(trait))
+        check_duplicates_and_paddings(ts, trait, self.by_key)
+        registered = copy.copy(trait)
+        ts.append(registered)
+        self.by_key.setdefault(non_padding_key(registered), []).append(registered)
 
     def get_num_traits(
         self, filter_fn: Optional[Callable[[FmhaFwdApiTrait], bool]] = None
