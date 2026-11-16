@@ -89,6 +89,11 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	s_mul_i32 s2, s17, s19
 	s_sub_i32 s2, s18, s2
 	s_add_i32 s2, s16, s2
+	; M=32768 is the A tile count and N=4096 the B tile count. The map
+	; above emits those counts swapped; exchange them before the offsets.
+	s_xor_b32 s2, s2, s19
+	s_xor_b32 s19, s2, s19
+	s_xor_b32 s2, s2, s19
 	s_lshl_b32 s16, s2, 8
 	s_mul_i32 s2, s16, 0x1200
 	s_lshl_b32 s17, s19, 8
@@ -329,9 +334,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	s_mov_b32 m0, s85
 	s_nop 0
 	buffer_load_dwordx4 v220, s[16:19], s22 offen lds
-	s_add_i32 s22, s62, 0x100
+	s_add_i32 s22, s62, 0x20
 	s_lshl_b32 s22, s22, 9
-	s_add_i32 s24, s64, 32
+	s_add_i32 s24, s64, 0x100
 	s_lshl_b32 s24, s24, 9
 	s_add_i32 s25, s67, 0x6000
 	s_add_i32 s86, 0x7000, s67
@@ -444,9 +449,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	s_mov_b32 m0, s74
 	s_add_i32 s22, s66, 0x100
 	buffer_load_dwordx4 v220, s[16:19], s22 offen lds
-	s_add_i32 s22, s62, 0x200
+	s_add_i32 s22, s62, 0x40
 	s_lshl_b32 s22, s22, 9
-	s_add_i32 s23, s64, 64
+	s_add_i32 s23, s64, 0x200
 	s_lshl_b32 s23, s23, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[6:11], 0, v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -638,13 +643,13 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_add_u32_e32 v243, 0x10000, v235
 .Lmain_loop:
 	s_lshl_b32 s3, s2, 4
-	s_lshl_b32 s90, s3, 8
+	s_lshl_b32 s90, s3, 5
 	s_add_i32 s90, s62, s90
-	s_add_i32 s91, s90, 0x300
+	s_add_i32 s91, s90, 0x60
 	s_lshl_b32 s91, s91, 9
-	s_lshl_b32 s92, s3, 5
+	s_lshl_b32 s92, s3, 8
 	s_add_i32 s92, s64, s92
-	s_add_i32 s93, s92, 0x60
+	s_add_i32 s93, s92, 0x300
 	s_lshl_b32 s93, s93, 9
 	s_lshr_b32 s94, s3, 2
 	s_mul_i32 s94, s94, 3
@@ -795,9 +800,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[102:107], v[168:173], a[248:251], v210, v213 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[96:101], v[168:173], a[252:255], v210, v213 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0x400
+	s_add_i32 s93, s90, 0x80
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x80
+	s_add_i32 s94, s92, 0x400
 	s_lshl_b32 s94, s94, 9
 	s_add_i32 s96, s3, 5
 	s_lshr_b32 s96, s96, 2
@@ -947,9 +952,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0x500
+	s_add_i32 s93, s90, 0xa0
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0xa0
+	s_add_i32 s94, s92, 0x500
 	s_lshl_b32 s94, s94, 9
 	s_add_i32 s96, s3, 6
 	s_lshr_b32 s96, s96, 2
@@ -1107,9 +1112,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[60:65], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0x600
+	s_add_i32 s93, s90, 0xc0
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0xc0
+	s_add_i32 s94, s92, 0x600
 	s_lshl_b32 s94, s94, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[66:71], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -1235,9 +1240,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0x700
+	s_add_i32 s93, s90, 0xe0
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0xe0
+	s_add_i32 s94, s92, 0x700
 	s_lshl_b32 s94, s94, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[78:83], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -1382,9 +1387,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0x800
+	s_add_i32 s93, s90, 0x100
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x100
+	s_add_i32 s94, s92, 0x800
 	s_lshl_b32 s94, s94, 9
 	s_add_i32 s96, s3, 9
 	s_lshr_b32 s96, s96, 2
@@ -1534,9 +1539,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0x900
+	s_add_i32 s93, s90, 0x120
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x120
+	s_add_i32 s94, s92, 0x900
 	s_lshl_b32 s94, s94, 9
 	s_add_i32 s96, s3, 10
 	s_lshr_b32 s96, s96, 2
@@ -1694,9 +1699,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0xa00
+	s_add_i32 s93, s90, 0x140
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x140
+	s_add_i32 s94, s92, 0xa00
 	s_lshl_b32 s94, s94, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[90:95], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -1822,9 +1827,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0xb00
+	s_add_i32 s93, s90, 0x160
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x160
+	s_add_i32 s94, s92, 0xb00
 	s_lshl_b32 s94, s94, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[96:101], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -1969,9 +1974,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0xc00
+	s_add_i32 s93, s90, 0x180
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x180
+	s_add_i32 s94, s92, 0xc00
 	s_lshl_b32 s94, s94, 9
 	s_add_i32 s96, s3, 13
 	s_lshr_b32 s96, s96, 2
@@ -2121,9 +2126,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0xd00
+	s_add_i32 s93, s90, 0x1a0
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x1a0
+	s_add_i32 s94, s92, 0xd00
 	s_lshl_b32 s94, s94, 9
 	s_add_i32 s96, s3, 14
 	s_lshr_b32 s96, s96, 2
@@ -2281,9 +2286,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0xe00
+	s_add_i32 s93, s90, 0x1c0
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x1c0
+	s_add_i32 s94, s92, 0xe00
 	s_lshl_b32 s94, s94, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[96:101], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -2409,9 +2414,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s93, s90, 0xf00
+	s_add_i32 s93, s90, 0x1e0
 	s_lshl_b32 s93, s93, 9
-	s_add_i32 s94, s92, 0x1e0
+	s_add_i32 s94, s92, 0xf00
 	s_lshl_b32 s94, s94, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[96:101], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -2556,9 +2561,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s91, s90, 0x1000
+	s_add_i32 s91, s90, 0x200
 	s_lshl_b32 s91, s91, 9
-	s_add_i32 s93, s92, 0x200
+	s_add_i32 s93, s92, 0x1000
 	s_lshl_b32 s93, s93, 9
 	s_add_i32 s94, s3, 17
 	s_lshr_b32 s94, s94, 2
@@ -2708,9 +2713,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s91, s90, 0x1100
+	s_add_i32 s91, s90, 0x220
 	s_lshl_b32 s91, s91, 9
-	s_add_i32 s93, s92, 0x220
+	s_add_i32 s93, s92, 0x1100
 	s_lshl_b32 s93, s93, 9
 	s_add_i32 s3, s3, 18
 	s_lshr_b32 s3, s3, 2
@@ -2868,9 +2873,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v210, v213 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v210, v213 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s3, s90, 0x1200
+	s_add_i32 s3, s90, 0x240
 	s_lshl_b32 s3, s3, 9
-	s_add_i32 s90, s92, 0x240
+	s_add_i32 s90, s92, 0x1200
 	s_lshl_b32 s90, s90, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[126:131], a[0:3], v214, v216 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -2999,9 +3004,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	s_add_i32 s2, s2, 1
 	s_cmp_lt_i32 s2, 2
 	s_cbranch_scc1 .Lmain_loop
-	s_add_i32 s2, s62, 0x2300
+	s_add_i32 s2, s62, 0x460
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x460
+	s_add_i32 s3, s64, 0x2300
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[96:101], v[54:59], a[0:3], v210, v212 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -3156,9 +3161,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[102:107], v[168:173], a[248:251], v210, v213 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[96:101], v[168:173], a[252:255], v210, v213 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2400
+	s_add_i32 s2, s62, 0x480
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x480
+	s_add_i32 s3, s64, 0x2400
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[54:59], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -3311,9 +3316,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2500
+	s_add_i32 s2, s62, 0x4a0
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x4a0
+	s_add_i32 s3, s64, 0x2500
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[66:71], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -3476,9 +3481,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[60:65], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2600
+	s_add_i32 s2, s62, 0x4c0
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x4c0
+	s_add_i32 s3, s64, 0x2600
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[66:71], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -3607,9 +3612,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2700
+	s_add_i32 s2, s62, 0x4e0
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x4e0
+	s_add_i32 s3, s64, 0x2700
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[78:83], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -3762,9 +3767,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2800
+	s_add_i32 s2, s62, 0x500
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x500
+	s_add_i32 s3, s64, 0x2800
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[78:83], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -3917,9 +3922,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2900
+	s_add_i32 s2, s62, 0x520
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x520
+	s_add_i32 s3, s64, 0x2900
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[90:95], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -4080,9 +4085,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2a00
+	s_add_i32 s2, s62, 0x540
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x540
+	s_add_i32 s3, s64, 0x2a00
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[90:95], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -4209,9 +4214,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2b00
+	s_add_i32 s2, s62, 0x560
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x560
+	s_add_i32 s3, s64, 0x2b00
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[96:101], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -4364,9 +4369,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2c00
+	s_add_i32 s2, s62, 0x580
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x580
+	s_add_i32 s3, s64, 0x2c00
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[96:101], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -4519,9 +4524,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2d00
+	s_add_i32 s2, s62, 0x5a0
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x5a0
+	s_add_i32 s3, s64, 0x2d00
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[96:101], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -4682,9 +4687,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[54:59], v[168:173], a[248:251], v178, v181 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[6:11], v[168:173], a[252:255], v178, v181 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2e00
+	s_add_i32 s2, s62, 0x5c0
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x5c0
+	s_add_i32 s3, s64, 0x2e00
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:5], v[96:101], a[0:3], v174, v176 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(8) lgkmcnt(0)
@@ -4811,9 +4816,9 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[248:251], v[12:17], v[144:149], a[248:251], v174, v177 op_sel:[1,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[252:255], v[0:5], v[144:149], a[252:255], v174, v177 op_sel:[0,1,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(0)
-	s_add_i32 s2, s62, 0x2f00
+	s_add_i32 s2, s62, 0x5e0
 	s_lshl_b32 s2, s2, 9
-	s_add_i32 s3, s64, 0x5e0
+	s_add_i32 s3, s64, 0x2f00
 	s_lshl_b32 s3, s3, 9
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:11], v[96:101], a[0:3], v178, v180 op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt vmcnt(0) lgkmcnt(0)
@@ -5041,7 +5046,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	s_mov_b32 s2, 0x7ffffff0
 	s_mov_b32 s3, 0x31014000
 	v_mad_u32_u24 v2, s7, v219, v3
-	v_lshl_add_u32 v203, v219, 13, v4
+	v_lshl_add_u32 v203, v219, 16, v4
 	ds_write2_b32 v202, v5, v0 offset1:68
 	v_accvgpr_read_b32 v0, a60
 	v_accvgpr_read_b32 v1, a61
@@ -5148,12 +5153,12 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[4:7], v16 offset:5184
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
-	s_lshl_b32 s6, s58, 13
+	s_lshl_b32 s6, s58, 16
 	s_lshl_b32 s7, s59, 1
 	s_add_i32 s6, s6, s7
-	v_add_u32_e32 v17, 0x8000, v203
-	v_add_u32_e32 v204, 0x10000, v203
-	v_add_u32_e32 v205, 0x18000, v203
+	v_add_u32_e32 v17, 0x40000, v203
+	v_add_u32_e32 v204, 0x80000, v203
+	v_add_u32_e32 v205, 0xc0000, v203
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[68:71], v[54:59], v[156:161], a[68:71], v196, v198 op_sel:[1,0,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(3)
 	buffer_store_dwordx4 v[0:3], v203, s[0:3], s6 offen nt
@@ -5288,7 +5293,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
 	s_add_i32 s6, s58, 16
-	s_lshl_b32 s6, s6, 13
+	s_lshl_b32 s6, s6, 16
 	s_add_i32 s6, s7, s6
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[180:183], v[60:65], v[174:179], a[180:183], v196, v199 op_sel:[0,1,0] op_sel_hi:[1,0,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(3)
@@ -5426,7 +5431,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
 	s_add_i32 s6, s58, 32
-	s_lshl_b32 s6, s6, 13
+	s_lshl_b32 s6, s6, 16
 	s_add_i32 s6, s7, s6
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[76:79], v[66:71], v[156:161], a[76:79], v196, v198 op_sel:[1,0,0] op_sel_hi:[1,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(3)
@@ -5562,7 +5567,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
 	s_add_i32 s6, s58, 48
-	s_lshl_b32 s6, s6, 13
+	s_lshl_b32 s6, s6, 16
 	s_add_i32 s6, s7, s6
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[172:175], v[72:77], v[174:179], a[172:175], v197, v199 op_sel:[0,1,0] op_sel_hi:[0,0,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(3)
@@ -5700,7 +5705,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
 	s_add_i32 s6, s58, 64
-	s_lshl_b32 s6, s6, 13
+	s_lshl_b32 s6, s6, 16
 	s_add_i32 s6, s7, s6
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[84:87], v[78:83], v[156:161], a[84:87], v197, v198 op_sel:[1,0,0] op_sel_hi:[0,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(3)
@@ -5836,7 +5841,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
 	s_add_i32 s6, s58, 0x50
-	s_lshl_b32 s6, s6, 13
+	s_lshl_b32 s6, s6, 16
 	s_add_i32 s6, s7, s6
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[164:167], v[84:89], v[174:179], a[164:167], v197, v199 op_sel:[0,1,0] op_sel_hi:[1,0,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(3)
@@ -5974,7 +5979,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
 	s_add_i32 s6, s58, 0x60
-	s_lshl_b32 s6, s6, 13
+	s_lshl_b32 s6, s6, 16
 	s_add_i32 s6, s7, s6
 	v_mfma_scale_f32_16x16x128_f8f6f4 a[92:95], v[90:95], v[156:161], a[92:95], v197, v198 op_sel:[1,0,0] op_sel_hi:[1,1,0] cbsz:2 blgp:2
 	s_waitcnt lgkmcnt(3)
@@ -6092,7 +6097,7 @@ rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_32
 	ds_read_b128 v[8:11], v16 offset:6272
 	ds_read_b128 v[12:15], v16 offset:7360
 	s_add_i32 s4, s58, 0x70
-	s_lshl_b32 s4, s4, 13
+	s_lshl_b32 s4, s4, 16
 	s_add_i32 s4, s7, s4
 	s_waitcnt lgkmcnt(3)
 	buffer_store_dwordx4 v[0:3], v203, s[0:3], s4 offen nt
