@@ -200,8 +200,10 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     # The hipDNN wrapper's host-only unit tests are plain TEST()s with no instantiation prefix,
-    # so a Smoke prefix would leave both binaries with no tests.
-    if("${TEST_NAME}" STREQUAL "test_hipdnn_lru_cache" OR "${TEST_NAME}" STREQUAL "test_hipdnn_output_hash")
+    # so a Smoke prefix would leave these binaries with no tests.
+    if("${TEST_NAME}" STREQUAL "test_hipdnn_lru_cache"
+       OR "${TEST_NAME}" STREQUAL "test_hipdnn_output_hash"
+       OR "${TEST_NAME}" STREQUAL "test_wrapper_routing")
       set(MIOPEN_GTEST_PREFIX "")
     endif()
 
