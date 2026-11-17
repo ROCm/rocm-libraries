@@ -154,3 +154,9 @@ def test_the_problem_selection_predicate_carries_the_flag(flag):
     peer = [p for p in predicates if p.tag == "PeerDCheck"]
     assert len(peer) == 1
     assert peer[0].value is flag
+
+
+def test_derivation_rejects_a_solution_that_cannot_store_peer_d():
+    state = _state(ISA=(9, 4, 2))
+    Solution.assignDerivedParameters(state, False, False, False, {}, None)
+    assert state["Valid"] is False

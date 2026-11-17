@@ -249,6 +249,48 @@ TEST(ClientProblemFactorySplit, OutputPeerDReachesEveryProblemAndSlice)
         EXPECT_TRUE(gemm(factory.sliceProblem(full, d)).outputPeerD()) << "device " << d;
 }
 
+TEST(ClientProblemFactorySplit, RefusesGroupedGemm)
+{
+    auto args = makeArgs({128, 96, 1, 64}, 2, "M");
+    TensileLite::TestUtils::setOption(args, "grouped-gemm", true);
+    try
+    {
+        ClientProblemFactory factory(args);
+        FAIL() << "a grouped gemm cannot be split";
+    }
+    catch(std::runtime_error const& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("grouped-gemm"), std::string::npos) << e.what();
+    }
+}
+
+TEST(ClientProblemFactorySplit, TightCStridesTightenWithTheSlice)
+{
+    // C strides that are the default ones for the full size are the default ones of a slice.
+    auto args = makeArgs({256, 256, 1, 128}, 2, "N");
+    TensileLite::TestUtils::setOption(
+        args, "c-strides", std::vector<std::vector<size_t>>{{1, 256, 256 * 256}});
+    ClientProblemFactory factory(args);
+    auto*                full = factory.problems()[0].get();
+
+    auto const& slice = gemm(factory.sliceProblem(full, 1));
+    EXPECT_EQ(slice.c().strides()[1], 256u);
+    EXPECT_EQ(slice.c().strides()[2], 256u * 128u);
+}
+
+TEST(ClientProblemFactorySplit, PaddedStridesStayAsGiven)
+{
+    auto args = makeArgs({256, 256, 1, 128}, 2, "M");
+    TensileLite::TestUtils::setOption(
+        args, "c-strides", std::vector<std::vector<size_t>>{{1, 300, 300 * 256}});
+    ClientProblemFactory factory(args);
+    auto*                full = factory.problems()[0].get();
+
+    auto const& slice = gemm(factory.sliceProblem(full, 1));
+    EXPECT_EQ(slice.c().strides()[1], 300u);
+    EXPECT_EQ(slice.c().strides()[2], 300u * 256u);
+}
+
 TEST(ClientProblemFactorySplit, RejectsAProblemFromAnotherFactory)
 {
     ClientProblemFactory factory(makeArgs({128, 96, 1, 64}, 2, "M"));
