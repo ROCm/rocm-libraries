@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import builtins
+from contextlib import nullcontext
 import json
 import os
 import sys
@@ -628,15 +629,19 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")
-def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
+@pytest.mark.parametrize("package_revision", [_SHA, None])
+@pytest.mark.parametrize("build_rocm", ["7.2.4", "8.0.0"])
+def test_system_rocm_client_request_uses_prefix_client(
+    tmp_path, monkeypatch, package_revision, build_rocm
+):
     root = _root(tmp_path)
     client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
     client.parent.mkdir(parents=True)
     client.write_text(
         "#!/bin/sh\n"
         "case \"$1\" in\n"
-        f"  --source-revision) echo {_SHA} ;;\n"
-        "  --build-rocm) echo '7.2.4 base' ;;\n"
+        f"  --source-revision) echo {package_revision or 'none'} ;;\n"
+        f"  --build-rocm) echo '{build_rocm} base' ;;\n"
         "esac\n",
         encoding="utf-8",
     )
@@ -649,7 +654,7 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
     monkeypatch.setattr(
         _runtime,
         "current_installation",
-        lambda: client_binding.Installation(package_dir, "id", "5.0.0+rocm7.2.4", _SHA, False),
+        lambda: client_binding.Installation(package_dir, "id", "5.0.0+rocm7.2.4", package_revision, False),
     )
 
     monkeypatch.setattr(_runtime, "_client", None)
@@ -661,7 +666,17 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
 
     _runtime.initialize()
 
-    assert _runtime.client_executable() == client
+    warning = (
+        pytest.warns(client_binding.ClientBindingWarning, match="could not be verified")
+        if package_revision is None else nullcontext()
+    )
+    with warning:
+        if build_rocm == "7.2.4":
+            assert _runtime.client_executable() == client
+        else:
+            with pytest.raises(_rocm.TensileLiteRuntimeError, match="different major ROCm version"):
+                _runtime.client_executable()
+            assert _runtime._client is None
 
 
 @pytest.fixture(autouse=True)

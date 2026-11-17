@@ -244,7 +244,7 @@ def validate_client(client: Path, installation: Installation) -> ClientIdentity:
             ClientBindingWarning,
             stacklevel=2,
         )
-        return
+        return ClientIdentity(client_revision, build_rocm)
 
     if package_revision is None or client_commit is None:
         hint = _rebuild_hint(installation)

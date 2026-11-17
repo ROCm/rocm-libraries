@@ -530,13 +530,14 @@ def test_editable_install_accepts_the_same_source_state(tmp_path, monkeypatch, r
 def test_both_source_revisions_missing_warns_and_allows_pairing(tmp_path, monkeypatch, editable):
     queries = _fake_client(monkeypatch, revision="none")
     with pytest.warns(binding.ClientBindingWarning, match="could not be verified") as warning:
-        binding.validate_client(
+        identity = binding.validate_client(
             _client(tmp_path), _installation(tmp_path, revision=None, editable=editable)
         )
     assert "same source" in str(warning[0].message)
     assert "neither the package nor the client has a source revision" in str(warning[0].message)
     assert queries == ["--source-revision", "--build-rocm"]
 
+    assert identity == binding.ClientIdentity("none", "7.2.4 base")
 
 @pytest.mark.parametrize("editable", [False, True])
 @pytest.mark.parametrize(
