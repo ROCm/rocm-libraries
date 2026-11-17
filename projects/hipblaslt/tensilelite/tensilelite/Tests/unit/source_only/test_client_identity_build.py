@@ -282,7 +282,8 @@ def test_source_export_override_survives_rebuild(project):
     assert _query(build, "--build-rocm") == "10.3.0 base"
 
 
-def test_canonical_wheel_and_client_stay_paired_through_incremental_builds(project):
+@pytest.mark.parametrize("rocm_identity", [None, "7.12.0rc1"])
+def test_canonical_wheel_and_client_stay_paired_through_incremental_builds(project, rocm_identity):
     src, build = project
     # Use the real distributable package and production wheel build module.
     stager = _ROOT / "tensilelite/scripts/stage_release_source.py"
@@ -304,7 +305,8 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
 """)
     _git(src, "add", ".")
     _git(src, "commit", "-qm", "wheel fixture")
-    _configure(src, build)
+    arguments = [f"-DHIPBLASLT_BUILD_ROCM_VERSION={rocm_identity}"] if rocm_identity else []
+    _configure(src, build, *arguments)
     manifest = build / "tensilelite-release-wheels/.published"
 
     def build_and_check():
