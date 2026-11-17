@@ -43,6 +43,8 @@ from rocke.runtime.launcher import (
     wait_stream_and_release,
 )
 
+from kernels.common.attention_dense_kv_split import max_segments_for_extent
+
 from rocke.helpers.attention import (
     BINARY_SEARCH_FALLBACK_ITERS,
     Attention2DConfig,
@@ -3604,6 +3606,40 @@ def _pre_bump_segments(
 
 
 def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
+    """Segments for ``problem``: the AITER-mirrored count, capped to what the
+    kernels can address.
+
+    The count below is a performance choice made without reference to the
+    segment workspace it implies, and the workspace grows with it, so on a long
+    prefill the preferred count can put ``segm_output``'s last index past i32
+    (gfx942 ``backend="auto"`` LSE at 65536 tokens x 32 heads x D256 prefers 8,
+    whose index is twice the limit). Nobody picked that count, so refusing the
+    launch would refuse a shape that runs perfectly well at 4: cap instead, and
+    leave the refusal to ``_check_3d_workspace_addr_width`` for a count the
+    caller pinned through a tuning spec.
+
+    Shares the dense bodies' search (``max_segments_for_extent``). The two
+    workspaces have the same layout, but the extent each route allows differs
+    for now: this one takes the measured fault boundary, the dense route stays
+    one element stricter until its own kernel pair is measured there.
+
+    A count that already fits is returned untouched, including a non-power-of-two
+    one. Only when the preferred count overruns does the shared rule pick the
+    largest power of two below it, so the cap never lowers a working choice.
+    """
+    want = _num_segments_unbounded(problem, arch)
+    if _3d_workspace_max_index(problem, want) < _WORKSPACE_I32_INDEX_LIMIT:
+        return want
+    return max_segments_for_extent(
+        problem.total_q,
+        problem.num_query_heads,
+        problem.head_size,
+        max_segments=want,
+        max_extent=_WORKSPACE_I32_INDEX_LIMIT,
+    )
+
+
+def _num_segments_unbounded(problem: UnifiedAttentionProblem, arch: str) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
@@ -4797,10 +4833,16 @@ def _run_3d_tiled_on_stream(
     if tuning_spec is not None:
         num_segments = int(tuning_spec.kernel_spec.num_segments)
         cache_key = tuning_spec.cache_key()
+        # Last gate, for a count the caller pinned. The heuristic branch below
+        # is already capped by ``_num_segments`` and the dispatcher's
+        # ``validate`` skips over-bound variants, so only an explicit spec can
+        # still arrive here with a workspace the kernels cannot address, and
+        # silently running a different count than the one asked for would make
+        # the measurement meaningless.
+        _check_3d_workspace_addr_width(problem, num_segments)
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
-    _check_3d_workspace_addr_width(problem, num_segments)
     # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
     # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
     if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
@@ -5650,17 +5692,18 @@ def _check_3d_workspace_addr_width(
     index, not the element count, and it is the same rule
     ``_validate_additive_bias`` applies to the bias tensor.
 
-    Declining here keeps the failure on the host with a reason the caller can
-    act on, and the segment count is the lever: halving it halves the
-    workspace.
+    This is the last gate, and it only sees a count the caller pinned through a
+    tuning spec. A count nobody chose is capped instead, upstream: the split
+    rule caps its own result (``_num_segments``) and the dispatcher's
+    ``validate`` skips a fixed-segment variant whose workspace overruns, so the
+    default route runs at a smaller split rather than refusing. Refusing is
+    right only here, because silently running a different count than the one
+    pinned would make the measurement meaningless.
 
-    The default route reaches this size too, so the decline is not only a
-    tuning-path guard. ``select_auto_path`` sends an LSE request the tiled 2D
-    gate declines to split-KV, so ``backend="auto"`` on gfx942 D256 block-size
-    32 lands here, and the heuristic count takes it past the bound: a
-    65536-token, 32-head prefill gets 8 segments, twice the limit. Such a
-    request is declined rather than capped, because a silently different
-    segment count is not the configuration the caller asked to measure.
+    The default route does reach these sizes: ``select_auto_path`` sends an LSE
+    request the tiled 2D gate declines to split-KV, so ``backend="auto"`` on
+    gfx942 D256 block-size 32 lands on this path, and a 65536-token, 32-head
+    prefill prefers 8 segments, twice the bound. That one now runs at 4.
     """
     max_idx = _3d_workspace_max_index(problem, num_segments)
     if max_idx >= _WORKSPACE_I32_INDEX_LIMIT:
