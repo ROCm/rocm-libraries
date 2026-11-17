@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <iostream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #define DEBUG_TYPE "InsertCoexecHazardPass"
@@ -84,6 +85,52 @@ bool wmmaToWmmaOverlap(const StinkyInstruction& prod, const StinkyInstruction& c
     if (srcs.size() > 1 && d.isOverlap(srcs[1])) return true;                   // B
     if (isSWMMA(cons) && srcs.size() > 2 && d.isOverlap(srcs[2])) return true;  // index
     return false;
+}
+
+// The consumer takes the producer's D through the C fast-forward path and writes it
+// back to the same registers. gfx1250 requires such a back-to-back WMMA to write a
+// different accumulator. Every same-accumulator chain counts, including the f8/f4
+// and f16 shapes that may be permitted.
+bool accumulatesInPlace(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty() || cons.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    if (!d.isOverlap(cons.getDestRegs()[0])) return false;
+    if (isSWMMA(cons)) return true;  // SWMMAC's C is its D
+    const auto& srcs = cons.getSrcRegs();
+    return srcs.size() > 2 && d.isOverlap(srcs[2]);
+}
+
+// The nearest XDL WMMA before `from` on every path; from the block end when null.
+void collectPrevWmmas(BasicBlock& bb, const StinkyInstruction* from,
+                      std::unordered_set<const BasicBlock*>& visited,
+                      std::vector<const StinkyInstruction*>& prev) {
+    for (IRBase* node = from ? from->getPrev() : bb.getTerminator(); node; node = node->getPrev()) {
+        auto* inst = dyn_cast<StinkyInstruction>(node);
+        if (!inst || isPseudoInst(inst)) continue;
+        if (isCall(*inst)) return;
+        if (isXDLWMMA(*inst)) {
+            prev.push_back(inst);
+            return;
+        }
+    }
+    for (BasicBlock* pred : bb.getPredecessors())
+        if (visited.insert(pred).second) collectPrevWmmas(*pred, nullptr, visited, prev);
+}
+
+// Detection only. Switching the accumulator needs a free register range that this
+// pass cannot pick.
+void warnInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma) {
+    std::unordered_set<const BasicBlock*> visited;
+    std::vector<const StinkyInstruction*> prev;
+    collectPrevWmmas(bb, &wmma, visited, prev);
+    for (const StinkyInstruction* p : prev) {
+        if (!accumulatesInPlace(*p, wmma)) continue;
+        std::cerr << "[InsertCoexecHazardPass] warning: WMMA in function \"" << func.getName()
+                  << "\" block \"" << bb.getLabel()
+                  << "\" accumulates the previous WMMA's D in place; switch the accumulator:\n";
+        p->dump(std::cerr);
+        wmma.dump(std::cerr);
+    }
 }
 
 // WMMA producer D vs a co-executable VALU consumer: RAW (D->src), WAW (D->dst),
@@ -243,6 +290,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
 
                 int toInsert = 0;
                 if (isXDLWMMA(*inst)) {
+                    warnInPlaceAccumulation(func, bb, *inst);
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::WMMA,
                                                             /*consumerIsWmma=*/true));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::TRANS,

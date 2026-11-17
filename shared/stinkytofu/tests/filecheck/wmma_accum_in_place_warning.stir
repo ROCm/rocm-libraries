@@ -1,0 +1,86 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertCoexecHazardPass 2>&1
+#
+# gfx1250 requires a WMMA that takes the previous WMMA's D through the C
+# fast-forward path to write a different accumulator (d1 = A*B + d0), not the
+# same one (d0 = A*B + d0 right after d0 is written). InsertCoexecHazardPass
+# warns on the same-accumulator chain and leaves the code alone.
+#
+# Functions that warn come first; the trailing CHECK-NOT covers the safe ones.
+
+# CHECK: warning: WMMA in function "in_place" block "entry" accumulates the previous WMMA's D in place
+# CHECK: warning: WMMA in function "valu_between" block "entry"
+# CHECK: warning: WMMA in function "f8_k128_different_ab" block "entry"
+# CHECK: warning: WMMA in function "swmmac_in_place" block "entry"
+# CHECK: warning: WMMA in function "loop_self_chain" block "loop"
+# CHECK-NOT: warning:
+
+#--- d0 = A*B + d0 right after d0 is written.
+st.func @in_place() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[50:57], v[60:67], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- A non-WMMA in between does not separate the two WMMAs.
+st.func @valu_between() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v100 = "st.v_add_f32"(v200, v201) { issueCycles = 1, latencyCycles = 5 }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[50:57], v[60:67], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- K=128 FP8 with different A and B still warns: no per-type allowance is applied.
+st.func @f8_k128_different_ab() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[20:35], v[36:51], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[52:67], v[68:83], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- SWMMAC accumulates into its own D, so a matching D alone is the chain.
+st.func @swmmac_in_place() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_swmmac_f32_16x16x64_f16"(v[40:47], v[50:65], v80) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- One accumulator per loop trip: the WMMA chains on itself across the backedge.
+st.func @loop_self_chain() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Safe: switched accumulator, d1 = A*B + d0.
+st.func @switched_accumulator() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[50:57], v[60:67], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Safe: same D, but C comes from elsewhere, so nothing is forwarded.
+st.func @same_d_other_c() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[50:57], v[60:67], v[100:107]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Safe: an independent WMMA sits between the two d0 WMMAs.
+st.func @independent_wmma_between() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[50:57], v[60:67], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[70:77], v[80:87], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
