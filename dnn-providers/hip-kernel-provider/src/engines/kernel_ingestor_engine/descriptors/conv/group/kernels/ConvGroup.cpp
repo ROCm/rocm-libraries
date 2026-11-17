@@ -158,13 +158,6 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE)
 extern "C" __global__ void __launch_bounds__(CONV_GROUP_CB* CONV_GROUP_ATOM::WAVE)
     ConvGroup(K4Args a CONV_EPI_PARAM)
 {
-    // Inlined here for a 3-D filter, whose taps make the body too large for the inliner. Called as
-    // a function past the short-branch range (128 KiB), the body gets long branches built in
-    // s[30:31], its return address, and the return jumps back into the body: the kernel never
-    // ends. In the entry point they take free registers. 2-D bodies inline on their own.
-#if CONV_GROUP_FT > 1
-    [[clang::always_inline]]
-#endif
     k4ConvMmaRows<CONV_GROUP_T,
                   CONV_GROUP_ATOM,
                   CONV_GROUP_FT,
