@@ -736,6 +736,48 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesFloatBiasOnHalfGraphWithFloatInt
                                      "input data type HALF"));
 }
 
+// The bias data type is compared with the convolution input and with nothing else. With the input
+// and the weights in different data types, a bias of the input type is accepted and a bias of the
+// weights type is declined, in both operand orders. The case is a legal input to the check, not a
+// claim that the convolution of such an input and weights is supported.
+TEST(TestMiopenConvApplicabilityChecks, BiasDataTypeIsComparedWithTheInputNotTheWeights)
+{
+    const std::vector<DataType> dataTypes = {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16};
+
+    for(const auto inputType : dataTypes)
+    {
+        for(const auto weightsType : dataTypes)
+        {
+            if(weightsType == inputType)
+            {
+                continue;
+            }
+
+            SCOPED_TRACE(std::string(fb::EnumNameDataType(inputType)) + " input, "
+                         + fb::EnumNameDataType(weightsType) + " weights");
+            const auto mixed = editTensor(cbaGraphOfDataType(inputType),
+                                          "w",
+                                          [weightsType](auto& t) { t.data_type = weightsType; });
+
+            // The bias has the type of the input.
+            EXPECT_EQ(layoutDeclineReason(mixed), "");
+            EXPECT_EQ(layoutDeclineReason(biasAsFirstAddOperand(mixed)), "");
+
+            // The bias has the type of the weights.
+            const auto weightsTypedBias
+                = editTensor(mixed, "bias", [weightsType](auto& t) { t.data_type = weightsType; });
+            const std::string reason = std::string("Bias tensor data type ")
+                                       + fb::EnumNameDataType(weightsType)
+                                       + " must equal the convolution input data type "
+                                       + fb::EnumNameDataType(inputType);
+
+            EXPECT_THAT(layoutDeclineReason(weightsTypedBias), ::testing::HasSubstr(reason));
+            EXPECT_THAT(layoutDeclineReason(biasAsFirstAddOperand(weightsTypedBias)),
+                        ::testing::HasSubstr(reason));
+        }
+    }
+}
+
 // A bias with both wrong dims and wrong data type is declined for its dims: the shape rule comes
 // first, so the reason is the same whichever rule a graph also breaks.
 TEST(TestMiopenConvApplicabilityChecks, ReportsBiasShapeBeforeBiasDataType)
@@ -900,6 +942,37 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardAcceptsNonPackedChannelsFirst)
 
                 expectAccepted(withTensorAt(base, role, padded), BACKWARD_OPS);
             }
+        }
+    }
+}
+
+// A tensor with a zero dim has no elements, and the io validators do not decline it for that: only
+// dims whose product would overflow are declined (below). The zero is the leading dim, where the
+// canonical strides of both layouts still describe a packed tensor, so the tensor takes its layout
+// class from them like any other. Each tensor in turn is empty, and the input and output of an
+// empty batch together.
+TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithSaneDims)
+{
+    for(const auto& shapes : rankShapes())
+    {
+        for(const bool channelsLastLayout : {false, true})
+        {
+            const std::string layout = channelsLastLayout ? " channels-last" : " channels-first";
+            const ConvCase base = uniformCase(shapes, channelsLastLayout);
+            const auto empty = [channelsLastLayout](std::vector<int64_t> dims) {
+                dims[0] = 0;
+                return channelsLastLayout ? channelsLast(dims) : channelsFirst(dims);
+            };
+
+            for(const Role role : ROLES)
+            {
+                SCOPED_TRACE("rank " + std::to_string(shapes.x.size()) + layout + ", tensor "
+                             + std::to_string(static_cast<int>(role)) + " empty");
+                expectAccepted(withTensorAt(base, role, empty(tensorAt(base, role).dims)));
+            }
+
+            SCOPED_TRACE("rank " + std::to_string(shapes.x.size()) + layout + ", empty batch");
+            expectAccepted({"empty batch", empty(shapes.y), base.w, empty(shapes.x)});
         }
     }
 }
@@ -1195,6 +1268,29 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesNonPackedChannelsLast)
     }
 }
 
+// A tensor with a broadcast axis (an extent above 1 with stride 0) is not packed (isTensorPacked),
+// and is judged like any other non-packed tensor: forward declines it with every non-packed
+// tensor, backward classifies it by its stride order and accepts it next to packed channels-first
+// tensors. This pins the behaviour that follows from that classification, unchanged from the
+// base; it is not a rule of its own for broadcast tensors.
+TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTensor)
+{
+    const ConvCase base = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, /*channelsLastLayout=*/false);
+
+    for(const Role role : ROLES)
+    {
+        auto strides = tensorAt(base, role).strides;
+        strides.back() = 0;
+        const TensorSpec broadcast = withStrides(tensorAt(base, role).dims, strides);
+        ASSERT_FALSE(isTensorPacked(broadcast.dims, broadcast.strides));
+
+        SCOPED_TRACE("tensor " + std::to_string(static_cast<int>(role)) + " broadcast");
+        const ConvCase tensors = withTensorAt(base, role, broadcast);
+        expectDeclined(tensors, PACKED_REASON, FORWARD_OPS);
+        expectAccepted(tensors, BACKWARD_OPS);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Declined: malformed tensors
 // ---------------------------------------------------------------------------------------------
@@ -1317,6 +1413,27 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeAcceptsZeroExtentDimsInA
 
         EXPECT_EQ(sizeDeclineReason(spec, small), "");
         EXPECT_EQ(sizeDeclineReason(small, spec), "");
+    }
+}
+
+// A zero dim makes the element count zero, whatever the other dims are, so an empty tensor is
+// within the limit. A zero counted as 1 would put the first two of these above it.
+TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeCountsAZeroDimAsZeroElements)
+{
+    const TensorSpec small = channelsFirst(Y_DIMS);
+
+    const std::vector<std::vector<int64_t>> emptyDims = {
+        {0, 3000000000, 1, 1},
+        {3000000000, 0, 1, 1},
+        {0, 5, 5, 5},
+        {2, 0, 3, 3},
+    };
+
+    for(const auto& dims : emptyDims)
+    {
+        SCOPED_TRACE(vecToString(dims));
+        EXPECT_EQ(sizeDeclineReason(channelsFirst(dims), small), "");
+        EXPECT_EQ(sizeDeclineReason(small, channelsFirst(dims)), "");
     }
 }
 
