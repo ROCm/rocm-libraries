@@ -9228,6 +9228,3217 @@
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormBackwardCalcStats3dFp16 (derived from 2_3_2_4_4_fp16_ndhwc)",
         "seed": 1
       }
+    },
+    {
+      "id": "1_12_64_64_fp16_nhwc",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp16_nhwc with dims 1x12x64x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_12_64_64_bfp16_nhwc",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_bfp16_nhwc with dims 1x12x64x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_12_64_64_fp32_nhwc",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nhwc with dims 1x12x64x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "2_12_16_16_fp16_nhwc",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp16_nhwc with dims 2x12x16x16",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "2_12_16_16_bfp16_nhwc",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_bfp16_nhwc with dims 2x12x16x16",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "2_12_16_16_fp32_nhwc",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              12,
+              16,
+              16
+            ],
+            "strides": [
+              3072,
+              1,
+              192,
+              12
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nhwc with dims 2x12x16x16",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "2_12_64_64_fp16_nhwc",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp16_nhwc with dims 2x12x64x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "2_12_64_64_bfp16_nhwc",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_bfp16_nhwc with dims 2x12x64x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "2_12_64_64_fp32_nhwc",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              12,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              12,
+              1,
+              1
+            ],
+            "strides": [
+              12,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              12,
+              64,
+              64
+            ],
+            "strides": [
+              49152,
+              1,
+              768,
+              12
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nhwc with dims 2x12x64x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "16_40_96_64_fp16_nhwc",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              40,
+              1,
+              1
+            ],
+            "strides": [
+              40,
+              1,
+              40,
+              40
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              40,
+              1,
+              1
+            ],
+            "strides": [
+              40,
+              1,
+              40,
+              40
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              16,
+              40,
+              96,
+              64
+            ],
+            "strides": [
+              245760,
+              1,
+              2560,
+              40
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              16,
+              40,
+              96,
+              64
+            ],
+            "strides": [
+              245760,
+              1,
+              2560,
+              40
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              40,
+              1,
+              1
+            ],
+            "strides": [
+              40,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              16,
+              40,
+              96,
+              64
+            ],
+            "strides": [
+              245760,
+              1,
+              2560,
+              40
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp16_nhwc with dims 16x40x96x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "3_2_2_2_fp16_nhwc",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              2,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              2,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              8,
+              1,
+              4,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              8,
+              1,
+              4,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              3,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              8,
+              1,
+              4,
+              2
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp16_nhwc with dims 3x2x2x2",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "16_40_96_64_bfp16_nhwc",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              40,
+              1,
+              1
+            ],
+            "strides": [
+              40,
+              1,
+              40,
+              40
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              40,
+              1,
+              1
+            ],
+            "strides": [
+              40,
+              1,
+              40,
+              40
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              16,
+              40,
+              96,
+              64
+            ],
+            "strides": [
+              245760,
+              1,
+              2560,
+              40
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              16,
+              40,
+              96,
+              64
+            ],
+            "strides": [
+              245760,
+              1,
+              2560,
+              40
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              40,
+              1,
+              1
+            ],
+            "strides": [
+              40,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              16,
+              40,
+              96,
+              64
+            ],
+            "strides": [
+              245760,
+              1,
+              2560,
+              40
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_bfp16_nhwc with dims 16x40x96x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "3_2_2_2_bfp16_nhwc",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              2,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              2,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              8,
+              1,
+              4,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              8,
+              1,
+              4,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              3,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              8,
+              1,
+              4,
+              2
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_bfp16_nhwc with dims 3x2x2x2",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_63_63_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              63,
+              63
+            ],
+            "strides": [
+              254016,
+              3969,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              63,
+              63
+            ],
+            "strides": [
+              254016,
+              3969,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              63,
+              63
+            ],
+            "strides": [
+              254016,
+              3969,
+              63,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nchw with dims 1x64x63x63",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_65_65_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nchw with dims 1x64x65x65",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_66_63_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nchw with dims 1x64x66x63",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_1024_257_257_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1024,
+              1,
+              1
+            ],
+            "strides": [
+              1024,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1024,
+              1,
+              1
+            ],
+            "strides": [
+              1024,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024,
+              257,
+              257
+            ],
+            "strides": [
+              67634176,
+              66049,
+              257,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1024,
+              257,
+              257
+            ],
+            "strides": [
+              67634176,
+              66049,
+              257,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1024,
+              1,
+              1
+            ],
+            "strides": [
+              1024,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              1024,
+              257,
+              257
+            ],
+            "strides": [
+              67634176,
+              66049,
+              257,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nchw with dims 1x1024x257x257",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "2_8_65_65_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              1,
+              1
+            ],
+            "strides": [
+              8,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              1,
+              1
+            ],
+            "strides": [
+              8,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              65,
+              65
+            ],
+            "strides": [
+              33800,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              65,
+              65
+            ],
+            "strides": [
+              33800,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              8,
+              1,
+              1
+            ],
+            "strides": [
+              8,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              8,
+              65,
+              65
+            ],
+            "strides": [
+              33800,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nchw with dims 2x8x65x65",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_65_65_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp16_nchw with dims 1x64x65x65",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_66_63_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp16_nchw with dims 1x64x66x63",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_65_65_bfp16_nchw",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_bfp16_nchw with dims 1x64x65x65",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_66_63_bfp16_nchw",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              66,
+              63
+            ],
+            "strides": [
+              266112,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_bfp16_nchw with dims 1x64x66x63",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_64_64_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              64,
+              64
+            ],
+            "strides": [
+              262144,
+              4096,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              64,
+              64
+            ],
+            "strides": [
+              262144,
+              4096,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              64,
+              64
+            ],
+            "strides": [
+              262144,
+              4096,
+              64,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nchw with dims 1x64x64x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_67_64_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              67,
+              64
+            ],
+            "strides": [
+              274432,
+              4288,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              67,
+              64
+            ],
+            "strides": [
+              274432,
+              4288,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              67,
+              64
+            ],
+            "strides": [
+              274432,
+              4288,
+              64,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nchw with dims 1x64x67x64",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
+    },
+    {
+      "id": "1_64_65_65_fp32_nhwc",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              1,
+              4160,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              1,
+              4160,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              64,
+              65,
+              65
+            ],
+            "strides": [
+              270400,
+              1,
+              4160,
+              64
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "seed": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_4_2_2_fp32_nhwc with dims 1x64x65x65",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
+      }
     }
   ]
 }

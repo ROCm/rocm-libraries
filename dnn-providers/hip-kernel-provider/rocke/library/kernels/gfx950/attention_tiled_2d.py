@@ -53,6 +53,7 @@ from kernels.common._lse_store import (
     lse_store,
     unified_lse_offset,
 )
+from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 
 from rocke.core.ir import (
@@ -537,10 +538,7 @@ class UnifiedAttention2DTiledSpec:
     lse_layout: str = field(default="token_major", kw_only=True)
 
     def __post_init__(self):
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         if self.lse_layout not in UNIFIED_LSE_LAYOUTS:
             raise ValueError(
                 f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, "
