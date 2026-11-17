@@ -653,7 +653,7 @@ def writeBenchmarkFiles(
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, True, deviceId, gfxName, \
                                   libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
-                                  sourceDir=str(sourcePath))
+                                  sourceDir=str(sourcePath), writeResultsFile=writeResultsFile)
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
@@ -1087,18 +1087,24 @@ def main(
                 if buildOnly:
                     print1("# Build-only mode: skipping result collection.")
                 else:
-                    print("clientExit={} {} for {}" \
-                            .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
-                            globalParameters["ConfigPath"]) )
-
                     # copy data
                     resultsFileBase = resultsFileBaseFinal
                     resultsFileName = resultsFileBase + ".csv"
                     solutionsFileName = resultsFileBase + ".yaml"
                     granularityFileName = resultsFileBase + "_Granularity.csv"
-                    if os.path.isfile(resultsFileName):
+                    resultsFileExists = os.path.isfile(resultsFileName)
+                    if writeResultsFile and not resultsFileExists:
+                        printWarning(f"Expected results CSV was not produced: {resultsFileName}")
+                        # A zero client exit does not establish that required results were written.
+                        if not benchmarkErrors:
+                            totalTestFails += 1
+                    print("clientExit={} {} for {}" \
+                            .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
+                            globalParameters["ConfigPath"]) )
+
+                    if resultsFileExists:
                         shutil.copy(resultsFileName, newResultsFileName)
-                    elif not writeResultsFile and os.path.isfile(newResultsFileName):
+                    elif os.path.isfile(newResultsFileName):
                         # From an earlier run (ForceRedoBenchmarkProblems): not this run's results.
                         os.remove(newResultsFileName)
                     shutil.copy(solutionsFileName, newSolutionsFileName)

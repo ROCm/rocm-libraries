@@ -57,7 +57,7 @@ def test_results_file_consumed(hasLibraryLogic, backendName, expected):
 # BenchmarkProblems.main with a stubbed benchmark step
 # ---------------------------------------------------------------------------
 def _run_main(tmp_path, monkeypatch, backend=None, forceRedo=False, **mainKwargs):
-    """Run main with a stubbed benchmark step that writes only the solutions YAML.
+    """Run main with a stubbed benchmark step that writes requested client outputs.
 
     Returns the 2_BenchmarkData directory and the writeResultsFile value of each
     stubbed benchmark step run.
@@ -70,6 +70,9 @@ def _run_main(tmp_path, monkeypatch, backend=None, forceRedo=False, **mainKwargs
         os.makedirs(os.path.dirname(resultsFileBase), exist_ok=True)
         with open(resultsFileBase + ".yaml", "w") as f:
             f.write("solutions\n")
+        if kwargs["writeResultsFile"]:
+            with open(resultsFileBase + ".csv", "w") as f:
+                f.write("results\n")
         return resultsFileBase, 0
 
     monkeypatch.setattr(bp, "_benchmarkProblemType", fakeBenchmarkProblemType)
@@ -167,6 +170,67 @@ def test_write_client_config_results_file(
     )
 
     assert passed == [expected]
+
+
+@pytest.mark.parametrize("writeResultsFile", [True, False])
+@pytest.mark.parametrize("tileAwareSelection", [True, False])
+def test_write_benchmark_files_results_policy(
+    tmp_path, monkeypatch, writeResultsFile, tileAwareSelection
+):
+    """Exercise the benchmark caller and writer together, with codegen stubbed out."""
+    class Solution(dict):
+        def getKernels(self):
+            return []
+
+    solution = Solution(
+        ProblemType={"TileAwareSelection": tileAwareSelection, "Batched": True},
+        MacroTile0=16, MacroTile1=32,
+    )
+    library = types.SimpleNamespace(
+        solutions={0: types.SimpleNamespace(problemType=None)},
+        applyNaming=lambda *args: None,
+    )
+    monkeypatch.setattr(bp, "copyStaticFiles", lambda *args: None)
+    monkeypatch.setattr(bp, "initHelperKernelObjects", lambda *args: [])
+    monkeypatch.setattr(bp, "KernelWriterAssembly", lambda *args: None)
+    monkeypatch.setattr(bp, "cmdLineArchsFor", lambda *args: ["gfx950"])
+    monkeypatch.setattr(bp, "writeSolutionsAndKernels", lambda *args, **kwargs: ([], None))
+    monkeypatch.setattr(bp, "getSolutionNameMin", lambda *args: "solution")
+    monkeypatch.setattr(bp, "getKernelNameMin", lambda *args: "kernel")
+    monkeypatch.setattr(
+        bp.SolutionLibrary.MasterSolutionLibrary, "BenchmarkingLibrary",
+        lambda *args: library,
+    )
+    monkeypatch.setattr(bp, "state", lambda *args: {})
+    monkeypatch.setattr(bp.LibraryIO, "write", lambda *args: None)
+    idealSizes = []
+
+    def problemSizes(problemType, sizes):
+        idealSizes.extend(sizes)
+        return sizes
+
+    monkeypatch.setattr(bp, "ProblemSizes", problemSizes)
+    passed = []
+    monkeypatch.setattr(
+        ClientWriter, "writeClientConfigIni", lambda *args: passed.append(args[9])
+    )
+    stepDir = tmp_path / "STEP"
+    bp.writeBenchmarkFiles(
+        stepBaseDir=str(stepDir), solutions=[solution], problemSizes=None,
+        biasTypeArgs=None, factorDimArgs=None, activationArgs=None, icacheFlushArgs=None,
+        stepName="name", solutionSummationSizes=[64],
+        asmToolchain=types.SimpleNamespace(
+            assembler=types.SimpleNamespace(path="/bin/assembler")
+        ),
+        srcToolchain=None, sourcePath=stepDir / "source", debugConfig=DebugConfig(),
+        gateTypeArgs=None, deviceId=0, gfxName="gfx950", isaInfoMap={}, probSolMap={},
+        writeResultsFile=writeResultsFile,
+    )
+
+    suffix = "_Granularity.csv" if tileAwareSelection else ".csv"
+    expected = os.path.join(str(stepDir), "../Data", "name" + suffix)
+    assert passed == [expected if writeResultsFile else None]
+    assert idealSizes == ([{"Exact": [576, 1152, 1, 64]}] if tileAwareSelection else [])
 
 
 def _make_problem_type():

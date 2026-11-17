@@ -1,12 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""BenchmarkProblems.main copies the client's results CSV only if it exists.
-
-After the client runs, main copies the results CSV, the solutions YAML and
-the granularity CSV from 1_BenchmarkProblems to 2_BenchmarkData. A client run
-that wrote no results CSV must not fail the copy, as for the granularity CSV.
-"""
+"""Result collection distinguishes missing required CSVs from deliberate omission."""
 
 import os
 
@@ -21,7 +16,10 @@ pytestmark = pytest.mark.unit
 PROBLEM_TYPE_NAME = "Cijk_Ailk_Bljk_HHS_BH"
 
 
-def _run_main(tmp_path, monkeypatch, clientOutputs):
+def _run_main(
+    tmp_path, monkeypatch, clientOutputs, *, benchmarkErrors=0, exitOnFails=True,
+    forceRedo=False, **mainKwargs,
+):
     """Run main with a stubbed benchmark step that writes ``clientOutputs``.
 
     clientOutputs maps a file suffix (".csv", ".yaml", "_Granularity.csv") to
@@ -38,18 +36,18 @@ def _run_main(tmp_path, monkeypatch, clientOutputs):
         for suffix, content in clientOutputs.items():
             with open(resultsFileBase + suffix, "w") as f:
                 f.write(content)
-        return resultsFileBase, 0
+        return resultsFileBase, benchmarkErrors
 
     monkeypatch.setattr(bp, "_benchmarkProblemType", fakeBenchmarkProblemType)
     monkeypatch.setattr(bp, "ProblemType", lambda config, printInfo: PROBLEM_TYPE_NAME)
     monkeypatch.setitem(globalParameters, "CSVExportWinner", False)
-    monkeypatch.setitem(globalParameters, "ForceRedoBenchmarkProblems", False)
-    monkeypatch.setitem(globalParameters, "ExitOnFails", True)
+    monkeypatch.setitem(globalParameters, "ForceRedoBenchmarkProblems", forceRedo)
+    monkeypatch.setitem(globalParameters, "ExitOnFails", exitOnFails)
     monkeypatch.setitem(globalParameters, "ConfigPath", str(tmp_path / "config.yaml"))
 
     outputPath = tmp_path / "out"
     bp.main(
-        backend=None,
+        backend=mainKwargs.pop("backend", None),
         config=[[{}, {}]],
         useCache=False,
         asmToolchain=None,
@@ -62,16 +60,66 @@ def _run_main(tmp_path, monkeypatch, clientOutputs):
         gfxName="gfx950",
         isaInfoMap={},
         probSolMap={},
+        **mainKwargs,
     )
     return outputPath / BENCHMARK_DATA_DIR, benchmarked
 
 
-def test_missing_results_csv_is_not_copied(tmp_path, monkeypatch):
-    """No results CSV: main succeeds and still copies the solutions YAML."""
-    dataPath, _ = _run_main(tmp_path, monkeypatch, {".yaml": "solutions\n"})
+def test_disabled_results_csv_is_not_copied(tmp_path, monkeypatch):
+    """Deliberately omitted results remain successful and retain the solutions YAML."""
+    dataPath, _ = _run_main(
+        tmp_path, monkeypatch, {".yaml": "solutions\n"}, hasLibraryLogic=False
+    )
 
     assert sorted(os.listdir(dataPath)) == [PROBLEM_TYPE_NAME + "_00_00.yaml"]
     assert (dataPath / (PROBLEM_TYPE_NAME + "_00_00.yaml")).read_text() == "solutions\n"
+
+
+@pytest.mark.parametrize(
+    "mainKwargs",
+    [{}, {"hasLibraryLogic": False, "backend": {"Name": "Ductile", "Config": {}}}],
+    ids=["library-logic", "ductile"],
+)
+def test_missing_required_results_csv_fails(tmp_path, monkeypatch, capsys, mainKwargs):
+    """A zero client exit cannot hide missing results needed by either consumer."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(tmp_path, monkeypatch, {".yaml": "solutions\n"}, **mainKwargs)
+
+    assert exc.value.code == 1
+    output = capsys.readouterr().out
+    assert "Expected results CSV was not produced" in output
+    assert "clientExit=1 (ERROR)" in output
+    dataPath = tmp_path / "out" / BENCHMARK_DATA_DIR
+    assert sorted(os.listdir(dataPath)) == [PROBLEM_TYPE_NAME + "_00_00.yaml"]
+
+
+@pytest.mark.parametrize("benchmarkErrors, expectedErrors", [(0, 1), (3, 3)])
+def test_missing_required_csv_respects_exit_policy(
+    tmp_path, monkeypatch, capsys, benchmarkErrors, expectedErrors
+):
+    """ExitOnFails=False permits continuation, but the run still reports failure."""
+    _run_main(
+        tmp_path, monkeypatch, {".yaml": "solutions\n"},
+        benchmarkErrors=benchmarkErrors, exitOnFails=False,
+    )
+
+    assert f"clientExit={expectedErrors} (ERROR)" in capsys.readouterr().out
+
+
+def test_missing_required_csv_removes_stale_rerun_marker(tmp_path, monkeypatch):
+    dataPath = tmp_path / "out" / BENCHMARK_DATA_DIR
+    dataPath.mkdir(parents=True)
+    staleCsv = dataPath / (PROBLEM_TYPE_NAME + "_00_00.csv")
+    staleCsv.write_text("previous run\n")
+
+    with pytest.raises(SystemExit):
+        _run_main(tmp_path, monkeypatch, {".yaml": "solutions\n"}, forceRedo=True)
+
+    assert not staleCsv.exists()
+    _, benchmarked = _run_main(
+        tmp_path, monkeypatch, {".yaml": "solutions\n"}, exitOnFails=False
+    )
+    assert benchmarked == [0]
 
 
 def test_existing_results_csv_is_copied(tmp_path, monkeypatch):
@@ -105,8 +153,10 @@ def test_results_csv_marks_problem_type_as_benchmarked(tmp_path, monkeypatch):
 
 
 def test_missing_results_csv_reruns_next_time(tmp_path, monkeypatch):
-    """Without a copied results CSV a rerun benchmarks the problem type again."""
-    _run_main(tmp_path, monkeypatch, {".yaml": "solutions\n"})
-    _, benchmarked = _run_main(tmp_path, monkeypatch, {".yaml": "solutions\n"})
+    """Without requested results a rerun benchmarks the problem type again."""
+    _run_main(tmp_path, monkeypatch, {".yaml": "solutions\n"}, hasLibraryLogic=False)
+    _, benchmarked = _run_main(
+        tmp_path, monkeypatch, {".yaml": "solutions\n"}, hasLibraryLogic=False
+    )
 
     assert benchmarked == [0]
