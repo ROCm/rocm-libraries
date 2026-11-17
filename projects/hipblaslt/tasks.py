@@ -448,6 +448,7 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
         "disable_marker": "Disable hipBLASLt markers.",
         "enable_tensile_marker": "Enable Tensile markers.",
         "skip_rocroller": "Skip the rocRoller backend.",
+        "skip_gfx1250v0": "Skip gfx1250v0 build when targeting gfx1250.",
         "quiet": "Build without VERBOSE=1.",
         "enable_asm_comments": "Enable assembly comments in generated asm.",
         "build_dir": "Override the build directory.",
@@ -492,6 +493,7 @@ def build(
     disable_marker=False,
     enable_tensile_marker=False,
     skip_rocroller=False,
+    skip_gfx1250v0=False,
     quiet=False,
     enable_asm_comments=False,
     build_dir=None,
@@ -654,6 +656,8 @@ def build(
         cmake_opts.append("-DTENSILELITE_EXPERIMENTAL=ON")
     if emit_occupancy_probe:
         cmake_opts.append("-DTENSILELITE_EMIT_OCCUPANCY_PROBE=ON")
+    if skip_gfx1250v0:
+        cmake_opts.append("-DHIPBLASLT_BUILD_GFX1250V0=OFF")
     if disable_marker:
         cmake_opts.append("-DHIPBLASLT_ENABLE_MARKER=OFF")
     if not enable_asm_comments:

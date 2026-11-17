@@ -99,6 +99,7 @@ while [[ $# -gt 0 ]]; do
         --codecoverage)     INVOKE_ARGS="$INVOKE_ARGS --codecoverage" ;;
         --gprof)            INVOKE_ARGS="$INVOKE_ARGS --gprof" ;;
         --skip_rocroller)   INVOKE_ARGS="$INVOKE_ARGS --skip-rocroller" ;;
+        --skip-gfx1250v0)   INVOKE_ARGS="$INVOKE_ARGS --skip-gfx1250v0" ;;
         --keep-build-tmp)   INVOKE_ARGS="$INVOKE_ARGS --keep-build-tmp" ;;
         --no-compress)      INVOKE_ARGS="$INVOKE_ARGS --no-compress" ;;
         --logic-yaml-filter) shift; INVOKE_ARGS="$INVOKE_ARGS --logic-filter=$1" ;;
