@@ -10,6 +10,7 @@
 #include "ck_tile/ops/fmha/block/variants.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
+#include "ck_tile/ops/fmha/kernel/fmha_fwd_workgroup_mapping.hpp"
 
 #include <string>
 #include <type_traits>
@@ -842,6 +843,13 @@ struct FmhaFwdPagedKVKernel
                         ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
                             ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1));
         }
+        else if constexpr(kUsesTdmAffineDramPath)
+        {
+            return dim3(nhead_,
+                        ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
+                            ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1),
+                        batch_size_);
+        }
         else
         {
             // TODO: this may need tuning
@@ -853,6 +861,53 @@ struct FmhaFwdPagedKVKernel
     }
 
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
+    {
+        if constexpr(kUsesTdmAffineDramPath)
+            return GetTdmTileIndex(kargs);
+        else
+            return GetGenericTileIndex(kargs);
+    }
+
+    // The TDM path takes the dense qr_tdm_sched launch order (FmhaFwdKernel::GetTileIndex):
+    // head-fastest grid and the shared MapFmhaFwdWorkgroup, which runs the heavy causal Q tiles
+    // of every head first.
+    CK_TILE_DEVICE static auto GetTdmTileIndex(const Kargs& kargs)
+    {
+        bool has_padded_seqlen_k = false;
+        if constexpr(kIsGroupMode)
+            has_padded_seqlen_k = kargs.seqlen_k_ptr != nullptr;
+
+        const FmhaFwdWorkgroupGrid grid{
+            static_cast<index_t>(gridDim.x),
+            static_cast<index_t>(has_padded_seqlen_k ? gridDim.z : gridDim.y),
+            static_cast<index_t>(has_padded_seqlen_k ? gridDim.y : gridDim.z),
+            ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1),
+            has_padded_seqlen_k};
+        const FmhaFwdWorkgroup block{
+            static_cast<index_t>(blockIdx.x),
+            static_cast<index_t>(has_padded_seqlen_k ? blockIdx.z : blockIdx.y),
+            static_cast<index_t>(has_padded_seqlen_k ? blockIdx.y : blockIdx.z)};
+
+        FmhaFwdWorkgroupFeatures features{};
+        // The head-stride guard avoids the single-head BSHD false positive.
+        features.is_bhsd = kargs.stride_q == kargs.hdim_q && kargs.nhead_stride_q > kargs.hdim_q;
+        // uniform_lengths stays false, so the XCD orders are never taken: paged KV always
+        // passes per-batch key lengths (seqlen_k_ptr).
+        // square_causal compares against the max seqlen_k; it only picks an order.
+        if constexpr(kHasMask)
+            features.square_causal = kargs.seqlen_q == kargs.seqlen_k &&
+                                     kargs.window_size_left < 0 && kargs.window_size_right == 0;
+
+        // FmhaFwdKernel enables head-major on gfx12 (CK_TILE_FMHA_FORCE_HEAD_MAJOR); this path
+        // only runs on gfx125.
+        constexpr bool kEnableHeadMajor   = true;
+        constexpr bool kEnableBatchCausal = kHasMask && !kIsGroupMode;
+        const auto tile = MapFmhaFwdWorkgroup<kHasMask, kEnableHeadMajor, kEnableBatchCausal>(
+            features, grid, block, CK_TILE_XCD_REMAP_NUM_XCDS, kargs.nhead_ratio_qk);
+        return ck_tile::make_tuple(tile.q_tile, tile.v_tile, tile.head, tile.batch);
+    }
+
+    CK_TILE_DEVICE static constexpr auto GetGenericTileIndex(const Kargs& kargs)
     {
         bool has_padded_seqlen_k = false;
 
