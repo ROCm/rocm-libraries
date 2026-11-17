@@ -91,8 +91,6 @@ class CompactSolution(Mapping):
         "_hydrated",
         "_misses",
         "_nameFull",
-        "srcName",
-        "duplicate",
         "baseName",
         "kernelNameMin",
         "_baseDedupeKey",
@@ -108,7 +106,6 @@ class CompactSolution(Mapping):
         summary,
         present,
         nameFull,
-        srcName,
         baseName,
         kernelNameMin,
         baseDedupeKey,
@@ -123,8 +120,6 @@ class CompactSolution(Mapping):
         self._hydrated = None
         self._misses = 0
         self._nameFull = nameFull
-        self.srcName = srcName
-        self.duplicate = False
         self.baseName = baseName
         self.kernelNameMin = kernelNameMin
         self._baseDedupeKey = baseDedupeKey
@@ -186,7 +181,6 @@ class CompactSolution(Mapping):
             summary,
             present,
             nameFull,
-            solution.srcName,
             baseName,
             kernelNameMin,
             baseDedupeKey,
@@ -213,7 +207,6 @@ class CompactSolution(Mapping):
             setattr(sol, attr, value)
         if self._overlay:
             sol._state.update(self._overlay)
-        sol.duplicate = self.duplicate
         return sol
 
     def _fallback(self):
@@ -305,8 +298,6 @@ class CompactSolution(Mapping):
             self._present,
             self._overlay,
             self._nameFull,
-            self.srcName,
-            self.duplicate,
             self.baseName,
             self.kernelNameMin,
             self._baseDedupeKey,
@@ -322,8 +313,6 @@ class CompactSolution(Mapping):
             self._present,
             self._overlay,
             self._nameFull,
-            self.srcName,
-            self.duplicate,
             self.baseName,
             self.kernelNameMin,
             self._baseDedupeKey,

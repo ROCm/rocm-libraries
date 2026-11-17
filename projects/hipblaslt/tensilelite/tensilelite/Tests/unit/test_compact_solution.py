@@ -122,7 +122,6 @@ def test_hydrate_restores_the_solution_with_overlay(parsed):
     real, compact = _realAndCompact(parsed)
     compact["codeObjectFile"] = "lib_x"
     compact["BaseName"] = "base_x"
-    compact.duplicate = True
     kernels = compact.getKernels()
     assert kernels == [compact]
     sol = compact.hydrate()
@@ -130,7 +129,7 @@ def test_hydrate_restores_the_solution_with_overlay(parsed):
     assert sol._state["codeObjectFile"] == "lib_x"
     assert sol._state["BaseName"] == "base_x"
     assert sol._state["Kernel"] is True
-    assert sol.duplicate is True
+    assert sol.srcName == real.srcName
     assert sol.assembler is compact.assembler
     assert sol.isaInfoMap is compact.isaInfoMap
     stripped = {
