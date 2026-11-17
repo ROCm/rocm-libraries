@@ -235,13 +235,16 @@ miopenStatus_t CheckScaleFactors(const void* alpha, const void* beta, miopenStat
 }
 
 // The policy that MIOPEN_FIND_ENFORCE names. MIOpen's FindEnforceAction values
-// are miopenTuningPolicy_t's, by name or by number. None when unset or unparsable.
-miopenTuningPolicy_t FindEnforcePolicy()
+// are miopenTuningPolicy_t's, by name or by number. None when unset, and no value
+// when MIOpen cannot parse it.
+std::optional<miopenTuningPolicy_t> FindEnforcePolicy()
 {
     const char* raw = std::getenv("MIOPEN_FIND_ENFORCE");
     if(raw == nullptr)
         return miopenTuningPolicyNone;
     const std::string value = ToLower(raw);
+    if(value.empty() || value == "none")
+        return miopenTuningPolicyNone;
     if(value == "db_update")
         return miopenTuningPolicyDbUpdate;
     if(value == "search")
@@ -251,8 +254,9 @@ miopenTuningPolicy_t FindEnforcePolicy()
     if(value == "db_clean")
         return miopenTuningPolicyDbClean;
     // Parsed as MIOpen and the provider parse it: std::stoul skips leading
-    // whitespace and ignores trailing characters. MIOpen throws for a value it
-    // cannot parse and the provider treats it as unset, so it is None here.
+    // whitespace and ignores trailing characters, and a number out of range is
+    // None. MIOpen throws for a value it cannot parse and the provider treats it
+    // as unset.
     try
     {
         const unsigned long action = std::stoul(value);
@@ -261,6 +265,7 @@ miopenTuningPolicy_t FindEnforcePolicy()
     }
     catch(const std::exception&)
     {
+        return std::nullopt;
     }
     return miopenTuningPolicyNone;
 }
@@ -306,8 +311,15 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
     // Pass DbUpdate through once hipDNN carries the policy (#14372).
     if(policy == miopenTuningPolicyDbUpdate)
     {
-        const miopenTuningPolicy_t enforced = FindEnforcePolicy();
-        if(enforced != miopenTuningPolicyNone && enforced != miopenTuningPolicyDbUpdate)
+        // A value MIOpen cannot parse never reaches MIOpen under DbUpdate, but the
+        // provider's None lets MIOpen read it and throw, so it is declined too.
+        const std::optional<miopenTuningPolicy_t> enforced = FindEnforcePolicy();
+        if(!enforced)
+            return RecordFailure(miopenStatusUnsupportedOp,
+                                 "hipDNN batchnorm cannot apply miopenTuningPolicyDbUpdate "
+                                 "while MIOPEN_FIND_ENFORCE has a value MIOpen cannot parse; "
+                                 "the provider would let MIOpen read it and throw");
+        if(*enforced != miopenTuningPolicyNone && *enforced != miopenTuningPolicyDbUpdate)
             return RecordFailure(miopenStatusUnsupportedOp,
                                  "hipDNN batchnorm cannot apply miopenTuningPolicyDbUpdate "
                                  "while MIOPEN_FIND_ENFORCE asks for SEARCH, SEARCH_DB_UPDATE "
@@ -319,7 +331,10 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
                              "hipDNN batchnorm cannot apply the handle's tuning policy; "
                              "only miopenTuningPolicyNone, DbUpdate and Search are "
                              "forwarded");
-    if(policy == miopenTuningPolicySearch && !ProviderCanApply(FindEnforcePolicy()))
+    // Under Search the provider's handle is Search too, so like MIOpen it never
+    // reads a value it cannot parse.
+    if(policy == miopenTuningPolicySearch &&
+       !ProviderCanApply(FindEnforcePolicy().value_or(miopenTuningPolicyNone)))
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm cannot apply miopenTuningPolicySearch while "
                              "MIOPEN_FIND_ENFORCE asks for DB_UPDATE, SEARCH_DB_UPDATE or "

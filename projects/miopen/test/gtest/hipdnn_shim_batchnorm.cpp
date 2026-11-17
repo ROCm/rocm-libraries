@@ -2003,15 +2003,19 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
 
 // A DbUpdate handle also wins over MIOPEN_FIND_ENFORCE in MIOpen, so MIOpen runs
 // as under None, but the provider would follow the variable. The shim declines
-// the variable's values that do more than None, on training only.
+// the variable's values that do more than None, on training only. It also declines
+// a value MIOpen cannot parse, which MIOpen never reads under DbUpdate but would
+// read and throw on behind the provider's None.
 TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyUnderFindEnforceIsDeclined)
 {
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbUpdate);
     const char* reason = "MIOPEN_FIND_ENFORCE";
 
-    const std::pair<const char*, const char*> values[] = {
-        {"search", "SEARCH"}, {"search_db_update", "SEARCH_DB_UPDATE"}, {"db_clean", "DB_CLEAN"}};
+    const std::pair<const char*, const char*> values[] = {{"search", "SEARCH"},
+                                                          {"search_db_update", "SEARCH_DB_UPDATE"},
+                                                          {"db_clean", "DB_CLEAN"},
+                                                          {"unparsable", "foo"}};
     for(const auto& [name, value] : values)
     {
         SCOPED_TRACE(value);
