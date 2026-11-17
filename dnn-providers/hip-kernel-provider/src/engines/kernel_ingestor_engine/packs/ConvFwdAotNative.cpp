@@ -25,6 +25,7 @@
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -760,6 +761,13 @@ std::optional<AotKernel> gfx950Instance(const KernelDefinition& kernel)
     return aotImplicitGemmInstance(kernel, *groupMerge);
 }
 
+/// @p kernel's instance_id for a diagnostic ("<unknown>" when it states none).
+std::string kernelLabel(const KernelDefinition& kernel)
+{
+    const auto* id = stringMetadata(kernel, "instance_id");
+    return id == nullptr ? std::string("<unknown>") : *id;
+}
+
 /// The gfx1250 instance @p kernel describes: a single-launch prebuilt kernel whose KMD
 /// fields (Gfx1250ConvFwdAotSpec) parse into a catalog kernel of a family this port runs
 /// (gfx1250::CatalogKernel::parse refuses anything else).
@@ -789,8 +797,12 @@ std::optional<AotKernel> gfx1250Instance(const KernelDefinition& kernel)
         return gfx1250::CatalogKernel::parse(
             gfx1250::InstanceGeometry(std::move(ints), std::move(strings)));
     }
-    catch(const std::exception&)
+    catch(const std::exception& e)
     {
+        // The kernel is not served; say which one and why, so a malformed catalog entry is
+        // visible at load time.
+        HIPDNN_PLUGIN_LOG_WARN("ConvFwdAot: skipping gfx1250 kernel " << kernelLabel(kernel) << ": "
+                                                                      << e.what());
         return std::nullopt;
     }
 }
@@ -838,8 +850,16 @@ std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
     {
         return std::make_shared<const AotPrepared>(decodeAot<E>(kernel));
     }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("ConvFwdAot: could not decode kernel " << kernelLabel(kernel) << ": "
+                                                                      << e.what());
+        return nullptr;
+    }
     catch(...)
     {
+        HIPDNN_PLUGIN_LOG_WARN("ConvFwdAot: could not decode kernel " << kernelLabel(kernel)
+                                                                      << ": unknown exception");
         return nullptr;
     }
 }
