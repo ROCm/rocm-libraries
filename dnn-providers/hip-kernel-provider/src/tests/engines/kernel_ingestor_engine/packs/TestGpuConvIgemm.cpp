@@ -1509,7 +1509,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputProblemsStageNoInput)
     }
 }
 
-conv_igemm::CfxTile cfxTile(int64_t bm, int64_t halo, long long ldsBytes = 64 * 1024)
+conv_igemm::CfxTile cfxTile(int64_t bm, int64_t halo, long long ldsBytes = 64LL * 1024)
 {
     conv_igemm::CfxTile tile;
     tile.bm = bm;
@@ -1554,7 +1554,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputFitsOneDimensionalGathersItsHaloHol
     auto deep = cfxTile(256, 2);
     deep.bk = 64;
     EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(1000, 3, 1, 2, 1), fwd), deep));
-    deep.ldsBytes = 160 * 1024;
+    deep.ldsBytes = 160LL * 1024;
     EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(1000, 3, 1, 2, 1), fwd), deep));
     // The FMA kernel's in-place tile (no halo) serves any stride.
     EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(100, 10, 0, 5, 1), fwd), cfxTile(64, 0)));
@@ -1575,7 +1575,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputConfigsServeOnlyOneDimensionalChann
         bool served;
     };
     auto stride5 = ncl(300, 5, 0, 5, 1);
-    std::vector<Graph> graphs{
+    const std::vector<Graph> graphs{
         {"ncl", ncl(300, 3, 1, 1, 1), true},
         {"nchw height 1", dense(64, 64, {1, 300}, {1, 3}, {0, 1}, false), true},
         {"nlc", dense(64, 64, {300}, {3}, {1}, true), false},
