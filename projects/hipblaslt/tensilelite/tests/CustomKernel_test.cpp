@@ -1457,6 +1457,52 @@ TEST(CustomKernelTest, TilesBandsLaunchesBandsPerTile)
                  std::runtime_error);
 }
 
+// A non-persistent clustered custom kernel launches its tile grid rounded up to
+// ClusterDim per dimension.
+TEST(CustomKernelTest, ClusterGridRoundsUpToClusterDim)
+{
+    struct Case
+    {
+        TensileLite::dim3 clusterDim;
+        size_t            groupsX;
+        size_t            groupsY;
+    };
+    // 640x384 over 128x128 macro tiles is a 5x3 tile grid.
+    auto problem
+        = ContractionProblemGemm::GEMM(false, false, 640, 384, 256, 640, 256, 640, 1.0, false, 1);
+    auto device = probeDevice();
+    for(auto const& c :
+        {Case{TensileLite::dim3(1, 1, 1), 5, 3}, Case{TensileLite::dim3(2, 2, 1), 6, 4}})
+    {
+        SCOPED_TRACE(::testing::Message() << c.clusterDim.x << "x" << c.clusterDim.y);
+        ContractionSolution solution;
+        configureProbeKernel(solution, {});
+        solution.sizeMapping.clusterDim = c.clusterDim;
+        PersistentLaunchSettings launch;
+        auto                     call
+            = solution.generateCustomCall<false>(problem, ContractionInputs(), device, launch);
+        EXPECT_EQ(call.clusterDim.x, c.clusterDim.x);
+        EXPECT_EQ(call.clusterDim.y, c.clusterDim.y);
+        EXPECT_EQ(call.numWorkGroups.x, c.groupsX);
+        EXPECT_EQ(call.numWorkGroups.y, c.groupsY);
+        EXPECT_EQ(call.numWorkGroups.z, 1u);
+        EXPECT_EQ(call.numWorkItems.x, 256u * c.groupsX);
+        EXPECT_EQ(call.numWorkItems.y, c.groupsY);
+        EXPECT_EQ(call.numWorkItems.z, 1u);
+    }
+
+    // A persistent grid comes from its schedule and is not rounded.
+    ContractionSolution      persistent;
+    PersistentLaunchSettings launch;
+    configureProbeKernel(persistent, {});
+    configureStreamK(persistent, launch);
+    persistent.sizeMapping.clusterDim = TensileLite::dim3(2, 1, 1);
+    launch.grid                       = 63;
+    auto call = persistent.generateCustomCall<false>(problem, ContractionInputs(), device, launch);
+    EXPECT_EQ(call.numWorkGroups.x, 63u);
+    EXPECT_EQ(call.numWorkItems.x, 256u * 63);
+}
+
 // In Stream-K parallel reduction AddressC/D and their strides name the real C
 // and D for every kernel; partials are reached only through AddressWorkspace.
 TEST(CustomKernelTest, ParallelReductionKeepsRealCAndD)
