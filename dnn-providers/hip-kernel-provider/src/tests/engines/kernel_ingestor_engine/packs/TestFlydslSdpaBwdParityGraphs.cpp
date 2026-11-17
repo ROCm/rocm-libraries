@@ -25,17 +25,17 @@
 /**
  * @file TestFlydslSdpaBwdParityGraphs.cpp
  * @brief The host half of the split backward engine's parity cases (FlydslSdpaBwdParityCases.hpp),
- *        a census over the gfx11 shard the census entry names.
+ *        a census over the gfx11, gfx90a or gfx942 shard the census entry names.
  *
- * On the architecture the entry names (HIPDNN_TEST_EXPECTED_ARCH, a gfx11 member) the split
- * graph matcher binds every served graph and each slot has a shipped object that admits it;
- * each declined graph is declined with its rule's cause. The suite is registered with
- * hkp_register_census_tests() in src/tests/CMakeLists.txt over the gfx11 architectures the
- * split ops ship content for. The suite is compiled into the census binary whatever
- * GPU_TARGETS holds, because a family job without gfx11 targets can supply the binary a gfx11
- * entry runs; it skips, with its reason, when the shard holds no gfx11 pack, which a census
- * entry reports as a failure. A shard that holds gfx11 packs but no object a graph needs
- * fails that case. The device half, which launches the same cases, is
+ * On the architecture the entry names (HIPDNN_TEST_EXPECTED_ARCH, a gfx11 member, gfx90a or
+ * gfx942) the split graph matcher binds every served graph and each slot has a shipped object
+ * that admits it; each declined graph is declined with its rule's cause. The suite is
+ * registered with hkp_register_census_tests() in src/tests/CMakeLists.txt over the gfx11,
+ * gfx90a and gfx942 architectures the split ops ship content for. The suite is compiled into
+ * the census binary whatever GPU_TARGETS holds, because a family job without the entry's
+ * targets can supply the binary the entry runs; it skips, with its reason, when the shard
+ * holds no pack for the entry's family, which a census entry reports as a failure. A shard
+ * that holds the family's packs but no object a graph needs fails that case. The device half, which launches the same cases, is
  * TestFlydslSdpaBwdParity.cpp.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -76,18 +76,27 @@ std::array<std::vector<KernelDefinition>, 3> shippedKernels()
     return kernels;
 }
 
-/// Whether the loaded split engine set holds a pack stamped for a gfx11 architecture.
-bool shardHoldsGfx11Content()
+/// Whether @p arch is one the parity cases are held to: the gfx11 members share one verdict
+/// table; gfx90a and gfx942 have tables of their own.
+bool isParityArch(const std::string& arch)
+{
+    return arch.rfind("gfx11", 0) == 0 || arch == "gfx90a" || arch == "gfx942";
+}
+
+/// Whether the loaded split engine set holds a pack stamped for the architecture family of
+/// @p entryArch (any gfx11 member, or that exact architecture).
+bool shardHoldsContentFor(const std::string& entryArch)
 {
     const auto* set = findLoadedSet(SPLIT_ENGINE_NAME);
     if(set == nullptr)
     {
         return false;
     }
-    return std::any_of(set->slots.begin(), set->slots.end(), [](const auto& slot) {
-        return std::any_of(slot.packs.begin(), slot.packs.end(), [](const auto& pack) {
-            return std::any_of(pack.arch.begin(), pack.arch.end(), [](const std::string& arch) {
-                return arch.rfind("gfx11", 0) == 0;
+    return std::any_of(set->slots.begin(), set->slots.end(), [&](const auto& slot) {
+        return std::any_of(slot.packs.begin(), slot.packs.end(), [&](const auto& pack) {
+            return std::any_of(pack.arch.begin(), pack.arch.end(), [&](const std::string& arch) {
+                return entryArch.rfind("gfx11", 0) == 0 ? arch.rfind("gfx11", 0) == 0
+                                                        : arch == entryArch;
             });
         });
     });
@@ -102,14 +111,14 @@ protected:
         ASSERT_FALSE(_arch.empty())
             << "HIPDNN_TEST_EXPECTED_ARCH is unset, so this census has no expectation to check "
                "against; the architecture is supplied by the census entry.";
-        ASSERT_EQ(_arch.rfind("gfx11", 0), 0U)
-            << "the parity cases follow the gfx11 verdict table; " << _arch
-            << " is not a gfx11 architecture";
+        ASSERT_TRUE(isParityArch(_arch))
+            << "the parity cases follow the gfx11, gfx90a and gfx942 verdict tables; " << _arch
+            << " is none of them";
 
-        if(!shardHoldsGfx11Content())
+        if(!shardHoldsContentFor(_arch))
         {
-            GTEST_SKIP() << "the loaded split engine set holds no gfx11 pack, so the gfx11 "
-                            "parity cases have nothing to check";
+            GTEST_SKIP() << "the loaded split engine set holds no " << _arch
+                         << " pack, so the parity cases have nothing to check";
         }
     }
 

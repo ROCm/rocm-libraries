@@ -8354,6 +8354,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
             log_error(__func__, msg.str());
             return rocblaslt_status_invalid_value;
         }
+        // Only grouped solutions run grouped problems. Rejecting the rest here skips the
+        // workspace sizing below, which walks every group for each candidate solution.
+        if(!solution->problemType.groupedGemm || !(*solution->hardwarePredicate)(*hardware))
+        {
+            log_error(__func__, "Solution is not supported");
+            return rocblaslt_status_invalid_value;
+        }
         if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
            st != rocblaslt_status_success)
             return st;
