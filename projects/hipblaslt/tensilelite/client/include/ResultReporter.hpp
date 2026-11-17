@@ -102,6 +102,11 @@ namespace TensileLite
             const std::string FastestGFlops    = "fastest-gflops";
             const std::string GbpsBW           = "gbps-bandwidth";
 
+            // Timing of one sync batch, in microseconds and number of enqueues. Consumed by
+            // DatabaseReporter.
+            const std::string SyncEnqueues = "sync-enqueues";
+            const std::string SyncTimeUS   = "sync-time-us";
+
             // Performance estimation and granularity
             const std::string Tile0Granularity = "tile0-gran";
             const std::string Tile1Granularity = "tile1-gran";

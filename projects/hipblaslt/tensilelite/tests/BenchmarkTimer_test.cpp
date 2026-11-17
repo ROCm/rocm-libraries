@@ -14,6 +14,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
@@ -57,10 +58,12 @@ namespace
         }
         void reportValue_int(std::string const& key, int64_t value) override
         {
+            order.push_back(key);
             doubles[key] = static_cast<double>(value);
         }
         void reportValue_double(std::string const& key, double value) override
         {
+            order.push_back(key);
             doubles[key] = value;
         }
         void reportValue_sizes(std::string const& key, std::vector<size_t> const& value) override {}
@@ -71,6 +74,7 @@ namespace
         void finalizeReport() override {}
 
         std::map<std::string, double> doubles;
+        std::vector<std::string>      order;
     };
 
     class ScriptedTimer : public BenchmarkTimer
@@ -145,6 +149,22 @@ TEST_F(BenchmarkTimerTest, ReportsMeanOfEnqueueTimes)
     start(timer);
     runSolution(timer, {10, 1, 9, 2, 8, 3, 7, 4, 6, 5});
     EXPECT_NEAR(reported(ResultKey::TimeUS), 5.5, 1e-9);
+}
+
+TEST_F(BenchmarkTimerTest, ReportsSyncEnqueuesBeforeSyncTime)
+{
+    ScriptedTimer timer(makeTimerArgs(1, 1), device, 0.0f);
+    start(timer);
+    runSolution(timer, {100.0});
+
+    auto enqueues
+        = std::find(reporter->order.begin(), reporter->order.end(), ResultKey::SyncEnqueues);
+    auto time = std::find(reporter->order.begin(), reporter->order.end(), ResultKey::SyncTimeUS);
+    ASSERT_NE(enqueues, reporter->order.end());
+    ASSERT_NE(time, reporter->order.end());
+    EXPECT_LT(enqueues, time);
+    EXPECT_EQ(reported(ResultKey::SyncEnqueues), 1.0);
+    EXPECT_NEAR(reported(ResultKey::SyncTimeUS), 100.0, 1e-9);
 }
 
 TEST_F(BenchmarkTimerTest, SubtractsFlushTime)

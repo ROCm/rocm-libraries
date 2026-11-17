@@ -46,6 +46,33 @@ if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     hipblaslt_sanitize_hsakmt_link_interface()
 endif()
 
+# The benchmark database needs SQLite. Look for TheRock's vendored config
+# package first: CMake's built-in FindSQLite3 module would otherwise win in
+# module mode, and it needs a header on the default search path that ROCm
+# containers do not have. Fall back to the distro library.
+if(DEFINED ROCM_PATH)
+    set(tensilelite_sqlite_rocm_path "${ROCM_PATH}")
+elseif(DEFINED ENV{ROCM_PATH})
+    set(tensilelite_sqlite_rocm_path "$ENV{ROCM_PATH}")
+else()
+    set(tensilelite_sqlite_rocm_path "/opt/rocm")
+endif()
+find_package(SQLite3 CONFIG QUIET
+    PATHS "${tensilelite_sqlite_rocm_path}/lib/rocm_sysdeps"
+    NO_DEFAULT_PATH)
+if(NOT SQLite3_FOUND)
+    find_package(SQLite3 QUIET)
+endif()
+if(NOT SQLite3_FOUND)
+    message(FATAL_ERROR
+        "SQLite3 not found. Looked for the ROCm-vendored config package in "
+        "${tensilelite_sqlite_rocm_path}/lib/rocm_sysdeps/lib/cmake/SQLite3 and for a system "
+        "libsqlite3 and sqlite3.h in the default system paths. Set ROCM_PATH "
+        "to a ROCm install that ships SQLite, or install the system SQLite "
+        "development package.")
+endif()
+message(STATUS "Found SQLite3 for the benchmark database: SQLite::SQLite3")
+
 target_link_libraries(tensilelite-client-common
     PUBLIC
         hip::device
@@ -53,6 +80,7 @@ target_link_libraries(tensilelite-client-common
         roc::tensilelite-host
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
+        SQLite::SQLite3
 )
 if(amd_smi_FOUND)
     target_link_libraries(tensilelite-client-common PUBLIC amd_smi)

@@ -551,6 +551,11 @@ namespace TensileLite
         {
             double_millis totalTime(takeBatchTimeMs());
 
+            // The enqueue count must come first: DatabaseReporter pairs it with the time.
+            m_reporter->report(ResultKey::SyncEnqueues,
+                               static_cast<int64_t>(startEvents.numInvocations()));
+            m_reporter->report(ResultKey::SyncTimeUS, double_micros(totalTime).count());
+
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents.numInvocations();
