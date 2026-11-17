@@ -256,3 +256,27 @@ def test_direct_columns_match_rows_built_from_dicts():
         sols,
     )
     assert grid.table.speeds is None and "speed" not in grid.table[0]
+
+
+@pytest.mark.parametrize("numpy_available", [True, False])
+def test_merging_into_empty_library_does_not_share_table(numpy_available, monkeypatch):
+    if not numpy_available:
+        import tensilelite.MatchingTable as MT
+
+        monkeypatch.setattr(MT, "_numpy", lambda: None)
+
+    sols = [_Sol(i) for i in range(3)]
+
+    def library(rows):
+        return MatchingLibrary.FromOriginalState(
+            {"indexOrder": [2, 3, 0, 1], "distance": "Equality", "table": rows}, sols
+        )
+
+    source = library([[[64, 64, 1, 64], [0, 1.0]]])
+    receiver = library([])
+    receiver.merge(source)
+    receiver.merge(library([[[32, 32, 1, 32], [1, 2.0]]]))
+    source.merge(library([[[96, 96, 1, 96], [2, 3.0]]]))
+
+    assert [row["index"] for row in state(source.table)] == [0, 2]
+    assert [row["index"] for row in state(receiver.table)] == [1, 0]

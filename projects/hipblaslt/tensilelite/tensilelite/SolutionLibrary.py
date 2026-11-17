@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+import copy
 from typing import Dict
 
 from . import Properties
@@ -184,7 +185,8 @@ class MatchingLibrary:
         elif len(other.table) == 0:
             pass
         elif len(self.table) == 0:
-            self.table = other.table
+            # Later merges replace the columns, but mutate the table object.
+            self.table = copy.copy(other.table)
         else:
             # Mixed or legacy forms merge as row dicts, as before.
             mine = self.table.toRows() if isinstance(self.table, MatchingTable) else self.table
