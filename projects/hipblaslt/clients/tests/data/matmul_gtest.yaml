@@ -80,11 +80,16 @@ Definitions:
     - {}
     - { stride_b: 0 }
 
+  - &api_real_precisions
+    - *hpa_half_precision
+    - { <<: *hpa_bf16_precision, gpu_arch_exclude: '' }
+    - *single_precision
+
 Tests:
 - name: matmul_bad_arg
   category: pre_checkin
   function:
-    - matmul_bad_arg: *real_precisions
+    - matmul_bad_arg: *api_real_precisions
   transA: N
   transB: N
 
@@ -93,7 +98,7 @@ Tests:
 - name: matmul_general_batch_bad_arg
   category: pre_checkin
   function:
-    - matmul_mul: *real_precisions
+    - matmul_mul: *api_real_precisions
   transA: N
   transB: N
   batch_count: 3
