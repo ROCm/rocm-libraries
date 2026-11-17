@@ -276,6 +276,14 @@ bool ProviderCanApply(miopenTuningPolicy_t policy)
     return policy == miopenTuningPolicyNone || policy == miopenTuningPolicySearch;
 }
 
+// Whether MIOPEN_FIND_ENFORCE leaves a handle under `policy` running as MIOpen
+// runs it: MIOpen lets the handle's policy win and the provider lets the variable
+// win, so the two agree only when the variable is None or names the same policy.
+bool FindEnforceAgrees(miopenTuningPolicy_t enforced, miopenTuningPolicy_t policy)
+{
+    return enforced == miopenTuningPolicyNone || enforced == policy;
+}
+
 // The provider runs MIOpen on a handle of its own, so a tuning policy set on the
 // caller's handle never reaches it. The spatial training and backward solvers
 // read that policy (Search tunes, DbClean drops the perf-db entry), so the
@@ -319,7 +327,7 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
                                  "hipDNN batchnorm cannot apply miopenTuningPolicyDbUpdate "
                                  "while MIOPEN_FIND_ENFORCE has a value MIOpen cannot parse; "
                                  "the provider would let MIOpen read it and throw");
-        if(*enforced != miopenTuningPolicyNone && *enforced != miopenTuningPolicyDbUpdate)
+        if(!FindEnforceAgrees(*enforced, miopenTuningPolicyDbUpdate))
             return RecordFailure(miopenStatusUnsupportedOp,
                                  "hipDNN batchnorm cannot apply miopenTuningPolicyDbUpdate "
                                  "while MIOPEN_FIND_ENFORCE asks for SEARCH, SEARCH_DB_UPDATE "
@@ -334,7 +342,8 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
     // Under Search the provider's handle is Search too, so like MIOpen it never
     // reads a value it cannot parse.
     if(policy == miopenTuningPolicySearch &&
-       !ProviderCanApply(FindEnforcePolicy().value_or(miopenTuningPolicyNone)))
+       !FindEnforceAgrees(FindEnforcePolicy().value_or(miopenTuningPolicyNone),
+                          miopenTuningPolicySearch))
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm cannot apply miopenTuningPolicySearch while "
                              "MIOPEN_FIND_ENFORCE asks for DB_UPDATE, SEARCH_DB_UPDATE or "
