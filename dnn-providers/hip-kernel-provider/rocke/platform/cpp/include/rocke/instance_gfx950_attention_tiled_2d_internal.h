@@ -411,6 +411,28 @@ static inline rocke_attn_tiled_lane_map_t
     return lm;
 }
 
+/* Fill the shared Fp8KvSyncLoader view of this ctx (pointer copies, no IR). */
+static inline rocke_attn_tiled_fp8_kv_loader_t
+    rocke_gfx950_attn2d_fp8_kv_loader(const rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    rocke_attn_tiled_fp8_kv_loader_t ld;
+    ld.b = ctx->b;
+    ld.T = ctx->T;
+    ld.HD = ctx->HD;
+    ld.THREADS = ctx->THREADS;
+    ld.tid = ctx->tid;
+    ld.key = ctx->key;
+    ld.value = ctx->value;
+    ld.k_scale = ctx->k_scale_p;
+    ld.v_scale = ctx->v_scale_p;
+    ld.k_lds = ctx->K_lds;
+    ld.v_lds = ctx->V_lds;
+    ld.kv_head_idx = ctx->kv_head_idx;
+    ld.kv_desc = ctx->kv_desc;
+    ld.dtype = ctx->dtype;
+    return ld;
+}
+
 /* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / build section.
  *  Each reads/writes only ctx (and the builder it carries) and emits IR in the

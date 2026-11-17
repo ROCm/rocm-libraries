@@ -912,7 +912,7 @@ void rocke_gfx942_attn2d_issue_k(rocke_gfx942_attn2d_build_ctx_t* ctx,
     if(ctx->FP8_MFMA_QK)
         rocke_gfx942_attn2d_issue_k_fp8_mfma_async(ctx, tile_idx, buf_idx);
     else if(ctx->KV_FP8)
-        rocke_gfx942_attn2d_issue_fp8_dequant_loads(ctx, tile_idx, buf_idx);
+        rocke_gfx942_attn2d_issue_fp8_dequant_loads(ctx, tile_idx, buf_idx, false);
     else
         rocke_gfx942_attn2d_issue_k_load_runtime(ctx, tile_idx, buf_idx);
 }
@@ -924,7 +924,8 @@ void rocke_gfx942_attn2d_issue_v(rocke_gfx942_attn2d_build_ctx_t* ctx,
     if(ctx->FP8_MFMA_PV)
         rocke_gfx942_attn2d_issue_v_fp8_mfma_stripe(ctx, tile_idx);
     else if(ctx->KV_FP8)
-        rocke_gfx942_attn2d_issue_fp8_dequant_loads(ctx, tile_idx, rocke_b_const_i32(ctx->b, 0));
+        rocke_gfx942_attn2d_issue_fp8_dequant_loads(
+            ctx, tile_idx, rocke_b_const_i32(ctx->b, 0), true);
     else if(ctx->TRANSPOSED_V_STORE)
         rocke_gfx942_attn2d_issue_v_transposed_store(ctx, tile_idx);
     else if(ctx->TRANSPOSED_V)

@@ -387,3 +387,178 @@ rocke_value_t* rocke_attn_tiled_pack_p_a32(const rocke_attn_tiled_lane_map_t* lm
         return rocke_b_vec_pack(b, casted, 8, lm->dtype);
     }
 }
+
+/* ------------------------------------- fp8 K/V sync loaders (Fp8KvSyncLoader) */
+
+/* Paged K/V byte offset for (tile_idx, linear_half, kv_head) through the
+ * resolved descriptor. Only the i32 offset path is ported; a NULL descriptor
+ * or offset falls back to const 0. */
+static rocke_value_t* fp8_kv_voff(const rocke_attn_tiled_fp8_kv_loader_t* ld,
+                                  rocke_value_t* tile_idx,
+                                  rocke_value_t* linear_half)
+{
+    const char* names[3] = {"tile_idx", "linear_half", "kv_head"};
+    rocke_value_t* vals[3] = {tile_idx, linear_half, ld->kv_head_idx};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+
+    if(ld->kv_desc != NULL)
+    {
+        (void)rocke_transforms_descriptor_offset(ld->b, ld->kv_desc, names, vals, 3, &off, &valid);
+    }
+    if(off == NULL)
+    {
+        off = rocke_b_const_i32(ld->b, 0);
+    }
+    return off;
+}
+
+void rocke_attn_tiled_fp8_issue_dequant_loads(const rocke_attn_tiled_fp8_kv_loader_t* ld,
+                                              rocke_value_t* kv_tile_idx,
+                                              rocke_value_t* buf_idx,
+                                              bool is_v)
+{
+    rocke_ir_builder_t* b = ld->b;
+    const int CHUNK = 8; /* fp8_elems_per_chunk */
+    int total_chunks;
+    int chunks_per_thread;
+    int cols_per_row;
+    rocke_value_t* scale;
+    rocke_value_t* lds;
+    rocke_value_t* src;
+    int call;
+
+    if(b == NULL || b->status != ROCKE_OK)
+    {
+        return;
+    }
+
+    total_chunks = (ld->T * ld->HD) / CHUNK;
+    if(ld->THREADS <= 0 || (total_chunks % ld->THREADS) != 0)
+    {
+        return;
+    }
+    chunks_per_thread = total_chunks / ld->THREADS;
+    cols_per_row = ld->HD / CHUNK; /* HD // fp8_elems_per_chunk */
+
+    /* lds_token selector: "V" -> value/v_scale/V_lds. */
+    scale = is_v ? ld->v_scale : ld->k_scale;
+    lds = is_v ? ld->v_lds : ld->k_lds;
+    src = is_v ? ld->value : ld->key;
+
+    for(call = 0; call < chunks_per_thread; ++call)
+    {
+        rocke_value_t* chunk_call = rocke_b_const_i32(b, call);
+        rocke_value_t* chunk_thr = rocke_b_const_i32(b, ld->THREADS);
+        rocke_value_t* chunk_id = rocke_b_add(b, rocke_b_mul(b, chunk_call, chunk_thr), ld->tid);
+        rocke_value_t* row = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK));
+         * the mod (and its const) are created before const(CHUNK). Sequence
+         * explicitly so C arg-eval order does not reorder value creation. */
+        rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* linear_half_first
+            = rocke_b_add(b, rocke_b_mul(b, row, rocke_b_const_i32(b, ld->HD)), col);
+        rocke_value_t* voff = fp8_kv_voff(ld, kv_tile_idx, linear_half_first);
+        rocke_value_t* fp8_vec
+            = rocke_b_global_load_vN(b, src, voff, rocke_fp8e4m3(), CHUNK, CHUNK);
+
+        rocke_value_t* lo_comp[4];
+        rocke_value_t* hi_comp[4];
+        rocke_value_t* lo_quad;
+        rocke_value_t* hi_quad;
+        rocke_value_t* lo_f32x4;
+        rocke_value_t* hi_f32x4;
+        rocke_value_t* lo_scaled[4];
+        rocke_value_t* hi_scaled[4];
+        rocke_value_t* dequanted[8];
+        rocke_value_t* packed;
+        rocke_value_t* idx_store[3];
+        int i;
+
+        /* Python emits all 4 lo extracts (then pack), then all 4 hi extracts
+         * (then pack) -- two separate list comprehensions, NOT interleaved. */
+        for(i = 0; i < 4; ++i)
+            lo_comp[i] = rocke_b_vec_extract(b, fp8_vec, i);
+        lo_quad = rocke_b_vec_pack(b, lo_comp, 4, rocke_fp8e4m3());
+        for(i = 0; i < 4; ++i)
+            hi_comp[i] = rocke_b_vec_extract(b, fp8_vec, i + 4);
+        hi_quad = rocke_b_vec_pack(b, hi_comp, 4, rocke_fp8e4m3());
+
+        /* CORRECTNESS: unfused cvt + *scale (non-pow2 scale safety). */
+        lo_f32x4 = rocke_b_cvt_pk_f32_fp8x4(b, lo_quad);
+        hi_f32x4 = rocke_b_cvt_pk_f32_fp8x4(b, hi_quad);
+        for(i = 0; i < 4; ++i)
+        {
+            lo_scaled[i] = rocke_b_fmul(b, rocke_b_vec_extract(b, lo_f32x4, i), scale);
+            hi_scaled[i] = rocke_b_fmul(b, rocke_b_vec_extract(b, hi_f32x4, i), scale);
+        }
+        lo_f32x4 = rocke_b_vec_pack(b, lo_scaled, 4, rocke_f32());
+        hi_f32x4 = rocke_b_vec_pack(b, hi_scaled, 4, rocke_f32());
+        for(i = 0; i < 4; ++i)
+        {
+            dequanted[i] = rocke_b_cast_f32_to(b, rocke_b_vec_extract(b, lo_f32x4, i), ld->dtype);
+        }
+        for(i = 0; i < 4; ++i)
+        {
+            dequanted[i + 4]
+                = rocke_b_cast_f32_to(b, rocke_b_vec_extract(b, hi_f32x4, i), ld->dtype);
+        }
+        packed = rocke_b_vec_pack(b, dequanted, CHUNK, ld->dtype);
+        idx_store[0] = buf_idx;
+        idx_store[1] = row;
+        idx_store[2] = col;
+        rocke_b_smem_store_vN(b, lds, idx_store, 3, packed, CHUNK);
+    }
+}
+
+void rocke_attn_tiled_fp8_issue_v_mfma_stripe(const rocke_attn_tiled_fp8_kv_loader_t* ld,
+                                              rocke_value_t* kv_tile_idx)
+{
+    rocke_ir_builder_t* b = ld->b;
+    const int CHUNK = 8; /* fp8_elems_per_chunk */
+    int total_chunks;
+    int chunks_per_thread;
+    int cols_per_row;
+    int call;
+
+    if(b == NULL || b->status != ROCKE_OK)
+    {
+        return;
+    }
+
+    total_chunks = (ld->T * ld->HD) / CHUNK;
+    if(ld->THREADS <= 0 || (total_chunks % ld->THREADS) != 0)
+    {
+        return;
+    }
+    chunks_per_thread = total_chunks / ld->THREADS;
+    cols_per_row = ld->HD / CHUNK; /* HD // fp8_elems_per_chunk */
+
+    for(call = 0; call < chunks_per_thread; ++call)
+    {
+        rocke_value_t* chunk_call = rocke_b_const_i32(b, call);
+        rocke_value_t* chunk_thr = rocke_b_const_i32(b, ld->THREADS);
+        rocke_value_t* chunk_id = rocke_b_add(b, rocke_b_mul(b, chunk_call, chunk_thr), ld->tid);
+        rocke_value_t* token = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK))
+         * creates the mod BEFORE const(CHUNK) (left-to-right); bind the mod so
+         * C's arg-eval order does not allocate const(CHUNK) first. */
+        rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* linear_first
+            = rocke_b_add(b, rocke_b_mul(b, token, rocke_b_const_i32(b, ld->HD)), col);
+        rocke_value_t* voff = fp8_kv_voff(ld, kv_tile_idx, linear_first);
+        rocke_value_t* fp8_vec
+            = rocke_b_global_load_vN(b, ld->value, voff, rocke_fp8e4m3(), CHUNK, CHUNK);
+        rocke_value_t* stripe_idx = rocke_b_div(b, col, rocke_b_const_i32(b, 16));
+        rocke_value_t* col_in_stripe = rocke_b_mod(b, col, rocke_b_const_i32(b, 16));
+        rocke_value_t* idx_store[4];
+
+        idx_store[0] = rocke_b_const_i32(b, 0);
+        idx_store[1] = stripe_idx;
+        idx_store[2] = token;
+        idx_store[3] = col_in_stripe;
+        rocke_b_smem_store_vN(b, ld->v_lds, idx_store, 4, fp8_vec, CHUNK);
+    }
+}

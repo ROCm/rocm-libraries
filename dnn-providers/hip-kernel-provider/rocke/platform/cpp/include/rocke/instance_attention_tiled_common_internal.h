@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 
+#include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t, rocke_type_t */
 
 #ifdef __cplusplus
@@ -87,6 +88,40 @@ rocke_value_t* rocke_attn_tiled_pack_p_a32(const rocke_attn_tiled_lane_map_t* lm
                                            rocke_value_t* const* p_regs0_f32,
                                            rocke_value_t* const* p_regs1_f32,
                                            int n);
+
+/* ------------------------------------- fp8 K/V sync loaders (Fp8KvSyncLoader) *
+ *
+ * Sync fp8 K/V cache loaders of the tiled 2D kernels. Each arch fills one from
+ * its build ctx right before a call (pointer copies only, no IR). Only valid
+ * when the spec stores K/V as fp8 (kv_storage_dtype == "fp8e4m3"). */
+typedef struct rocke_attn_tiled_fp8_kv_loader
+{
+    rocke_ir_builder_t* b;
+    int T;
+    int HD;
+    int THREADS;
+    rocke_value_t* tid;
+    rocke_value_t* key;
+    rocke_value_t* value;
+    rocke_value_t* k_scale;
+    rocke_value_t* v_scale;
+    rocke_value_t* k_lds;
+    rocke_value_t* v_lds;
+    rocke_value_t* kv_head_idx;
+    rocke_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor */
+    const rocke_type_t* dtype;
+} rocke_attn_tiled_fp8_kv_loader_t;
+
+/* issue_dequant_loads(kv_tile_idx, buf_idx, lds_token): per-thread fp8 ->
+ * f32 -> *scale -> working dtype -> LDS. ``is_v`` selects V (value / v_scale /
+ * V_lds) instead of K. */
+void rocke_attn_tiled_fp8_issue_dequant_loads(const rocke_attn_tiled_fp8_kv_loader_t* ld,
+                                              rocke_value_t* kv_tile_idx,
+                                              rocke_value_t* buf_idx,
+                                              bool is_v);
+/* issue_v_mfma_stripe(kv_tile_idx): raw fp8 V -> V_lds[0, col/16, token, col%16]. */
+void rocke_attn_tiled_fp8_issue_v_mfma_stripe(const rocke_attn_tiled_fp8_kv_loader_t* ld,
+                                              rocke_value_t* kv_tile_idx);
 
 /* AccLayout.idx: flat index of the (N-tile, M-atom) PV accumulator. */
 static inline int rocke_attn_tiled_acc_idx(int acc_m_atoms, int n, int atom)

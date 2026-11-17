@@ -16,13 +16,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from rocke.core.ir import IRBuilder, Type, Value
+from rocke.core.ir import F32, FP8E4M3, IRBuilder, Type, Value
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.distribution import make_static_tile_distribution
 
 __all__ = [
     "C32_DIST",
     "AccLayout",
+    "Fp8KvSyncLoader",
     "TiledLaneMap",
     "mfma_32x32_c_col",
     "mfma_32x32_c_row",
@@ -216,3 +217,201 @@ class AccLayout:
     def getter(self, vals: list[Value]) -> Callable[[int, int], Value]:
         """Return ``get(n, atom)`` reading the accumulator list ``vals``."""
         return lambda n, atom: vals[self.idx(n, atom)]
+
+
+@dataclass(frozen=True)
+class Fp8KvSyncLoader:
+    """Sync fp8 K/V cache loaders of the tiled 2D kernels.
+
+    ``issue_dequant_loads`` loads fp8 K or V from the paged cache,
+    dequantises it and stores the working dtype to LDS;
+    ``issue_v_mfma_stripe`` stores raw fp8 V into the striped LDS layout the
+    native-fp8 PV path reads. Fields are the builder values the inline
+    closures used to capture; only valid when the spec stores K/V as fp8.
+    """
+
+    b: IRBuilder
+    hd: int
+    threads: int
+    tid: Value
+    key: Value
+    value: Value
+    k_scale: Value
+    v_scale: Value
+    k_lds: object
+    v_lds: object
+    kv_head_idx: Value
+    paged_kv_desc: object
+    dtype: Type
+    i64_kv_addr: bool
+    elems_per_chunk: int
+    chunks_per_thread: int
+
+    def issue_dequant_loads(
+        self, kv_tile_idx: Value, buf_idx: Value, lds_token: str
+    ) -> None:
+        """Sync per-thread fp8 -> f32 -> *scale -> bf16/fp16 -> LDS.
+
+        ``lds_token`` is either ``"K"`` or ``"V"``; selects the LDS slab
+        and the per-tensor scale parameter.
+
+        Per-chunk serial structure: each iteration issues one VMEM load,
+        does the dequant chain, then publishes to LDS. The AMDGPU
+        compiler's instruction scheduler interleaves the back-to-back
+        chunks' loads, dequant, and stores.
+
+        Cvt chain: uses ``cvt_pk_f32_fp8x4`` (lowers to two packed
+        ``v_cvt_pk_f32_fp8`` instructions per 4 fp8 inputs) instead of
+        the per-element ``cvt_fp8_to_f32`` (which the compiler does NOT
+        fuse into the packed variant on its own — ISA inspection of the
+        round-1 sync loader showed 48 separate ``v_cvt_f32_fp8_e32``
+        instructions instead of 24 ``v_cvt_pk_f32_fp8`` for the same
+        kernel). The packed primitive matches AITER's ``to_float_fp8x4``
+        helper in ``csrc/include/attention_common.cuh`` which is what
+        AITER's production paged-attention FP8 K/V path uses.
+
+        For each ``fp8_elems_per_chunk = 8``-fp8 chunk we issue two
+        packed cvts (4 fp8 each) — 4 ``v_cvt_pk_f32_fp8`` total per
+        chunk vs the previous 8 scalar ``v_cvt_f32_fp8`` (50% fewer
+        cvt-class instructions).
+        """
+        b = self.b
+        scale = self.k_scale if lds_token == "K" else self.v_scale
+        lds = self.k_lds if lds_token == "K" else self.v_lds
+        src = self.key if lds_token == "K" else self.value
+        assert self.elems_per_chunk == 8, (
+            f"FP8 dequant loader expects 8-elem chunks (got "
+            f"{self.elems_per_chunk}); the packed-cvt path needs the chunk "
+            f"to split cleanly into 2× <4 x fp8> sub-chunks."
+        )
+        for call in range(self.chunks_per_thread):
+            chunk_id = b.add(
+                b.mul(b.const_i32(call), b.const_i32(self.threads)),
+                self.tid,
+            )
+            row = b.div(chunk_id, b.const_i32(self.hd // self.elems_per_chunk))
+            col = b.mul(
+                b.mod(chunk_id, b.const_i32(self.hd // self.elems_per_chunk)),
+                b.const_i32(self.elems_per_chunk),
+            )
+            linear_half_first = b.add(
+                b.mul(row, b.const_i32(self.hd)),
+                col,
+            )
+            if self.i64_kv_addr:
+                # Flat per-lane global load: full i64 byte/element offset so
+                # the per-thread physical_block * stride cannot overflow the
+                # cache addressing for paged caches > 2 GiB.
+                voff, _ = self.paged_kv_desc.offset_i64(
+                    b,
+                    "physical_block",
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half_first,
+                    kv_head=self.kv_head_idx,
+                )
+            else:
+                voff, _ = self.paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half_first,
+                    kv_head=self.kv_head_idx,
+                )
+            fp8_vec = b.global_load_vN(
+                src, voff, FP8E4M3, n=self.elems_per_chunk, align=self.elems_per_chunk
+            )
+            # Split <8 x fp8> into 2x <4 x fp8> via extract+pack so we
+            # can apply the packed cvt (the LLVM backend collapses the
+            # extract+pack chain back into a bitcast-equivalent shuffle
+            # once it sees the cvt.pk.f32.fp8 operand is whole-i32).
+            lo_quad = b.vec_pack(
+                [b.vec_extract(fp8_vec, i) for i in range(4)],
+                FP8E4M3,
+            )
+            hi_quad = b.vec_pack(
+                [b.vec_extract(fp8_vec, i) for i in range(4, 8)],
+                FP8E4M3,
+            )
+            # CORRECTNESS: ``v_cvt_scalef32_pk_f32_fp8`` interprets its
+            # ``scale`` operand as an E8M0 microscaling factor (only the
+            # f32 exponent bits matter, mantissa is discarded). For
+            # arbitrary per-tensor scales like ``k_scale = max_abs/448 ≈
+            # 0.011`` the hardware silently rounds to the nearest
+            # power-of-two (0.0078 instead of 0.011), giving outputs
+            # ~0.71x of expected. Power-of-two scales happen to work
+            # bit-correctly by coincidence, which is why the original
+            # bench-driven "win" measurement looked correct on shapes
+            # whose extracted ``k_scale`` rounded toward the right
+            # exponent.
+            #
+            # The correct sequence is unfused: ``cvt_pk_f32_fp8`` (no
+            # scaling) followed by a regular ``v_pk_mul`` against the
+            # f32 scale. We pay ~4 extra packed muls per inner-loop
+            # iter; that's the cost of being correct for non-pow2
+            # scales. A future fast path can detect pow2 scales and
+            # opt into the fused intrinsic, but the production trace
+            # has only non-pow2 scales.
+            lo_f32x4 = b.cvt_pk_f32_fp8x4(lo_quad)
+            hi_f32x4 = b.cvt_pk_f32_fp8x4(hi_quad)
+            lo_scaled = []
+            hi_scaled = []
+            for i in range(4):
+                lo_scaled.append(b.fmul(b.vec_extract(lo_f32x4, i), scale))
+                hi_scaled.append(b.fmul(b.vec_extract(hi_f32x4, i), scale))
+            lo_f32x4 = b.vec_pack(lo_scaled, F32)
+            hi_f32x4 = b.vec_pack(hi_scaled, F32)
+            dequanted = []
+            for i in range(4):
+                dequanted.append(b.cast_f32_to(b.vec_extract(lo_f32x4, i), self.dtype))
+            for i in range(4):
+                dequanted.append(b.cast_f32_to(b.vec_extract(hi_f32x4, i), self.dtype))
+            packed = b.vec_pack(dequanted, self.dtype)
+            b.smem_store_vN(lds, [buf_idx, row, col], packed, self.elems_per_chunk)
+        # Caller is expected to issue a `b.sync()` (LDS visibility) when
+        # appropriate. The sync loader has no in-flight async work, so the
+        # consumer side only needs the LDS barrier, not VMEM waitcnt.
+
+    def issue_v_mfma_stripe(self, kv_tile_idx: Value) -> None:
+        """Load raw fp8 V and store it into V_lds as
+        [V_BUFS=1, N_STRIPES=HD/16, T, 16].
+
+        Each thread loads 8 contiguous fp8 values from V[token, col..col+7]
+        in HBM, then writes them as one 8-byte LDS vec store into the
+        owning stripe at V_lds[0, col/16, token, col%16].
+
+        Because our chunk size is exactly 8 fp8 (= half a 16-byte stripe
+        row), col%16 is always 0 or 8 — both 8-byte-aligned, so the LDS
+        vec store stays b64 and there is no scalar-byte regression.
+        """
+        b = self.b
+        for call in range(self.chunks_per_thread):
+            chunk_id = b.add(
+                b.mul(b.const_i32(call), b.const_i32(self.threads)),
+                self.tid,
+            )
+            token = b.div(chunk_id, b.const_i32(self.hd // self.elems_per_chunk))
+            col = b.mul(
+                b.mod(chunk_id, b.const_i32(self.hd // self.elems_per_chunk)),
+                b.const_i32(self.elems_per_chunk),
+            )
+            linear_first = b.add(b.mul(token, b.const_i32(self.hd)), col)
+            voff, _ = self.paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_first,
+                kv_head=self.kv_head_idx,
+            )
+            fp8_vec = b.global_load_vN(
+                self.value,
+                voff,
+                FP8E4M3,
+                n=self.elems_per_chunk,
+                align=self.elems_per_chunk,
+            )
+            stripe_idx = b.div(col, b.const_i32(16))
+            col_in_stripe = b.mod(col, b.const_i32(16))
+            b.smem_store_vN(
+                self.v_lds,
+                [b.const_i32(0), stripe_idx, token, col_in_stripe],
+                fp8_vec,
+                self.elems_per_chunk,
+            )

@@ -391,6 +391,28 @@ static inline rocke_attn_tiled_lane_map_t
     return lm;
 }
 
+/* Fill the shared Fp8KvSyncLoader view of this ctx (pointer copies, no IR). */
+static inline rocke_attn_tiled_fp8_kv_loader_t
+    rocke_gfx942_attn2d_fp8_kv_loader(const rocke_gfx942_attn2d_build_ctx_t* ctx)
+{
+    rocke_attn_tiled_fp8_kv_loader_t ld;
+    ld.b = ctx->b;
+    ld.T = ctx->T;
+    ld.HD = ctx->HD;
+    ld.THREADS = ctx->THREADS;
+    ld.tid = ctx->tid;
+    ld.key = ctx->key;
+    ld.value = ctx->value;
+    ld.k_scale = ctx->k_scale_p;
+    ld.v_scale = ctx->v_scale_p;
+    ld.k_lds = ctx->K_lds;
+    ld.v_lds = ctx->V_lds;
+    ld.kv_head_idx = ctx->kv_head_idx;
+    ld.kv_desc = ctx->kv_desc;
+    ld.dtype = ctx->dtype;
+    return ld;
+}
+
 /* ===================================================================== *
  *  DRIVER-INTERNAL ctx population (the build prologue, lines 1104-1912).
  *
@@ -546,9 +568,12 @@ void rocke_gfx942_attn2d_dequant_fp8_lds_to_bf16(rocke_gfx942_attn2d_build_ctx_t
                                                  rocke_value_t* dst,
                                                  rocke_value_t* scale,
                                                  rocke_value_t* buf_idx);
+/* Python _issue_fp8_dequant_loads(kv_tile_idx, buf_idx, lds_token). is_v selects
+ * the "V" slab (value src + v_scale + V_lds); false selects "K". */
 void rocke_gfx942_attn2d_issue_fp8_dequant_loads(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                  rocke_value_t* kv_tile_idx,
-                                                 rocke_value_t* buf_idx);
+                                                 rocke_value_t* buf_idx,
+                                                 bool is_v);
 void rocke_gfx942_attn2d_issue_k_fp8_mfma_async(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                 rocke_value_t* kv_tile_idx,
                                                 rocke_value_t* buf_idx);
