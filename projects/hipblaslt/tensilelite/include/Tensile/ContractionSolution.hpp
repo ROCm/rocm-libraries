@@ -320,7 +320,7 @@ namespace TensileLite
         // Uniform summation order refuses hand-written kernels without it.
         bool uniformSummationOrder = false;
         // Stream-K reduction modes the kernel implements.
-        std::vector<CustomReductionMode> reductions{CustomReductionMode::Tree};
+        std::vector<CustomReductionMode> streamKReductions{CustomReductionMode::Tree};
         // Kernels launched after this one, in order. Requires persistent loop
         // argument layout 3.
         std::vector<CustomPostKernel> postKernels;

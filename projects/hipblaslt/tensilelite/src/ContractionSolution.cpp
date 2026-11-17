@@ -5145,14 +5145,15 @@ namespace TensileLite
     void ContractionSolution::validateCustomPostKernels() const
     {
         std::array<bool, static_cast<size_t>(CustomReductionMode::Count)> modes{};
-        for(auto mode : customKernel.reductions)
+        for(auto mode : customKernel.streamKReductions)
         {
             const auto i = static_cast<size_t>(mode);
             if(i >= modes.size() || modes[i])
-                throw std::runtime_error("Custom kernel reductions must be distinct known modes");
+                throw std::runtime_error(
+                    "CustomKernel.streamKReductions must be distinct known modes");
             modes[i] = true;
         }
-        if(customKernel.reductions.empty())
+        if(customKernel.streamKReductions.empty())
             throw std::runtime_error("Custom kernel must support at least one reduction mode");
         if(customKernel.grid.x == CustomGridSize::TilesBands
            || customKernel.grid.y == CustomGridSize::TilesBands
@@ -6532,8 +6533,10 @@ namespace TensileLite
 
     bool ContractionSolution::customKernelReduces(CustomReductionMode mode) const
     {
-        return std::find(customKernel.reductions.begin(), customKernel.reductions.end(), mode)
-               != customKernel.reductions.end();
+        return std::find(customKernel.streamKReductions.begin(),
+                         customKernel.streamKReductions.end(),
+                         mode)
+               != customKernel.streamKReductions.end();
     }
 
     bool ContractionSolution::customDataParallelClamp(origami::reduction_t reduction) const

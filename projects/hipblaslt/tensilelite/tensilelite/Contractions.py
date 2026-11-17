@@ -865,14 +865,14 @@ class CustomKernel:
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
                    generated=d.get('generated', False),
                    uniformSummationOrder=d.get('uniformSummationOrder', False),
-                   reductions=d.get('reductions', ['tree']),
+                   streamKReductions=d.get('streamKReductions', ['tree']),
                    postKernels=d.get('postKernels', []))
 
     def state(self):
         keys = self.StateKeys
         # Emitted only when declared so kernels without post kernels are unchanged.
-        if self.postKernels or self.reductions != ['tree']:
-            keys = keys + ['reductions', 'postKernels']
+        if self.postKernels or self.streamKReductions != ['tree']:
+            keys = keys + ['streamKReductions', 'postKernels']
         return {key: state(getattr(self, key)) for key in keys}
 
     def __init__(self, **kwargs):

@@ -1932,7 +1932,7 @@ _POST_KERNEL_CONFIG = """\
       macrotile: [256, 256, 64]
       threads: [256, 1, 1]
       grid: [StreamKNoBatch, One, One]
-      reductions: [tree, parallel]
+      streamKReductions: [tree, parallel]
       postKernels:
         - kind: streamKReduce
           name: sk_main_streamKReduce
@@ -1968,7 +1968,7 @@ def test_post_kernels_parse(tmp_path):
     write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, ["sk_main", "sk_main_streamKReduce"])
     config = getCustomKernelConfig("sk_main", {}, str(tmp_path))
     descriptor = config["CustomKernel"]
-    assert descriptor["reductions"] == ["tree", "parallel"]
+    assert descriptor["streamKReductions"] == ["tree", "parallel"]
     (post,) = descriptor["postKernels"]
     assert post["kind"] == "streamKReduce"
     assert post["bands"] == 1
@@ -1976,7 +1976,7 @@ def test_post_kernels_parse(tmp_path):
     assert [a["semantic"] for a in post["args"]][1:] == ["SKSplitFactor", "NumTiles", "WorkspaceOffsetPartials"]
 
     state = ContractionsCustomKernel.FromOriginalState(descriptor).state()
-    assert state["reductions"] == ["tree", "parallel"]
+    assert state["streamKReductions"] == ["tree", "parallel"]
     assert state["postKernels"][0]["grid"] == ["TilesBands", "One", "One"]
 
 
@@ -1984,7 +1984,7 @@ def test_kernel_without_post_kernels_serializes_unchanged():
     descriptor = {"name": "k", "args": [], "macrotile": [16, 16, 16], "threads": [64, 1, 1],
                   "grid": ["TilesX", "TilesY", "Batch"]}
     state = ContractionsCustomKernel.FromOriginalState(descriptor).state()
-    assert "reductions" not in state and "postKernels" not in state
+    assert "streamKReductions" not in state and "postKernels" not in state
     ck_mod.validateCustomPostKernels({"CustomKernel": descriptor})
 
 
@@ -2012,7 +2012,7 @@ def _duplicatePost(config):
 
 def _dropPostKernels(config):
     config["CustomKernel"].pop("postKernels")
-    config["CustomKernel"]["reductions"] = ["tree"]
+    config["CustomKernel"]["streamKReductions"] = ["tree"]
 
 
 @pytest.mark.parametrize("mutate,match", [
@@ -2030,10 +2030,10 @@ def _dropPostKernels(config):
     (_setPost("workspace", 1), "keys from"),
     (_duplicatePost, "Duplicate post kernel kind"),
     (_setDescriptor("postKernels", {}), "must be a list"),
-    (_setDescriptor("reductions", []), "non-empty list"),
-    (_setDescriptor("reductions", ["tree", "tree", "parallel"]), "distinct"),
-    (_setDescriptor("reductions", ["tree", "kernelPartition"]), "distinct modes"),
-    (_setDescriptor("reductions", ["tree"]), "parallel if and only if"),
+    (_setDescriptor("streamKReductions", []), "non-empty list"),
+    (_setDescriptor("streamKReductions", ["tree", "tree", "parallel"]), "distinct"),
+    (_setDescriptor("streamKReductions", ["tree", "kernelPartition"]), "distinct modes"),
+    (_setDescriptor("streamKReductions", ["tree"]), "parallel if and only if"),
     (_setDescriptor("postKernels", []), "parallel if and only if"),
     (_setVersion(0), "postKernels requires PersistentLoopArgsVersion=3"),
     (_dropPostKernels, "PersistentLoopArgsVersion=3 requires CustomKernel.postKernels"),

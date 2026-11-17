@@ -460,7 +460,7 @@ _POST_KERNEL_KEYS = {"kind", "version", "name", "args", "threads", "grid", "band
 _POST_KERNEL_VERSION = 1
 
 def validateCustomPostKernels(kernelConfig):
-    """Validate CustomKernel.reductions and CustomKernel.postKernels.
+    """Validate CustomKernel.streamKReductions and CustomKernel.postKernels.
 
     Post kernels are launched after the main kernel. They require
     PersistentLoopArgsVersion 3, which older runtimes reject instead of
@@ -476,11 +476,11 @@ def validateCustomPostKernels(kernelConfig):
     if not isinstance(descriptor, dict):
         descriptor = {}
 
-    reductions = descriptor.get("reductions", ["tree"])
-    if (not isinstance(reductions, list) or not reductions
-            or any(mode not in REDUCTION_MODES for mode in reductions)
-            or len(set(reductions)) != len(reductions)):
-        raise ValueError(f"CustomKernel.reductions must be a non-empty list of distinct modes from {REDUCTION_MODES}")
+    streamKReductions = descriptor.get("streamKReductions", ["tree"])
+    if (not isinstance(streamKReductions, list) or not streamKReductions
+            or any(mode not in REDUCTION_MODES for mode in streamKReductions)
+            or len(set(streamKReductions)) != len(streamKReductions)):
+        raise ValueError(f"CustomKernel.streamKReductions must be a non-empty list of distinct modes from {REDUCTION_MODES}")
 
     postKernels = descriptor.get("postKernels", [])
     if not isinstance(postKernels, list):
@@ -521,17 +521,17 @@ def validateCustomPostKernels(kernelConfig):
         raise ValueError("CustomKernel.postKernels do not support GroupedGemm")
     if postKernels and descriptor.get("generated", False):
         raise ValueError("CustomKernel.postKernels require a handwritten custom kernel")
-    if ("parallel" in reductions or postKernels or version == 3) and not isStreamK(kernelConfig):
+    if ("parallel" in streamKReductions or postKernels or version == 3) and not isStreamK(kernelConfig):
         raise ValueError("Parallel reduction, post kernels and PersistentLoopArgsVersion=3 require TileProcessingStrategy=StreamK")
-    if ("parallel" in reductions) != ("streamKReduce" in kinds):
-        raise ValueError("CustomKernel.reductions includes parallel if and only if a streamKReduce post kernel is declared")
+    if ("parallel" in streamKReductions) != ("streamKReduce" in kinds):
+        raise ValueError("CustomKernel.streamKReductions includes parallel if and only if a streamKReduce post kernel is declared")
     # SKSplitFactor tells the modes apart and gives the reducer the split
     # count; the partials live in the workspace.
     splitArgs = {"SKSplitFactor", "AddressWorkspace"}
     def hasSplitArgs(args):
         return isinstance(args, list) and splitArgs <= {
             arg.get("semantic") for arg in args if isinstance(arg, dict)}
-    if "parallel" in reductions:
+    if "parallel" in streamKReductions:
         if not hasSplitArgs(descriptor.get("args")):
             raise ValueError("Parallel reduction requires main kernel args SKSplitFactor and AddressWorkspace")
         if not all(hasSplitArgs(post.get("args", [])) for post in postKernels if post["kind"] == "streamKReduce"):
@@ -887,7 +887,7 @@ def validateCustomKernelMetadata(name, directory=None):
 
     # Post kernels are checked by the same validators getCustomKernelConfig runs.
     if isinstance(config.get("CustomKernel"), dict) and (
-            config["CustomKernel"].get("postKernels") or "reductions" in config["CustomKernel"]):
+            config["CustomKernel"].get("postKernels") or "streamKReductions" in config["CustomKernel"]):
         try:
             getCustomKernelConfig(name, {}, directory)
         except (RuntimeError, ValueError) as e:

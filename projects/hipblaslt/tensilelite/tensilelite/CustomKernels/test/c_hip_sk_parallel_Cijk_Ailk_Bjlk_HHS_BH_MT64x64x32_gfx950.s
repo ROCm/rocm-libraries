@@ -967,7 +967,7 @@ custom.config:
     grid: [StreamKNoBatch, One, One]
     workspaceType: StreamK
     workspaceSizePerElemC: 4
-    reductions: [parallel]
+    streamKReductions: [parallel]
     postKernels:
       - kind: streamKReduce
         version: 1

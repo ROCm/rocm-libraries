@@ -255,7 +255,7 @@ def test_assign_custom_kernel_params_no_workspace_without_partials(over):
 
 def _post_kernel_state(**over):
     state = _ck_state(TileProcessingStrategy="StreamK", **over)
-    state["CustomKernel"]["reductions"] = ["tree", "parallel"]
+    state["CustomKernel"]["streamKReductions"] = ["tree", "parallel"]
     state["CustomKernel"]["postKernels"] = [{"kind": "streamKReduce", "name": "k_streamKReduce"}]
     return state
 

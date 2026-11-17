@@ -144,8 +144,8 @@ test YAML.
 
 ### Stream-K reductions and post kernels
 
-An external Stream-K kernel lists the reductions it supports in
-`CustomKernel.reductions` (`[tree]` by default, or any of `tree`,
+An external Stream-K kernel lists the reduction modes it supports in
+`CustomKernel.streamKReductions` (`[tree]` by default, or any of `tree`,
 `parallel`). `parallel` needs a `streamKReduce` entry in
 `CustomKernel.postKernels`, and the reverse. A post kernel has `kind`,
 `version: 1`, `name`, `args`, `threads`, `grid` and `bands` (default 1). It

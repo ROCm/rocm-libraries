@@ -105,7 +105,8 @@ TEST(CustomKernelTest, PostKernelsDefaultWhenAbsent)
     Serialization::MessagePackInput reader(unpacked.get());
     reader.input(kernel);
     ASSERT_TRUE(reader.error.empty()) << reader.error.front();
-    EXPECT_EQ(kernel.reductions, std::vector<CustomReductionMode>{CustomReductionMode::Tree});
+    EXPECT_EQ(kernel.streamKReductions,
+              std::vector<CustomReductionMode>{CustomReductionMode::Tree});
     EXPECT_TRUE(kernel.postKernels.empty());
 }
 
@@ -115,7 +116,7 @@ TEST(CustomKernelTest, EmptyReductionsAreNotDefaulted)
     msgpack::zone                          zone;
     std::map<std::string, msgpack::object> fields{
         {"name", msgpack::object(std::string("probe"), zone)},
-        {"reductions", msgpack::object(std::vector<std::string>{}, zone)}};
+        {"streamKReductions", msgpack::object(std::vector<std::string>{}, zone)}};
     msgpack::sbuffer packed;
     msgpack::pack(packed, fields);
     auto unpacked = msgpack::unpack(packed.data(), packed.size());
@@ -124,7 +125,7 @@ TEST(CustomKernelTest, EmptyReductionsAreNotDefaulted)
     Serialization::MessagePackInput reader(unpacked.get());
     reader.input(kernel);
     ASSERT_TRUE(reader.error.empty()) << reader.error.front();
-    EXPECT_TRUE(kernel.reductions.empty());
+    EXPECT_TRUE(kernel.streamKReductions.empty());
 
     ContractionSolution solution;
     solution.customKernel = kernel;
@@ -135,7 +136,7 @@ TEST(CustomKernelTest, PostKernelsRoundTrip)
 {
     CustomKernel kernel;
     kernel.name       = "probe";
-    kernel.reductions = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+    kernel.streamKReductions = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
 
     CustomPostKernel post;
     post.version = 1;
@@ -159,7 +160,7 @@ TEST(CustomKernelTest, PostKernelsRoundTrip)
     Serialization::MessagePackInput reader(unpacked.get());
     reader.input(loaded);
     ASSERT_TRUE(reader.error.empty()) << reader.error.front();
-    EXPECT_EQ(loaded.reductions, kernel.reductions);
+    EXPECT_EQ(loaded.streamKReductions, kernel.streamKReductions);
     ASSERT_EQ(loaded.postKernels.size(), 1u);
     auto const& got = loaded.postKernels[0];
     EXPECT_EQ(got.kind, CustomPostKernelKind::StreamKReduce);
@@ -909,7 +910,7 @@ namespace
         solution.customKernel.threads                          = TensileLite::dim3(256, 1, 1);
         solution.customKernel.grid
             = {CustomGridSize::StreamKNoBatch, CustomGridSize::One, CustomGridSize::One};
-        solution.customKernel.reductions
+        solution.customKernel.streamKReductions
             = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
         solution.customKernel.workspaceType         = CustomWorkspaceType::StreamKWithReduction;
         solution.customKernel.workspaceSizePerElemC = 4;
@@ -942,20 +943,21 @@ TEST(CustomKernelTest, PostKernelsValidate)
          "version 3 requires KernArgsVersion=3 and post kernels"},
         {[](Solution& s) {
              s.customKernel.postKernels.clear();
-             s.customKernel.reductions = {CustomReductionMode::Tree};
+             s.customKernel.streamKReductions = {CustomReductionMode::Tree};
          },
          "version 3 requires KernArgsVersion=3 and post kernels"},
-        {[](Solution& s) { s.customKernel.reductions = {CustomReductionMode::Tree}; },
+        {[](Solution& s) { s.customKernel.streamKReductions = {CustomReductionMode::Tree}; },
          "Parallel reduction requires a streamKReduce post kernel"},
         {[](Solution& s) {
              s.customKernel.postKernels.clear();
-             s.customKernel.reductions                       = {CustomReductionMode::Parallel};
+             s.customKernel.streamKReductions                = {CustomReductionMode::Parallel};
              s.internalArgsSupport.persistentLoopArgsVersion = 0;
          },
          "Parallel reduction requires a streamKReduce post kernel"},
-        {[](Solution& s) { s.customKernel.reductions.push_back(CustomReductionMode::Tree); },
+        {[](Solution& s) { s.customKernel.streamKReductions.push_back(CustomReductionMode::Tree); },
          "distinct known modes"},
-        {[](Solution& s) { s.customKernel.reductions.clear(); }, "at least one reduction mode"},
+        {[](Solution& s) { s.customKernel.streamKReductions.clear(); },
+         "at least one reduction mode"},
         {[](Solution& s) { s.customKernel.postKernels[0].name = "other_streamKReduce"; },
          "Post kernel must be named probe_streamKReduce"},
         {[](Solution& s) { s.customKernel.postKernels.push_back(s.customKernel.postKernels[0]); },
@@ -1051,7 +1053,7 @@ TEST(CustomKernelTest, ParallelReductionRequiresStreamK)
 {
     ContractionSolution solution;
     solution.customKernel.name       = "probe";
-    solution.customKernel.reductions = {CustomReductionMode::Parallel};
+    solution.customKernel.streamKReductions = {CustomReductionMode::Parallel};
     EXPECT_THROW(solution.validateCustomPostKernels(), std::runtime_error);
 }
 

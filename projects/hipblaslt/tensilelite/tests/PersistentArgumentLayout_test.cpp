@@ -978,7 +978,7 @@ namespace
     // A handwritten static Stream-K kernel declaring the given reduction modes,
     // with a streamKReduce post kernel when parallel is among them.
     void configureHandwrittenStreamK(ContractionSolution&             solution,
-                                     std::vector<CustomReductionMode> reductions)
+                                     std::vector<CustomReductionMode> streamKReductions)
     {
         using S = CustomArgSemantic;
         using T = CustomArgType;
@@ -995,7 +995,7 @@ namespace
         ck.grid = {CustomGridSize::StreamKNoBatch, CustomGridSize::One, CustomGridSize::One};
         ck.workspaceType         = CustomWorkspaceType::StreamKWithReduction;
         ck.workspaceSizePerElemC = 4;
-        ck.reductions            = reductions;
+        ck.streamKReductions     = streamKReductions;
         std::vector<CustomArgDefinition> const common{{T::address, S::AddressC},
                                                       {T::address, S::AddressD},
                                                       {T::address, S::AddressWorkspace},
@@ -1006,8 +1006,9 @@ namespace
         ck.args.push_back({T::address, S::AddressFlags});
         ck.args.push_back({T::uint32, S::SKGrid});
         ck.args.push_back({T::uint32, S::SKTilesAndSplit});
-        if(std::find(reductions.begin(), reductions.end(), CustomReductionMode::Parallel)
-           != reductions.end())
+        if(std::find(
+               streamKReductions.begin(), streamKReductions.end(), CustomReductionMode::Parallel)
+           != streamKReductions.end())
         {
             solution.internalArgsSupport.persistentLoopArgsVersion = 3;
             CustomPostKernel post;
