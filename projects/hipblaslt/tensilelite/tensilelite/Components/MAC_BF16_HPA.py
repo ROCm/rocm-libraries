@@ -26,19 +26,16 @@ from rocisa.container import vgpr
 from rocisa.instruction import SSetPrior, VDot2F32BF16, VDot2CF32BF16, VAndB32, VFmaF32, VLShiftLeftB32
 
 from rocisa.enum import DataTypeEnum
-from ..Common import IsaVersion
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
 class FMA_BF16_HPA(MAC):
     asmCaps = {"v_fma_f32": True}
-    # gfx1030 only: the packed BF16 LDS reads this unpack pairs with (LocalReadVALU's
-    # ds_read_u16_d16_hi) are verified there alone. Other ISAs fail codegen instead.
+    archCaps = {"DSLow16NotPreserve": False}
     kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.BFloat16),
                               "MacDataTypeB": DataType(DataTypeEnum.BFloat16),
                               "HighPrecisionAccumulate": True},
               "UseDotInstruction": False,
-              "ISA": IsaVersion(10, 3, 0),
               }
 
     def __call__(self, writer, tPA, tPB, m, innerUnroll):

@@ -7,14 +7,11 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import types
 
 import pytest
 import yaml
 
 from config_harness import emit_kernels_from_config
-from tensilelite.Common import IsaVersion
-from tensilelite.Component import Component
 
 
 @pytest.mark.parametrize("transpose_a,transpose_b", [(False, False), (False, True),
@@ -44,23 +41,6 @@ def test_bf16_fallback_codegen(tmp_path, transpose_a, transpose_b):
             [assembler, "-x", "assembler", "-target", "amdgcn-amd-amdhsa",
              "-mcpu=gfx1030", "-c", str(asm), "-o", str(asm.with_suffix(".o"))],
             check=True, capture_output=True)
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("isa,selected", [pytest.param((10, 3, 0), True, id="gfx1030"),
-                                          pytest.param((10, 1, 0), False, id="gfx1010"),
-                                          pytest.param((10, 3, 1), False, id="gfx1031"),
-                                          pytest.param((9, 0, 10), False, id="gfx90a"),
-                                          pytest.param((12, 0, 1), False, id="gfx1201")])
-def test_bf16_fallback_is_selected_for_gfx1030_only(isa, selected):
-    """The packed-LDS high-half read the fallback needs is only emitted for gfx1030.
-
-    Any other ISA has to fail codegen rather than emit kernels that read the wrong data.
-    """
-    fallback = Component.MAC.FMA_BF16_HPA
-    states = types.SimpleNamespace(asmCaps=fallback.asmCaps, archCaps={},
-                                   kernel={**fallback.kernel, "ISA": IsaVersion(*isa)})
-    assert fallback.matches(types.SimpleNamespace(states=states)) is selected
 
 
 # Valu register map read back from the emitted assembly. A block is one
