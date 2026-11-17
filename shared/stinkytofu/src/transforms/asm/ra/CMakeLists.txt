@@ -14,6 +14,7 @@ target_sources(stinkytofu_objs PRIVATE
     RegisterAllocationPass.cpp
     RegisterBudget.cpp
     RegisterSymbolSync.cpp
+    VgprMsbPrediction.cpp
     allocators/LegacyIdentityAllocator.cpp
     allocators/GreedyAllocator.cpp
     allocators/FreedomOrderedGreedyAllocator.cpp
