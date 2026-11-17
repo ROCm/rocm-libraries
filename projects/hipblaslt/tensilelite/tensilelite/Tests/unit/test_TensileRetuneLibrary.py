@@ -522,9 +522,6 @@ class TestTensileRetuneLibrary:
             # Verify output directory was created
             assert os.path.exists(output_path)
 
-            # Verify the library is built as msgpack, the only format the standard (YAML-disabled) client loads
-            assert mock_assign.call_args[0][0]["LibraryFormat"] == "msgpack"
-
     @patch('tensilelite.retune_library.LibraryIO.writeYAML')
     @patch('tensilelite.retune_library.LibraryIO.read')
     @patch('tensilelite.retune_library.runBenchmarking')

@@ -201,7 +201,6 @@ def TensileRetuneLibrary(userArgs):
                            help="Method for making new library logic file")
 
     addCommonArguments(argParser)
-    argParser.set_defaults(LibraryFormat="msgpack")
     args = argParser.parse_args(userArgs)
 
     libPath = args.LogicFile
