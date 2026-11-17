@@ -8,6 +8,12 @@
 > the canonical wheel, client-binding, device-generation, and artifact-test
 > design. The phases below are historical where they conflict with those files.
 
+> **Identity refresh update (2026-11-17):**
+> [PackagingIdentityPlan.md](PackagingIdentityPlan.md) records the current
+> build-time metadata refresh, combined JSON query, canonical wheel publication
+> manifest, and relocatable installed identity CTests. Configure-only identity
+> and fixed wheel filenames in older notes are superseded by that implementation.
+
 Status: Implemented for TensileLite; rocisa packaging explicitly deferred
 Plan date: 2026-07-29
 Decision record: `PackagingDecisions.md`

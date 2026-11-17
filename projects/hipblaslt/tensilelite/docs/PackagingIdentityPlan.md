@@ -167,18 +167,25 @@ Restack only.
 
 ### #11018 `package-client-version-identity` (introduces `TensileLiteClientVersion.hpp`)
 
-- CMake resolves the SHA once per configure by calling the same
-  `_source_revision.py` (decision 3).
+- CMake runs `release_metadata.py metadata` once at configure for diagnostics
+  and again whenever a relevant client or canonical-wheel target is built. The
+  JSON result contains distribution version and complete source revision from
+  one `_source_revision.resolve` call (decision 3). The individual queries remain.
+  #11021 adds the explicit `--rocm-identity` argument to this combined query.
   - A `TENSILELITE_SOURCE_REVISION` cache variable feeds the resolver's step 3, for
     builds of a tree without git (release tarballs).
   - If no SHA is found, CMake records none and warns at configure time: "no source
     revision found; client pairing disabled. Build from a git checkout or pass
     `-DTENSILELITE_SOURCE_REVISION=<sha>`." The client prints `none` for
     `--source-revision` and never pairs (decision 3).
-  - Add `.git/HEAD`, the current ref file and `packed-refs` to
-    `CMAKE_CONFIGURE_DEPENDS`, located via `git rev-parse --git-path`, so a new
-    commit triggers a re-configure.
-- The CMake build passes the same value into the client.
+  - The `tensilelite-metadata` build prerequisite refreshes `metadata.json` and
+    `TensileLiteClientVersion.hpp`. Unchanged contents preserve timestamps, so an
+    unchanged identity does not recompile the client. Dirty edits, reverts, and
+    commits after packed-ref configure require no manual reconfigure.
+- The client consumes this refreshed header. Build-tree and installed identity
+  CTests compare all three one-line queries with saved final-build metadata.
+  Installed tests use relative paths and work after moving the installation;
+  they do not require the source checkout or derive expectations from the client.
 - `tensilelite-client --version` keeps its one-line contract (Q065). A new
   `--source-revision` command prints the full SHA under the same no-GPU, one-line,
   five-second rules.
@@ -193,7 +200,10 @@ Restack only.
   - `hipblaslt_resolve_build_rocm_root()` and the `.info/version`/manifest
     configure dependencies therefore stay on this branch, but feed only the client.
     They never feed the wheel's version (decision 1).
-  - A ctest checks `--build-rocm` against the value CMake computed.
+  - A CTest checks `--build-rocm` against the saved build value. The reviewed
+    TheRock gfx942/gfx950 toolchain roots supplied `10.3.0 base` through
+    `.info/version`, without the auxiliary full manifest. This precision cannot
+    distinguish two nightlies with the same base release; it is retained.
 
 ### #11019 `runtime-client-binding-foundation` (introduces `validate_client`, `_rocm.py`)
 
@@ -273,15 +283,20 @@ the docs branch #11254. Not gated; it lands with the lower stack.
     canonical `pyproject.toml` still installs (`Tensile`, `TensileCreateLibrary`,
     `TensileGetPath`, …). That stays, now with no replacement; the PR body says to
     use the `tensilelite` command family.
-- Pass the configure's SHA to the wheel build (`TENSILELITE_SOURCE_REVISION`), so the
-  wheel and the client always share it. Set `SOURCE_DATE_EPOCH` from
-  `git log -1 --format=%ct` for reproducible wheels.
+- Pass the refreshed metadata's source revision to the staged wheel build
+  (`TENSILELITE_SOURCE_REVISION`), so wheel and client share the complete identity.
+  Derive the version-dependent filename at build time and publish the selected
+  basename plus metadata in the stable `tensilelite-release-wheels/.published`
+  manifest. Validate a new wheel before replacing the published selection.
+  Respect an explicit `SOURCE_DATE_EPOCH`; otherwise use the resolved commit's
+  timestamp when Git is available.
   - **Required, not optional** (audit): the staged copy under the build directory
     is not owned by git (`build*/` is ignored), so without it the wheel is a bare
     `5.0.0` with `SOURCE_REVISION = None`.
   - Remove `ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}` and the `.info/version`
     dependency from the wheel build (decision 1).
-  - Add `_build_info.py` to `stage_release_source.py`'s ignore list.
+  - Remove stray `_build_info.py` from ordinary checkout staging, but retain
+    the saved stamp when staging an sdist with `PKG-INFO`.
   - `check_release_wheel_contents.py` gains `--expected-source-revision`, compared
     with the `_build_info.py` inside the wheel.
 - Keep unpacking the wheel into `share/hipblaslt/tensilelite`, because TheRock
@@ -895,14 +910,16 @@ Where the implementation went beyond or differs from section 1.2:
   execution is pending. #11032's candidate tests also use the shared helper;
   215 binding/runtime/build-task tests passed there. See Q135 for the reasons
   and first-run regression.
-- **#11020:** the wheel also depends on a configured identity file (version, SHA,
-  passed identity), so a new commit or identity rebuilds and renames the wheel even
-  when no TensileLite file changed.
+- **#11020:** canonical wheels depend on refreshed metadata (version, complete
+  revision, optional explicit identity). The build helper derives the filename
+  and saves the selection in `.published`; source-only commits rebuild the stamp
+  even when an explicit ROCm label keeps the filename unchanged.
 - **#11021:** an unpacked sdist keeps the version in its `PKG-INFO`, so a TheRock
   identity survives sdist → wheel; passing a different identity there is an error.
 - **#11022:** codegen depends on the unpacked wheel through the new CMake variable
-  `HIPBLASLT_PYTHON_INPUTS`; the client header is configured only when the client
-  is enabled. The generator environment also carries `ROCM_VERSION=${hip_VERSION}`:
+  `HIPBLASLT_PYTHON_INPUTS`. Unpacking depends on `.published`, rather than a
+  configure-time filename, and removes stale wheel-owned extracted files.
+  Metadata is available whenever client or canonical wheel consumers need it. The generator environment also carries `ROCM_VERSION=${hip_VERSION}`:
   TheRock's build prefix has no ambient `/opt/rocm` for the legacy version lookup.
   The regression and nine adjacent environment tests passed after the restack.
 - **#11023:** `validate_client` returns the client's SHA and build ROCm together
@@ -1033,7 +1050,7 @@ changes.
 - `tensilelite/_build_info.py` is generated only into `build_lib` (wheels) and the
   sdist release tree, never into the source tree;
 - editable installs carry no stamp;
-- the client gets the same value from the same CMake configure;
+- client and canonical wheel get the same complete value from build-time metadata;
 - dev builds use `5.0.0+g<40-hex>[.dirty]`; releases keep `+rocm…`/`+devrocm…` with
   the SHA only in `_build_info`.
 
@@ -1086,20 +1103,37 @@ review on 2026-11-10 (pip 26.2.1, setuptools 82, tox 4.56.1, git 2.43):
   29378454574, release 40359466840); the build image sets `safe.directory '*'`. Use
   `rev-parse`, not `describe --dirty`: the only empty tweak found came from an
   internal simulator SDK whose checkout had no working tree.
-- **CMake records the SHA at configure time,** so it must re-configure when HEAD
-  moves. The wheel filename is fixed at configure.
+- **CMake refreshes identity when targets build.** Configure gives initial
+  diagnostics; the metadata prerequisite handles later edits, reverts and new
+  commits. Canonical filename selection occurs inside the build helper, and the
+  manifest drives unpacking and installation. The measured warm incremental
+  refresh overhead was about 0.3 s; unchanged output timestamps are retained.
 - **Wheels are byte-identical across builds only with `SOURCE_DATE_EPOCH` set.**
 - **A separate TheRock Python stage must pass the SHA explicitly,** because the wheel
   and the client would come from two builds.
 
 Not yet handled:
 
-- Edits made after a CMake configure are not reflected in a dirty value until the
-  next configure.
+- Concurrent edits during one build can race with its identity resolution. Build
+  from a stable checkout when producing paired release artifacts. The refresh
+  does not freeze source files while a compiler or wheel backend reads them.
 - Concurrent builds from one source tree already race on the shared `build/lib`,
   which `CleanBuildPy` deletes; this predates the SHA design.
 - `export-subst` (`$Format:%H$`) could carry the SHA in `git archive` tarballs if
   TheRock's tarballs are made that way, which is not yet established.
+
+
+### Review-resolution integration (2026-11-17)
+
+#11018 owns build-time metadata refresh, the combined query, behavioral client
+build/query regressions and installed identity CTests. #11020 owns canonical
+wheel staging and publication; #11021 supplies its explicit ROCm identity;
+#11022 consumes the manifest-selected wheel for generation. #11025 tests a real
+installed wheel's package and CLI version while retaining `GENERATOR_VERSION`.
+#15580 copies the selected wheel without extracting it beside the installed
+tests, and removes older canonical wheels after successfully copying the new
+selection. Source freshness tests stay in source lanes; artifact query tests
+use saved metadata and need no Git checkout.
 
 ## Decision 4 — ROCm identity per installation form (Decided)
 

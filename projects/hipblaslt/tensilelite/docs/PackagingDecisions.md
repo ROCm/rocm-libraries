@@ -8,6 +8,12 @@
 > generation, rocisa staging, and installed-artifact testing. Historical
 > decisions below remain useful only where they do not conflict with that file.
 
+> **Identity refresh update (2026-11-17):**
+> [PackagingIdentityPlan.md](PackagingIdentityPlan.md) records the current
+> build-time metadata refresh, combined JSON query, canonical wheel publication
+> manifest, and relocatable installed identity CTests. Configure-only identity
+> and fixed wheel filenames in older notes are superseded by that implementation.
+
 Status: Accepted for implementation
 Decision date: 2026-07-29
 Source proposal: `Public.md`
