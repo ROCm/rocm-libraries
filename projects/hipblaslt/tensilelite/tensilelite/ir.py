@@ -43,8 +43,10 @@ backend's class so type checks keep working across the migration. Names that are
 not migrated stay the real rocisa class and pay no dispatch cost.
 """
 
+import os
 from contextvars import ContextVar
 
+import rocisa as _rocisa
 import rocisa.instruction as _rocisa_instruction
 
 # ISA ([major, minor, stepping]) being generated in the current context, set by
@@ -71,17 +73,58 @@ def active_version():
   return _active_version.get()
 
 
+class _LogicalBackend:
+  """Construction backend that builds StinkyTofu logical IR instead of rocisa.
+
+  ``getattr(_logical_backend, "VMovB32")(dst, src, comment)`` builds the rocisa
+  instruction, lowers it through ``rocisa.makeLogicalLeaf`` (the exact
+  ``createLogicalFromRocisa`` path the lazy converter runs at
+  ``toStinkyTofuModule`` time) and returns a ``rocisa.LogicalLeaf`` carrier. The
+  leaf is a real ``rocisa.Item`` so it drops straight into the module tree, and
+  its payload passes through the converter unchanged -- byte-identical to
+  converting the same rocisa instruction lazily.
+  """
+
+  def __getattr__(self, name):
+    real = getattr(_rocisa_instruction, name)
+
+    def _build(*args, **kwargs):
+      inst = real(*args, **kwargs)
+      return _rocisa.makeLogicalLeaf(inst, _active_version.get())
+
+    return _build
+
+
+_logical_backend = _LogicalBackend()
+
+
+# Trial opt-in: instructions routed through the logical backend for gfx1250 only
+# when TENSILELITE_LOGICALIR_TRIAL is set in the environment. Intentionally EMPTY:
+# an opcode-level trial proved too coarse. Even v_mov_b32 has callers that build
+# it with a deferred Holder destination (copyAccToArchVgpr / moveMIoutToArch),
+# resolved later by replaceHolder() walking the rocisa tree; building it as a
+# logical leaf freezes the unresolved Holder and the resolution pass skips the
+# opaque leaf, so the mixed tree diverges. The mechanism below is kept for the
+# next stage, which flips the whole gfx1250 build to logical at once (no mixed
+# tree within a kernel) rather than migrating by opcode.
+_TRIAL_NAMES = frozenset()
+
+
+def _trial_enabled():
+  return bool(os.environ.get("TENSILELITE_LOGICALIR_TRIAL"))
+
+
 def _backend():
   """Return the namespace that builds instructions for the active ISA.
 
-  This is the single arch dispatch point. Today every architecture builds
-  rocisa, so codegen is byte-identical to the pre-facade path. The next
-  migration stage flips exactly this function, e.g.::
-
-      if _active_version.get() == (12, 5, 0):
-          return _logical_backend   # StinkyTofu logical-IR constructors
-      return _rocisa_instruction
+  This is the single arch dispatch point. By default every architecture builds
+  rocisa, so codegen is byte-identical to the pre-facade path. The trial flips
+  to the logical backend for gfx1250 only when TENSILELITE_LOGICALIR_TRIAL is
+  set; the eventual migration stage replaces this with an unconditional
+  ``if _active_version.get() == (12, 5, 0): return _logical_backend``.
   """
+  if _trial_enabled() and _active_version.get() == (12, 5, 0):
+    return _rocisa_instruction
   return _rocisa_instruction
 
 
@@ -96,7 +139,9 @@ _dispatch_cache = {}
 
 
 def _is_dispatched(name):
-  return _MIGRATE_ALL or name in _MIGRATED
+  if _MIGRATE_ALL or name in _MIGRATED:
+    return True
+  return _trial_enabled() and name in _TRIAL_NAMES
 
 
 def _make_dispatcher(name, real):
@@ -115,10 +160,18 @@ def _make_dispatcher(name, real):
     return getattr(_backend(), name)(*args, **kwargs)
 
   def _instancecheck(cls, obj):
-    return isinstance(obj, getattr(_backend(), name))
+    target = getattr(_backend(), name)
+    # The logical backend exposes a factory callable, not a class; type checks
+    # fall back to the real rocisa class so isinstance stays non-crashing.
+    if not isinstance(target, type):
+      target = real
+    return isinstance(obj, target)
 
   def _subclasscheck(cls, sub):
-    return issubclass(sub, getattr(_backend(), name))
+    target = getattr(_backend(), name)
+    if not isinstance(target, type):
+      target = real
+    return issubclass(sub, target)
 
   ns = {"__call__": _call, "__instancecheck__": _instancecheck,
         "__subclasscheck__": _subclasscheck}

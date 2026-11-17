@@ -2380,4 +2380,26 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         nb::arg("module"), nb::arg("arch"), nb::arg("moduleName") = "",
         "Build the StinkyTofu logical IR for a rocisa.Module and return it as text "
         "(debug helper for ENABLE_DEBUG_STINKYTOFU_LOGICAL).");
+
+    // Lower a single freshly built rocisa instruction to StinkyTofu logical IR and
+    // wrap it in a rocisa.LogicalLeaf carrier, so a codegen region can emit logical
+    // IR while still handing a rocisa.Item back into the rocisa module tree. The
+    // lowering reuses the exact createLogicalFromRocisa() path the lazy converter
+    // runs at toStinkyTofuModule() time, so a leaf is byte-identical to converting
+    // the same rocisa instruction later. asmCaps / HasVgprMSB / archId are resolved
+    // identically to dumpLogicalModuleText so the eager and lazy paths agree.
+    m.def(
+        "makeLogicalLeaf",
+        [](const rocisa::Instruction& inst, nb::object arch_obj) -> std::shared_ptr<rocisa::Item> {
+            const std::array<int, 3> archArray = convertArch(arch_obj);
+            const std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+            const bool hasVgprMsb = asmCap(asmCaps, "HasVgprMSB") != 0;
+            auto archId = resolveArchId(archArray, "");
+            auto logicalInst = createLogicalFromRocisa(inst, asmCaps, hasVgprMsb, archId);
+            return std::make_shared<rocisa::LogicalLeaf>(logicalInst, rocisaClassName(inst));
+        },
+        nb::arg("inst"), nb::arg("arch"),
+        "Lower a rocisa instruction to StinkyTofu logical IR and wrap it in a "
+        "rocisa.LogicalLeaf carrier (byte-identical to converting it lazily). Lets a "
+        "codegen region build logical IR while still returning a rocisa.Item into the tree.");
 }
