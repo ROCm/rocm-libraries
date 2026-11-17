@@ -224,9 +224,10 @@ With `emit_lse=True`, `lse` is required; with the flag disabled, supplying it is
 an error. Keep all buffers alive until the supplied stream completes.
 
 A row with no allowed real keys writes exact-zero output and `LSE=-inf`.
-A finite attention sink contributes only to the denominator; an otherwise empty
-row writes zero output and `LSE=sink`. Nonempty rows write the same `O` bits as
-the LSE-off kernel.
+A finite attention sink contributes only to the denominator; it is `[Hq]` in the
+input dtype, or `float32` with `sink_dtype="f32"`, loaded unrounded. An otherwise
+empty row writes zero output and `LSE=sink`. Nonempty rows write the same `O`
+bits as the LSE-off kernel.
 
 This opt-in covers the existing legal gfx950 dense modes: ordinary/persistent,
 fp16/bf16, D64/D128, head sharing, supported masks/windows, fixed ragged, paged,

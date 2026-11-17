@@ -34,6 +34,7 @@ _GFX950_DENSE_FEATURES = {
     "layout_dense",
     "lse",
     "sinks",
+    "sinks_f32",
     "sliding_window",
 }
 _GFX950_DENSE_GRID_BODY_FEATURES = _GFX950_DENSE_FEATURES | {
