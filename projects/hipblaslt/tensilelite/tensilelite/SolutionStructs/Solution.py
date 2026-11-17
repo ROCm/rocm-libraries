@@ -7243,8 +7243,9 @@ class Solution(collections.abc.Mapping):
     # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
     if not validateBlockDequantCombination(state, printRejectionReason):
       return
-    if state["ProblemType"]["UseScaleAB"] == "Block":
-      # The block-scale pointer follows neither a staggered K start nor a split K.
+    if state["ProblemType"]["UseScaleAB"] == "Block" and state["WaveSplitK"]:
+      # Short dot2 waves keep the prologue minimal: no stagger and a static
+      # split K. The WMMA block-scale kernels follow both at runtime.
       _disableRuntimeStaggerU(state)
       state["InternalSupportParams"]["SupportUserGSU"] = False
     if not validateDirectToVgprDot2A(state, printRejectionReason):

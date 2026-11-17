@@ -126,7 +126,8 @@ def test_dequant_waits_for_its_load(toolchain):
     _kernel, src = _emit_solution(toolchain, _solution(toolchain, pgr=1))
     begin = src.index("label_LoopBeginL:")
     body = src[begin:src.index("label_LoopEndL_evenexit:", begin)]
-    dequants = list(re.finditer(r"w4a16: int4 #0 and #4", body))
+    # The first instruction of each per-load dequantize (fp16 or bf16 path).
+    dequants = list(re.finditer(r"w4a16: (save packed int4 dword 0|byte 0 \(int4 #0, #1\))", body))
     assert dequants, "no dequant in the main loop"
     for m in dequants:
         before = body[:m.start()]

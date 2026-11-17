@@ -640,9 +640,11 @@ class GSUOn(GSU):
         needSecondNLL  = isDTV # need 2 NLL for 2 buffers (PGR1/2)
         NLLnum = 2 if needSecondNLL else 1
         gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
-        with writer.allocTmpSgpr(1, tag="GSU On noLoadLoop_tmpSgprGSU") as tmpSgprGSU:
-            module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
+        gsuIsOne = writer.gsuIsOne(kernel)
+        if not gsuIsOne:
+            with writer.allocTmpSgpr(1, tag="GSU On noLoadLoop_tmpSgprGSU") as tmpSgprGSU:
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
+                module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         noLoadLoopModules = None
         acclen = 0
         gsuBackup          = kernel["GlobalSplitU"]
@@ -683,7 +685,9 @@ class GSUOn(GSU):
         kernel["_GlobalAccumulation"] = gsuAccumBackup
         writer.states.bpeCexternal = bpeCexternalBackup
 
-        if acclen > 16384:
+        if gsuIsOne:
+            pass  # GSU == 1 is static: no branch around the GSU == 1 loop.
+        elif acclen > 16384:
             with writer.allocTmpSgpr(3, tag="GSU On noLoadLoop_tmpSgprInfo") as tmpSgprInfo:
                 module.add(writer.longBranchScc0(gsuLabel, posNeg=1, tmpSgprInfo=tmpSgprInfo, comment="branch if GSU != 1"))
         else:

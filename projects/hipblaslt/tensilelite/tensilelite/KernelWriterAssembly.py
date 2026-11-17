@@ -3071,7 +3071,7 @@ class KernelWriterAssembly(KernelWriter):
         moduleRegInit.add(SLShiftRightB32(dst=sgpr("StaggerU"), shiftHex=hex(16), src=sgpr("StaggerU")))
       if kernel["GlobalSplitU"] != 0 or kernel["AdaptiveGemmNTAB"] != 0:
         moduleRegInit.add(SAndB32(dst=sgpr("GSU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF), comment="Restore GSUConfig and GSU"))
-        if kernel["ProblemType"]["UseScaleAB"] == "Block" and kernel["GlobalSplitU"] != 0:
+        if kernel["ProblemType"]["UseScaleAB"] == "Block" and kernel["GlobalSplitU"] != 0 and not self.gsuIsOne(kernel):
           # Split K into contiguous ranges (GSUC) whatever the host asked for:
           # the block-scale pointers step one group at a time, which an
           # interleaved split would break whenever GSU*DepthU is not a whole
@@ -5563,7 +5563,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["ProblemType"]["ScaleZeroPointA"]:
       module.add(self.blockScaleZeroAComputeSrd(kernel))
-    if kernel["GlobalSplitU"] != 0:
+    if kernel["GlobalSplitU"] != 0 and not self.gsuIsOne(kernel):
       module.add(self.blockScaleAGsuOffset(kernel))
     elif isStreamK(kernel) and not isPersistentDataParallel(kernel):
       # A Stream-K work item covers iterations [StreamKLocalStart, StreamKLocalEnd)
@@ -10833,7 +10833,7 @@ class KernelWriterAssembly(KernelWriter):
       srcDwords = int(kernel["GlobalReadVectorWidthA"] * tPA["bpeGR"]) // self.states.bpr
       for load in loads:
         g2lIdx = load * pairs
-        module.add(self.blockScaleADequant(kernel, tPA, "G2LA", g2lIdx, g2lIdx, load, srcDwords))
+        module.add(self.blockScaleADequant(kernel, tPA, "G2LA", g2lIdx, load, srcDwords))
     return module
 
   def macIter(self, kernel, tPA, tPB, bufferIdx, iuiCount, useMacro, isTail=False, unrollIdx=None):
