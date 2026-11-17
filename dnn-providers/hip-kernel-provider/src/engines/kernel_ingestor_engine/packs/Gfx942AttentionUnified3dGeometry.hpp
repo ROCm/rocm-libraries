@@ -376,10 +376,13 @@ inline bool gfx942Unified3dServesGqaRatio(int64_t ratio)
     return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
 }
 
-/// gfx942Unified3dServesGqaRatio for a head pair; a non-dividing pair has no ratio.
+/// gfx942Unified3dServesGqaRatio for a head pair. Mirrors rocKE's check_head_counts, which the
+/// split-KV reduce's pack-time predicate (supports_split_kv_reduce) applies: both counts
+/// positive and the query heads grouping evenly over the KV heads; a pair that fails has no
+/// ratio.
 inline bool gfx942Unified3dServesGqaGroup(int64_t numQueryHeads, int64_t numKvHeads)
 {
-    return numKvHeads > 0 && numQueryHeads % numKvHeads == 0
+    return numQueryHeads > 0 && numKvHeads > 0 && numQueryHeads % numKvHeads == 0
            && gfx942Unified3dServesGqaRatio(numQueryHeads / numKvHeads);
 }
 
