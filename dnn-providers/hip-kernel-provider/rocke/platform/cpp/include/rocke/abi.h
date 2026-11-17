@@ -133,9 +133,14 @@ extern "C" {
  *     the padding after page_block_size (its size and offsets are unchanged).
  * 19: rocke_coalesced_tile_loader_t gained has_col_xor and col_xor[4] at its
  *     end (after elem_dtype), which changes its size.
- * 20: rocke_implicit_gemm_conv_wgrad_spec_t gained the register-transpose
- *     fields (reg_transpose onward) at its end, which changes its size. */
-#define ROCKE_ABI_VERSION 20
+ * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
+ *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
+ *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_implicit_gemm_conv_wgrad_spec_t gained the register-transpose
+ *     fields (reg_transpose onward) at its end, which changes its size.
+ *     (Independent of #16063's ABI 21 claim; whichever lands second re-bumps.) */
+#define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

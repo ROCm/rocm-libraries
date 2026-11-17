@@ -730,7 +730,12 @@ def _bias_dq_cells(arch: str):
                                 yield graph, ranked
 
 
-@pytest.mark.parametrize("arch", model.ARCHES)
+# The arches whose dQ rows rank a no-dB twin above its dB-storing twin and break no other tie: gfx950 and gfx11-generic. gfx942 and gfx90a
+# re-rank by rung alone (``_instances._sdpa_bwd_instances``), so the f32-bias twins of a bias dQ row tie there and the kernel id decides.
+RANKED_ARCHES = (model.SDPA_BWD_TARGET, model.SDPA_BWD_GFX11_TARGET)
+
+
+@pytest.mark.parametrize("arch", RANKED_ARCHES)
 def test_a_bias_graph_without_dbias_picks_a_store_db_0_row_wherever_one_ties_the_top_geometry(
     arch: str,
 ) -> None:
@@ -747,7 +752,7 @@ def test_a_bias_graph_without_dbias_picks_a_store_db_0_row_wherever_one_ties_the
     assert picked
 
 
-@pytest.mark.parametrize("arch", model.ARCHES)
+@pytest.mark.parametrize("arch", RANKED_ARCHES)
 def test_every_f32_bias_store_db_0_row_is_the_pick_of_some_graph(arch: str) -> None:
     """The f32-bias no-dB rows that no graph ranked first before the criterion (a lower kernel id broke the tie) are reachable."""
     reachable = {
@@ -764,7 +769,7 @@ def test_every_f32_bias_store_db_0_row_is_the_pick_of_some_graph(arch: str) -> N
     assert not set(exact) - reachable
 
 
-@pytest.mark.parametrize("arch", model.ARCHES)
+@pytest.mark.parametrize("arch", RANKED_ARCHES)
 def test_no_two_16_bit_bias_dq_rows_serving_one_graph_tie(arch: str) -> None:
     """Every row serving a 16-bit bias dQ graph ranks strictly; the fp32 graphs' only ties are the ``block_m`` twins."""
     checked = 0

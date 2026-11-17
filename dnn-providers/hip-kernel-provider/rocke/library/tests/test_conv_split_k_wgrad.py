@@ -440,10 +440,6 @@ class TestGfx1250Policy(unittest.TestCase):
                 )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestGfx12RdnaWgradPolicy(unittest.TestCase):
     """gfx12 RDNA wgrad degree: the CK formula, one CTA per CU on small
     ungrouped grids, the grouped CK formula, and the 16-bit atomic caps."""
@@ -493,3 +489,7 @@ class TestGfx12RdnaWgradPolicy(unittest.TestCase):
             arch="gfx1201", groups=4, block_size=64, dtype_d="bf16", **kw
         )
         self.assertEqual(bf16.split_k, min(ck.split_k, 12))
+
+
+if __name__ == "__main__":
+    unittest.main()

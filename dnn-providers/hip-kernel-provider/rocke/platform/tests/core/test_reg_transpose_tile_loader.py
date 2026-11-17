@@ -118,3 +118,27 @@ def test_col_swizzle_applies_to_every_store():
     )
     _kernel(loader)
     assert len(calls) == loader.units_per_thread * loader.vec
+
+
+def test_plan_refuses_above_regt_max_units():
+    """plan rejects configurations where any thread would hold > REGT_MAX_UNITS
+    micro-tiles; the C++ staged heap has exactly that many slots."""
+    from rocke.helpers.loads import REGT_MAX_UNITS
+
+    # At boundary: (256 * 1) units over 1 thread -- exactly at the cap.
+    # tile_rows=256, tile_cols=8, vec=1 -> units = (256//1) * (8//8) = 256.
+    # block_size=1 -> per_thread = 256 == REGT_MAX_UNITS -> accepted.
+    units, active, why = L.plan(
+        tile_rows=256, tile_cols=8, block_size=1, wave_size=32, vec=1
+    )
+    assert not why, f"expected accepted at boundary, got: {why}"
+    assert units == REGT_MAX_UNITS
+
+    # Above boundary: 257 micro-tiles per thread.
+    # tile_rows=257 is not divisible by vec=1 … use tile_rows=512, block_size=1.
+    # units = (512 // 1) * (8 // 8) = 512 > REGT_MAX_UNITS -> rejected.
+    _, _, why_over = L.plan(
+        tile_rows=512, tile_cols=8, block_size=1, wave_size=32, vec=1
+    )
+    assert why_over, "expected rejection above REGT_MAX_UNITS"
+    assert str(REGT_MAX_UNITS) in why_over

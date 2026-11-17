@@ -247,12 +247,16 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
         # The default tile depends on the shape (128 rows when the 256-row grid
         # would leave CUs idle), so the expected tile is read from the default spec
         # the factory builds (dispatch refuses it, so it cannot come from dispatch).
-        # 1152 is a block_n multiple, so only the query length is named there.
+        # 1088 is a block_n multiple, so only the query length is named there. It is
+        # partial at either row count (1152 = 9 x 128 is whole at 128 rows and would
+        # stop pinning the tile if the pick moved). 500 takes the 128-row tile.
+        tiles = set()
         with _Gfx942Arch():
-            for seqlen in (1152, 1000):
+            for seqlen in (1088, 1000, 500):
                 with self.subTest(seqlen=seqlen):
                     req = _req(seqlen_q=seqlen, seqlen_k=seqlen)
                     spec = tuned_base_spec(req)
+                    tiles.add((spec.block_m, spec.block_n))
                     self.assertNotEqual(seqlen % spec.block_m, 0)
                     ok, why = _candidate().admits(req)
                     self.assertFalse(ok)
@@ -271,6 +275,9 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
                         self.assertIn(kv_part, why)
                     else:
                         self.assertNotIn("seqlen_kv", why)
+        # The lengths must reach more than one tile, or a helper that always names
+        # one registered pair would pass.
+        self.assertGreater(len(tiles), 1, tiles)
 
 
 class TestGfx942BottomRightSafety(unittest.TestCase):

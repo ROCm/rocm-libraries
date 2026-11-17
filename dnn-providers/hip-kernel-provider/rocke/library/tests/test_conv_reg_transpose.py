@@ -524,5 +524,90 @@ class TestWgradRdna4Grid(unittest.TestCase):
             self.assertEqual(n, c, arch)
 
 
+class TestXRunAndRasRefusals(unittest.TestCase):
+    """x_run combination refusals and ras (regt_addr_step) 3-D refusal."""
+
+    def _xrun_spec(self, **kw):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        base = dict(
+            problem=ConvProblem(N=2, Hi=64, Wi=64, C=3, K=64, Y=16, X=16, sH=16, sW=16),
+            reg_transpose=False,
+            tile_k=16,
+            vector_size_a=8,
+            vector_size_b=8,
+            x_run=True,
+        )
+        base.update(kw)
+        return _wgrad(**base)
+
+    def test_x_run_refused_with_async_dma(self):
+        with self.assertRaises(ValueError):
+            self._xrun_spec(async_dma=True).validate()
+
+    def test_x_run_refused_with_lds_k_outer(self):
+        with self.assertRaises(ValueError):
+            self._xrun_spec(lds_k_outer=True, warp_tile_k=16).validate()
+
+    def test_x_run_refused_with_group_merge(self):
+        with self.assertRaises(ValueError):
+            self._xrun_spec(group_merge=2).validate()
+
+    def test_x_run_refused_with_stream_k(self):
+        with self.assertRaises(ValueError):
+            self._xrun_spec(streamk="full").validate()
+
+    def test_x_run_refused_with_3d(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        p3d = ConvProblem(
+            N=2,
+            Di=8,
+            Hi=64,
+            Wi=64,
+            C=3,
+            K=64,
+            Z=3,
+            Y=3,
+            X=3,
+            sD=1,
+            sH=1,
+            sW=1,
+            pD=1,
+            pH=1,
+            pW=1,
+            dD=1,
+        )
+        with self.assertRaises(ValueError):
+            self._xrun_spec(problem=p3d).validate()
+
+    def test_ras_refused_with_3d(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        p3d = ConvProblem(
+            N=2,
+            Di=8,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=64,
+            Z=3,
+            Y=3,
+            X=3,
+            sD=1,
+            sH=1,
+            sW=1,
+            pD=1,
+            pH=1,
+            pW=1,
+            dD=1,
+        )
+        spec = _wgrad(problem=p3d, regt_addr_step=True)
+        ok, why = is_valid_wgrad_spec(spec, "gfx1201")
+        self.assertFalse(ok)
+        self.assertIn("3-D", why)
+
+
 if __name__ == "__main__":
     unittest.main()

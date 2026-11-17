@@ -773,6 +773,9 @@ class CoalescedTileLoader:
 REGT_K_RUN = 8
 # Free-axis load widths the register transpose is written for, widest first.
 REGT_VECS = (8, 4, 2, 1)
+# Hard cap on micro-tiles per thread; mirrors C++ ROCKE_REGT_MAX_UNITS in
+# helper_rocke.helpers.loads.h (the staged heap has exactly that many slots).
+REGT_MAX_UNITS = 256
 
 
 class _RegTransposeStaged(list):
@@ -870,8 +873,17 @@ class RegTransposeTileLoader:
             return 0, 0, f"tile free extent {tile_rows} not divisible by vec {vec}"
         units = (tile_rows // vec) * (tile_cols // REGT_K_RUN)
         if units % block_size == 0:
+            per_thread = units // block_size
+            if per_thread > REGT_MAX_UNITS:
+                return (
+                    0,
+                    0,
+                    f"RegTransposeTileLoader: {per_thread} micro-tiles per thread "
+                    f"> REGT_MAX_UNITS {REGT_MAX_UNITS}",
+                )
             return units, block_size, ""
         if units < block_size and units % wave_size == 0:
+            # Active threads each handle exactly one micro-tile.
             return units, units, ""
         return (
             0,
