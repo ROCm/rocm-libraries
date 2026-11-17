@@ -52,9 +52,7 @@ set(FLYDSL_CONTENT_DIR "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}/FlyDSL")
 #
 # GPU_TARGETS entries may carry target features (gfx942:sramecc+:xnack-). The
 # content tree keys on the bare arch, so match on the part before the first colon.
-set(_flydsl_families_json "${CMAKE_CURRENT_SOURCE_DIR}/generators/arch_families.json")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_flydsl_families_json}")
-file(READ "${_flydsl_families_json}" _flydsl_families)
+include("${CMAKE_CURRENT_SOURCE_DIR}/FlydslArchFamilies.cmake")
 
 # Each content directory is a DVC output (git holds <op>/<target>.dvc). The
 # provider's top-level CMakeLists.txt checks every pointer against what was
@@ -62,30 +60,6 @@ file(READ "${_flydsl_families_json}" _flydsl_families)
 # HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS fails -- when one is missing. A
 # directory that was not pulled is absent below: it adds to the content set
 # through its pointer but ships nothing.
-
-# The architectures a content target stands for: itself, or every member of an
-# LLVM generic target.
-function(_flydsl_target_members target entry out)
-    if(NOT target MATCHES "-generic$")
-        set(${out} "${target}" PARENT_SCOPE)
-        return()
-    endif()
-    string(JSON _count ERROR_VARIABLE _flydsl_json_error
-           LENGTH "${_flydsl_families}" "${target}" members)
-    if(_flydsl_json_error)
-        message(FATAL_ERROR
-            "flydsl: content '${entry}' names generic target '${target}', which "
-            "generators/arch_families.json does not list")
-    endif()
-    set(_members "")
-    math(EXPR _last "${_count} - 1")
-    # cmake-lint: disable=E1120
-    foreach(_index RANGE ${_last})
-        string(JSON _member GET "${_flydsl_families}" "${target}" members ${_index})
-        list(APPEND _members "${_member}")
-    endforeach()
-    set(${out} "${_members}" PARENT_SCOPE)
-endfunction()
 
 file(GLOB _flydsl_pointers RELATIVE "${FLYDSL_CONTENT_DIR}"
      CONFIGURE_DEPENDS "${FLYDSL_CONTENT_DIR}/*/gfx*.dvc")
@@ -265,6 +239,13 @@ if(_flydsl_product_root)
             LABELS "unit_test;hip-kernel-provider;host"
             ENVIRONMENT
                 "FLYDSL_PRODUCT_OUT_ROOT=${_flydsl_product_root};FLYDSL_SHARD_ARCH=${_flydsl_shard_arch};HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON=${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON};PYTHONDONTWRITEBYTECODE=1")
+        # test_installed_models.py checks the generator against uhd_gen promote itself, which
+        # needs uhd_gen's requirements; like uhd_gen's own suites it skips without them,
+        # unless the build requires those suites to run.
+        if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+            set_property(TEST hip-kernel-provider-flydsl-drift-guards APPEND PROPERTY
+                ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+        endif()
         if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND COMMAND apply_ctest_category_labels)
             apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
         endif()

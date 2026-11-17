@@ -218,14 +218,11 @@ class TestFwdWmmaSpec(unittest.TestCase):
             )
         )
 
-    def test_engines_refuse_non_positive_extents(self):
-        """Every user of the forward WMMA gate (direct, gstream, tap-outer,
-        small C, small K) refuses a zero or negative extent first, with the
-        same text in both engines. groups = 0 used to pass: K = 0 is a
-        multiple of every block_k and the tensors are 0 bytes."""
-        import dataclasses
-
-        eng = pytest.importorskip("rocke_engine")
+    @staticmethod
+    def _extent_families():
+        """(spec, Python validator, engine family) for every user of the
+        forward WMMA gate: direct, grouped direct, gstream, tap-outer, small C
+        and small K."""
         from kernels.common.conv_direct_fwd_gstream_wmma import (
             FwdGstreamWmmaSpec,
             fwd_gstream_reason,
@@ -234,78 +231,117 @@ class TestFwdWmmaSpec(unittest.TestCase):
             DirectFwdTapOuterSpec,
             tapouter_reason,
         )
-        from kernels.common.conv_direct_grouped import PROBLEM_DIMS
         from kernels.common.conv_fwd_small_wmma import (
             FwdSmallcWmmaSpec,
             FwdSmallkWmmaSpec,
             fwd_smallc_reason,
             fwd_smallk_reason,
         )
-        from rocke.core import backend as be
 
-        families = (
+        return (
             (
                 DirectFwdWmmaSpec(problem=_problem()),
                 fwd_wmma_reason,
-                eng.conv_direct_fwd_wmma_describe,
-                be.conv_direct_fwd_wmma_spec_to_dict,
+                "direct_fwd_wmma",
             ),
             (
                 DirectFwdWmmaSpec(problem=_problem(C=64, K=64, groups=4)),
                 fwd_wmma_reason,
-                eng.conv_direct_fwd_wmma_describe,
-                be.conv_direct_fwd_wmma_spec_to_dict,
+                "direct_fwd_wmma",
             ),
             (
                 FwdGstreamWmmaSpec(problem=_problem(C=128, K=128, groups=8)),
                 fwd_gstream_reason,
-                eng.conv_direct_fwd_gstream_wmma_describe,
-                be.conv_direct_fwd_gstream_wmma_spec_to_dict,
+                "direct_fwd_gstream_wmma",
             ),
             (
                 DirectFwdTapOuterSpec(
                     problem=_problem(H=29, W=37, PAD=12, dil_h=12, dil_w=12)
                 ),
                 tapouter_reason,
-                eng.conv_direct_fwd_tapouter_wmma_describe,
-                be.conv_direct_fwd_tapouter_wmma_spec_to_dict,
+                "direct_fwd_tapouter_wmma",
             ),
             (
                 FwdSmallcWmmaSpec(problem=_problem(H=32, W=48, C=3, K=64)),
                 fwd_smallc_reason,
-                eng.conv_direct_fwd_smallc_wmma_describe,
-                be.conv_direct_fwd_smallc_wmma_spec_to_dict,
+                "direct_fwd_smallc_wmma",
             ),
             (
                 FwdSmallkWmmaSpec(problem=_problem(H=32, W=48, C=64, K=4)),
                 fwd_smallk_reason,
+                "direct_fwd_smallk_wmma",
+            ),
+        )
+
+    @staticmethod
+    def _non_positive_extents(base):
+        """(spec, refusal text) for each extent of ``base`` set to 0, -1, -16."""
+        import dataclasses
+
+        from kernels.common.conv_direct_grouped import PROBLEM_DIMS
+
+        for name in PROBLEM_DIMS:
+            for value in (0, -1, -16):
+                problem = dataclasses.replace(base.problem, **{name: value})
+                spec = dataclasses.replace(base, problem=problem)
+                yield spec, f"{name} must be >= 1 (got {value})"
+
+    def test_gate_refuses_non_positive_extents(self):
+        """Every user of the forward WMMA gate refuses a zero or negative
+        extent first, with problem_dims_reason's text. groups = 0 used to
+        pass: K = 0 is a multiple of every block_k and the tensors are 0
+        bytes. Needs no C++ engine, so CI runs it."""
+        for base, reason, _ in self._extent_families():
+            self.assertIsNone(reason(base, "gfx1250"), base)
+            for spec, want in self._non_positive_extents(base):
+                self.assertEqual(reason(spec, "gfx1250"), want, spec)
+
+    def test_engines_refuse_non_positive_extents(self):
+        """The C++ engine refuses the same extents with the same text."""
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv import engine_bridge as be
+
+        engines = {
+            "direct_fwd_wmma": (
+                eng.conv_direct_fwd_wmma_describe,
+                be.conv_direct_fwd_wmma_spec_to_dict,
+            ),
+            "direct_fwd_gstream_wmma": (
+                eng.conv_direct_fwd_gstream_wmma_describe,
+                be.conv_direct_fwd_gstream_wmma_spec_to_dict,
+            ),
+            "direct_fwd_tapouter_wmma": (
+                eng.conv_direct_fwd_tapouter_wmma_describe,
+                be.conv_direct_fwd_tapouter_wmma_spec_to_dict,
+            ),
+            "direct_fwd_smallc_wmma": (
+                eng.conv_direct_fwd_smallc_wmma_describe,
+                be.conv_direct_fwd_smallc_wmma_spec_to_dict,
+            ),
+            "direct_fwd_smallk_wmma": (
                 eng.conv_direct_fwd_smallk_wmma_describe,
                 be.conv_direct_fwd_smallk_wmma_spec_to_dict,
             ),
-        )
-        for base, reason, describe, to_dict in families:
-            self.assertIsNone(reason(base, "gfx1250"), base)
-            for name in PROBLEM_DIMS:
-                for value in (0, -1, -16):
-                    problem = dataclasses.replace(base.problem, **{name: value})
-                    spec = dataclasses.replace(base, problem=problem)
-                    want = f"{name} must be >= 1 (got {value})"
-                    self.assertEqual(reason(spec, "gfx1250"), want, spec)
-                    ok, why_cpp, *_ = describe(to_dict(spec), "gfx1250")
-                    self.assertFalse(ok, spec)
-                    self.assertEqual(why_cpp, want, spec)
+        }
+        for base, _, family in self._extent_families():
+            describe, to_dict = engines[family]
+            self.assertTrue(describe(to_dict(base), "gfx1250")[0], base)
+            for spec, want in self._non_positive_extents(base):
+                ok, why_cpp, *_ = describe(to_dict(spec), "gfx1250")
+                self.assertFalse(ok, spec)
+                self.assertEqual(why_cpp, want, spec)
 
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs (the
         byte-identity gate only covers the IR of specs both engines build)."""
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
             probe_problem,
         )
-        from rocke.core.backend import conv_direct_fwd_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_fwd_wmma_spec_to_dict
 
         specs = []
         _, caps_list = DIRECT_CAPABILITIES["direct_fwd_wmma"]
@@ -429,8 +465,8 @@ class TestFwdWmmaSpec(unittest.TestCase):
         """The shared validator tail refuses an unknown scheduler with
         normalize_scheduler_strategy's text, choices included, in both
         engines."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_fwd_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_fwd_wmma_spec_to_dict
         from rocke.core.codegen_policy import normalize_scheduler_strategy
 
         for sched in ("no-such-strategy", ""):
@@ -449,8 +485,8 @@ class TestFwdWmmaSpec(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_fwd_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_fwd_wmma_spec_to_dict
 
         for knobs in (dict(waves_k=0), dict(tiles_k=0), dict(waves_p=0)):
             sd = conv_direct_fwd_wmma_spec_to_dict(

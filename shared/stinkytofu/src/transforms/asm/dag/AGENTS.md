@@ -125,7 +125,7 @@ Each concern has one model. Query it; do not build a second copy beside it.
 | --- | --- |
 | `s_wait_alu` waits and hazards | `WaitAluTracker` (`query`, `untilFree`, `requiredGap`, `commit`), the same scoreboard `InsertWaitAluPass` uses. |
 | ds pacing | `DsSpreadPacer` and the ds credit queue (`dsReadInflight_`). |
-| WMMA queue and cover | `outstandingWmmas()`, `wmmaQueueDepth()`, `queuedCoverCycles()`. |
+| WMMA queue and cover | `outstandingWmmas()`, `effectiveWmmaQueueDepth()`, `queuedCoverCycles()`. |
 | Barrier placement | The barrier thresholds (`barrierWmmaThresholds_`). |
 | Prefetch placement | `prefetchEarliestWmma_` and `needByWindow_`. |
 
@@ -153,7 +153,8 @@ are ready.
 
 ## Before you send the change
 
-Build and run the StinkyTofu ctest suite.
+For a refactor, prove that the generated assembly is identical (rule 6). How to do that is in
+[`harness/ab.md`](../../../../harness/ab.md).
 
 Read the related docs:
 

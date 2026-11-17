@@ -28,6 +28,33 @@
 
 #include "rocke/ir_internal.h"
 
+/* Python repr() of an Optional[str] appended to `out`: "None", or
+ * rocke_py_str_repr's text. */
+static void emit_repr_str(rocke_strbuf_t* out, const char* s)
+{
+    if(!s)
+    {
+        rocke_strbuf_append(out, "None");
+        return;
+    }
+    char small[128];
+    const size_t n = rocke_py_str_repr(s, small, sizeof(small));
+    if(n < sizeof(small))
+    {
+        rocke_strbuf_append(out, small);
+        return;
+    }
+    char* big = (char*)malloc(n + 1);
+    if(!big)
+    {
+        out->oom = 1;
+        return;
+    }
+    rocke_py_str_repr(s, big, n + 1);
+    rocke_strbuf_append(out, big);
+    free(big);
+}
+
 /* --------------------------------------------------------------- operands */
 
 /* Python _format_operand: returns v.name (already includes the leading '%'). */
@@ -206,9 +233,8 @@ static void emit_float(rocke_strbuf_t* out, double f)
  * case below. A list attr is a Python List[Dict[str, Any]] (scf.for iter_args
  * metadata), and str(list) renders every contained element with repr(), which
  * differs from the top-level _attr_value (repr single-quotes strings, whereas
- * the top level double-quotes them). emit_repr_str is defined later in the file
- * and is the faithful port of Python repr(str). */
-static void emit_repr_str(rocke_strbuf_t* out, const char* s);
+ * the top level double-quotes them). Python repr(str) itself is emit_repr_str
+ * (rocke_py_str_repr). */
 static void emit_repr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v);
 static void emit_repr_map(rocke_strbuf_t* out, const struct rocke_attr_map* m);
 
@@ -448,74 +474,6 @@ static void emit_pad(rocke_strbuf_t* out, int indent)
     {
         rocke_strbuf_append_char(out, ' ');
     }
-}
-
-/* Python repr(label) for a str: single-quoted. Handles the common identifier
- * labels ("body","then","entry"). CPython switches to double-quotes when the
- * string contains a single quote but no double quote, and escapes backslashes /
- * non-printables; those cases never occur for region labels in the engine. */
-static void emit_repr_str(rocke_strbuf_t* out, const char* s)
-{
-    if(!s)
-    {
-        /* Python repr(None) -> "None"; labels are always strings, but be safe. */
-        rocke_strbuf_append(out, "None");
-        return;
-    }
-    int has_single = 0, has_double = 0;
-    for(const char* p = s; *p; ++p)
-    {
-        if(*p == '\'')
-            has_single = 1;
-        else if(*p == '"')
-            has_double = 1;
-    }
-    char quote = (has_single && !has_double) ? '"' : '\'';
-    rocke_strbuf_append_char(out, quote);
-    for(const char* p = s; *p; ++p)
-    {
-        char c = *p;
-        if(c == '\\' || c == quote)
-        {
-            rocke_strbuf_append_char(out, '\\');
-            rocke_strbuf_append_char(out, c);
-        }
-        else if(c == '\n')
-        {
-            rocke_strbuf_append(out, "\\n");
-        }
-        else if(c == '\t')
-        {
-            rocke_strbuf_append(out, "\\t");
-        }
-        else if(c == '\r')
-        {
-            rocke_strbuf_append(out, "\\r");
-        }
-        else
-        {
-            unsigned char uc = (unsigned char)c;
-            /* CPython repr(str) escapes C0 control characters (other than the
-             * \t \n \r handled above) and DEL (0x7f) as lowercase 2-digit
-             * "\xNN". Printable ASCII (0x20..0x7e) is emitted verbatim. Bytes
-             * >= 0x80 would require UTF-8 decoding to reproduce CPython's
-             * per-codepoint repr (\xNN / \uNNNN / printable) and are passed
-             * through verbatim; region labels and attr strings in the frozen IR
-             * contract are ASCII identifiers, so this case never arises. */
-            if(uc < 0x20 || uc == 0x7f)
-            {
-                static const char hexdig[] = "0123456789abcdef";
-                rocke_strbuf_append(out, "\\x");
-                rocke_strbuf_append_char(out, hexdig[(uc >> 4) & 0xf]);
-                rocke_strbuf_append_char(out, hexdig[uc & 0xf]);
-            }
-            else
-            {
-                rocke_strbuf_append_char(out, c);
-            }
-        }
-    }
-    rocke_strbuf_append_char(out, quote);
 }
 
 /* ---------------------------------------------------------------- ops */

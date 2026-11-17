@@ -27,6 +27,12 @@ engine:
   - block_size
   - num_segments
   heuristic: native
+  heuristics:
+    sort_kernel_catalog:
+      gfx942:
+      - ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8
+  trained_catalog_sha256:
+    gfx942: 25a902ef1972c4d78ce9f7c19248d655d1598820693ee5b0e95a657f2e5145a0
 kmd_fields:
 - name: dtype
   type: string
