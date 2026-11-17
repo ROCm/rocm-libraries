@@ -73,7 +73,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 
-* Fixed CK support for gfx1250-strict: LDS transpose loads now compile for it, and the CK and CK Tile device checks accept gfx1250-strict devices.
+* Fixed CK support for gfx1250-strict: LDS transpose loads now compile for it, and the CK device checks accept gfx1250-strict devices.
 * Fixed wrong FP8 results in the XDL FP8 GEMM, convolution, MoE, elementwise, CK Tile FlatMM, and block-scale GEMM examples when built for both gfx942 and gfx950. They now use FNUZ types on gfx942 and OCP types on gfx950.
 * Fixed CK Tile TF32 GEMM compilation failures in builds that target both gfx942 and gfx950.
 * Fixed incorrect results in the CK Tile TDM GEMM pipelines on gfx1250 for tile shapes where the TDM loads and the LDS reads used different LDS padding layouts, such as tiles whose LDS rows are not a power of two.
@@ -98,7 +98,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed CK build failures with Clang when glibc source fortification (`_FORTIFY_SOURCE`) is enabled, and with newer compilers that declare the AMDGPU builtins with `ext_vector_type` signatures, reject `__fp16` vector types, or report the experimental lifetime-safety diagnostics as errors.
 * Fixed compilation errors on gfx1250 for CK Tile GEMMs that select the fp32 16x16x4 or the fp16 and bf16 16x16x32 WMMA instructions with fp32 accumulation, such as the bf16 grouped GEMM that PyTorch builds.
 * Fixed build failures of the CK Tile FMHA backward instances for gfx1250 with `--offload-new-driver` by shortening the generated instance names, for example `_srv` instead of `_storerandval` and `_tl` instead of `_trload`.
-* Fixed the CK Tile FMHA forward example treating gfx1103, gfx1150, gfx1152, and gfx1153 as unsupported.
 * Fixed the CK Tile dispatcher heuristics data pipeline refusing `--capture_hw` on gfx950 and gfx1250 nodes and misparsing kernel names whose pipeline name contains an underscore, such as `comp_tdm_v2`.
 * Fixed the `ck-template-driver` executable not being installed when CK is built with `CK_USE_CODEGEN=ON`.
 
