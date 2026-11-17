@@ -1620,7 +1620,7 @@ inline SdpaFieldDecline sdpaAttributeField(
 }
 
 /// The variable-length fields every FlyDSL SDPA engine declines (FlydslSdpaVarlen.hpp): per-batch
-/// lengths, the padding switch and ragged Q/K/V/O. A form an engine comes to serve moves from here
+/// lengths, cumulative lengths, the padding switch and ragged Q/K/V/O. A form an engine comes to serve moves from here
 /// to that engine's own accept and decline tables.
 inline std::vector<SdpaFieldDecline> sdpaVarlenFieldDeclines()
 {
@@ -1631,6 +1631,10 @@ inline std::vector<SdpaFieldDecline> sdpaVarlenFieldDeclines()
         sdpaAttributeField("SeqLenQ", [](Builder& b) { b.add_seq_len_q_tensor_uid(AUX); }));
     cases.push_back(
         sdpaAttributeField("SeqLenKv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(AUX); }));
+    cases.push_back(
+        sdpaAttributeField("CuSeqLenQ", [](Builder& b) { b.add_cu_seq_len_q_tensor_uid(AUX); }));
+    cases.push_back(
+        sdpaAttributeField("CuSeqLenKv", [](Builder& b) { b.add_cu_seq_len_kv_tensor_uid(AUX); }));
     cases.push_back({"PaddingMask", [](SdpaGraphSpec& s) { s.paddingMask = true; }, {}});
     for(const auto& [name, uid] : {std::pair{"Q", FLYDSL_SDPA_RDNA_Q_UID},
                                    std::pair{"K", FLYDSL_SDPA_RDNA_K_UID},

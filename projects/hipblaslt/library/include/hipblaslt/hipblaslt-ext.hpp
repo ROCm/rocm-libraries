@@ -33,6 +33,7 @@
 #include "hipblaslt/hipblaslt.h"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_ext
