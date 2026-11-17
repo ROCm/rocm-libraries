@@ -2248,9 +2248,13 @@ namespace TensileLite
     static const std::unordered_map<AMDGPU::Processor, size_t> kStaggerAliasBytes
         = {{AMDGPU::Processor::gfx1151, 2048}};
 
-    static bool ldAliasesChannels(size_t ld, float bpe, size_t aliasBytes)
+    // Exact: elementBytes() is a float (sub-byte types), which would drop low bits of a
+    // leading dimension above 2^24, so form the byte stride from the integer segment size.
+    static bool ldAliasesChannels(size_t ld, TensorDescriptor const& t, size_t aliasBytes)
     {
-        return static_cast<size_t>(ld * bpe) % aliasBytes == 0;
+        auto const&  info         = DataTypeInfo::Get(t.dataType());
+        const size_t segmentBytes = static_cast<size_t>(info.elementSize * info.packing + 0.5f);
+        return (ld * segmentBytes) % (aliasBytes * info.packing) == 0;
     }
 
     // True if no A/B leading dimension aliases, but at least one would alias if it were
@@ -2267,9 +2271,9 @@ namespace TensileLite
                 continue;
             size_t ld     = t->strides()[1];
             size_t packed = t->sizes()[0];
-            if(ldAliasesChannels(ld, t->elementBytes(), aliasBytes))
+            if(ldAliasesChannels(ld, *t, aliasBytes))
                 return false;
-            padded |= ld != packed && ldAliasesChannels(packed, t->elementBytes(), aliasBytes);
+            padded |= ld != packed && ldAliasesChannels(packed, *t, aliasBytes);
         }
         return padded;
     }
