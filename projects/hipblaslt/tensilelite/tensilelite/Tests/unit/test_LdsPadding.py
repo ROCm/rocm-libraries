@@ -260,9 +260,9 @@ def fp32_lds_kernel(assembler, gfx1250_iim):
     from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
     from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
-    def make(*, xf32=False, vw=4, pad=-1, block=-1):
+    def make(*, xf32=False, vw=4, waveTile=(4, 4), pad=-1, block=-1):
         isa = IsaVersion(12, 5, 0)
-        mi = [16, 16, 32 if xf32 else 4, 1, 1, 4, 4, 2, 2]
+        mi = [16, 16, 32 if xf32 else 4, 1, 1, *waveTile, 2, 2]
         problem = dict(OperationType="GEMM", DataType="S", DestDataType="S",
                        ComputeDataType="S", F32XdlMathOp="X" if xf32 else "S",
                        TransposeA=False, TransposeB=True, Batched=True)
@@ -294,17 +294,46 @@ def fp32_lds_kernel(assembler, gfx1250_iim):
         yield make
 
 
-@pytest.mark.parametrize("xf32", [False, True])
-@pytest.mark.parametrize("vw", [1, 2, 4])
-def test_fp32_padding_supported_codegen_widths(fp32_lds_kernel, xf32, vw):
-    writer, kernel, tensors = fp32_lds_kernel(xf32=xf32, vw=vw)
+@pytest.mark.parametrize(
+    "xf32, waveTile, vw, expectedPadding",
+    [
+        pytest.param(False, (1, 1), 1, ((256, 16), (256, 16)), id="fp32-mt32-vw1"),
+        pytest.param(False, (2, 2), 2, ((512, 32), (512, 32)), id="fp32-mt64-vw2"),
+        pytest.param(False, (4, 4), 1, ((1024, 16), (1024, 16)), id="fp32-mt128-vw1"),
+        pytest.param(False, (4, 4), 2, ((1024, 32), (1024, 32)), id="fp32-mt128-vw2"),
+        pytest.param(False, (4, 4), 4, ((1024, 2), (1024, 2)), id="fp32-mt128-vw4"),
+        pytest.param(False, (8, 4), 4, ((128, 2), (1024, 2)), id="fp32-mt256x128-vw4"),
+        pytest.param(True, (1, 1), 1, ((512, 16), (512, 16)), id="xf32-mt32-vw1"),
+        pytest.param(True, (2, 2), 2, ((1024, 32), (1024, 32)), id="xf32-mt64-vw2"),
+        pytest.param(True, (4, 4), 1, ((1024, 8), (1024, 8)), id="xf32-mt128-vw1"),
+        pytest.param(True, (4, 4), 2, ((1024, 16), (1024, 16)), id="xf32-mt128-vw2"),
+        pytest.param(True, (4, 4), 4, ((0, 0), (0, 0)), id="xf32-mt128-vw4"),
+    ],
+)
+def test_fp32_padding_supported_codegen_widths(
+        fp32_lds_kernel, assembler, xf32, waveTile, vw, expectedPadding):
+    from codegen_harness import emit_one_kernel
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+
+    writer, kernel, tensors = fp32_lds_kernel(xf32=xf32, vw=vw, waveTile=waveTile)
     expected = vw if xf32 else 1
     assert kernel["UseF32XEmulation"] == xf32
-    for tc, tensor in tensors.items():
+    assert (kernel["MacroTile0"], kernel["MacroTile1"]) == tuple(32 * wt for wt in waveTile)
+    for (tc, tensor), padding in zip(tensors.items(), expectedPadding):
         assert kernel[f"enableTDM{tc}"]
         assert not kernel[f"UnrollMajorLDS{tc}"]
+        assert kernel[f"VectorWidth{tc}"] == vw
+        assert kernel[f"MIInputPerThread{tc}"] == (16 if xf32 else 2)
+        assert kernel[f"LocalReadVectorWidth{tc}"] == (4 if xf32 else 2)
+        assert (kernel[f"LdsBlockSizePerPad{tc}"], kernel[f"LdsPad{tc}"]) == padding
         assert getattr(writer.states, f"lrvwTile{tc}") == expected
         assert tensor["localReadInstruction"].inst.__name__ == f"DSLoadB{32 * expected}"
+
+    kernel.duplicate = False
+    _, source, error = emit_one_kernel(KernelWriterAssembly(assembler, DebugConfig()), kernel)
+    assert error == 0
+    assert f"ds_load_b{32 * expected} " in source
 
 
 @pytest.mark.parametrize("lrvwTile", [2, 4])
