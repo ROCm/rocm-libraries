@@ -114,12 +114,13 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     assert "_tensilelite_client_binding.py" in archived_names
     assert "tensilelite_configure_client.py" in archived_names
 
+
 def test_cmake_device_generation_owns_raw_rocisa():
     """Device generation builds raw rocisa; rocisa-only builds opt in explicitly."""
     cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
 
     assert (
-        'option(ROCISA_BUILD_PYTHON '
+        "option(ROCISA_BUILD_PYTHON "
         '"Build the in-tree rocisa Python extension without device libraries." OFF)'
     ) in cmake
     assert "if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON" in cmake
@@ -240,7 +241,10 @@ def test_rocisa_python_package_outputs_are_configuration_invariant():
     assert "LIBRARY_OUTPUT_DIRECTORY_${_config_upper}" in cmake
     assert "RUNTIME_OUTPUT_DIRECTORY_${_config_upper}" in cmake
     assert "_rocisa_set_python_package_output_directory(\n        _rocisa" in cmake
-    assert "_rocisa_set_python_package_output_directory(\n            stinkytofu_python" in cmake
+    assert (
+        "_rocisa_set_python_package_output_directory(\n            stinkytofu_python"
+        in cmake
+    )
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
