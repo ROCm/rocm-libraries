@@ -6,12 +6,18 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
 import pytest
 
-from hkp_pack.descriptors import HkpPackError, load_flat_input
+from hkp_pack.descriptors import (
+    _BEHAVIOR_NOTES,
+    _NUMERICAL_NOTES,
+    HkpPackError,
+    load_flat_input,
+)
 from hkp_pack.pipeline import compile_intermediate
 from pack_helpers import GENERIC_TARGETS
 
@@ -526,6 +532,12 @@ def _canonical_uhd_validator():
         "linear_data_max_objective",
         "linear_data_metric",
         "linear_data_transform",
+        "mlp_data",
+        "mlp_data_time",
+        "mlp_data_without_metric",
+        "mlp_data_transform",
+        "mlp_data_without_transform",
+        "mlp_data_without_signature",
     ],
 )
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
@@ -539,12 +551,19 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         "feature_semantics",
         "uppercase_ids",
         "linear_data",
+        "mlp_data",
+        "mlp_data_time",
     )
     if mutation.startswith("linear_data"):
         # RFC 0019 §7.5: a log slowdown, lower is better, in no registered unit.
         doc["adapter"] = "linear_data"
         doc["linear_data"] = doc.pop("tree_data")
         doc["objective"] = "min"
+    if mutation.startswith("mlp_data"):
+        # RFC 0019 §7.6: the log of the registered metric the artifact names.
+        doc["adapter"] = "mlp_data"
+        doc["mlp_data"] = doc.pop("tree_data")
+        doc["score"] = {"metric": "tflops", "transform": "log"}
     if mutation == "missing_objective":
         del doc["objective"]
     elif mutation == "missing_provenance":
@@ -597,6 +616,17 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["score"] = {"metric": "time"}
     elif mutation == "linear_data_transform":
         doc["score"] = {"transform": "log1p"}
+    elif mutation == "mlp_data_time":
+        doc["objective"] = "min"
+        doc["score"] = {"metric": "time", "calibrated": True, "transform": "log"}
+    elif mutation == "mlp_data_without_metric":
+        del doc["score"]["metric"]
+    elif mutation == "mlp_data_transform":
+        doc["score"]["transform"] = "log1p"
+    elif mutation == "mlp_data_without_transform":
+        del doc["score"]["transform"]
+    elif mutation == "mlp_data_without_signature":
+        del doc["features_signature"]
     elif mutation == "uppercase_ids":
         doc["id"] = doc["id"].upper()
         doc["trained_against"]["ued"]["id"] = doc["trained_against"]["ued"][
@@ -1132,6 +1162,50 @@ def test_packaging_rejects_ambiguous_per_metric_models(
         load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
+_TRAINED_ID = "833a8b19-8e34-4f74-86d6-b6495a6483f3"
+
+
+def _trained_uhd(adapter: str) -> dict:
+    """A trained model UHD of @p adapter, declared as UhdParser requires for it."""
+    doc = _model_uhd("trained.bin")
+    doc["id"] = _TRAINED_ID
+    doc["adapter"] = adapter
+    doc[adapter] = doc.pop("tree_data")
+    if adapter == "linear_data":
+        doc["objective"] = "min"
+    elif adapter == "mlp_data":
+        doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log"}
+    return doc
+
+
+@pytest.mark.parametrize(
+    "adapter, role",
+    [
+        ("tree_data", "sort_kernel_catalog"),
+        ("linear_data", "sort_kernel_catalog"),
+        ("mlp_data", "sort_kernel_catalog"),
+        ("mlp_data", "predict_engine"),
+    ],
+)
+def test_an_engine_ships_each_trained_adapter(tmp_path, main_fixture, adapter, role):
+    """An engine whose UED binds a trained model packs it with its artifact, whatever
+    adapter trained it: the packer must know every adapter the runtime loads."""
+    root = _root_with_roles(tmp_path, main_fixture)
+    _write_json(root / "trained.uhd.json", _trained_uhd(adapter))
+    (root / "trained.bin").write_bytes(b"model bytes")
+    ued_path = root / "pointwise.ued.json"
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    ued[role] = {"gfx942": _TRAINED_ID}
+    _write_json(ued_path, ued)
+
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+    (uhd,) = [d for d in flat.by_type("uhd") if d.id == _TRAINED_ID]
+    assert uhd.doc["adapter"] == adapter
+    (sidecar,) = uhd.sidecars
+    assert sidecar.source.read_bytes() == b"model bytes"
+
+
 def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture):
     """Metric uniqueness is per (architecture, metric)."""
     root = _root_with_roles(
@@ -1174,13 +1248,70 @@ def _drop(key):
     return lambda doc: doc.pop(key)
 
 
+def test_packaging_admits_an_authored_empty_numerical_notes_list(
+    tmp_path, main_fixture
+):
+    """`[]` is an explicit claim of no notes, not an absent field."""
+    load_flat_input(
+        _root_with_ued(
+            tmp_path, main_fixture, lambda ued: ued.update(numerical_notes=[])
+        ),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
+
+
+@pytest.mark.parametrize("note", _NUMERICAL_NOTES)
+def test_packaging_admits_every_numerical_note_name(tmp_path, main_fixture, note):
+    load_flat_input(
+        _root_with_ued(
+            tmp_path, main_fixture, lambda ued: ued.update(numerical_notes=[note])
+        ),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
+
+
+def test_numerical_note_names_match_the_loader():
+    """The packer and DescriptorLoader.hpp accept the same names, in enum order."""
+    header = (
+        Path(__file__).resolve().parents[4]
+        / "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp"
+    )
+    text = header.read_text(encoding="utf-8")
+    body = text[text.index("numericalNoteFromString(") :]
+    body = body[: body.index("fail(")]
+    pairs = re.findall(
+        r'\{"([a-z_0-9]+)", HIPDNN_NUMERICAL_NOTE_([A-Za-z_0-9]+)\}', body
+    )
+    assert [name for name, _ in pairs] == list(_NUMERICAL_NOTES)
+    assert all(constant.lower() == name for name, constant in pairs)
+
+
+def test_behavior_note_names_match_the_loader():
+    """The packer and DescriptorLoader.hpp accept the same behavior-note names."""
+    header = (
+        Path(__file__).resolve().parents[4]
+        / "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp"
+    )
+    text = header.read_text(encoding="utf-8")
+    body = text[text.index("behaviorNoteFromString(") :]
+    body = body[: body.index("fail(")]
+    pairs = re.findall(
+        r'text == "([a-z_0-9]+)"\)\s*\{\s*return HIPDNN_BEHAVIOR_NOTE_([A-Za-z_0-9]+);',
+        body,
+    )
+    assert [name for name, _ in pairs] == list(_BEHAVIOR_NOTES)
+    assert all(constant.lower() == name for name, constant in pairs)
+
+
 def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixture):
     """The control for the rejections below: each field, well formed, loads."""
 
     def mutate(ued):
         ued["knobs"] = ["block_size"]
         ued["behavior_notes"] = ["runtime_compilation", "supports_graph_capture"]
-        ued["numerical_notes"] = ["ftz"]
+        ued["numerical_notes"] = ["nondeterministic"]
         ued["sdk_version"] = "1.2.3"
         ued["graph_match"] = {"native": "test.match", "x-note": "ignored"}
         ued["revision"] = "999999999.999999999"
@@ -1218,14 +1349,39 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
             id="behavior_note_unknown",
         ),
         pytest.param(
+            _set("behavior_notes", ["RUNTIME_COMPILATION"]),
+            "unknown note",
+            id="behavior_note_wrong_case",
+        ),
+        pytest.param(
+            _set("behavior_notes", ["nondeterministic"]),
+            "unknown note",
+            id="behavior_note_numerical_name",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["runtime_compilation"]),
+            "unknown note",
+            id="numerical_note_behavior_name",
+        ),
+        pytest.param(
             _set("behavior_notes", "runtime_compilation"),
             "array of strings",
             id="behavior_notes_not_array",
         ),
         pytest.param(
-            _set("numerical_notes", ["ftz", "ftz"]),
+            _set("numerical_notes", ["nondeterministic", "nondeterministic"]),
             "twice",
             id="numerical_note_repeated",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["ftz"]),
+            "unknown note",
+            id="numerical_note_unknown",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["NONDETERMINISTIC"]),
+            "unknown note",
+            id="numerical_note_wrong_case",
         ),
         pytest.param(
             _set("sdk_version", "1.2"), "MAJOR.MINOR.PATCH", id="sdk_version_short"

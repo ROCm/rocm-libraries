@@ -14,9 +14,10 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
     # lane points the production source root. Gfx950AttentionDense, Gfx950AttentionUnified2D,
-    # Gfx950AttentionUnified3D, Gfx942AttentionDense, Gfx950ConvDgradAot and
-    # Gfx1250ConvDgradAot ship from descriptors/; the two dense attention engines share
-    # AttentionDenseNative.cpp, the two dgrad engines ConvDgradAotNative.cpp.
+    # Gfx950AttentionUnified3D, Gfx942AttentionUnified2D, Gfx942AttentionDense,
+    # Gfx950ConvFwdAot, Gfx950ConvDgradAot and Gfx1250ConvDgradAot ship from descriptors/; the
+    # two dense attention engines share AttentionDenseNative.cpp, the two dgrad engines
+    # ConvDgradAotNative.cpp.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/AttentionDenseNative.cpp
@@ -24,6 +25,8 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionUnified3dNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionUnified2DNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionUnified3DNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionUnified2DNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvFwdNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx1151WmmaAttentionNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDgradAotNative.cpp
@@ -228,6 +231,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDecodeNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaDropoutMaskNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaHeadPadNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaBwdMergedNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaBwdSplitNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()

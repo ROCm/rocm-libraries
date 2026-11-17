@@ -729,6 +729,20 @@ namespace
         }
     }
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    TensileLite::FusedA2A toTensileFusedA2A(RocblasltFusedEpilogueInfo::Mode mode)
+    {
+        switch(mode)
+        {
+        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+            return TensileLite::FusedA2A::GemmA2A;
+        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+            break;
+        }
+        return TensileLite::FusedA2A::Disabled;
+    }
+#endif
+
     /// Shared scale-mode mapping for problem construction and updates.
     inline void setTensileScaleAB(const RocblasltContractionProblem&   prob,
                                   TensileLite::ContractionProblemGemm& tensileProblem)
@@ -1155,13 +1169,22 @@ namespace
         return 0;
     }
 
+    // MXScaleFormat id of HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT, the only
+    // layout that sets it.
+    constexpr int kMXScaleFormatHostPreSwizzle128x4
+        = static_cast<int>(TensileLite::MXScaleFormat::HostPreSwizzle128x4);
+
     inline int benchScaleAFormat(const TensileLite::ContractionProblemGemm& problem)
     {
+        if(problem.mxBlockA() && problem.mxScaleFormat() == kMXScaleFormatHostPreSwizzle128x4)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
         return benchScaleFormat(problem.mxTypeA(), problem.mxBlockA(), problem.useScaleAB());
     }
 
     inline int benchScaleBFormat(const TensileLite::ContractionProblemGemm& problem)
     {
+        if(problem.mxBlockB() && problem.mxScaleFormat() == kMXScaleFormatHostPreSwizzle128x4)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
         return benchScaleFormat(problem.mxTypeB(), problem.mxBlockB(), problem.useScaleAB());
     }
     /// True on the W4A16 group-scale path.
@@ -2064,6 +2087,18 @@ namespace
         return format != RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
     }
 
+    // MXScaleFormat id (tensilelite Contractions.py) that the caller's scale layout
+    // requires of a solution; 0 for the layouts selection does not tell apart.
+    int hostMXScaleFormat(const RocblasltContractionProblem& prob)
+    {
+        return (prob.scaleAType
+                    == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+                || prob.scaleBType
+                       == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                   ? kMXScaleFormatHostPreSwizzle128x4
+                   : 0;
+    }
+
     // The adaptive launch's occupancy probe target; none outside one.
     void setOccupancyProbe(TensileLite::ContractionProblemParameters& params,
                            const RocblasltContractionProblem&         prob)
@@ -2315,6 +2350,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2365,6 +2401,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2408,10 +2445,9 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }
@@ -2446,16 +2482,19 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
           rocblaslt::setHostMXScaleA(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
                                      padMXScaleTensorFreeDim,
                                      hostMXScalesArePacked(prob.scaleAType));
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
           rocblaslt::setHostMXScaleB(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
@@ -2660,6 +2699,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2711,6 +2751,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2753,12 +2794,17 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
+        }
+        else
+        {
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::Disabled);
+            tensileProblem.setFusedA2AExtent(0);
+            tensileProblem.setWorld(1);
         }
 #endif
 
@@ -2803,16 +2849,19 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
 	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
 	    rocblaslt::setHostMXScaleA(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
 	                               padMXScaleTensorFreeDim,
 	                               hostMXScalesArePacked(prob.scaleAType));
 	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
 	    rocblaslt::setHostMXScaleB(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
@@ -2910,6 +2959,7 @@ namespace
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -2938,6 +2988,7 @@ namespace
 
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -3060,8 +3111,7 @@ namespace
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         // Device-side fused-A2A operands.
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
             inputs.fusedA2ACounter = prob.Synchronizer;
             inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
@@ -3706,6 +3756,9 @@ struct TensileDataGroupedGemm
     rocblaslt_mx_scale_need mxScaleNeed = rocblaslt_mx_scale_need::Any;
 };
 
+inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm const& problem,
+                                          TensileLite::ContractionSolution const&    solution);
+
 namespace
 {
     void updateTensileData(const RocblasltContractionProblem& prob, TensileDataGemm& data)
@@ -3766,6 +3819,51 @@ namespace
         if(mxScaleLayoutFits(need, solution))
             return rocblaslt_status_success;
         log_error(caller, rocblaslt_mx_scale_mismatch_message(need));
+        return rocblaslt_status_invalid_value;
+    }
+
+    // An algo index can name a solution of the other kind, grouped or not, whose
+    // kernel takes different arguments.
+    rocblaslt_status checkGroupedGemmMatch(const char*                             caller,
+                                           bool                                    grouped,
+                                           const TensileLite::ContractionSolution& solution)
+    {
+        if(solution.problemType.groupedGemm == grouped)
+            return rocblaslt_status_success;
+        log_error(caller,
+                  grouped ? "the algo's solution is not a grouped GEMM solution"
+                          : "the algo's solution is a grouped GEMM solution");
+        return rocblaslt_status_invalid_value;
+    }
+
+    // A hand-written kernel may rely on its problem predicates to stay inside the
+    // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
+    // addresses, so an algo for one is refused once the problem it runs no longer
+    // satisfies them or is a pointer-array batch. Generated kernels and the grouped
+    // path keep their existing launch checks.
+    rocblaslt_status checkHandwrittenKernelPredicates(
+        const char*                                caller,
+        const TensileLite::ContractionProblemGemm& problem,
+        const TensileLite::ContractionSolution&    solution)
+    {
+        if(isCustomKernelForPointerArray(problem, solution))
+        {
+            log_error(caller, "custom kernels do not support batch_mode=POINTER_ARRAY");
+            return rocblaslt_status_invalid_value;
+        }
+        if(solution.customKernel.name.empty() || solution.customKernel.generated
+           || (*solution.problemPredicate)(problem))
+            return rocblaslt_status_success;
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "Software match: " << solution.description();
+            solution.problemPredicate->debugEval(problem, msg);
+            log_info(caller, msg.str());
+        }
+        log_error(caller,
+                  "the algo's solution does not support this problem; query an algo for "
+                  "this problem instead");
         return rocblaslt_status_invalid_value;
     }
 }
@@ -4052,6 +4150,13 @@ void initTensileGemmData(rocblaslt_handle       handle,
 
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Do not use rocRoller for a fused all-to-all
+    RocblasltFusedEpilogueInfo fusedInfo;
+    if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
+        return false;
+#endif
+
     // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
     bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
     bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
@@ -4067,6 +4172,14 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     bool isFp8A = (prob.a_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
     bool isFp8B = (prob.b_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
     if(isFp8A && isFp8B && isShuffledScale)
+        return false;
+
+    // Nor for FP6 A + FP6 B with scales shuffled in 128-row by 4-K-block tiles
+    bool isScale128x4
+        = (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+           && prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT);
+    if(isFp6Datatype(prob.a_type) && isFp6Datatype(prob.b_type) && isScale128x4)
         return false;
 
     return handle->useRocRoller == 1
@@ -4919,7 +5032,7 @@ namespace
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo info;
-        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info) && info.hasA2APrefix;
+        return rocblaslt_resolve_fused_a2a(prob, info);
 #else
         static_cast<void>(prob);
         return false;
@@ -6372,6 +6485,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         auto solution = solutionAt(*solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
+        if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+           st != rocblaslt_status_success)
+            return st;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -6438,6 +6554,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                         << std::endl;
                     log_info(__func__, msg.str());
                 }
+            }
+
+            if(callerSuppliedAlgo)
+            {
+                if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+                   st != rocblaslt_status_success)
+                    return st;
             }
 
             // Build the inputs here rather than inline, so the flag pointer can
@@ -6723,6 +6846,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+               st != rocblaslt_status_success)
+                return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
@@ -6771,6 +6897,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "workspace size is less than the solution requires");
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+               st != rocblaslt_status_success)
+                return st;
 
             // The object API learns its stream here, not at create time, and the
             // flag pointer is baked into the kernel arguments by solve() just
@@ -6801,6 +6930,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, true, *solution);
+               st != rocblaslt_status_success)
+                return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
@@ -6884,6 +7016,14 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               "Device scalar alpha with device user args requires GSU=1.");
                     return rocblaslt_status_invalid_value;
                 }
+            }
+
+            // Clustered StreamK rejects grouped GEMM by throwing from workspace
+            // sizing. Report that as an unsupported solution instead.
+            if(solution->usesStreamKSpatialCluster())
+            {
+                log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
+                return rocblaslt_status_invalid_value;
             }
 
             // User-args workspace holds no host args, only per-problem workspaces.
@@ -8238,12 +8378,28 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
             log_error(__func__, msg.str());
             return rocblaslt_status_invalid_value;
         }
+        // Only grouped solutions run grouped problems. Rejecting the rest here skips the
+        // workspace sizing below, which walks every group for each candidate solution.
+        if(!solution->problemType.groupedGemm || !(*solution->hardwarePredicate)(*hardware))
+        {
+            log_error(__func__, "Solution is not supported");
+            return rocblaslt_status_invalid_value;
+        }
         if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
            st != rocblaslt_status_success)
             return st;
         if(!solution->deviceScalarAlphaSupported(tensile_prob.gemms))
         {
             log_error(__func__, "Unsupported or mixed grouped device scalar alpha modes.");
+            return rocblaslt_status_invalid_value;
+        }
+        // Workspace sizing for a clustered StreamK solution throws on a grouped
+        // problem. That rejection has to stay a skipped candidate: the throw
+        // would escape this search and fail the heuristic, including solutions
+        // already found.
+        if(solution->usesStreamKSpatialCluster())
+        {
+            log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
             return rocblaslt_status_invalid_value;
         }
 
