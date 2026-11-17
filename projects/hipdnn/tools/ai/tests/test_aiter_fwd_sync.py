@@ -758,10 +758,11 @@ def test_new_arch_diffs_the_host_code_the_vendored_archs_share(sync, env, capsys
     assert pin(kernels)["abi_commit"] == pin(kernels, new)["abi_commit"] == target
 
 
-def test_new_arch_diffs_from_the_oldest_host_code_commit_of_the_others(sync, env):
-    """When the vendored archs record different host-code commits, a new arch is
-    diffed from the oldest in history, so a change after it is not missed. The
-    older commit carries the later date, so ordering by date would pick wrong."""
+def test_new_arch_diffs_from_the_merge_base_of_linear_host_code_commits(sync, env):
+    """When the vendored archs record host-code commits on one line of history, a
+    new arch is diffed from their merge base, the earlier one, so a change after it
+    is not missed. The earlier commit carries the later date, so ordering by date
+    would pick wrong."""
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
     aiter.module("gfx950", [ROW_HD128])
@@ -789,6 +790,39 @@ def test_new_arch_diffs_from_the_oldest_host_code_commit_of_the_others(sync, env
         "+    int nsplit;"
         in of_kind(report, "reference_changed", "gfx1100/fmha_v3_fwd")[0]["diff"]
     )
+
+
+def test_new_arch_diffs_from_the_merge_base_of_diverging_host_code_commits(sync, env):
+    """When the vendored archs record host-code commits on diverging branches,
+    neither an ancestor of the other, a new arch is diffed from their common
+    ancestor. Picking either recorded commit would hide the other branch's change."""
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    aiter.module("gfx950", [ROW_HD128])
+    ancestor = aiter.commit("v0.1.1")
+    plan(sync, env, "v0.1.1", arch="gfx942,gfx950")
+    apply(sync, env)
+    assert run(sync, env, "mark-ported", "--module", KEY) == 0
+
+    recorded = []
+    for branch, field in (("left", "int nsplit;"), ("right", "int nhead;")):
+        git(aiter.root, "checkout", "-q", "-b", branch, ancestor)
+        aiter.write(
+            "csrc/include/mha_fwd.h",
+            MHA_FWD_H.replace("p2 _p0;", f"p2 _p0;\n    {field}"),
+        )
+        recorded.append(aiter.commit(f"v0.1.1-{branch}"))
+    git(aiter.root, "checkout", "-q", "main")
+    pins_path = kernels / "aiter_fwd_pins.json"
+    pins = json.loads(pins_path.read_text())
+    pins["modules"][KEY]["abi_commit"] = recorded[0]
+    pins["modules"]["gfx950/fmha_v3_fwd"]["abi_commit"] = recorded[1]
+    pins_path.write_text(json.dumps(pins))
+    aiter.module("gfx1100", [ROW_HD128])
+    aiter.commit("v0.3.0")
+
+    plan(sync, env, "v0.3.0", arch="gfx1100")
+    assert module_plan(report, "gfx1100/fmha_v3_fwd")["abi_baseline"] == ancestor
 
 
 def test_host_code_baseline_precedence(sync, env):
