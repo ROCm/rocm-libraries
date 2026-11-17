@@ -12,27 +12,31 @@ from _emit_common import run_emit
 
 
 def _spec(idx: int) -> MxGemmSpec:
-    common = dict(
-        mantissa_dtype="fp8e4m3",
-        group_k=32,
-        block_tile_m=16,
-        block_tile_n=16,
-        name="rocke_mx_gemm",
-        per_input_row=True,
+    common = {"group_k": 32, "name": "rocke_mx_gemm"}
+    # (M, N, K, mantissa, block_tile_m, block_tile_n): whole and partial
+    # workgroup tiles, a K that is not a multiple of 64 (one group added
+    # without the scaled MFMA) and an N that is not a multiple of 32 (stores
+    # past N moved past the end of C).
+    configs = (
+        (16, 16, 64, "fp8e4m3", 32, 32),
+        (32, 32, 64, "fp8e4m3", 32, 256),
+        (16, 16, 32, "bf8e5m2", 32, 32),
+        (32, 32, 128, "fp8e4m3", 64, 64),
+        (48, 64, 96, "fp8e4m3", 32, 64),
+        (64, 48, 160, "bf8e5m2", 64, 32),
     )
-    if idx == 0:
-        return MxGemmSpec(M=16, N=16, K=64, **{**common, "mantissa_dtype": "fp8e4m3"})
-    if idx == 1:
-        return MxGemmSpec(M=32, N=32, K=64, **{**common, "mantissa_dtype": "fp8e4m3"})
-    if idx == 2:
-        return MxGemmSpec(M=16, N=16, K=32, **{**common, "mantissa_dtype": "bf8e5m2"})
-    if idx == 3:
-        return MxGemmSpec(M=32, N=32, K=128, **{**common, "mantissa_dtype": "fp8e4m3"})
-    if idx == 4:
-        return MxGemmSpec(M=48, N=64, K=96, **{**common, "mantissa_dtype": "fp8e4m3"})
-    if idx == 5:
-        return MxGemmSpec(M=64, N=48, K=160, **{**common, "mantissa_dtype": "bf8e5m2"})
-    raise SystemExit(f"unknown config index {idx}")
+    if not 0 <= idx < len(configs):
+        raise SystemExit(f"unknown config index {idx}")
+    M, N, K, mantissa, tile_m, tile_n = configs[idx]
+    return MxGemmSpec(
+        M=M,
+        N=N,
+        K=K,
+        mantissa_dtype=mantissa,
+        block_tile_m=tile_m,
+        block_tile_n=tile_n,
+        **common,
+    )
 
 
 def main() -> int:
