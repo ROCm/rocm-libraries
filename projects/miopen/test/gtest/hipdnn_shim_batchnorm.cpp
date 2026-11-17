@@ -2373,6 +2373,35 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
         hs::ExpectStatusParity(
             "no_solver_unknown_mode_one_value_bwd", result, miopenStatusInvalidValue, unknown_mode);
     }
+    // Each of these has two faults, so the status pins the order of the checks:
+    // MIOpen tests the rank, then names the mode, then looks for a solver.
+    {
+        SCOPED_TRACE("rank 3 unknown mode train");
+        RawProblem p(handle, {2, 4, 64}, miopenFloat, miopenFloat, miopenFloat);
+        p.mode            = UnknownBnMode();
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity("no_solver_rank3_unknown_mode_train",
+                               result,
+                               miopenStatusUnknownError,
+                               "Unknown spatial dim");
+    }
+    {
+        SCOPED_TRACE("double unknown mode train");
+        RawProblem p(handle, nchw, miopenDouble, miopenDouble, miopenFloat);
+        p.mode            = UnknownBnMode();
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_double_unknown_mode_train", result, miopenStatusInvalidValue, unknown_mode);
+    }
+    {
+        SCOPED_TRACE("tanh unknown mode infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.mode = UnknownBnMode();
+        p.SetActivation(miopenActivationTANH);
+        const auto result = hs::CaptureCall([&] { return p.Infer(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_tanh_unknown_mode_infer", result, miopenStatusInvalidValue, unknown_mode);
+    }
     {
         SCOPED_TRACE("tanh infer");
         RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
@@ -2394,6 +2423,14 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
         const auto result = hs::CaptureCall([&] { return p.Train(handle); });
         hs::ExpectStatusParity(
             "no_solver_half_scale_train", result, miopenStatusNotImplemented, no_solver);
+    }
+    // MIOpen serves half data only with FLOAT scale, bias and statistics.
+    {
+        SCOPED_TRACE("all half train");
+        RawProblem p(handle, nchw, miopenHalf, miopenHalf, miopenHalf);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_all_half_train", result, miopenStatusNotImplemented, no_solver);
     }
     {
         SCOPED_TRACE("mixed bwd");
