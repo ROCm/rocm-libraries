@@ -2787,6 +2787,10 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
  *  \p rocsparse_spmv_descr also still computes the product. Analyses computed by \p rocsparse_spsv,
  *  \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
  *
+ *  This routine frees nothing and does not synchronize the device; the next preprocess stage of
+ *  \p rocsparse_spmv frees the previous analysis and returns \ref rocsparse_status_invalid_value if the
+ *  stream of its handle is being captured.
+ *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
