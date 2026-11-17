@@ -249,9 +249,13 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}),
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true),
         // S_q = 1 on the hd64 and hd192 rows, which gfx950 runs as the gfx942
-        // kernels rebuilt; atol as in the other S_q = 1 cases.
+        // kernels rebuilt. hd64 takes the atol of the other S_q = 1 cases (worst
+        // ratio 0.14 over seeds 0-3 on MI300X and MI355X). At hd192 the bf16 dQ
+        // reaches 6.25 and its error 0.03125 (one bf16 ulp there), which used 88%
+        // of a 1e-2 atol on gfx942; atol 6.25e-2 keeps the ratio at or below 0.5,
+        // and the smallest largest |dV| measured, 0.247, still fails a halved dV.
         SdpaBwdTestCase({1, 2, 1, 64}, {1, 2, 256, 64}).withAbsoluteTolerance(1e-2f),
-        SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192}).withAbsoluteTolerance(1e-2f),
+        SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192}).withAbsoluteTolerance(6.25e-2f),
         // D_qk = 192 with D_v = 128: the hd128 odo, the 192 x 128 dqdkdv and the
         // hd192 dq_convert kernels.
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 128}).onlyOn(K_GFX950_ONLY),
