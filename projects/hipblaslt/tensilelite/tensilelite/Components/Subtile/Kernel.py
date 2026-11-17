@@ -1356,17 +1356,22 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   return module
 
 
-def _emitDualPeriodTailScaleSrdAlignment(kernel, unrollIdx, scaleTiA, scaleTiB):
-  """Align dual-period scale SRDs with the residual data-DU.
+def _emitDualPeriodTailScalePhase(writer, kernel, unrollIdx, scaleTiA, scaleTiB):
+  """Point the tail's scale DTL write at the half the tail reads from.
 
-  A dual-period scale epoch spans two data DepthU iterations.  Its PGR2
-  prefetch advances each scale SRD at the start of the epoch and shrinks
-  Srd+2 by the same amount.  Consequently, a residual tail after an odd
-  number of complete data-DUs still belongs to the previous scale epoch,
-  while the scale SRDs already name the next epoch.  Rewind one scale
-  increment and restore its num_records window in that case.  After an even
-  number of complete data-DUs the residual starts a new epoch and the SRDs
-  are already aligned.
+  A dual-period scale epoch spans two data DepthU iterations, so the scale
+  stream takes one double-buffer step per two data steps while the local
+  reads take one per epoch they consume.  The two stay in phase while the
+  epoch count is whole: each exit path that reads an epoch also swaps both
+  halves.  A residual tail after an odd number of complete data-DUs breaks
+  that -- it re-enters mid-epoch, leaving the GR write half one step behind
+  the half its own local reads will take.  Swap the write half so the tail's
+  scale load lands where the tail reads it.  After an even number of
+  complete data-DUs the two halves already agree.
+
+  The scale SRDs need no correction: with one epoch seeded in the preloop,
+  the increments the kernel has executed by here name exactly the epoch the
+  tail starts in, and num_records has shrunk in lock-step with them.
 
   The completed-DepthU parity is bit log2(DepthU) of global K.  The tail is
   the final global K interval under both data-parallel and StreamK execution,
@@ -1374,32 +1379,23 @@ def _emitDualPeriodTailScaleSrdAlignment(kernel, unrollIdx, scaleTiA, scaleTiB):
   """
   assert kernel["DepthU"] > 0 and \
       kernel["DepthU"] & (kernel["DepthU"] - 1) == 0, \
-      "dual-period tail scale alignment requires a power-of-two DepthU"
+      "dual-period tail scale phase requires a power-of-two DepthU"
 
-  module = Module("Dual-period tail scale SRD alignment")
-  aligned = Label("SubtileTailScaleSrdAligned", "")
+  module = Module("Dual-period tail scale buffer phase")
+  aligned = Label("SubtileTailScalePhased", "")
   phaseBit = kernel["DepthU"].bit_length() - 1
   module.add(SBitcmp1B32(
       src0=sgpr(f"SizesSum+{unrollIdx}"),
       src1=phaseBit,
-      comment="dual-period tail: test completed-DepthU parity for scale SRDs"))
+      comment="dual-period tail: test completed-DepthU parity for scale LDS"))
   module.add(SCBranchSCC0(
       labelName=aligned.getLabelName(),
-      comment="even completed DepthU count: scale SRDs already aligned"))
+      comment="even completed DepthU count: scale LDS halves already in phase"))
 
-  for tc, ti in (("MXSA", scaleTiA), ("MXSB", scaleTiB)):
+  for ti in (scaleTiA, scaleTiB):
     if ti is None:
       continue
-    inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
-    module.add(SSubU32(
-        dst=sgpr(f"Srd{tc}+0"), src0=sgpr(f"Srd{tc}+0"), src1=inc,
-        comment=f"{tc}: rewind to odd-DU scale epoch"))
-    module.add(SSubBU32(
-        dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
-        comment=f"{tc}: scale SRD rewind borrow"))
-    module.add(SAddU32(
-        dst=sgpr(f"Srd{tc}+2"), src0=sgpr(f"Srd{tc}+2"), src1=inc,
-        comment=f"{tc}: restore rewound num_records"))
+    module.add(emitScaleGRLDSSwap(ti, writer, kernel))
 
   module.add(aligned)
   return module
@@ -1660,8 +1656,8 @@ def mainLoop(writer, kernel):
       if mxScaleTPs:
         module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
       if kernel.get("_DualPeriodMXFP8"):
-        module.add(_emitDualPeriodTailScaleSrdAlignment(
-            kernel, writer.states.unrollIdx, scaleTiA, scaleTiB))
+        module.add(_emitDualPeriodTailScalePhase(
+            writer, kernel, writer.states.unrollIdx, scaleTiA, scaleTiB))
       if needTailSrdRewind:
         module.add(_emitMultiDUTailSrdRewind(
             writer, kernel, scheduler.config.numUnroll, tiA, tiB, scaleTiA, scaleTiB,

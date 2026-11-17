@@ -4289,13 +4289,16 @@ class LogicalScheduler:
             placements.append(lr)
         return placements
 
-    def _make_depops_all_tensors(self, cls, holdOnLastIter=False) -> List[BaseOp]:
+    def _make_depops_all_tensors(self, cls, holdOnLastIter=False,
+                                 skipScale=False) -> List[BaseOp]:
         """Create a BaseOp subclass instance for each tensor (and uid for GRIncOp)."""
+        tensors = [t for t in self.tensors
+                   if not (skipScale and t in ('SA', 'SB'))]
         if cls is GRIncOp:
             return [GRIncOp(tensor=t, unrollId=uid, holdOnLastIter=holdOnLastIter)
-                    for t in self.tensors
+                    for t in tensors
                     for uid in range(self.config.numUnroll.get(t, 1))]
-        return [cls(tensor=tensor) for tensor in self.tensors]
+        return [cls(tensor=tensor) for tensor in tensors]
 
     def _make_gr_all_tensors_uid(self, mt: int, tiles: dict, uid: int) -> List[GRPlacement]:
         """Create GR placements for a single uid across all tensors.
@@ -4323,7 +4326,8 @@ class LogicalScheduler:
                 tensor, mt, uid_tile, uid))
         return result
 
-    def _make_depops_uid(self, cls, uid: int, holdOnLastIter=False) -> List[BaseOp]:
+    def _make_depops_uid(self, cls, uid: int, holdOnLastIter=False,
+                         skipScale=False) -> List[BaseOp]:
         """Create a BaseOp subclass instance for a single uid across all tensors.
 
         Only emits for tensors where uid < numUnroll[tensor].
@@ -4333,6 +4337,8 @@ class LogicalScheduler:
             nUnroll = self.config.numUnroll.get(tensor, 1)
             if uid >= nUnroll:
                 continue
+            if skipScale and tensor in ('SA', 'SB'):
+                continue
             if cls is GRIncOp:
                 result.append(GRIncOp(tensor=tensor, unrollId=uid,
                                       holdOnLastIter=holdOnLastIter))
@@ -4340,13 +4346,31 @@ class LogicalScheduler:
                 result.append(cls(tensor=tensor))
         return result
 
+    def _preloop_mt1_drops_scale(self, tensor: str, pi: int) -> bool:
+        """Is this preloop MT1 scale placement redundant?
+
+        A dual-period epoch already covers the MT1 data iteration, so seeding
+        a second epoch here buys nothing and leaves the scale stream a full
+        epoch ahead of the data it belongs to for the rest of the kernel --
+        every later epoch load inherits the extra SRD advance that came with
+        it.  Single-period scales carry one epoch per data iteration and do
+        need the MT1 copy; uniform-epoch mode keeps that at the legacy
+        partition prefix, since only the prefix seeds scales.
+        """
+        if tensor not in ('SA', 'SB'):
+            return False
+        if self.config.dualPeriodScale:
+            return True
+        return (self.config.uniformPgrEpoch
+                and pi >= self.config.offsetPartition)
+
     def _make_preloop_mt1_grs(self) -> List[GRPlacement]:
         """Create MT1 GRs for the PGR=2 preloop, ordered to match the mainloop.
 
         Covers partitions 0..offsetPartition-1 in legacy mode.  Uniform PGR
         epoch mode covers every partition for A/B and keeps the scale range
-        at the legacy prefix.  Each unique (tensor, uid, tile-range, k-range)
-        appears exactly once.
+        at the legacy prefix; a dual period drops the scale copy entirely.
+        Each unique (tensor, uid, tile-range, k-range) appears exactly once.
 
         For multi-DU data tensors (numUnroll > 1), each uid only emits GRs
         for the K slots that belong to it (uid u → k in [u*grGran.k, (u+1)*grGran.k)).
@@ -4373,9 +4397,7 @@ class LogicalScheduler:
                         items.append(('SA', target_range['A'], cfg.grSA))
                         items.append(('SB', target_range['B'], cfg.grSB))
                     for tensor, (t_start, t_end), gr_gran in items:
-                        if (cfg.uniformPgrEpoch
-                                and tensor in ('SA', 'SB')
-                                and pi >= cfg.offsetPartition):
+                        if self._preloop_mt1_drops_scale(tensor, pi):
                             continue
                         nUnroll = cfg.numUnroll.get(tensor, 1)
                         if uid >= nUnroll:
@@ -4427,9 +4449,7 @@ class LogicalScheduler:
                     items.append(('SA', target_range['A'], cfg.grSA))
                     items.append(('SB', target_range['B'], cfg.grSB))
                 for tensor, (t_start, t_end), gr_gran in items:
-                    if (cfg.uniformPgrEpoch
-                            and tensor in ('SA', 'SB')
-                            and pi >= cfg.offsetPartition):
+                    if self._preloop_mt1_drops_scale(tensor, pi):
                         continue
                     nUnroll = cfg.numUnroll.get(tensor, 1)
                     if uid >= nUnroll:
@@ -4775,6 +4795,11 @@ class LogicalScheduler:
                     SkipOp(compare='LE', value=1, target='NLL'),
                 ])
         else:
+            # The MT1 batch carries no scale load under a dual period (see
+            # _preloop_mt1_drops_scale), so its MT0 increment has nothing left
+            # to seed: leaving it in would advance the scale SRD past the epoch
+            # the mainloop is about to load.
+            skipScaleInc = cfg.dualPeriodScale
             gl2_preloop_ops = []
             if cfg.pgl > 0:
                 gl2_preloop_ops.append(GL2PrefetchOp())
@@ -4792,14 +4817,16 @@ class LogicalScheduler:
                 for uid in range(maxUnroll):
                     preloop_ops.extend(self._make_gr_all_tensors_uid(0, all_tiles, uid))
                     preloop_ops.extend(self._make_depops_uid(GRIncOp, uid,
-                                                             holdOnLastIter=True))
+                                                             holdOnLastIter=True,
+                                                             skipScale=skipScaleInc))
                 mt1_ops = []
                 mt1_grs_only = []
                 for uid in range(maxUnroll):
                     uid_grs = self._make_preloop_mt1_grs_uid(uid)
                     mt1_grs_only.extend(uid_grs)
                     mt1_ops.extend(uid_grs)
-                    mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
+                    mt1_ops.extend(self._make_depops_uid(GRIncOp, uid,
+                                                         skipScale=skipScaleInc))
                 if do_reorder:
                     # GR reorder (Experiment 3): MT1 GRs issued before WaitGR so both
                     # MT0 and MT1 prefetch batches are in-flight simultaneously.
@@ -4864,7 +4891,8 @@ class LogicalScheduler:
                     # the initC seed→MFMA ordering that op-level clustering could not.
                     emitted = self._to_emitted([
                         *self._make_gr_all_tensors(0, all_tiles),
-                        *self._make_depops_all_tensors(GRIncOp, holdOnLastIter=True),
+                        *self._make_depops_all_tensors(GRIncOp, holdOnLastIter=True,
+                                                       skipScale=skipScaleInc),
                         initC_op,
                         *mt1_grs,                              # ← moved before WaitGR
                         WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs)),
@@ -4882,7 +4910,8 @@ class LogicalScheduler:
                         wait_done_label = "SubtilePreloopWaitDone"
                         emitted = self._to_emitted([
                             *self._make_gr_all_tensors(0, all_tiles),
-                            *self._make_depops_all_tensors(GRIncOp),
+                            *self._make_depops_all_tensors(GRIncOp,
+                                                           skipScale=skipScaleInc),
                             initC_op,
                             SkipOp(compare='LE', value=1, target=no_mt1_label,
                                    rawLabel=True,
@@ -4905,7 +4934,8 @@ class LogicalScheduler:
                         # initC is unchanged, so _interleave_preloop_filler still rewrites it.
                         emitted = self._to_emitted([
                             *self._make_gr_all_tensors(0, all_tiles),
-                            *self._make_depops_all_tensors(GRIncOp, holdOnLastIter=True),
+                            *self._make_depops_all_tensors(GRIncOp, holdOnLastIter=True,
+                                                           skipScale=skipScaleInc),
                             initC_op,
                             WaitGROp(wait_gr_counts=WaitGRCounts()),
                             SyncOp(),

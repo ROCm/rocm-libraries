@@ -308,6 +308,34 @@ def test_single_period_has_one_body():
     assert len(wait.wait_gr_counts_by_unroll) == 1
 
 
+def _preloop_mt1_tensors(dual_period):
+    cfg = _config(lrSA=ReadGranularity(mn=2, k=1),
+                  lrSB=ReadGranularity(mn=2, k=1),
+                  scaleReuse=2 if dual_period else 1)
+    assert cfg.dualPeriodScale is dual_period
+    parts = _grid(numK=1, numPartitions=4)
+    for partition in parts:
+        for slot in partition:
+            # The preloop reads the K step off each slot's MFMA.
+            slot.mfma = SimpleNamespace(subIterK=slot.subIterK)
+    sched = _scheduler(cfg, parts)
+    return {gr.tensor for gr in sched._make_preloop_mt1_grs()}
+
+
+def test_dual_period_preloop_seeds_one_scale_epoch():
+    """The MT1 batch covers a data iteration the seeded epoch already spans.
+
+    Issuing scales there would start a second epoch, and its increment would
+    leave the scale stream one epoch past the data frontier for the rest of
+    the kernel.
+    """
+    assert _preloop_mt1_tensors(dual_period=True) == {'A', 'B'}
+
+
+def test_single_period_preloop_still_seeds_the_mt1_scales():
+    assert _preloop_mt1_tensors(dual_period=False) == {'A', 'B', 'SA', 'SB'}
+
+
 def test_epoch_wait_without_a_consumer_is_rejected():
     """The frontier slot must still hold the read that defined it."""
     cfg = _config()
