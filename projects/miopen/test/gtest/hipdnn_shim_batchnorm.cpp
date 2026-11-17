@@ -450,14 +450,15 @@ void CheckInferWithoutEstimates(miopen::Handle& handle, InferData& d)
 // The test data seeds each tensor from its lengths, so dy holds the same values as
 // x. Backward with the true stats of x then cancels to a residue of order
 // epsilon / variance: rounding noise, which the compare fails on in both modes.
-// Draw dy from a seed of its own.
+// Draw dy from a seed of its own, with the distribution the test data uses.
 template <typename Data>
 void DecoupleDy(miopen::Handle& handle, Data& d)
 {
     using Dy = typename decltype(d.dy.data)::value_type;
     prng::reset_seed(1);
-    for(auto& v : d.dy.data)
-        v = prng::gen_descreet_uniform_sign<Dy>(2e-3, 1000);
+    std::generate(d.dy.data.begin(),
+                  d.dy.data.end(),
+                  uniform_signed_initializer<Dy>(2e-3 /*scale*/, 1000 /*range*/));
     d.dy_dev = handle.Write(d.dy.data);
 }
 
