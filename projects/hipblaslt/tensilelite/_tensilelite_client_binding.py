@@ -242,7 +242,7 @@ def validate_client(client: Path, installation: Installation) -> ClientIdentity:
             ClientBindingWarning,
             stacklevel=2,
         )
-        return
+        return ClientIdentity(client_revision, build_rocm)
 
     if not installation.editable:
         if client_revision != package_revision:
