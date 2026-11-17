@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "MiopenUtils.hpp"
+#include "Workarounds.hpp"
 #include "engines/plans/MiopenPointwiseTensorChecks.hpp"
 #include "engines/plans/MiopenUnaryActivationChecks.hpp"
 
@@ -148,10 +149,10 @@ void checkTensorsSupported(
     }
 
     // MIOpen walks two packed tensors flat, so the logical index of an element must sit at the
-    // same memory offset in the input and the output. Strides of unit dims never contribute to
-    // an offset. A pair that is not both packed is served by the strided activation solver,
-    // which takes the strides of both tensors, except for the two-dimensional shortcut declined
-    // below.
+    // same memory offset in the input and the output, i.e. both tensors must share one layout.
+    // Strides of unit dims never contribute to an offset. A pair that is not both packed is
+    // declined by workaround 16024: MIOpen reads it strided only when its N stride exceeds
+    // C*H*W and reuses cached kernels across problems.
     const std::vector<int64_t> inDims(inputDims->begin(), inputDims->end());
     const std::vector<int64_t> outDims(outputDims->begin(), outputDims->end());
     const std::vector<int64_t> inStrides(inputTensor.strides()->begin(),
@@ -287,6 +288,12 @@ bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opG
         }
 
         checkTensorsSupported(attrs, opGraph.getTensorMap(), opName);
+
+        const auto& inputTensor
+            = miopen_utils::findTensorAttributes(opGraph.getTensorMap(), attrs.in_0_tensor_uid());
+        const auto& outputTensor
+            = miopen_utils::findTensorAttributes(opGraph.getTensorMap(), attrs.out_0_tensor_uid());
+        REJECT_IF_WORKAROUND_ISSUE_16024(inputTensor, outputTensor);
     }
     catch(const std::exception& e)
     {

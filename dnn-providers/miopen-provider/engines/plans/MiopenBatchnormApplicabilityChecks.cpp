@@ -534,6 +534,52 @@ bool hasPairedSavedStatistics(
     return bnAttr.mean_tensor_uid().has_value() == bnAttr.inv_variance_tensor_uid().has_value();
 }
 
+bool hasUnrequestedSavedPair(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!bnAttr.mean_tensor_uid().has_value() || !bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    if(bnAttr.prev_running_mean_tensor_uid().has_value()
+       || bnAttr.prev_running_variance_tensor_uid().has_value()
+       || bnAttr.next_running_mean_tensor_uid().has_value()
+       || bnAttr.next_running_variance_tensor_uid().has_value()
+       || bnAttr.momentum_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    return miopen_utils::findTensorAttributes(tensorMap, *bnAttr.mean_tensor_uid()).virtual_()
+           && miopen_utils::findTensorAttributes(tensorMap, *bnAttr.inv_variance_tensor_uid())
+                  .virtual_();
+}
+
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!hasUnrequestedSavedPair(bnAttr, tensorMap))
+    {
+        return batchnormTensorGroups(bnAttr);
+    }
+
+    BatchnormTensorGroups groups{{bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()},
+                                 {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()},
+                                 {}};
+    appendIfPresent(groups.stat, bnAttr.prev_running_mean_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.prev_running_variance_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.next_running_mean_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.next_running_variance_tensor_uid());
+    return groups;
+}
+
 namespace
 {
 
@@ -584,8 +630,10 @@ void checkBatchnormTensorConfigSupported(
 
 // The training plan honours running statistics only as a complete set, and saved mean /
 // inv_variance only as a pair; any other subset would be dropped silently at execute time.
-// The running-statistics (V3) and activation (V2) MIOpen entry points dereference the saved
-// statistics descriptors, so those paths additionally require the saved pair to be present.
+// The plan passes null saved-statistic descriptors to the running-statistics (V3) and activation
+// (V2) MIOpen entry points, which dereference them (null saved pointers are legal), so those
+// paths additionally require the saved pair to be present. That is a limitation of this
+// provider's plan, not of MIOpen.
 void checkBatchnormFwdTrainingStatisticsSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr, bool hasActivation)
 {
@@ -690,7 +738,7 @@ void checkBatchnormFwdTrainingTensorConfigSupported(
         bnAttr.peer_stats_tensor_uid(),
         "Batchnorm forward training does not support peer statistics");
 
-    const auto groups = batchnormTensorGroups(bnAttr);
+    const auto groups = batchnormTensorGroups(bnAttr, tensorMap);
     checkBatchnormTensorConfigSupported(groups.io, groups.affine, groups.stat, {}, tensorMap, true);
 }
 
@@ -798,8 +846,8 @@ void checkBatchnormActivationModeSupported(
                 "Batchnorm fused activation does not support Leaky ReLU.");
         }
 
-        // MIOpen has no activation for a shifted lower knee: without an upper clip a non-zero
-        // lower clip cannot be mapped (see MiopenUtils::mapPointwiseModeToMiopenActivation).
+        // The provider's activation mapping does not yet express a lower-only clip (see
+        // MiopenUtils::mapPointwiseModeToMiopenActivation).
         if(!activAttr.relu_upper_clip().has_value() && activAttr.relu_lower_clip().has_value()
            && *activAttr.relu_lower_clip() != 0.f)
         {

@@ -57,14 +57,27 @@ TEST(TestMiopenUnaryActivationChecks, DeclinesInputAndOutputWithDifferentLayouts
         {1, 3, 4, 4}, std::vector<int64_t>{48, 16, 4, 1}, std::vector<int64_t>{48, 1, 12, 3})));
 }
 
-TEST(TestMiopenUnaryActivationChecks, AcceptsNonPackedTensorsWithDifferentStrides)
+TEST(TestMiopenUnaryActivationChecks, DeclinesNonPackedTensorsWithDifferentStrides)
 {
-    // Padded rows on both sides: MIOpen's strided activation solver takes both stride sets.
-    EXPECT_TRUE(isSupported(reluGraph(
+    // Padded rows on both sides: declined by workaround 16024.
+    EXPECT_FALSE(isSupported(reluGraph(
         {2, 3, 4, 4}, std::vector<int64_t>{240, 80, 16, 2}, std::vector<int64_t>{192, 64, 16, 2})));
     // One packed and one padded side.
-    EXPECT_TRUE(isSupported(reluGraph(
+    EXPECT_FALSE(isSupported(reluGraph(
         {2, 3, 4, 4}, std::vector<int64_t>{48, 16, 4, 1}, std::vector<int64_t>{192, 64, 16, 2})));
+}
+
+TEST(TestMiopenUnaryActivationChecks, DeclinesNonPackedNhwcPairThatMiopenReadsFlat)
+{
+    // Channels-last with padded batch strides on both sides.
+    EXPECT_FALSE(isSupported(reluGraph(
+        {2, 3, 4, 4}, std::vector<int64_t>{48, 1, 12, 3}, std::vector<int64_t>{64, 1, 16, 4})));
+}
+
+TEST(TestMiopenUnaryActivationChecks, DeclinesNonPackedRank3PairThatMiopenReadsFlat)
+{
+    EXPECT_FALSE(isSupported(
+        reluGraph({2, 3, 8}, std::vector<int64_t>{24, 1, 3}, std::vector<int64_t>{32, 1, 4})));
 }
 
 TEST(TestMiopenUnaryActivationChecks,
@@ -114,13 +127,14 @@ TEST(TestMiopenUnaryActivationChecks, AcceptsPackedColumnMajorPairWithUnitLeadin
         {1, 1, 4, 8}, std::vector<int64_t>{32, 32, 1, 4}, std::vector<int64_t>{32, 32, 1, 4})));
 }
 
-TEST(TestMiopenUnaryActivationChecks, AcceptsNonPackedPairTheTwoDimensionalSolverReadsCorrectly)
+TEST(TestMiopenUnaryActivationChecks,
+     DeclinesNonPackedPairTheTwoDimensionalSolverWouldReadCorrectly)
 {
     // Unit columns on both sides.
-    EXPECT_TRUE(isSupported(reluGraph(
+    EXPECT_FALSE(isSupported(reluGraph(
         {1, 1, 4, 8}, std::vector<int64_t>{32, 32, 8, 1}, std::vector<int64_t>{64, 64, 16, 1})));
     // Width 1 has a single column, so the innermost stride is never walked.
-    EXPECT_TRUE(isSupported(reluGraph(
+    EXPECT_FALSE(isSupported(reluGraph(
         {1, 1, 4, 1}, std::vector<int64_t>{4, 4, 1, 1}, std::vector<int64_t>{8, 8, 2, 3})));
 }
 
@@ -139,6 +153,16 @@ TEST(TestMiopenUnaryActivationChecks, DeclinesInputAndOutputWithDifferentDims)
                                                          {1, 3, 16, 1},
                                                          std::vector<int64_t>{48, 16, 1, 1}));
     EXPECT_FALSE(isSupported(builder));
+
+    // Both packed, with equal strides on the non-unit axes: only the equal-dims requirement
+    // declines it.
+    const auto flatBuilder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 16},
+                                                         std::vector<int64_t>{16, 1},
+                                                         {16, 1},
+                                                         std::vector<int64_t>{1, 1}));
+    EXPECT_FALSE(isSupported(flatBuilder));
 }
 
 TEST(TestMiopenUnaryActivationChecks, AcceptsPackedRank1)

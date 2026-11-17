@@ -648,13 +648,40 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesBiasWithStridedChannels)
     EXPECT_FALSE(layoutsSupported(builder));
 }
 
+TEST(TestMiopenConvApplicabilityChecks, AcceptsLowerRankPerChannelBias)
+{
+    // [4,1,1] right-aligns against the rank-4 output as [1,4,1,1].
+    const auto builder = editTensor(cbaGraph(), "bias", [](fb::TensorAttributesT& t) {
+        t.dims = {4, 1, 1};
+        t.strides = {1, 1, 1};
+    });
+    EXPECT_TRUE(layoutsSupported(builder));
+}
+
+TEST(TestMiopenConvApplicabilityChecks, DeclinesLowerRankBiasOnWidth)
+{
+    // Right-aligned, a rank-1 bias lies on W, not on the channel axis.
+    EXPECT_FALSE(layoutsSupported(editTensor(cbaGraph(), "bias", [](fb::TensorAttributesT& t) {
+        t.dims = {4};
+        t.strides = {1};
+    })));
+    EXPECT_FALSE(layoutsSupported(editTensor(cbaGraph(), "bias", [](fb::TensorAttributesT& t) {
+        t.dims = {1};
+        t.strides = {1};
+    })));
+}
+
 TEST(TestMiopenConvApplicabilityChecks, DeclinesBiasWithDifferentRank)
 {
-    const auto builder = editTensor(cbaGraph(), "bias", [](fb::TensorAttributesT& t) {
+    // Rank 3 puts the channel extent on H once right-aligned; rank 5 exceeds the output's rank.
+    EXPECT_FALSE(layoutsSupported(editTensor(cbaGraph(), "bias", [](fb::TensorAttributesT& t) {
         t.dims = {1, 4, 1};
         t.strides = {4, 1, 1};
-    });
-    EXPECT_FALSE(layoutsSupported(builder));
+    })));
+    EXPECT_FALSE(layoutsSupported(editTensor(cbaGraph(), "bias", [](fb::TensorAttributesT& t) {
+        t.dims = {1, 4, 1, 1, 1};
+        t.strides = {4, 1, 1, 1, 1};
+    })));
 }
 
 TEST(TestMiopenConvApplicabilityChecks, AcceptsPerChannelBiasAsFirstAddOperand)
@@ -797,6 +824,72 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesOutputInDifferentLayoutThanInput
         })));
 }
 
+TEST(TestMiopenConvApplicabilityChecks, AcceptsFusedOutputInNclLayout)
+{
+    const auto builder = createValidConvFwdBiasActivGraph(
+        {2, 4, 8}, {32, 8, 1}, {4, 4, 3}, {12, 3, 1}, {2, 4, 6}, {24, 6, 1}, {0}, {0}, {1}, {1});
+    EXPECT_TRUE(layoutsSupported(builder));
+}
+
+TEST(TestMiopenConvApplicabilityChecks, AcceptsFusedOutputInNlcLayout)
+{
+    const auto builder = createValidConvFwdBiasActivGraph(
+        {2, 4, 8}, {32, 1, 4}, {4, 4, 3}, {12, 1, 4}, {2, 4, 6}, {24, 1, 4}, {0}, {0}, {1}, {1});
+    EXPECT_TRUE(layoutsSupported(builder));
+}
+
+TEST(TestMiopenConvApplicabilityChecks, AcceptsFusedOutputInNlcLayoutWithUnitOutputChannels)
+{
+    // K = 1: the unit channel dimension ties with L at stride 1 in the channels-last output.
+    const auto builder = createValidConvFwdBiasActivGraph(
+        {2, 4, 8}, {32, 1, 4}, {1, 4, 3}, {12, 1, 4}, {2, 1, 6}, {6, 1, 1}, {0}, {0}, {1}, {1});
+    EXPECT_TRUE(layoutsSupported(builder));
+}
+
+TEST(TestMiopenConvApplicabilityChecks, AcceptsFusedOutputInNclLayoutWithUnitOutputLength)
+{
+    const auto builder = createValidConvFwdBiasActivGraph(
+        {2, 4, 3}, {12, 3, 1}, {4, 4, 3}, {12, 3, 1}, {2, 4, 1}, {4, 1, 1}, {0}, {0}, {1}, {1});
+    EXPECT_TRUE(layoutsSupported(builder));
+}
+
+TEST(TestMiopenConvApplicabilityChecks, DeclinesNlcInputWithNclOutput)
+{
+    const auto builder = createValidConvFwdBiasActivGraph(
+        {2, 4, 8}, {32, 1, 4}, {4, 4, 3}, {12, 1, 4}, {2, 4, 6}, {24, 6, 1}, {0}, {0}, {1}, {1});
+    EXPECT_FALSE(layoutsSupported(builder));
+}
+
+TEST(TestMiopenConvApplicabilityChecks, AcceptsFusedOutputInNcdhwLayout)
+{
+    const auto builder = createValidConvFwdBiasActivGraph({2, 4, 4, 4, 4},
+                                                          {256, 64, 16, 4, 1},
+                                                          {4, 4, 1, 1, 1},
+                                                          {4, 1, 1, 1, 1},
+                                                          {2, 4, 4, 4, 4},
+                                                          {256, 64, 16, 4, 1},
+                                                          {0, 0, 0},
+                                                          {0, 0, 0},
+                                                          {1, 1, 1},
+                                                          {1, 1, 1});
+    EXPECT_TRUE(layoutsSupported(builder));
+}
+
+TEST(TestMiopenConvApplicabilityChecks, AcceptsFusedOutputInNdhwcLayout)
+{
+    const auto builder = createValidConvFwdBiasActivGraph({2, 4, 4, 4, 4},
+                                                          {256, 1, 64, 16, 4},
+                                                          {4, 4, 1, 1, 1},
+                                                          {4, 1, 4, 4, 4},
+                                                          {2, 4, 4, 4, 4},
+                                                          {256, 1, 64, 16, 4},
+                                                          {0, 0, 0},
+                                                          {0, 0, 0},
+                                                          {1, 1, 1},
+                                                          {1, 1, 1});
+    EXPECT_TRUE(layoutsSupported(builder));
+}
+
 TEST(TestMiopenConvApplicabilityChecks, DeclinesOutputWithDifferentDataTypeThanInput)
 {
     const auto builder = editTensor(
@@ -821,10 +914,15 @@ TEST(TestMiopenConvApplicabilityChecks, DetectsPassByValueTensors)
 
     for(const char* name : {"x", "w", "bias", "y"})
     {
-        const auto builder = editTensor(
+        const auto runtime = editTensor(
             legal, name, [](fb::TensorAttributesT& t) { t.is_runtime_pass_by_value = true; });
-        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-        EXPECT_TRUE(conv_applicability::hasPassByValueTensor(graph.getTensorMap())) << name;
+        const GraphWrapper runtimeGraph(runtime.GetBufferPointer(), runtime.GetSize());
+        EXPECT_TRUE(conv_applicability::hasPassByValueTensor(runtimeGraph.getTensorMap())) << name;
+
+        const auto baked = editTensor(
+            legal, name, [](fb::TensorAttributesT& t) { t.value.Set(fb::Float64Value(1.0)); });
+        const GraphWrapper bakedGraph(baked.GetBufferPointer(), baked.GetSize());
+        EXPECT_TRUE(conv_applicability::hasPassByValueTensor(bakedGraph.getTensorMap())) << name;
     }
 }
 

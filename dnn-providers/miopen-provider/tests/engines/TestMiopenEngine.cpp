@@ -620,7 +620,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
 
-TEST(TestMiopenEngine, InitializeExecutionContextThrowsBadParamIfNoApplicableBuilders)
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsInternalErrorIfNoApplicableBuilders)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -657,6 +657,6 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsBadParamIfNoApplicableBui
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }

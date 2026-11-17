@@ -77,6 +77,28 @@ protected:
     MockEngineConfig _mockEngineConfig;
 };
 
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableMatchesIsGraphApplicable)
+{
+    auto servedBuilder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+    const GraphWrapper served(servedBuilder.GetBufferPointer(), servedBuilder.GetSize());
+    EXPECT_EQ(_planBuilder.isApplicable(*_dummyHandle, served),
+              MiopenBatchnormPlanBuilder::isGraphApplicable(served));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, served));
+
+    auto declinedBuilder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+            {150528, 50176, 224, 1},
+            {1, 3, 224, 224},
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            /*overrideShapeEnabled=*/true);
+    const GraphWrapper declined(declinedBuilder.GetBufferPointer(), declinedBuilder.GetSize());
+    EXPECT_EQ(_planBuilder.isApplicable(*_dummyHandle, declined),
+              MiopenBatchnormPlanBuilder::isGraphApplicable(declined));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, declined));
+}
+
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsupportedNodeCount)
 {
     const MockGraph mockGraph;
@@ -2519,14 +2541,6 @@ const std::vector<BnVirtualRoleParam>& singleNodeVirtualRoles()
 class TestMiopenBatchnormPlanBuilderTrainingStats
     : public ::testing::TestWithParam<BnTrainingStatsParam>
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
-    }
-
-    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
 };
 
 TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats, ServesOnlyGraphsWhoseStatsThePlanHonours)
@@ -2538,7 +2552,7 @@ TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats, ServesOnlyGraphsWhoseStatsTh
 
     const bool planHonoursStats = p.runningStatsMask == 0U && p.saveMean == p.saveInvVariance;
 
-    EXPECT_EQ(MiopenBatchnormPlanBuilder{}.isApplicable(*_dummyHandle, graph), planHonoursStats);
+    EXPECT_EQ(MiopenBatchnormPlanBuilder::isGraphApplicable(graph), planHonoursStats);
 }
 
 // The training builder serves no running statistics, or the complete set together with the
@@ -2556,8 +2570,7 @@ TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats,
         = (p.runningStatsMask == 0U && p.saveMean == p.saveInvVariance)
           || (p.runningStatsMask == ALL_RUNNING_STATS && p.saveMean && p.saveInvVariance);
 
-    EXPECT_EQ(MiopenBatchnormFwdTrainingPlanBuilder{}.isApplicable(*_dummyHandle, graph),
-              planHonoursStats);
+    EXPECT_EQ(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph), planHonoursStats);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllRunningStatsAndSavedStatsSubsets,
@@ -2568,15 +2581,6 @@ INSTANTIATE_TEST_SUITE_P(AllRunningStatsAndSavedStatsSubsets,
 class TestMiopenBatchnormPlanBuilderVirtualRole
     : public ::testing::TestWithParam<BnVirtualRoleParam>
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
-    }
-
-    MiopenBatchnormPlanBuilder _planBuilder;
-    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
 };
 
 // The single-node plans execute against caller-supplied device buffers, which a virtual
@@ -2587,11 +2591,11 @@ TEST_P(TestMiopenBatchnormPlanBuilderVirtualRole, DeclinesVirtualTensor)
 
     auto servedBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, -1);
     const GraphWrapper served(servedBuilder.GetBufferPointer(), servedBuilder.GetSize());
-    ASSERT_TRUE(_planBuilder.isApplicable(*_dummyHandle, served));
+    ASSERT_TRUE(MiopenBatchnormPlanBuilder::isGraphApplicable(served));
 
     auto virtualBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, p.uid);
     const GraphWrapper graph(virtualBuilder.GetBufferPointer(), virtualBuilder.GetSize());
-    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+    EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
 }
 
 INSTANTIATE_TEST_SUITE_P(EveryRolePerMode,
@@ -2600,3 +2604,111 @@ INSTANTIATE_TEST_SUITE_P(EveryRolePerMode,
                          [](const ::testing::TestParamInfo<BnVirtualRoleParam>& info) {
                              return std::string(modeName(info.param.mode)) + "_" + info.param.role;
                          });
+
+namespace
+{
+
+constexpr int64_t SAVED_MEAN_UID = 6;
+constexpr int64_t SAVED_INV_VARIANCE_UID = 7;
+
+// A single-node training graph (saved mean uid 6, saved inv_variance uid 7) whose saved tensors
+// are flagged virtual independently.
+flatbuffers::FlatBufferBuilder
+    createSavedPairGraph(unsigned runningStatsMask, bool virtualMean, bool virtualInvVariance)
+{
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        createBatchnormTrainingGraphWithStats(runningStatsMask, true, true),
+        [virtualMean, virtualInvVariance](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if((tensor->uid == SAVED_MEAN_UID && virtualMean)
+                   || (tensor->uid == SAVED_INV_VARIANCE_UID && virtualInvVariance))
+                {
+                    tensor->virtual_ = true;
+                }
+            }
+        });
+}
+
+} // namespace
+
+// A saved mean / inv_variance pair that is virtual and unconsumed is "saved statistics not
+// requested" and is served; exactly one virtual tensor, running statistics, or a fused
+// activation stay declined.
+class TestMiopenBatchnormSavedPairVirtual : public ::testing::Test
+{
+};
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderServesBothVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderServesBothVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyMeanVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, false);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyInvVarianceVirtual)
+{
+    auto builder = createSavedPairGraph(0U, false, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyMeanVirtual)
+{
+    auto builder = createSavedPairGraph(0U, true, false);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyInvVarianceVirtual)
+{
+    auto builder = createSavedPairGraph(0U, false, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWithRunningStats)
+{
+    auto builder = createSavedPairGraph(ALL_RUNNING_STATS, true, true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}
+
+TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWithFusedActivation)
+{
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(),
+        [](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->name == "mean" || tensor->name == "inv_variance")
+                {
+                    tensor->virtual_ = true;
+                }
+            }
+        });
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
+}

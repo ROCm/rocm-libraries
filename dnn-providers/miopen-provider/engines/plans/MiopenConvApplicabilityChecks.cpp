@@ -93,17 +93,33 @@ std::vector<size_t> layoutOrder(const std::vector<int64_t>& dims,
     return order;
 }
 
+// Left-pads `values` with `fill` up to `rank` (numpy-style right alignment).
+std::vector<int64_t> leftPad(const std::vector<int64_t>& values, size_t rank, int64_t fill)
+{
+    std::vector<int64_t> padded(rank - values.size(), fill);
+    padded.insert(padded.end(), values.begin(), values.end());
+    return padded;
+}
+
 void checkBiasIsPerChannel(const TensorAttributes& bias, const TensorAttributes& convOutput)
 {
-    const auto biasDims = toVector(bias.dims());
-    const auto biasStrides = toVector(bias.strides());
     const auto outputDims = toVector(convOutput.dims());
-
-    if(outputDims.size() < 2 || biasDims.size() != outputDims.size()
-       || biasStrides.size() != biasDims.size())
+    if(outputDims.size() < 2)
     {
-        decline("Bias tensor must have the same rank as the convolution output");
+        decline("Convolution output must have at least a batch and a channel dimension");
     }
+
+    auto biasDims = toVector(bias.dims());
+    auto biasStrides = toVector(bias.strides());
+    if(biasDims.size() > outputDims.size() || biasStrides.size() != biasDims.size())
+    {
+        decline("Bias tensor rank must not exceed the convolution output rank");
+    }
+
+    // A lower-rank bias is right-aligned against the output, so its missing leading
+    // dimensions are units.
+    biasDims = leftPad(biasDims, outputDims.size(), 1);
+    biasStrides = leftPad(biasStrides, outputDims.size(), 1);
 
     for(size_t i = 0; i < biasDims.size(); ++i)
     {
@@ -138,8 +154,15 @@ void checkBiasDataTypeMatchesInput(const TensorAttributes& bias, const TensorAtt
 }
 
 // Packed strides for `outputDims` laid out in the dimension order MIOpen derives for the input
-// tensor (see layoutOrder). MIOpen's fused execute compares whole tensor descriptors, so the
-// caller compares the strides of unit dimensions as well.
+// tensor (see layoutOrder: dimensions sorted by stride, then length, descending, ties by index;
+// TensorDescriptor::find_permutation, which backs GetLayout / GetLayout_str in
+// projects/miopen/src/tensor.cpp; ConvolutionDescriptor::GetForwardOutputTensor[WithLayout] in
+// projects/miopen/src/convolution.cpp builds the output descriptor from that layout name).
+// MIOpen's fused execute compares whole tensor descriptors, unit dimensions included
+// (FusionPlanDescriptor::Execute, "The output descriptors dont match.", projects/miopen/src/
+// fusion.cpp), so the caller compares the strides of unit dimensions as well. No public API
+// returns the fused output strides, so they are reproduced here; MIOpen's rejection of a layout
+// it does not name is left to the device check.
 std::vector<int64_t> packedStridesInLayoutOrder(const std::vector<int64_t>& inputDims,
                                                 const std::vector<int64_t>& inputStrides,
                                                 const std::vector<int64_t>& outputDims)

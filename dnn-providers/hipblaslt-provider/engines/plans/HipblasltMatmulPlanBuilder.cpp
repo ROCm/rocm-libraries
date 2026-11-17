@@ -380,8 +380,9 @@ void checkVirtualTensors(
 }
 
 // The plan reads A, B, the bias input and the final output from device buffers, so a
-// compile-time scalar on any of them has no buffer to resolve.
-void checkNoCompileTimeScalars(
+// pass-by-value tensor (compile-time or runtime scalar) on any of them has no buffer to
+// resolve.
+void checkNoPassByValue(
     const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& matmulAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
@@ -389,33 +390,33 @@ void checkNoCompileTimeScalars(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    const auto rejectScalar = [&tensorMap](int64_t uid, const char* name) {
-        if(hipblaslt_utils::findTensorAttributes(tensorMap, uid).hasCompileTimeConstant())
+    const auto rejectPassByValue = [&tensorMap](int64_t uid, const char* name) {
+        if(hipblaslt_utils::findTensorAttributes(tensorMap, uid).isByValue())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 std::string("Matmul: ") + name
-                    + " tensor must not be a compile-time scalar (it needs a device buffer)");
+                    + " tensor must not be pass-by-value (it needs a device buffer)");
         }
     };
 
-    rejectScalar(matmulAttr.a_tensor_uid(), "A");
-    rejectScalar(matmulAttr.b_tensor_uid(), "B");
+    rejectPassByValue(matmulAttr.a_tensor_uid(), "A");
+    rejectPassByValue(matmulAttr.b_tensor_uid(), "B");
 
     if(biasAttr != nullptr)
     {
-        rejectScalar(biasOperandUid(*biasAttr, matmulAttr.c_tensor_uid()), "bias input");
-        rejectScalar(activAttr != nullptr ? activAttr->out_0_tensor_uid()
-                                          : biasAttr->out_0_tensor_uid(),
-                     activAttr != nullptr ? "activation output" : "bias output");
+        rejectPassByValue(biasOperandUid(*biasAttr, matmulAttr.c_tensor_uid()), "bias input");
+        rejectPassByValue(activAttr != nullptr ? activAttr->out_0_tensor_uid()
+                                               : biasAttr->out_0_tensor_uid(),
+                          activAttr != nullptr ? "activation output" : "bias output");
     }
     else if(activAttr != nullptr)
     {
-        rejectScalar(activAttr->out_0_tensor_uid(), "activation output");
+        rejectPassByValue(activAttr->out_0_tensor_uid(), "activation output");
     }
     else
     {
-        rejectScalar(matmulAttr.c_tensor_uid(), "matmul output");
+        rejectPassByValue(matmulAttr.c_tensor_uid(), "matmul output");
     }
 }
 
@@ -438,10 +439,10 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                             std::get<2>(nodeAttrs),
                             opGraph.getTensorMap());
 
-        checkNoCompileTimeScalars(std::get<0>(nodeAttrs),
-                                  std::get<1>(nodeAttrs),
-                                  std::get<2>(nodeAttrs),
-                                  opGraph.getTensorMap());
+        checkNoPassByValue(std::get<0>(nodeAttrs),
+                           std::get<1>(nodeAttrs),
+                           std::get<2>(nodeAttrs),
+                           opGraph.getTensorMap());
 
         checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
 

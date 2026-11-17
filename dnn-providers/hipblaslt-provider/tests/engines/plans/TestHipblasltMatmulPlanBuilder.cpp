@@ -321,11 +321,12 @@ INSTANTIATE_TEST_SUITE_P(Strides,
                                            BiasStridesCase{{1, 5}, false}));
 
 // The bias input is validated on its own data type, independent of the matmul
-// output type (which stays fp32 here).
+// output type (which stays fp32 here). A HALF or BF16 bias on an FP32 graph passes the
+// type check; hipBLASLt declines it when it has no kernel.
 struct BiasTypeCase
 {
     hipdnn_flatbuffers_sdk::data_objects::DataType type;
-    bool served;
+    bool passesTypeCheck;
 };
 
 class TestHipblasltMatmulPlanBuilderBiasTypeCases
@@ -347,7 +348,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderBiasTypeCases, IsApplicableDeclinesUnserved
         (void)_planBuilder.isApplicable(_handle, graph);
         EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_INFO,
                                             "Bias node input and output data types must be"),
-                  !GetParam().served)
+                  !GetParam().passesTypeCheck)
             << "biasFirst=" << biasFirst << "\n"
             << recorder.getRecordedLogsAsString();
     }
@@ -448,9 +449,9 @@ INSTANTIATE_TEST_SUITE_P(
         BatchStrideCase{"FusedNestedFinal", "C", {60, 20, 5, 1}, true, PointwiseMode::RELU_FWD}),
     [](const auto& info) { return std::string(info.param.name); });
 
-// A singleton trailing batch axis can carry an arbitrary stride that would otherwise
-// become the flattened batch stride.
-TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesSingletonBatchAxisStride)
+// A singleton trailing batch axis can carry an arbitrary stride; it never advances, so the
+// flattened batch stride comes from the next axis with extent above one.
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsSingletonBatchAxisStrideOnA)
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
@@ -466,7 +467,34 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesSingletonBatch
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "batch strides of tensor A"))
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "are not uniform"))
+        << recorder.getRecordedLogsAsString();
+}
+
+// A fused final output with a singleton batch axis keeps the matmul output's flattened batch
+// stride, so it is not declined for a batch stride or batch dimensions mismatch.
+TEST_F(TestHipblasltMatmulPlanBuilderDecline,
+       IsApplicableDoesNotDeclineFusedFinalWithSingletonBatchAxis)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    // The virtual matmul output is packed; the final output keeps a stride of 5 on the
+    // singleton axis.
+    auto builder = withTensorStrides(createBatchedGraph({2, 1, 4, 8},
+                                                        {32, 32, 8, 1},
+                                                        {2, 1, 8, 5},
+                                                        {40, 40, 5, 1},
+                                                        {2, 1, 4, 5},
+                                                        {20, 5, 5, 1},
+                                                        PointwiseMode::RELU_FWD),
+                                     "C_matmul",
+                                     {20, 20, 5, 1});
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    (void)_planBuilder.isApplicable(_handle, graph);
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "are not uniform"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "final output batch"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -659,7 +687,7 @@ INSTANTIATE_TEST_SUITE_P(
         ActivOutputTypeCase{hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE, false}));
 
 // The plan binds A, B, the bias input and the final output to device buffers, so a
-// compile-time scalar on any of them has no buffer.
+// pass-by-value tensor (compile-time or runtime scalar) on any of them has no buffer.
 struct ScalarCase
 {
     const char* name;
@@ -667,6 +695,7 @@ struct ScalarCase
     PointwiseMode activMode;
     const char* tensorName;
     const char* role;
+    bool runtime = false;
 };
 
 class TestHipblasltMatmulPlanBuilderScalarCases : public TestHipblasltMatmulPlanBuilderDecline,
@@ -674,7 +703,7 @@ class TestHipblasltMatmulPlanBuilderScalarCases : public TestHipblasltMatmulPlan
 {
 };
 
-TEST_P(TestHipblasltMatmulPlanBuilderScalarCases, IsApplicableDeclinesCompileTimeScalar)
+TEST_P(TestHipblasltMatmulPlanBuilderScalarCases, IsApplicableDeclinesPassByValue)
 {
     const auto& param = GetParam();
     const auto base = createFusedGraph(param.doBias, param.activMode);
@@ -683,7 +712,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderScalarCases, IsApplicableDeclinesCompileTim
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         GraphWrapper const graph(base.GetBufferPointer(), base.GetSize());
         (void)_planBuilder.isApplicable(_handle, graph);
-        EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "compile-time scalar"))
+        EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "must not be pass-by-value"))
             << recorder.getRecordedLogsAsString();
     }
 
@@ -694,7 +723,14 @@ TEST_P(TestHipblasltMatmulPlanBuilderScalarCases, IsApplicableDeclinesCompileTim
         {
             if(tensor->name == param.tensorName)
             {
-                tensor->value.Set(hipdnn_flatbuffers_sdk::data_objects::Float32Value(2.0f));
+                if(param.runtime)
+                {
+                    tensor->is_runtime_pass_by_value = true;
+                }
+                else
+                {
+                    tensor->value.Set(hipdnn_flatbuffers_sdk::data_objects::Float32Value(2.0f));
+                }
             }
         }
     });
@@ -703,7 +739,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderScalarCases, IsApplicableDeclinesCompileTim
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO,
                                           std::string("Matmul: ") + param.role
-                                              + " tensor must not be a compile-time scalar"))
+                                              + " tensor must not be pass-by-value"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -714,6 +750,7 @@ INSTANTIATE_TEST_SUITE_P(
         ScalarCase{"A", true, PointwiseMode::RELU_FWD, "A", "A"},
         ScalarCase{"B", true, PointwiseMode::RELU_FWD, "B", "B"},
         ScalarCase{"BiasInput", true, PointwiseMode::RELU_FWD, "bias", "bias input"},
+        ScalarCase{"BiasInputRuntime", true, PointwiseMode::RELU_FWD, "bias", "bias input", true},
         ScalarCase{"BiasActivOutput", true, PointwiseMode::RELU_FWD, "C", "activation output"},
         ScalarCase{"BiasOnlyOutput", true, PointwiseMode::UNSET, "C_bias", "bias output"},
         ScalarCase{"ActivOnlyOutput", false, PointwiseMode::RELU_FWD, "C", "activation output"},
@@ -741,6 +778,38 @@ protected:
     HipblasltMatmulPlanBuilder _planBuilder;
     HipdnnEnginePluginHandle _handle;
 };
+
+// Size-1 batch axes are ignored, so the plan builder serves these graphs. Values are not
+// compared here.
+TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicableAcceptsSingletonBatchAxisGraphs)
+{
+    {
+        auto builder = withTensorStrides(createBatchedGraph({2, 1, 4, 8},
+                                                            {32, 32, 8, 1},
+                                                            {2, 1, 8, 5},
+                                                            {40, 40, 5, 1},
+                                                            {2, 1, 4, 5},
+                                                            {20, 5, 5, 1},
+                                                            PointwiseMode::RELU_FWD),
+                                         "C_matmul",
+                                         {20, 20, 5, 1});
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+    }
+    {
+        auto builder = withTensorStrides(createBatchedGraph({4, 1, 4, 8},
+                                                            {32, 32, 8, 1},
+                                                            {4, 1, 8, 5},
+                                                            {40, 40, 5, 1},
+                                                            {4, 1, 4, 5},
+                                                            {20, 20, 5, 1},
+                                                            PointwiseMode::UNSET),
+                                         "A",
+                                         {32, 7, 8, 1});
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+    }
+}
 
 TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 {

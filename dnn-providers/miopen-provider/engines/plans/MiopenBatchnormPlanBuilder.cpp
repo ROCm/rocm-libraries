@@ -396,9 +396,8 @@ void checkSingleNodeTensorsNonVirtual(
 
 } // namespace
 
-bool MiopenBatchnormPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool MiopenBatchnormPlanBuilder::isGraphApplicable(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     // Execute-time override shapes can diverge from the compile-time dims this
     // builder matched exactly; the plan bakes those dims into the MIOpen
@@ -479,8 +478,9 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             {
                 const auto& attr = *node.attributes_as_BatchnormAttributes();
                 checkBatchnormFwdTrainingTensorConfigSupported(attr, opGraph.getTensorMap());
-                checkSingleNodeTensorsNonVirtual(batchnormTensorGroups(attr).all(),
-                                                 opGraph.getTensorMap());
+                checkSingleNodeTensorsNonVirtual(
+                    batchnormTensorGroups(attr, opGraph.getTensorMap()).all(),
+                    opGraph.getTensorMap());
             }
             break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
@@ -657,6 +657,13 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         return false;
     }
     }
+}
+
+bool MiopenBatchnormPlanBuilder::isApplicable(
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    return isGraphApplicable(opGraph);
 }
 
 size_t MiopenBatchnormPlanBuilder::getMaxWorkspaceSize(

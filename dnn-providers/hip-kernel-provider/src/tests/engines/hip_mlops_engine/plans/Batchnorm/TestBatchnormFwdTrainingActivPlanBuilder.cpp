@@ -685,15 +685,16 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeVirtualInputTensorInv
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
-TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeVirtualMeanTensorInvalid)
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeBothSavedStatisticsVirtualIsAccepted)
 {
+    // Both saved statistics virtual and no running statistics: the saved pair is not requested.
     const flatbuffers::FlatBufferBuilder builder
-        = createInvalidBatchnormFwdTrainingGraph(false, true);
+        = createInvalidBatchnormFwdTrainingGraph(false, true, true);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, SingleNodeVirtualInvVarTensorInvalid)

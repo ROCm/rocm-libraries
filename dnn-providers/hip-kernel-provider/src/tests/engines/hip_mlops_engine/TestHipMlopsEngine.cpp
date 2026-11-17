@@ -31,7 +31,7 @@ TEST(TestHipMlopsEngine, ConstructorAndId)
 // Workspace Size
 // ============================================================================
 
-TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
+TEST(TestHipMlopsEngine, WorkspaceSizeThrowsInternalErrorIfNoPlanBuilders)
 {
     const HipMlopsEngine engine(1);
 
@@ -39,7 +39,15 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
+    try
+    {
+        static_cast<void>(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig));
+        FAIL() << "a workspace query with no plan builders must throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }
 
 TEST(TestHipMlopsEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
@@ -95,7 +103,7 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 45000u);
 }
 
-TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
+TEST(TestHipMlopsEngine, WorkspaceSizeThrowsInternalErrorIfNoPlanBuilderApplies)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
@@ -108,7 +116,15 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
+    try
+    {
+        static_cast<void>(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig));
+        FAIL() << "a workspace query with no applicable builder must throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }
 
 // ============================================================================
@@ -425,7 +441,7 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
 
-TEST(TestHipMlopsEngine, InitializeExecutionContextThrowsBadParamIfNoBuilderApplies)
+TEST(TestHipMlopsEngine, InitializeExecutionContextThrowsInternalErrorIfNoBuilderApplies)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -464,6 +480,6 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextThrowsBadParamIfNoBuilderAppl
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }

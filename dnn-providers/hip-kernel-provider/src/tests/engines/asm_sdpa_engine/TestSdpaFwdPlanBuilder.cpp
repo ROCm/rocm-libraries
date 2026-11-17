@@ -2513,10 +2513,12 @@ TEST(TestSdpaFwdShapeConsistency, DeclinesOperandsThatDisagreeOnShape)
                                                         *tensors.at(attrs.o_tensor_uid()));
           };
 
-    // Accepted: the legal GQA graph, equal head sizes at another width, and a GQA ratio of 1.
+    // Accepted: the legal GQA graph, equal head sizes at another width, a GQA ratio of 1, and a
+    // K/V sequence length different from Q's.
     EXPECT_TRUE(hasConsistentShapes([](auto&, auto&, auto&, auto&) {}));
     EXPECT_TRUE(hasConsistentShapes([](auto& q, auto& k, auto&, auto&) { q[3] = k[3] = 64; }));
     EXPECT_TRUE(hasConsistentShapes([](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 8; }));
+    EXPECT_TRUE(hasConsistentShapes([](auto&, auto& k, auto& v, auto&) { k[2] = v[2] = 512; }));
 
     using DimsMutation = std::function<void(std::vector<int64_t> & q,
                                             std::vector<int64_t> & k,
@@ -2530,6 +2532,13 @@ TEST(TestSdpaFwdShapeConsistency, DeclinesOperandsThatDisagreeOnShape)
         {"VHeadsDifferFromKHeads", [](auto&, auto&, auto& v, auto&) { v[1] = 2; }},
         {"KBatchDiffersFromQBatch", [](auto&, auto& k, auto&, auto&) { k[0] = 2; }},
         {"OHeadSizeDiffersFromVHeadSize", [](auto&, auto&, auto&, auto& o) { o[3] = 64; }},
+        {"KvHeadsExceedQueryHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 16; }},
+        {"ZeroKvHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 0; }},
+        {"VSequenceDiffersFromKSequence", [](auto&, auto&, auto& v, auto&) { v[2] = 128; }},
+        {"VBatchDiffersFromQBatch", [](auto&, auto&, auto& v, auto&) { v[0] = 2; }},
+        {"OBatchDiffersFromQBatch", [](auto&, auto&, auto&, auto& o) { o[0] = 2; }},
+        {"OHeadsDifferFromQHeads", [](auto&, auto&, auto&, auto& o) { o[1] = 4; }},
+        {"OSequenceDiffersFromQSequence", [](auto&, auto&, auto&, auto& o) { o[2] = 128; }},
         // Every operand agrees on the zero, so only the positive-extent rule declines them.
         {"ZeroBatch", [](auto& q, auto& k, auto& v, auto& o) { q[0] = k[0] = v[0] = o[0] = 0; }},
         {"ZeroQueryLength", [](auto& q, auto&, auto&, auto& o) { q[2] = o[2] = 0; }},

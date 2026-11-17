@@ -114,10 +114,12 @@ size_t HipMlopsEngine::getMaxWorkspaceSize(
     Settings baseExecutionSettings;
     initializeHipKernelSettings(engineConfig, baseExecutionSettings);
     size_t workspaceSize = 0;
+    bool anyApplied = false;
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
+            anyApplied = true;
             Settings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
@@ -125,6 +127,13 @@ size_t HipMlopsEngine::getMaxWorkspaceSize(
                 = std::max(workspaceSize,
                            planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
         }
+    }
+
+    if(!anyApplied)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "HipMlopsEngine::getMaxWorkspaceSize: no plan builder applies to the graph");
     }
     return workspaceSize;
 }
@@ -160,7 +169,7 @@ void HipMlopsEngine::initializeExecutionContext(
     }
 
     throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
         "HipMlopsEngine::initializeExecutionContext: no plan builder applies to the graph");
 }
 
