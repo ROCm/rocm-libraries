@@ -1428,10 +1428,23 @@ RppStatus rppt_slice(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
     if (srcGenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if (srcGenericDescPtr->layout != dstGenericDescPtr->layout) return RPP_ERROR_LAYOUT_MISMATCH;
+    if ((srcGenericDescPtr->numDims < 2) || (srcGenericDescPtr->numDims > 5))
+        return RPP_ERROR_INVALID_SRC_DIMS;
+    if ((srcGenericDescPtr->numDims == 4) && (srcGenericDescPtr->layout != RpptLayout::NCHW) &&
+        (srcGenericDescPtr->layout != RpptLayout::NHWC))
+        return RPP_ERROR_INVALID_SRC_LAYOUT;
+    if ((srcGenericDescPtr->numDims == 5) && (srcGenericDescPtr->layout != RpptLayout::NCDHW) &&
+        (srcGenericDescPtr->layout != RpptLayout::NDHWC))
+        return RPP_ERROR_INVALID_SRC_LAYOUT;
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
+        if ((srcGenericDescPtr->numDims > 3) &&
+            ((srcGenericDescPtr->layout == RpptLayout::NCHW) ||
+             (srcGenericDescPtr->layout == RpptLayout::NCDHW)) &&
+            (srcGenericDescPtr->dims[1] != 1) && (srcGenericDescPtr->dims[1] != 3))
+            return RPP_ERROR_INVALID_SRC_CHANNELS;
         RppLayoutParams layoutParams;
         if ((srcGenericDescPtr->layout == RpptLayout::NCDHW) &&
             (dstGenericDescPtr->layout == RpptLayout::NCDHW))

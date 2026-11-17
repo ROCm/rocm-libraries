@@ -201,6 +201,37 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *dstDesc, 0.0));
 }
 
+// A descriptor no slice kernel handles: the op must reject it rather than return RPP_SUCCESS with
+// the destination untouched.
+RppStatus slice_status(const NdConfig& cfg, const NdDims& dims, RpptLayout layout) {
+    const Rpp32u nDim = nd_rank(dims);
+    const Rpp32u batch = dims[0];
+    GenericDescriptor srcDesc(cfg.backend, dims, cfg.dtypeIn, layout);
+    GenericDescriptor dstDesc(cfg.backend, dims, cfg.dtypeIn, layout);
+    const std::size_t bytes = generic_byte_size(*srcDesc, cfg.dtypeIn);
+
+    PinnedArray<Rpp32s> anchor(cfg.backend, static_cast<std::size_t>(batch) * nDim);
+    PinnedArray<Rpp32s> shape(cfg.backend, static_cast<std::size_t>(batch) * nDim);
+    for (Rpp32u n = 0; n < batch; ++n)
+        for (Rpp32u a = 0; a < nDim; ++a) {
+            anchor[static_cast<std::size_t>(n) * nDim + a] = 0;
+            shape[static_cast<std::size_t>(n) * nDim + a] = static_cast<Rpp32s>(dims[a + 1]);
+        }
+    const std::vector<Rpp32u> roiVec = make_nd_roi_tensor(dims);
+    PinnedArray<Rpp32u> roi(cfg.backend, roiVec.size());
+    for (std::size_t i = 0; i < roiVec.size(); ++i) roi[i] = roiVec[i];
+    PinnedArray<Rpp32f> fillValue(cfg.backend, 1);
+    fillValue[0] = 0.0f;
+
+    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
+    RppHandle handle(cfg.backend, batch);
+    const RppStatus status =
+        rppt_slice(src.ptr(), srcDesc.get(), dst.ptr(), dstDesc.get(), anchor.data(),
+                   shape.data(), fillValue.data(), false, roi.data(), handle.get(), cfg.backend);
+    handle.sync();
+    return status;
+}
+
 }  // namespace
 
 // Full name:
@@ -225,6 +256,24 @@ TEST_P(SliceTest, Correctness) {
         GTEST_SKIP() << kHipDenseSkip;
     dispatch_dtype<DType::U8, DType::F32>(
         cfg.dtypeIn, [&](auto tag) { run_slice<Element<decltype(tag)>>(cfg, p); });
+}
+
+// Rank 3 takes any layout, so only ranks 4 and 5 have a layout to reject. The HOST planar path
+// handles 1 or 3 channels only; HIP slices any channel count.
+TEST_P(SliceTest, RejectsUnsupportedDescriptor) {
+    const NdConfig cfg = GetParam().cfg;
+    const SliceParams p = GetParam().op;
+    if (cfg.nDim == 2) GTEST_SKIP() << "rank 3 slice accepts any layout";
+    const NdDims dims = slice_extents(cfg.nDim, p.layout);
+    const RpptLayout otherRankLayout = rpp_layout(cfg.nDim == 3 ? 4 : 3, p.layout);
+    EXPECT_EQ(slice_status(cfg, dims, otherRankLayout), RPP_ERROR_INVALID_SRC_LAYOUT);
+
+    if (cfg.backend == RPP_HOST_BACKEND && p.layout == SliceLayout::Planar) {
+        NdDims fiveChannels = dims;
+        fiveChannels[1] = 5;
+        EXPECT_EQ(slice_status(cfg, fiveChannels, rpp_layout(cfg.nDim, p.layout)),
+                  RPP_ERROR_INVALID_SRC_CHANNELS);
+    }
 }
 
 // U8 and F32 are the conversions the header documents. Rank 2 has no channel axis, so it is planar

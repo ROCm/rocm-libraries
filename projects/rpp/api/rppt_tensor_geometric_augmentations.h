@@ -329,9 +329,12 @@ RppStatus rppt_phase(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDescPtr,
  *          Slice augmentation involves selecting a region of interest (ROI) from the source tensor
  *          and copying it to the destination tensor. Support added for f32 -> f32 and u8 -> u8
  * dataypes. \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory (for
- * HOST backend) \param [in] srcGenericDescPtr source tensor descriptor \param [out] dstPtr
- * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
- * dstGenericDescPtr destination tensor descriptor \param [in] anchorTensor starting index of the
+ * HOST backend) \param [in] srcGenericDescPtr source tensor descriptor (Restrictions - numDims =
+ * 2/3/4/5, dataType = U8/F32, layout = NCHW/NHWC for numDims = 4, NCDHW/NDHWC for numDims = 5,
+ * channels = 1/3 for NCHW/NCDHW on HOST backend) \param [out] dstPtr destination tensor in HIP
+ * memory (for HIP backend) or HOST memory (for HOST backend) \param [in] dstGenericDescPtr
+ * destination tensor descriptor (Restrictions - dataType and layout = same as that of
+ * srcGenericDescPtr) \param [in] anchorTensor starting index of the
  * slice for each dimension in input (1D tensor in pinned / HIP memory (for HIP backend) or HOST
  * memory (for HOST backend), of size = batchSize * numberOfDimensions) \param [in] shapeTensor
  * length of the slice for each dimension in input (1D tensor in pinned / HIP memory (for HIP
