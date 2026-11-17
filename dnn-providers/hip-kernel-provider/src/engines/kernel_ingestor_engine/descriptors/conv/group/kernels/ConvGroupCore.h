@@ -497,11 +497,7 @@ template <class T,
           int CB,
           int DEPTH,
           int NBI = 0>
-// Always inlined into the entry point. A 3-D filter's taps make the body too large for the
-// inliner, and a body called as a function past the short-branch range (128 KiB) gets long
-// branches that the compiler builds in s[30:31], the return address: the return then jumps back
-// into the body and the kernel never ends.
-__device__ __forceinline__ void k4ConvMmaRows(const K4Args& a CONV_EPI_FN_PARAM)
+__device__ void k4ConvMmaRows(const K4Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = CB * WAVE;
