@@ -1849,13 +1849,12 @@ namespace TensileLite
             // Int8 MACs use a 32-bit integer reduction even with a float epilogue.
             // Unsigned storage gives defined wraparound; interpret the completed
             // sum as signed Int32 before converting to the epilogue type.
-            constexpr bool isInt8Float = std::is_same_v<typename Inputs::AType, int8_t>
-                                         && std::is_same_v<typename Inputs::BType, int8_t>
-                                         && std::is_floating_point_v<Accumulator>;
-            using MacT       = std::conditional_t<isInt8Float, uint32_t, Accumulator>;
-            using MacMathOpT = std::conditional_t<isInt8Float, uint32_t, MathOpAccum>;
-            using SignedMacT = std::conditional_t<isInt8Float, int32_t, MacT>;
-            if constexpr(isInt8Float)
+            constexpr bool isInt8Mac = std::is_same_v<typename Inputs::AType, int8_t>
+                                       && std::is_same_v<typename Inputs::BType, int8_t>;
+            using MacT       = std::conditional_t<isInt8Mac, uint32_t, Accumulator>;
+            using MacMathOpT = std::conditional_t<isInt8Mac, uint32_t, MathOpAccum>;
+            using SignedMacT = std::conditional_t<isInt8Mac, int32_t, MacT>;
+            if constexpr(isInt8Mac)
             {
                 // The integer MAC would truncate a fractional MX scale to zero.
                 if(problem.mxBlockA() || problem.mxBlockB())

@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 using namespace TensileLite;
@@ -140,17 +141,17 @@ INSTANTIATE_TEST_SUITE_P(
         return std::string(test.name) + (tryFastPath ? "TryFastPath" : "SlowPath");
     });
 
-class ReferenceInt8MX : public ::testing::TestWithParam<std::tuple<bool, bool>>
+class ReferenceInt8MX : public ::testing::TestWithParam<std::tuple<bool, bool, bool>>
 {
 };
 
 TEST_P(ReferenceInt8MX, RejectsMXScalesBeforeWritingOutput)
 {
-    const auto [scaleA, tryFastPath] = GetParam();
-    constexpr size_t    k            = 32;
+    const auto [floatAlpha, scaleA, tryFastPath] = GetParam();
+    constexpr size_t    k                        = 32;
     std::vector<int8_t> a(k, 1);
     std::vector<int8_t> b(k, 1);
-    auto                problem = makeProblem(k, true);
+    auto                problem = makeProblem(k, floatAlpha);
     if(scaleA)
         problem.setMXScaleA(rocisa::DataType::E8, k, {}, /*padScaleTensor=*/false);
     else
@@ -161,6 +162,11 @@ TEST_P(ReferenceInt8MX, RejectsMXScalesBeforeWritingOutput)
     int32_t           c = 0;
     int32_t           d = -1;
     ContractionInputs inputs(a.data(), b.data(), &c, &d, 1.0f, 0.0f);
+    if(!floatAlpha)
+    {
+        inputs.alpha = int32_t(1);
+        inputs.beta  = int32_t(0);
+    }
     if(scaleA)
         inputs.mxsa = scales.data();
     else
@@ -178,13 +184,15 @@ TEST_P(ReferenceInt8MX, RejectsMXScalesBeforeWritingOutput)
     EXPECT_EQ(d, -1);
 }
 
-INSTANTIATE_TEST_SUITE_P(CPUReference,
-                         ReferenceInt8MX,
-                         ::testing::Combine(::testing::Bool(), ::testing::Bool()),
-                         [](const ::testing::TestParamInfo<ReferenceInt8MX::ParamType>& info) {
-                             return std::string(std::get<0>(info.param) ? "ScaleA" : "ScaleB")
-                                    + (std::get<1>(info.param) ? "TryFastPath" : "SlowPath");
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    CPUReference,
+    ReferenceInt8MX,
+    ::testing::Combine(::testing::Bool(), ::testing::Bool(), ::testing::Bool()),
+    [](const ::testing::TestParamInfo<ReferenceInt8MX::ParamType>& info) {
+        return std::string(std::get<0>(info.param) ? "FloatAlpha" : "IntegerAlpha")
+               + (std::get<1>(info.param) ? "ScaleA" : "ScaleB")
+               + (std::get<2>(info.param) ? "TryFastPath" : "SlowPath");
+    });
 
 template <typename Tuple>
 class ReferenceInt8Output : public ::testing::Test
@@ -238,5 +246,51 @@ TEST(ReferenceInt8Wrapping, CompletedSumIsSignedInt32BeforeFloatEpilogue)
         ContractionInputs inputs(a.data(), b.data(), &c, &d, 0.5f, 0.0f);
         SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
         EXPECT_EQ(d, -1073741824);
+    }
+}
+
+template <typename Tuple>
+class ReferenceInt8IntegerWrapping : public ::testing::Test
+{
+};
+
+using Int8IntegerOutputTypes = ::testing::Types<std::tuple<int32_t>, std::tuple<int8_t>>;
+TYPED_TEST_SUITE(ReferenceInt8IntegerWrapping, Int8IntegerOutputTypes);
+
+TYPED_TEST(ReferenceInt8IntegerWrapping, BothOverflowDirectionsBeforeIntegerEpilogue)
+{
+    using OutputT = typename std::tuple_element<0, TypeParam>::type;
+    struct WrappingCase
+    {
+        size_t  k;
+        int8_t  b;
+        int32_t expected;
+    };
+    // (-128)*(-128)*2^17 = 2^31, which wraps to INT32_MIN.
+    // (-128)*64*(2^18+1) = -2^31-8192, which wraps to 2^31-8192.
+    const WrappingCase wrappingCases[] = {
+        {131072, -128, std::numeric_limits<int32_t>::min()},
+        {262145, 64, 2147475456},
+    };
+    for(auto const& test : wrappingCases)
+    {
+        SCOPED_TRACE(test.k);
+        std::vector<int8_t> a(test.k, -128);
+        std::vector<int8_t> b(test.k, test.b);
+        auto                problem = makeProblem(test.k, false, TypeInfo<OutputT>::Enum);
+        OutputT             c       = 0;
+        for(bool tryFastPath : {false, true})
+        {
+            SCOPED_TRACE(tryFastPath);
+            OutputT           d = 0;
+            ContractionInputs inputs(a.data(), b.data(), &c, &d, int32_t(1), int32_t(0));
+            SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+            if constexpr(std::is_same_v<OutputT, int8_t>)
+                EXPECT_EQ(d,
+                          test.expected < 0 ? std::numeric_limits<int8_t>::min()
+                                            : std::numeric_limits<int8_t>::max());
+            else
+                EXPECT_EQ(d, test.expected);
+        }
     }
 }
