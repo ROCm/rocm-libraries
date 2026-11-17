@@ -146,7 +146,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -318,7 +318,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -345,10 +345,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -402,7 +402,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -574,7 +574,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -601,10 +601,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 5
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -658,7 +658,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -830,7 +830,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -857,10 +857,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -914,7 +914,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -1086,7 +1086,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -1113,10 +1113,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -1170,7 +1170,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -1342,7 +1342,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -1369,10 +1369,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -1426,7 +1426,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -1598,7 +1598,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -1625,10 +1625,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -1682,7 +1682,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -1854,7 +1854,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -1881,10 +1881,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 5
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -1938,7 +1938,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -1965,7 +1965,7 @@
     LocalDotLayout: 4
     LocalRead2A: true
     LocalRead2B: true
-    LocalReadVectorWidth: 8
+    LocalReadVectorWidth: 4
     LocalSplitU: 1
     LocalWrite2A: true
     LocalWrite2B: true
@@ -2110,7 +2110,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -2137,10 +2137,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 8
-    VectorWidthB: 8
-    GlobalReadVectorWidthA: 8
-    GlobalReadVectorWidthB: 8
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -2194,7 +2194,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -2366,7 +2366,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -2393,10 +2393,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -2450,7 +2450,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -2622,7 +2622,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -2649,10 +2649,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -2706,7 +2706,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -2878,7 +2878,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -2905,10 +2905,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -2962,7 +2962,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -3134,7 +3134,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -3161,10 +3161,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -3218,7 +3218,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -3390,7 +3390,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -3417,10 +3417,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -3474,7 +3474,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -3646,7 +3646,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -3673,10 +3673,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -3730,7 +3730,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -3757,7 +3757,7 @@
     LocalDotLayout: 4
     LocalRead2A: true
     LocalRead2B: true
-    LocalReadVectorWidth: 8
+    LocalReadVectorWidth: 4
     LocalSplitU: 1
     LocalWrite2A: true
     LocalWrite2B: true
@@ -3902,7 +3902,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -3929,10 +3929,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 8
-    VectorWidthB: 8
-    GlobalReadVectorWidthA: 8
-    GlobalReadVectorWidthB: 8
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -3986,7 +3986,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -4158,7 +4158,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -4185,10 +4185,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 5
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -4242,7 +4242,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -4414,7 +4414,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -4441,10 +4441,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -4498,7 +4498,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -4670,7 +4670,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -4697,10 +4697,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -4754,7 +4754,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -4926,7 +4926,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -4953,10 +4953,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -5010,7 +5010,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -5037,7 +5037,7 @@
     LocalDotLayout: 4
     LocalRead2A: true
     LocalRead2B: true
-    LocalReadVectorWidth: 8
+    LocalReadVectorWidth: 4
     LocalSplitU: 1
     LocalWrite2A: true
     LocalWrite2B: true
@@ -5182,7 +5182,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -5209,10 +5209,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 8
-    VectorWidthB: 8
-    GlobalReadVectorWidthA: 8
-    GlobalReadVectorWidthB: 8
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -5266,7 +5266,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -5438,7 +5438,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -5465,10 +5465,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -5522,7 +5522,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -5694,7 +5694,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -5721,10 +5721,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 5
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -5778,7 +5778,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -5950,7 +5950,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -5977,10 +5977,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -6034,7 +6034,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -6206,7 +6206,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -6233,10 +6233,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -6290,7 +6290,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -6462,7 +6462,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -6489,10 +6489,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -6546,7 +6546,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -6718,7 +6718,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -6745,10 +6745,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -6802,7 +6802,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -6974,7 +6974,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -7001,10 +7001,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -7058,7 +7058,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -7230,7 +7230,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -7257,10 +7257,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -7314,7 +7314,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -7486,7 +7486,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -7513,10 +7513,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -7570,7 +7570,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -7742,7 +7742,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -7769,10 +7769,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -7826,7 +7826,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -7853,7 +7853,7 @@
     LocalDotLayout: 4
     LocalRead2A: true
     LocalRead2B: true
-    LocalReadVectorWidth: 8
+    LocalReadVectorWidth: 4
     LocalSplitU: 1
     LocalWrite2A: true
     LocalWrite2B: true
@@ -7998,7 +7998,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -8025,10 +8025,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 8
-    VectorWidthB: 8
-    GlobalReadVectorWidthA: 8
-    GlobalReadVectorWidthB: 8
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -8082,7 +8082,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -8254,7 +8254,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -8281,10 +8281,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -8338,7 +8338,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -8365,7 +8365,7 @@
     LocalDotLayout: 4
     LocalRead2A: true
     LocalRead2B: true
-    LocalReadVectorWidth: 8
+    LocalReadVectorWidth: 4
     LocalSplitU: 1
     LocalWrite2A: true
     LocalWrite2B: true
@@ -8510,7 +8510,7 @@
     ThreadTile1: 8
     ThreadTileA: 8
     ThreadTileB: 8
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -8537,10 +8537,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 3
-    VectorWidthA: 8
-    VectorWidthB: 8
-    GlobalReadVectorWidthA: 8
-    GlobalReadVectorWidthB: 8
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -8594,7 +8594,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 32
@@ -8766,7 +8766,7 @@
     ThreadTile1: 4
     ThreadTileA: 4
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -8793,10 +8793,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
   - 1LDSBuffer: 0
     AggressivePerfMode: 1
     AssertFree0ElementMultiple: 1
@@ -8850,7 +8850,7 @@
     - 10
     - 3
     - 0
-    InnerUnroll: 4
+    InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
     LSCA: 64
@@ -9022,7 +9022,7 @@
     ThreadTile1: 4
     ThreadTileA: 8
     ThreadTileB: 4
-    TransposeLDS: 0
+    TransposeLDS: 2
     UnrollIncIsDepthU: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
@@ -9049,10 +9049,10 @@
     _VectorStore: 1
     _WorkspaceSizePerElemC: 0
     _staggerStrideShift: 4
-    VectorWidthA: 4
-    VectorWidthB: 4
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    VectorWidthA: 1
+    VectorWidthB: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
 - - 2
   - 3
   - 0
