@@ -246,8 +246,8 @@ TEST(GeneratedBackendTest, FirstFitFallsThroughToNarrowerKernel)
 template <template <typename> class Instance>
 void expect_tdm_cshuffle_and_split_k_gate()
 {
-    using Unpadded256   = TdmStubKernel<256, 256, false, false, 8>;
-    using Unpadded128   = TdmStubKernel<256, 128, false, false, 8>;
+    using Unpadded256    = TdmStubKernel<256, 256, false, false, 8>;
+    using Unpadded128    = TdmStubKernel<256, 128, false, false, 8>;
     using PaddedCShuffle = TdmStubKernel<256, 256, false, true, 8>;
     using TdmEpi256 =
         TdmStubKernel<256, 256, false, false, 1, ck_tile::TdmEpilogue<StubEpilogueProblem>>;
@@ -339,7 +339,7 @@ TEST(GeneratedBackendTest, GeneratedKernelInstanceDerivesStridesFromLayout)
                              ck_tile::index_t want_a,
                              ck_tile::index_t want_b,
                              ck_tile::index_t want_c) {
-        KernelKey key          = make_tdm_key(256, 256, Pipeline::CompTDMV3, Epilogue::CShuffle, lc);
+        KernelKey key = make_tdm_key(256, 256, Pipeline::CompTDMV3, Epilogue::CShuffle, lc);
         key.signature.layout_a = la;
         key.signature.layout_b = lb;
         TdmKernelInstance<StrideCaptureKernel> inst(key, "stride_capture");

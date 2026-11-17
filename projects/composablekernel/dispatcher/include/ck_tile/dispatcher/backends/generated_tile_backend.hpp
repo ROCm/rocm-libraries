@@ -116,9 +116,9 @@ bool generated_gemm_supports(const KernelKey& key, const Problem& problem)
         // TdmEpilogue overwrites C, and non-PC TDM launchers emit a host k_batch == 1
         // guard. Plain CompTDMPC with CShuffle omits that guard for split-K, where
         // UniversalGemmKernel::IsSupportedArgument requires whole TileK splits per batch.
-        const bool pc_cshuffle_split_k =
-            !tdm_epilogue && !kernel_requires_full_nk_tiles<SelectedKernel>::value &&
-            key.algorithm.pipeline == Pipeline::CompTDMPC;
+        const bool pc_cshuffle_split_k = !tdm_epilogue &&
+                                         !kernel_requires_full_nk_tiles<SelectedKernel>::value &&
+                                         key.algorithm.pipeline == Pipeline::CompTDMPC;
         if(problem.k_batch != 1)
         {
             if(!pc_cshuffle_split_k)
@@ -158,11 +158,8 @@ bool generated_gemm_supports(const KernelKey& key, const Problem& problem)
 
 /// Derive layout-accurate GemmHostArgs strides from KernelKey (RowMajor A/B/C ->
 /// K/N/N; ColMajor -> M/K/M) so non-square rrr/crr/ccr launches never assume rcr.
-inline ck_tile::GemmHostArgs make_generated_gemm_host_args(const KernelKey& key,
-                                                           const Problem& problem,
-                                                           const void* a_ptr,
-                                                           const void* b_ptr,
-                                                           void* c_ptr)
+inline ck_tile::GemmHostArgs make_generated_gemm_host_args(
+    const KernelKey& key, const Problem& problem, const void* a_ptr, const void* b_ptr, void* c_ptr)
 {
     const auto is_row   = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
     const auto stride_a = is_row(key.signature.layout_a) ? problem.K : problem.M;
