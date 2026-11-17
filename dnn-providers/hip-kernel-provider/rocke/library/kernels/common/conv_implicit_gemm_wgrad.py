@@ -582,8 +582,9 @@ class WgradConvSpec:
     # offsets: tile k+1's global reads are issued right after the barrier that
     # publishes tile k, stay in VGPRs under tile k's MFMAs, and are written to
     # LDS at the top of the next iteration. Both barriers of that loop are
-    # LDS-only: a full barrier would also drain the outstanding global reads
-    # and serialise them with the MFMAs again. The read issued in the last
+    # LDS-only: a full barrier may also wait for the outstanding global reads
+    # (on gfx12 RDNA, depending on the compiler) and serialise them with the
+    # MFMAs again. The read issued in the last
     # iteration is never stored. async_dma, unroll_k, prefetch_addr and
     # stream-K have their own K loops and reject it. Not the same loop as
     # ``register_prefetch`` above (tag ``rpf``, the compv3 + prefetch_addr
@@ -624,8 +625,8 @@ class WgradConvSpec:
     # stored (store_lds), so the global latency hides behind the MMAs.
     #   0 -- off (the plain load / barrier / MMA / barrier loop).
     #   3 -- the two in-loop barriers emitted LDS-only (rocke.helpers.asm.
-    #        lds_barrier_keep_vmem, since sync_lds_only still drains the loads
-    #        on gfx12 RDNA), the prefetch pinned ahead of the MMAs with
+    #        lds_barrier_keep_vmem: sync_lds_only may still drain the loads
+    #        on gfx12 RDNA, depending on the compiler), the prefetch pinned ahead of the MMAs with
     #        sched_barrier (the machine scheduler otherwise sinks the loads
     #        behind most of them), and the reads of a partially loading tile
     #        in their own branch (RegTransposeTileLoader guard).
@@ -4161,9 +4162,10 @@ def build_implicit_gemm_conv_wgrad(
             new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
             # ... and the transposes of the prefetched tile behind them.
             b.sched_barrier(0)
-            # sync_lds_only would still drain the prefetch on gfx12 RDNA, where
-            # the wait-count pass waits for every counter in front of an
-            # s_barrier it emits; the helper emits the barrier itself there.
+            # sync_lds_only may still drain the prefetch on gfx12 RDNA, where the
+            # wait-count pass can wait for every counter in front of an
+            # s_barrier it emits (compiler-dependent); the helper emits the
+            # barrier itself there.
             lds_barrier_keep_vmem(b, arch)
             _store(_st)
             lds_barrier_keep_vmem(b, arch)

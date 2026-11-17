@@ -116,11 +116,12 @@ int rocke_mfma_f8f6f4_agpr_cluster(rocke_ir_builder_t* b,
 /* Workgroup barrier that waits for LDS but leaves global loads in flight
  * (Python `lds_barrier_keep_vmem`).
  *
- * On gfx12 RDNA (target_family gfx12_rdna) the AMDGPU wait-count pass
- * drains every counter, vmcnt / loadcnt included, in front of an `s_barrier`
- * it emits itself, so `rocke_b_sync_lds_only` still waits for a register
- * prefetch. There the barrier is a side-effecting inline asm with a memory
- * clobber (CK's `block_sync_lds`):
+ * On gfx12 RDNA (target_family gfx12_rdna) the AMDGPU wait-count pass may
+ * drain every counter, vmcnt / loadcnt included, in front of an `s_barrier`
+ * it emits itself (compiler-version dependent), in which case
+ * `rocke_b_sync_lds_only` still waits for a register prefetch. There the
+ * barrier is always a side-effecting inline asm with a memory clobber (CK's
+ * `block_sync_lds`):
  *
  *   gfx12_rdna: "s_wait_dscnt 0x0\ns_barrier_signal -1\ns_barrier_wait -1"
  *

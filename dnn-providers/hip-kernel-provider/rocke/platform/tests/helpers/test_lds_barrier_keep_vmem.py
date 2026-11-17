@@ -9,7 +9,7 @@ an ``s_barrier`` it emits itself, so ``sync_lds_only`` can wait for a register
 prefetch issued before the barrier.  Whether the pass adds the drain depends on
 the compiler version: some builds do not, in which case
 ``test_sync_lds_only_drains_the_load_on_rdna`` skips rather than fails.  The
-helper emits the barrier as inline asm on all gfx12 targets and
+helper emits the barrier as inline asm on the gfx12 RDNA targets and
 ``sync_lds_only`` everywhere else; the codegen test always checks that the
 helper itself keeps the load in flight.
 
@@ -171,8 +171,9 @@ def test_sync_lds_only_drains_the_load_on_rdna(arch):
     lines = _isa(arch, keep_vmem=False)
     if not _drained_before_first_barrier(arch, lines):
         pytest.skip(
-            f"compiler on {arch} does not emit s_wait_loadcnt before s_barrier; "
-            "the helper is still needed to keep the load in flight across the barrier"
+            f"compiler on {arch} does not emit s_wait_loadcnt before s_barrier, "
+            "so there is no drain here for the helper to avoid (the helper "
+            "itself is still checked by the other tests)"
         )
     assert True  # drain observed; expectation met
 

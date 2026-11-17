@@ -138,8 +138,7 @@ extern "C" {
  *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
  *     returns long long (it returned int), which changes its signature.
  * 21: rocke_implicit_gemm_conv_wgrad_spec_t gained the register-transpose
- *     fields (reg_transpose onward) at its end, which changes its size.
- *     (Independent of #16063's ABI 21 claim; whichever lands second re-bumps.) */
+ *     fields (reg_transpose onward) at its end, which changes its size. */
 #define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.

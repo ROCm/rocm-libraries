@@ -74,8 +74,8 @@ tagged in the kernel name and `KernelIdentity`.
   loop of the `reg_transpose` loaders. Each K step issues the next tile's
   global reads into registers, runs the current tile's MMAs out of LDS, then
   transposes and stores the prefetched tile. Mode 3 makes both in-loop barriers
-  LDS-only (`rocke.helpers.asm.lds_barrier_keep_vmem`, since `sync_lds_only`
-  still drains the loads on gfx12 RDNA), pins the prefetch ahead of the MMAs
+  LDS-only (`rocke.helpers.asm.lds_barrier_keep_vmem`; on gfx12 RDNA
+  `sync_lds_only` may still drain the loads, depending on the compiler), pins the prefetch ahead of the MMAs
   with `sched_barrier` and branches the reads of a partially loading tile
   (`guard`). The last step's prefetch is masked to the out-of-range sentinel.
   Accepted values: 0 (off) and 3. Rejected with `unroll_k` and stream-K. Not
