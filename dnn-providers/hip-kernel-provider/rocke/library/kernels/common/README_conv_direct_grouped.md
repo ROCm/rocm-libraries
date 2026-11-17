@@ -150,7 +150,7 @@ direct ABI over that problem and the buffers `A = dY`, `B = W`, `D = dX`.
   `DCONV4C_MAX_ROW_PASSES`, `DCONV4C_MAX_THREADS` or the target's LDS.
 
 AOT cache variant `direct_grouped_dgrad_4c` (see
-[Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950)).
+[Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950-gfx942)).
 
 ### cpg = 8 — `DirectConv8cSpec`
 
@@ -273,7 +273,7 @@ the "whole image" of a JIT build is a cached tile height
 [`../conv/docs/convolution.md`](../conv/docs/convolution.md) ("Generic Kernel
 dgrad: fused weights").
 
-### Dgrad AOT cache variants (gfx950)
+### Dgrad AOT cache variants (gfx950, gfx942)
 
 The single-kernel direct dgrad forms are AOT cache variants
 (`library/kernels/conv/direct_aot_jobs.py`); each cached binary is a variant
@@ -776,7 +776,7 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | Other directions, gfx1250 | Implicit-GEMM, or the WMMA direct kernels where they apply |
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
 | Backward-data, gfx942 | The gfx942 backward-data instance list (`library/dispatch/grouped_convolution_instances/gfx942_dgrad.json`): windowed and streaming depthwise, 4c / fused generic and MFMA direct dgrad, and implicit GEMM (`mem`, `compv3` and `compv4` pipelines) |
-| Backward-data, gfx950 | Run the cached candidates ([Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950)): windowed depthwise, 4c / fused generic direct, and implicit GEMM; keep the faster |
+| Backward-data, gfx950 | Run the cached candidates ([Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950-gfx942)): windowed depthwise, 4c / fused generic direct, and implicit GEMM; keep the faster |
 | Backward-weights, gfx950, `cpg` and `kpg` ≥ 16, `stride = 1` | Direct-conv wgrad |
 | Backward-weights, anything else | Implicit-GEMM wgrad |
 | Non-grouped (`groups = 1`), `stride ≤ 2` | Sweep `conv_direct_nongrouped` and implicit-GEMM, keep the faster ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)) |
