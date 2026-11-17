@@ -14,6 +14,8 @@
 // KV-split binaries (CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS 2) run the same checks on the split
 // kernel and its merge, launched as the generated instances launch them, on a NaN-filled workspace;
 // query-tail binaries (CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL 1) with the M128 kernel in front.
+// FP8 binaries (CK_TILE_FMHA_PAGE_TILE_TEST_FP8 1) run the FP8 page tile under the FP8 contract
+// (accuracy_contract.md, "FP8 P") and its negative controls.
 // Known blind spot: at long KV (32768) a single wrong logical page under random V is below the
 // accuracy contract; the marker patterns cover only their marked pages.
 
@@ -26,6 +28,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -36,6 +39,7 @@
 #include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_split_merge_kernel.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_batch_prefill_pipeline_qr_ks_vs_tdm_sched_fp8_page_tile.hpp"
 #include "fmha_reference.hpp"
 #include "fmha_test_common.hpp"
 
@@ -87,15 +91,27 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL
 #define CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL 0
 #endif
+// 1: the FP8 page tile (fp8bf16): FP8 Q/K/V and P, BF16 O, per-tensor q/k/v descales; vectorized
+// x = 16 pools, P64, D64, M128, vLLM table.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_FP8
+#define CK_TILE_FMHA_PAGE_TILE_TEST_FP8 0
+#endif
 
 namespace {
 
 namespace reference = ck_tile::test::reference;
 using ck_tile::index_t;
 constexpr bool kFp16 = CK_TILE_FMHA_PAGE_TILE_TEST_FP16 != 0;
-using Data           = std::conditional_t<kFp16, ck_tile::half_t, ck_tile::bf16_t>;
-using DataConfig     = std::conditional_t<kFp16, FmhaFwdFp16, FmhaFwdBf16>;
-// Mantissa bits of the 16-bit type, for the accuracy contract (P is rounded to it).
+constexpr bool kFp8  = CK_TILE_FMHA_PAGE_TILE_TEST_FP8 != 0;
+// Q/K/V (and bias) elements, and O: BF16 O for FP8 Q/K/V.
+using Data  = std::conditional_t<kFp8,
+                                 ck_tile::fp8_t,
+                                 std::conditional_t<kFp16, ck_tile::half_t, ck_tile::bf16_t>>;
+using OData = std::conditional_t<kFp8, ck_tile::bf16_t, Data>;
+using DataConfig =
+    std::conditional_t<kFp8, FmhaFwdFp8Bf16, std::conditional_t<kFp16, FmhaFwdFp16, FmhaFwdBf16>>;
+// Mantissa bits of O, for the accuracy contract; P is rounded to them too, except FP8 P (the
+// contract's quantized-P model).
 constexpr int kMantissaBits = kFp16 ? 10 : 7;
 
 constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
@@ -130,23 +146,50 @@ static_assert(kKvSplits == 1 ||
 constexpr index_t kQueryTailRows = CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL != 0 ? 128 : 0;
 static_assert(kQueryTailRows == 0 || (kKvSplits == 2 && kM64),
               "the query tail is a KV split with M64 tiles");
+static_assert(!kFp8 || (kVectorized && kPage == 64 && CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM == 64 &&
+                        !kSglang && !kFp16 && !kLse && !kSink && !kSoftcap && kBias == 0 && !kM64 &&
+                        kKvSplits == 1),
+              "the FP8 page tile is P64 D64 M128 over vectorized pools and a vLLM table, without "
+              "LSE, sink, soft cap, bias or KV split");
+
+// The page-tile pipeline of a problem, the FP8 one in FP8 binaries. Each binary names only its
+// own pipeline: naming the FP8 pipeline forms its default policy from the problem.
+template <typename Problem, bool Fp8 = kFp8>
+struct PageTilePipeline
+{
+    using type = ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile<Problem>;
+};
+template <typename Problem>
+struct PageTilePipeline<Problem, true>
+{
+    using type = ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile<Problem>;
+};
 
 // Pipeline and epilogue of one page-tile kernel with an M TileM, PV stage depth TileK1 tile.
 // Split: the KV split's kernel, which stores FP32 partial outputs and their LSE (the merge
-// writes O).
+// writes O). FP8: the FP8 WMMA warp tiles, a full-head QK stage and one PV stage over the whole
+// 128-key tile (TileK1 does not apply).
 template <index_t HeadDim, bool Causal, index_t TileM, index_t TileK1, bool Split>
 struct KernelTypes
 {
     using TypeConfig = FmhaFwdTypeConfig<DataConfig>;
     using OData      = std::conditional_t<Split, float, typename TypeConfig::ODataType>;
-    using Shape =
-        ck_tile::TileFmhaShape<ck_tile::sequence<TileM, 128, 32, HeadDim, TileK1, HeadDim>,
-                               ck_tile::sequence<4, 1, 1>,
-                               ck_tile::sequence<16, 16, 32>,
-                               ck_tile::sequence<4, 1, 1>,
-                               ck_tile::sequence<16, 16, 32>,
-                               true,
-                               false>;
+    using Shape      = std::conditional_t<
+             kFp8,
+             ck_tile::TileFmhaShape<ck_tile::sequence<TileM, 128, HeadDim, HeadDim, 128, HeadDim>,
+                                    ck_tile::sequence<4, 1, 1>,
+                                    ck_tile::sequence<16, 16, 64>,
+                                    ck_tile::sequence<4, 1, 1>,
+                                    ck_tile::sequence<16, 16, 128>,
+                                    true,
+                                    false>,
+             ck_tile::TileFmhaShape<ck_tile::sequence<TileM, 128, 32, HeadDim, TileK1, HeadDim>,
+                                    ck_tile::sequence<4, 1, 1>,
+                                    ck_tile::sequence<16, 16, 32>,
+                                    ck_tile::sequence<4, 1, 1>,
+                                    ck_tile::sequence<16, 16, 32>,
+                                    true,
+                                    false>>;
     using Traits = ck_tile::TileFmhaBatchPrefillTraits<
         true,
         true,
@@ -157,7 +200,8 @@ struct KernelTypes
         false,
         kLse || Split,
         false,
-        ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
+        kFp8 ? ck_tile::BlockAttentionQuantScaleEnum::PERTENSOR
+             : ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
         1,
         false,
         kSink,
@@ -185,13 +229,13 @@ struct KernelTypes
         false,
         static_cast<int>(kPage),
         Traits>;
-    using Pipeline = ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile<Problem>;
+    using Pipeline = typename PageTilePipeline<Problem>::type;
     using Epilogue = ck_tile::Default2DEpilogue<
         ck_tile::Default2DEpilogueProblem<typename TypeConfig::OaccDataType, OData, true, false>>;
 };
 
-// BF16 or FP16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group
-// mode, M128/N128 (or M64/N128).
+// BF16, FP16 or FP8 (BF16 O), vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V
+// pool, group mode, M128/N128 (or M64/N128).
 template <index_t HeadDim, bool Causal>
 struct Model
 {
@@ -231,7 +275,7 @@ struct ModelNames
                 : kBias == 2 ? "Alibi"
                              : "") +
                (kM64 ? "M64" : "") + (kKvSplits == 2 ? "Split" : "") +
-               (kQueryTailRows > 0 ? "Tail" : "");
+               (kQueryTailRows > 0 ? "Tail" : "") + (kFp8 ? "Fp8" : "");
     }
 };
 
@@ -252,6 +296,9 @@ struct Pointers
     const void* bias              = nullptr; // elementwise bias, or the ALiBi slopes [Hq]
     void* o_acc                   = nullptr; // KV-split workspace: partial O and LSE planes
     void* lse_acc                 = nullptr;
+    const void* q_descale         = nullptr; // FP8: one fp32 each
+    const void* k_descale         = nullptr;
+    const void* v_descale         = nullptr;
 };
 
 // Problem in the kernel's native layout: Q/O packed [sum(q_len), Hq, D]; K/V pools
@@ -304,6 +351,9 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.q_ptr                    = d.q;
     a.k_ptr                    = d.k;
     a.v_ptr                    = d.v;
+    a.q_descale_ptr            = d.q_descale;
+    a.k_descale_ptr            = d.k_descale;
+    a.v_descale_ptr            = d.v_descale;
     a.o_ptr                    = d.o;
     a.seqstart_q_ptr           = d.seqstart_q;
     a.kv_page_indices          = const_cast<void*>(d.block_table);
@@ -436,7 +486,10 @@ TYPED_TEST(PageTileContract, CheckLaunch)
                      nullptr,
                      fake(0xb0000),
                      fake(0xc0000),
-                     fake(0xd0000)};
+                     fake(0xd0000),
+                     fake(0xe0000),
+                     fake(0xe0004),
+                     fake(0xe0008)};
     const auto [base, grids] = MakeKargsAndGrids<Kernel>(MakeArgs<TypeParam>(l, d));
     const index_t need       = Kernel::GetLaunchDynamicSmemSize();
 
@@ -583,6 +636,13 @@ TYPED_TEST(PageTileContract, CheckLaunch)
         expect_refused("an ALiBi instance needs the slopes", need, [](Kargs& k) {
             k.alibi_slope_ptr = nullptr;
         });
+    if constexpr(kFp8)
+    {
+        const char* rule = "a per-tensor descale instance needs q/k/v_descale_ptr";
+        expect_refused(rule, need, [](Kargs& k) { k.q_descale_ptr = nullptr; });
+        expect_refused(rule, need, [](Kargs& k) { k.k_descale_ptr = nullptr; });
+        expect_refused(rule, need, [](Kargs& k) { k.v_descale_ptr = nullptr; });
+    }
     if constexpr(kSink)
         EXPECT_EQ(refusal(need, [&](Kargs& k) { k.sink_ptr = fake(0xa0000); }), "");
     else
@@ -627,13 +687,23 @@ struct Case
 
 // Rows never read as a valid key get this value: a leak into a valid score, or into P*V with a
 // nonzero P, is far outside the accuracy contract. Unlike NaN it stays harmless when multiplied
-// by P = 0, so rows masked inside a tile are not checked this way.
-constexpr float kUnusedRowValue = 1000.0f;
+// by P = 0, so rows masked inside a tile are not checked this way. FP8: the largest finite e4m3
+// value, above every FP8 input (|x| <= kQkAmplitude).
+constexpr float kUnusedRowValue = kFp8 ? 448.0f : 1000.0f;
+
+// Q and K are drawn from U(-kQkAmplitude, kQkAmplitude), V from U(-1, 1). FP8: spread scores
+// (standard deviation near 2 with the descales below), the data of the q / k descale controls.
+constexpr float kQkAmplitude = kFp8 ? 2.5f : 1.0f;
 
 struct HostProblem
 {
     Layout layout;
     int head_dim = 0;
+    // Per-tensor descales of the FP8 inputs: distinct and not 1, so that a descale applied to the
+    // wrong operand or twice changes the output. 1 for the 16-bit types.
+    float q_descale = kFp8 ? 0.75f : 1.0f;
+    float k_descale = kFp8 ? 1.25f : 1.0f;
+    float v_descale = kFp8 ? 0.625f : 1.0f;
     std::vector<Data> q, k, v;
     std::vector<float> q_float;
     std::vector<float> sink_logits; // per query head, in the scaled score domain
@@ -759,9 +829,10 @@ HostProblem MakeProblem(const Case& s,
     const std::size_t pool_len = static_cast<std::size_t>(l.num_total_pages) * kPage * row;
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> uniform(-1.0f, 1.0f);
-    auto draw = [&] { return ck_tile::type_convert<Data>(uniform(rng)); };
+    auto draw    = [&] { return ck_tile::type_convert<Data>(uniform(rng)); };
+    auto draw_qk = [&] { return ck_tile::type_convert<Data>(kQkAmplitude * uniform(rng)); };
     h.q.resize(static_cast<std::size_t>(l.seqstart_q.back()) * l.q_heads * head_dim);
-    std::generate(h.q.begin(), h.q.end(), draw);
+    std::generate(h.q.begin(), h.q.end(), draw_qk);
     // Rows that no sequence reads as a valid key keep kUnusedRowValue.
     const Data unused = ck_tile::type_convert<Data>(kUnusedRowValue);
     h.k.assign(pool_len, unused);
@@ -777,7 +848,7 @@ HostProblem MakeProblem(const Case& s,
                 row;
             for(std::size_t x = 0; x < row; ++x)
             {
-                h.k[dst + x]   = draw();
+                h.k[dst + x]   = draw_qk();
                 const Data v   = draw();
                 const float on = IsMarkerPage(values, key / kPage, pages) ? 1.0f : 0.0f;
                 h.v[dst + x]   = values == Values::Random ? v : ck_tile::type_convert<Data>(on);
@@ -812,7 +883,7 @@ HostProblem MakeProblem(const Case& s,
 struct DeviceProblem
 {
     ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens,
-        lse, sink, bias, o_acc, lse_acc;
+        lse, sink, bias, o_acc, lse_acc, descales;
 
     // (head, split, query) rows of the KV-split workspace (see MakeArgs; one row without a
     // split).
@@ -827,15 +898,15 @@ struct DeviceProblem
         return kSglang ? l.kv_page_indices : l.block_table;
     }
 
-    // Linear pool [page][token][head][D] -> vectorized page-heads: K [page][head][D/8][P][8],
-    // V [page][head][P/8][D][8]. The page stride is unchanged. V rows that no sequence reads
-    // (kUnusedRowValue, including the tail of each sequence's last page) become NaN: a partial
-    // group of 8 tokens is read past seqlen_k unless the kernel keeps those rows out of LDS, and
-    // a zero probability does not hide a NaN.
+    // Linear pool [page][token][head][D] -> vectorized page-heads: K [page][head][D/x][P][x],
+    // V [page][head][P/x][D][x], x = 16 / sizeof(Data) (8, or 16 for FP8). The page stride is
+    // unchanged. V rows that no sequence reads (kUnusedRowValue, including the tail of each
+    // sequence's last page) become NaN: a partial group of x tokens is read past seqlen_k unless
+    // the kernel keeps those rows out of LDS, and a zero probability does not hide a NaN.
     static std::vector<Data>
     Vectorize(const HostProblem& h, const std::vector<Data>& linear, bool is_k)
     {
-        const std::size_t H = h.layout.kv_heads, D = h.head_dim, P = kPage;
+        const std::size_t H = h.layout.kv_heads, D = h.head_dim, P = kPage, X = 16 / sizeof(Data);
         std::vector<Data> out(linear.size());
         for(std::size_t page = 0; page < static_cast<std::size_t>(h.layout.num_total_pages); ++page)
             for(std::size_t t = 0; t < P; ++t)
@@ -843,8 +914,8 @@ struct DeviceProblem
                     for(std::size_t d = 0; d < D; ++d)
                     {
                         const std::size_t base = (page * H + head) * P * D;
-                        const std::size_t dst  = is_k ? base + ((d / 8) * P + t) * 8 + d % 8
-                                                      : base + ((t / 8) * D + d) * 8 + t % 8;
+                        const std::size_t dst  = is_k ? base + ((d / X) * P + t) * X + d % X
+                                                      : base + ((t / X) * D + d) * X + t % X;
                         const Data x           = linear[((page * P + t) * H + head) * D + d];
                         out[dst] = !is_k && ck_tile::type_convert<float>(x) == kUnusedRowValue
                                        ? ck_tile::type_convert<Data>(
@@ -867,7 +938,7 @@ struct DeviceProblem
         : q(h.q.size() * sizeof(Data)),
           k(PoolBytes(h, page_shift)),
           v(PoolBytes(h, page_shift)),
-          o(h.q.size() * sizeof(Data)),
+          o(h.q.size() * sizeof(OData)),
           seqstart_q(h.layout.seqstart_q.size() * sizeof(int32_t)),
           seqlen_k(h.layout.seqlen_k.size() * sizeof(int32_t)),
           block_table(std::max<std::size_t>(Pages(h.layout).size(), 1) * sizeof(int32_t)),
@@ -881,8 +952,10 @@ struct DeviceProblem
           bias(std::max<std::size_t>(
               std::max(h.bias.size() * sizeof(Data), h.alibi_slopes.size() * sizeof(float)), 4)),
           o_acc(WorkspaceRows(h.layout) * h.layout.q_heads * h.head_dim * sizeof(float)),
-          lse_acc(WorkspaceRows(h.layout) * h.layout.q_heads * sizeof(float))
+          lse_acc(WorkspaceRows(h.layout) * h.layout.q_heads * sizeof(float)),
+          descales(3 * sizeof(float))
     {
+        SetDescales(h.q_descale, h.k_descale, h.v_descale);
         if(!h.bias.empty())
             bias.ToDevice(h.bias.data());
         if(!h.alibi_slopes.empty())
@@ -916,8 +989,16 @@ struct DeviceProblem
             kv_last_page_lens.ToDevice(h.layout.kv_last_page_lens.data());
     }
 
+    // The descales the kernel reads (the negative controls perturb them).
+    void SetDescales(float q_descale, float k_descale, float v_descale)
+    {
+        const std::array<float, 3> values{q_descale, k_descale, v_descale};
+        descales.ToDevice(values.data());
+    }
+
     Pointers pointers()
     {
+        auto* descale = static_cast<const float*>(descales.GetDeviceBuffer());
         return {q.GetDeviceBuffer(),
                 k.GetDeviceBuffer(),
                 v.GetDeviceBuffer(),
@@ -931,22 +1012,25 @@ struct DeviceProblem
                 sink.GetDeviceBuffer(),
                 bias.GetDeviceBuffer(),
                 o_acc.GetDeviceBuffer(),
-                lse_acc.GetDeviceBuffer()};
+                lse_acc.GetDeviceBuffer(),
+                descale,
+                descale + 1,
+                descale + 2};
     }
 };
 
 // Runs one checked launch on a NaN-filled output (and LSE) and returns the output; with an LSE
 // kernel the [Hq, total_q] LSE is returned through lse_out when given.
 template <typename M>
-std::vector<Data> Run(const HostProblem& h,
-                      DeviceProblem& d,
-                      Window window               = {},
-                      std::vector<float>* lse_out = nullptr,
-                      std::int64_t page_shift     = 0)
+std::vector<OData> Run(const HostProblem& h,
+                       DeviceProblem& d,
+                       Window window               = {},
+                       std::vector<float>* lse_out = nullptr,
+                       std::int64_t page_shift     = 0)
 {
     using Kernel = typename M::Kernel;
-    std::vector<Data> o(h.q.size(),
-                        ck_tile::type_convert<Data>(std::numeric_limits<float>::quiet_NaN()));
+    std::vector<OData> o(h.q.size(),
+                         ck_tile::type_convert<OData>(std::numeric_limits<float>::quiet_NaN()));
     d.o.ToDevice(o.data());
     std::vector<float> lse(static_cast<std::size_t>(h.layout.q_heads) * h.layout.seqstart_q.back(),
                            std::numeric_limits<float>::quiet_NaN());
@@ -985,10 +1069,28 @@ std::vector<Data> Run(const HostProblem& h,
     return o;
 }
 
+// The FP8 page tile's P (the contract's quantized-P model, accuracy_contract.md "FP8 P"): e4m3,
+// the pipeline's kPScale, subnormals kept (the native controls of
+// test_batch_prefill_fp8_native_controls.cpp). None for the 16-bit types.
+template <typename M>
+std::optional<reference::QuantizedP> QuantizedPModel()
+{
+    if constexpr(kFp8)
+    {
+        reference::QuantizedP quantized;
+        quantized.scale            = M::Types::Pipeline::kPScale;
+        quantized.keeps_subnormals = true;
+        return quantized;
+    }
+    else
+        return std::nullopt;
+}
+
 // Gathers each sequence's keys and values through the block table into contiguous
 // [k_len, Hkv, D] arrays and compares every (or every sampled) output row.
+template <typename M>
 reference::Metrics CompareWithReference(const HostProblem& h,
-                                        const std::vector<Data>& o,
+                                        const std::vector<OData>& o,
                                         bool causal,
                                         const std::vector<std::size_t>& sampled_rows = {},
                                         Window window                                = {},
@@ -999,7 +1101,7 @@ reference::Metrics CompareWithReference(const HostProblem& h,
     const std::size_t krow = static_cast<std::size_t>(l.kv_heads) * D;
     const std::size_t qrow = static_cast<std::size_t>(l.q_heads) * D;
     std::vector<float> o_float(o.size());
-    std::transform(o.begin(), o.end(), o_float.begin(), [](Data x) {
+    std::transform(o.begin(), o.end(), o_float.begin(), [](OData x) {
         return ck_tile::type_convert<float>(x);
     });
     std::vector<std::vector<float>> keys(l.batch()), values(l.batch());
@@ -1032,6 +1134,9 @@ reference::Metrics CompareWithReference(const HostProblem& h,
         s.query_dimension = D;
         s.value_dimension = D;
         s.score_scale     = 1.0f / std::sqrt(static_cast<float>(D));
+        s.q_descale       = h.q_descale;
+        s.k_descale       = h.k_descale;
+        s.v_descale       = h.v_descale;
         if(kSoftcap)
             s.score_transform = [](std::size_t, std::size_t, std::size_t, float x) {
                 return kSoftcapValue * std::tanh(x / kSoftcapValue);
@@ -1104,9 +1209,13 @@ reference::Metrics CompareWithReference(const HostProblem& h,
                                             1};
         outputs.push_back({{o_float.data(), o_float.size(), q_offset, D, qrow, 1}, lse_view});
     }
-    const auto expected = reference::Compute(sequences);
-    return reference::Compare(
-        sequences, expected, outputs, {}, reference::AccuracyContract{kMantissaBits, 128});
+    const auto quantized = QuantizedPModel<M>();
+    const auto expected  = reference::Compute(sequences, 128, quantized);
+    return reference::Compare(sequences,
+                              expected,
+                              outputs,
+                              {},
+                              reference::AccuracyContract{kMantissaBits, 128, quantized});
 }
 
 template <typename M>
@@ -1141,7 +1250,7 @@ TYPED_TEST(PageTileForward, MatchesReference)
             // Identity and permuted pools hold the same logical data: the outputs must be
             // bitwise equal, which exposes a page-indexing fault of any size. The aliased table
             // has its own data and is checked against the reference only.
-            std::vector<Data> identity_output;
+            std::vector<OData> identity_output;
             for(auto mapping : {Mapping::Identity, Mapping::Permuted, Mapping::Aliased})
             {
                 const std::string name = std::string(shape.name) + " " + MappingName(mapping) +
@@ -1152,7 +1261,7 @@ TYPED_TEST(PageTileForward, MatchesReference)
                 DeviceProblem d(h);
                 std::vector<float> lse;
                 const auto o       = Run<TypeParam>(h, d, Window{}, &lse);
-                const auto metrics = CompareWithReference(
+                const auto metrics = CompareWithReference<TypeParam>(
                     h, o, TypeParam::kCausal, {}, Window{}, kLse ? &lse : nullptr);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
                           << (TypeParam::kCausal ? " causal " : " dense ")
@@ -1171,7 +1280,7 @@ TYPED_TEST(PageTileForward, MatchesReference)
                 {
                     ASSERT_EQ(o.size(), identity_output.size());
                     EXPECT_EQ(
-                        std::memcmp(o.data(), identity_output.data(), o.size() * sizeof(Data)), 0)
+                        std::memcmp(o.data(), identity_output.data(), o.size() * sizeof(OData)), 0)
                         << "the permuted table changed the output of the same logical problem";
                 }
             }
@@ -1197,7 +1306,7 @@ TYPED_TEST(PageTileForward, MatchesReferenceTopLeft)
         std::uint32_t seed = 51;
         for(const auto& shape : shapes)
         {
-            std::vector<Data> identity_output;
+            std::vector<OData> identity_output;
             for(auto mapping : {Mapping::Identity, Mapping::Permuted})
             {
                 const std::string name =
@@ -1206,7 +1315,7 @@ TYPED_TEST(PageTileForward, MatchesReferenceTopLeft)
                 const auto h = MakeProblem(shape, mapping, TypeParam::kHeadDim, false, seed);
                 DeviceProblem d(h);
                 const auto o       = Run<TypeParam>(h, d, Window{true});
-                const auto metrics = CompareWithReference(h, o, true, {}, Window{true});
+                const auto metrics = CompareWithReference<TypeParam>(h, o, true, {}, Window{true});
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " causal "
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
@@ -1222,7 +1331,7 @@ TYPED_TEST(PageTileForward, MatchesReferenceTopLeft)
                 {
                     ASSERT_EQ(o.size(), identity_output.size());
                     EXPECT_EQ(
-                        std::memcmp(o.data(), identity_output.data(), o.size() * sizeof(Data)), 0)
+                        std::memcmp(o.data(), identity_output.data(), o.size() * sizeof(OData)), 0)
                         << "the permuted table changed the output of the same logical problem";
                 }
             }
@@ -1270,7 +1379,7 @@ TYPED_TEST(PageTileForward, MatchesReferenceWindow)
                 const std::string name = std::string(shape.name) + " " + window_name;
                 SCOPED_TRACE(name);
                 const auto o       = Run<TypeParam>(h, d, window);
-                const auto metrics = CompareWithReference(h, o, true, {}, window);
+                const auto metrics = CompareWithReference<TypeParam>(h, o, true, {}, window);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " window "
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
@@ -1321,7 +1430,7 @@ TYPED_TEST(PageTileForward, MatchesReferenceSink)
                 const std::string name = std::string(shape.name) + " " + window_name;
                 SCOPED_TRACE(name);
                 const auto o       = Run<TypeParam>(h, d, window);
-                const auto metrics = CompareWithReference(h, o, true, {}, window);
+                const auto metrics = CompareWithReference<TypeParam>(h, o, true, {}, window);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " sink "
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
@@ -1376,7 +1485,7 @@ TYPED_TEST(PageTileForward, SkippedSinkPages)
         ASSERT_NE(poisoned.layout.block_table, h.layout.block_table) << "no page was skipped";
         DeviceProblem d(poisoned);
         const auto o       = Run<TypeParam>(poisoned, d, window);
-        const auto metrics = CompareWithReference(h, o, true, {}, window);
+        const auto metrics = CompareWithReference<TypeParam>(h, o, true, {}, window);
         std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " sink "
                   << (kSglang ? "sglang " : "") << "skipped pages rows=" << metrics.checked_rows
                   << " max_abs=" << metrics.max_abs_error << " passed=" << metrics.passed << '\n';
@@ -1384,7 +1493,7 @@ TYPED_TEST(PageTileForward, SkippedSinkPages)
         EXPECT_EQ(metrics.nonfinite_output_count, 0u);
         EXPECT_TRUE(metrics.passed);
         ASSERT_EQ(o.size(), base_output.size());
-        EXPECT_EQ(std::memcmp(o.data(), base_output.data(), o.size() * sizeof(Data)), 0)
+        EXPECT_EQ(std::memcmp(o.data(), base_output.data(), o.size() * sizeof(OData)), 0)
             << "the table entries of skipped pages changed the output";
     }
 }
@@ -1479,7 +1588,7 @@ TYPED_TEST(PageTileForward, SpareTableEntries)
                                        table);
             DeviceProblem d(h);
             const auto o       = Run<TypeParam>(h, d);
-            const auto metrics = CompareWithReference(h, o, TypeParam::kCausal);
+            const auto metrics = CompareWithReference<TypeParam>(h, o, TypeParam::kCausal);
             std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
                       << (TypeParam::kCausal ? " causal " : " dense ") << (kSglang ? "sglang " : "")
                       << name << " rows=" << metrics.checked_rows
@@ -1491,7 +1600,7 @@ TYPED_TEST(PageTileForward, SpareTableEntries)
             EXPECT_EQ(metrics.nonfinite_output_count, 0u);
             EXPECT_TRUE(metrics.passed);
             ASSERT_EQ(o.size(), base_output.size());
-            EXPECT_EQ(std::memcmp(o.data(), base_output.data(), o.size() * sizeof(Data)), 0)
+            EXPECT_EQ(std::memcmp(o.data(), base_output.data(), o.size() * sizeof(OData)), 0)
                 << "changing only the spare table entries changed the output";
         }
     }
@@ -1515,7 +1624,7 @@ TYPED_TEST(PageTileForward, LargePool)
               << (TypeParam::kCausal ? " causal" : " dense") << " large pool: page shift " << shift
               << " (" << static_cast<double>(shift) * page_bytes / (1u << 30) << " GiB)\n";
     ASSERT_EQ(o.size(), base.size());
-    EXPECT_EQ(std::memcmp(o.data(), base.data(), o.size() * sizeof(Data)), 0)
+    EXPECT_EQ(std::memcmp(o.data(), base.data(), o.size() * sizeof(OData)), 0)
         << "pages past 5 GiB changed the output of the same logical problem";
 }
 
@@ -1533,14 +1642,14 @@ TYPED_TEST(PageTileForward, Deterministic)
     const Case shape{"race", 32, 8, {8192}, {32768}};
     const auto h =
         MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, TypeParam::kCausal, 99);
-    std::vector<Data> first;
+    std::vector<OData> first;
     {
         DeviceProblem d(h);
         first = Run<TypeParam>(h, d);
         for(int repeat = 1; repeat < 8; ++repeat)
         {
             const auto again = Run<TypeParam>(h, d);
-            ASSERT_EQ(std::memcmp(first.data(), again.data(), first.size() * sizeof(Data)), 0)
+            ASSERT_EQ(std::memcmp(first.data(), again.data(), first.size() * sizeof(OData)), 0)
                 << "repeat " << repeat << " differs from the first launch";
         }
     }
@@ -1549,11 +1658,11 @@ TYPED_TEST(PageTileForward, Deterministic)
             MakeProblem(shape, Mapping::Identity, TypeParam::kHeadDim, TypeParam::kCausal, 99);
         DeviceProblem d(identity);
         const auto o = Run<TypeParam>(identity, d);
-        EXPECT_EQ(std::memcmp(first.data(), o.data(), first.size() * sizeof(Data)), 0)
+        EXPECT_EQ(std::memcmp(first.data(), o.data(), first.size() * sizeof(OData)), 0)
             << "the permuted table changed the output of the same logical problem";
     }
     const std::vector<std::size_t> sampled = {0, 1, 127, 128, 129, 4095, 8191};
-    const auto metrics = CompareWithReference(h, first, TypeParam::kCausal, sampled);
+    const auto metrics = CompareWithReference<TypeParam>(h, first, TypeParam::kCausal, sampled);
     EXPECT_EQ(metrics.checked_rows, sampled.size() * shape.q_heads);
     EXPECT_EQ(metrics.nonfinite_output_count, 0u);
     EXPECT_TRUE(metrics.passed);
@@ -1567,18 +1676,104 @@ TYPED_TEST(PageTileForward, Deterministic)
                                         99,
                                         Values::SparseMarker);
         DeviceProblem d(marker);
-        const auto o              = Run<TypeParam>(marker, d);
-        const auto marker_metrics = CompareWithReference(marker, o, TypeParam::kCausal, sampled);
+        const auto o = Run<TypeParam>(marker, d);
+        const auto marker_metrics =
+            CompareWithReference<TypeParam>(marker, o, TypeParam::kCausal, sampled);
         // Non-vacuity: the marked pages must reach the output. V is zero on every other page, so
         // a row that sees one marked page has outputs of about kPage / 32768 or more (about
         // 0.0005 at P16); require half of that somewhere.
         const float floor = 0.5f * static_cast<float>(kPage) / 32768.0f;
-        EXPECT_TRUE(std::any_of(o.begin(), o.end(), [floor](Data x) {
+        EXPECT_TRUE(std::any_of(o.begin(), o.end(), [floor](OData x) {
             return ck_tile::type_convert<float>(x) > floor;
         })) << "no marked page reached the output";
         EXPECT_EQ(marker_metrics.checked_rows, sampled.size() * shape.q_heads);
         EXPECT_EQ(marker_metrics.nonfinite_output_count, 0u);
         EXPECT_TRUE(marker_metrics.passed);
+    }
+}
+
+// FP8 negative controls (accuracy_contract.md, "FP8 P"): each perturbation of the device inputs
+// must fail the FP8 contract through the component ratio on long-K rows (3000 keys as the Window
+// test's long rows, 8192, 32768 as Deterministic, 73728 as the longest chunked-prefill row):
+// q / k descale x1.5, and x1.25 up to 8192 keys, on spread scores with random V; v descale x1.25
+// and a wrong page-table entry on SparseMarker V. The unperturbed launch passes on the same data.
+// The reference host test Fp8ControlsFireAtLongK shows the same on a CPU model of the device.
+TYPED_TEST(PageTileForward, NegativeControls)
+{
+    if constexpr(!kFp8)
+        GTEST_SKIP() << "FP8 binaries only (the 16-bit contract's controls are host tests)";
+    else
+    {
+        const std::vector<std::size_t> sampled = {0, 1, 64, 127, 128, 255};
+        // Launches `device` (h, or h with a perturbed table) with h's descales times the gains,
+        // and compares the output with the reference of h.
+        auto run = [&](const HostProblem& h,
+                       const HostProblem& device,
+                       float q_gain,
+                       float k_gain,
+                       float v_gain) {
+            DeviceProblem d(device);
+            d.SetDescales(h.q_descale * q_gain, h.k_descale * k_gain, h.v_descale * v_gain);
+            const auto o = Run<TypeParam>(device, d);
+            return CompareWithReference<TypeParam>(h, o, TypeParam::kCausal, sampled);
+        };
+        auto fired = [](const reference::Metrics& metrics) {
+            return !metrics.passed && metrics.max_component_ratio > 1;
+        };
+        std::uint32_t seed = 81;
+        for(const int keys : {3000, 8192, 32768, 73728})
+        {
+            SCOPED_TRACE("K=" + std::to_string(keys));
+            const Case shape{"control", 4, 1, {256}, {keys}};
+            const auto spread = MakeProblem(
+                shape, Mapping::Permuted, TypeParam::kHeadDim, TypeParam::kCausal, seed++);
+            const auto marker = MakeProblem(shape,
+                                            Mapping::Permuted,
+                                            TypeParam::kHeadDim,
+                                            TypeParam::kCausal,
+                                            seed++,
+                                            Values::SparseMarker);
+            // The middle marked page's table entry points at the (unmarked) second page.
+            auto wrong_page = marker;
+            const int pages = (keys + kPage - 1) / kPage;
+            ASSERT_TRUE(IsMarkerPage(Values::SparseMarker, (pages - 1) / 2, pages) &&
+                        !IsMarkerPage(Values::SparseMarker, 1, pages));
+            wrong_page.layout.block_table[(pages - 1) / 2] = marker.layout.block_table[1];
+
+            const auto spread_base = run(spread, spread, 1, 1, 1);
+            const auto q_125       = run(spread, spread, 1.25f, 1, 1);
+            const auto k_125       = run(spread, spread, 1, 1.25f, 1);
+            const auto q_150       = run(spread, spread, 1.5f, 1, 1);
+            const auto k_150       = run(spread, spread, 1, 1.5f, 1);
+            const auto marker_base = run(marker, marker, 1, 1, 1);
+            const auto v_125       = run(marker, marker, 1, 1, 1.25f);
+            const auto page        = run(marker, wrong_page, 1, 1, 1);
+            std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
+                      << (TypeParam::kCausal ? " causal" : " dense") << " FP8 controls K=" << keys
+                      << " ratio base=" << spread_base.max_component_ratio
+                      << " q x1.25=" << q_125.max_component_ratio
+                      << " k x1.25=" << k_125.max_component_ratio
+                      << " q x1.5=" << q_150.max_component_ratio
+                      << " k x1.5=" << k_150.max_component_ratio
+                      << " marker base=" << marker_base.max_component_ratio
+                      << " v x1.25=" << v_125.max_component_ratio
+                      << " page=" << page.max_component_ratio << '\n';
+            for(const auto* base : {&spread_base, &marker_base})
+            {
+                EXPECT_EQ(base->checked_rows, sampled.size() * shape.q_heads);
+                EXPECT_EQ(base->nonfinite_output_count, 0u);
+                EXPECT_TRUE(base->passed) << "the unperturbed launch fails on the control's data";
+            }
+            EXPECT_TRUE(fired(q_150)) << "q descale x1.5";
+            EXPECT_TRUE(fired(k_150)) << "k descale x1.5";
+            if(keys <= 8192)
+            {
+                EXPECT_TRUE(fired(q_125)) << "q descale x1.25";
+                EXPECT_TRUE(fired(k_125)) << "k descale x1.25";
+            }
+            EXPECT_TRUE(fired(v_125)) << "v descale x1.25";
+            EXPECT_TRUE(fired(page)) << "wrong page entry";
+        }
     }
 }
 

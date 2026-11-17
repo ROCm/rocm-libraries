@@ -415,6 +415,14 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
+    # FP8 page tile (fp8bf16, per-tensor descales): vectorized x = 16 pools, P64 D64 M128, dense
+    # and causal.
+    foreach(mask IN ITEMS dense causal)
+        add_page_tile_gtest(p64_d64_${mask}_vec_fp8
+            CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
+            CK_TILE_FMHA_PAGE_TILE_TEST_FP8=1)
+    endforeach()
+
     # FP8 page tile (fp8bf16): the policy's operand pairing on the window's LDS tiles, and the
     # native FP8 conversions and WMMA on subnormals, with the page-tile gtests' flags.
     foreach(name IN ITEMS operand_layout native_controls)
