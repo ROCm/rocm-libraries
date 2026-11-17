@@ -165,8 +165,14 @@ namespace
         const test_env::ScopedEnv file("HIPBLASLT_LOG_FILE", nullptr);
         EXPECT_EXIT(
             {
-                const LookupMiss miss(rocblaslt_testing_solution_lookup_miss_all);
-                std::exit(nullAlgoMatmul() == HIPBLAS_STATUS_NOT_SUPPORTED ? 0 : 1);
+                hipblasStatus_t status;
+                {
+                    const LookupMiss miss(rocblaslt_testing_solution_lookup_miss_all);
+                    status = nullAlgoMatmul();
+                }
+                // std::exit skips GoogleTest's fixture teardown, so invoke it manually.
+                TearDown();
+                std::exit(status == HIPBLAS_STATUS_NOT_SUPPORTED ? 0 : 1);
             },
             ::testing::ExitedWithCode(0),
             "no algorithm supports this problem: arch=.* m=64 n=64 k=64 .*type_a=f32_r");
