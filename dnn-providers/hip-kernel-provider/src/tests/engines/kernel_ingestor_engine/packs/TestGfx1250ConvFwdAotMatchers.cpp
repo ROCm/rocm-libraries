@@ -529,6 +529,21 @@ TEST(TestGfx1250ConvFwdAotMatchers, AnInstanceItCannotReadDoesNotServe)
     EXPECT_FALSE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), notKpack, *bound));
 }
 
+TEST(TestGfx1250ConvFwdAotMatchers, AnImplicitGemmWithNonPositiveTileDimensionDoesNotServe)
+{
+    // tile_m=0 or tile_n=0 would reach ceilDiv(...,0) during graph matching and cause
+    // undefined behaviour; the parser must reject them before constructing the kernel.
+    const auto graph = graphOf(ConvShape{});
+    const auto bound = matchesGraph(GFX1250_CONV_FWD_AOT, graph.context());
+    ASSERT_TRUE(bound.has_value());
+    auto zeroTileM = implicitGemm("6b7f3c52-0000-4000-8000-00000000000a");
+    zeroTileM.metadata["tile_m"] = int64_t{0};
+    EXPECT_FALSE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), zeroTileM, *bound));
+    auto zeroTileN = implicitGemm("6b7f3c52-0000-4000-8000-00000000000b");
+    zeroTileN.metadata["tile_n"] = int64_t{0};
+    EXPECT_FALSE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), zeroTileN, *bound));
+}
+
 TEST(TestGfx1250ConvFwdAotMatchers, ABakedFieldIsCheckedAgainstTheWidthFoldedProblem)
 {
     // A 4x4 stride-4 stem folds its width into its channels (X 4 -> 1), and the kernel runs

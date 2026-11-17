@@ -413,6 +413,9 @@ def _request_errors(req: OperatorRequest) -> tuple[str, ...]:
     for field_name in ("N", "C", "K", "Hi", "Wi", "Y", "X", "G"):
         if int(getattr(req, field_name)) <= 0:
             errors.append(f"{field_name} must be positive")
+    for pad_name in ("pad_h", "pad_w"):
+        if int(getattr(req, pad_name)) < 0:
+            errors.append(f"{pad_name}={getattr(req, pad_name)} must be non-negative")
     if req.dtype.lower() not in ("fp16", "bf16"):
         errors.append(f"unsupported dtype {req.dtype!r}; fp16 or bf16 only")
     if req.layout.upper() != "NHWC":

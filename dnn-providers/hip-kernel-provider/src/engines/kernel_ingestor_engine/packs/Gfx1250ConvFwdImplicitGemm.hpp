@@ -44,9 +44,17 @@ struct ImplicitGemmKernel
         {
             throw std::invalid_argument(g.label() + ": unported ungrouped implicit-GEMM instance");
         }
+        const auto tile_m = g.integer("tile_m");
+        const auto tile_n = g.integer("tile_n");
+        if(tile_m <= 0 || tile_n <= 0)
+        {
+            throw std::invalid_argument(g.label() + ": tile_m=" + std::to_string(tile_m)
+                                        + " tile_n=" + std::to_string(tile_n)
+                                        + " must both be positive");
+        }
         return {g.label(),
-                g.integer("tile_m"),
-                g.integer("tile_n"),
+                tile_m,
+                tile_n,
                 g.integer("warp_m"),
                 g.integer("warp_n"),
                 g.integer("wave_size"),

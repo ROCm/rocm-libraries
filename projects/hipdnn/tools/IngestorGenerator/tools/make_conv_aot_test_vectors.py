@@ -184,14 +184,23 @@ def _parse_shapes(path: Path):
     """MIOpenDriver-style lines (``convfp16 -n .. -c ..``) -> problems."""
     out = []
     for line in path.read_text().splitlines():
-        if not line.startswith("conv"):
+        if line.startswith("convfp16"):
+            dtype = "fp16"
+        elif line.startswith("convbfp16"):
+            dtype = "bf16"
+        elif line.startswith("conv"):
+            raise ValueError(
+                f"unrecognised dtype prefix in shape line {line!r}; "
+                "expected convfp16 or convbfp16"
+            )
+        else:
             continue
         a = dict(re.findall(r"-(\w) (\S+)", line))
         i = lambda k: int(a[k])  # noqa: E731
         out.append(
             dict(N=i("n"), C=i("c"), K=i("k"), H=i("H"), W=i("W"), Y=i("y"), X=i("x"),
                  G=i("g"), sh=i("u"), sw=i("v"), ph=i("p"), pw=i("q"), dh=i("l"),
-                 dw=i("j"), dtype="bf16" if line.startswith("convbfp16") else "fp16")  # fmt: skip
+                 dw=i("j"), dtype=dtype)  # fmt: skip
         )
     return out
 

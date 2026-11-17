@@ -392,6 +392,15 @@ def test_unknown_llvm_flavor_request_is_rejected():
         gc.dispatch_conv_grouped(_req(llvm_flavor="llvm-other"))
 
 
+def test_negative_padding_is_rejected():
+    # pad_w=-1 is the internal "use row padding" sentinel; a negative request
+    # padding must be refused before the sentinel encoding is applied.
+    with pytest.raises(ValueError, match="pad_w"):
+        gc.dispatch_conv_grouped(_req(pad_w=-1))
+    with pytest.raises(ValueError, match="pad_h"):
+        gc.dispatch_conv_grouped(_req(pad_h=-1))
+
+
 def test_unrecognized_llvm_flavor_env_raises(monkeypatch):
     """A typo'd ROCKE_LLVM_FLAVOR must fail loudly, not fall back to auto-detect."""
     from rocke.core.lower_llvm import _detect_llvm_flavor

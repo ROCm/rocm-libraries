@@ -61,6 +61,12 @@ def _text(path: Path) -> str:
 
 
 def test_the_golden_header_regenerates_from_the_in_tree_adapter(tmp_path):
+    missing = sorted(str(p) for p in _INSTANCES if not p.exists())
+    if missing:
+        pytest.skip(
+            "DVC-tracked instance list(s) not pulled, run `dvc pull` in "
+            f"{_ROOT / 'configs'}: {missing}"
+        )
     out = tmp_path / _HEADER.name
     result = _run(
         "--instances",
