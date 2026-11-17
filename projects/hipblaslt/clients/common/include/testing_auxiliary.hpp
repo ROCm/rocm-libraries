@@ -48,6 +48,7 @@
 #include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
+#include <regex>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {

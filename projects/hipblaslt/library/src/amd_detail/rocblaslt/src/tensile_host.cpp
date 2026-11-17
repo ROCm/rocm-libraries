@@ -63,6 +63,7 @@
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 #include <Tensile/FusedA2AKernArg.hpp>
 #endif
+#include <Tensile/LongPath.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
@@ -729,6 +730,20 @@ namespace
             return false;
         }
     }
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    TensileLite::FusedA2A toTensileFusedA2A(RocblasltFusedEpilogueInfo::Mode mode)
+    {
+        switch(mode)
+        {
+        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+            return TensileLite::FusedA2A::GemmA2A;
+        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+            break;
+        }
+        return TensileLite::FusedA2A::Disabled;
+    }
+#endif
 
     /// Shared scale-mode mapping for problem construction and updates.
     inline void setTensileScaleAB(const RocblasltContractionProblem&   prob,
@@ -2432,10 +2447,9 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }
@@ -2782,12 +2796,17 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
+        }
+        else
+        {
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::Disabled);
+            tensileProblem.setFusedA2AExtent(0);
+            tensileProblem.setWorld(1);
         }
 #endif
 
@@ -3094,8 +3113,7 @@ namespace
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         // Device-side fused-A2A operands.
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
             inputs.fusedA2ACounter = prob.Synchronizer;
             inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
@@ -3415,8 +3433,10 @@ namespace
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
-                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
-                       || std::filesystem::exists(mapping_yaml))
+                    if(std::filesystem::exists(TensileLite::longPathSafe(mapping_msgpack.string()))
+                       || std::filesystem::exists(
+                           TensileLite::longPathSafe(mapping_msgpack_gz.string()))
+                       || std::filesystem::exists(TensileLite::longPathSafe(mapping_yaml.string())))
                     {
                         path = std::move(processor_path);
                     }
@@ -3435,7 +3455,8 @@ namespace
             if(!lazyLoad)
             {
                 bool no_match = true;
-                for(const auto& entry : std::filesystem::directory_iterator(path))
+                for(const auto& entry :
+                    std::filesystem::directory_iterator(TensileLite::longPathSafe(path.string())))
                 {
                     auto filename = entry.path().filename();
                     if(codeObjectTargets(filename, processor))
@@ -3492,8 +3513,9 @@ namespace
                             = path / (std::string("TensileLibrary_") + processor + ".dat");
                     }
                 }
-                if(!std::filesystem::exists(tensileLibPath)
-                   && !std::filesystem::exists(tensileLibPath.string() + ".zlib"))
+                if(!std::filesystem::exists(TensileLite::longPathSafe(tensileLibPath.string()))
+                   && !std::filesystem::exists(
+                       TensileLite::longPathSafe(tensileLibPath.string() + ".zlib")))
                 {
                     std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
                               << " (or .zlib variant): " << strerror(errno) << std::endl;
@@ -4134,6 +4156,13 @@ void initTensileGemmData(rocblaslt_handle       handle,
 
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Do not use rocRoller for a fused all-to-all
+    RocblasltFusedEpilogueInfo fusedInfo;
+    if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
+        return false;
+#endif
+
     // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
     bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
     bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
@@ -5009,7 +5038,7 @@ namespace
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo info;
-        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info) && info.hasA2APrefix;
+        return rocblaslt_resolve_fused_a2a(prob, info);
 #else
         static_cast<void>(prob);
         return false;
@@ -8367,6 +8396,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
                 << " (solution missing from library map; check Tensile packaging or version "
                    "skew)";
             log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
+        // Only grouped solutions run grouped problems. Rejecting the rest here skips the
+        // workspace sizing below, which walks every group for each candidate solution.
+        if(!solution->problemType.groupedGemm || !(*solution->hardwarePredicate)(*hardware))
+        {
+            log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
         if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
