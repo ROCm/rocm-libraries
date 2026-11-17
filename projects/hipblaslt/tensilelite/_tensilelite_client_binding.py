@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import functools
 import hashlib
 from importlib import metadata, util
@@ -48,11 +48,18 @@ class Installation:
     package_dir: Path
     identifier: str
     version: str
-    # The rocm-libraries commit this package was built from, or None. Installed
-    # packages read it from their _build_info.py; editable installs compute it
-    # from git when the installation is identified.
-    source_revision: str | None
+    _source_revision: str | None | Callable[[], str | None] = field(repr=False)
     editable: bool
+    source_root: Path | None = None
+
+    @functools.cached_property
+    def source_revision(self) -> str | None:
+        """Resolve source identity on first client use, once for this installation.
+
+        Fresh configuration operations identify a new installation, so this
+        cache does not preserve a revision across subsequent checkout changes.
+        """
+        return self._source_revision() if callable(self._source_revision) else self._source_revision
 
 
 @dataclass(frozen=True)
@@ -65,34 +72,43 @@ class ClientCandidate:
 # Public installation identity
 # ---------------------------------------------------------------------------
 
+
 def current_installation() -> Installation:
     """Identify the installed TensileLite package that owns this import."""
     package_dir = _package_dir()
     matches = [
         distribution
         for distribution in metadata.distributions(name="tensilelite")
-        if _distribution_package_dir(distribution) == package_dir
+        if _distribution_owns_package(distribution, package_dir)
     ]
     versions = {distribution.version for distribution in matches}
-    if not matches or len(versions) != 1:
+    source_roots = {
+        _distribution_package_dir(distribution).parent
+        for distribution in matches
+        if _is_editable(distribution)
+    }
+    if not matches or len(versions) != 1 or len(source_roots) > 1:
         raise ClientBindingError(
             "Could not identify one tensilelite version owning "
             f"{package_dir}; matching metadata versions: {sorted(versions)}."
         )
     identifier = hashlib.sha256(os.fsencode(str(package_dir))).hexdigest()
     editable = any(_is_editable(distribution) for distribution in matches)
+    source_root = next(iter(source_roots), None)
     return Installation(
         package_dir,
         identifier,
         versions.pop(),
-        _installation_source_revision(package_dir, editable),
+        functools.partial(_installation_source_revision, package_dir, editable, source_root),
         editable,
+        source_root,
     )
 
 
 # ---------------------------------------------------------------------------
 # Public binding storage
 # ---------------------------------------------------------------------------
+
 
 def binding_path(installation: Installation | None = None) -> Path:
     """Return the explicit-client binding path for an installation."""
@@ -171,7 +187,8 @@ def validate_client(client: Path, installation: Installation) -> None:
 
     An installed package must match the client's ``--source-revision`` exactly,
     including any dirty suffix. An editable install compares the commit only:
-    a different commit fails, and uncommitted changes on either side warn.
+    a different commit fails, and differing recorded source states warn.
+    If either source revision is unavailable, allow use with a warning.
     """
     if not client.is_absolute():
         raise ClientBindingError(f"Client path must be absolute: {client}")
@@ -182,56 +199,56 @@ def validate_client(client: Path, installation: Installation) -> None:
 
     client_revision = _query_client(client, "--source-revision")
     build_rocm = _query_client(client, "--build-rocm")
+    package_revision = installation.source_revision
     details = (
         f"  tensilelite: {installation.version} at {installation.package_dir}\n"
-        f"  tensilelite source revision: {installation.source_revision or 'none'}"
+        f"  tensilelite source revision: {package_revision or 'none'}"
         f"{' (editable install)' if installation.editable else ''}\n"
         f"  client: {client}\n"
         f"  client source revision: {client_revision}\n"
         f"  client build ROCm: {build_rocm}\n"
     )
 
-    if installation.source_revision is None:
-        raise ClientBindingError(
-            "This tensilelite installation records no source revision, so no client "
-            "can be paired with it.\n"
-            + details
-            + "Install tensilelite from a git checkout of rocm-libraries, or build it "
-            "with TENSILELITE_SOURCE_REVISION set to the commit it came from."
-        )
-    if client_revision == "none":
-        raise ClientBindingError(
-            "The client records no source revision, so it cannot be paired.\n"
-            + details
-            + _rebuild_hint(installation)
-        )
-
     revisions = _source_revision_module(installation.package_dir)
     try:
-        client_commit = revisions["commit_of"](client_revision)
+        client_commit = (
+            None if client_revision == "none" else revisions["commit_of"](client_revision)
+        )
     except revisions["SourceRevisionError"] as exc:
         raise ClientBindingError(
             f"Client source revision is not a git commit: {client_revision!r}\n" + details
         ) from exc
+    if package_revision is not None:
+        try:
+            package_commit = revisions["commit_of"](package_revision)
+        except revisions["SourceRevisionError"] as exc:
+            raise ClientBindingError(
+                f"Package source revision is not a git commit: {package_revision!r}\n" + details
+            ) from exc
+
+    if package_revision is None or client_commit is None:
+        warnings.warn(
+            "Source compatibility could not be verified because a source revision "
+            "is unavailable. Use a client built from the same source as this package.\n" + details,
+            ClientBindingWarning,
+            stacklevel=2,
+        )
+        return
 
     if not installation.editable:
-        if client_revision != installation.source_revision:
+        if client_revision != package_revision:
             raise ClientBindingError(
                 "Client source revision mismatch: the client was not built from the "
-                "same source as this tensilelite package.\n"
-                + details
-                + _rebuild_hint(installation)
+                "same source as this tensilelite package.\n" + details + _rebuild_hint(installation)
             )
         return
 
-    if client_commit != revisions["commit_of"](installation.source_revision):
+    if client_commit != package_commit:
         raise ClientBindingError(
             "Client commit mismatch: the client was built from a different commit "
-            "than this editable tensilelite checkout.\n"
-            + details
-            + _rebuild_hint(installation)
+            "than this editable tensilelite checkout.\n" + details + _rebuild_hint(installation)
         )
-    if client_revision != installation.source_revision:
+    if client_revision != package_revision:
         warnings.warn(
             "The client and this editable tensilelite checkout share a commit, but "
             "one of them was built with uncommitted changes. Rebuild the client if "
@@ -297,6 +314,7 @@ def _rebuild_hint(installation: Installation) -> str:
 # Private installation identity helpers
 # ---------------------------------------------------------------------------
 
+
 def _package_dir() -> Path:
     """Locate the installed tensilelite package without importing it."""
     spec = util.find_spec("tensilelite")
@@ -313,17 +331,32 @@ def _source_revision_module(package_dir: Path) -> dict:
     Importing tensilelite._source_revision would run tensilelite/__init__,
     which validates the ROCm runtime; client configuration must not need that.
     """
-    return runpy.run_path(str(package_dir / "_source_revision.py"))
+    path = package_dir / "_source_revision.py"
+    try:
+        return runpy.run_path(str(path))
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise ClientBindingError(f"Cannot load source revision helper {path}: {exc}") from exc
 
 
-def _installation_source_revision(package_dir: Path, editable: bool) -> str | None:
+def _installation_source_revision(
+    package_dir: Path, editable: bool, source_root: Path | None = None
+) -> str | None:
     revisions = _source_revision_module(package_dir)
-    if editable:
-        # Computed from the checkout each time, so it cannot go stale. The
-        # build-time TENSILELITE_SOURCE_REVISION override does not apply here.
-        return revisions["resolve"](package_dir.parent, {})
     build_info = package_dir / "_build_info.py"
-    return revisions["read_build_info"](build_info) if build_info.is_file() else None
+    try:
+        if editable:
+            # The live source root also covers strict editables, whose import
+            # directory contains links. Build-time overrides do not apply here.
+            return revisions["resolve"](source_root or package_dir.parent, {})
+        try:
+            return revisions["read_build_info"](build_info)
+        except FileNotFoundError:
+            if build_info.is_symlink():
+                raise
+            return None
+    except (revisions["SourceRevisionError"], OSError, SyntaxError, ValueError) as exc:
+        location = (source_root or package_dir.parent) if editable else build_info
+        raise ClientBindingError(f"Cannot resolve source revision from {location}: {exc}") from exc
 
 
 def _is_editable(distribution: metadata.Distribution) -> bool:
@@ -353,6 +386,26 @@ def _distribution_package_dir(distribution: metadata.Distribution) -> Path | Non
         if parsed.scheme == "file":
             return (Path(_file_url_path(direct_url)) / "tensilelite").resolve()
     return None
+
+
+def _distribution_owns_package(distribution: metadata.Distribution, package_dir: Path) -> bool:
+    """Match ordinary packages and strict editable file links to their source.
+
+    Checking file identity supports both symlinks and hardlinks. A matching
+    distribution name or a directory under build/ is insufficient evidence.
+    """
+    source_package = _distribution_package_dir(distribution)
+    if source_package == package_dir:
+        return True
+    if source_package is None or not _is_editable(distribution):
+        return False
+    try:
+        return all(
+            (package_dir / name).samefile(source_package / name)
+            for name in ("__init__.py", "_source_revision.py")
+        )
+    except OSError:
+        return False
 
 
 def _file_url_path(url: str, *, platform: str = sys.platform) -> PurePath:
