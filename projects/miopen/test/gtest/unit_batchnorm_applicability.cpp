@@ -369,3 +369,39 @@ TEST_P(CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE, IsApplicable
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
+
+// The per-activation solver must reject a spatial problem whatever its activation, so an
+// activation the spatial solver rejects fails with NotImplemented instead of running the
+// per-activation kernel on spatial-sized scale and bias buffers.
+TEST(CPU_BatchNormBwdTrainingPerActivationApplicability_NONE, RejectsSpatialProblem)
+{
+    auto ctx       = MakeContext();
+    auto xDesc     = MakeTensorDesc(miopenFloat);
+    auto dyDesc    = MakeTensorDesc(miopenFloat);
+    auto dxDesc    = MakeTensorDesc(miopenFloat);
+    auto scaleDesc = MakeTensorDesc(miopenFloat);
+    auto biasDesc  = MakeTensorDesc(miopenFloat);
+    auto meanDesc  = MakeTensorDesc(miopenFloat);
+    auto varDesc   = MakeTensorDesc(miopenFloat);
+
+    for(auto mode : {miopenActivationPASTHRU, miopenActivationRELU, miopenActivationTANH})
+    {
+        auto actDesc = MakeActivationDesc(mode);
+        ProblemDescription problem(miopenBNSpatial,
+                                   xDesc,
+                                   dyDesc,
+                                   dxDesc,
+                                   scaleDesc,
+                                   biasDesc,
+                                   meanDesc,
+                                   varDesc,
+                                   1e-5,
+                                   false,
+                                   1,
+                                   actDesc);
+
+        EXPECT_FALSE(BnBwdTrainingPerActivation{}.IsApplicable(ctx, problem)) << mode;
+        if(mode == miopenActivationTANH)
+            EXPECT_FALSE(BnBwdTrainingSpatial{}.IsApplicable(ctx, problem));
+    }
+}
