@@ -25,7 +25,8 @@
 // rocsparse_sparse_to_sparse: formats outside the dispatch table (SELL and beyond) are
 // rejected before it is indexed, intermediate CSR arrays are sized with the index types
 // stored on that descriptor and oversized counts are rejected before any allocation,
-// a null target value array is a structural conversion when the route supports it, and
+// a null target value array is a structural conversion when the route supports it,
+// a null target index array on an identity conversion is rejected before any write, and
 // an empty conversion can be captured.
 
 #include "unit_test_device_conv_common.hpp"
@@ -1031,26 +1032,25 @@ namespace
     {
         rocsparse_format source;
         rocsparse_format target;
-        bool             supported;
     };
 
     // A null target value pointer is a symbolic conversion for every pair, including
     // an identity copy. The index arrays are still written.
     constexpr SymbolicPair k_symbolic[] = {
-        {rocsparse_format_coo_aos, rocsparse_format_coo, true},
-        {rocsparse_format_coo_aos, rocsparse_format_csr, true},
-        {rocsparse_format_coo, rocsparse_format_coo_aos, true},
-        {rocsparse_format_coo, rocsparse_format_csr, true},
-        {rocsparse_format_csr, rocsparse_format_coo, true},
-        {rocsparse_format_csr, rocsparse_format_csc, true},
-        {rocsparse_format_csc, rocsparse_format_csr, true},
-        {rocsparse_format_csr, rocsparse_format_coo_aos, true},
-        {rocsparse_format_coo, rocsparse_format_csc, true},
-        {rocsparse_format_coo_aos, rocsparse_format_csc, true},
-        {rocsparse_format_coo, rocsparse_format_coo, true},
-        {rocsparse_format_csr, rocsparse_format_csr, true},
-        {rocsparse_format_csc, rocsparse_format_csc, true},
-        {rocsparse_format_coo_aos, rocsparse_format_coo_aos, true},
+        {rocsparse_format_coo_aos, rocsparse_format_coo},
+        {rocsparse_format_coo_aos, rocsparse_format_csr},
+        {rocsparse_format_coo, rocsparse_format_coo_aos},
+        {rocsparse_format_coo, rocsparse_format_csr},
+        {rocsparse_format_csr, rocsparse_format_coo},
+        {rocsparse_format_csr, rocsparse_format_csc},
+        {rocsparse_format_csc, rocsparse_format_csr},
+        {rocsparse_format_csr, rocsparse_format_coo_aos},
+        {rocsparse_format_coo, rocsparse_format_csc},
+        {rocsparse_format_coo_aos, rocsparse_format_csc},
+        {rocsparse_format_coo, rocsparse_format_coo},
+        {rocsparse_format_csr, rocsparse_format_csr},
+        {rocsparse_format_csc, rocsparse_format_csc},
+        {rocsparse_format_coo_aos, rocsparse_format_coo_aos},
     };
 
     // nnz 0 accepts a null value pointer. set_pointers does not, so the value pointer
@@ -1178,18 +1178,6 @@ namespace
             }
         };
         expect_values_kept();
-
-        if(!pair.supported)
-        {
-            EXPECT_EQ(status, st_ptr);
-            // Rejected before any index is written.
-            EXPECT_TRUE(dst_primary.is_fill(k_sentinel)) << label;
-            if(!tgt_aos)
-            {
-                EXPECT_TRUE(dst_secondary.is_fill(k_sentinel)) << label;
-            }
-            return;
-        }
 
         EXPECT_EQ(status, st_ok);
         if(status != st_ok)
@@ -1571,12 +1559,66 @@ namespace
     {
         for(const auto& pair : k_symbolic)
         {
-            if(pair.supported)
-            {
-                run_symbolic(handle, pair, true);
-            }
+            run_symbolic(handle, pair, true);
             run_symbolic(handle, pair, false);
         }
+    }
+
+    TEST_F(ConvS2s, IdentityNullTargetColumn)
+    {
+        // Identity CSR checks each index pointer before it writes. A null target
+        // column is invalid_pointer, and the row pointer and the values stay put.
+        // nnz 0 is what lets the constructor take a null column array.
+        clear_hip_error();
+        DeviceMem   src_row(8);
+        DeviceMem   src_col(4);
+        DeviceMem   src_val(sizeof(float));
+        const float source_value = 3.f;
+        upload_i32(src_row.ptr, {0, 1});
+        upload_i32(src_col.ptr, {0});
+        src_val.upload(&source_value, sizeof(source_value));
+
+        Spmat source;
+        ASSERT_EQ(
+            rocsparse_create_csr_descr(
+                &source, 1, 1, 1, src_row.ptr, src_col.ptr, src_val.ptr, idx32, idx32, base, f32_r),
+            st_ok);
+
+        DeviceMem dst_row(8);
+        DeviceMem dst_val(sizeof(float));
+        dst_row.fill(k_sentinel);
+        dst_val.fill(k_sentinel);
+
+        Spmat target;
+        ASSERT_EQ(rocsparse_create_csr_descr(
+                      &target, 1, 1, 0, dst_row.ptr, nullptr, nullptr, idx32, idx32, base, f32_r),
+                  st_ok);
+        ASSERT_EQ(rocsparse_spmat_set_values(target, dst_val.ptr), st_ok);
+
+        S2sDescr descr;
+        ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&descr, source, target, alg), st_ok);
+        ASSERT_EQ(rocsparse_sparse_to_sparse_permissive(descr), st_ok);
+        size_t bytes = 0;
+        ASSERT_EQ(
+            rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_a, &bytes),
+            st_ok);
+        DeviceMem analysis(std::max<size_t>(bytes, 1));
+        ASSERT_EQ(
+            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_a, bytes, analysis.ptr),
+            st_ok);
+        EXPECT_TRUE(dst_row.is_fill(k_sentinel));
+        EXPECT_TRUE(dst_val.is_fill(k_sentinel));
+
+        ASSERT_EQ(
+            rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_c, &bytes),
+            st_ok);
+        DeviceMem compute(std::max<size_t>(bytes, 1));
+        EXPECT_EQ(
+            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_c, bytes, compute.ptr),
+            st_ptr);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_TRUE(dst_row.is_fill(k_sentinel));
+        EXPECT_TRUE(dst_val.is_fill(k_sentinel));
     }
 
     TEST_F(ConvS2s, IntermediateCountOverflow)
