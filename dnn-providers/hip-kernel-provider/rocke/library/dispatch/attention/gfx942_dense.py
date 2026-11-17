@@ -140,8 +140,10 @@ def _narrow_window_geometry(head_size, dtype):
 # Additive-bias geometry (see :func:`_bias_geometry_spec`).
 _BIAS_BLOCK_M = 128
 _BIAS_BLOCK_N_D128 = 32
-# bf16 D64 measured ahead at the waves-per-eu of the other configs (a 256-register
-# budget) with the bias, not at the kernel's own per-config 4 (``_tuned_waves_per_eu``).
+# bf16 D64 measured ahead at the waves-per-eu of the other configs, not at the kernel's
+# own per-config 4 (``_tuned_waves_per_eu``): 2 waves/EU is a 256-register budget
+# (512 VGPRs per SIMD lane // 2, the rule of ``test_attention_builds.py`` and of
+# ``estimate_occupancy_detail``). The paired A/B is in the PR's Performance section.
 _BIAS_D64_BF16_WAVES_PER_EU = 2
 # The mask kinds whose band is a plain one over equal lengths: a bottom-right band
 # over equal lengths is the top-left one, and ``_make_spec`` builds the same spec.

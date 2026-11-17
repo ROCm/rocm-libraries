@@ -246,7 +246,14 @@ _BIAS_FLOOR = -(2.0**97)
 # a row whose every score is -inf. _EMPTY_ROW_MAX_GRID (-2**33) cannot serve here: a real
 # bias of, say, -1e10 makes a legitimate row max far smaller than that.
 _BIAS_LIVE_ROW_MIN = -(2.0**98)
-assert _MASK_SENTINEL < _BIAS_LIVE_ROW_MIN < _BIAS_FLOOR * LOG2E
+# Not an `assert`: `python -O` strips asserts, and a violation is a silent wrong
+# answer (the bias-on epilogue would misclassify rows).
+if not _MASK_SENTINEL < _BIAS_LIVE_ROW_MIN < _BIAS_FLOOR * LOG2E:
+    raise ValueError(
+        "bias constants must satisfy _MASK_SENTINEL < _BIAS_LIVE_ROW_MIN < "
+        f"_BIAS_FLOOR * log2e, got {_MASK_SENTINEL}, {_BIAS_LIVE_ROW_MIN}, "
+        f"{_BIAS_FLOOR * LOG2E}"
+    )
 
 
 @dataclass(frozen=True)
@@ -1551,7 +1558,7 @@ def build_attention_dense(
         here, and softmax_max and _p_exp skip the scale on this path."""
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
         # The x4 bias loads lift the D128 LSE kernels past the 256-VGPR budget
-        # (2 waves/SIMD, LDS-bound) into a scratch spill; they keep the scalar loads.
+        # (2 waves/SIMD) into a scratch spill; they keep the scalar loads.
         x4 = not RAGGED and not (spec.emit_lse and D == 128)
         if x4:
             # One bias pointer per KV tile, at the lane's first key; the x4 loads

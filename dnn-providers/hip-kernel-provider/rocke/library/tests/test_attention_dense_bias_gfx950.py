@@ -270,6 +270,51 @@ def test_bias_is_refused_with_fp8_kv():
         replace(_BASE, kv_storage_dtype="fp8e4m3", use_additive_bias=True)
 
 
+def _constants_block():
+    """The kernel module's bias-constant block (the mask sentinel through the live-row
+    threshold and its order check), as source text."""
+    import kernels.gfx950.attention_dense as dense
+
+    src = open(dense.__file__).read()
+    start = src.index("_MASK_SENTINEL = ")
+    return src[start : src.index("@dataclass(frozen=True)\nclass Gfx950", start)]
+
+
+def _exec_constants(block):
+    from kernels.gfx950.attention_dense import LOG2E
+
+    ns = {"LOG2E": LOG2E}
+    exec(compile(block, "<constants>", "exec"), ns)
+    return ns
+
+
+def test_the_bias_constants_keep_their_order():
+    """The mask sentinel is below the live-row threshold, which is below the floor's
+    score: a masked score cannot read as live, and a floored bias (finfo.min padding)
+    cannot read as dead. The module raises (not asserts: ``python -O`` would strip it)
+    when a constant breaks the order."""
+    import kernels.gfx950.attention_dense as dense
+
+    assert (
+        dense._MASK_SENTINEL
+        < dense._BIAS_LIVE_ROW_MIN
+        < dense._BIAS_FLOOR * dense.LOG2E
+    )
+    block = _constants_block()
+    assert _exec_constants(block)["_BIAS_LIVE_ROW_MIN"] == dense._BIAS_LIVE_ROW_MIN
+    for old, new in (
+        # A threshold above the floor's score.
+        ("_BIAS_LIVE_ROW_MIN = -(2.0**98)", "_BIAS_LIVE_ROW_MIN = -(2.0**97)"),
+        # A sentinel above the threshold.
+        ("_MASK_SENTINEL = -(2.0**99)", "_MASK_SENTINEL = -(2.0**97)"),
+        # A floor below the threshold's score would let a floored key read as masked.
+        ("_BIAS_FLOOR = -(2.0**97)", "_BIAS_FLOOR = -(2.0**99)"),
+    ):
+        assert old in block, old
+        with pytest.raises(ValueError, match="bias constants must satisfy"):
+            _exec_constants(block.replace(old, new))
+
+
 def test_a_bias_request_for_fp8_kv_is_refused_by_the_grid_candidate():
     from dispatch.attention import attention_tuning_spec
     from rocke.dispatch.core import PinRefused
@@ -278,6 +323,20 @@ def test_a_bias_request_for_fp8_kv_is_refused_by_the_grid_candidate():
         attention_tuning_spec(_request(**kw), "gfx950_dense_grid")  # each alone is fine
     with pytest.raises(PinRefused, match=r"not supported with fp8 KV"):
         attention_tuning_spec(_request(use_fp8=True), "gfx950_dense_grid")
+
+
+def test_a_bias_request_for_paged_kv_is_refused_by_the_grid_candidate():
+    """The candidate declares both features (paged K/V and the bias), the spec refuses
+    the pair, and the dispatcher reports the pin as refused."""
+    from dispatch.attention import attention_tuning_spec
+    from rocke.dispatch.core import PinRefused
+
+    paged = dict(batch=1, layout="paged", kv_block_size=16)
+    # Each alone is fine: paged K/V without the bias, and the bias without paged K/V.
+    attention_tuning_spec(_request(**paged, use_attn_bias=False), "gfx950_dense_grid")
+    attention_tuning_spec(_request(), "gfx950_dense_grid")
+    with pytest.raises(PinRefused, match=r"not supported with paged K/V"):
+        attention_tuning_spec(_request(**paged), "gfx950_dense_grid")
 
 
 def test_the_kv_segment_knob_is_out_of_scope_with_a_bias():

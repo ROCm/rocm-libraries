@@ -287,6 +287,31 @@ def test_ragged_lengths(mask, bias_shape):
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+@pytest.mark.parametrize("mask", ["none", "top_left"])
+@pytest.mark.parametrize("d", [64, 128])
+def test_rows_are_independent_of_the_other_rows_of_their_wave(d, mask, lse):
+    """The lazy rescale keeps or moves each row's running max on that row's own scores;
+    the wave skips the O / l multiply only when every row keeps its max. A bias bumped
+    by +400 at the last key of the last query row alone moves that row's max and no
+    other row's, so every other row's output (and LSE) must be bit-identical to the run
+    without the bump, and the last row must change. A wave-wide decision would move the
+    max of the 31 rows that share the last row's wave and change their output bits."""
+    dtype, hq, hkv, batch, sq, skv = "bf16", 4, 2, 1, 512, 512
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask, lse=lse)
+    assert spec.lazy_rescale and not spec.ragged
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    bumped = bias.copy()
+    bumped[:, :, sq - 1, skv - 1] += 400.0
+    scale = 1.0 / math.sqrt(d)
+    base, base_lse = _launch(spec, q, k, v, bias, scale)
+    out, out_lse = _launch(spec, q, k, v, bumped, scale)
+    np.testing.assert_array_equal(out[:, : sq - 1], base[:, : sq - 1])
+    if lse:
+        np.testing.assert_array_equal(out_lse[..., : sq - 1], base_lse[..., : sq - 1])
+    assert max_abs(out[:, sq - 1], base[:, sq - 1]) > 5 * tolerance(dtype)
+
+
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
 def test_rows_with_no_live_key_store_zero(lse):
     """Rows 0..63 see only keys 0..q under the causal mask, all -inf: they store
     O = 0 and LSE = -inf, the hipDNN reference's answer for a row of -inf scores."""

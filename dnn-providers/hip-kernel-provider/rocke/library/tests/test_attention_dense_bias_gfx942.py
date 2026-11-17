@@ -1547,25 +1547,18 @@ def test_the_binding_hands_attn_bias_to_the_runner(monkeypatch):
     assert "additive_bias" not in calls[2]
 
 
-def test_the_gfx942_binding_still_refuses_inputs_the_runner_has_no_argument_for(
-    monkeypatch,
-):
-    """The binding names the runner's inputs per arch (inferring them from the
-    signature drops arguments and launches another kernel): gfx942 takes the bias now,
-    but not paged K/V inputs."""
-    import kernels.gfx942.attention_dense as dense
+def test_a_bias_request_for_paged_kv_is_refused_by_the_gfx942_candidate():
+    """The candidate declares both features (paged K/V and the bias), the spec refuses
+    the pair, and the dispatcher reports the pin as refused."""
     from dispatch.attention import attention_tuning_spec
-    from dispatch.attention.bindings import bind_dense_attention_torch
+    from rocke.dispatch.core import PinRefused
 
-    monkeypatch.setattr(dense, "run_attention_dense_torch", lambda **kw: None)
-    req = _request()
-    ts = attention_tuning_spec(req, "gfx942_dense")
-    tensors = {"q": 0, "k": 0, "v": 0, "out": 0, "block_tables": object()}
-    with pytest.raises(
-        NotImplementedError,
-        match=r"gfx942 dense runner does not accept 'block_tables'",
-    ):
-        bind_dense_attention_torch(req, ts, tensors).launch()
+    paged = dict(batch=1, layout="paged", kv_block_size=16)
+    # Each alone is fine: paged K/V without the bias, and the bias without paged K/V.
+    attention_tuning_spec(_request(**paged, use_attn_bias=False), "gfx942_dense")
+    attention_tuning_spec(_request(), "gfx942_dense")
+    with pytest.raises(PinRefused, match=r"not supported with paged K/V"):
+        attention_tuning_spec(_request(**paged), "gfx942_dense")
 
 
 # --------------------------------------------------------------------------- #
