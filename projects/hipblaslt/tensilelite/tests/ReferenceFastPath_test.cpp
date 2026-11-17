@@ -15,6 +15,7 @@
 #include <cstring>
 #include <limits>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1674,5 +1675,35 @@ TEST(ReferenceFastPath, GradientBiasFollowsElementsToValidate)
         // From D the slow path computes every D element as well.
         if(src == ContractionProblemGemm::D)
             EXPECT_EQ(d[true], d[false]);
+    }
+}
+
+TEST(ReferenceFastPath, BatchedBiasGradientReportsUnsupportedShape)
+{
+    for(auto src :
+        {ContractionProblemGemm::A, ContractionProblemGemm::B, ContractionProblemGemm::D})
+    {
+        auto problem = makeGradientProblem(1, 1, 1, false, false, 2);
+        setBiasGradient(problem, src);
+        EXPECT_FALSE(isFastPathEligible(problem));
+        std::vector<float> a(2, 1.0f), b(2, 1.0f), c(2, 0.0f), d(2, 0.0f);
+        float              bias = 99.0f;
+        for(bool fast : {false, true})
+        {
+            SCOPED_TRACE(testing::Message() << "source " << src << ", fast " << fast);
+            ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+            inputs.bias = &bias;
+            try
+            {
+                SolveGemmCPU(problem, inputs, -1, fast);
+                FAIL() << "Expected an unsupported bias-gradient shape error";
+            }
+            catch(std::runtime_error const& e)
+            {
+                EXPECT_NE(std::string(e.what()).find("single batch"), std::string::npos);
+                EXPECT_NE(std::string(e.what()).find("2 batches"), std::string::npos);
+            }
+            EXPECT_EQ(bias, 99.0f);
+        }
     }
 }
