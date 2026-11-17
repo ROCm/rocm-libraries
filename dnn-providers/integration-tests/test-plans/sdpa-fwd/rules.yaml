@@ -582,9 +582,9 @@ rules:
       - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [mqa], v_head_sharing: [gqa]}
       - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [gqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [differ]}
       - {tensor_overlap: [inputs_overlap], strides_k: [inherited], paged_kv: [absent], seq_q_vs_seq_kv: [shorter]}
-    source: "the case builder's shared-memory check (a view dim larger than its owner's dim is 'view-does-not-fit'); class_to_value.head_counts (H_v > H_k for these sharing pairs; k_and_v_differ gives V more heads than K); class_to_value.seq_lengths (shorter: S_q < S_kv)"
+    source: "the graph exporter's shared-memory check (a view dim larger than its owner's dim does not fit); class_to_value.head_counts (H_v > H_k for these sharing pairs; k_and_v_differ gives V more heads than K); class_to_value.seq_lengths (shorter: S_q < S_kv)"
     adapted: "Model only: the class values fix which tensor is the view (strides `inherited`, D-INPUTS-OVERLAP-VIEW-LAYOUT) and its sizes."
-    note: "The rule states the fit for unpaged storage only: the case builder makes no shared-memory view on a paged row (overlapProblem returns 'paged' before the fit check), and a paged side holds a page pool, not [B, H, S, D] slots. A view on a ragged row is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
+    note: "The rule states the fit for unpaged storage only: the graph exporter refuses a shared-memory view on a paged row before the fit check, and a paged side holds a page pool, not [B, H, S, D] slots. A view on a ragged row is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
     evidence: read in code
 
   # =========================================================================== definition — structural
@@ -698,7 +698,7 @@ rules:
       - {page_count: [surplus], max_seq_len_kv: [equal]}
       - {page_count: [exact], max_seq_len_kv: [larger]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (\"max_blocks_per_seq must equal ceil(max_seq_len_kv / block_size)\"; its comment states it as cuDNN's rule)"
-    note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph builder sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (an API-path variant), but the model has no unset value."
+    note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph exporter sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (an API-path variant), but the model has no unset value."
     debatable: "A validation choice, not an impossibility: a wider table, or a declared maximum the table more than covers, is well defined (the extra pages are never read). The frontend rejects both to match cuDNN. Not yet confirmed."
     evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950)"
 
@@ -708,7 +708,7 @@ rules:
     reason: "One page-table tensor has one width, but with max_seq_len_kv declared each side's table must be ceil(max_seq_len_kv / that side's page size) wide, so one table shared by K and V cannot serve two page sizes."
     forbid: {page_table_sharing: [shared], page_size_k_vs_v: [differ]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (each table's dim 2 must equal ceil(max_seq_len_kv / its own block size))"
-    note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (an API-path variant); the graph builder always declares it."
+    note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (an API-path variant); the graph exporter always declares it."
     debatable: "Not yet confirmed. A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
     evidence: read in code
 
@@ -781,7 +781,7 @@ rules:
       - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [v_only], page_size: [partial, whole_sequence], strides_v: [zero_broadcast]}
       - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], seq_q: [many], strides_q: [zero_broadcast]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp::validate (\"ragged offset multiplier must be >= 1\")"
-    note: "Model only: the builder puts a zero stride on the sequence dimension when its extent is above 1 (class_to_value strides.zero_broadcast). That dimension is the page of a paged K or V (V's page holds two tokens with page_size_k_vs_v differ) and max_seq_len_kv on a dense side beside a paged one. A view (`inherited`) reads with its owner's strides. O and Stats take no zero stride (D-OUTPUT-SELF-ALIAS); a negative stride is F-NO-NEGATIVE-STRIDE."
+    note: "Model only: the graph exporter puts a zero stride on the sequence dimension when its extent is above 1 (class_to_value strides.zero_broadcast). That dimension is the page of a paged K or V (V's page holds two tokens with page_size_k_vs_v differ) and max_seq_len_kv on a dense side beside a paged one. A view (`inherited`) reads with its owner's strides. O and Stats take no zero stride (D-OUTPUT-SELF-ALIAS); a negative stride is F-NO-NEGATIVE-STRIDE."
     evidence: read in code
 
   - id: F-LEFT-BOUND-NOT-ZERO
@@ -903,7 +903,7 @@ rules:
   - id: CH-FIXED-API-SETTINGS
     kind: choice
     form: setting
-    reason: "Held fixed: workspace large enough; O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the driver."
+    reason: "Held fixed: workspace large enough; O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the case runner."
     applies_to: []
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::get_workspace_size, ::outputTensor (an output is virtual by default)"
 

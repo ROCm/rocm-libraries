@@ -56,7 +56,7 @@ input files became the bundles.
 | ragged | A tensor that packs sequences of different lengths one after the other. Offsets tell where each sequence starts. |
 | CTest, GTest | CTest is the test runner of CMake. GTest (GoogleTest) is the C++ test framework of the suite. |
 | plugin | A shared library that hipDNN loads at run time. A provider plugin holds one or more engines. |
-| tier | `quick`, `standard`, `comprehensive` or `full` (section 7). RFC 0022, `sdpa-bwd.md` and the `level` fields of the plan files call it a level. |
+| tier | `quick`, `standard`, `comprehensive` or `full` (section 7). RFC 0022, `sdpa-bwd.md`, the `levels:` recipe in `model.yaml` and the `level` column of the case list call it a level. The `level` field of an axis in `model.yaml` means something else: which call decides the axis value (`graph`, `execute` or `both`). |
 | shape class | One set of concrete sizes: S, H, M, L or X (section 7). The plan files hold them under `level_labels.shape_tiers`, and the case list in its `shape_tier` column. |
 
 ### Relation to RFC 0022
@@ -247,9 +247,6 @@ sizes relate. Example: `seq_q_vs_seq_kv` is `shorter`, `equal` or `longer`.
 The **class-to-value table** (`class_to_value` in `model.yaml`) turns each
 class into numbers. Example: `k_head_sharing = gqa` means the K head count is
 the query head count divided by 4, at least 2.
-
-Rules hold only for the values that were tested. A result at head size 128
-says nothing about head size 80.
 
 **Base case.** `base_cases.shared` is the plain case that other cases start
 from: bf16 in and out, fp32 compute, batch 2, 8 heads, head size 128,

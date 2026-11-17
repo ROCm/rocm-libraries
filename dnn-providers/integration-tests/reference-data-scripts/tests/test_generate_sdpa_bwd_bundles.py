@@ -388,10 +388,6 @@ def _sdpa_fwd_plan_names():
     ]
 
 
-def _glob_regex(pattern):
-    return re.compile(".*".join(re.escape(part) for part in pattern.split("*")))
-
-
 def test_engine_toml_entries_have_known_keys():
     """A misspelled key is not an error for the harness: a misspelled `archs`
     makes a skip apply on every GPU."""
@@ -414,11 +410,11 @@ def test_engine_toml_sdpa_fwd_plan_filters_match_cases():
             for f in filters:
                 if "SdpaFwdPlan" not in f:
                     continue
-                if "*" not in f:
-                    assert f in exact, (path.name, section, f)
+                where = (path.name, section, f)
+                if not any(c in f for c in "*?["):
+                    assert f in exact, where
                     continue
-                regex = _glob_regex(f)
-                assert any(regex.fullmatch(n) for n in names), (path.name, section, f)
+                assert any(fnmatch.fnmatchcase(n, f) for n in names), where
 
 
 def test_quarantined_cases_are_rejection_probes(written):
