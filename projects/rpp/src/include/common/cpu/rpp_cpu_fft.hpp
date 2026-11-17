@@ -45,13 +45,14 @@ SOFTWARE.
 // float32 value on any toolchain. That makes the kernel both more accurate than a float32 FFT
 // and bitwise reproducible, which is what the audio QA suite's exact-match checks require.
 
-#include <immintrin.h>
-
 #include <cmath>
 #include <complex>
 #include <utility>
 #include <vector>
 
+// Brings in the portable SIMD intrinsics: <immintrin.h> on x86, SIMDE with native aliases
+// elsewhere. Including <immintrin.h> directly here would break the non-x86 HOST build.
+#include "rpp_cpu_simd_load_store.hpp"
 #include "rppdefs.h"
 
 constexpr Rpp64f RPP_PI = 3.14159265358979323846;
