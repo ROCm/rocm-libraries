@@ -1658,6 +1658,38 @@ namespace
         expect_one_entry(*target, "csr -> csc after overflow");
     }
 
+    TEST_F(ConvS2s, EmptyEllThroughIntermediate)
+    {
+        // A 0-row ELL still needs a one-element intermediate CSR row pointer.
+        // csr_set_pointers rejects a null one, including when m is 0.
+        Spmat source, target;
+        ASSERT_EQ(
+            rocsparse_create_ell_descr(&source, 0, 3, nullptr, nullptr, 0, idx32, base, f32_r),
+            st_ok);
+        ASSERT_EQ(rocsparse_create_coo_descr(
+                      &target, 0, 3, 0, nullptr, nullptr, nullptr, idx32, base, f32_r),
+                  st_ok);
+        S2sDescr descr;
+        ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&descr, source, target, alg), st_ok);
+        ASSERT_EQ(rocsparse_sparse_to_sparse_permissive(descr), st_ok);
+        size_t bytes = 0;
+        ASSERT_EQ(
+            rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_a, &bytes),
+            st_ok);
+        DeviceMem analysis(std::max<size_t>(bytes, 1));
+        ASSERT_EQ(
+            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_a, bytes, analysis.ptr),
+            st_ok);
+        ASSERT_EQ(
+            rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_c, &bytes),
+            st_ok);
+        DeviceMem compute(std::max<size_t>(bytes, 1));
+        ASSERT_EQ(
+            rocsparse_sparse_to_sparse(handle, descr, source, target, stage_c, bytes, compute.ptr),
+            st_ok);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
     TEST_F(ConvS2s, CaptureMatchesEager)
     {
         for(const auto& cc : k_capture)

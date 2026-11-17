@@ -209,26 +209,54 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
                                   (csr_nnz > std::numeric_limits<int32_t>::max()
                                    && (row_type == rocsparse_indextype_i32)));
-        if(csr_m > 0)
+        // csr_m + 1 is never zero, including a 0-row matrix. csr_set_pointers
+        // requires that row pointer even when m is 0.
+        if(row_bytes > 0)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_row__, row_bytes));
         }
         if(csr_nnz > 0)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_col__, col_bytes));
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_val__, val_bytes));
+            const hipError_t col_error = rocsparse_hipMalloc(&TEMP_col__, col_bytes);
+            if(col_error != hipSuccess)
+            {
+                (void)rocsparse_hipFree(TEMP_row__);
+                TEMP_row__ = nullptr;
+                RETURN_IF_HIP_ERROR(col_error);
+            }
+            const hipError_t val_error = rocsparse_hipMalloc(&TEMP_val__, val_bytes);
+            if(val_error != hipSuccess)
+            {
+                (void)rocsparse_hipFree(TEMP_row__);
+                (void)rocsparse_hipFree(TEMP_col__);
+                TEMP_row__ = nullptr;
+                TEMP_col__ = nullptr;
+                RETURN_IF_HIP_ERROR(val_error);
+            }
         }
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_csr_descr(&intermediate,
-                                                             csr_m,
-                                                             csr_n,
-                                                             csr_nnz,
-                                                             TEMP_row__,
-                                                             TEMP_col__,
-                                                             TEMP_val__,
-                                                             row_type,
-                                                             col_type,
-                                                             source_->idx_base,
-                                                             source_->data_type));
+        {
+            const rocsparse_status create_status = rocsparse_create_csr_descr(&intermediate,
+                                                                              csr_m,
+                                                                              csr_n,
+                                                                              csr_nnz,
+                                                                              TEMP_row__,
+                                                                              TEMP_col__,
+                                                                              TEMP_val__,
+                                                                              row_type,
+                                                                              col_type,
+                                                                              source_->idx_base,
+                                                                              source_->data_type);
+            if(create_status != rocsparse_status_success)
+            {
+                (void)rocsparse_hipFree(TEMP_row__);
+                (void)rocsparse_hipFree(TEMP_col__);
+                (void)rocsparse_hipFree(TEMP_val__);
+                TEMP_row__ = nullptr;
+                TEMP_col__ = nullptr;
+                TEMP_val__ = nullptr;
+                RETURN_IF_ROCSPARSE_ERROR(create_status);
+            }
+        }
 
         //
         // Attach the intermediate.
@@ -289,6 +317,7 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
                 intermediate->nnz, rocsparse::datatype_sizeof(intermediate->data_type), val_bytes));
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_col__, col_bytes));
+            // MUST BE CONDITIONAL
             {
                 const hipError_t val_error = rocsparse_hipMalloc(&TEMP_val__, val_bytes);
                 if(val_error != hipSuccess)
@@ -298,9 +327,6 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                     RETURN_IF_HIP_ERROR(val_error);
                 }
             }
-            //
-            // MUST BE CONDITIONAL
-            //
             {
                 const rocsparse_status set_status
                     = rocsparse_csr_set_pointers(intermediate, TEMP_row__, TEMP_col__, TEMP_val__);
