@@ -4205,6 +4205,12 @@ class GlobalWriteBatchWriter:
           pendingInc = None
         prevN = blockIdxN
 
+    plainCachelineAlign = usePermlane16 and self._plainCachelineAlignActive()
+    alignedSecond = set()   # elementIdx of the sba=1 element of a pair already stored by a cacheline align
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    nE = len(self.batchElements)
+
     for elementIdx, element in enumerate(self.batchElements):
       tt0 = element[1]
       blockIdxN = element[0]
@@ -4214,11 +4220,26 @@ class GlobalWriteBatchWriter:
         partnerElementIdx = elementIdx - 1
         partnerExists = (partnerElementIdx >= 0 and
                          self.batchElements[partnerElementIdx][1] == tt0 - 1)
+        if partnerExists and elementIdx in alignedSecond:
+          continue
         if partnerExists:
           flushAtTransition(blockIdxN)
           partnerAddrCalc = self.ss.elementAddr[partnerElementIdx]
           sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
           sumIdx1 = self.ss.elementSumIdx[elementIdx]
+          # Store cacheline align with the next pair of this N-group when the two are the halves of
+          # the same 128B lines (both in this batch, 64B apart).
+          b0, b1 = elementIdx + 1, elementIdx + 2
+          if (plainCachelineAlign and ((tt0 - 1) // 2) % 2 == self._cachelineAlignLineStartParity() and b1 < nE
+              and self.batchElements[b0][0] == blockIdxN and self.batchElements[b0][1] == tt0 + 1
+              and self.batchElements[b1][0] == blockIdxN and self.batchElements[b1][1] == tt0 + 2
+              and self.ss.elementAddr[b0].addrDVgpr == partnerAddrCalc.addrDVgpr
+              and (self.ss.elementAddr[b0].globalOffset - partnerAddrCalc.globalOffset) * bpeDest // bpeCurr == 64):
+            mod.add(self._emitPlainCachelineAlignPair(partnerAddrCalc, sumIdx0, sumIdx1,
+                                            self.ss.elementAddr[b0], self.ss.elementSumIdx[b0],
+                                            self.ss.elementSumIdx[b1], prefixOffset, tt0 - 1, blockIdxN, forceSlc))
+            alignedSecond.add(b1)
+            continue
           issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1, blockIdxN)
         else:
           flushAtTransition(blockIdxN)
@@ -4732,6 +4753,34 @@ class GlobalWriteBatchWriter:
     module.add(VCndMaskB32(dst=vgpr(T), src0=vgpr(T), src1=vgpr(addr), src2=VCC(),
                            comment="align voff1: even<-addr, odd<-perm addr+64"))
     self._cachelineAlignStoreNow(module, addrCalcA, tt0A, forceSlc, H, T, "align store 1")
+
+  def _plainCachelineAlignActive(self) -> bool:
+    """Store cacheline align on the plain (non-fused) paired store's guard-free interior body."""
+    return (storeCachelineAlignEnabled(self.kernel)
+            and getattr(self, "_permlane16Active", False)
+            and not self.parentWriter.states.subtileFusedFullTileStore
+            and getattr(self.cvtVgprStruct, "vgprCachelineAlignTmp", -1) >= 0)
+
+  def _emitPlainCachelineAlignPair(self, addrA, sA0, sA1, addrB, sB0, sB1, prefixOffset, tt0A, blockIdxN, forceSlc) -> Module:
+    """Interior body of the plain store: align pair A (tt0A, tt0A+1) with pair B (tt0A+2,
+    tt0A+3) of the same N-group. Both are in this batch with their epilogues (bias,
+    activation, alpha) already applied; the interior body is only entered when every row
+    and column of the batch is in bounds, so EXEC is full and there are no guards. Pair B
+    is packed in place into its own ValuC registers, so no register is added."""
+    module = Module("16bitSubtilePlainCachelineAlign")
+    H = self.cvtVgprStruct.vgprBf16Temp
+    X = ('c', sB0 - prefixOffset)
+    W = "ValuC+" + str(sB1 - prefixOffset)
+    for (ac, s0, s1, t, q) in ((addrA, sA0, sA1, tt0A, H), (addrB, sB0, sB1, tt0A + 2, X)):
+      module.add(self._emit16bitSubtilePairedStorePhase1(
+        ac, s0, s1, prefixOffset, tt0=t, blockIdxM=t, blockIdxN=blockIdxN, interior=True, vPackOverride=q))
+      module.add(self._emit16bitSubtilePairedStorePhase2(ac, tt0=t, interior=True, forceSlc=forceSlc,
+                                                         vPackOverride=q, emitStore=False))
+    self._emitCachelineAlignBlendAndStores(module, addrA, tt0A, forceSlc, H, X, W, marker=16, rebuildMask=False)
+    # gfx940+: a VALU that overwrites the data of a store wider than 8 bytes needs 2 wait
+    # states. The next line's first convert writes H straight after the store that read it.
+    module.add(SNop(waitState=1, comment="2 wait states: WAR hazard between store src and next pack dst"))
+    return module
 
   def _pairPackQuad(self) -> int:
     """Base vgpr of the 4-dword pack quad this paired store uses.
