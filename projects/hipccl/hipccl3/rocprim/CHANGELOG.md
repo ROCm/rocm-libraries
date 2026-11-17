@@ -4,6 +4,15 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 5.1.0 for ROCm 10.3.0
 
+### Changed
+
+* Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
+* The configuration summary now prints the coverage setting when `BUILD_TEST` is enabled.
+* Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
+
+### Removed
+
+* Deprecated `BUILD_CODE_COVERAGE`, use `ROCPRIM_ENABLE_COVERAGE` instead.
 ### Resolved Issues
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
 

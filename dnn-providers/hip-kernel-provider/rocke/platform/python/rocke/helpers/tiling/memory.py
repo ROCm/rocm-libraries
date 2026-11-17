@@ -12,7 +12,7 @@ owns the *correctness envelope* the style cannot reach past (rev-7 Principle 8, 
   cooperative descriptor (invariant a) and written in the convention order ``(free, K)``. The extent is
   ``bounds``-independent: a style never sizes LDS, so it cannot clip-size the buffer (which would let a
   full-width unmasked read index a neighbour workgroup's LDS). The buffer is flat and sized from the
-  descriptor: ``b.smem_alloc(td.dtype, [td.element_span])``.
+  descriptor by ``lds_allocation``.
 - ``lds_store`` / ``lds_read`` -- the LDS-facing verbs. Their signature has NO ``bounds`` parameter, so
   masking an LDS access is unrepresentable (invariant b -- the cooperative store/read stay full-width
   and unmasked; zeros, if any, flow through LDS and contribute nothing to the MAC). Each runs the
@@ -44,8 +44,8 @@ def cooperative_load_width(
 ) -> int | None:
     """Widest GEOMETRY-PERMITTED per-lane free-run (in elements) for a cooperative load of this operand,
     or ``None`` if none works. This is the distribution ceiling only -- the dtype / 128-bit HARDWARE ceiling
-    is applied separately in ``emit``: ``_contiguous_run`` caps a vector-eligible dtype at 16 B (an f32
-    8-run -> 2x ``dwordx4``) and scalarizes an ineligible one (f64) outright, so a wide result here need not
+    is applied separately in ``emit``: ``_contiguous_run`` caps a vector-eligible storage unit at 16 B (an
+    f32 8-run -> 2x ``dwordx4``) and scalarizes an ineligible one (f64) outright, so a wide result here need not
     be a single global access. DERIVED, and PER OPERAND -- A and B have independent free extents so may want
     different widths.
 
@@ -141,8 +141,8 @@ def lds_tile_desc(
     ``buffers`` is the multi-buffer count. The buffers sit side by side on the free axis -- buffer ``i``
     starts at free position ``i * free_ext`` -- so the lengths are ``(buffers * free_ext, k_ext)`` and
     the strides ``(1, buffers * free_ext)``: element ``(f, k)`` lives at ``f + k * buffers * free_ext``,
-    a ``[K][buffers * free]`` buffer. Allocate it flat from the descriptor,
-    ``b.smem_alloc(td.dtype, [td.element_span])``, and address it with the cooperative and read tiles
+    a ``[K][buffers * free]`` buffer. Allocate it flat from the descriptor with ``lds_allocation``
+    (:mod:`rocke.helpers.tiling.emit`), and address it with the cooperative and read tiles
     as they are (``(free, K)``, unswapped) at origins ``(free_position, k)``.
 
     The stride-1 axis is axis 0 (the free axis), so the built-in ``lds_swizzle=True`` refuses this

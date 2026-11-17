@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -72,6 +73,15 @@ namespace TensileLite
 {
     namespace
     {
+        // OutputPeerD: the kernel adds this distance to every D store address to reach the peer
+        // D. It is taken between the two buffers' batch 0, so it is the same whether the kernel
+        // gets D as one pointer or as a batch pointer array (both D have the same layout).
+        int64_t peerDDistance(ContractionInputs const& inputs)
+        {
+            return static_cast<int64_t>(reinterpret_cast<intptr_t>(inputs.peerD)
+                                        - reinterpret_cast<intptr_t>(inputs.d));
+        }
+
         size_t checkedMultiply(size_t a, size_t b)
         {
             if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
@@ -837,6 +847,10 @@ namespace TensileLite
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args)
     {
+        for(auto const& problem : problems)
+            if(problem.fusedA2A() == FusedA2A::A2AGemm)
+                throw std::runtime_error("A2AGemm does not support device user arguments");
+
         for(int i = 0; i < problems.size(); i++)
         {
             const TensorDescriptor& e = problems[i].tensor(ContractionProblemGemm::TENSOR::E);
@@ -1442,10 +1456,13 @@ namespace TensileLite
             for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), mxsa.strides()[i]);
 
+        const size_t bStrideDivisor
+            = problemType.fusedA2A == FusedA2A::A2AGemm ? problem.world() : 1;
         for(size_t i = startStrideAB; i < b.dimensions(); i++)
         {
             auto stride_b = problemType.sparse == 2 ? compressed.strides()[i] : b.strides()[i];
-            args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i), stride_b);
+            args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i),
+                                           stride_b / bStrideDivisor);
         }
 
         if(problemType.mxBlockB)
@@ -2042,6 +2059,10 @@ namespace TensileLite
             }
         }
 
+        // After the activation arguments and before the amax ones, as in the kernel signature.
+        if(problemType.outputPeerD)
+            args.template append<int64_t>("DeltaPeerD", peerDDistance(inputs));
+
         if(problemType.outputAmaxD)
         {
             args.template append<const void*>("AddrAmaxOut", inputs.amaxD);
@@ -2118,14 +2139,27 @@ namespace TensileLite
             {
                 if(sizes.size() >= 4)
                 {
+                    // Built as PredictionLibrary builds the ranking's problem, so both see
+                    // the same operand layouts and pick the same WGM.
+                    auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
+                    if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                        miDataType = origami::data_type_t::XFloat32;
                     origami::problem_t origami_problem = {
-                        .size    = {sizes[0], sizes[1], sizes[3]},
-                        .batch   = sizes[2],
+                        .size        = {sizes[0], sizes[1], sizes[3]},
+                        .batch       = sizes[2],
                         // CU budget hint; 0 = use all CUs.
-                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
-                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_transpose = problem.transA() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .b_transpose = problem.transB() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                        .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                        .mi_dtype    = miDataType,
                     };
+                    // Origami ranks an auto mapping with this same call.
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
                                           static_cast<size_t>(sizeMapping.macroTile.y),
@@ -2546,6 +2580,12 @@ namespace TensileLite
         const uint32_t mask16              = 0xFFFF;
         const uint32_t mask14              = 0x3FFF;
         const uint32_t mask8               = 0xFF;
+
+        if(problemType.fusedA2A == FusedA2A::A2AGemm && (wgm < 0 || wgmxcc > 1))
+            throw std::runtime_error("[fused-a2a] A2AGemm requires WorkGroupMapping >= 0 and "
+                                     "WorkGroupMappingXCC = 1; got "
+                                     + std::to_string(wgm) + " and " + std::to_string(wgmxcc)
+                                     + ".");
 
         internalArg0 = 0;
         internalArg1 = 0;
@@ -3051,14 +3091,20 @@ namespace TensileLite
         }
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
-        if(problem.fusedGemmA2A())
+        if(problemType.fusedA2A != FusedA2A::Disabled)
+        {
+            if(problemType.fusedA2A == FusedA2A::A2AGemm)
+                checkA2AGemmBufAligned(inputs.fusedA2APeers, inputs.fusedA2AMyRank);
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
             appendFusedSegment(rv.args,
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
                                inputs.fusedA2AMyRank,
                                problem.world(),
                                inputs.fusedA2ADrain,
-                               static_cast<uint32_t>(problem.fusedA2AExtent()));
+                               static_cast<uint32_t>(problem.fusedA2AExtent()),
+                               static_cast<uint32_t>(pAMDGPU ? pAMDGPU->computeUnitCount : 0));
+        }
 
         // CU-occupancy probe tail args (layout: Signature.py addOccupancyProbeArgs).
         // A grid smaller than minGrid is padded with probe-only WGs so the probe
@@ -3830,6 +3876,9 @@ namespace TensileLite
                                                        problem.useGateResidual() ? gate.strides().at(index) : 0);
                     break;
                 }
+                case CustomArgSemantic::DeltaPeerD:
+                    rv.args.template append<int64_t>("DeltaPeerD", peerDDistance(inputs));
+                    break;
                 case CustomArgSemantic::AddressAmaxOut:
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
                     break;
@@ -4012,13 +4061,18 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::FusedA2ASegment:
                 {
-                    appendFusedSegment(rv.args,
-                                       inputs.fusedA2APeers,
-                                       inputs.fusedA2ACounter,
-                                       inputs.fusedA2AMyRank,
-                                       problem.world(),
-                                       inputs.fusedA2ADrain,
-                                       static_cast<uint32_t>(problem.fusedA2AExtent()));
+                    if(problemType.fusedA2A == FusedA2A::A2AGemm)
+                        checkA2AGemmBufAligned(inputs.fusedA2APeers, inputs.fusedA2AMyRank);
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+                    appendFusedSegment(
+                        rv.args,
+                        inputs.fusedA2APeers,
+                        inputs.fusedA2ACounter,
+                        inputs.fusedA2AMyRank,
+                        problem.world(),
+                        inputs.fusedA2ADrain,
+                        static_cast<uint32_t>(problem.fusedA2AExtent()),
+                        static_cast<uint32_t>(pAMDGPU ? pAMDGPU->computeUnitCount : 0));
                     break;
                 }
                 // ---- Random seed args ----
@@ -7718,7 +7772,12 @@ namespace TensileLite
                                static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
                         .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
                         .workgroup_mapping         = self.sizeMapping.workGroupMapping,
-                        .workspace_size            = problem.workspaceSize(),
+                        // The spatial-cluster schedule re-cuts this grid and checks its own
+                        // (unpadded) workspace requirement, so the per-WG tile check must not
+                        // turn the exact size it reports into a whole-tile grid.
+                        .workspace_size            = self.usesStreamKSpatialCluster()
+                                                         ? std::numeric_limits<size_t>::max()
+                                                         : problem.workspaceSize(),
                         .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
                                                          ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
                                                          : self.sizeMapping.workspaceSizePerElemC,
@@ -8730,5 +8789,18 @@ namespace TensileLite
         return stream << " shiftPtrElemA=" << st.shiftPtrElemA
                       << " shiftPtrElemB=" << st.shiftPtrElemB << " depthUorMT0=" << st.depthUorMT0
                       << " depthUorMT1=" << st.depthUorMT1;
+    }
+
+    std::ostream& operator<<(std::ostream& stream, GL2PrefetchSAddrCheckPacket const& st)
+    {
+        return stream << " tluA=" << st.tluA << " tluB=" << st.tluB << " depthUA=" << st.depthUA
+                      << " depthUB=" << st.depthUB << " clusterMT0=" << st.clusterMT0
+                      << " clusterMT1=" << st.clusterMT1 << " depthU=" << st.depthU
+                      << " matrixInstK=" << st.matrixInstK << " mxBlockA=" << st.mxBlockA
+                      << " mxBlockB=" << st.mxBlockB << " mxBlockFreeA=" << st.mxBlockFreeA
+                      << " mxBlockFreeB=" << st.mxBlockFreeB << " metadata=" << st.metadata
+                      << " tluMetadata=" << st.tluMetadata
+                      << " depthUMetadata=" << st.depthUMetadata
+                      << " clusterMTMetadata=" << st.clusterMTMetadata;
     }
 } // namespace TensileLite

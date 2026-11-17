@@ -54,8 +54,9 @@ def _kernel(**over):
     problem_type = {
         "MXBlockA": False, "MXBlockB": False, "Sparse": False, "UseBeta": True,
         "UseScaleAB": False, "UseScaleCD": False, "UseScaleAlphaVec": 0, "UseE": False,
-        "ActivationType": ActivationType("none"), "OutputAmaxD": False, "UseBias": 0,
-        "GroupedGemm": False, "FusedGemmA2A": False,
+        "ActivationType": ActivationType("none"), "OutputAmaxD": False, "OutputPeerD": False,
+        "UseBias": 0,
+        "GroupedGemm": False, "FusedA2A": "Disabled",
     }
     problem_type.update(over.pop("ProblemType", {}))
     kernel = {
@@ -264,6 +265,19 @@ def test_amax_output_addresses():
         assert expected in sems
 
 
+def test_peer_d_distance_follows_the_epilogue_args_and_precedes_amax():
+    sems = _sems(_writer(), _kernel(ProblemType={"OutputPeerD": True, "OutputAmaxD": True}))
+    assert sems.count("DeltaPeerD") == 1
+    assert sems.index("DeltaPeerD") < sems.index("AddressAmaxOut")
+    assert "DeltaPeerD" not in _sems(_writer(), _kernel())
+
+
+def test_peer_d_is_a_signed_distance_not_an_address():
+    args = _register(_writer(), _kernel(ProblemType={"OutputPeerD": True}))
+    peer = [a for a in args if a["semantic"] == "DeltaPeerD"]
+    assert [a["type"] for a in peer] == ["int64"]
+
+
 def test_mbsk_trailing_args_from_algorithm():
     sems = _sems(_writer(), _kernel(GlobalSplitUAlgorithm="MultipleBufferSingleKernel"))
     assert sems[-7:] == ["AddressTD", "Synchronizer", "GSUSync",
@@ -276,7 +290,8 @@ def test_mbsk_trailing_args_from_adaptive_gsua():
         assert expected in sems
 
 
-def test_fused_a2a_appends_one_segment_entry():
+@pytest.mark.parametrize("mode", ["GemmA2A", "A2AGemm"])
+def test_fused_a2a_appends_one_segment_entry(mode):
     plain = _sems(_writer(), _kernel())
-    fused = _sems(_writer(), _kernel(ProblemType={"FusedGemmA2A": True}))
+    fused = _sems(_writer(), _kernel(ProblemType={"FusedA2A": mode}))
     assert fused == plain + ["FusedA2ASegment"]

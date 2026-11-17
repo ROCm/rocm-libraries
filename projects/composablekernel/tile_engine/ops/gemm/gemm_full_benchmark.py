@@ -210,6 +210,25 @@ def resolve_configs(args, arch):
                      cfg_dir / names[-1]))]
 
 
+def parse_pipelines(value):
+    """Parse a restriction to bridged pipeline names, not a config override."""
+    from codegen_common import CommonTypeMappings
+
+    names = tuple(part.strip() for part in value.split(","))
+    if not all(names):
+        raise argparse.ArgumentTypeError(
+            "expected non-empty comma-separated pipeline names"
+        )
+    if len(set(names)) != len(names):
+        raise argparse.ArgumentTypeError("duplicate pipeline names")
+    unknown = sorted(set(names) - CommonTypeMappings.PIPELINE_TO_CK.keys())
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"unknown pipeline name(s): {', '.join(unknown)}"
+        )
+    return names
+
+
 def load_problems(path, variant):
     if path:
         with open(path) as f:
@@ -619,13 +638,15 @@ def write_pair_listing(path, header, problems, configs, vfb, dims=DIMS):
     )
 
 
-def read_listed_pairs(path, problems, configs, vfb, searching=False, dims=DIMS):
+def read_listed_pairs(path, problems, configs, vfb, searching=False, dims=DIMS,
+                      hint=""):
     """--pairs: the listed pairs, validated against the full expansion and
     judged by the pairing a full run applies. Returns (wanted, paired, star,
     needed): the listed kernel names per problem key ("*" expanded), the
     names the driver pairs with each problem, the "*" keys, and the names to
     build (``searching``: the search builds only those it proposes); None
-    after printing why the file cannot be used."""
+    after printing why the file cannot be used (with ``hint``: what else
+    the run must share, e.g. " and --pipelines")."""
     try:
         requested = load_pair_list(path)
     except (OSError, ValueError) as e:
@@ -639,7 +660,7 @@ def read_listed_pairs(path, problems, configs, vfb, searching=False, dims=DIMS):
             if items:
                 print(
                     f"  ERROR: --pairs lists {len(items)} {what} this run does not "
-                    f"have (same configs, problems, dtype, layout and arch?): "
+                    f"have (same configs, problems, dtype, layout and arch{hint}?): "
                     f"{', '.join(items[:3])}{' ...' if len(items) > 3 else ''}"
                 )
         return None
@@ -764,7 +785,7 @@ def repeat_plan(measured, top_k):
     return plan
 
 
-def run_repeats(plan, count, problems, built_kernels, devices, run_args):
+def run_repeats(plan, count, problems, built_kernels, devices, run_args, extra=None):
     """Re-time each planned (problem, kernel) ``count`` times, one subprocess per
     launch, rep-major so repeats of one kernel are spread over the run.
 
@@ -795,7 +816,13 @@ def run_repeats(plan, count, problems, built_kernels, devices, run_args):
                 return
             fails = []
             rows, _, n_fail, n_skip = _run_batch_on_device(
-                device_id, unit, rargs, worker_path, base_env, failures=fails,
+                device_id,
+                unit,
+                rargs,
+                worker_path,
+                base_env,
+                extra,
+                failures=fails,
                 workers=workers,
             )
             if workers.cancelled:
@@ -1097,6 +1124,15 @@ def main():
         help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
+        "--pipelines",
+        type=parse_pipelines,
+        default=None,
+        metavar="NAME[,NAME...]",
+        help="Keep only these bridged pipelines from the selected configs, before "
+        "--max-kernels and --pairs; applies to plain runs, --list-pairs and search. "
+        "Does not change which config files are selected",
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="Check each kernel's output against an fp32 numpy reference "
@@ -1152,6 +1188,9 @@ def main():
     )
     add_pair_and_search_args(parser, search_scope="; gemm_universal only")
     args = parser.parse_args()
+    pipeline_metadata = (
+        {"pipelines": list(args.pipelines)} if args.pipelines is not None else {}
+    )
     if args.verify_tol is None:
         args.verify_tol = VERIFY_TOL.get(args.dtype, DEFAULT_VERIFY_TOL)
     if args.build_timeout is not None and args.build_timeout <= 0:
@@ -1271,10 +1310,22 @@ def main():
         )
     vfb.report_rejects()
 
+    expanded_pipelines = list(dict.fromkeys(cfg.pipeline for cfg in all_configs))
+    if args.pipelines is not None:
+        all_configs = [cfg for cfg in all_configs if cfg.pipeline in args.pipelines]
+        print(f"  Pipeline filter (--pipelines): {', '.join(args.pipelines)}")
     all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
     if not all_configs:
+        if args.pipelines is not None and expanded_pipelines:
+            print(
+                f"  ERROR: 0 configs left after --pipelines {', '.join(args.pipelines)} "
+                f"for dtype {args.dtype} on {arch} (layout {sweep_layout}); "
+                f"{', '.join(config_paths)} expanded only: "
+                f"{', '.join(expanded_pipelines)}"
+            )
+            return 1
         print(
             f"  ERROR: 0 configs expanded for dtype {args.dtype} on {arch} "
             f"(layout {sweep_layout}); no config in {', '.join(config_paths)} "
@@ -1285,7 +1336,8 @@ def main():
 
     if args.list_pairs:
         header = {"arch": arch, "dtype": args.dtype, "layout": sweep_layout,
-                  "variant": codegen_variant, "configs": config_paths}
+                  "variant": codegen_variant, "configs": config_paths,
+                  **pipeline_metadata}
         write_pair_listing(args.list_pairs, header, problems, all_configs, vfb)
         return 0
 
@@ -1294,7 +1346,9 @@ def main():
         # Validate against the full expansion, build only what is listed, and
         # judge every listed pair by the pairing a full run would apply.
         listed = read_listed_pairs(args.pairs, problems, all_configs, vfb,
-                                   searching=search_settings is not None)
+                                   searching=search_settings is not None,
+                                   hint=" and --pipelines"
+                                   if args.pipelines is not None else "")
         if listed is None:
             return 1
         wanted, paired, star, needed = listed
@@ -1305,6 +1359,7 @@ def main():
             "layout": sweep_layout,
             "variant": codegen_variant,
             "configs": config_paths,
+            **pipeline_metadata,
         }
         return run_search_mode(
             args, search_settings, problems, all_configs, vfb,
@@ -1414,6 +1469,9 @@ def main():
     measured = [] if args.repeat_top else None
     if measured is not None:
         hooks["measured"] = measured
+    # The workers' fp8/bf8 host format (OCP or FNUZ) follows the arch the
+    # kernels were built for, not the local GPU's detection, which can fail.
+    worker_extra = {"arch": arch}
     stats = benchmark_on_devices(
         problems,
         pairs,
@@ -1423,6 +1481,7 @@ def main():
         worker_path,
         base_env,
         csv_path,
+        worker_extra,
         **hooks,
     )
 
@@ -1442,7 +1501,13 @@ def main():
             rwriter.writeheader()
             run_args = (args, worker_path, base_env, rwriter, rfh, threading.Lock())
             repeat_result = run_repeats(
-                plan, args.repeat_count, problems, built_kernels, devices, run_args
+                plan,
+                args.repeat_count,
+                problems,
+                built_kernels,
+                devices,
+                run_args,
+                worker_extra,
             )
         stats["failures"] += repeat_result[1]
     if fail_file:

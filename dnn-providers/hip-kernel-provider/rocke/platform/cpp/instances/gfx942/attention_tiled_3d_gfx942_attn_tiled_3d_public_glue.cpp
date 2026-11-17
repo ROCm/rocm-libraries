@@ -140,6 +140,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.kv_cache_policy = "all";
     s.use_kv_lds_swizzle = false;
     s.use_wave_page_id_load = false;
+    s.emit_lse = false;
     return s;
 }
 

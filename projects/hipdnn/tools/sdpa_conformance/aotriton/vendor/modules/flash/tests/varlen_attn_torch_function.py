@@ -38,6 +38,11 @@ class _attention_varlen(torch.autograd.Function):
     # DEBUG_MASK_DTYPE = torch.int32
     # DEBUG_MASK_DTYPE = torch.float32
 
+    # `causal` may be a window with the principal diagonal, `(left, right, p)`;
+    # see aotriton_flash.split_principal_diagonal. It is forwarded untouched to
+    # attn_fwd_varlen / attn_bwd_varlen (ctx.causal carries it to the backward).
+    # The kernel applies p per sequence, from each sequence's own seqlen_k -
+    # seqlen_q, so the batch may freely mix q < k, q == k and q > k.
     @staticmethod
     def forward(ctx, q, k, v, seqlens_q, seqlens_k, causal, sm_scale, dropout_p,
                 varlen_type, lse_layout='HT',

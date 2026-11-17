@@ -26,32 +26,32 @@ struct arch_mi400
 
     template <fpfmt Fmt, int Rows, int Cols, use Use>
     struct layout_config;
-    template <>
-    struct layout_config<fpfmt::e4m3, 16, 128, use::A>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 16, 128, use::A>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] % 16, x[0] / 16 * 16 ^ x[1] / 16 * 32 ^ x[1] % 16};
         }
     };
-    template <>
-    struct layout_config<fpfmt::e4m3, 128, 16, use::B>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 128, 16, use::B>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] / 16 * 16 ^ x[1] / 16 * 32 ^ x[1] % 16, x[0] % 16};
         }
     };
-    template <>
-    struct layout_config<fpfmt::e4m3, 32, 128, use::A>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 32, 128, use::A>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] % 16 ^ x[1] / 64 * 16, x[0] / 16 * 16 ^ x[1] / 16 % 4 * 32 ^ x[1] % 16};
         }
     };
-    template <>
-    struct layout_config<fpfmt::e4m3, 128, 32, use::B>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 128, 32, use::B>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
@@ -465,6 +465,18 @@ struct arch_mi400
                                     matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
         {
             d.data = __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(std::bit_cast<int32x16>(a.data),
+                                                                 std::bit_cast<int32x16>(b.data),
+                                                                 0,
+                                                                 c.data,
+                                                                 A_reuse,
+                                                                 B_reuse);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    matrix<fpfmt::e5m2, 16, 128, use::A>& a,
+                                    matrix<fpfmt::e5m2, 128, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8(std::bit_cast<int32x16>(a.data),
                                                                  std::bit_cast<int32x16>(b.data),
                                                                  0,
                                                                  c.data,
@@ -1112,6 +1124,22 @@ struct arch_mi400
             tensor_stride3_lo = stride;
             tensor_stride3_hi = stride >> 32;
         }
+        __device__ inline auto get_lds_addr_increment() const { return get_tensor_dim3(); }
+        __device__ inline void set_lds_addr_increment(uint32_t increment)
+        {
+            set_tensor_dim3(increment);
+        }
+        __device__ inline auto get_global_addr_increment() const { return get_tensor_stride3(); }
+        __device__ inline void set_global_addr_increment(uint64_t increment)
+        {
+            set_tensor_stride3(increment);
+        }
+        __device__ inline auto get_iterate_count() const { return tile_dim3 + 1; }
+        // iterate_count must be greater than 0
+        __device__ inline void set_iterate_count(uint16_t iterate_count)
+        {
+            tile_dim3 = iterate_count - 1;
+        }
     };
 
     union __attribute__((__packed__)) tdm_group3
@@ -1195,10 +1223,10 @@ struct arch_mi400
                                               tdm_group4 const& d4)
     {
         __builtin_amdgcn_tensor_load_to_lds(d0.data,
-                                            std::bit_cast<int32x8>(d1.data),
-                                            std::bit_cast<int32x4>(d2.data),
-                                            std::bit_cast<int32x4>(d3.data),
-                                            std::bit_cast<int32x8>(d4.data),
+                                            std::bit_cast<uint32x8>(d1.data),
+                                            std::bit_cast<uint32x4>(d2.data),
+                                            std::bit_cast<uint32x4>(d3.data),
+                                            std::bit_cast<uint32x8>(d4.data),
                                             CachePolicy);
     }
     template <int CachePolicy = make_cache_flags<scope::WGP, th::RT>()>
@@ -1209,10 +1237,10 @@ struct arch_mi400
                                                  tdm_group4 const& d4)
     {
         __builtin_amdgcn_tensor_store_from_lds(d0.data,
-                                               std::bit_cast<int32x8>(d1.data),
-                                               std::bit_cast<int32x4>(d2.data),
-                                               std::bit_cast<int32x4>(d3.data),
-                                               std::bit_cast<int32x8>(d4.data),
+                                               std::bit_cast<uint32x8>(d1.data),
+                                               std::bit_cast<uint32x4>(d2.data),
+                                               std::bit_cast<uint32x4>(d3.data),
+                                               std::bit_cast<uint32x8>(d4.data),
                                                CachePolicy);
     }
 

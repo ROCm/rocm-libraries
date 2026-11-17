@@ -5,9 +5,10 @@
 batched_gemm_full_benchmark.main, which shares its measurement) under stubs.
 
 Imported (never collected: its name has no ``test_`` prefix) by the driver CLI
-tests. It owns the fixed command line (gfx950, fp16, rcr), the problems file
-and the patches of device and arch resolution; each test passes its own build
-and batch-runner stubs. No GPU or compiler needed.
+tests. It owns the fixed command line (gfx950, fp16, rcr unless a test passes
+another arch, dtype or layout), the problems file and the patches of device
+and arch resolution; each test passes its own build and batch-runner stubs.
+No GPU or compiler needed.
 """
 
 import json
@@ -20,7 +21,7 @@ BUILD = {"gemm_full_benchmark": "setup_multiple_gemm_dispatchers",
 
 
 def run_stub_driver(drv, monkeypatch, capsys, tmp_path, problems, *argv, build,
-                    run_batch, devices=("0",)):
+                    run_batch, devices=("0",), arch=ARCH, dtype=DTYPE, layout=LAYOUT):
     """``drv.main()`` on ``problems`` with ``argv`` after the fixed options.
 
     ``build`` replaces the driver's build function (``BUILD``) and
@@ -33,12 +34,12 @@ def run_stub_driver(drv, monkeypatch, capsys, tmp_path, problems, *argv, build,
     probs = tmp_path / "problems.json"
     probs.write_text(json.dumps({"problems": list(problems)}))
     monkeypatch.setattr(sys, "argv", [
-        "gemm_full_benchmark.py", "--arch", ARCH, "--dtype", DTYPE,
-        "--layout", LAYOUT, "--problems", str(probs),
+        "gemm_full_benchmark.py", "--arch", arch, "--dtype", dtype,
+        "--layout", layout, "--problems", str(probs),
         "--csv", str(tmp_path / "out.csv"), *argv,
     ])
     monkeypatch.setattr(drv, "resolve_devices", lambda spec: list(devices))
-    monkeypatch.setattr(drv, "_resolve_arch", lambda a: ARCH)
+    monkeypatch.setattr(drv, "_resolve_arch", lambda a: arch)
     monkeypatch.setattr(drv, BUILD[drv.__name__], build)
     monkeypatch.setattr(sys.modules["gemm_full_benchmark"], "_run_batch_on_device",
                         run_batch)
