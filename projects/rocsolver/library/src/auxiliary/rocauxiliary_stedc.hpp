@@ -1420,7 +1420,8 @@ __device__ I laed4_alt(I n,
 
     S d1 = DELTA(1);
     S di = DELTA(i);
-    S dnm1 = DELTA(n - 1);
+    // unused when n == 1, where the read would be DELTA(0)
+    S dnm1 = (n > 1) ? DELTA(n - 1) : d1;
     S dn = DELTA(n);
 
     rhoinv = S(1.) / rho;
@@ -1744,7 +1745,8 @@ __device__ I laed4_alt(I n,
         stedc_detail::reduce_wave_sum(psi);
 
         phi = S(0.);
-        for(int j = n - hipThreadIdx_x; j >= i + 2; j -= hipBlockDim_x)
+        // signed arithmetic: j must go negative when hipThreadIdx_x > n
+        for(int j = n - (int)hipThreadIdx_x; j >= i + 2; j -= (int)hipBlockDim_x)
         {
             S dj = (DELTA(j) - di) - midpt;
             phi = phi + Z(j) * Z(j) / dj;
@@ -1805,8 +1807,9 @@ __device__ I laed4_alt(I n,
         }
         iim1 = ii - 1;
         iip1 = ii + 1;
-        S diim1 = DELTA(iim1);
-        S diip1 = DELTA(iip1);
+        // unused when ii == 1 or ii == n, where the reads would be DELTA(0) and DELTA(n + 1)
+        S diim1 = (iim1 >= 1) ? DELTA(iim1) : S(0.);
+        S diip1 = (iip1 <= n) ? DELTA(iip1) : S(0.);
         if(orgati)
         {
             for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
@@ -1845,7 +1848,8 @@ __device__ I laed4_alt(I n,
         dphi = S(0.);
         phi = S(0.);
         erretm2 = S(0.);
-        for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+        // signed arithmetic: j must go negative when hipThreadIdx_x > n
+        for(int j = n - (int)hipThreadIdx_x; j >= iip1; j -= (int)hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
             S zt = Z(j) * temp;
@@ -2034,7 +2038,8 @@ __device__ I laed4_alt(I n,
         dphi = S(0.);
         phi = S(0.);
         erretm2 = S(0.);
-        for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+        // signed arithmetic: j must go negative when hipThreadIdx_x > n
+        for(int j = n - (int)hipThreadIdx_x; j >= iip1; j -= (int)hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
             S zt = Z(j) * temp;
@@ -2250,7 +2255,8 @@ __device__ I laed4_alt(I n,
             dphi = S(0.);
             phi = S(0.);
             erretm2 = S(0.);
-            for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+            // signed arithmetic: j must go negative when hipThreadIdx_x > n
+            for(int j = n - (int)hipThreadIdx_x; j >= iip1; j -= (int)hipBlockDim_x)
             {
                 temp = Z(j) / DELTA(j);
                 S zt = Z(j) * temp;
