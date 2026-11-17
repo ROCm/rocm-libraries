@@ -178,7 +178,7 @@ To efficiently install directly from the rocm-libraries repository use do the fo
 ```bash
 TEMP_DIR=$(mktemp -d)
 git clone --no-checkout --filter=blob:none --sparse https://github.com/ROCm/rocm-libraries.git $TEMP_DIR
-git -C $TEMP_DIR sparse-checkout set shared/origami
+git -C $TEMP_DIR sparse-checkout set shared/origami cmake/modules
 git -C $TEMP_DIR checkout develop
 pip install $TEMP_DIR/shared/origami/python -v
 rm -rf $TEMP_DIR

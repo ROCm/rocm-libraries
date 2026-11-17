@@ -168,11 +168,15 @@ endif()
 
 # Windows VERSIONINFO for the shipped origami DLL and test binary. The check below
 # fails configure, on every platform, if a DLL/EXE target here has no version resource.
-# Component-only checkouts, such as the sparse checkout for the Python install in
-# README.md, don't include the shared module; they skip version resources.
+# The sparse checkout for the Python install in README.md includes the shared module.
+# Checkouts without it, such as an sdist, skip version resources.
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules/rocm_libraries_version_resource.cmake"
         OPTIONAL RESULT_VARIABLE _origami_version_resource_module)
-if(_origami_version_resource_module)
+if(NOT _origami_version_resource_module AND WIN32)
+    message(WARNING "Origami: cmake/modules/rocm_libraries_version_resource.cmake is not in this checkout; "
+                    "origami.dll will be built without a version resource. Add cmake/modules to a sparse "
+                    "checkout to embed it.")
+elseif(_origami_version_resource_module)
     set(ORIGAMI_VERSION_COMMIT_ID "unknown")
     if(WIN32 AND GIT)
         execute_process(
