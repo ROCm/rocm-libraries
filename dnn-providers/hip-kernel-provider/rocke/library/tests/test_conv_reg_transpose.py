@@ -498,6 +498,39 @@ class TestWgradRdna4Grid(unittest.TestCase):
         }
         self.assertLessEqual(set(CACHE_WGRAD_WMMA_TWO_STAGE_RDNA4_GEOMETRIES), grid)
 
+    def test_tile_k_128_axis_is_wgrad_regt_only(self):
+        from kernels.conv.aot_jobs import (
+            _geometry_list,
+            _wgrad_regt_listed_geometries,
+        )
+        from rocke.core.arch import ArchTarget
+
+        listed = _wgrad_regt_listed_geometries()
+        for arch in ("gfx1201", "gfx1200", "gfx12-generic"):
+            target = ArchTarget.from_gfx(arch)
+            for direction in ("fwd", "dgrad"):
+                with self.subTest(arch=arch, direction=direction):
+                    geos = _geometry_list(target, "fp16", direction)
+                    self.assertFalse([g for g in geos if g[2] == 128])
+            geos = [g for g in _geometry_list(target, "fp16", "wgrad") if g[2] == 128]
+            with self.subTest(arch=arch, direction="wgrad"):
+                self.assertTrue(geos)
+                # Only geometries of a listed register-transpose kernel.
+                for g in geos:
+                    self.assertIn(tuple(g[:6]), listed)
+                    self.assertEqual(g[7], "default")
+                # The jobs of those geometries are all register-transpose.
+                jobs = self._jobs(arch, geos=geos[:60])
+                self.assertTrue(jobs)
+                self.assertTrue(all(j.identity.reg_transpose for j in jobs))
+        # Every other arch keeps its geometry lists.
+        for arch in ("gfx1250", "gfx950"):
+            target = ArchTarget.from_gfx(arch)
+            for direction in ("fwd", "dgrad", "wgrad"):
+                with self.subTest(arch=arch, direction=direction):
+                    geos = _geometry_list(target, "fp16", direction)
+                    self.assertFalse([g for g in geos if g[2] == 128])
+
     def test_count_jobs_matches_the_walk(self):
         from kernels.conv.aot_jobs import (
             CACHE_DGRAD_MAX_SUB_GEMMS,

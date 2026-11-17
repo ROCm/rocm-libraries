@@ -138,6 +138,7 @@ K-outer one, since that layout takes its stride from the builder.
 
 from __future__ import annotations
 
+import functools
 import itertools
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
@@ -166,18 +167,18 @@ CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
 CACHE_TILE_K: Tuple[int, ...] = (16, 32, 64)
 # ---- RDNA4 deep-K tiles ------------------------------------------------------
 # The gfx12 RDNA targets (gfx1200 / gfx1201 and their generic target) also
-# build the forward and wgrad geometries above at tile_k 128: few-wave tiles over a deep
-# reduction (small grids, wide channels) halve their K-loop barriers there and
-# lead those rows. Appended after the base product (see :func:`_geometries`),
+# build the wgrad register-transpose geometries above at tile_k 128: few-wave
+# tiles over a deep reduction (small grids, wide channels) halve their K-loop
+# barriers there and lead those rows. Appended after the base product (see :func:`_geometries`),
 # so the geometry order and the enumeration chunks of every other target are
 # unchanged.
 CACHE_RDNA4_ARCHS: Tuple[str, ...] = ("gfx1200", "gfx1201", "gfx12-generic")
 CACHE_RDNA4_EXTRA_TILE_K: Tuple[int, ...] = (128,)
-# Forward and wgrad walk that axis: forward's tile_k 128 kernels are the
-# GPU-verified listed rows, and the wgrad register-transpose / two-stage / x_run
-# kernels (the RDNA4 wgrad rows below) live on it and were verified on gfx1201.
-# dgrad's tile_k 128 kernels are not verified, so the axis stays off there.
-CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS: Tuple[str, ...] = ("fwd", "wgrad")
+# Only wgrad walks that axis, and there only the listed register-transpose rows
+# (CACHE_WGRAD_REGT_KERNELS: the register-transpose / two-stage / x_run kernels,
+# verified on gfx1201); its M-outer kernels stay off it. The other directions'
+# tile_k 128 kernels are not verified, so the axis stays off there.
+CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS: Tuple[str, ...] = ("wgrad",)
 CACHE_WARP_MN: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
 
@@ -830,6 +831,26 @@ def _grid_axes(direction: Optional[str]) -> Tuple[Tuple[int, ...], Tuple[int, ..
     )
 
 
+def _wgrad_extra_k_only(arch: str, tile_k: int) -> bool:
+    """Whether a wgrad geometry at ``tile_k`` is on the RDNA4 tile_k axis, where
+    only the listed register-transpose kernels are built (no M-outer kernel,
+    stream-K or group-merged job: none of them is verified at that depth)."""
+    return arch in CACHE_RDNA4_ARCHS and tile_k in CACHE_RDNA4_EXTRA_TILE_K
+
+
+@functools.lru_cache(maxsize=None)
+def _wgrad_regt_listed_geometries() -> frozenset:
+    from kernels.conv.rdna4_wgrad_regt_kernels import CACHE_WGRAD_REGT_KERNELS
+
+    return frozenset(tuple(k[:6]) for k in CACHE_WGRAD_REGT_KERNELS)
+
+
+def _wgrad_extra_k_listed(geometry: tuple, epilogue: str) -> bool:
+    """Whether ``geometry`` ((tile_m, tile_n, tile_k, warp_m, warp_n, warp
+    tile)) carries a kernel of CACHE_WGRAD_REGT_KERNELS (default epilogue)."""
+    return epilogue == "default" and geometry in _wgrad_regt_listed_geometries()
+
+
 def _geometries(
     target,
     mma_family: str,
@@ -850,7 +871,9 @@ def _geometries(
     extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
     base grid. The RDNA4 targets (:data:`CACHE_RDNA4_ARCHS`) walk the same
     grid again at :data:`CACHE_RDNA4_EXTRA_TILE_K` after it, for the
-    directions in :data:`CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS` (not dgrad).
+    directions in :data:`CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS` (wgrad only), and
+    there only the geometries of a listed register-transpose kernel
+    (:func:`_wgrad_extra_k_only`).
     It must be threaded through wherever a geometry list is built for a
     direction, or the chunk bounds stop matching the list the worker walks.
     """
@@ -895,6 +918,10 @@ def _geometries(
             family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=wt, n=wt
         )
         if atom is None or tile_k % atom.k:
+            continue
+        if _wgrad_extra_k_only(target.gfx, tile_k) and not _wgrad_extra_k_listed(
+            (tile_m, tile_n, tile_k, warp_m, warp_n, wt), epilogue
+        ):
             continue
         yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom
 
@@ -1605,6 +1632,8 @@ def _wgrad_jobs(
         )
         if epilogue != "default" and not in_cover:
             continue
+        # On the RDNA4 tile_k axis only the register-transpose rows are built.
+        regt_only = _wgrad_extra_k_only(arch, tile_k)
         ts_cover = _wgrad_two_stage_cover(
             arch, mma_family, (tile_m, tile_n, tile_k, warp_m, warp_n), in_cover
         )
@@ -1641,7 +1670,9 @@ def _wgrad_jobs(
         # share one width; A (dY) runs along kpg. The default epilogue (and so
         # every two-stage kernel) stores scalar, so there D is 1 and B takes
         # its own width -- tied to D it could only ever load scalar.
-        for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
+        for vec_a, vec_bc, split_k in itertools.product(
+            _VECS, _VECS, () if regt_only else split_ks
+        ):
             for two_stage, caps in itertools.product(
                 _wgrad_split_reductions(arch, split_k, False), _layout_caps()
             ):
@@ -1742,8 +1773,12 @@ def _wgrad_jobs(
         # K partition). The workspace reduction reuses the two-stage scratch,
         # so its replica count is pinned exactly as for two-stage.
         for (mode, reduction, vec_a, vec_b), caps in itertools.product(
-            _wgrad_streamk_builds(
-                epilogue, tile_n, dtype, streamk_modes, streamk_reductions
+            (
+                ()
+                if regt_only
+                else _wgrad_streamk_builds(
+                    epilogue, tile_n, dtype, streamk_modes, streamk_reductions
+                )
             ),
             _layout_caps(),
         ):
@@ -1792,7 +1827,7 @@ def _wgrad_jobs(
         # serves (cpg = kpg = 1) -- while an explicit width is validated
         # against the per-group run of 1 and could only be 1.
         for gm, split_k in itertools.product(
-            _WGRAD_GROUP_MERGES, [sk for sk in split_ks if sk > 1]
+            _WGRAD_GROUP_MERGES, [sk for sk in split_ks if sk > 1 and not regt_only]
         ):
             cfg = dict(
                 tile_m=tile_m,
@@ -2511,7 +2546,9 @@ def count_jobs(
                     if in_cover
                     else 0
                 )
-                total += vecs * stages * layouts + asyncs * layouts
+                regt_only = _wgrad_extra_k_only(target.gfx, geo[2])
+                if not regt_only:
+                    total += vecs * stages * layouts + asyncs * layouts
                 if geo[7] == "default" and _wgrad_regt_geometry(target, geo, da, db):
                     for v in _wgrad_regt_variants(
                         target.gfx, dtype_triple(dtype)[2], geo[:6], split_ks
@@ -2535,6 +2572,8 @@ def count_jobs(
                         ):
                             # The ungrouped x_run twin of the grouped job.
                             total += sum(1 for c in _layout_caps() if c["grouped"])
+                if regt_only:
+                    continue
                 if 8 in _VECS and _wgrad_prefetch_global_regs_geometry(
                     target.gfx, geo[:6]
                 ):
