@@ -98,6 +98,7 @@ set(UNIT_ASM_TEST_FILES
     unit/ra/RegisterAllocationPassTest.cpp
     unit/ra/RegisterBudgetTest.cpp
     unit/ra/RegisterSymbolSyncTest.cpp
+    unit/ra/VgprMsbPredictionTest.cpp
     unit/ssa/AsmPrinterSSAFormTest.cpp
     unit/ssa/LiftAsmRegistersToSSATest.cpp
     unit/asm/DefUseAnalysisCleanupTest.cpp

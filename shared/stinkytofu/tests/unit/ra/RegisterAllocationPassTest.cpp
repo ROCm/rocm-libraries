@@ -903,3 +903,33 @@ TEST_F(RegisterAllocationPassTest, AChainThatEveryAllocatorRefusesNamesEachRefus
         << text;
     EXPECT_TRUE(func->hasAttachedSSA()) << "nothing was applied";
 }
+
+TEST_F(RegisterAllocationPassTest, TheReportPredictsVgprMsbSwitchesOnlyWhereBanksAreSelected) {
+    // In a loop, src1 in bank 2 and then in bank 3: the first instruction sets
+    // the word and the second changes it. The legacy colouring is the
+    // producer's, so both sides read 2. A target without a VGPR MSB mode has
+    // nothing to count, and its report stays as it was.
+    BasicBlock* entry = block("entry");
+    BasicBlock* loop = block("loop");
+    BasicBlock* exit = block("exit");
+    func->addEdge(entry, loop);
+    func->addEdge(loop, loop);
+    func->addEdge(loop, exit);
+    createWmmaScale16(loop, /*dst=*/0, /*a=*/256, /*b=*/512, /*scaleA=*/10, /*scaleB=*/12);
+    createWmmaScale16(loop, /*dst=*/8, /*a=*/264, /*b=*/768, /*scaleA=*/10, /*scaleB=*/12);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.applyToOperands = false;
+    options.report = true;
+    LegacyIdentityAllocator allocator;
+
+    std::string withoutMode;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &withoutMode).hasValue());
+    EXPECT_FALSE(contains(withoutMode, "msb[")) << withoutMode;
+
+    options.caps.vgprMsbMode = VgprMsbMode::Msb16;
+    std::string withMode;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &withMode).hasValue());
+    EXPECT_TRUE(contains(withMode, " msb[loop=2->2]")) << withMode;
+}

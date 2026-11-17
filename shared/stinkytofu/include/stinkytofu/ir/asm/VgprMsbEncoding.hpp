@@ -175,25 +175,41 @@ inline void forEachUnencodableVgprOperand(const StinkyInstruction& inst, Callbac
 }
 
 /// Record the per-slot VGPR banks of \p inst; \p hasVgpr set if any VGPR is seen.
-inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst,
-                                bool& hasVgpr) {
-    forEachVgprOperandField(*inst, [&](const StinkyRegister& reg, size_t, bool, int slot) {
-        if (slot < 0) return;
-        const int msb = getMsbFromVgpr(reg);
-        if (msb < 0) return;
+///
+/// \p bankOf names the bank of each slotted VGPR operand, called as
+/// bankOf(operand, operandIndex, isDest). It exists so that a colouring can be
+/// priced before it is written into the operands; everywhere else the bank is
+/// the operand's own, which is what collectVgprMsbSlots() passes.
+template <typename BankOf>
+inline void collectVgprMsbSlotsWith(const StinkyInstruction* inst, BankOf&& bankOf, int msbSrc[3],
+                                    int& msbDst, bool& hasVgpr) {
+    forEachVgprOperandField(*inst,
+                            [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+                                if (slot < 0) return;
+                                if (getMsbFromVgpr(reg) < 0) return;
+                                const int msb = bankOf(reg, operand, isDest);
 
-        hasVgpr = true;
-        if (slot == 3)
-            msbDst = msb;
-        else
-            msbSrc[slot] = msb;
-    });
+                                hasVgpr = true;
+                                if (slot == 3)
+                                    msbDst = msb;
+                                else
+                                    msbSrc[slot] = msb;
+                            });
 }
 
-/// The s_set_vgpr_msb immediate \p inst needs for its VGPR operands; (setVal, hasVgpr)
-/// with hasVgpr false / setVal -1 for ops that carry no VGPR MSB. Shared by the scheduler
-/// (MSB-affinity tiebreak) and InsertVgprMsbPass (materialization) so they cannot drift.
-inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
+inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst,
+                                bool& hasVgpr) {
+    collectVgprMsbSlotsWith(
+        inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); }, msbSrc,
+        msbDst, hasVgpr);
+}
+
+/// computeRequiredMsb() with each slotted VGPR operand's bank supplied by
+/// \p bankOf, as collectVgprMsbSlotsWith() takes it. One body for both, so a
+/// predicted word and an emitted one cannot disagree about which instructions
+/// carry an MSB or which field maps to which slot.
+template <typename BankOf>
+inline std::pair<int, bool> computeRequiredMsbWith(const StinkyInstruction* inst, BankOf&& bankOf) {
     if (inst->is(InstFlag::IF_SALU) || inst->is(InstFlag::IF_SMemLoad) ||
         inst->is(InstFlag::IF_SMemStore) || inst->is(InstFlag::IF_SMemAtomic) ||
         inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Call) ||
@@ -206,13 +222,21 @@ inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
     int msbDst = 0;
     bool hasVgpr = false;
 
-    collectVgprMsbSlots(inst, msbSrc, msbDst, hasVgpr);
+    collectVgprMsbSlotsWith(inst, bankOf, msbSrc, msbDst, hasVgpr);
 
     if (!hasVgpr) return {-1, false};
 
     int setVal = encodeVgprMsbForSlot(0, msbSrc[0]) | encodeVgprMsbForSlot(1, msbSrc[1]) |
                  encodeVgprMsbForSlot(2, msbSrc[2]) | encodeVgprMsbForSlot(3, msbDst);
     return {setVal, true};
+}
+
+/// The s_set_vgpr_msb immediate \p inst needs for its VGPR operands; (setVal, hasVgpr)
+/// with hasVgpr false / setVal -1 for ops that carry no VGPR MSB. Shared by the scheduler
+/// (MSB-affinity tiebreak) and InsertVgprMsbPass (materialization) so they cannot drift.
+inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
+    return computeRequiredMsbWith(
+        inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); });
 }
 
 }  // namespace stinkytofu

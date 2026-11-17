@@ -36,6 +36,7 @@
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterSymbolSync.hpp"
+#include "stinkytofu/transforms/asm/ra/VgprMsbPrediction.hpp"
 #include "stinkytofu/transforms/asm/ssa/SSADestruction.hpp"
 
 #define DEBUG_TYPE "RegisterAllocationPass"
@@ -209,13 +210,19 @@ struct UnbankableChoice {
     std::string allocateRefusal;
 };
 
+/// "n/a" for a loop whose count could not be predicted, the count otherwise.
+std::string switchCountText(const std::optional<uint32_t>& switches) {
+    return switches.has_value() ? std::to_string(*switches) : "n/a";
+}
+
 /// One line per kernel comparing a colouring against the producer's: what it
 /// would cost, next to the pressure floor it could not go below.
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
                          const SSALiveIntervals& intervals,
                          const AllocationConstraints& constraints, const AllocationScope& scope,
                          const AllocationRules& rules, const AsmTargetRegisters& target,
-                         const UnbankableChoice& unbankable, const char* allocator) {
+                         const UnbankableChoice& unbankable, const char* allocator,
+                         const std::vector<Loop>& loops, VgprMsbMode msbMode) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
     const GfxArchID arch =
@@ -238,6 +245,29 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
         if (regClass == RegType::V)
             text += " waves=" + wavesOf(arch, was + 1) + "->" + wavesOf(arch, now + 1);
         text += "]";
+    }
+    // What each loop will pay in s_set_vgpr_msb, producer first. Where the
+    // allocator puts a value decides the bank word every instruction needs, so
+    // this is a cost of the colouring like the high-water mark is -- one that
+    // otherwise shows only in the final asm. Only on a target that selects banks
+    // this way, so every other report stays byte-identical, and only loops that
+    // pay something, since a straight-line block is counted once per kernel.
+    if (msbMode != VgprMsbMode::None && !loops.empty()) {
+        const uint32_t vgprs = target.indexCount(RegType::V);
+        const std::vector<LoopVgprMsbSwitches> before =
+            predictLoopVgprMsbSwitches(function, producer, loops, vgprs);
+        const std::vector<LoopVgprMsbSwitches> after =
+            predictLoopVgprMsbSwitches(function, coloured, loops, vgprs);
+        std::string entries;
+        for (size_t index = 0; index < loops.size(); ++index) {
+            const std::optional<uint32_t>& was = before[index].switches;
+            const std::optional<uint32_t>& now = after[index].switches;
+            if (was == 0u && now == 0u) continue;
+            if (!entries.empty()) entries += ' ';
+            entries +=
+                after[index].header + "=" + switchCountText(was) + "->" + switchCountText(now);
+        }
+        if (!entries.empty()) text += " msb[" + entries + "]";
     }
     // Which rules were in force, so a report can be read without knowing the
     // triple or how capabilities were configured. Silent when there are none,
@@ -606,7 +636,8 @@ Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator
             if (!refusals.empty())
                 choice.allocateRefusal = withoutFunctionName(function, refusals.front());
             *report = shadowReport(function, *allocated, run.intervals, run.constraints, scope,
-                                   run.rules, run.target, choice, allocator.name());
+                                   run.rules, run.target, choice, allocator.name(), run.loops,
+                                   options.caps.vgprMsbMode);
         }
         if (options.applyToOperands) {
             if (std::optional<std::string> problem =
