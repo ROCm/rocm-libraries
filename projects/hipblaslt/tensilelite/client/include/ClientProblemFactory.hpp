@@ -49,7 +49,8 @@ namespace TensileLite
         {
         public:
             ClientProblemFactory(po::variables_map const& args);
-            // One slice of --split-devices: device `sliceIdx` of `sliceCount` gets its share of M.
+            // One slice of --split-devices: device `sliceIdx` of `sliceCount` gets its share of M
+            // (or N), rounded so its D slice starts on 256 bytes when that is nearly free.
             ClientProblemFactory(po::variables_map const& args, size_t sliceIdx, size_t sliceCount);
             ~ClientProblemFactory();
 
@@ -82,6 +83,10 @@ namespace TensileLite
 
         private:
             void createProblems(std::vector<ContractionProblemGemm>& rv);
+
+            // Largest (aligned - last) / aligned the share may be rounded up at.
+            static constexpr double SplitMaxImbalance = 0.01;
+            size_t splitShare(size_t total, size_t step, rocisa::DataType dType) const;
 
             std::vector<std::shared_ptr<ContractionProblem>> m_problems;
 
@@ -143,6 +148,10 @@ namespace TensileLite
             size_t                            m_sliceIdx   = 0;
             size_t                            m_sliceCount = 1;
             bool                              m_splitN     = false;
+            // Per problem, the share of the split dimension devices 0..N-2 take (the last device
+            // takes the rest). Cut once per problem from the full problem's D, so the slice sizes
+            // and sliceOffsetInD agree.
+            std::vector<size_t>               m_splitShares;
             std::vector<std::unique_ptr<ClientProblemFactory>> m_slices;
             // Index of each problem in m_problems, built once with the slices (read-only after
             // that, so devices can look their slice up concurrently).

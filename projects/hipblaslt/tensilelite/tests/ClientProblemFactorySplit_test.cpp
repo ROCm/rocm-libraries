@@ -297,3 +297,47 @@ TEST(ClientProblemFactorySplit, RejectsAProblemFromAnotherFactory)
     ClientProblemFactory other(makeArgs({128, 96, 1, 64}, 2, "M"));
     EXPECT_THROW(factory.sliceProblem(other.problems()[0].get(), 0), std::runtime_error);
 }
+
+TEST(ClientProblemFactorySplit, MShareThatIsAlreadyAlignedIsKept)
+{
+    // float, M split: step 1, g = 2048 / gcd(2048, 32) = 64 rows. 512000 (M = 1024000) is a multiple of 64.
+    ClientProblemFactory factory(makeArgs({1024000, 64, 1, 64}, 2, "M"));
+    auto*                full = factory.problems()[0].get();
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 0)).c().sizes()[0], 512000u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[0], 512000u);
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 512000u);
+}
+
+TEST(ClientProblemFactorySplit, MShareIsRoundedUpWhenTheImbalanceIsTiny)
+{
+    // plain 500005 rounds up to 500032 (a multiple of 64); the last device gets 499978, 0.01% less.
+    ClientProblemFactory factory(makeArgs({1000010, 64, 1, 64}, 2, "M"));
+    auto*                full = factory.problems()[0].get();
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 0)).c().sizes()[0], 500032u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[0], 499978u);
+    // The offset uses the same share as the slice sizes.
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 500032u);
+}
+
+TEST(ClientProblemFactorySplit, MShareIsNotRoundedWhenTheImbalanceIsOverOnePercent)
+{
+    // Rounding 100 to 64 rows would give {128, 72}.
+    ClientProblemFactory factory(makeArgs({200, 64, 1, 64}, 2, "M"));
+    auto*                full = factory.problems()[0].get();
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 0)).c().sizes()[0], 100u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[0], 100u);
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 100u);
+}
+
+TEST(ClientProblemFactorySplit, NShareIsRoundedToTheDPitch)
+{
+    // float, M = 3: a tight D has a pitch of 3 floats = 12 bytes, so a column start is a multiple
+    // of 256 bytes every g = 2048 / gcd(2048, 3 * 32) = 64 columns. plain 50005 -> 50048, the last
+    // device keeps 49962 columns (0.2% less).
+    ClientProblemFactory factory(makeArgs({3, 100010, 1, 64}, 2, "N"));
+    auto*                full = factory.problems()[0].get();
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 0)).c().sizes()[1], 50048u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[1], 49962u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).b().sizes()[1], 49962u);
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 50048u * 3u);
+}
