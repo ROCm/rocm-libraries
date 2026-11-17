@@ -188,6 +188,28 @@ TEST_F(EstimateAsmCyclesTest, SetVgprMsbAfterBarrierCostsIssue) {
     EXPECT_EQ(runPassAndGetResult(), 12u);
 }
 
+// ds_load_b128, ds_load_b128, s_wait_dscnt 1. The wait retires the first load.
+// That load starts at clock 0 and its drain is its own latency (56). The wait is
+// reached at clock 2, so it still needs 54. A wait of 0 also retires the second
+// load, which started one cycle later.
+TEST_F(EstimateAsmCyclesTest, WaitDscntOneWaitsForFirstDsLoad) {
+    createNoOperandInst(GFX::ds_load_b128);
+    createNoOperandInst(GFX::ds_load_b128);
+    StinkyInstruction* wait = createNoOperandInst(GFX::s_wait_dscnt);
+    wait->addSrcReg(StinkyRegister(1));
+
+    EXPECT_EQ(runPassAndGetResult(), 56u);
+}
+
+TEST_F(EstimateAsmCyclesTest, WaitDscntZeroWaitsForSecondDsLoad) {
+    createNoOperandInst(GFX::ds_load_b128);
+    createNoOperandInst(GFX::ds_load_b128);
+    StinkyInstruction* wait = createNoOperandInst(GFX::s_wait_dscnt);
+    wait->addSrcReg(StinkyRegister(0));
+
+    EXPECT_EQ(runPassAndGetResult(), 57u);
+}
+
 TEST_F(EstimateAsmCyclesTest, SecondSetVgprMsbCostsIssue) {
     createVAddF32(0, 1, 2, 5);
     createNoOperandInst(GFX::s_set_vgpr_msb);
