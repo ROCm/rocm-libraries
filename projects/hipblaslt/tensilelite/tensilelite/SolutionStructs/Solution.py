@@ -4371,12 +4371,9 @@ class Solution(collections.abc.Mapping):
 
     # StinkyTofu expert scheduling mode2 (EnableStinkyTofuESM2) — independent of the rocisa ExpertSchedulingMode rules.
     def evaluateStinkyTofuESM2() -> bool:
-      if not isaInfoMap[isa].archCaps["HasSchedMode"]: return False
-      # stinkytofu does not yet support f64 (double / double-complex) datatypes
-      if state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex(): return False
-      if state["ProblemType"]["MacDataTypeB"].isDouble() or state["ProblemType"]["MacDataTypeB"].isDoubleComplex(): return False
-      if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
-      return True
+      # Every data type, double and double-complex included: InsertWaitAlu models the DPMACC
+      # (f64) pipe like the others.
+      return bool(isaInfoMap[isa].archCaps["HasSchedMode"])
 
     # Let WMMAs issue back to back (SCHED_MODE DISABLE_XDL_ARB_STALL).
     # Skipped for sparse and for persistent (StreamK or DataParallel) kernels.
