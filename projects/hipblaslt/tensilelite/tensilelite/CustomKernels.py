@@ -495,7 +495,8 @@ def validateCustomPostKernels(kernelConfig):
         if kind in kinds:
             raise ValueError(f"Duplicate post kernel kind {kind!r}")
         kinds.append(kind)
-        if post.get("version", _POST_KERNEL_VERSION) != _POST_KERNEL_VERSION:
+        postVersion = post.get("version", _POST_KERNEL_VERSION)
+        if type(postVersion) is not int or postVersion != _POST_KERNEL_VERSION:
             raise ValueError(f"Post kernel kind {kind!r} version must be {_POST_KERNEL_VERSION}")
         expected = f"{descriptor.get('name')}_{kind}"
         if post.get("name") != expected:
@@ -565,6 +566,12 @@ def validatePostKernelSymbols(kernelName, postKernels, directory=None):
     for post in postKernels:
         if post["name"] not in names:
             raise RuntimeError(f"Post kernel '{post['name']}' is not in the amdhsa.kernels of '{kernelName}'")
+        meta = kernels[names.index(post["name"])]
+        maxThreads = meta.get(".max_flat_workgroup_size")
+        threads = post["threads"][0] * post["threads"][1] * post["threads"][2]
+        if maxThreads is not None and threads > maxThreads:
+            raise RuntimeError(f"Post kernel '{post['name']}' threads {post['threads']} exceed "
+                               f"its .max_flat_workgroup_size {maxThreads}")
 
 
 def _hasRocRollerWgmArgs(args):

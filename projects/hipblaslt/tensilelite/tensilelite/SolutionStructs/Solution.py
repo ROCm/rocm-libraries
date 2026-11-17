@@ -2332,6 +2332,19 @@ class Solution(collections.abc.Mapping):
       raise RuntimeError(
         f"Custom kernel '{ck.get('name', '?')}' has post kernels, which do not support "
         f"OutputAmaxD or a bias gradient.")
+    # LibraryIO replaces custom.config's ProblemType with the logic file's, and
+    # the logic file can supply the execution policy.
+    if ck.get("postKernels") and state["ProblemType"].get("GroupedGemm", False):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' has post kernels, which do not support GroupedGemm.")
+    if ck.get("postKernels") and (not isStreamK(state) or hasDynamicAssignment(state)):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' has post kernels, which require "
+        f"TileProcessingStrategy StreamK with WorkAssignment StaticGrid or Hybrid.")
+    # The host does not round a handwritten Stream-K grid to the cluster size.
+    if isStreamK(state) and list(state.get("ClusterDim", [1, 1]))[:2] != [1, 1]:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' is Stream-K and requires ClusterDim [1, 1].")
     if "parallel" in ck.get("reductions", []) and (
         ck.get("workspaceType") not in ("StreamK", "StreamKWithReduction")
         or not ck.get("workspaceSizePerElemC")):

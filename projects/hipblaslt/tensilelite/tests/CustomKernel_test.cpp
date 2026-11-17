@@ -1005,6 +1005,10 @@ TEST(CustomKernelTest, PostKernelsValidate)
              args.erase(args.begin());
          },
          "requires streamKReduce args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) { s.sizeMapping.clusterDim = TensileLite::dim3(2, 1, 1); },
+         "Handwritten custom Stream-K kernels require ClusterDim [1, 1]"},
+        {[](Solution& s) { s.sizeMapping.clusterDim = TensileLite::dim3(1, 2, 1); },
+         "Handwritten custom Stream-K kernels require ClusterDim [1, 1]"},
         {[](Solution& s) {
              s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
          },
@@ -1049,6 +1053,18 @@ TEST(CustomKernelTest, ParallelReductionRequiresStreamK)
     solution.customKernel.name       = "probe";
     solution.customKernel.reductions = {CustomReductionMode::Parallel};
     EXPECT_THROW(solution.validateCustomPostKernels(), std::runtime_error);
+}
+
+// The layout-0 grid is not rounded to the cluster size either.
+TEST(CustomKernelTest, HandwrittenStreamKRefusesCluster)
+{
+    ContractionSolution solution;
+    solution.customKernel.name                  = "probe";
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+    solution.sizeMapping.clusterDim             = TensileLite::dim3(2, 1, 1);
+    EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error);
+    solution.customKernel.generated = true;
+    EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
 }
 
 TEST(CustomKernelTest, PostKernelsRefuseGroupedGemm)

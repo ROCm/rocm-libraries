@@ -1946,14 +1946,14 @@ _POST_KERNEL_CONFIG = """\
 """
 
 
-def write_multi_kernel(path, config, symbols, descriptors=None):
+def write_multi_kernel(path, config, symbols, descriptors=None, maxThreads=256):
     """A .s whose metadata lists `symbols` and whose descriptors appear in `descriptors` order."""
     path.write_text(
         "".join(f".amdhsa_kernel {s}\n.end_amdhsa_kernel\n" for s in (descriptors or symbols))
         + ".amdgpu_metadata\n---\ncustom.config:\n"
         + indent(dedent(config).strip(), "  ") + "\n"
         + "amdhsa.kernels:\n"
-        + "".join(f"  - .name: {s}\n    .max_flat_workgroup_size: 256\n" for s in symbols)
+        + "".join(f"  - .name: {s}\n    .max_flat_workgroup_size: {maxThreads}\n" for s in symbols)
         + "...\n"
     )
 
@@ -2020,6 +2020,8 @@ def _dropPostKernels(config):
     (_setPost("name", "other_streamKReduce"), "must be named 'sk_main_streamKReduce'"),
     (_setPost("bands", 0), "bands must be a positive integer"),
     (_setPost("version", 2), "version must be 1"),
+    (_setPost("version", True), "version must be 1"),
+    (_setPost("version", 1.0), "version must be 1"),
     (_setDescriptor("generated", True), "require a handwritten custom kernel"),
     (_setPost("threads", [256, 1]), "three-element threads"),
     (_setPost("threads", [0, 1, 1]), "threads must be positive"),
@@ -2101,6 +2103,13 @@ def test_post_kernels_require_kern_args_version_3(tmp_path):
 def test_post_kernel_symbols_checked_against_metadata(tmp_path, symbols, descriptors, match):
     write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, symbols, descriptors)
     with pytest.raises(RuntimeError, match=match):
+        getCustomKernelConfig("sk_main", {}, str(tmp_path))
+
+
+def test_post_kernel_threads_checked_against_max_flat_workgroup_size(tmp_path):
+    write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG,
+                       ["sk_main", "sk_main_streamKReduce"], maxThreads=128)
+    with pytest.raises(RuntimeError, match="exceed its .max_flat_workgroup_size 128"):
         getCustomKernelConfig("sk_main", {}, str(tmp_path))
 
 

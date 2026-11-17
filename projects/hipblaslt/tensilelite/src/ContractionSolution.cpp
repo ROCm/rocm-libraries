@@ -5268,6 +5268,10 @@ namespace TensileLite
         validateCustomPostKernels();
         if(customKernel.name.empty())
             return;
+        // These layouts launch launch.grid without rounding it to the cluster.
+        if(handwrittenCustomKernel() && sizeMapping.isStreamK()
+           && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1))
+            throw std::runtime_error("Handwritten custom Stream-K kernels require ClusterDim [1, 1]");
 
         if(version == 0 || version == 3)
         {

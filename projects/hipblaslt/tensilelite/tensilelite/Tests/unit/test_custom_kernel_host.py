@@ -279,6 +279,32 @@ def test_assign_custom_kernel_params_post_kernels_refuse_workspace_aliasing(prob
         Solution._assignCustomKernelParameters(state)
 
 
+# custom.config's ProblemType and execution policy can be replaced by the
+# logic file's.
+@pytest.mark.parametrize("over,match", [
+    ({"ProblemType": {"GroupedGemm": True}}, "do not support GroupedGemm"),
+    ({"WorkAssignment": "DynamicWorkQueue"}, "StaticGrid or Hybrid"),
+])
+def test_assign_custom_kernel_params_post_kernels_refuse_logic_overrides(over, match):
+    state = _post_kernel_state(**over)
+    with pytest.raises(RuntimeError, match=match):
+        Solution._assignCustomKernelParameters(state)
+
+
+def test_assign_custom_kernel_params_post_kernels_require_stream_k():
+    state = _post_kernel_state()
+    state["TileProcessingStrategy"] = "DataParallel"
+    with pytest.raises(RuntimeError, match="require TileProcessingStrategy StreamK"):
+        Solution._assignCustomKernelParameters(state)
+
+
+@pytest.mark.parametrize("cluster", [[2, 1], [1, 2]])
+def test_assign_custom_kernel_params_stream_k_refuses_cluster(cluster):
+    state = _ck_state(TileProcessingStrategy="StreamK", ClusterDim=cluster)
+    with pytest.raises(RuntimeError, match=r"requires ClusterDim \[1, 1\]"):
+        Solution._assignCustomKernelParameters(state)
+
+
 def test_assign_custom_kernel_params_parallel_requires_workspace():
     # Atomic Stream-K derives no partials workspace.
     state = _post_kernel_state(StreamKAtomic=1)
