@@ -11,7 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from probe_support import GENERIC_TARGETS_JSON, MAIN_FIXTURE, PROBE_DERIVE, run_derive
+from probe_support import (
+    GENERIC_TARGETS_JSON,
+    MAIN_FIXTURE,
+    PROBE_DERIVE,
+    run_derive,
+    tool_module,
+)
 
 
 def _derive(src: Path, arch: str, out: Path, ukds=()):
@@ -891,17 +897,9 @@ def test_excluded_folder_alone_removes_its_ukds_from_the_expectation(tmp_path):
 
 
 # --- the kinds registry -----------------------------------------------------
-def _tool_module(name):
-    sys.path.insert(0, str(PROBE_DERIVE.parent))
-    try:
-        return __import__(name)
-    finally:
-        sys.path.pop(0)
-
-
 def test_kinds_registry_is_complete():
-    kinds = _tool_module("hkp_probe_kinds").KINDS
-    checks = _tool_module("hkp_probe_assert")._PROVENANCE_CHECKS
+    kinds = tool_module("hkp_probe_kinds").KINDS
+    checks = tool_module("hkp_probe_assert")._PROVENANCE_CHECKS
     assert kinds
     used = set()
     for kind, entry in kinds.items():
@@ -914,14 +912,23 @@ def test_kinds_registry_is_complete():
 
 
 def test_every_registered_output_type_has_checks():
-    kinds = _tool_module("hkp_probe_kinds").KINDS
-    outputs = _tool_module("hkp_probe_assert")._OUTPUT_CHECKS
+    kinds = tool_module("hkp_probe_kinds").KINDS
+    outputs = tool_module("hkp_probe_assert")._OUTPUT_CHECKS
     assert {k.output for k in kinds.values()} <= set(outputs)
     # ... and no check set is dead.
     assert set(outputs) <= {k.output for k in kinds.values()}
 
 
 # --- multi-launch UKDs (`sources`) ---------------------------------------------
+def _sources_ukd(name, sources, arch=None):
+    """A multi-launch UKD carrying `sources` in place of `kernel_source`."""
+    ukd = _ukd(name, {}, arch)
+    del ukd["kernel_source"]
+    ukd["version"] = "1.1"
+    ukd["sources"] = sources
+    return ukd
+
+
 def _rocke_sources(name, launches, spec=None, arch=None):
     """A multi-launch rocke UKD. `launches` maps each launch name to (builder, role)."""
     sources = {}
@@ -935,11 +942,7 @@ def _rocke_sources(name, launches, spec=None, arch=None):
         if role is not None:
             entry["role"] = role
         sources[launch] = entry
-    ukd = _ukd(name, {}, arch)
-    del ukd["kernel_source"]
-    ukd["version"] = "1.1"
-    ukd["sources"] = sources
-    return ukd
+    return _sources_ukd(name, sources, arch)
 
 
 _DECODE_MERGE = {"decode": ("b1", None), "merge": ("b1", "merge")}
@@ -989,3 +992,141 @@ def test_sweep_covers_the_values_of_every_launch(tmp_path):
     )
     expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
     assert sorted(e["name"] for e in expect) == ["m_128", "m_64"]
+
+
+def test_sweep_keys_each_launch_apart_when_a_constant_launch_sorts_later(tmp_path):
+    # Only `decode` (the first launch by name) varies; `merge` carries one value under
+    # the same spec key in both UKDs. Keys not told apart by launch would let `merge`
+    # mask the variation, and one UKD would be kept.
+    def ukd(name, decode_block):
+        built = _rocke_sources(name, _DECODE_MERGE)
+        built["sources"]["decode"]["spec"] = {"block": decode_block}
+        built["sources"]["merge"]["spec"] = {"block": 32}
+        return built
+
+    _write_root(tmp_path / "src", [ukd("m_64", 64), ukd("m_128", 128)])
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["m_128", "m_64"]
+
+
+def test_launch_names_alone_separate_compile_groups(tmp_path):
+    # Same builder, source and launch count throughout; only the second launch's name
+    # differs. `a1`/`a2` and `b1`/`b2` each vary `decode`, so each pair keeps both. In
+    # one group the four would be covered by two, as `merge` and `reduce` are absent
+    # in each other's UKDs.
+    def ukd(name, second, decode_block):
+        built = _rocke_sources(name, {"decode": ("b1", None), second: ("b1", None)})
+        built["sources"]["decode"]["spec"] = {"block": decode_block}
+        built["sources"][second]["spec"] = {"block": 1}
+        return built
+
+    ukds = [
+        ukd("a1", "merge", 1),
+        ukd("a2", "merge", 2),
+        ukd("b1", "reduce", 1),
+        ukd("b2", "reduce", 2),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["a1", "a2", "b1", "b2"]
+
+
+def test_authored_launch_order_does_not_change_the_compile_group(tmp_path):
+    ukds = [
+        _rocke_sources("m_a", _DECODE_MERGE),
+        _rocke_sources("m_b", dict(reversed(list(_DECODE_MERGE.items())))),
+    ]
+    assert list(ukds[1]["sources"]) == ["merge", "decode"]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert [e["name"] for e in expect] == ["m_a"]
+
+
+# --- hip and hsaco multi-launch UKDs -------------------------------------------
+def _hip_sources(name, launches, source="a.cpp", build=None):
+    """A multi-launch hip UKD. `launches` maps each launch name to its kernel symbol."""
+    return _sources_ukd(
+        name,
+        {
+            launch: {
+                "kind": "hip",
+                "source": source,
+                "entry": entry,
+                "build": dict(build) if build is not None else {},
+            }
+            for launch, entry in launches.items()
+        },
+    )
+
+
+def _hsaco_sources(name, launches, file="k.hsaco"):
+    """A multi-launch hsaco UKD. `launches` maps each launch name to its symbol."""
+    return _sources_ukd(
+        name,
+        {
+            launch: {"kind": "hsaco", "file": file, "symbol": symbol}
+            for launch, symbol in launches.items()
+        },
+        ["gfx950"],
+    )
+
+
+_HIP_DECODE_MERGE = {"decode": "k_decode", "merge": "k_merge"}
+
+
+def test_expect_lists_hip_and_hsaco_launches_with_no_role(tmp_path):
+    _write_root(
+        tmp_path / "src",
+        [
+            _hip_sources("h", _HIP_DECODE_MERGE),
+            _hsaco_sources("s", _HIP_DECODE_MERGE),
+        ],
+        kdp_file="x.kdp.json",
+    )
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    by_name = {e["name"]: e for e in expect}
+    assert by_name["h"] == {
+        "kdp": "x.kdp.json",
+        "name": "h",
+        "kind": "hip",
+        "arch": "gfx950",
+        "launches": {"decode": None, "merge": None},
+    }
+    assert by_name["s"]["kind"] == "hsaco"
+    assert by_name["s"]["launches"] == {"decode": None, "merge": None}
+
+
+def test_hip_launches_are_grouped_by_source_and_build_per_launch(tmp_path):
+    ukds = [
+        _hip_sources("h_a", _HIP_DECODE_MERGE),
+        # Same source and build, other kernel symbols: the same compile group.
+        _hip_sources("h_same", {"decode": "k_other", "merge": "k_third"}),
+        # Another build: a different compile group.
+        _hip_sources("h_build", _HIP_DECODE_MERGE, build={"defines": {"N": 1}}),
+        # Another source: a different compile group.
+        _hip_sources("h_source", _HIP_DECODE_MERGE, source="b.cpp"),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["h_a", "h_build", "h_source"]
+
+
+def test_one_differing_hip_launch_separates_compile_groups(tmp_path):
+    # `decode` agrees in both UKDs; only the build of `merge` differs. A key that read
+    # the first launch alone would keep one UKD.
+    other = _hip_sources("h_b", _HIP_DECODE_MERGE)
+    other["sources"]["merge"]["build"] = {"flags": ["-O1"]}
+    _write_root(tmp_path / "src", [_hip_sources("h_a", _HIP_DECODE_MERGE), other])
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["h_a", "h_b"]
+
+
+def test_hsaco_sources_with_the_same_launch_names_are_one_compile_group(tmp_path):
+    ukds = [
+        _hsaco_sources("s_a", _HIP_DECODE_MERGE),
+        _hsaco_sources("s_b", _HIP_DECODE_MERGE, file="other.hsaco"),
+        _hsaco_sources("s_c", {"decode": "k_decode", "reduce": "k_reduce"}),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["s_a", "s_c"]

@@ -95,7 +95,8 @@ struct SdpaBwdParams
     unsigned int dvStrideHead;
     unsigned int dvStrideBatch;
 
-    // Stats (LSE): [B, H_q, S_q] in FP32
+    // Stats (LSE) and D: packed [B, H_q, S_q] in FP32. buildPlan derives these
+    // from Q's dims; they are not the stats tensor's strides.
     unsigned int statsStrideHead;
     unsigned int statsStrideBatch;
 

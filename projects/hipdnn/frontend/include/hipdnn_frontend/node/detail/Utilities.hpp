@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend/node/scaled_dot_product_flash_attention.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 #pragma once
 
 #include <algorithm>
@@ -7,6 +13,9 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -469,6 +478,29 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
     return {ErrorCode::OK, ""};
 }
 
+// Validates an SDPA diagonal band (forward and backward share the domain). hipDNN follows
+// cuDNN: left_bound = L keeps the L keys ending at the diagonal, diagonal included, and
+// right_bound = R keeps R keys past it; -1 is unbounded for either. hipDNN rejects
+// left_bound = 0 in both directions (cuDNN's backward does too) and either bound below -1
+// (SdpaSemanticsRegister SEM-005).
+inline Error validateSdpaDiagonalBand(const std::optional<int64_t>& leftBound,
+                                      const std::optional<int64_t>& rightBound,
+                                      const std::string& nodeName)
+{
+    HIPDNN_RETURN_IF_TRUE(leftBound.has_value()
+                              && (leftBound.value() == 0 || leftBound.value() < -1),
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": left_bound must be -1 (unbounded) or >= 1, got "
+                              + std::to_string(leftBound.value_or(0))
+                              + ". left_bound = L keeps the L keys ending at the diagonal, "
+                                "diagonal included");
+    HIPDNN_RETURN_IF_TRUE(rightBound.has_value() && rightBound.value() < -1,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": right_bound must be >= -1, got "
+                              + std::to_string(rightBound.value_or(0)));
+    return {};
+}
+
 // Validates scalar parameter tensor is properly configured
 // Uses param's name if set, otherwise uses fallbackName for error messages
 // Used for required scalar parameters (e.g., epsilon) that must have dimensions set
@@ -512,6 +544,55 @@ inline Error validateScalarParameter(const std::shared_ptr<graph::TensorAttribut
     // since the data isn't available yet. This validation is structural only.
 
     return {ErrorCode::OK, ""};
+}
+
+// Promotes a 1-D (n) index tensor to (n,1,1,1) in place, as cuDNN's
+// promote_1d_index_tensor_to_4d does (keeps the leading stride if set). In place so the caller's
+// handle and uid stay valid.
+inline void promoteIndexTensorTo4d(const std::shared_ptr<graph::TensorAttributes>& tensor)
+{
+    if(!tensor || tensor->get_dim().size() != 1)
+    {
+        return;
+    }
+    const int64_t n = tensor->get_dim()[0];
+    const auto& stride = tensor->get_stride();
+    const int64_t leadingStride = stride.size() == 1 ? stride[0] : 1;
+    tensor->set_dim({n, 1, 1, 1}).set_stride({leadingStride, 1, 1, 1});
+}
+
+// Validates a per-batch INT32 length tensor of dims (firstDim, 1, 1, 1). Errors read
+// "<nodeName>: <tensorName> ...". firstDimLabel names what firstDim is (e.g. "batch").
+inline Error validateIndexTensor(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                 const std::string& nodeName,
+                                 const std::string& tensorName,
+                                 int64_t firstDim,
+                                 const std::string& firstDimLabel)
+{
+    constexpr size_t RANK = 4;
+    const auto& dims = tensor->get_dim();
+    const std::string prefix = nodeName + ": " + tensorName;
+    HIPDNN_RETURN_IF_NE(dims.size(),
+                        RANK,
+                        ErrorCode::INVALID_VALUE,
+                        prefix + " must be rank-4, got rank=" + std::to_string(dims.size()));
+    HIPDNN_RETURN_IF_NE(dims[0],
+                        firstDim,
+                        ErrorCode::INVALID_VALUE,
+                        prefix + " dim[0] must equal " + firstDimLabel + " ("
+                            + std::to_string(firstDim) + "), got " + std::to_string(dims[0]));
+    for(size_t i = 1; i < RANK; ++i)
+    {
+        HIPDNN_RETURN_IF_NE(dims[i],
+                            static_cast<int64_t>(1),
+                            ErrorCode::INVALID_VALUE,
+                            prefix + " dim[" + std::to_string(i) + "] must be 1, got "
+                                + std::to_string(dims[i]));
+    }
+    HIPDNN_RETURN_IF_TRUE(tensor->get_data_type() != DataType::INT32,
+                          ErrorCode::INVALID_VALUE,
+                          prefix + " must have INT32 data type");
+    return {};
 }
 
 } // namespace hipdnn_frontend::detail
