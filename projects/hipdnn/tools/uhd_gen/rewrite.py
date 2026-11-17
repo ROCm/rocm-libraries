@@ -174,7 +174,9 @@ def _prove(
     args: argparse.Namespace,
 ) -> dict:
     """Old and new features agree wherever every reference is bound; each wrapped reference
-    absent is now evaluable, where the old signature refused the row."""
+    absent leaves every row evaluable. How many of those rows the old signature refused is
+    reported, not required: a bare read under a conditional may short-circuit on some rows,
+    which is no proof it always does."""
     references = signature_references(signature)
     rows = _bound_rows(references, encoding, args.proof_rows, random.Random(args.seed))
     _, old = evaluate_feature_maps(rows, signature, encoding, args.feature_evaluator)
@@ -185,21 +187,27 @@ def _prove(
             f"the rewritten signature changes features on row {rows[differing]}: "
             f"{old[differing]} -> {new[differing]}"
         )
+    absent_rows = {}
     for item in wrapped:
-        absent = [{**rows[0], item["reference"][1:]: None}]
+        reference = item["reference"]
+        absent = [{**row, reference[1:]: None} for row in rows]
+        # Raises when any row is unscorable: the rewrite must score them all.
         evaluate_feature_maps(absent, rewritten, encoding, args.feature_evaluator)
-        try:
-            evaluate_feature_maps(absent, signature, encoding, args.feature_evaluator)
-        except ValueError:
-            continue
-        raise ValueError(
-            f"{item['reference']} absent was already evaluable; the lint and the evaluator "
-            "disagree"
-        )
+        refused = 0
+        for row in absent:
+            try:
+                evaluate_feature_maps(
+                    [row], signature, encoding, args.feature_evaluator
+                )
+            except ValueError:
+                refused += 1
+        absent_rows[reference] = refused
     return {
         "rows_compared": len(rows),
         "features_identical": True,
         "absent_now_evaluable": [item["reference"] for item in wrapped],
+        # Of `rows_compared` rows lacking each reference, how many the old signature refused.
+        "old_refused_rows_when_absent": absent_rows,
     }
 
 

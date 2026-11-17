@@ -166,6 +166,10 @@ def test_rewrite_keeps_the_trees_and_restates_every_hash(tmp_path, evaluator):
     assert report["status"] == "rewritten"
     assert report["proof"]["features_identical"]
     assert report["proof"]["absent_now_evaluable"] == [SCALE]
+    # A bare scale fails every row without it; the rewrite scores them all.
+    assert report["proof"]["old_refused_rows_when_absent"] == {
+        SCALE: report["proof"]["rows_compared"]
+    }
     descriptor = json.loads(path.read_text(encoding="utf-8"))
     assert descriptor["features_signature"] == [
         {"value_or_default": [SCALE, 1.0]},
