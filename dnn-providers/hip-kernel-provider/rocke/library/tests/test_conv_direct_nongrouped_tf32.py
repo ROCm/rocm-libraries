@@ -343,10 +343,11 @@ class TestNongroupedF32Build(unittest.TestCase):
         for fp16 / bf16 and for the fp32 / tf32 storage path. Every call names
         ``backend="both"``, which compares the two builders' serialized IR and
         ``.ll`` and raises on any difference, whatever lane the suite runs in."""
+        from kernels.conv.engine_bridge import lower_conv_direct_nongrouped
         from rocke.core import backend
 
-        if importlib.util.find_spec("rocke_engine") is None:
-            self.skipTest("rocke_engine extension not importable")
+        if importlib.util.find_spec("rocke_library_engine") is None:
+            self.skipTest("rocke_library_engine extension not importable")
         for arch, atoms in (
             ("gfx950", ("32x32x16", "16x16x32")),
             ("gfx942", ("32x32x8", "16x16x16")),
@@ -372,7 +373,7 @@ class TestNongroupedF32Build(unittest.TestCase):
                             continue
                         with self.subTest(arch=arch, dtype=dt, atom=atom, g=gname):
                             # "both" raises when the two engines disagree.
-                            backend.lower_conv_direct_nongrouped(
+                            lower_conv_direct_nongrouped(
                                 spec, arch=arch, backend="both"
                             )
         for arch in _ARCHES:
@@ -384,7 +385,7 @@ class TestNongroupedF32Build(unittest.TestCase):
                         if not ok:
                             continue
                         with self.subTest(arch=arch, dtype=dt, atom=atom, g=gname):
-                            res = backend.lower_conv_direct_nongrouped(
+                            res = lower_conv_direct_nongrouped(
                                 spec, arch=arch, backend="both"
                             )
                             self.assertEqual(res.backend, backend.BACKEND_BOTH)

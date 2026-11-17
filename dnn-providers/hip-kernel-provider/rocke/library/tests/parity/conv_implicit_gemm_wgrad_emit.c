@@ -72,6 +72,23 @@
  *         is compv3 + prefetch_addr with register_prefetch left at its
  *         default false, so it is NOT this loop. Must match the Python
  *         emitter's _PFA_BASES.
+ *  89-100 prefetch_global_regs=true on a base config: mem/cshuffle M-outer and
+ *         K-outer, compv3 packed fp16 atomic, compv4 two-stage fp16 dW,
+ *         two-stage bf16 dW, packed bf16 atomic, the 16x16x32 atom on a
+ *         128x128 compv3 tile, and with async_dma / unroll_k / prefetch_addr /
+ *         WMMA / stream-K, which both engines must reject. Must match the
+ *         Python emitter's _PGR_BASES.
+ *  101-105 prefetch_global_regs=true, continued: bf16 A/B operands on the K-outer
+ *         cshuffle base (101), compv4 two-stage into bf16 dW (102) and scalar
+ *         loads (103); fp16 scalar loads with tile_k=256, 64 loads per thread
+ *         per operand, which both engines must reject (104), and tile_k=128,
+ *         exactly the 32 allowed (105). Must match the Python _PGR_BASES.
+ *  106-107 the packed 16-bit split-K atomic at dW width 2 on the K-outer
+ *         cshuffle base, fp16 (106) and bf16 (107) dW. Must match the Python
+ *         _ATOMIC_VEC_C_BASES.
+ *  108    the same base at split_k = 1 with vector_size_c = 2: the cshuffle
+ *         store epilogue honours the explicit dW width (C = 64 alone would
+ *         pick 8). Must match the Python _ATOMIC_VEC_C_BASES.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,6 +144,82 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     spec->streamk_reduction = cfgs[i].reduction;
     spec->streamk_ctas = cfgs[i].ctas;
     *arch = cfgs[i].arch;
+    return 0;
+}
+
+/* prefetch_global_regs configs 89-105 (Python _PGR_BASES). */
+static int make_pgr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    static const int bases[] = {1, 11, 11, 15, 15, 11, 11, 12, 18, 0, 5, 21, 11, 15, 11, 11, 11};
+    if(make_base_cfg(bases[idx - 89], spec, arch) != 0)
+        return -1;
+    spec->prefetch_global_regs = true;
+    switch(idx)
+    {
+    case 91:
+        spec->split_k = 2; /* packed fp16 atomic */
+        spec->pipeline = "compv3";
+        break;
+    case 92:
+        /* two-stage, fp16 dW */
+        spec->pipeline = "compv4";
+        break;
+    case 93:
+        /* two-stage, bf16 dW */
+        spec->dtype_d = "bf16";
+        break;
+    case 94:
+        spec->split_k = 2; /* packed bf16 atomic */
+        spec->dtype_d = "bf16";
+        break;
+    case 95:
+        /* The 16x16x32 atom on a 128x128 tile, compv3. */
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->pipeline = "compv3";
+        break;
+    case 98:
+        /* + prefetch_addr: rejected */
+        spec->prefetch_addr = true;
+        break;
+    case 101:
+        /* bf16 A/B operands, bf16 dW. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        break;
+    case 102:
+        /* bf16 A/B, compv4 two-stage into bf16 dW, K-outer. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->pipeline = "compv4";
+        spec->lds_k_outer = true;
+        break;
+    case 103:
+        /* bf16 A/B, scalar loads. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    case 104:
+    case 105:
+        /* Scalar loads: 64 per thread per operand (rejected), then 32. */
+        spec->tile_k = idx == 104 ? 256 : 128;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    default:
+        break;
+    }
     return 0;
 }
 
@@ -222,6 +315,31 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
 {
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);
+    if(idx >= 89 && idx <= 105)
+        return make_pgr_cfg(idx, spec, arch);
+    if(idx == 108)
+    {
+        /* split_k = 1 cshuffle store at dW width 2 (Python
+         * _ATOMIC_VEC_C_BASES). */
+        if(make_base_cfg(11, spec, arch) != 0)
+            return -1;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        return 0;
+    }
+    if(idx == 106 || idx == 107)
+    {
+        /* Packed 16-bit split-K atomic at dW width 2 (Python
+         * _ATOMIC_VEC_C_BASES): fp16 (106) and bf16 (107) dW. */
+        if(make_base_cfg(11, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        if(idx == 107)
+            spec->dtype_d = "bf16";
+        return 0;
+    }
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)
         base = idx == 71 ? 11 : 15;

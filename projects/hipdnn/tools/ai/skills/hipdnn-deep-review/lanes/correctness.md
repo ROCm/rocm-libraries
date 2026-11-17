@@ -14,7 +14,7 @@ Read every changed line of your owned files, and the outside code each change de
 - PR CI does not catch leaks: its ASAN job builds sanitizer binaries without running tests
   (`projects/hipdnn/docs/testing/KNOWN_TESTING_GAPS.md`). Prove a leak by reasoning over the ownership path, or request a local
   `-DBUILD_ADDRESS_SANITIZER=ON` run of the affected tests from `RUN` under **Handoffs**.
-- Providers: applicability predicates match what the implementation supports; registration names the right op, layouts, types and
+- Providers: applicability predicates match what the implementation supports (when `APPL` runs, predicate gaps go to it under **Handoffs**); registration names the right op, layouts, types and
   behavior notes; workspace size, stream use, async behavior and external-library calls are correct; unsupported inputs fail
   predictably.
 - New operation: walk the PR Checklist in `projects/hipdnn/docs/AddingNewOperations.md`; report each layer the diff misses
