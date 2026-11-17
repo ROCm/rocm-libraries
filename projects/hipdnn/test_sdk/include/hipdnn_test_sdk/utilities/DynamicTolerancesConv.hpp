@@ -496,12 +496,15 @@ enum class ConvDirection
 
 /// The calibrated allowances of the model, per direction and output type; tolerances.md has the
 /// calibration. lambda: intermediates and products, in units of eps * sigma. summationOrder: c,
-/// in units of sqrt(K) * u32.
+/// in units of sqrt(K) * u32. Every lambda is fitted to MIOpen (the smallest that leaves a
+/// headroom of 1.5 on the calibration data; c is the base 4 of forward): backward float to the
+/// Winograd solvers at the shortest reductions, backward data half to Winograd, backward weights
+/// half and bfloat16 to the split-K kernels that add partial results in the output type.
 ///
 ///   (lambda, c)   float                half      bfloat16
 ///   forward       (0, 4)               (12, 1)   (0, 1)
-///   dgrad         (32, 4)              (12, 1)   (6, 1)
-///   wrw           (32, 4)              (36, 1)   (24, 1)
+///   dgrad         (13, 4)              (12, 1)   (6, 1)
+///   wrw           (13, 4)              (36, 1)   (21, 1)
 struct ConvToleranceAllowances
 {
     double intermediateLambda = 0.0;
@@ -516,7 +519,7 @@ constexpr ConvToleranceAllowances convToleranceAllowances()
                   "the convolution output tolerance models half, bfloat16 and float outputs only");
     if constexpr(std::is_same_v<OutputType, float>)
     {
-        return {Direction == ConvDirection::FPROP ? 0.0 : 32.0, DEFAULT_FLOAT_SUMMATION_ORDER};
+        return {Direction == ConvDirection::FPROP ? 0.0 : 13.0, DEFAULT_FLOAT_SUMMATION_ORDER};
     }
     else if constexpr(std::is_same_v<OutputType, half>)
     {
@@ -528,7 +531,7 @@ constexpr ConvToleranceAllowances convToleranceAllowances()
     }
     else
     {
-        return {Direction == ConvDirection::WRW ? 24.0 : 6.0, 1.0};
+        return {Direction == ConvDirection::WRW ? 21.0 : 6.0, 1.0};
     }
 }
 

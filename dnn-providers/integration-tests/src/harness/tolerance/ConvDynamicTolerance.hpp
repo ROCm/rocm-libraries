@@ -278,7 +278,7 @@ inline bool
                || std::abs(*pointwise.relu_lower_clip_slope()) <= 1.0f;
     case PointwiseMode::ELU_FWD:
     case PointwiseMode::ELU_BWD:
-        return !pointwise.elu_alpha().has_value() || *pointwise.elu_alpha() <= 1.0f;
+        return !pointwise.elu_alpha().has_value() || std::abs(*pointwise.elu_alpha()) <= 1.0f;
     default:
         return false;
     }
@@ -752,14 +752,28 @@ inline std::optional<ConvErrorScale>
         const auto& node = info[n];
         double result = 0.0;
         bool depends = false;
+        const auto* pw = pointwise[n].attrs;
         if(node.isScale)
         {
             result = factorOf(node.carried) * node.scaleMax;
             depends = dependent.count(node.carried) != 0;
         }
+        else if(detail::isBackwardActivation(pw->operation()))
+        {
+            // The gradient (in_0) carries the convolution's result and the forward input (in_1)
+            // does not; the other way round the result is not a slope of the convolution's.
+            const auto forwardInput = pw->in_1_tensor_uid();
+            if(dependent.count(pw->in_0_tensor_uid()) == 0
+               || (forwardInput.has_value() && dependent.count(*forwardInput) != 0))
+            {
+                return std::nullopt;
+            }
+            result = factorOf(pw->in_0_tensor_uid());
+            depends = true;
+        }
         else
         {
-            for(const auto& operand : detail::operandsOf(*pointwise[n].attrs))
+            for(const auto& operand : detail::operandsOf(*pw))
             {
                 if(operand.has_value())
                 {
@@ -785,19 +799,20 @@ inline std::optional<ConvErrorScale>
         return std::nullopt;
     }
 
-    // The typical magnitude of a tensor, from the statistics of the inputs it depends on; none
-    // when one of them has none. A value is `factor` times the convolution's result plus a
-    // remainder of mean square `independent`: a multiply multiplies the remainder by the square
-    // of the scale's max |v|; every other node adds the remainders of its operands (independent
-    // inputs add in quadrature). Worked out when a point asks for it, together with the
-    // remainders it depends on, so that no input is looked up for nothing. The walk above is
-    // complete, so the graph has no cycle and this ends.
     // The root mean square of the convolution's result (see the test SDK's model): with means,
     // the partial sums do not cancel and the result grows as K * mean * mean.
     const auto products = static_cast<double>(scale.accumulationLength);
     const double meanProduct = scale.inputMean * scale.weightMean;
     const double sigma = std::sqrt(products * scale.inputMeanSquare * scale.weightMeanSquare
                                    + products * (products - 1.0) * meanProduct * meanProduct);
+    // The typical magnitude of a tensor, from the statistics of the inputs it depends on; none
+    // when one of them has none. A value is `factor` times the convolution's result plus a
+    // remainder of mean square `independent`: a multiply multiplies the remainder by the square
+    // of the scale's max |v|; a backward activation keeps its gradient's (it scales the gradient
+    // by a derivative of at most about 1, and the forward input adds nothing); every other node
+    // adds the remainders of its operands (independent inputs add in quadrature). Worked out when
+    // a point asks for it, together with the remainders it depends on, so that no input is looked
+    // up for nothing. The walk above is complete, so the graph has no cycle and this ends.
     std::map<int64_t, std::optional<double>> independent;
     const auto independentSquareOf = [&](int64_t target) -> std::optional<double> {
         std::vector<int64_t> pending = {target};
@@ -827,6 +842,10 @@ inline std::optional<ConvErrorScale>
             if(node.isScale)
             {
                 reads.push_back(node.carried);
+            }
+            else if(detail::isBackwardActivation(pointwise[n].attrs->operation()))
+            {
+                reads.push_back(pointwise[n].attrs->in_0_tensor_uid());
             }
             else
             {

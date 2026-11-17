@@ -57,10 +57,17 @@ struct GraphSpec
     std::vector<int64_t> wDims = {32, 8, 3, 3}; ///< 2 groups of 8 input channels
     std::vector<int64_t> stride = {1, 1};
     std::vector<int64_t> dilation = {1, 1};
-    bool fusedReluBackward = false; ///< RELU_BWD(dgrad result, x) after the dgrad
+    bool fusedBackwardActivation = false; ///< backwardMode(conv result, act_x) after the conv
     DataType resultType = DataType::FLOAT; ///< the dgrad result's type when the activation reads it
     bool dyWrittenByANode = false; ///< dy is RELU_FWD of another input: not a graph input
     bool addForwardConvolution = false; ///< a second, forward, convolution in the same graph
+    PointwiseMode backwardMode = PointwiseMode::RELU_BWD; ///< the mode of that activation
+    DataType activationCompute = DataType::FLOAT; ///< the compute type of that activation
+    flatbuffers::Optional<float> reluSlope; ///< its lower-clip slope
+    flatbuffers::Optional<float> eluAlpha; ///< its alpha
+    std::optional<int64_t> graded; ///< the graded output, when not the default (gradedOutput)
+    bool activationOperandsSwapped = false; ///< the conv result as the forward input (in_1)
+    DataType outType = DataType::HALF; ///< the stored type of the activation's result
 };
 
 fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& spec)
@@ -76,7 +83,10 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
         tensors.push_back(
             CreateTensorAttributesDirect(b, uid, name, type, &ones, &dims, isVirtual));
     };
-    const bool dgradResultIsRead = spec.direction == Direction::DGRAD && spec.fusedReluBackward;
+    const int64_t resultUid = spec.direction == Direction::DGRAD ? X_UID : W_UID;
+    // The convolution's result is a virtual intermediate when the activation reads it.
+    const bool dgradResultIsRead = spec.fusedBackwardActivation && resultUid == X_UID;
+    const bool wrwResultIsRead = spec.fusedBackwardActivation && resultUid == W_UID;
     addTensor(X_UID,
               "x",
               spec.xDims,
@@ -87,8 +97,12 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
               spec.dyDims,
               spec.dyWrittenByANode,
               spec.dyWrittenByANode ? DataType::FLOAT : DataType::HALF);
-    addTensor(W_UID, "w", spec.wDims, false);
-    addTensor(OUT_UID, "out", spec.xDims, false);
+    addTensor(W_UID,
+              "w",
+              spec.wDims,
+              wrwResultIsRead,
+              wrwResultIsRead ? spec.resultType : DataType::HALF);
+    addTensor(OUT_UID, "out", spec.xDims, false, spec.outType);
     addTensor(ACT_X_UID, "act_x", spec.xDims, false);
     addTensor(Y_UID, "y", spec.dyDims, false);
 
@@ -137,20 +151,26 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
         nodes.push_back(CreateNodeDirect(
             b, "wrw", DataType::FLOAT, NodeAttributes::ConvolutionWrwAttributes, conv.Union()));
     }
-    if(spec.fusedReluBackward)
+    if(spec.fusedBackwardActivation)
     {
-        const auto relu = CreatePointwiseAttributes(b,
-                                                    PointwiseMode::RELU_BWD,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    X_UID,
-                                                    ACT_X_UID,
-                                                    flatbuffers::nullopt,
-                                                    OUT_UID);
-        nodes.push_back(CreateNodeDirect(
-            b, "relu_bwd", DataType::FLOAT, NodeAttributes::PointwiseAttributes, relu.Union()));
+        const auto activation
+            = CreatePointwiseAttributes(b,
+                                        spec.backwardMode,
+                                        flatbuffers::nullopt,
+                                        flatbuffers::nullopt,
+                                        spec.reluSlope,
+                                        flatbuffers::nullopt,
+                                        spec.activationOperandsSwapped ? ACT_X_UID : resultUid,
+                                        spec.activationOperandsSwapped ? resultUid : ACT_X_UID,
+                                        flatbuffers::nullopt,
+                                        OUT_UID,
+                                        flatbuffers::nullopt,
+                                        spec.eluAlpha);
+        nodes.push_back(CreateNodeDirect(b,
+                                         "activation_bwd",
+                                         spec.activationCompute,
+                                         NodeAttributes::PointwiseAttributes,
+                                         activation.Union()));
     }
     if(spec.addForwardConvolution)
     {
@@ -180,6 +200,21 @@ std::shared_ptr<ITensor> filled(const std::vector<int64_t>& dims, float value)
     return t;
 }
 
+// The graded output: the one the spec names, else the activation's result when there is one,
+// else the convolution's.
+int64_t gradedOutput(const GraphSpec& spec)
+{
+    if(spec.graded.has_value())
+    {
+        return *spec.graded;
+    }
+    if(spec.fusedBackwardActivation)
+    {
+        return OUT_UID;
+    }
+    return spec.direction == Direction::DGRAD ? X_UID : W_UID;
+}
+
 // x is 2 everywhere, dy 3 and w 0.5: mean squares 4, 9 and 0.25. The tensors take the default
 // shapes whatever the graph says: only their values count, and a tensor cannot have a zero
 // dimension.
@@ -200,10 +235,7 @@ std::optional<tol::ConvErrorScale> errorScale(const GraphSpec& spec)
         return tol::hostMoments(*it->second, DataType::HALF);
     };
     flatbuffers::FlatBufferBuilder b;
-    // The graded output: the activation's result when there is one, else the convolution's.
-    const int64_t output
-        = spec.fusedReluBackward ? OUT_UID : (spec.direction == Direction::DGRAD ? X_UID : W_UID);
-    return tol::convErrorScale(buildGraph(b, spec), lookup, output);
+    return tol::convErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec));
 }
 
 std::optional<sdk::ConvDgradErrorScale> dgradScale(const GraphSpec& spec)
@@ -227,6 +259,55 @@ std::optional<sdk::ConvWrwErrorScale> wrwScale(const GraphSpec& spec)
     EXPECT_TRUE(std::holds_alternative<sdk::ConvWrwErrorScale>(*scale));
     return std::get<sdk::ConvWrwErrorScale>(*scale);
 }
+
+// Whether the graph is modeled when its two convolution operands (dy and w for dgrad, x and dy
+// for wrw) are filled from these recipes and every other input from a free one.
+bool modeledWithRecipes(const GraphSpec& spec,
+                        const hipdnn_integration_tests::FillRecipe& first,
+                        const hipdnn_integration_tests::FillRecipe& second)
+{
+    const bool dgrad = spec.direction == Direction::DGRAD;
+    const int64_t firstUid = dgrad ? DY_UID : X_UID;
+    const int64_t secondUid = dgrad ? W_UID : DY_UID;
+    const auto lookup = [&](int64_t uid) -> std::optional<tol::InputMoments> {
+        if(uid == firstUid)
+        {
+            return tol::recipeMoments(first);
+        }
+        if(uid == secondUid)
+        {
+            return tol::recipeMoments(second);
+        }
+        return tol::recipeMoments(hipdnn_integration_tests::FillRecipe::free(-1.0f, 1.0f));
+    };
+    flatbuffers::FlatBufferBuilder b;
+    return tol::convErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value();
+}
+
+// One FIXED operand still changes sign with the other; two sum products that round alike.
+void expectFixedOnBothOperandsToFallBack(Direction direction)
+{
+    using hipdnn_integration_tests::FillRecipe;
+    GraphSpec spec;
+    spec.direction = direction;
+    const auto free = FillRecipe::free(-1.0f, 1.0f);
+    const auto fixed = FillRecipe::fixed(0.5f);
+    const auto list = FillRecipe::values(std::vector<int64_t>{3, -4});
+    EXPECT_TRUE(modeledWithRecipes(spec, free, free));
+    EXPECT_TRUE(modeledWithRecipes(spec, fixed, free));
+    EXPECT_TRUE(modeledWithRecipes(spec, free, fixed));
+    EXPECT_TRUE(modeledWithRecipes(spec, fixed, list));
+    EXPECT_FALSE(modeledWithRecipes(spec, fixed, fixed));
+}
+
+const std::vector<PointwiseMode> BACKWARD_ACTIVATIONS = {PointwiseMode::RELU_BWD,
+                                                         PointwiseMode::SIGMOID_BWD,
+                                                         PointwiseMode::TANH_BWD,
+                                                         PointwiseMode::SOFTPLUS_BWD,
+                                                         PointwiseMode::ELU_BWD,
+                                                         PointwiseMode::SWISH_BWD,
+                                                         PointwiseMode::GELU_BWD,
+                                                         PointwiseMode::GELU_APPROX_TANH_BWD};
 
 } // namespace
 
@@ -298,7 +379,7 @@ TEST(TestConvBwdDynamicTolerance, DgradWithAZeroStrideIsNotModeled)
 TEST(TestConvBwdDynamicTolerance, DgradFollowedByABackwardActivationIsModeled)
 {
     GraphSpec spec;
-    spec.fusedReluBackward = true;
+    spec.fusedBackwardActivation = true;
     const auto scale = dgradScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->outputScale, 1.0);
@@ -312,7 +393,7 @@ TEST(TestConvBwdDynamicTolerance, DgradFollowedByABackwardActivationIsModeled)
 TEST(TestConvBwdDynamicTolerance, DgradResultStoredInHalfAndReadByAnActivationIsARoundingPoint)
 {
     GraphSpec spec;
-    spec.fusedReluBackward = true;
+    spec.fusedBackwardActivation = true;
     spec.resultType = DataType::HALF;
     const auto scale = dgradScale(spec);
     ASSERT_TRUE(scale.has_value());
@@ -320,6 +401,130 @@ TEST(TestConvBwdDynamicTolerance, DgradResultStoredInHalfAndReadByAnActivationIs
     EXPECT_DOUBLE_EQ(scale->roundingPoints[0].epsilon, std::ldexp(1.0, -10));
     EXPECT_DOUBLE_EQ(scale->roundingPoints[0].magnitude, 216.0);
     EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 1.0);
+}
+
+// Catches a backward mode dropped from the priced set: each has a derivative of at most ~1.13.
+TEST(TestConvBwdDynamicTolerance, DgradFollowedByEachBackwardActivationIsModeled)
+{
+    for(const auto mode : BACKWARD_ACTIVATIONS)
+    {
+        GraphSpec spec;
+        spec.fusedBackwardActivation = true;
+        spec.backwardMode = mode;
+        const auto scale = dgradScale(spec);
+        ASSERT_TRUE(scale.has_value()) << EnumNamePointwiseMode(mode);
+        EXPECT_GT(scale->outputScale, 0.0) << EnumNamePointwiseMode(mode);
+        EXPECT_LE(scale->outputScale, 1.2) << EnumNamePointwiseMode(mode);
+        EXPECT_TRUE(scale->roundingPoints.empty()) << EnumNamePointwiseMode(mode);
+    }
+}
+
+// Catches a leaky relu slope or an elu alpha above 1 being priced as a slope of 1 behind a dgrad.
+TEST(TestConvBwdDynamicTolerance, BackwardActivationThatSteepensTheGradientIsNotModeled)
+{
+    for(const auto& [slope, modeled] : {std::pair{0.01f, true},
+                                        std::pair{1.0f, true},
+                                        std::pair{-1.0f, true},
+                                        std::pair{2.0f, false},
+                                        std::pair{-2.0f, false}})
+    {
+        GraphSpec spec;
+        spec.fusedBackwardActivation = true;
+        spec.reluSlope = slope;
+        EXPECT_EQ(errorScale(spec).has_value(), modeled) << "slope " << slope;
+    }
+    for(const auto& [alpha, modeled] : {std::pair{0.5f, true},
+                                        std::pair{1.0f, true},
+                                        std::pair{2.0f, false},
+                                        std::pair{-2.0f, false}})
+    {
+        GraphSpec spec;
+        spec.fusedBackwardActivation = true;
+        spec.backwardMode = PointwiseMode::ELU_BWD;
+        spec.eluAlpha = alpha;
+        EXPECT_EQ(errorScale(spec).has_value(), modeled) << "alpha " << alpha;
+    }
+}
+
+// Catches a backward activation priced as a slope of the convolution's result when that result
+// is its forward input (in_1): the output is then g * f'(dx), not a gradient scaled by f'.
+TEST(TestConvBwdDynamicTolerance,
+     BackwardActivationReadingTheDgradResultAsItsForwardInputIsNotModeled)
+{
+    GraphSpec spec;
+    spec.fusedBackwardActivation = true;
+    spec.activationOperandsSwapped = true;
+    EXPECT_FALSE(errorScale(spec).has_value());
+}
+
+// Catches the forward input of a backward activation entering the magnitude of its result. The
+// activation computes in half and stores its result as float, so the result is a rounding point
+// at its own size: that of the dgrad result, 216, with act_x (mean square 1) adding nothing; the
+// float dgrad result converted to half is a second point at the same size.
+TEST(TestConvBwdDynamicTolerance, ForwardInputDoesNotEnterTheMagnitudeOfABackwardActivation)
+{
+    GraphSpec spec;
+    spec.fusedBackwardActivation = true;
+    spec.activationCompute = DataType::HALF;
+    spec.outType = DataType::FLOAT;
+    const auto scale = dgradScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 2u);
+    for(const auto& point : scale->roundingPoints)
+    {
+        EXPECT_DOUBLE_EQ(point.magnitude, 216.0);
+    }
+}
+
+// Catches a half-compute activation not rounding the float dgrad result it reads (at 216).
+TEST(TestConvBwdDynamicTolerance, BackwardActivationComputingInHalfRoundsTheDgradResult)
+{
+    GraphSpec spec;
+    spec.fusedBackwardActivation = true;
+    spec.activationCompute = DataType::HALF;
+    const auto scale = dgradScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 1u);
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].epsilon, std::ldexp(1.0, -10));
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].magnitude, 216.0);
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 1.0);
+}
+
+// Catches the graded output being ignored: the result graded itself has no point of its own.
+TEST(TestConvBwdDynamicTolerance, DgradResultGradedDirectlyHasTheScaleOfTheActivationButNoPoint)
+{
+    GraphSpec through;
+    through.fusedBackwardActivation = true;
+    through.resultType = DataType::HALF;
+    GraphSpec direct = through;
+    direct.graded = X_UID;
+    const auto viaActivation = dgradScale(through);
+    const auto asResult = dgradScale(direct);
+    ASSERT_TRUE(viaActivation.has_value());
+    ASSERT_TRUE(asResult.has_value());
+    EXPECT_EQ(asResult->accumulationLength, viaActivation->accumulationLength);
+    EXPECT_DOUBLE_EQ(asResult->outputScale, viaActivation->outputScale);
+    EXPECT_EQ(viaActivation->roundingPoints.size(), 1u);
+    EXPECT_TRUE(asResult->roundingPoints.empty());
+}
+
+// Catches an output that does not depend on the convolution (an input, or one no node writes).
+TEST(TestConvBwdDynamicTolerance, GradedOutputThatDoesNotDependOnTheConvolutionIsNotModeled)
+{
+    GraphSpec input;
+    input.fusedBackwardActivation = true;
+    input.graded = ACT_X_UID;
+    EXPECT_FALSE(errorScale(input).has_value());
+
+    GraphSpec unwritten;
+    unwritten.graded = OUT_UID;
+    EXPECT_FALSE(errorScale(unwritten).has_value());
+}
+
+// Catches the FIXED-on-both fallback being lost on dgrad (dy and w).
+TEST(TestConvBwdDynamicTolerance, DgradWithFixedFillOfDyAndWeightsIsNotModeled)
+{
+    expectFixedOnBothOperandsToFallBack(Direction::DGRAD);
 }
 
 TEST(TestConvBwdDynamicTolerance, DyWrittenByAnotherNodeIsNotModeled)
@@ -366,6 +571,26 @@ TEST(TestConvBwdDynamicTolerance, WrwWithAnEmptyBatchIsNotModeled)
     spec.direction = Direction::WRW;
     spec.dyDims = {0, 32, 6, 6};
     EXPECT_FALSE(errorScale(spec).has_value());
+}
+
+// Catches the FIXED-on-both fallback being lost on wrw (x and dy).
+TEST(TestConvBwdDynamicTolerance, WrwWithFixedFillOfTheInputAndDyIsNotModeled)
+{
+    expectFixedOnBothOperandsToFallBack(Direction::WRW);
+}
+
+// Catches a backward activation priced behind a wrw; its control, the same graph behind a dgrad.
+TEST(TestConvBwdDynamicTolerance, BackwardActivationBehindWrwIsNotModeled)
+{
+    for(const auto mode : BACKWARD_ACTIVATIONS)
+    {
+        GraphSpec spec;
+        spec.fusedBackwardActivation = true;
+        spec.backwardMode = mode;
+        EXPECT_TRUE(errorScale(spec).has_value()) << EnumNamePointwiseMode(mode);
+        spec.direction = Direction::WRW;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNamePointwiseMode(mode);
+    }
 }
 
 // ── Output dispatch ─────────────────────────────────────────────────────────

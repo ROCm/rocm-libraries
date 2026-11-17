@@ -1894,7 +1894,7 @@ constexpr Allowances calibratedAllowances()
     constexpr bool IS_WRW = Case::DIRECTION == ConvDirection::WRW;
     if constexpr(std::is_same_v<T, float>)
     {
-        return {32.0, 4.0};
+        return {13.0, 4.0};
     }
     else if constexpr(std::is_same_v<T, half>)
     {
@@ -1902,7 +1902,7 @@ constexpr Allowances calibratedAllowances()
     }
     else
     {
-        return {IS_WRW ? 24.0 : 6.0, 1.0};
+        return {IS_WRW ? 21.0 : 6.0, 1.0};
     }
 }
 
@@ -2028,7 +2028,7 @@ class ConvBackwardSingleTermToleranceFixture : public ::testing::Test
 {
 };
 
-// Every backward case but bfloat16 wrw: its lambda of 24, which MIOpen's split reductions need,
+// Every backward case but bfloat16 wrw: its lambda of 21, which MIOpen's split-K reductions need,
 // is about 2 at this scale and hides a single product of up to 1 (tolerances.md, limits).
 using ConvBackwardSingleTermCases = ::testing::Types<OutputCase<ConvDirection::DGRAD, float>,
                                                      OutputCase<ConvDirection::DGRAD, half>,
@@ -2073,10 +2073,28 @@ using ConvBackwardLowPrecisionCases = ::testing::Types<OutputCase<ConvDirection:
                                                        OutputCase<ConvDirection::WRW, bfloat16>>;
 TYPED_TEST_SUITE(ConvBackwardLowPrecisionToleranceFixture, ConvBackwardLowPrecisionCases, );
 
+// The largest lambda each 16-bit backward case was measured to need near zero, in eps * sigma
+// (tolerances.md, "Which backward solvers need lambda"), with the solvers that set it: Winograd
+// for backward data half, CK grouped backward data with split-K for bfloat16, and the split-K
+// backward-weights kernels that add partial results in the output type for both wrw types.
+template <typename Case>
+constexpr double measuredLambda()
+{
+    using T = typename Case::OutputType;
+    if constexpr(Case::DIRECTION == ConvDirection::DGRAD)
+    {
+        return std::is_same_v<T, half> ? 7.71 : 2.33;
+    }
+    else
+    {
+        return std::is_same_v<T, half> ? 21.62 : 11.53;
+    }
+}
+
 // lambda is the allowance for intermediates kept in the output type. Near zero the band is that
-// allowance: an error just below lambda * eps * sigma passes, one half an eps * sigma above it
-// fails. K = 144 and mean squares 1/3 give sigma = 4.
-TYPED_TEST(ConvBackwardLowPrecisionToleranceFixture, AllowanceIsLambdaNearZero)
+// allowance: the largest measured error passes, an error just below lambda * eps * sigma passes,
+// and one half an eps * sigma above it fails. K = 144 and mean squares 1/3 give sigma = 4.
+TYPED_TEST(ConvBackwardLowPrecisionToleranceFixture, AllowanceCoversTheLargestMeasuredError)
 {
     using T = typename TypeParam::OutputType;
     const auto tol = TypeParam::tolerance(UNIFORM_144);
@@ -2084,6 +2102,7 @@ TYPED_TEST(ConvBackwardLowPrecisionToleranceFixture, AllowanceIsLambdaNearZero)
     const double epsSigma = static_cast<double>(std::numeric_limits<T>::epsilon()) * 4.0;
     for(const double sign : {1.0, -1.0})
     {
+        EXPECT_TRUE(withinTolerance<T>(sign * measuredLambda<TypeParam>() * epsSigma, 0.0, tol));
         EXPECT_TRUE(withinTolerance<T>(sign * (lambda - 0.1) * epsSigma, 0.0, tol));
         EXPECT_FALSE(withinTolerance<T>(sign * (lambda + 0.5) * epsSigma, 0.0, tol));
     }
