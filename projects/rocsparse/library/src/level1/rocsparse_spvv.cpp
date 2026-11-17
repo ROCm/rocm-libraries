@@ -60,9 +60,9 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::doti_template(handle,
                                                                (I)x->nnz,
-                                                               (const X*)x->val_data,
-                                                               (const I*)x->idx_data,
-                                                               (const Y*)y->values,
+                                                               (const X*)x->const_val_data,
+                                                               (const I*)x->const_idx_data,
+                                                               (const Y*)y->const_values,
                                                                (T*)result,
                                                                x->idx_base));
             return rocsparse_status_success;
@@ -101,9 +101,9 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::doti_template(handle,
                                                                    (I)x->nnz,
-                                                                   (const X*)x->val_data,
-                                                                   (const I*)x->idx_data,
-                                                                   (const Y*)y->values,
+                                                                   (const X*)x->const_val_data,
+                                                                   (const I*)x->const_idx_data,
+                                                                   (const Y*)y->const_values,
                                                                    (T*)result,
                                                                    x->idx_base));
                 return rocsparse_status_success;
@@ -114,9 +114,9 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dotci_template(handle,
                                                                     (I)x->nnz,
-                                                                    (const X*)x->val_data,
-                                                                    (const I*)x->idx_data,
-                                                                    (const Y*)y->values,
+                                                                    (const X*)x->const_val_data,
+                                                                    (const I*)x->const_idx_data,
+                                                                    (const Y*)y->const_values,
                                                                     (T*)result,
                                                                     x->idx_base));
                 return rocsparse_status_success;
