@@ -270,7 +270,8 @@ namespace
                 DevBuf<char> src(iota_bytes(s, n)), dst(std::vector<char>(want.size(), -1));
                 const rocsparse_status st
                     = rocsparse::convert_array(handle, n, t, dst.get(), s, src.get());
-                EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()), st_ok);
+                // The type check runs before the zero-item return, so an unsupported pair fails at zero items too.
+                EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()), st);
                 const bool must_convert
                     = t == s
                       || std::find(std::begin(converted), std::end(converted), std::make_pair(t, s))
