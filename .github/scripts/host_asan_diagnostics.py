@@ -131,8 +131,21 @@ def snapshot(directory, root_pid=None, executable=None):
         directory / "dmesg.txt", ["sudo", "-n", "dmesg", "--time-format", "iso"]
     )
     bin_dir = Path(os.environ.get("THEROCK_BIN_DIR", "build/bin"))
+    smi_command = [str(bin_dir / "amd-smi")]
+    asan_runtime = next(
+        (bin_dir.parent / "lib/llvm/lib/clang").rglob("libclang_rt.asan*.so"), None
+    )
+    if asan_runtime:
+        # The Python CLI loads ASAN-instrumented libamd_smi through ctypes.
+        # Preload its runtime; omit interpreter leak checks for this probe only.
+        smi_command = [
+            "env",
+            f"LD_PRELOAD={asan_runtime.resolve()}",
+            f"ASAN_OPTIONS={os.environ.get('ASAN_OPTIONS', '')}:detect_leaks=0",
+            *smi_command,
+        ]
     for mode in ("static", "metric", "process"):
-        command_log(directory / f"amd-smi-{mode}.txt", [str(bin_dir / "amd-smi"), mode])
+        command_log(directory / f"amd-smi-{mode}.txt", [*smi_command, mode])
     command_log(directory / "rocminfo.txt", [str(bin_dir / "rocminfo")])
 
 
