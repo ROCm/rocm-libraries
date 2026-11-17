@@ -200,3 +200,59 @@ def test_matching_library_uses_column_storage_and_serializes_identically():
     legacy.merge(legacyOther)
     assert state(lib) == state(legacy)
     assert len(lib.table) == 4 and lib.table[0]["key"] == [8, 8, 1, 8]
+
+
+def test_without_numpy_the_legacy_rows_are_kept(monkeypatch):
+    import tensilelite.MatchingTable as MT
+
+    monkeypatch.setattr(MT, "_numpy", lambda: None)
+    assert MatchingTable.fromRows(_legacyRows(5)) is None
+    sols = [_Sol(i) for i in range(3)]
+    d = {
+        "indexOrder": [2, 3, 0, 1],
+        "distance": "Equality",
+        "table": [
+            [[64, 128, 1, 256], [0, 1.5]],
+            [[32, 32, 1, 64], [1, 2.5]],
+            [[64, 128, 1, 256], [2, 0.5]],
+        ],
+    }
+    lib = MatchingLibrary.FromOriginalState(d, sols)
+    assert isinstance(lib.table, list)
+    assert [r["key"] for r in lib.table] == [
+        [32, 32, 1, 64],
+        [64, 128, 1, 256],
+        [64, 128, 1, 256],
+    ]
+    assert lib.table[0]["index"].solution is sols[1]
+    assert isinstance(lib.table[0]["index"], IndexSolutionLibrary)
+
+
+def test_direct_columns_match_rows_built_from_dicts():
+    sols = [_Sol(i) for i in range(4)]
+    origTable = [
+        [[64, 128, 1, 256], [0, 1.5]],
+        [[32, 32, 1, 64], [1, 0]],
+        [[64, 128, 1, 256], [2, 0.5]],
+        [[8, 8, 1, 8], [9, 1.0]],
+    ]
+    d = {"indexOrder": [2, 3, 0, 1], "distance": "Equality", "table": origTable}
+    lib = MatchingLibrary.FromOriginalState(
+        d, {0: sols[0], 1: sols[1], 2: sols[2]}
+    )  # index 9 is skipped
+    assert isinstance(lib.table, MatchingTable) and len(lib.table) == 3
+    rows = []
+    for row in origTable[:3]:
+        rows.append(
+            {
+                "key": list(row[0]),  # keyOrder keeps the file order for Equality
+                "index": IndexSolutionLibrary(sols[row[1][0]]),
+                "speed": row[1][1],
+            }
+        )
+    assert state(lib.table) == state(_legacySorted(rows))
+    grid = MatchingLibrary.FromOriginalState(
+        {"indexOrder": [2, 3, 0, 1], "distance": "GridBased", "table": origTable[:3]},
+        sols,
+    )
+    assert grid.table.speeds is None and "speed" not in grid.table[0]
