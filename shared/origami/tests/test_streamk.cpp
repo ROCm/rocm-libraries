@@ -460,19 +460,27 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
 }
 
 TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split", "[streamk]") {
-  // One tile row of `tiles` columns on 256 CUs, unbounded workspace. Returns
+  // `tiles` output tiles (one tile row per batch entry) on 256 CUs. Returns
   // origami's reduction and the k_split_aware grid sized for that reduction.
-  auto pick = [](size_t tiles, size_t ipt, bool needs_divisor, size_t num_cus = 0) {
-    constexpr size_t MT_M = 256, MT_N = 32, MT_K = 128;
-    auto p                      = make_problem(MT_M, MT_N * tiles, MT_K * ipt);
+  constexpr size_t MT_M = 256, MT_N = 32, MT_K = 128;
+  constexpr size_t kTileBytes = MT_M * MT_N * 4;
+  auto make = [](size_t tiles, size_t ipt, bool needs_divisor, size_t num_cus, size_t batch,
+                 size_t workspace) {
+    auto p = make_problem(MT_M, MT_N * tiles / batch, MT_K * ipt, origami::transpose_t::T,
+                          origami::transpose_t::N, batch);
     p.num_cus                   = num_cus;
     auto c                      = make_config(MT_M, MT_N, MT_K);
-    c.workspace_size            = std::numeric_limits<size_t>::max();
+    c.workspace_size            = workspace;
     c.workspace_size_per_elem_c = 4;
     c.tree_split_needs_divisor  = needs_divisor;
-    const auto hw               = make_hardware(950);
-    const auto algo             = origami::grid_selection_t::k_split_aware;
-    c.reduction_strategy        = origami::streamk::select_reduction(p, hw, c, algo);
+    return std::make_pair(p, c);
+  };
+  const auto hw   = make_hardware(950);
+  const auto algo = origami::grid_selection_t::k_split_aware;
+  auto pick       = [&](size_t tiles, size_t ipt, bool needs_divisor, size_t num_cus = 0,
+                  size_t batch = 1, size_t workspace = std::numeric_limits<size_t>::max()) {
+    auto [p, c]          = make(tiles, ipt, needs_divisor, num_cus, batch, workspace);
+    c.reduction_strategy = origami::streamk::select_reduction(p, hw, c, algo);
     return std::make_pair(c.reduction_strategy, origami::streamk::select_grid_size(p, hw, c, algo));
   };
   using origami::reduction_t;
@@ -499,6 +507,33 @@ TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split
   REQUIRE(pick(128, 63, true).first == reduction_t::tree);
   REQUIRE(pick(256, 4096, true).first == reduction_t::tree);
 
-  // A genuine CU cap keeps the one-wave split.
+  // Edges of the widened band: cu_count / 4 + 1 and cu_count - 1 tiles.
+  REQUIRE(pick(65, 4096, false) == R{reduction_t::tree, 65 * 3});
+  REQUIRE(pick(65, 4096, true) == R{reduction_t::parallel, 65 * 7});
+  REQUIRE(pick(255, 4096, true) == R{reduction_t::parallel, 255});
+
+  // Above cu_count / 4 tiles two waves allow F <= 7 while select_reduction's
+  // 64 iterations allow F <= 8, so via select_reduction the wave cap binds.
+  REQUIRE(pick(65, 64, true) == R{reduction_t::parallel, 65 * 7});
+  // A caller that asks for parallel with fewer iterations gets F <= I / 8.
+  {
+    auto [p, c]          = make(65, 16, true, 0, 1, std::numeric_limits<size_t>::max());
+    c.reduction_strategy = reduction_t::parallel;
+    REQUIRE(origami::streamk::select_grid_size(p, hw, c, algo) == 65 * 2);
+  }
+
+  // A split whose partials do not fit the workspace falls back to one
+  // workgroup per tile (the caller demotes that to tree).
+  REQUIRE(pick(128, 4225, true, 0, 1, 256 * kTileBytes) == R{reduction_t::parallel, 256});
+  REQUIRE(pick(128, 4225, true, 0, 1, 256 * kTileBytes - 1) == R{reduction_t::parallel, 128});
+
+  // Batch entries count as tiles.
+  REQUIRE(pick(128, 4225, true, 0, 4) == R{reduction_t::parallel, 128 * 2});
+  REQUIRE(pick(128, 4225, false, 0, 4) == R{reduction_t::tree, 128 * 2});
+
+  // A genuine CU cap keeps the one-wave split, and at or below a quarter of
+  // the cap the flag changes nothing.
   REQUIRE(pick(80, 4096, true, 200) == R{reduction_t::parallel, 160});
+  REQUIRE(pick(50, 4096, true, 200) == R{reduction_t::parallel, 200});
+  REQUIRE(pick(50, 4096, true, 200) == pick(50, 4096, false, 200));
 }
