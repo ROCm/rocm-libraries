@@ -18231,6 +18231,7 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileStoreTt0PerStage = 0
     self.states.subtileStoreStageHighWater = 0
     self.states.subtilePairPackSlot = 0
+    self.states.subtileStagedHold = None   # staged store cacheline align: pair held for its line partner
     self.states.subtileHoistedAddrArm = -1
     self.states.subtileHoistedAddrDVgpr = -1
     self.states.subtileHoistedAddrBlockN = -1

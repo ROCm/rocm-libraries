@@ -2667,6 +2667,9 @@ class GlobalWriteBatchWriter:
               else:
                 if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
                   tmpStoreCode = self._emit16bitSubtilePairedStoreWoven(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, _weavePairIdx, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                elif self._stagedCachelineAlignActive():
+                  tmpStoreCode = self._emitStagedCachelineAlignPair(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1,
+                                                          blockIdxM, blockIdxN, fusedA2APushPass)
                 else:
                   tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
                 storeCodeModule.add(tmpStoreCode)
@@ -3880,6 +3883,10 @@ class GlobalWriteBatchWriter:
     Must be called once after all elements have been emitted to close out the last
     N group and anchor the N-cbranch target past all stores.
     """
+    # Staged store cacheline align: a held pair whose line partner never arrived is stored as is.
+    if (getattr(self.parentWriter.states, "subtileStagedHold", None) is not None
+        and self.batchIdx >= self.numBatches - 1):
+      targetModule.add(self._flushStagedHold())
     if self._subtileNGroupSkipLabel is not None:
       targetModule.add(self._subtileNGroupSkipLabel)
       self._subtileNGroupSkipLabel = None
@@ -4780,6 +4787,89 @@ class GlobalWriteBatchWriter:
     # gfx940+: a VALU that overwrites the data of a store wider than 8 bytes needs 2 wait
     # states. The next line's first convert writes H straight after the store that read it.
     module.add(SNop(waitState=1, comment="2 wait states: WAR hazard between store src and next pack dst"))
+    return module
+
+  STAGED_UNIT_CUT = "[plsin-unit-cut]"
+
+  def _stagedCachelineAlignActive(self) -> bool:
+    """Store cacheline align on the STAGED fused store (block-scheduled tiles). Needs the 2-quad pack
+    ring (one hold quad per stage parity) and the cacheline align temp, and no register beyond those."""
+    c = self.cvtVgprStruct
+    return (storeCachelineAlignEnabled(self.kernel)
+            and bool(getattr(self.parentWriter.states, "subtileStoreStages", 0))
+            and self._fusedFullTileNoGuards()
+            and getattr(self, "_permlane16Active", False)
+            and getattr(c, "vgprCachelineAlignTmp", -1) >= 0
+            and getattr(c, "vgprPairPackRing", -1) >= 0)
+
+  def _flushStagedHold(self) -> Module:
+    """A held pair whose line partner never came: store it unblended."""
+    hold = self.parentWriter.states.subtileStagedHold
+    self.parentWriter.states.subtileStagedHold = None
+    module = Module("16bitSubtileStagedHoldFlush")
+    self._cachelineAlignStoreNow(module, hold["addrCalc"], hold["tt0"], hold["forceSlc"], hold["H"],
+                       self.cvtVgprStruct.vgprAddrScratch, "staged hold flushed")
+    return module
+
+  def _emitStagedCachelineAlignPair(self, addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0, blockIdxM, blockIdxN, forceSlc) -> Module:
+    """Staged fused store with the store cacheline align. The scheduler cuts each stage into units
+    (one per buffer_store, plus the cut tag below) and scatters them between the loop
+    tail's MFMAs, where units of the NEIGHBOURING stage can land between them. So the only
+    register live across units is the hold quad H, private to the stage parity (the two
+    pack-ring quads). Everything else is used inside one unit: X (pair B packed in place
+    into its own, now dead, ValuC registers), W (another dead ValuC register of pair B),
+    the cacheline align temp and VCC.
+      unit A : prep A -> H                      (no store)
+      unit B : prep B -> X, blend (H<-store1, X<-store2), store 2
+      unit S1: rebuild the mask and store-1 voffset, store 1 from H"""
+    states = self.parentWriter.states
+    c = self.cvtVgprStruct
+    stage = states.subtileStoreStageHighWater
+    H = c.vgprPairPackRing if stage % 2 else c.vgprBf16Temp
+    X = ('c', sumIdx0 - prefixOffset)                 # cvt_pk in place: d_k reads only regs >= k
+    W = "ValuC+" + str(sumIdx1 - prefixOffset)        # dead once pair B is packed
+    addr = c.vgprAddrScratch
+    bpeCurr = states.bpeCexternal
+    bpeDest = states.bpeCexternalGSU1
+    module = Module("16bitSubtileStagedCachelineAlign")
+    hold = getattr(states, "subtileStagedHold", None)
+
+    def prep(vPack):
+      module.add(self._emit16bitSubtilePairedStorePhase1(
+        addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN,
+        vPackOverride=vPack))
+      module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0, forceSlc=forceSlc,
+                                                         vPackOverride=vPack, emitStore=False))
+
+    if hold is not None:
+      a = hold["addrCalc"]
+      partner = (hold["stage"] == stage and hold["blockIdxN"] == blockIdxN
+                 and tt0 == hold["tt0"] + 2 and a.addrDVgpr == addrCalc.addrDVgpr
+                 and a.coordOffset1 == addrCalc.coordOffset1
+                 and (addrCalc.globalOffset - a.globalOffset) * bpeDest // bpeCurr == 64)
+      if not partner:
+        module.add(self._flushStagedHold())
+        hold = None
+    if hold is not None:
+      prep(X)
+      self._emitCachelineAlignBlendAndStores(module, hold["addrCalc"], hold["tt0"], forceSlc, H, X, W,
+                                   marker=14, rebuildMask=True)
+      states.subtileStagedHold = None
+      return module
+
+    tt0PerStage = getattr(states, "subtileStoreTt0PerStage", 0)
+    lineStart = ((tt0 // 2) % 2 == self._cachelineAlignLineStartParity()
+                 and tt0PerStage and (tt0 + 3) // tt0PerStage == tt0 // tt0PerStage)
+    if lineStart:
+      prep(H)
+      last = [i for i in module.flatitems() if isinstance(i, VPermlane16SwapB32)][-1]
+      last.comment = (last.comment or "") + " " + self.STAGED_UNIT_CUT
+      states.subtileStagedHold = {"addrCalc": addrCalc, "tt0": tt0, "blockIdxN": blockIdxN,
+                                  "stage": stage, "H": H, "forceSlc": forceSlc}
+      return module
+    # no line partner in this stage: self-contained store on the pair's own ValuC quad
+    prep(X)
+    self._cachelineAlignStoreNow(module, addrCalc, tt0, forceSlc, X, addr, "staged, unaligned")
     return module
 
   def _pairPackQuad(self) -> int:
