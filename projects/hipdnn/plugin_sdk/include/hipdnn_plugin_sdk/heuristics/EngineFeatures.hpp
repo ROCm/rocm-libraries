@@ -233,8 +233,8 @@ std::optional<KeyExtent> denseKeys(const Graph& graph, const TAttention& op)
 /// own table [B, 1, pages, 1] and block size. The keys are `max_seq_len_kv` when stated; else
 /// an unpaged K's, then V's, sequence extent; else the attention mask's last extent; else
 /// rng_dump's; else the smaller of the paged sides' pages x block size. Nullopt when they
-/// cannot be read or exceed a paged side's capacity: the work is then unknown. The bench
-/// writes `seq_len_kv`, `cu_seq_len_kv` and the page tables from the same keys.
+/// cannot be read, exceed a paged side's capacity or differ from an unpaged side's extent: the
+/// work is then unknown. The bench writes `seq_len_kv` and `cu_seq_len_kv` from the same keys.
 inline std::optional<KeyExtent>
     keyExtent(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
 {
@@ -305,6 +305,16 @@ inline std::optional<KeyExtent>
     {
         return std::nullopt;
     }
+    // An unpaged side holds the keys itself: [B, heads, keys, D].
+    for(const auto& [paged, uid] : {std::pair{tableK.has_value(), op.k_tensor_uid()},
+                                    std::pair{tableV.has_value(), op.v_tensor_uid()}})
+    {
+        const auto* side = tensor(graph, uid);
+        if(!paged && (!shaped(side, 4) || side->dims()->Get(2) != *keys))
+        {
+            return std::nullopt;
+        }
+    }
     return KeyExtent{*keys, tableK.has_value(), tableV.has_value()};
 }
 
@@ -348,9 +358,9 @@ std::optional<double>
     }
     // The deprecated causal flags compose as cuDNN's setters do (SEM-002, the references'
     // extractDiagonalBandParams): a flag means right_bound 0 unless one of at least 0 is
-    // stated, and causal_mask_bottom_right also means BOTTOM_RIGHT. The frontend rejects a band
-    // outside hipDNN's domain (SEM-005: left_bound 0, a bound below -1, both flags), so its
-    // work is unknown.
+    // stated, and causal_mask_bottom_right also means BOTTOM_RIGHT. A band outside hipDNN's
+    // domain has unknown work: the frontend rejects left_bound 0 and a bound below -1
+    // (SEM-005), and the references and the hip-kernel-provider reject both flags together.
     std::optional<int64_t> left = op.left_bound();
     std::optional<int64_t> right = op.right_bound();
     if((left && (*left == 0 || *left < -1)) || (right && *right < -1)

@@ -4,16 +4,21 @@
 #include <array>
 #include <atomic>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
+
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 
 namespace
 {
@@ -1237,6 +1242,46 @@ TEST(TestEngineFeatures, PagedKeysAreInferredAsTheReferencesDo)
         {"bottom-right over the paged keys",
          pagedGraph(bottomRight, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}),
          2.0 * 2 * 8 * 33 * 48});
+    auto unreadableV = paged(true, true);
+    unreadableV.page_table_v_tensor_uid = 99;
+    cases.push_back(
+        {"an unreadable V table",
+         pagedGraph(unreadableV, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}),
+         std::nullopt});
+    auto zeroMax = paged(true, true);
+    zeroMax.max_seq_len_kv = 0;
+    cases.push_back({"a maximum of 0",
+                     pagedGraph(zeroMax, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}),
+                     std::nullopt});
+    // An unpaged side's keys come before the mask's.
+    auto vWithMask = paged(false, true);
+    vWithMask.attn_mask_tensor_uid = 7;
+    cases.push_back(
+        {"an unpaged K before the mask",
+         pagedGraph(vWithMask, {2, 2, 8, 16}, {4, 2, 4, 32}, {}, {2, 1, 2, 1}, {2, 8, 3, 6}),
+         flopsFor(8)});
+    auto bothWithRng = paged(true, true);
+    bothWithRng.rng_dump_tensor_uid = 7;
+    cases.push_back(
+        {"rng_dump's keys",
+         pagedGraph(
+             bothWithRng, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}, {2, 8, 3, 10}),
+         flopsFor(10)});
+    // K holds 2 pages of 4: a maximum of 10 fits V's 12 but not K's 8.
+    auto beyondK = paged(true, true);
+    beyondK.max_seq_len_kv = 10;
+    cases.push_back({"a maximum beyond K's cache",
+                     pagedGraph(beyondK, {4, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 2, 1}, {2, 1, 3, 1}),
+                     std::nullopt});
+    // With a stated maximum, an unpaged side must hold exactly that many keys.
+    auto kWithMax = paged(true, false);
+    kWithMax.max_seq_len_kv = 12;
+    cases.push_back({"a maximum an unpaged V holds",
+                     pagedGraph(kWithMax, {6, 2, 4, 16}, {2, 2, 12, 32}, {2, 1, 3, 1}),
+                     flopsFor(12)});
+    cases.push_back({"a maximum an unpaged V does not hold",
+                     pagedGraph(kWithMax, {6, 2, 4, 16}, {2, 2, 10, 32}, {2, 1, 3, 1}),
+                     std::nullopt});
     for(const auto& [name, graph, flops] : cases)
     {
         SCOPED_TRACE(name);
@@ -1346,6 +1391,180 @@ TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOpera
     }
 }
 
+/// The key a reference keeps for query row @p row, as CpuFpReferenceSdpa masks (SEM-001).
+bool referenceKeeps(
+    const DiagonalBandParams& band, int64_t row, int64_t key, int64_t sq, int64_t sk)
+{
+    const int64_t offset = band.topLeftAlignment ? 0 : sk - sq;
+    return (band.rightBound < 0 || key < row + 1 + offset + band.rightBound)
+           && (band.leftBound < 0 || key > row + offset - band.leftBound);
+}
+
+const SdpaAttributes& packedAttention(flatbuffers::FlatBufferBuilder& buffer, const GraphT& graph)
+{
+    buffer.Finish(Graph::Pack(buffer, &graph));
+    return *GetGraph(buffer.GetBufferPointer())->nodes()->Get(0)->attributes_as_SdpaAttributes();
+}
+
+// The work model's band composition and paged keys are a second copy of the references'
+// (extractDiagonalBandParams, sdpaPagedMaxSeqKv): every graph a reference accepts is counted
+// over the band and keys it uses, and every band it rejects is uncounted.
+TEST(TestEngineFeatures, BandAndPagedKeysAgreeWithTheReferences)
+{
+    // UNSET leaves the bound absent.
+    constexpr int64_t UNSET = std::numeric_limits<int64_t>::min();
+    const std::vector<int64_t> lefts = {UNSET, -2, -1, 0, 1, 2, 3};
+    const std::vector<int64_t> rights = {UNSET, -2, -1, 0, 1, 2};
+    for(int64_t sq = 1; sq <= 4; ++sq)
+    {
+        for(int64_t sk = 1; sk <= 4; ++sk)
+        {
+            for(const int64_t left : lefts)
+            {
+                for(const int64_t right : rights)
+                {
+                    for(int flags = 0; flags < 4; ++flags)
+                    {
+                        for(const bool bottomRight : {false, true})
+                        {
+                            auto sdpa = attention();
+                            if(left != UNSET)
+                            {
+                                sdpa.left_bound = left;
+                            }
+                            if(right != UNSET)
+                            {
+                                sdpa.right_bound = right;
+                            }
+                            sdpa.causal_mask = (flags & 1) != 0;
+                            sdpa.causal_mask_bottom_right = (flags & 2) != 0;
+                            sdpa.diagonal_alignment = bottomRight ? DiagonalAlignment::BOTTOM_RIGHT
+                                                                  : DiagonalAlignment::TOP_LEFT;
+                            const auto graph = single(
+                                {{1, 1, sq, 4}, {1, 1, sk, 4}, {1, 1, sk, 4}, {1, 1, sq, 4}}, sdpa);
+                            flatbuffers::FlatBufferBuilder buffer;
+                            const auto& packed = packedAttention(buffer, graph);
+                            SCOPED_TRACE(testing::Message()
+                                         << "sq " << sq << " sk " << sk << " flags " << flags
+                                         << " br " << bottomRight);
+                            const auto published = features(buffer);
+                            std::optional<DiagonalBandParams> band;
+                            try
+                            {
+                                band = extractDiagonalBandParams(packed, "test");
+                            }
+                            catch(const std::invalid_argument&)
+                            {
+                                EXPECT_FALSE(published.contains("graph.flops"));
+                                continue;
+                            }
+                            int64_t pairs = 0;
+                            for(int64_t row = 0; row < sq; ++row)
+                            {
+                                for(int64_t key = 0; key < sk; ++key)
+                                {
+                                    pairs += referenceKeeps(*band, row, key, sq, sk) ? 1 : 0;
+                                }
+                            }
+                            if(pairs == 0)
+                            {
+                                EXPECT_FALSE(published.contains("graph.flops"));
+                            }
+                            else
+                            {
+                                EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(),
+                                                 16.0 * static_cast<double>(pairs));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Paged keys: wherever the reference accepts the layout, its keys are the counted ones.
+    int compared = 0;
+    for(const auto& [pageK, pageV] :
+        {std::pair{true, false}, std::pair{false, true}, std::pair{true, true}})
+    {
+        for(const int64_t blockK : {2, 3})
+        {
+            for(const int64_t blockV : {2, 3})
+            {
+                for(const int64_t pages : {2, 3})
+                {
+                    for(const int32_t maximum : {0, 4, 5, 6})
+                    {
+                        for(const int64_t mask : {int64_t{0}, int64_t{5}})
+                        {
+                            for(const int64_t dense : {4, 5, 6})
+                            {
+                                auto sdpa = attention();
+                                sdpa.seq_len_q_tensor_uid = 8;
+                                sdpa.seq_len_kv_tensor_uid = 9;
+                                if(pageK)
+                                {
+                                    sdpa.page_table_k_tensor_uid = 5;
+                                }
+                                if(pageV)
+                                {
+                                    sdpa.page_table_v_tensor_uid = 6;
+                                }
+                                if(maximum > 0)
+                                {
+                                    sdpa.max_seq_len_kv = maximum;
+                                }
+                                if(mask > 0)
+                                {
+                                    sdpa.attn_mask_tensor_uid = 7;
+                                }
+                                auto graph = single({{2, 1, 3, 4},
+                                                     pageK ? std::vector<int64_t>{8, 1, blockK, 4}
+                                                           : std::vector<int64_t>{2, 1, dense, 4},
+                                                     pageV ? std::vector<int64_t>{8, 1, blockV, 4}
+                                                           : std::vector<int64_t>{2, 1, dense, 4},
+                                                     {2, 1, 3, 4},
+                                                     {2, 1, pages, 1},
+                                                     {2, 1, pages, 1},
+                                                     {2, 1, 3, mask > 0 ? mask : 1},
+                                                     {2, 1, 1, 1},
+                                                     {2, 1, 1, 1}},
+                                                    sdpa);
+                                for(const size_t index : {4U, 5U, 7U, 8U})
+                                {
+                                    graph.tensors[index]->data_type = DataType::INT32;
+                                }
+                                flatbuffers::FlatBufferBuilder buffer;
+                                const auto& packed = packedAttention(buffer, graph);
+                                std::unordered_map<int64_t, const TensorAttributes*> tensors;
+                                for(const auto* value :
+                                    *GetGraph(buffer.GetBufferPointer())->tensors())
+                                {
+                                    tensors.emplace(value->uid(), value);
+                                }
+                                const auto keys = sdpaPagedMaxSeqKv(packed, tensors);
+                                if(keys <= 0)
+                                {
+                                    continue;
+                                }
+                                SCOPED_TRACE(testing::Message()
+                                             << "K " << pageK << " V " << pageV << " blocks "
+                                             << blockK << "/" << blockV << " pages " << pages
+                                             << " max " << maximum << " mask " << mask << " dense "
+                                             << dense);
+                                ++compared;
+                                EXPECT_DOUBLE_EQ(features(buffer).at("graph.flops").get<double>(),
+                                                 2.0 * 2 * 3 * static_cast<double>(keys) * 8);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_GT(compared, 20);
+}
+
 TEST(TestEngineFeatures, WorkOfLaterTypesCountsTheDeclaredExtent)
 {
     PointwiseAttributesT relu;
@@ -1365,7 +1584,9 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
 {
     // Shipped models read these values; changing any requires bumping
     // FEATURE_SEMANTICS_REVISION. Publishing a value where none was (a band, dropout, a paged
-    // cache) does not (RFC 0019 section 6.9).
+    // cache) does not (RFC 0019 section 6.9). Bands outside hipDNN's domain, which the work
+    // model once counted, are no longer counted without a bump: no engine serves them, and
+    // their training rows are re-collected (RFC 0019 section 6.8).
     EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 1);
     struct Case
     {
@@ -1516,6 +1737,13 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
         {"left_bound", [](SdpaAttributesT& op) { op.left_bound = 1; }, 27648.0},
         // Row i keeps keys [0, i + 1]: 2 + 3 + 4 pairs.
         {"right_bound", [](SdpaAttributesT& op) { op.right_bound = 1; }, 13824.0},
+        // A flag with an unbounded right bound is the flag alone (SEM-002).
+        {"causal flag with an unbounded right",
+         [](SdpaAttributesT& op) {
+             op.causal_mask = true;
+             op.right_bound = -1;
+         },
+         9216.0},
     };
     for(const auto& [name, vary, flops] : variations)
     {
@@ -1857,7 +2085,8 @@ TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
     GdnAttributesT gdn;
     gdn.q_tensor_uid = 1;
     gdn.o_tensor_uid = 2;
-    // Bands outside hipDNN's domain (SEM-005), which the frontend rejects.
+    // Bands outside hipDNN's domain: the frontend rejects left_bound 0 and a bound below -1
+    // (SEM-005), the references both deprecated flags together.
     const auto band = [](void (*vary)(SdpaAttributesT&)) {
         auto sdpa = attention();
         vary(sdpa);
@@ -1879,6 +2108,14 @@ TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
                            op.causal_mask = true;
                            op.causal_mask_bottom_right = true;
                        }));
+    auto shortV = attentionGraph(attention());
+    shortV.tensors[2]->dims = {2, 2, 6, 32};
+    cases.emplace_back("an unpaged V shorter than K", std::move(shortV));
+    auto otherBatch = attentionGraph(attention());
+    otherBatch.tensors[2]->dims = {3, 2, 7, 32};
+    cases.emplace_back("an unpaged V of another batch", std::move(otherBatch));
+    cases.emplace_back("MoE output N against weight N",
+                       single({{1, 32, 64}, {4, 64, 128}, {4}, {1, 32, 100}}, moe));
     for(const auto& [name, graph] : cases)
     {
         SCOPED_TRACE(name);
