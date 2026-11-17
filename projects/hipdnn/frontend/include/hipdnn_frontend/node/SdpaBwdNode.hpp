@@ -315,8 +315,8 @@ public:
         HIPDNN_CHECK_ERROR(validateGradientOutput(dv, vDims, "dV", "V", true));
 
         // Rule 12: dBias has the bias tensor's shape (SdpaSemanticsRegister SEM-014), so it
-        // needs a bias to take that shape from. Its last dimension is seq_kv, not the head
-        // dimension, so the contiguity rule does not apply.
+        // needs a bias to take that shape from. cuDNN's last-stride-1 check does not list
+        // dBias, so it is not held to that rule.
         const auto dBias = attributes.get_dbias();
         if(dBias)
         {

@@ -1179,7 +1179,7 @@ TEST(TestSdpaBwdNode, PreValidateChecksDBiasAgainstBias)
 
     EXPECT_EQ(validate({}, {}), error_code_t::OK) << "left to inference";
     EXPECT_EQ(validate({1, 8, 16, 32}, {4096, 512, 32, 1}), error_code_t::OK);
-    // dBias ends in seq_kv, not the head dim, so its last stride is not held to 1.
+    // cuDNN's last-stride-1 check does not list dBias, so its last stride is not held to 1.
     EXPECT_EQ(validate({1, 8, 16, 32}, {8192, 1024, 64, 2}), error_code_t::OK);
 
     // The expanded [B, H_q, S_q, S_kv] gradient is not the broadcast bias's shape.
@@ -1204,6 +1204,23 @@ TEST(TestSdpaBwdNode, InferPropertiesSetsDBiasFromBias)
     // The bias's broadcast shape, not [B, H_q, S_q, S_kv] from Q, K and V.
     EXPECT_EQ(dBias->get_dim(), (std::vector<int64_t>{1, 8, 16, 32}));
     EXPECT_EQ(dBias->get_stride(), (std::vector<int64_t>{4096, 512, 32, 1}));
+}
+
+TEST(TestSdpaBwdNode, InferPropertiesKeepsExplicitDBiasStrides)
+{
+    auto attrs = makeGqaAttrs();
+    attrs.set_bias(makeBroadcastBias());
+    auto dBias = std::make_shared<TensorAttributes>();
+    dBias->set_stride({4096, 32, 256, 1});
+    attrs.set_dbias(dBias);
+
+    const GraphAttributes graphAttrs;
+    SdpaBwdNode node(std::move(attrs), graphAttrs);
+    ASSERT_EQ(node.pre_validate_node().code, error_code_t::OK);
+    ASSERT_EQ(node.infer_properties_node().code, error_code_t::OK);
+
+    EXPECT_EQ(dBias->get_dim(), (std::vector<int64_t>{1, 8, 16, 32}));
+    EXPECT_EQ(dBias->get_stride(), (std::vector<int64_t>{4096, 32, 256, 1}));
 }
 
 TEST(TestSdpaBwdNode, PreValidateRejectsDBiasDataTypeUnlikeBias)
