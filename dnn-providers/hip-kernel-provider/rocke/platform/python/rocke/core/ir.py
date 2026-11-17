@@ -491,6 +491,27 @@ def _string_attr_error(
     return None
 
 
+def _unsigned_form_width_error(
+    attrs: Mapping[str, Any],
+    op_name: str,
+    key: str,
+    unsigned_value: str,
+    operand_type: str,
+) -> str | None:
+    """The error for the unsigned form ``unsigned_value`` of the string attr
+    ``key`` in an ``op_name`` op's ``attrs`` (``arith.add``'s ``nuw``,
+    ``arith.cmp``'s ``ult``) on operands of type ``operand_type`` (a type
+    name), or None: the unsigned forms take the builders' operands, i32 or
+    i64. The C++ engine's ``unsigned_form_width_error`` writes the same text.
+    """
+    if attrs.get(key) != unsigned_value or operand_type in ("i32", "i64"):
+        return None
+    return (
+        f"{op_name}: {key} '{unsigned_value}' needs i32 or i64 operands, "
+        f"got {operand_type}"
+    )
+
+
 def _int_add_wrap_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
     """The error for the ``wrap`` attr in an ``arith.add`` op's ``attrs`` on
     operands of type ``operand_type`` (a type name), or None when it is valid.
@@ -506,13 +527,9 @@ def _int_add_wrap_error(attrs: Mapping[str, Any], operand_type: str) -> str | No
         _INT_ADD_WRAPS,
         "arith.add: wrap must be the string 'nsw' or 'nuw'",
     )
-    if (
-        error is None
-        and attrs.get("wrap") == "nuw"
-        and operand_type not in ("i32", "i64")
-    ):
-        return f"arith.add: wrap 'nuw' needs i32 or i64 operands, got {operand_type}"
-    return error
+    if error:
+        return error
+    return _unsigned_form_width_error(attrs, "arith.add", "wrap", "nuw", operand_type)
 
 
 def _int_cmp_pred_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
@@ -528,13 +545,9 @@ def _int_cmp_pred_error(attrs: Mapping[str, Any], operand_type: str) -> str | No
         "arith.cmp: pred must be a string",
         required=True,
     )
-    if (
-        error is None
-        and attrs.get("pred") == "ult"
-        and operand_type not in ("i32", "i64")
-    ):
-        return f"arith.cmp: pred 'ult' needs i32 or i64 operands, got {operand_type}"
-    return error
+    if error:
+        return error
+    return _unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type)
 
 
 def _int_cmp_error(
