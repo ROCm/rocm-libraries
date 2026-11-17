@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
  * ************************************************************************ */
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
+
+#include <limits>
 
 template <typename T>
 void testing_bsrpad_value_bad_arg(const Arguments& arg)
@@ -53,12 +55,12 @@ void testing_bsrpad_value_bad_arg(const Arguments& arg)
 
     select_bad_arg_analysis(rocsparse_bsrpad_value<T>, nargs_to_exclude, args_to_exclude, PARAMS);
 
-    // block_dim * mb > m
+    // m > block_dim * mb
     mb = 3;
     m  = block_dim * mb + 1;
     EXPECT_ROCSPARSE_STATUS(rocsparse_bsrpad_value<T>(PARAMS), rocsparse_status_invalid_size);
 
-    // block_dim * mb < m
+    // m <= block_dim * (mb - 1)
     mb = 3;
     m  = block_dim * (mb - 1);
     EXPECT_ROCSPARSE_STATUS(rocsparse_bsrpad_value<T>(PARAMS), rocsparse_status_invalid_size);
@@ -68,6 +70,86 @@ void testing_bsrpad_value_bad_arg(const Arguments& arg)
     mb        = 3;
     m         = block_dim * mb;
     EXPECT_ROCSPARSE_STATUS(rocsparse_bsrpad_value<T>(PARAMS), rocsparse_status_invalid_size);
+
+    // Shape relation (mb - 1) * block_dim < m <= mb * block_dim near the rocsparse_int limits,
+    // including shapes whose products overflow 32 bits (GitHub issue #15913).
+    // nnzb = 0 so that a valid shape returns before any array is dereferenced.
+    {
+        // Exact in int64_t for these inputs, which are all <= INT32_MAX.
+        auto shape_status = [](int64_t m_, int64_t mb_, int64_t block_dim_) {
+            return ((mb_ - 1) * block_dim_ < m_ && m_ <= mb_ * block_dim_)
+                       ? rocsparse_status_success
+                       : rocsparse_status_invalid_size;
+        };
+
+        struct shape_case
+        {
+            rocsparse_int    m, mb, block_dim;
+            rocsparse_status expected;
+        };
+
+        constexpr rocsparse_int imax = std::numeric_limits<int32_t>::max();
+        constexpr auto          ok   = rocsparse_status_success;
+        constexpr auto          bad  = rocsparse_status_invalid_size;
+
+        const shape_case cases[] = {
+            {1, 1, 1, ok},
+            {1, 2, 2, bad},
+            {1, 3, 1431655766, bad},
+            {4, 4, 1073741825, bad},
+            {1, imax, imax, bad},
+            {3, 1073741825, 4, bad},
+            {imax, 2, 1073741824, ok},
+            {1073741825, 2, 1073741824, ok},
+            {1073741824, 2, 1073741824, bad},
+            {imax, 3, 1073741823, ok},
+            {imax, 3, 1073741824, bad},
+            {imax - 1, 2, 1073741823, ok},
+            {1, 1, imax, ok},
+            {imax, 1, imax, ok},
+            {1, 2, imax, bad},
+            {0, 0, 1, ok},
+            {0, 0, imax, ok},
+            {0, 1, 1, bad},
+            {1, 0, 1, bad},
+            {1, 1, 1431655766, ok},
+            {0, 1, 5, bad},
+        };
+
+        nnzb = 0;
+        for(const auto& c : cases)
+        {
+            m         = c.m;
+            mb        = c.mb;
+            block_dim = c.block_dim;
+#ifdef GOOGLE_TEST
+            SCOPED_TRACE(testing::Message()
+                         << "m=" << m << " mb=" << mb << " block_dim=" << block_dim);
+#endif
+            EXPECT_ROCSPARSE_STATUS(shape_status(m, mb, block_dim), c.expected);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_bsrpad_value<T>(PARAMS), c.expected);
+        }
+
+        // An invalid pointer is reported before an invalid shape.
+        m           = 1;
+        mb          = 3;
+        block_dim   = 1431655766;
+        bsr_row_ptr = nullptr;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_bsrpad_value<T>(PARAMS),
+                                rocsparse_status_invalid_pointer);
+        bsr_row_ptr = (rocsparse_int*)0x4;
+
+        // 3 * block_dim = 2^64 + 2 overflows a 64-bit rocsparse_int.
+        if(sizeof(rocsparse_int) == sizeof(int64_t))
+        {
+            const int64_t big = 6148914691236517206;
+            m                 = 1;
+            mb                = 3;
+            block_dim         = static_cast<rocsparse_int>(big);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_bsrpad_value<T>(PARAMS),
+                                    rocsparse_status_invalid_size);
+        }
+    }
 
 #undef PARAMS
 }
