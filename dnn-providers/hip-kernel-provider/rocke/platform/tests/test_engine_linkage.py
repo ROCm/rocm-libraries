@@ -427,6 +427,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 "PATH": os.pathsep.join(
                     [
                         str(rocm_path / "bin"),
+                        str(rocm_path / "llvm/bin"),
                         str(rocm_path / "lib/llvm/bin"),
                         ctest_env.get("PATH", ""),
                     ]
