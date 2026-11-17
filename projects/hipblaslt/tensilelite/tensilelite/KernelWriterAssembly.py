@@ -24809,7 +24809,7 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def _emitSwizzleTdmIterateInit(self, mod, kernel, tc, dtype, descSgprName,
-                                 swzTile0, swzRows, bpe, globalIncSgpr):
+                                 swzTile0, swzRows, bpe, globalIncSgpr, remainRowsSgpr=None):
     """TDM iterate-mode init for the swizzled-B VW>1 LDS pad.
 
     Unlike the generic _emitTdmIterateInit (which walks contiguous N-rows in pad-block
@@ -24830,7 +24830,16 @@ class KernelWriterAssembly(KernelWriter):
     lds_inc = (nOTileBytes + pad_bytes) >> dss
     mod.add(comp.setIterationEnabled(descSgprName(1), True))
     with self.allocTmpSgpr(1, tag="swzTdmIterCount") as itTmp:
-      mod.add(SMovB32(sgpr(itTmp.idx), swzRows - 1, "TDM iterate: #nO(%d) - 1 (field = n-1)" % swzRows))
+      if remainRowsSgpr is None:
+        mod.add(SMovB32(sgpr(itTmp.idx), swzRows - 1, "TDM iterate: #nO(%d) - 1 (field = n-1)" % swzRows))
+      else:
+        # tile1 == 1, so dim1 only guards the first nO of the walk; later iterations step past
+        # the buffer end unless the count is clamped to the nO rows this wave still has.
+        mod.add(SMinU32(dst=sgpr(itTmp.idx), src0=sgpr(remainRowsSgpr), src1=swzRows,
+                        comment="TDM iterate: nO rows this wave loads = min(rows left, %d)" % swzRows))
+        mod.add(SMaxU32(dst=sgpr(itTmp.idx), src0=sgpr(itTmp.idx), src1=1,
+                        comment="an empty wave still walks once; dim1 keeps it off memory"))
+        mod.add(SSubU32(dst=sgpr(itTmp.idx), src0=sgpr(itTmp.idx), src1=1, comment="field = n-1"))
       mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, globalIncSgpr))
       mod.add(comp.setIterations(descSgprName(2), itTmp.idx))
 
@@ -25253,7 +25262,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
         if isTdmIter:
           self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
-                                          swzTile0, swzRows, bpe, strideS)
+                                          swzTile0, swzRows, bpe, strideS, sIdx)
       mod.add(comp.setTensorTile0(descSgprName(1), swzTile0 >> swzUnitShift, self, 0))
       mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
     elif isMetadataML1:
@@ -25554,7 +25563,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
         if isTdmIter:
           self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
-                                          swzTile0, swzRows, bpe, strideS)
+                                          swzTile0, swzRows, bpe, strideS, sIdx)
       mod.add(comp.setTensorTile0(descSgprName(1), swzTile0 >> swzUnitShift, self, 0))
       mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
       return mod
