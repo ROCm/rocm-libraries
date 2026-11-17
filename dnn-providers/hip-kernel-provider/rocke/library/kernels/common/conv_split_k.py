@@ -134,13 +134,14 @@ WGRAD_ASSUMED_WAVES_PER_CU = 2
 # round-robin by flat workgroup id, so this is the modulus a grouped launch has
 # to stay aligned to -- see the snap in select_split_k_wgrad. RDNA parts have a
 # single shader-engine group and want no snap at all.
+# The gfx12 RDNA targets (wave32, WMMA): the one place the list is spelled.
+_GFX12_RDNA_ARCHS: tuple[str, ...] = ("gfx1200", "gfx1201", "gfx12-generic")
+
 _ARCH_NUM_XCDS: dict[str, int] = {
     "gfx942": 8,
     "gfx950": 8,
     "gfx1151": 1,
-    "gfx1201": 1,
-    "gfx1200": 1,
-    "gfx12-generic": 1,
+    **dict.fromkeys(_GFX12_RDNA_ARCHS, 1),
     "gfx1100": 1,
     "gfx11-generic": 1,
 }
@@ -265,7 +266,7 @@ def _gfx12_rdna_wgrad_split_policy(arch: str) -> WgradSplitPolicy:
 _WGRAD_SPLIT_POLICY.update(
     {
         arch: _gfx12_rdna_wgrad_split_policy(arch)
-        for arch in ("gfx1200", "gfx1201", "gfx12-generic")
+        for arch in _GFX12_RDNA_ARCHS
     }
 )
 
