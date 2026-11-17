@@ -15,9 +15,9 @@
 {% if op.work_data_dependent_fields %}
 //
 // Work-data-dependent operands: {{ op.work_data_dependent_fields | join(', ') }}.
-// logicalFlops leaves the work unknown whenever one of them is present, so the formula
-// only has to count graphs without them. If a required operand is among them the work
-// is never known: list the op in NO_COUNTING_CONVENTION instead, as MoeGroupedMatmul is.
+// Their contents decide how much of the declared work runs. Count the problem the shapes
+// declare (padded lengths, every routed row) and never read an operand's contents; the
+// node's data_dependent feature tells a model the count is a bound.
 {% endif %}
 
 inline std::optional<double>
