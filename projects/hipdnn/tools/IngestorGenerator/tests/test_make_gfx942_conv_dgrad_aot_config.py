@@ -4,7 +4,7 @@
 """The gfx942-only cases of the shipped hipkernel:Gfx942ConvDgradAot bundle and its
 catalog, made by tools/make_conv_dgrad_aot_config.py --arch gfx942. What every dgrad
 engine shares is test_make_conv_dgrad_aot_config.py's, run for gfx942 too; these
-reuse its loaders."""
+reuse its loaders and fixtures."""
 
 import collections
 import json
@@ -22,25 +22,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import make_conv_dgrad_aot_config as tool  # noqa: E402
 import test_make_conv_dgrad_aot_config as shared  # noqa: E402
 
+# The shared module's fixtures, bound to this engine by the ``arch`` below.
+from test_make_conv_dgrad_aot_config import (  # noqa: E402, F401
+    _rocke_on_path,
+    identities,
+    specs,
+)
+
 _ARCH = "gfx942"
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _rocke_on_path():
-    before = list(sys.path)
-    tool._bind_rocke(shared._ROCKE)
-    yield
-    sys.path[:] = before
-
-
 @pytest.fixture(scope="module")
-def identities():
-    return list(shared.load_identities(_ARCH))
-
-
-@pytest.fixture(scope="module")
-def specs():
-    return list(shared.load_specs(_ARCH))
+def arch():
+    return _ARCH
 
 
 def test_the_catalog_is_173_selectable_kernels_and_8_helpers_per_dtype(specs):
@@ -97,42 +91,6 @@ def test_the_streaming_depthwise_channels_per_lane_is_an_int_knob(specs):
     assert "cpl" in shared.document(_ARCH, "ued")["knobs"]
     assert "cpl" not in shared.document("gfx950", "ued")["knobs"]
     assert {s.direct_variant for s in specs if s.cpl} == {"depthwise_dgrad"}
-
-
-def test_every_mfma_instance_finds_its_helpers_in_the_bundle(specs):
-    """As gfx950's: each MFMA instance's helper lookup (by KMD field values) finds
-    exactly one helper kernel of its own shard, and every helper is used."""
-    from builders.common.convolution_backward_data import (
-        gfx950_conv_dgrad_aot_helper_fields,
-    )
-
-    shipped = shared.load_shipped(_ARCH)
-    defaults = {
-        f["name"]: f.get("default_value")
-        for f in shared.document(_ARCH, "kmd")["fields"]
-    }
-    helpers = [
-        (shard, dict(defaults, **k["metadata"]))
-        for shard, k in shipped.values()
-        if k["metadata"].get("kernel_family") == 2
-    ]
-    assert helpers
-    by_id = {s.instance_id: s for s in specs}
-    used = set()
-    for shard, kernel in shipped.values():
-        spec = by_id[kernel["metadata"]["instance_id"]]
-        if not spec.is_mfma:
-            continue
-        for wanted in gfx950_conv_dgrad_aot_helper_fields(spec):
-            found = [
-                (s, h)
-                for s, h in helpers
-                if all(h[name] == value for name, value in wanted.items())
-            ]
-            assert len(found) == 1, (spec.instance_id, wanted)
-            assert found[0][0] == shard
-            used.add(found[0][1]["instance_id"])
-    assert used == {h["instance_id"] for _, h in helpers}
 
 
 def test_a_gfx950_instance_is_refused_from_the_gfx942_catalog(tmp_path, identities):
