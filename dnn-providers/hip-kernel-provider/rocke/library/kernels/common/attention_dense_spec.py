@@ -587,6 +587,23 @@ class AttentionDenseSpec:
 OCP_FP8_KV_DTYPE = "torch.float8_e4m3fn"
 
 
+class RuntimeShapeNamePartsMixin:
+    """Drop the baked shape and head-count tokens from a runtime-shape name.
+
+    One runtime-shape binary serves every batch, sequence length and head
+    count, so its symbol must not claim ``sq``/``sk`` or ``hq``/``kv``. Mix in
+    ahead of :class:`AttentionDenseSpec`; the per-arch dense specs share it.
+    """
+
+    runtime_shape: bool
+
+    def _shape_name_parts(self) -> tuple[str, ...]:
+        return () if self.runtime_shape else super()._shape_name_parts()
+
+    def _head_name_parts(self) -> tuple[str, ...]:
+        return () if self.runtime_shape else super()._head_name_parts()
+
+
 def require_ocp_fp8_kv(named_tensors) -> None:
     """Raise unless every ``(name, tensor)`` is OCP fp8 K/V.
 
@@ -779,6 +796,7 @@ __all__ = [
     "DENSE_MIN_SCALE",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
+    "RuntimeShapeNamePartsMixin",
     "attention_dense_cache_key",
     "check_dense_scale",
     "check_dense_spec_preflight",

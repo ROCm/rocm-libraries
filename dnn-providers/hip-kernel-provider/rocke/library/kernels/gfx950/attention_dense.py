@@ -102,6 +102,7 @@ from kernels.common.attention_dense_spec import (
     check_dense_spec_preflight,
     require_fp8_kv_scale,
     require_ocp_fp8_kv,
+    RuntimeShapeNamePartsMixin,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -212,7 +213,7 @@ _EMPTY_ROW_MAX_PERSIST = -1e29
 
 
 @dataclass(frozen=True)
-class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
+class Gfx950AttentionDenseSpec(RuntimeShapeNamePartsMixin, _AttentionDenseSpecBase):
     """gfx950 dense-attention spec and architecture-specific codegen policy."""
 
     lds_v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
@@ -549,14 +550,6 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         if self.lds_v_row_pad != _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]:
             parts.append(f"vpad{self.lds_v_row_pad}")
         return tuple(parts)
-
-    def _shape_name_parts(self) -> tuple[str, ...]:
-        return () if self.runtime_shape else super()._shape_name_parts()
-
-    def _head_name_parts(self) -> tuple[str, ...]:
-        # One runtime-shape binary serves every head count, so the symbol must not
-        # claim an hq/kv -- mirrors _shape_name_parts dropping sq/sk.
-        return () if self.runtime_shape else super()._head_name_parts()
 
     def _kv_storage_name_parts(self) -> tuple[str, ...]:
         return (f"kv{self.kv_storage_dtype}",) if self.kv_storage_dtype else ()

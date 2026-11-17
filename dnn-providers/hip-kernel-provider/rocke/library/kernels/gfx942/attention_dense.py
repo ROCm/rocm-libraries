@@ -214,6 +214,7 @@ from kernels.common.attention_dense_spec import (
     check_dense_scale,
     check_dense_spec_preflight,
     partial_tile_reason,
+    RuntimeShapeNamePartsMixin,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -286,7 +287,7 @@ _SCHED_BARRIER_MASK_MAX = 0x7FF
 
 
 @dataclass(frozen=True)
-class Gfx942AttentionDenseSpec(AttentionDenseSpec):
+class Gfx942AttentionDenseSpec(RuntimeShapeNamePartsMixin, AttentionDenseSpec):
     """The gfx942 dense prefill spec: the shared spec plus gfx942-private knobs.
 
     A SUBCLASS of :class:`AttentionDenseSpec`, not a fork and not a sidecar struct.
@@ -635,12 +636,6 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         if not self.runtime_shape:
             return ()
         return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
-
-    def _shape_name_parts(self) -> tuple[str, ...]:
-        return () if self.runtime_shape else super()._shape_name_parts()
-
-    def _head_name_parts(self) -> tuple[str, ...]:
-        return () if self.runtime_shape else super()._head_name_parts()
 
     def kernel_name(self) -> str:
         """The gfx942 kernel symbol: the shared name plus everything THIS body bakes.
