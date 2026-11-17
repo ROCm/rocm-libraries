@@ -18,7 +18,18 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <cstddef>
+#include <cstring>
+#include <list>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/heuristics/DeviceFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #endif
@@ -848,16 +859,170 @@ inline uhd::FeatureExtractionContext
     return features;
 }
 
+namespace detail
+{
+/// Everything problemFeatures() reads: the graph's content (GraphContentKey), the one
+/// `(cache_ignore)` graph field it also reads, and the device values it publishes.
+struct ProblemFeatureKey
+{
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
+    bool overrideShapes = false;
+    std::vector<std::pair<std::string, std::variant<int64_t, double>>> device;
+    size_t hash = 0;
+
+    template <typename TProperties>
+    ProblemFeatureKey(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& source,
+                      const TProperties& properties)
+        : graph(source)
+        , overrideShapes(source.getGraph().is_override_shape_enabled())
+        , device(deviceFeatureValues(properties))
+    {
+        hash = static_cast<size_t>(graph.hash());
+        const auto mix = [this](uint64_t value) {
+            hash
+                ^= static_cast<size_t>(value) + 0x9e3779b97f4a7c15ULL + (hash << 6U) + (hash >> 2U);
+        };
+        mix(overrideShapes ? 1U : 0U);
+        for(const auto& [name, value] : device)
+        {
+            mix(std::hash<std::string>{}(name));
+            std::visit(
+                [&mix](auto held) {
+                    uint64_t bits = 0;
+                    static_assert(sizeof(held) == sizeof(bits));
+                    std::memcpy(&bits, &held, sizeof(bits));
+                    mix(bits);
+                },
+                value);
+        }
+    }
+
+    bool operator==(const ProblemFeatureKey& other) const
+    {
+        return hash == other.hash && overrideShapes == other.overrideShapes
+               && device == other.device && graph == other.graph;
+    }
+};
+} // namespace detail
+
+/// @brief Recently computed problemFeatures(), shared by every engine of one plugin.
+///
+/// The backend asks each applicable engine for its estimate of the same graph in turn, and
+/// each one needs the same problem features: they depend on the graph and the device alone
+/// (problemFeatures()). The cache builds them once per (graph content, device) and hands each
+/// engine the same immutable context, which the engine's own context reads through
+/// (uhd::FeatureExtractionContext's shared base) while binding its own names on top.
+///
+/// Least recently used, a few entries: one selection asks for one graph, and a few threads
+/// may select at once. A graph without usable content (GraphContentKey::isUsable()) is never
+/// cached. Thread-safe.
+class ProblemFeatureCache
+{
+public:
+    static constexpr size_t CAPACITY = 16;
+
+    /// @returns problemFeatures(@p graph, @p device), computed now or reused.
+    template <typename TProperties>
+    std::shared_ptr<const uhd::FeatureExtractionContext>
+        get(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+            const TProperties& device)
+    {
+        detail::ProblemFeatureKey key(graph, device);
+        if(!key.graph.isUsable())
+        {
+            return std::make_shared<const uhd::FeatureExtractionContext>(
+                problemFeatures(graph, device));
+        }
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            if(auto found = findLocked(key))
+            {
+                return found;
+            }
+        }
+        // Computed outside the lock, so engines selecting for other graphs do not wait.
+        auto computed
+            = std::make_shared<const uhd::FeatureExtractionContext>(problemFeatures(graph, device));
+        const std::lock_guard<std::mutex> lock(_mutex);
+        if(auto found = findLocked(key))
+        {
+            return found; // Another thread computed it first.
+        }
+        _entries.emplace_front(std::move(key), computed);
+        if(_entries.size() > CAPACITY)
+        {
+            _entries.pop_back();
+        }
+        return computed;
+    }
+
+    /// @returns The number of graphs held, at most CAPACITY.
+    size_t size() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _entries.size();
+    }
+
+    /// Forgets every graph; a context already handed out stays valid for its holders.
+    void clear()
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _entries.clear();
+    }
+
+private:
+    using Entry = std::pair<detail::ProblemFeatureKey,
+                            std::shared_ptr<const uhd::FeatureExtractionContext>>;
+
+    /// The entry for @p key, moved to the front, or null. Caller holds _mutex.
+    std::shared_ptr<const uhd::FeatureExtractionContext>
+        findLocked(const detail::ProblemFeatureKey& key)
+    {
+        for(auto it = _entries.begin(); it != _entries.end(); ++it)
+        {
+            if(it->first == key)
+            {
+                _entries.splice(_entries.begin(), _entries, it);
+                return _entries.front().second;
+            }
+        }
+        return nullptr;
+    }
+
+    mutable std::mutex _mutex;
+    std::list<Entry> _entries; // Most recently used first.
+};
+
+/// @brief The process-wide (per plugin library) ProblemFeatureCache.
+inline ProblemFeatureCache& problemFeatureCache()
+{
+    static ProblemFeatureCache s_cache;
+    return s_cache;
+}
+
+/// @brief problemFeatures() through problemFeatureCache(): built once per graph and device,
+///        then shared, immutable, by every caller.
+template <typename TProperties>
+inline std::shared_ptr<const uhd::FeatureExtractionContext>
+    sharedProblemFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                          const TProperties& device)
+{
+    return problemFeatureCache().get(graph, device);
+}
+
 /// @brief problemFeatures() plus the engine-level (L1) `constraint.*` features of @p config:
 ///        `constraint.workspace_limit` and `constraint.knobs.<name>` for every pinned knob
 ///        except the benchmarking knob, which chooses how to select, not what.
+///
+/// The problem features are sharedProblemFeatures(), read through; only the `constraint.*`
+/// names are bound in the returned context itself.
 template <typename TProperties>
 inline uhd::FeatureExtractionContext
     engineFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
                    const TProperties& device)
 {
-    auto features = problemFeatures(graph, device);
+    uhd::FeatureExtractionContext features(sharedProblemFeatures(graph, device));
     if(const auto limit = workspaceLimit(config))
     {
         features.bind("constraint.workspace_limit", *limit);

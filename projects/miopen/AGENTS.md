@@ -150,8 +150,8 @@ ctest -N -L '^quick$'
 # Generic hardware: -LE ex_gpu drops the arch-specific suites.
 ctest --output-on-failure --no-tests=error -L '^quick$' -LE ex_gpu
 # Architecture with its own exclusions: use the exact ex_gpu_* key from
-# test_categories.yaml, often a family name (gfx942 -> ex_gpu_gfx94X).
-ctest --output-on-failure --no-tests=error -L '^quick$' -L '^ex_gpu_gfx94X$'
+# test_categories.yaml, often a family name (gfx1100 -> ex_gpu_gfx110X).
+ctest --output-on-failure --no-tests=error -L '^quick$' -L '^ex_gpu_gfx110X$'
 # Discrete mode (naive solvers apply to every GPU; many solvers skip unsupported ones):
 ./bin/test_unit_conv_solver_ConvDirectNaiveConvFwd --gtest_filter='Smoke/*FP32*'
 # Driver; keep reference verification enabled (-V 0 disables it):
@@ -166,10 +166,11 @@ python3 script/check_public_abi.py check-headers --require-provider
 python3 script/check_public_abi.py check build/lib/libMIOpen.so \
   --baseline test/public_abi/public_symbols.baseline
 python3 -m pytest script/test_check_public_abi.py
-# test_forwarding_parity_gpu_labels lives in test/gtest/, hence PYTHONPATH; the rest are in script/.
+# test_forwarding_parity_gpu_labels and test_check_wrapper_registration live in test/gtest/, hence
+# PYTHONPATH; the rest are in script/.
 (cd script && PYTHONPATH=../test/gtest python3 -m unittest \
   test_check_wrapper_abi test_miopen_wrapper_libs test_run_forwarding_parity \
-  test_compare_forwarding_runs test_forwarding_parity_gpu_labels)
+  test_compare_forwarding_runs test_forwarding_parity_gpu_labels test_check_wrapper_registration)
 # Wrapper-ON builds, after building miopen-tests (the libraries, forwarding_failure_probe,
 # and the two test hipDNN backends); no GPU needed (the reentrant-backend case skips without one):
 ctest --test-dir build --output-on-failure --no-tests=error \

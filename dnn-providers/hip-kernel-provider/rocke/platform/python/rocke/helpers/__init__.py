@@ -238,6 +238,7 @@ from .grid import (
     super_tile_swizzle_dynamic,
 )
 from .io import (
+    concat_tree,
     io_ir_type,
     load_scalar,
     load_scalar_as_f32,
@@ -245,13 +246,14 @@ from .io import (
     load_vec_as_f32,
     pack_f32_to,
     pack_quant_chunk_f32,
+    smem_load_fragment,
     store_packed_chunk,
     store_scalar,
     store_scalar_from_f32,
     store_vec,
     vector_row_copy,
 )
-from .layouts import ConvKOuterFragmentReader, LdsLayout, TransposeLdsReader
+from .layouts import LdsLayout, TransposeLdsReader
 from .loads import (
     AsyncPingPongLoader,
     AsyncTileLoader,
@@ -325,11 +327,10 @@ from .mx_scale import (
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
     MxElementFormat,
-    MxScaleSplit,
+    add_mx_scaled_dot,
     apply_mx_scale,
     decode_mx_scale_e8m0,
-    exact_mx_scale_split,
-    fma_with_mx_scale_pair,
+    largest_safe_mx_scale_code,
     load_and_decode_mx_scale_byte,
 )
 from .preshuffle import (
@@ -499,7 +500,6 @@ __all__ = [
     "super_tile_swizzle_dynamic",
     # Loads
     "LdsLayout",
-    "ConvKOuterFragmentReader",
     "TransposeLdsReader",
     "AsyncPingPongLoader",
     "AsyncTileLoader",
@@ -611,6 +611,7 @@ __all__ = [
     "pass2_row_chunks",
     "sweep_row_chunks",
     # I/O dispatch
+    "concat_tree",
     "io_ir_type",
     "load_scalar",
     "load_scalar_as_f32",
@@ -618,6 +619,7 @@ __all__ = [
     "load_vec_as_f32",
     "pack_f32_to",
     "pack_quant_chunk_f32",
+    "smem_load_fragment",
     "store_packed_chunk",
     "store_scalar",
     "store_scalar_from_f32",
@@ -681,11 +683,10 @@ __all__ = [
     "FP8_E4M3_FNUZ",
     "FP8_E4M3_OCP",
     "MxElementFormat",
-    "MxScaleSplit",
+    "add_mx_scaled_dot",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",
-    "exact_mx_scale_split",
-    "fma_with_mx_scale_pair",
+    "largest_safe_mx_scale_code",
     "load_and_decode_mx_scale_byte",
     # preshuffled-B layout
     "PreshuffleBSpec",

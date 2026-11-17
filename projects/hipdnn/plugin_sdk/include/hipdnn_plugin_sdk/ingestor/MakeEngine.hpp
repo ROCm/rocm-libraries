@@ -48,6 +48,10 @@ inline int selectorCode(UhdAdapter adapter)
         return 3;
     case UhdAdapter::CUSTOM_LIBRARY:
         return 4;
+    case UhdAdapter::LINEAR_DATA:
+        return 5;
+    case UhdAdapter::MLP_DATA:
+        return 6;
     // Required by -Wswitch-default; reached only by an adapter missing from this table.
     default:
         throw std::logic_error("UHD adapter has no selector code");
