@@ -1268,14 +1268,23 @@ validParameters = { # we need to make sure this matches develop
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     # Route the inner-loop body through the LoopModel path
     "UseLoopModel": [False, True],
+    # Pick the LoopModel parameters left at -1 -- WmmaInnerOrder, WmmaOuterOrder, WmmaFactorM/N/K,
+    # the per-operand PrefetchLocalRead, ClusterLocalRead, VgprGroup and VgprAlloc, and
+    # TDMSplitA/B -- for the fastest schedule whose GPRs fit, by Components/LoopModel/Auto.
+    # A stated value is kept.  The chosen values are written into the solution as if the config
+    # had named them, so the kernel name and the logic yaml record them and not this switch.
+    # 0 : off
+    # 1 : on (requires UseLoopModel)
+    "LoopModelAutoSelect": [0, 1],
     # Axis order of wmma loop
+    # -1: LoopModelAutoSelect picks it; 1 without it
     # 1 : KMN
     # 2 : KNM
     # 3 : MNK
     # 4 : MKN
     # 5 : NMK
     # 6 : NKM
-    "WmmaInnerOrder": [1, 2, 3, 4, 5, 6],
+    "WmmaInnerOrder": [-1, 1, 2, 3, 4, 5, 6],
     # Which logical axis is promoted outermost.
     # -1 : derive it -- 0 with no split, the split side's own axis when one side splits
     #  0 : no outer order, ordered by inner order
@@ -1345,8 +1354,9 @@ validParameters = { # we need to make sure this matches develop
     # 1: split MT (A on M, B on N)
     # 2: split DU
     # Two extra SGPRs per split operand hold the per-iteration LDS and global address increments.
-    "TDMSplitA": [0, 1, 2],
-    "TDMSplitB": [0, 1, 2],
+    # -1: LoopModelAutoSelect picks it; 0 without it
+    "TDMSplitA": [-1, 0, 1, 2],
+    "TDMSplitB": [-1, 0, 1, 2],
     # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
     # (different TDM wait groups) so every wave finishes the urgent group before any
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;

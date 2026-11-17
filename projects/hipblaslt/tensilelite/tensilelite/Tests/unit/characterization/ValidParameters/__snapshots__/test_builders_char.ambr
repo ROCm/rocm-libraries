@@ -1436,6 +1436,7 @@
     'LocalReadVectorWidthA',
     'LocalReadVectorWidthB',
     'LocalWritePerMfma',
+    'LoopModelAutoSelect',
     'MIArchVgpr',
     'MXLoadInst',
     'MXScaleFormat',
@@ -2216,6 +2217,14 @@
       'len': 3200,
       'type': 'list',
     }),
+    'LoopModelAutoSelect': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'MIArchVgpr': dict({
       'head': list([
         False,
@@ -2919,20 +2928,20 @@
     }),
     'TDMSplitA': dict({
       'head': list([
+        -1,
         0,
         1,
-        2,
       ]),
-      'len': 3,
+      'len': 4,
       'type': 'list',
     }),
     'TDMSplitB': dict({
       'head': list([
+        -1,
         0,
         1,
-        2,
       ]),
-      'len': 3,
+      'len': 4,
       'type': 'list',
     }),
     'TailloopInNll': dict({
@@ -3297,11 +3306,11 @@
     }),
     'WmmaInnerOrder': dict({
       'head': list([
+        -1,
         1,
         2,
-        3,
       ]),
-      'len': 6,
+      'len': 7,
       'type': 'list',
     }),
     'WmmaOuterOrder': dict({

@@ -381,6 +381,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       else:
         requiredParametersTemp.discard(_registerParam)
 
+    # The search writes what it picked into the solution, so the switch names nothing.
+    requiredParametersTemp.discard("LoopModelAutoSelect")
+
     # Same rule for the LoopModel knobs: UseLoopModel=False is every shipped kernel, and the
     # traversal order only exists on that path, so neither is named off it.
     if state.get("UseLoopModel", False):
