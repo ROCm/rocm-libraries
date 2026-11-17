@@ -1,438 +1,617 @@
 {
-  "probe": {
-    "name": "rocke-compiler-capabilities",
-    "implementation_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "schema_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "target_triple": "amdgcn-amd-amdhsa",
-    "processor": "gfx942",
-    "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
-  },
-  "compiler": {
-    "repository": "https://github.com/ROCm/llvm-project",
-    "executable": "clang",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "version_text": "illustrative compiler identity",
-    "source_revision": null,
-    "patched_revision": null
-  },
-  "tools": {
-    "opt": {
-      "executable": "opt",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "version_text": "illustrative tool identity"
-    }
-  },
   "capabilities": {
-    "amdgpu.ir.data_layout": {
-      "status": "known",
-      "value": {
-        "text": "e-m:e-p:64:64-p8:128:128:128:48",
-        "elf_mangling": "e",
-        "address_space_8": [
-          128,
-          128,
-          128,
-          48
-        ],
-        "additional_pointer_address_spaces": []
-      }
-    },
-    "amdgpu.ir.module_preamble": {
-      "status": "known",
-      "value": {
-        "target_triple": "amdgcn-amd-amdhsa",
-        "kernel_calling_convention": "amdgpu_kernel",
-        "module_flags": []
-      }
-    },
-    "amdgpu.ir.explicit_data_layout_policy": {
-      "status": "known",
-      "value": {
-        "candidates": [
-          {
-            "candidate": "L0",
-            "outcome": "overwritten",
-            "observed_layout": "illustrative layout"
-          },
-          {
-            "candidate": "L1",
-            "outcome": "overwritten",
-            "observed_layout": "illustrative layout"
-          },
-          {
-            "candidate": "L2",
-            "outcome": "accepted",
-            "observed_layout": "illustrative layout"
-          },
-          {
-            "candidate": "L3",
-            "outcome": "overwritten",
-            "observed_layout": "illustrative layout"
-          }
-        ]
-      }
-    },
-    "amdgpu.intrinsic.make_buffer_resource.abis": {
-      "status": "known",
-      "value": {
-        "accepted": [
-          {
-            "candidate": "p8_p1_i64",
-            "family": "make_buffer_resource",
-            "canonical_declaration": "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1.i64(ptr addrspace(1), i16, i64, i32)",
-            "canonical_intrinsic": "llvm.amdgcn.make.buffer.rsrc.p8.p1.i64",
-            "canonical_abi": "p8_p1_i64"
-          }
-        ],
-        "rejected": [
-          {
-            "candidate": "p1_i32",
-            "family": "make_buffer_resource",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "p1_i64",
-            "family": "make_buffer_resource",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "p8_p1_i32",
-            "family": "make_buffer_resource",
-            "diagnostic": "illustrative rejection"
-          }
-        ],
-        "corpus": [
-          "make_buffer_resource:p1_i32",
-          "make_buffer_resource:p1_i64",
-          "make_buffer_resource:p8_p1_i32",
-          "make_buffer_resource:p8_p1_i64"
-        ]
-      }
-    },
-    "amdgpu.intrinsic.mfma_fp8_bf8.packed_operand_type": {
-      "status": "known",
-      "value": {
-        "accepted": [
-          {
-            "candidate": "i64",
-            "family": "16x16x32_fp8_fp8",
-            "canonical_declaration": "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(i64, i64, <4 x float>, i32, i32, i32)"
-          }
-        ],
-        "rejected": [
-          {
-            "candidate": "v2i32",
-            "family": "16x16x32_fp8_fp8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "v2i32",
-            "family": "16x16x32_bf8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "i64",
-            "family": "16x16x32_bf8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "v2i32",
-            "family": "16x16x32_fp8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "i64",
-            "family": "16x16x32_fp8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "v2i32",
-            "family": "16x16x32_bf8_fp8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "i64",
-            "family": "16x16x32_bf8_fp8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "v2i32",
-            "family": "32x32x16_fp8_fp8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "i64",
-            "family": "32x32x16_fp8_fp8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "v2i32",
-            "family": "32x32x16_bf8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "i64",
-            "family": "32x32x16_bf8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "v2i32",
-            "family": "32x32x16_fp8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "i64",
-            "family": "32x32x16_fp8_bf8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "v2i32",
-            "family": "32x32x16_bf8_fp8",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "i64",
-            "family": "32x32x16_bf8_fp8",
-            "diagnostic": "illustrative rejection"
-          }
-        ],
-        "corpus": [
-          "16x16x32_fp8_fp8:v2i32",
-          "16x16x32_fp8_fp8:i64",
-          "16x16x32_bf8_bf8:v2i32",
-          "16x16x32_bf8_bf8:i64",
-          "16x16x32_fp8_bf8:v2i32",
-          "16x16x32_fp8_bf8:i64",
-          "16x16x32_bf8_fp8:v2i32",
-          "16x16x32_bf8_fp8:i64",
-          "32x32x16_fp8_fp8:v2i32",
-          "32x32x16_fp8_fp8:i64",
-          "32x32x16_bf8_bf8:v2i32",
-          "32x32x16_bf8_bf8:i64",
-          "32x32x16_fp8_bf8:v2i32",
-          "32x32x16_fp8_bf8:i64",
-          "32x32x16_bf8_fp8:v2i32",
-          "32x32x16_bf8_fp8:i64"
-        ]
-      }
-    },
-    "amdgpu.intrinsic.named_barrier.pointer_address_space": {
-      "status": "known",
-      "value": {
-        "accepted": [
-          {
-            "candidate": "as3",
-            "family": "s.barrier.init",
-            "canonical_declaration": "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(3), i32)"
-          }
-        ],
-        "rejected": [
-          {
-            "candidate": "as15",
-            "family": "s.barrier.init",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "as3",
-            "family": "s.barrier.signal.var",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "as15",
-            "family": "s.barrier.signal.var",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "as3",
-            "family": "s.barrier.join",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "as15",
-            "family": "s.barrier.join",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "as3",
-            "family": "s.wakeup.barrier",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "as15",
-            "family": "s.wakeup.barrier",
-            "diagnostic": "illustrative rejection"
-          }
-        ],
-        "corpus": [
-          "s.barrier.init:as3",
-          "s.barrier.init:as15",
-          "s.barrier.signal.var:as3",
-          "s.barrier.signal.var:as15",
-          "s.barrier.join:as3",
-          "s.barrier.join:as15",
-          "s.wakeup.barrier:as3",
-          "s.wakeup.barrier:as15"
-        ]
-      }
-    },
-    "amdgpu.intrinsic.mfma_f8f6f4.call_abi": {
-      "status": "known",
-      "value": {
-        "accepted": [
-          {
-            "candidate": "current_9",
-            "family": "16x16x128",
-            "canonical_declaration": "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x i32>, <4 x float>, i32, i32, i32, i32, i32, i32)"
-          }
-        ],
-        "rejected": [
-          {
-            "candidate": "legacy_11",
-            "family": "16x16x128",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "current_9",
-            "family": "32x32x64",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "legacy_11",
-            "family": "32x32x64",
-            "diagnostic": "illustrative rejection"
-          }
-        ],
-        "corpus": [
-          "16x16x128:current_9",
-          "16x16x128:legacy_11",
-          "32x32x64:current_9",
-          "32x32x64:legacy_11"
-        ]
-      }
-    },
-    "amdgpu.frontend.builtin.mfma_fp16.source_abi": {
-      "status": "known",
-      "value": {
-        "observations": [
-          {
-            "candidate": "canonical_prototype",
-            "family": "__builtin_amdgcn_mfma_f32_32x32x8f16",
-            "stage": "frontend",
-            "outcome": "accepted",
-            "evidence": {
-              "prototype": "illustrative builtin prototype"
-            }
-          }
-        ]
-      }
-    },
-    "amdgpu.compiler.accepts_processor_name": {
+    "amdgpu.comgr.accepts_processor_name": {
       "status": "known",
       "value": {
         "observations": [
           {
             "candidate": "requested",
-            "family": "gfx942",
-            "stage": "frontend",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "gfx950",
             "outcome": "accepted"
           },
           {
             "candidate": "generic",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "e4c09bbe6e0e436813e0281d5b7ad63adb612f37eb963717f7527ca084b752fa",
+              "hsaco_size": 3808
+            },
             "family": "gfx9-4-generic",
-            "stage": "frontend",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
-          }
-        ]
-      }
-    },
-    "amdgpu.pipeline.optimization_level_codegen": {
-      "status": "known",
-      "value": {
-        "observations": [
-          {
-            "candidate": "O0",
-            "family": "uniform_half_extract",
-            "stage": "codegen",
             "outcome": "accepted"
-          },
-          {
-            "candidate": "O1",
-            "family": "uniform_half_extract",
-            "stage": "codegen",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "O2",
-            "family": "uniform_half_extract",
-            "stage": "codegen",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
-          },
-          {
-            "candidate": "O3",
-            "family": "uniform_half_extract",
-            "stage": "codegen",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
           }
-        ]
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
       }
     },
-    "amdgpu.compiler_option.known_controls": {
+    "amdgpu.comgr.compiler_option.known_controls": {
       "status": "known",
       "value": {
         "observations": [
           {
             "candidate": "slp_off",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
             "family": "backend_option",
-            "stage": "option_parser",
             "outcome": "accepted"
           },
           {
             "candidate": "mfma_vgpr_form",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
             "family": "backend_option",
-            "stage": "option_parser",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
+            "outcome": "accepted"
           },
           {
             "candidate": "iterative_ilp_scheduler",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
             "family": "backend_option",
-            "stage": "option_parser",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
+            "outcome": "accepted"
           }
-        ]
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
       }
     },
-    "amdgpu.function_attribute.known_controls": {
+    "amdgpu.comgr.explicit_data_layout": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "L0",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "module",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "L1",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "module",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "L2",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "module",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "L3",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "module",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.function_attribute.known_controls": {
       "status": "known",
       "value": {
         "observations": [
           {
             "candidate": "waves_per_eu_1",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
             "family": "function_attribute",
-            "stage": "codegen",
             "outcome": "accepted"
           },
           {
             "candidate": "waves_per_eu_2",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
             "family": "function_attribute",
-            "stage": "codegen",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
+            "outcome": "accepted"
           },
           {
             "candidate": "zero_agpr",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
             "family": "function_attribute",
-            "stage": "codegen",
-            "outcome": "rejected",
-            "diagnostic": "illustrative rejection"
+            "outcome": "accepted"
           }
-        ]
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.make_buffer_resource.abis": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "p1_i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "make_buffer_resource",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "p1_i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "make_buffer_resource",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "p8_p1_i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "make_buffer_resource",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "p8_p1_i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "make_buffer_resource",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "current_9",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "16x16x128",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "legacy_11",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "16x16x128",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "current_9",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "32x32x64",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "legacy_11",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "32x32x64",
+            "outcome": "rejected"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "16x16x32_fp8_fp8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "16x16x32_fp8_fp8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "16x16x32_bf8_bf8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "16x16x32_bf8_bf8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "16x16x32_fp8_bf8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "16x16x32_fp8_bf8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "16x16x32_bf8_fp8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "16x16x32_bf8_fp8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "32x32x16_fp8_fp8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "32x32x16_fp8_fp8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "32x32x16_bf8_bf8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "32x32x16_bf8_bf8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "32x32x16_fp8_bf8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "32x32x16_fp8_bf8",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "v2i32",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "32x32x16_bf8_fp8",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "i64",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
+              "hsaco_size": 3808
+            },
+            "family": "32x32x16_bf8_fp8",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "as3",
+            "diagnostic": "COMGR probe worker crashed: COMGR probe worker exited with status -11",
+            "family": "s.barrier.init",
+            "outcome": "crash"
+          },
+          {
+            "candidate": "as15",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "s.barrier.init",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "as3",
+            "diagnostic": "COMGR probe worker crashed: COMGR probe worker exited with status -11",
+            "family": "s.barrier.signal.var",
+            "outcome": "crash"
+          },
+          {
+            "candidate": "as15",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "s.barrier.signal.var",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "as3",
+            "diagnostic": "COMGR probe worker crashed: COMGR probe worker exited with status -11",
+            "family": "s.barrier.join",
+            "outcome": "crash"
+          },
+          {
+            "candidate": "as15",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "s.barrier.join",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "as3",
+            "diagnostic": "COMGR probe worker crashed: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.s.wakeup.barrier",
+            "family": "s.wakeup.barrier",
+            "outcome": "crash"
+          },
+          {
+            "candidate": "as15",
+            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
+            "failed_stage": "compile_source_to_bc",
+            "family": "s.wakeup.barrier",
+            "outcome": "rejected"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
+      }
+    },
+    "amdgpu.comgr.optimization_level_codegen": {
+      "status": "known",
+      "value": {
+        "observations": [
+          {
+            "candidate": "O0",
+            "diagnostic": "do_action(CODEGEN_BC_TO_RELOCATABLE): status=1 (ERROR)",
+            "failed_stage": "codegen_bc_to_relocatable",
+            "family": "uniform_half_extract",
+            "outcome": "rejected"
+          },
+          {
+            "candidate": "O1",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "1f3614ed19a14a1db5896155bc918dc0cb7bdab3433442f74d38c0b5a4c8260c",
+              "hsaco_size": 3808
+            },
+            "family": "uniform_half_extract",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "O2",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "1f3614ed19a14a1db5896155bc918dc0cb7bdab3433442f74d38c0b5a4c8260c",
+              "hsaco_size": 3808
+            },
+            "family": "uniform_half_extract",
+            "outcome": "accepted"
+          },
+          {
+            "candidate": "O3",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "1f3614ed19a14a1db5896155bc918dc0cb7bdab3433442f74d38c0b5a4c8260c",
+              "hsaco_size": 3808
+            },
+            "family": "uniform_half_extract",
+            "outcome": "accepted"
+          }
+        ],
+        "route": "comgr_llvm_ir_to_hsaco"
       }
     }
+  },
+  "compiler": {
+    "library": "libamd_comgr.so.3",
+    "llvm_version": [
+      23,
+      0,
+      0
+    ],
+    "query_library": null,
+    "route": "comgr",
+    "sha256": "ff98e63e6b8677eb51376816f3e1169e377ac446e7bf4c5d247683a72f2f59eb",
+    "version_source": "LLVMGetVersion"
+  },
+  "probe": {
+    "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "implementation_sha256": "183fc94ebdca5fc4531abe09a3860ecb7bc5d852230ae1506322812470aa3b92",
+    "name": "rocke-comgr-capabilities",
+    "processor": "gfx950",
+    "schema_sha256": "0f6bd45340c8cc936f83bedbb4290e1cac75338a7fe255270e8e69fe649127d2",
+    "target_triple": "amdgcn-amd-amdhsa"
   }
 }

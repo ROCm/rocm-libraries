@@ -1,1 +1,1 @@
-"""Standalone compiler-capability probe used by the rocKE research demo."""
+"""Standalone evidence probes for rocKE's production COMGR compiler route."""

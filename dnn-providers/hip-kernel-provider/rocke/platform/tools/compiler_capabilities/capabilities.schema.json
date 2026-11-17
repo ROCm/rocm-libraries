@@ -1,44 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rocm.docs.amd.com/schemas/rocke/compiler-capabilities.schema.json",
-  "title": "rocKE compiler structural capability report",
+  "$id": "https://rocm.docs.amd.com/schemas/rocke/comgr-capabilities.schema.json",
+  "title": "rocKE COMGR capability report",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "probe",
-    "compiler",
-    "tools",
-    "capabilities"
-  ],
+  "required": ["probe", "compiler", "capabilities"],
   "properties": {
-    "probe": {
-      "$ref": "#/$defs/probe"
-    },
-    "compiler": {
-      "$ref": "#/$defs/compiler"
-    },
-    "tools": {
-      "$ref": "#/$defs/tools"
-    },
+    "probe": {"$ref": "#/$defs/probe"},
+    "compiler": {"$ref": "#/$defs/compiler"},
     "capabilities": {
-      "$ref": "#/$defs/capabilities"
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/capability"}
     }
   },
   "$defs": {
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
-    },
-    "revision": {
-      "oneOf": [
-        {
-          "type": "string",
-          "pattern": "^[0-9a-f]{40}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
     },
     "probe": {
       "type": "object",
@@ -52,676 +31,126 @@
         "fingerprint"
       ],
       "properties": {
-        "name": {
-          "const": "rocke-compiler-capabilities"
-        },
-        "implementation_sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "schema_sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "target_triple": {
-          "const": "amdgcn-amd-amdhsa"
-        },
+        "name": {"const": "rocke-comgr-capabilities"},
+        "implementation_sha256": {"$ref": "#/$defs/sha256"},
+        "schema_sha256": {"$ref": "#/$defs/sha256"},
+        "target_triple": {"const": "amdgcn-amd-amdhsa"},
         "processor": {
           "type": "string",
           "pattern": "^gfx[0-9a-z-]+$"
         },
-        "fingerprint": {
-          "$ref": "#/$defs/sha256"
-        }
+        "fingerprint": {"$ref": "#/$defs/sha256"}
       }
+    },
+    "nullablePath": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
     },
     "compiler": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "repository",
-        "executable",
-        "sha256",
-        "version_text",
-        "source_revision",
-        "patched_revision"
+        "route",
+        "llvm_version",
+        "version_source",
+        "query_library",
+        "library",
+        "sha256"
       ],
       "properties": {
-        "repository": {
-          "oneOf": [
-            {
-              "type": "string",
-              "format": "uri"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "executable": {
-          "type": "string",
-          "minLength": 1
-        },
-        "sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "version_text": {
-          "type": "string",
-          "minLength": 1
-        },
-        "source_revision": {
-          "$ref": "#/$defs/revision"
-        },
-        "patched_revision": {
-          "$ref": "#/$defs/revision"
-        }
-      }
-    },
-    "tool": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "executable",
-        "sha256",
-        "version_text"
-      ],
-      "properties": {
-        "executable": {
-          "type": "string",
-          "minLength": 1
-        },
-        "sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "version_text": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "tools": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "opt"
-      ],
-      "properties": {
-        "opt": {
-          "$ref": "#/$defs/tool"
-        }
-      }
-    },
-    "errorResult": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "status",
-        "diagnostic"
-      ],
-      "properties": {
-        "status": {
-          "const": "error"
-        },
-        "diagnostic": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "dataLayoutValue": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "text",
-        "elf_mangling",
-        "address_space_8",
-        "additional_pointer_address_spaces"
-      ],
-      "properties": {
-        "text": {
-          "type": "string",
-          "minLength": 1
-        },
-        "elf_mangling": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "address_space_8": {
+        "route": {"const": "comgr"},
+        "llvm_version": {
           "oneOf": [
             {
               "type": "array",
-              "minItems": 2,
-              "items": {
-                "type": "integer",
-                "minimum": 1
-              }
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {"type": "integer", "minimum": 0}
             },
-            {
-              "type": "null"
-            }
+            {"type": "null"}
           ]
         },
-        "additional_pointer_address_spaces": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "type": "integer",
-            "minimum": 10
-          }
-        }
+        "version_source": {"type": "string", "minLength": 1},
+        "query_library": {"$ref": "#/$defs/nullablePath"},
+        "library": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
       }
     },
-    "dataLayoutResult": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/errorResult"
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "status",
-            "value"
-          ],
-          "properties": {
-            "status": {
-              "const": "known"
-            },
-            "value": {
-              "$ref": "#/$defs/dataLayoutValue"
-            }
-          }
-        }
-      ]
-    },
-    "preambleResult": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/errorResult"
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "status",
-            "value"
-          ],
-          "properties": {
-            "status": {
-              "const": "known"
-            },
-            "value": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "target_triple",
-                "kernel_calling_convention",
-                "module_flags"
-              ],
-              "properties": {
-                "target_triple": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "kernel_calling_convention": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "module_flags": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "layoutPolicyResult": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/errorResult"
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "status",
-            "value"
-          ],
-          "properties": {
-            "status": {
-              "const": "known"
-            },
-            "value": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "candidates"
-              ],
-              "properties": {
-                "candidates": {
-                  "type": "array",
-                  "minItems": 4,
-                  "maxItems": 4,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "candidate",
-                      "outcome"
-                    ],
-                    "properties": {
-                      "candidate": {
-                        "enum": [
-                          "L0",
-                          "L1",
-                          "L2",
-                          "L3"
-                        ]
-                      },
-                      "outcome": {
-                        "enum": [
-                          "accepted",
-                          "overwritten",
-                          "rejected"
-                        ]
-                      },
-                      "observed_layout": {
-                        "type": "string"
-                      },
-                      "diagnostic": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "acceptedCandidate": {
+    "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "candidate",
-        "family",
-        "canonical_declaration"
-      ],
+      "required": ["hsaco_sha256", "hsaco_size", "completed_stages"],
       "properties": {
-        "candidate": {
-          "type": "string",
-          "minLength": 1
-        },
-        "family": {
-          "type": "string",
-          "minLength": 1
-        },
-        "canonical_declaration": {
-          "type": "string",
-          "minLength": 1
-        },
-        "canonical_intrinsic": {
-          "type": "string",
-          "minLength": 1
-        },
-        "canonical_abi": {
-          "enum": [
-            "p1_i32",
-            "p1_i64",
-            "p8_p1_i32",
-            "p8_p1_i64"
+        "hsaco_sha256": {"$ref": "#/$defs/sha256"},
+        "hsaco_size": {"type": "integer", "minimum": 1},
+        "completed_stages": {
+          "const": [
+            "compile_source_to_bc",
+            "codegen_bc_to_relocatable",
+            "link_relocatable_to_executable"
           ]
         }
       }
-    },
-    "rejectedCandidate": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "candidate",
-        "family",
-        "diagnostic"
-      ],
-      "properties": {
-        "candidate": {
-          "type": "string",
-          "minLength": 1
-        },
-        "family": {
-          "type": "string",
-          "minLength": 1
-        },
-        "diagnostic": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "candidateSetResult": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/errorResult"
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "status",
-            "value"
-          ],
-          "properties": {
-            "status": {
-              "const": "known"
-            },
-            "value": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "corpus",
-                "accepted",
-                "rejected"
-              ],
-              "properties": {
-                "corpus": {
-                  "type": "array",
-                  "minItems": 1,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "accepted": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/acceptedCandidate"
-                  }
-                },
-                "rejected": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/rejectedCandidate"
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
     },
     "observation": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "candidate",
-        "family",
-        "stage",
-        "outcome"
-      ],
-      "properties": {
-        "candidate": {
-          "type": "string",
-          "minLength": 1
-        },
-        "family": {
-          "type": "string",
-          "minLength": 1
-        },
-        "stage": {
-          "enum": [
-            "frontend",
-            "option_parser",
-            "parser",
-            "optimizer",
-            "codegen",
-            "link",
-            "assembler",
-            "code_object"
-          ]
-        },
-        "outcome": {
-          "enum": [
-            "accepted",
-            "rejected",
-            "crash",
-            "timeout"
-          ]
-        },
-        "diagnostic": {
-          "type": "string",
-          "minLength": 1
-        },
-        "evidence": {
-          "type": "object",
-          "additionalProperties": {
-            "type": [
-              "string",
-              "integer",
-              "number",
-              "boolean"
-            ]
-          }
-        }
-      }
-    },
-    "observationsResult": {
       "oneOf": [
         {
-          "$ref": "#/$defs/errorResult"
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["family", "candidate", "outcome", "evidence"],
+          "properties": {
+            "family": {"type": "string", "minLength": 1},
+            "candidate": {"type": "string", "minLength": 1},
+            "outcome": {"const": "accepted"},
+            "evidence": {"$ref": "#/$defs/evidence"}
+          }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "status",
-            "value"
-          ],
+          "required": ["family", "candidate", "outcome", "diagnostic"],
           "properties": {
-            "status": {
-              "const": "known"
+            "family": {"type": "string", "minLength": 1},
+            "candidate": {"type": "string", "minLength": 1},
+            "outcome": {
+              "enum": ["rejected", "crash", "timeout", "error"]
             },
-            "value": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "observations"
-              ],
-              "properties": {
-                "observations": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/observation"
-                  }
-                }
-              }
+            "diagnostic": {"type": "string", "minLength": 1},
+            "failed_stage": {
+              "enum": [
+                "setup",
+                "set_isa",
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ]
             }
           }
         }
       ]
     },
-    "capabilities": {
+    "capability": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "amdgpu.ir.data_layout",
-        "amdgpu.ir.module_preamble",
-        "amdgpu.ir.explicit_data_layout_policy",
-        "amdgpu.intrinsic.make_buffer_resource.abis",
-        "amdgpu.intrinsic.mfma_fp8_bf8.packed_operand_type",
-        "amdgpu.intrinsic.named_barrier.pointer_address_space",
-        "amdgpu.intrinsic.mfma_f8f6f4.call_abi",
-        "amdgpu.frontend.builtin.mfma_fp16.source_abi",
-        "amdgpu.compiler.accepts_processor_name",
-        "amdgpu.pipeline.optimization_level_codegen",
-        "amdgpu.compiler_option.known_controls",
-        "amdgpu.function_attribute.known_controls"
-      ],
+      "required": ["status", "value"],
       "properties": {
-        "amdgpu.ir.data_layout": {
-          "$ref": "#/$defs/dataLayoutResult"
-        },
-        "amdgpu.ir.module_preamble": {
-          "$ref": "#/$defs/preambleResult"
-        },
-        "amdgpu.ir.explicit_data_layout_policy": {
-          "$ref": "#/$defs/layoutPolicyResult"
-        },
-        "amdgpu.intrinsic.make_buffer_resource.abis": {
-          "$ref": "#/$defs/bufferResourceResult"
-        },
-        "amdgpu.intrinsic.mfma_fp8_bf8.packed_operand_type": {
-          "$ref": "#/$defs/fp8PackingResult"
-        },
-        "amdgpu.intrinsic.named_barrier.pointer_address_space": {
-          "$ref": "#/$defs/namedBarrierResult"
-        },
-        "amdgpu.intrinsic.mfma_f8f6f4.call_abi": {
-          "$ref": "#/$defs/scaledMfmaResult"
-        },
-        "amdgpu.frontend.builtin.mfma_fp16.source_abi": {
-          "$ref": "#/$defs/observationsResult"
-        },
-        "amdgpu.compiler.accepts_processor_name": {
-          "$ref": "#/$defs/observationsResult"
-        },
-        "amdgpu.pipeline.optimization_level_codegen": {
-          "$ref": "#/$defs/observationsResult"
-        },
-        "amdgpu.compiler_option.known_controls": {
-          "$ref": "#/$defs/observationsResult"
-        },
-        "amdgpu.function_attribute.known_controls": {
-          "$ref": "#/$defs/observationsResult"
+        "status": {"const": "known"},
+        "value": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["route", "observations"],
+          "properties": {
+            "route": {"const": "comgr_llvm_ir_to_hsaco"},
+            "observations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"$ref": "#/$defs/observation"}
+            }
+          }
         }
       }
-    },
-    "bufferResourceResult": {
-      "allOf": [
-        {
-          "$ref": "#/$defs/candidateSetResult"
-        },
-        {
-          "properties": {
-            "value": {
-              "properties": {
-                "corpus": {
-                  "const": [
-                    "make_buffer_resource:p1_i32",
-                    "make_buffer_resource:p1_i64",
-                    "make_buffer_resource:p8_p1_i32",
-                    "make_buffer_resource:p8_p1_i64"
-                  ]
-                },
-                "accepted": {
-                  "items": {
-                    "allOf": [
-                      {
-                        "$ref": "#/$defs/acceptedCandidate"
-                      },
-                      {
-                        "required": [
-                          "canonical_intrinsic",
-                          "canonical_abi"
-                        ]
-                      }
-                    ]
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "fp8PackingResult": {
-      "allOf": [
-        {
-          "$ref": "#/$defs/candidateSetResult"
-        },
-        {
-          "properties": {
-            "value": {
-              "properties": {
-                "corpus": {
-                  "const": [
-                    "16x16x32_fp8_fp8:v2i32",
-                    "16x16x32_fp8_fp8:i64",
-                    "16x16x32_bf8_bf8:v2i32",
-                    "16x16x32_bf8_bf8:i64",
-                    "16x16x32_fp8_bf8:v2i32",
-                    "16x16x32_fp8_bf8:i64",
-                    "16x16x32_bf8_fp8:v2i32",
-                    "16x16x32_bf8_fp8:i64",
-                    "32x32x16_fp8_fp8:v2i32",
-                    "32x32x16_fp8_fp8:i64",
-                    "32x32x16_bf8_bf8:v2i32",
-                    "32x32x16_bf8_bf8:i64",
-                    "32x32x16_fp8_bf8:v2i32",
-                    "32x32x16_fp8_bf8:i64",
-                    "32x32x16_bf8_fp8:v2i32",
-                    "32x32x16_bf8_fp8:i64"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "namedBarrierResult": {
-      "allOf": [
-        {
-          "$ref": "#/$defs/candidateSetResult"
-        },
-        {
-          "properties": {
-            "value": {
-              "properties": {
-                "corpus": {
-                  "const": [
-                    "s.barrier.init:as3",
-                    "s.barrier.init:as15",
-                    "s.barrier.signal.var:as3",
-                    "s.barrier.signal.var:as15",
-                    "s.barrier.join:as3",
-                    "s.barrier.join:as15",
-                    "s.wakeup.barrier:as3",
-                    "s.wakeup.barrier:as15"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "scaledMfmaResult": {
-      "allOf": [
-        {
-          "$ref": "#/$defs/candidateSetResult"
-        },
-        {
-          "properties": {
-            "value": {
-              "properties": {
-                "corpus": {
-                  "const": [
-                    "16x16x128:current_9",
-                    "16x16x128:legacy_11",
-                    "32x32x64:current_9",
-                    "32x32x64:legacy_11"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      ]
     }
   }
 }

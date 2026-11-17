@@ -932,21 +932,27 @@ def _build_hsaco(
     *,
     isa: str,
     options: Optional[List[str]],
+    validate_profile: bool = True,
 ) -> Tuple[bytes, ComgrTimings]:
-    """The one comgr pipeline behind both public entry points.
+    """The one COMGR pipeline behind the public entry points and probe worker.
 
     A single module takes exactly the historical path (one SOURCE named
     ``kernel.ll``, no link stage), so single-kernel objects are unchanged.
+    ``validate_profile=False`` is private to the isolated capability worker:
+    that worker measures candidate contracts and must not let the legacy
+    major-derived profile prejudge them.
     """
     options = list(options or ["-O3"])
     linking = len(ir_texts) > 1
 
-    # Query the loaded compiler before submitting IR: a known p8-generation
-    # mismatch can abort inside codegen. The guard reports version provenance
-    # and raises a catchable error instead.
+    # Query the loaded compiler before submitting normal IR: a known
+    # p8-generation mismatch can abort inside codegen. Capability candidates
+    # deliberately bypass this legacy guard, but only in their disposable
+    # subprocess.
     _resolve_lib()
-    for ir_text in ir_texts:
-        _assert_ir_flavor_matches_lib(ir_text)
+    if validate_profile:
+        for ir_text in ir_texts:
+            _assert_ir_flavor_matches_lib(ir_text)
 
     # Handles are created lazily below; declare them up front so the
     # ``finally`` block can release whatever was successfully created even

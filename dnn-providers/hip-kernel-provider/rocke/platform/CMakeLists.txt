@@ -546,6 +546,16 @@ if(ROCKE_INSTALL_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
 
+    # Test-only compiler-capability package. Keep it under tests/tools so
+    # TheRock's existing test artifact captures it; it is research tooling,
+    # not production wheel content. The tests resolve this colocated copy when
+    # the source platform/tools tree is absent.
+    install(DIRECTORY
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/compiler_capabilities"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools"
+            PATTERN "__pycache__" EXCLUDE
+            PATTERN "*.pyc" EXCLUDE)
+
     # Test-only copy of the compiler-option measurement tool for the installed
     # reproduction gate below; the table it checks is package data.
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_compiler_options.py"

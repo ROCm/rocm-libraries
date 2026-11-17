@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Probe structural AMD LLVM capabilities and write ``capabilities.json``.
+"""Probe the COMGR compiler contract that consumes rocKE's production LLVM IR.
 
-The report compares focused module-policy and intrinsic-ABI observations across
-compiler snapshots. It remains an evidence producer: rocKE lowering does not
-consume this report.
+Every observation traverses COMGR's LLVM-IR-to-HSACO pipeline in a disposable
+process. Clang and opt are intentionally absent: their behavior does not decide
+whether rocKE's production compiler accepts an emitted module.
 """
 
 from __future__ import annotations
@@ -13,13 +13,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+_PLATFORM = Path(__file__).resolve().parents[2]
+_PYTHON = _PLATFORM / "python"
+if _PYTHON.is_dir() and str(_PYTHON) not in sys.path:
+    sys.path.insert(0, str(_PYTHON))
 
 if __package__:
     from . import _probe_support as support
@@ -28,17 +33,15 @@ else:
     from compiler_capabilities import _probe_support as support
 
 _TARGET_TRIPLE = "amdgcn-amd-amdhsa"
-_CAPABILITY_PREAMBLE = "amdgpu.ir.module_preamble"
-_CAPABILITY_LAYOUT_POLICY = "amdgpu.ir.explicit_data_layout_policy"
-_CAPABILITY_BUFFER_RESOURCE = "amdgpu.intrinsic.make_buffer_resource.abis"
-_CAPABILITY_FP8_PACKING = "amdgpu.intrinsic.mfma_fp8_bf8.packed_operand_type"
-_CAPABILITY_NAMED_BARRIER = "amdgpu.intrinsic.named_barrier.pointer_address_space"
-_CAPABILITY_SCALED_MFMA = "amdgpu.intrinsic.mfma_f8f6f4.call_abi"
-_CAPABILITY_FRONTEND_FP16 = "amdgpu.frontend.builtin.mfma_fp16.source_abi"
-_CAPABILITY_PROCESSOR_NAMES = "amdgpu.compiler.accepts_processor_name"
-_CAPABILITY_OPT_LEVELS = "amdgpu.pipeline.optimization_level_codegen"
-_CAPABILITY_COMPILER_OPTIONS = "amdgpu.compiler_option.known_controls"
-_CAPABILITY_FUNCTION_ATTRIBUTES = "amdgpu.function_attribute.known_controls"
+_CAPABILITY_LAYOUT = "amdgpu.comgr.explicit_data_layout"
+_CAPABILITY_BUFFER_RESOURCE = "amdgpu.comgr.intrinsic.make_buffer_resource.abis"
+_CAPABILITY_FP8_PACKING = "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type"
+_CAPABILITY_NAMED_BARRIER = "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space"
+_CAPABILITY_SCALED_MFMA = "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi"
+_CAPABILITY_PROCESSOR_NAMES = "amdgpu.comgr.accepts_processor_name"
+_CAPABILITY_OPT_LEVELS = "amdgpu.comgr.optimization_level_codegen"
+_CAPABILITY_COMPILER_OPTIONS = "amdgpu.comgr.compiler_option.known_controls"
+_CAPABILITY_FUNCTION_ATTRIBUTES = "amdgpu.comgr.function_attribute.known_controls"
 
 _LAYOUT_CANDIDATES = {
     "L0": (
@@ -68,10 +71,24 @@ _LAYOUT_CANDIDATES = {
     ),
 }
 
+# LLVM generic processor names are not derivable from the concrete gfx digits.
+# Keep only names whose spelling is part of rocKE's target catalog/history.
+_GENERIC_PROCESSORS = {
+    "gfx906": "gfx9-generic",
+    "gfx908": "gfx9-generic",
+    "gfx90a": "gfx9-generic",
+    "gfx942": "gfx9-4-generic",
+    "gfx950": "gfx9-4-generic",
+    "gfx1100": "gfx11-generic",
+    "gfx1151": "gfx11-generic",
+    "gfx1201": "gfx12-generic",
+    "gfx1250": "gfx12-generic",
+}
+
 
 @dataclass(frozen=True)
 class _IntrinsicCandidate:
-    """One exact intrinsic declaration and call submitted to ``opt``."""
+    """One exact intrinsic declaration and call submitted to COMGR."""
 
     candidate: str
     family: str
@@ -80,206 +97,23 @@ class _IntrinsicCandidate:
     declaration_args: tuple[str, ...]
     call_args: tuple[tuple[str, str], ...]
 
-    def module(self) -> str:
-        """Return a minimal module that verifies the candidate call shape."""
+    def module(self, *, layout: str | None = None) -> str:
         arguments = ", ".join(f"{ty} {value}" for ty, value in self.call_args)
         declaration = ", ".join(self.declaration_args)
         call = f"call {self.result_type} @{self.intrinsic}({arguments})"
         if self.result_type != "void":
             call = "%result = " + call
+        preamble = f'target triple = "{_TARGET_TRIPLE}"\n'
+        if layout is not None:
+            preamble = f'target datalayout = "{layout}"\n' + preamble
         return (
-            f'target triple = "{_TARGET_TRIPLE}"\n'
-            "define amdgpu_kernel void @probe() {\n"
-            f"  {call}\n"
-            "  ret void\n"
-            "}\n"
-            f"declare {self.result_type} @{self.intrinsic}({declaration})\n"
+            preamble
+            + "define amdgpu_kernel void @probe() {\n"
+            + f"  {call}\n"
+            + "  ret void\n"
+            + "}\n"
+            + f"declare {self.result_type} @{self.intrinsic}({declaration})\n"
         )
-
-
-def _canonical_declaration(text: str, intrinsic_stem: str) -> str | None:
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped.startswith("declare ") or f"@{intrinsic_stem}" not in stripped:
-            continue
-        previous = lines[index - 1].strip() if index else ""
-        if previous == "; Unknown intrinsic" or re.search(r" #\d+$", stripped) is None:
-            return None
-        return re.sub(r" #\d+$", "", stripped)
-    return None
-
-
-def _probe_intrinsic_candidates(
-    opt: Path,
-    candidates: tuple[_IntrinsicCandidate, ...],
-    run: support._RunCommand,
-) -> dict[str, object]:
-    accepted: list[dict[str, str]] = []
-    rejected: list[dict[str, str]] = []
-    corpus = [f"{candidate.family}:{candidate.candidate}" for candidate in candidates]
-    for candidate in candidates:
-        result = run([str(opt), "-S", "-", "-o", "-"], candidate.module())
-        if result.timed_out:
-            return {
-                "status": "error",
-                "diagnostic": f"{candidate.candidate}: {support._first_diagnostic(result)}",
-            }
-        if support._process_crashed(result):
-            return {
-                "status": "error",
-                "diagnostic": f"{candidate.candidate}: compiler process crashed",
-            }
-        if result.returncode != 0:
-            rejected.append(
-                {
-                    "candidate": candidate.candidate,
-                    "family": candidate.family,
-                    "diagnostic": support._first_diagnostic(result),
-                }
-            )
-            continue
-        intrinsic_stem = candidate.intrinsic
-        if intrinsic_stem.startswith("llvm.amdgcn.make.buffer.rsrc."):
-            intrinsic_stem = "llvm.amdgcn.make.buffer.rsrc."
-        declaration = _canonical_declaration(result.stdout, intrinsic_stem)
-        if declaration is None:
-            rejected.append(
-                {
-                    "candidate": candidate.candidate,
-                    "family": candidate.family,
-                    "diagnostic": "opt did not resolve the declaration as an intrinsic",
-                }
-            )
-            continue
-        accepted.append(
-            {
-                "candidate": candidate.candidate,
-                "family": candidate.family,
-                "canonical_declaration": declaration,
-            }
-        )
-    return {
-        "status": "known",
-        "value": {"corpus": corpus, "accepted": accepted, "rejected": rejected},
-    }
-
-
-def _probe_module_preamble(
-    clang: Path, processor: str, run: support._RunCommand
-) -> dict[str, object]:
-    result = run(
-        [
-            str(clang),
-            "-target",
-            _TARGET_TRIPLE,
-            f"-mcpu={processor}",
-            "-nogpulib",
-            "-S",
-            "-emit-llvm",
-            "-x",
-            "c",
-            "-",
-            "-o",
-            "-",
-        ],
-        "__attribute__((amdgpu_kernel)) void probe(void) {}\n",
-    )
-    if result.returncode != 0:
-        return {"status": "error", "diagnostic": support._first_diagnostic(result)}
-    triple = re.search(r'^target triple = "([^"]+)"$', result.stdout, re.MULTILINE)
-    calling_convention = re.search(
-        r"^define\b.*\b(amdgpu_kernel)\b.*@probe\(", result.stdout, re.MULTILINE
-    )
-    if triple is None or calling_convention is None:
-        return {
-            "status": "error",
-            "diagnostic": "compiler output omitted the target triple or kernel calling convention",
-        }
-    metadata = {
-        match.group(1): match.group(2)
-        for line in result.stdout.splitlines()
-        if (match := re.match(r"^!(\d+) = (.+)$", line))
-    }
-    root = next(
-        (
-            line
-            for line in result.stdout.splitlines()
-            if line.startswith("!llvm.module.flags =")
-        ),
-        "",
-    )
-    flags = [
-        metadata[index] for index in re.findall(r"!(\d+)", root) if index in metadata
-    ]
-    return {
-        "status": "known",
-        "value": {
-            "target_triple": triple.group(1),
-            "kernel_calling_convention": calling_convention.group(1),
-            "module_flags": flags,
-        },
-    }
-
-
-def _probe_layout_policy(
-    clang: Path, processor: str, run: support._RunCommand
-) -> dict[str, object]:
-    observations: list[dict[str, object]] = []
-    for name, layout in _LAYOUT_CANDIDATES.items():
-        module = (
-            f'target datalayout = "{layout}"\n'
-            f'target triple = "{_TARGET_TRIPLE}"\n'
-            "define amdgpu_kernel void @probe() { ret void }\n"
-        )
-        result = run(
-            [
-                str(clang),
-                "-target",
-                _TARGET_TRIPLE,
-                f"-mcpu={processor}",
-                "-nogpulib",
-                "-S",
-                "-emit-llvm",
-                "-x",
-                "ir",
-                "-",
-                "-o",
-                "-",
-            ],
-            module,
-        )
-        if result.timed_out:
-            return {
-                "status": "error",
-                "diagnostic": f"{name}: {support._first_diagnostic(result)}",
-            }
-        if support._process_crashed(result):
-            return {
-                "status": "error",
-                "diagnostic": f"{name}: compiler process crashed",
-            }
-        if result.returncode != 0:
-            observations.append(
-                {
-                    "candidate": name,
-                    "outcome": "rejected",
-                    "diagnostic": support._first_diagnostic(result),
-                }
-            )
-            continue
-        try:
-            observed = support._data_layout_value(result.stdout)["text"]
-        except support.ProbeError as exc:
-            return {"status": "error", "diagnostic": f"{name}: {exc}"}
-        observations.append(
-            {
-                "candidate": name,
-                "outcome": "accepted" if observed == layout else "overwritten",
-                "observed_layout": observed,
-            }
-        )
-    return {"status": "known", "value": {"candidates": observations}}
 
 
 def _buffer_resource_candidates() -> tuple[_IntrinsicCandidate, ...]:
@@ -305,30 +139,6 @@ def _buffer_resource_candidates() -> tuple[_IntrinsicCandidate, ...]:
                 )
             )
     return tuple(result)
-
-
-def _probe_buffer_resource_matrix(
-    opt: Path, run: support._RunCommand
-) -> dict[str, object]:
-    result = _probe_intrinsic_candidates(opt, _buffer_resource_candidates(), run)
-    if result["status"] != "known":
-        return result
-    for accepted in result["value"]["accepted"]:
-        declaration = accepted["canonical_declaration"]
-        name = re.search(r"@(llvm\.amdgcn\.make\.buffer\.rsrc\.[^(]+)", declaration)
-        if name is None:
-            return {
-                "status": "error",
-                "diagnostic": f"unrecognized buffer-resource declaration: {declaration}",
-            }
-        accepted["canonical_intrinsic"] = name.group(1)
-        try:
-            accepted["canonical_abi"] = support._canonical_buffer_resource_abi(
-                name.group(1), declaration
-            )
-        except support.ProbeError as exc:
-            return {"status": "error", "diagnostic": str(exc)}
-    return result
 
 
 def _fp8_packing_candidates() -> tuple[_IntrinsicCandidate, ...]:
@@ -386,18 +196,18 @@ def _named_barrier_candidates() -> tuple[_IntrinsicCandidate, ...]:
     ):
         for address_space in (3, 15):
             pointer = f"ptr addrspace({address_space})"
-            declaration_args = (pointer, "i32") if has_count else (pointer,)
-            call_args = (
-                ((pointer, "null"), ("i32", "1")) if has_count else ((pointer, "null"),)
-            )
             result.append(
                 _IntrinsicCandidate(
                     f"as{address_space}",
                     operation,
                     f"llvm.amdgcn.{operation}",
                     "void",
-                    declaration_args,
-                    call_args,
+                    (pointer, "i32") if has_count else (pointer,),
+                    (
+                        ((pointer, "null"), ("i32", "1"))
+                        if has_count
+                        else ((pointer, "null"),)
+                    ),
                 )
             )
     return tuple(result)
@@ -450,160 +260,15 @@ def _scaled_mfma_candidates() -> tuple[_IntrinsicCandidate, ...]:
     return tuple(result)
 
 
-def _observation(
-    *,
-    candidate: str,
-    family: str,
-    stage: str,
-    result: support.CommandResult,
-    evidence: dict[str, object] | None = None,
-) -> dict[str, object]:
-    if result.timed_out:
-        return {
-            "candidate": candidate,
-            "family": family,
-            "stage": stage,
-            "outcome": "timeout",
-            "diagnostic": support._first_diagnostic(result),
-        }
-    if result.returncode != 0:
-        return {
-            "candidate": candidate,
-            "family": family,
-            "stage": stage,
-            "outcome": "crash" if support._process_crashed(result) else "rejected",
-            "diagnostic": support._first_diagnostic(result),
-        }
-    value: dict[str, object] = {
-        "candidate": candidate,
-        "family": family,
-        "stage": stage,
-        "outcome": "accepted",
-    }
-    if evidence:
-        value["evidence"] = evidence
-    return value
-
-
-def _observations_result(observations: list[dict[str, object]]) -> dict[str, object]:
-    return {"status": "known", "value": {"observations": observations}}
-
-
-def _output_evidence(result: support.CommandResult) -> dict[str, object]:
-    text = result.stdout
-    return {
-        "output_sha256": hashlib.sha256(text.encode()).hexdigest(),
-        "output_lines": len(text.splitlines()),
-    }
-
-
-def _probe_frontend_fp16_abi(
-    clang: Path, processor: str, run: support._RunCommand
-) -> dict[str, object]:
-    builtin = "__builtin_amdgcn_mfma_f32_32x32x8f16"
-    result = run(
-        [
-            str(clang),
-            "-target",
-            _TARGET_TRIPLE,
-            f"-mcpu={processor}",
-            "-nogpulib",
-            "-fsyntax-only",
-            "-ferror-limit=0",
-            "-Xclang",
-            "-ast-dump",
-            "-x",
-            "c",
-            "-",
-        ],
-        f"void query(void) {{ {builtin}(); }}\n",
-    )
-    if result.timed_out or (support._process_crashed(result)):
-        return _observations_result(
-            [
-                _observation(
-                    candidate="canonical_prototype",
-                    family=builtin,
-                    stage="frontend",
-                    result=result,
-                )
-            ]
-        )
-    match = re.search(
-        rf"FunctionDecl[^\n]*\b{re.escape(builtin)} '(?P<prototype>.*)'",
-        result.stdout,
-    )
-    if match is not None:
-        return _observations_result(
-            [
-                {
-                    "candidate": "canonical_prototype",
-                    "family": builtin,
-                    "stage": "frontend",
-                    "outcome": "accepted",
-                    "evidence": {"prototype": match.group("prototype")},
-                }
-            ]
-        )
-    return _observations_result(
-        [
-            _observation(
-                candidate="canonical_prototype",
-                family=builtin,
-                stage="frontend",
-                result=result,
-            )
-        ]
-    )
-
-
-def _generic_processor_name(processor: str) -> str | None:
-    if re.fullmatch(r"gfx11\d+", processor):
-        return "gfx11-generic"
-    if re.fullmatch(r"gfx12\d+", processor):
-        return "gfx12-generic"
-    match = re.fullmatch(r"gfx(9|10)(\d)\d+", processor)
-    if match is None:
-        return None
-    return f"gfx{match.group(1)}-{match.group(2)}-generic"
-
-
-def _probe_processor_names(
-    clang: Path, processor: str, run: support._RunCommand
-) -> dict[str, object]:
-    names = [("requested", processor)]
-    generic = _generic_processor_name(processor)
-    if generic is not None and generic != processor:
-        names.append(("generic", generic))
-    observations = []
-    for candidate, name in names:
-        result = run(
-            [
-                str(clang),
-                "-target",
-                _TARGET_TRIPLE,
-                f"-mcpu={name}",
-                "-nogpulib",
-                "-S",
-                "-emit-llvm",
-                "-x",
-                "c",
-                "-",
-                "-o",
-                "-",
-            ],
-            "__attribute__((amdgpu_kernel)) void probe(void) {}\n",
-        )
-        observations.append(
-            _observation(
-                candidate=candidate,
-                family=name,
-                stage="frontend",
-                result=result,
-                evidence=_output_evidence(result) if result.returncode == 0 else None,
-            )
-        )
-    return _observations_result(observations)
+def _empty_module(layout: str | None = None, attribute: str | None = None) -> str:
+    preamble = f'target triple = "{_TARGET_TRIPLE}"\n'
+    if layout is not None:
+        preamble = f'target datalayout = "{layout}"\n' + preamble
+    suffix = " #0" if attribute else ""
+    module = preamble + f"define amdgpu_kernel void @probe(){suffix} {{ ret void }}\n"
+    if attribute:
+        module += f'attributes #0 = {{ "{attribute}" }}\n'
+    return module
 
 
 def _codegen_reproducer() -> str:
@@ -623,509 +288,356 @@ def _codegen_reproducer() -> str:
     )
 
 
-def _probe_optimization_levels(
-    clang: Path, processor: str, run: support._RunCommand
-) -> dict[str, object]:
-    observations = []
+def _request_key(capability: str, family: str, candidate: str) -> str:
+    return f"{capability}\0{family}\0{candidate}"
+
+
+def _requests(
+    processor: str,
+) -> tuple[list[support.ProbeRequest], dict[str, tuple[str, str, str]]]:
+    isa = f"{_TARGET_TRIPLE}--{processor}"
+    requests: list[support.ProbeRequest] = []
+    metadata: dict[str, tuple[str, str, str]] = {}
+
+    def add(
+        capability: str,
+        family: str,
+        candidate: str,
+        module: str,
+        *,
+        request_isa: str = isa,
+        options: tuple[str, ...] = ("-O3",),
+    ) -> None:
+        key = _request_key(capability, family, candidate)
+        requests.append(support.ProbeRequest(key, module, request_isa, options))
+        metadata[key] = (capability, family, candidate)
+
+    for name, layout in _LAYOUT_CANDIDATES.items():
+        add(_CAPABILITY_LAYOUT, "module", name, _empty_module(layout))
+    for capability, candidates in (
+        (_CAPABILITY_BUFFER_RESOURCE, _buffer_resource_candidates()),
+        (_CAPABILITY_FP8_PACKING, _fp8_packing_candidates()),
+        (_CAPABILITY_NAMED_BARRIER, _named_barrier_candidates()),
+        (_CAPABILITY_SCALED_MFMA, _scaled_mfma_candidates()),
+    ):
+        for item in candidates:
+            add(capability, item.family, item.candidate, item.module())
+
+    add(_CAPABILITY_PROCESSOR_NAMES, processor, "requested", _empty_module())
+    generic = _GENERIC_PROCESSORS.get(processor)
+    if generic:
+        add(
+            _CAPABILITY_PROCESSOR_NAMES,
+            generic,
+            "generic",
+            _empty_module(),
+            request_isa=f"{_TARGET_TRIPLE}--{generic}",
+        )
     for level in ("O0", "O1", "O2", "O3"):
-        result = run(
-            [
-                str(clang),
-                "-target",
-                _TARGET_TRIPLE,
-                f"-mcpu={processor}",
-                "-nogpulib",
-                f"-{level}",
-                "-S",
-                "-x",
-                "ir",
-                "-",
-                "-o",
-                "-",
-            ],
+        add(
+            _CAPABILITY_OPT_LEVELS,
+            "uniform_half_extract",
+            level,
             _codegen_reproducer(),
+            options=(f"-{level}",),
         )
-        observations.append(
-            _observation(
-                candidate=level,
-                family="uniform_half_extract",
-                stage="codegen",
-                result=result,
-                evidence=_output_evidence(result) if result.returncode == 0 else None,
-            )
-        )
-    return _observations_result(observations)
-
-
-def _probe_compiler_options(
-    clang: Path, processor: str, run: support._RunCommand
-) -> dict[str, object]:
-    source = "__attribute__((amdgpu_kernel)) void probe(void) {}\n"
-    candidates = (
-        ("slp_off", ("-fno-slp-vectorize",)),
-        ("mfma_vgpr_form", ("-mllvm", "-amdgpu-mfma-vgpr-form")),
+    for candidate, options in (
+        ("slp_off", ("-O3", "-fno-slp-vectorize")),
+        ("mfma_vgpr_form", ("-O3", "-mllvm", "-amdgpu-mfma-vgpr-form")),
         (
             "iterative_ilp_scheduler",
-            ("-mllvm", "-amdgpu-sched-strategy=iterative-ilp"),
+            ("-O3", "-mllvm", "-amdgpu-sched-strategy=iterative-ilp"),
         ),
-    )
-    observations = []
-    for candidate, options in candidates:
-        result = run(
-            [
-                str(clang),
-                "-target",
-                _TARGET_TRIPLE,
-                f"-mcpu={processor}",
-                "-nogpulib",
-                "-O3",
-                *options,
-                "-S",
-                "-emit-llvm",
-                "-x",
-                "c",
-                "-",
-                "-o",
-                "-",
-            ],
-            source,
+    ):
+        add(
+            _CAPABILITY_COMPILER_OPTIONS,
+            "backend_option",
+            candidate,
+            _empty_module(),
+            options=options,
         )
-        observations.append(
-            _observation(
-                candidate=candidate,
-                family="backend_option",
-                stage="option_parser",
-                result=result,
-                evidence=_output_evidence(result) if result.returncode == 0 else None,
-            )
-        )
-    return _observations_result(observations)
-
-
-def _attribute_module(attribute: str) -> str:
-    return (
-        f'target triple = "{_TARGET_TRIPLE}"\n'
-        "define amdgpu_kernel void @probe() #0 { ret void }\n"
-        f'attributes #0 = {{ "{attribute}" }}\n'
-    )
-
-
-def _probe_function_attributes(
-    clang: Path, processor: str, run: support._RunCommand
-) -> dict[str, object]:
-    candidates = (
+    for candidate, attribute in (
         ("waves_per_eu_1", 'amdgpu-waves-per-eu"="1,1'),
         ("waves_per_eu_2", 'amdgpu-waves-per-eu"="2,2'),
         ("zero_agpr", 'amdgpu-agpr-alloc"="0'),
+    ):
+        add(
+            _CAPABILITY_FUNCTION_ATTRIBUTES,
+            "function_attribute",
+            candidate,
+            _empty_module(attribute=attribute),
+        )
+    return requests, metadata
+
+
+def _implementation_sha256() -> str:
+    paths = (
+        Path(__file__).resolve(),
+        Path(support.__file__).resolve(),
+        Path(__file__).with_name("_comgr_worker.py"),
     )
-    observations = []
-    for candidate, attribute in candidates:
-        result = run(
-            [
-                str(clang),
-                "-target",
-                _TARGET_TRIPLE,
-                f"-mcpu={processor}",
-                "-nogpulib",
-                "-O3",
-                "-S",
-                "-x",
-                "ir",
-                "-",
-                "-o",
-                "-",
-            ],
-            _attribute_module(attribute),
-        )
-        observations.append(
-            _observation(
-                candidate=candidate,
-                family="function_attribute",
-                stage="codegen",
-                result=result,
-                evidence=_output_evidence(result) if result.returncode == 0 else None,
-            )
-        )
-    return _observations_result(observations)
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
-def _structural_report(
-    llvm_bin: Path | None,
+def _schema_sha256() -> str:
+    return support._sha256(Path(__file__).with_name("capabilities.schema.json"))
+
+
+def _fingerprint(
+    identity: dict[str, object], processor: str, implementation: str, schema: str
+) -> str:
+    inputs = {
+        "comgr": identity,
+        "processor": processor,
+        "target_triple": _TARGET_TRIPLE,
+        "implementation_sha256": implementation,
+        "schema_sha256": schema,
+    }
+    return hashlib.sha256(
+        json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _build_capabilities(
+    requests: list[support.ProbeRequest],
+    metadata: dict[str, tuple[str, str, str]],
+    results: dict[str, support.ProbeResult],
+) -> dict[str, object]:
+    capabilities: dict[str, dict[str, object]] = {}
+    for request in requests:
+        capability, family, candidate = metadata[request.key]
+        result = results[request.key]
+        observation: dict[str, object] = {
+            "family": family,
+            "candidate": candidate,
+            **result.as_report_entry(),
+        }
+        entry = capabilities.setdefault(
+            capability,
+            {
+                "status": "known",
+                "value": {
+                    "route": "comgr_llvm_ir_to_hsaco",
+                    "observations": [],
+                },
+            },
+        )
+        entry["value"]["observations"].append(observation)
+    return capabilities
+
+
+_Identify = Callable[[Path | None], dict[str, object]]
+_ProbeAll = Callable[..., dict[str, support.ProbeResult]]
+
+
+def load_or_probe(
+    *,
+    comgr_lib: Path | None,
     processor: str,
     cache_dir: Path,
-    refresh: bool,
-    run: support._RunCommand,
+    refresh: bool = False,
+    jobs: int = 0,
+    timeout: int = 60,
+    identify: _Identify = support.identify_comgr,
+    run: _ProbeAll = support.probe_all,
 ) -> tuple[dict[str, object], bool]:
-    base, _ = support.load_or_probe(
-        llvm_bin=llvm_bin,
-        processor=processor,
-        cache_dir=cache_dir / "base",
-        refresh=refresh,
-        run=run,
-    )
-    clang = support._tool_path("clang", llvm_bin)
-    opt = support._tool_path("opt", llvm_bin)
-    implementation_sha256 = hashlib.sha256(
-        Path(__file__).resolve().read_bytes()
-        + Path(support.__file__).resolve().read_bytes()
-    ).hexdigest()
-    schema_sha256 = support._sha256(
-        Path(__file__).with_name("capabilities.schema.json")
-    )
-    fingerprint = hashlib.sha256(
-        f"structural:{implementation_sha256}:{schema_sha256}:"
-        f"{base['probe']['fingerprint']}".encode()
-    ).hexdigest()
+    """Return COMGR capability evidence and whether it came from cache."""
+    if re.fullmatch(r"gfx[0-9a-z-]+", processor) is None:
+        raise ValueError(
+            f"compiler capability probe failed - processor={processor!r}, "
+            "expected a gfx processor identifier"
+        )
+    identity = identify(comgr_lib)
+    selected_library = identity.get("library")
+    if not isinstance(selected_library, str) or not selected_library:
+        raise support.ProbeError("COMGR identity omitted the selected library")
+    pinned_comgr = Path(selected_library)
+    implementation = _implementation_sha256()
+    schema = _schema_sha256()
+    fingerprint = _fingerprint(identity, processor, implementation, schema)
     cache_path = cache_dir / f"{fingerprint}.json"
     if not refresh:
         cached = support._read_cache(cache_path, fingerprint)
         if cached is not None:
             _validate_report_completeness(cached)
             return cached, True
-    capabilities = dict(base["capabilities"])
-    capabilities[_CAPABILITY_PREAMBLE] = _probe_module_preamble(clang, processor, run)
-    capabilities[_CAPABILITY_LAYOUT_POLICY] = _probe_layout_policy(
-        clang, processor, run
+
+    requests, metadata = _requests(processor)
+    results = run(
+        requests,
+        comgr_lib=pinned_comgr,
+        jobs=jobs,
+        timeout=timeout,
     )
-    capabilities[_CAPABILITY_BUFFER_RESOURCE] = _probe_buffer_resource_matrix(opt, run)
-    capabilities[_CAPABILITY_FP8_PACKING] = _probe_intrinsic_candidates(
-        opt, _fp8_packing_candidates(), run
-    )
-    capabilities[_CAPABILITY_NAMED_BARRIER] = _probe_intrinsic_candidates(
-        opt, _named_barrier_candidates(), run
-    )
-    capabilities[_CAPABILITY_SCALED_MFMA] = _probe_intrinsic_candidates(
-        opt, _scaled_mfma_candidates(), run
-    )
-    capabilities[_CAPABILITY_FRONTEND_FP16] = _probe_frontend_fp16_abi(
-        clang, processor, run
-    )
-    capabilities[_CAPABILITY_PROCESSOR_NAMES] = _probe_processor_names(
-        clang, processor, run
-    )
-    capabilities[_CAPABILITY_OPT_LEVELS] = _probe_optimization_levels(
-        clang, processor, run
-    )
-    capabilities[_CAPABILITY_COMPILER_OPTIONS] = _probe_compiler_options(
-        clang, processor, run
-    )
-    capabilities[_CAPABILITY_FUNCTION_ATTRIBUTES] = _probe_function_attributes(
-        clang, processor, run
-    )
-    report = dict(base)
-    probe = dict(base["probe"])
-    probe.pop("implementation_sha256", None)
-    report["probe"] = dict(
-        probe,
-        implementation_sha256=implementation_sha256,
-        schema_sha256=schema_sha256,
-        fingerprint=fingerprint,
-    )
-    report["capabilities"] = capabilities
+    report = {
+        "probe": {
+            "name": "rocke-comgr-capabilities",
+            "implementation_sha256": implementation,
+            "schema_sha256": schema,
+            "target_triple": _TARGET_TRIPLE,
+            "processor": processor,
+            "fingerprint": fingerprint,
+        },
+        "compiler": {"route": "comgr", **identity},
+        "capabilities": _build_capabilities(requests, metadata, results),
+    }
     _validate_report_completeness(report)
-    if all(result.get("status") == "known" for result in capabilities.values()):
+    outcomes = [result.outcome for result in results.values()]
+    if all(outcome != "error" for outcome in outcomes):
         support._write_json(cache_path, report)
     return report, False
 
 
-def load_or_probe(
-    *,
-    llvm_bin: Path | None,
-    processor: str,
-    cache_dir: Path,
-    refresh: bool = False,
-    run: support._RunCommand = support._run_command,
-) -> tuple[dict[str, object], bool]:
-    """Return a structural report and whether it came from the report cache."""
-    return _structural_report(llvm_bin, processor, cache_dir, refresh, run)
-
-
-def _llvm_bin_from_python_env(python_env: Path) -> Path:
-    """Find the LLVM tool directory installed by ROCm Python packages."""
-    executable = ".exe" if os.name == "nt" else ""
-    candidates = [
-        python_env / "lib" / "llvm" / "bin",
-        python_env
-        / "Lib"
-        / "site-packages"
-        / "_rocm_sdk_core"
-        / "lib"
-        / "llvm"
-        / "bin",
-    ]
-    candidates.extend(
-        python_env.glob("lib/python*/site-packages/_rocm_sdk_core/lib/llvm/bin")
-    )
-    candidates.extend(
-        python_env.glob("lib/python*/site-packages/_rocm_sdk_devel/lib/llvm/bin")
-    )
-    usable: list[Path] = []
-    for candidate in candidates:
-        if (candidate / f"clang{executable}").is_file() and (
-            candidate / f"opt{executable}"
-        ).is_file():
-            resolved = candidate.resolve()
-            if resolved not in usable:
-                usable.append(resolved)
-    if not usable:
-        raise support.ProbeError(
-            "compiler capability probe failed - no clang/opt pair found in "
-            f"python_env={str(python_env)!r}; install rocm-sdk-core or pass --llvm-bin"
-        )
-    return usable[0]
-
-
-def _layout_name(value: dict[str, object]) -> str:
-    key = (
-        value.get("elf_mangling"),
-        tuple(value.get("address_space_8") or ()),
-        tuple(value.get("additional_pointer_address_spaces") or ()),
-    )
-    return {
-        (None, (128, 128), ()): "L0",
-        (None, (128, 128, 128, 48), ()): "L1",
-        ("e", (128, 128, 128, 48), ()): "L2",
-        ("e", (128, 128, 128, 48), (10, 11, 12, 13, 14, 15)): "L3",
-    }.get(key, "custom")
-
-
-def _accepted_candidates(result: dict[str, object]) -> list[dict[str, str]]:
-    if result.get("status") != "known":
-        return []
-    value = result.get("value")
-    if not isinstance(value, dict):
-        return []
-    accepted = value.get("accepted")
-    return accepted if isinstance(accepted, list) else []
-
-
-def _observation_summary(result: dict[str, object]) -> str:
-    if result.get("status") != "known":
-        return "error"
-    value = result.get("value")
-    if not isinstance(value, dict) or not isinstance(value.get("observations"), list):
-        return "malformed"
-    return ", ".join(
-        f"{entry['candidate']}={entry['outcome']}" for entry in value["observations"]
-    )
-
-
-def _uniform_candidate(result: dict[str, object], family_count: int) -> str:
-    accepted = _accepted_candidates(result)
-    families = {entry["family"] for entry in accepted}
-    candidates = {entry["candidate"] for entry in accepted}
-    if len(families) != family_count or len(candidates) != 1:
-        return "mixed or unavailable"
-    return next(iter(candidates))
-
-
-def _print_summary(report: dict[str, object], cache_hit: bool, output: Path) -> None:
-    capabilities = report["capabilities"]
-    layout = capabilities[support._CAPABILITY_DATA_LAYOUT]
-    preamble = capabilities[_CAPABILITY_PREAMBLE]
-    policy = capabilities[_CAPABILITY_LAYOUT_POLICY]
-    print(f"probe implementation: {report['probe']['implementation_sha256'][:12]}…")
-    print(f"schema: {report['probe']['schema_sha256'][:12]}…")
-    print(
-        f"compiler revision: {report['compiler'].get('source_revision') or 'unreported'}"
-    )
-    print(f"cache: {'hit' if cache_hit else 'miss'}")
-    if layout.get("status") == "known":
-        print(f"module layout: {_layout_name(layout['value'])}")
-    if preamble.get("status") == "known":
-        value = preamble["value"]
-        print(
-            "module preamble: "
-            f"{value['target_triple']}, {value['kernel_calling_convention']}, "
-            f"{len(value['module_flags'])} flags"
-        )
-    if policy.get("status") == "known":
-        outcomes = ", ".join(
-            f"{entry['candidate']}={entry['outcome']}"
-            for entry in policy["value"]["candidates"]
-        )
-        print(f"explicit layouts: {outcomes}")
-    buffer_abis = sorted(
-        {
-            entry["canonical_abi"]
-            for entry in _accepted_candidates(capabilities[_CAPABILITY_BUFFER_RESOURCE])
-        }
-    )
-    print(f"buffer-resource ABIs: {', '.join(buffer_abis) or 'none'}")
-    print(
-        "FP8/BF8 packed operand: "
-        + _uniform_candidate(capabilities[_CAPABILITY_FP8_PACKING], 8)
-    )
-    print(
-        "named-barrier pointer: "
-        + _uniform_candidate(capabilities[_CAPABILITY_NAMED_BARRIER], 4)
-    )
-    print(
-        "scaled-MFMA call ABI: "
-        + _uniform_candidate(capabilities[_CAPABILITY_SCALED_MFMA], 2)
-    )
-    print(
-        "frontend FP16 ABI: "
-        + _observation_summary(capabilities[_CAPABILITY_FRONTEND_FP16])
-    )
-    print(
-        "processor names: "
-        + _observation_summary(capabilities[_CAPABILITY_PROCESSOR_NAMES])
-    )
-    print(
-        "optimization levels: "
-        + _observation_summary(capabilities[_CAPABILITY_OPT_LEVELS])
-    )
-    print(
-        "compiler options: "
-        + _observation_summary(capabilities[_CAPABILITY_COMPILER_OPTIONS])
-    )
-    print(
-        "function attributes: "
-        + _observation_summary(capabilities[_CAPABILITY_FUNCTION_ATTRIBUTES])
-    )
-    errors = [
-        f"{name}: {result.get('diagnostic', 'unknown probe error')}"
-        for name, result in capabilities.items()
-        if result.get("status") != "known"
-    ]
-    for error in errors:
-        print(f"ERROR: {error}")
-    print(f"output: {output}")
-
-
-def _candidate_id(entry: dict[str, object]) -> str:
-    return f"{entry['family']}:{entry['candidate']}"
+def _expected_observations(processor: str) -> dict[str, list[tuple[str, str]]]:
+    expected = {
+        _CAPABILITY_LAYOUT: [("module", name) for name in _LAYOUT_CANDIDATES],
+        _CAPABILITY_BUFFER_RESOURCE: [
+            (item.family, item.candidate) for item in _buffer_resource_candidates()
+        ],
+        _CAPABILITY_FP8_PACKING: [
+            (item.family, item.candidate) for item in _fp8_packing_candidates()
+        ],
+        _CAPABILITY_NAMED_BARRIER: [
+            (item.family, item.candidate) for item in _named_barrier_candidates()
+        ],
+        _CAPABILITY_SCALED_MFMA: [
+            (item.family, item.candidate) for item in _scaled_mfma_candidates()
+        ],
+        _CAPABILITY_PROCESSOR_NAMES: [(processor, "requested")],
+        _CAPABILITY_OPT_LEVELS: [
+            ("uniform_half_extract", level) for level in ("O0", "O1", "O2", "O3")
+        ],
+        _CAPABILITY_COMPILER_OPTIONS: [
+            ("backend_option", name)
+            for name in ("slp_off", "mfma_vgpr_form", "iterative_ilp_scheduler")
+        ],
+        _CAPABILITY_FUNCTION_ATTRIBUTES: [
+            ("function_attribute", name)
+            for name in ("waves_per_eu_1", "waves_per_eu_2", "zero_agpr")
+        ],
+    }
+    generic = _GENERIC_PROCESSORS.get(processor)
+    if generic:
+        expected[_CAPABILITY_PROCESSOR_NAMES].append((generic, "generic"))
+    return expected
 
 
 def _validate_report_completeness(report: dict[str, object]) -> None:
-    capabilities = report["capabilities"]
-    expected_corpora = {
-        _CAPABILITY_BUFFER_RESOURCE: [
-            f"{candidate.family}:{candidate.candidate}"
-            for candidate in _buffer_resource_candidates()
-        ],
-        _CAPABILITY_FP8_PACKING: [
-            f"{candidate.family}:{candidate.candidate}"
-            for candidate in _fp8_packing_candidates()
-        ],
-        _CAPABILITY_NAMED_BARRIER: [
-            f"{candidate.family}:{candidate.candidate}"
-            for candidate in _named_barrier_candidates()
-        ],
-        _CAPABILITY_SCALED_MFMA: [
-            f"{candidate.family}:{candidate.candidate}"
-            for candidate in _scaled_mfma_candidates()
-        ],
-    }
-    for name, expected in expected_corpora.items():
+    capabilities = report.get("capabilities")
+    probe = report.get("probe")
+    if not isinstance(capabilities, dict) or not isinstance(probe, dict):
+        raise support.ProbeError("report must contain probe and capabilities objects")
+    processor = probe.get("processor")
+    if not isinstance(processor, str):
+        raise support.ProbeError("report probe.processor must be a string")
+    expected = _expected_observations(processor)
+    if set(capabilities) != set(expected):
+        raise support.ProbeError("report capability set differs from the COMGR corpus")
+    for name, corpus in expected.items():
         result = capabilities[name]
-        if result.get("status") != "known":
-            continue
-        value = result["value"]
+        if not isinstance(result, dict) or result.get("status") != "known":
+            raise support.ProbeError(f"{name} must be a known observation set")
+        value = result.get("value")
+        if (
+            not isinstance(value, dict)
+            or value.get("route") != "comgr_llvm_ir_to_hsaco"
+        ):
+            raise support.ProbeError(f"{name} has no COMGR route")
+        observations = value.get("observations")
+        if not isinstance(observations, list):
+            raise support.ProbeError(f"{name} observations must be a list")
         observed = [
-            _candidate_id(entry) for entry in (*value["accepted"], *value["rejected"])
+            (entry.get("family"), entry.get("candidate")) for entry in observations
         ]
-        if value["corpus"] != expected or sorted(observed) != sorted(expected):
+        if observed != corpus:
             raise support.ProbeError(
-                f"{name} did not report its complete candidate corpus"
+                f"{name} did not report its complete ordered corpus"
             )
-        if len(observed) != len(set(observed)):
-            raise support.ProbeError(f"{name} reported a candidate more than once")
-
-    layout = capabilities[_CAPABILITY_LAYOUT_POLICY]
-    if layout.get("status") == "known":
-        entries = layout["value"]["candidates"]
-        if [entry["candidate"] for entry in entries] != list(_LAYOUT_CANDIDATES):
-            raise support.ProbeError(
-                f"{_CAPABILITY_LAYOUT_POLICY} did not report L0 through L3 exactly once"
-            )
-        for entry in entries:
-            outcome = entry["outcome"]
-            if outcome in {"accepted", "overwritten"} and not entry.get(
-                "observed_layout"
+        for entry in observations:
+            if entry.get("outcome") not in {
+                "accepted",
+                "rejected",
+                "crash",
+                "timeout",
+                "error",
+            }:
+                raise support.ProbeError(f"{name} reported an unknown outcome")
+            if entry.get("outcome") == "accepted" and not isinstance(
+                entry.get("evidence"), dict
             ):
+                raise support.ProbeError(f"{name} accepted candidate lacks evidence")
+            if entry.get("outcome") != "accepted" and not entry.get("diagnostic"):
                 raise support.ProbeError(
-                    f"{_CAPABILITY_LAYOUT_POLICY} {entry['candidate']} lacks observed_layout"
+                    f"{name} non-accepted candidate lacks diagnostic"
                 )
-            if outcome == "rejected" and not entry.get("diagnostic"):
-                raise support.ProbeError(
-                    f"{_CAPABILITY_LAYOUT_POLICY} {entry['candidate']} lacks diagnostic"
-                )
-
-    expected_observations = {
-        _CAPABILITY_FRONTEND_FP16: ["canonical_prototype"],
-        _CAPABILITY_OPT_LEVELS: ["O0", "O1", "O2", "O3"],
-        _CAPABILITY_COMPILER_OPTIONS: [
-            "slp_off",
-            "mfma_vgpr_form",
-            "iterative_ilp_scheduler",
-        ],
-        _CAPABILITY_FUNCTION_ATTRIBUTES: [
-            "waves_per_eu_1",
-            "waves_per_eu_2",
-            "zero_agpr",
-        ],
-    }
-    processor = report["probe"]["processor"]
-    expected_observations[_CAPABILITY_PROCESSOR_NAMES] = ["requested"] + (
-        ["generic"] if _generic_processor_name(processor) is not None else []
-    )
-    for name, expected in expected_observations.items():
-        result = capabilities[name]
-        if result.get("status") != "known":
-            continue
-        observed = [entry["candidate"] for entry in result["value"]["observations"]]
-        if observed != expected:
-            raise support.ProbeError(
-                f"{name} did not report its complete observation corpus"
-            )
 
 
 def _validate_report(report: dict[str, object]) -> None:
+    _validate_report_completeness(report)
     try:
         import jsonschema
     except ImportError as exc:
         raise support.ProbeError(
-            "schema validation requires jsonschema; install it or omit --validate"
+            "full schema validation requires jsonschema; the dependency-free "
+            "report contract passed"
         ) from exc
-    schema_path = Path(__file__).with_name("capabilities.schema.json")
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    schema = json.loads(
+        Path(__file__).with_name("capabilities.schema.json").read_text(encoding="utf-8")
+    )
     try:
         jsonschema.validate(instance=report, schema=schema)
     except jsonschema.ValidationError as exc:
         raise support.ProbeError(
             f"generated report failed schema validation: {exc.message}"
         ) from exc
-    _validate_report_completeness(report)
+
+
+def _print_summary(report: dict[str, object], cache_hit: bool, output: Path) -> None:
+    compiler = report["compiler"]
+    version = compiler.get("llvm_version")
+    version_text = ".".join(str(part) for part in version) if version else "unknown"
+    print(f"COMGR: {compiler['library']}")
+    print(f"COMGR sha256: {compiler['sha256'][:12]}…")
+    print(f"embedded LLVM: {version_text} via {compiler['version_source']}")
+    print(f"cache: {'hit' if cache_hit else 'miss'}")
+    for name, result in report["capabilities"].items():
+        observations = result["value"]["observations"]
+        counts = {
+            outcome: sum(entry["outcome"] == outcome for entry in observations)
+            for outcome in ("accepted", "rejected", "crash", "timeout", "error")
+        }
+        detail = ", ".join(f"{key}={value}" for key, value in counts.items() if value)
+        print(f"{name}: {detail}")
+    print(f"output: {output}")
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="probe structural AMD LLVM behavior")
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
-        "--llvm-bin", type=Path, default=None, help="directory containing clang and opt"
+    parser = argparse.ArgumentParser(
+        description="probe the COMGR contract that compiles rocKE LLVM IR"
     )
-    source.add_argument(
-        "--python-env",
+    parser.add_argument(
+        "--comgr-lib",
         type=Path,
         default=None,
-        help="ROCm Python environment containing rocm-sdk-core",
+        help="explicit libamd_comgr path (default: rocKE runtime discovery)",
     )
     parser.add_argument("--processor", default="gfx950")
     parser.add_argument("--output", type=Path, default=Path("capabilities.json"))
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(tempfile.gettempdir()) / "rocke_compiler_capabilities",
+        default=Path(tempfile.gettempdir()) / "rocke_comgr_capabilities",
     )
+    parser.add_argument(
+        "--jobs", type=int, default=0, help="parallel workers; 0=CPU count"
+    )
+    parser.add_argument("--timeout", type=int, default=60, help="seconds per candidate")
     parser.add_argument("--refresh", action="store_true")
-    parser.add_argument(
-        "--validate", action="store_true", help="validate the report against the schema"
-    )
-    parser.add_argument(
-        "--quiet", action="store_true", help="write JSON without a summary"
-    )
+    parser.add_argument("--validate", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -1133,26 +645,18 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     started = time.perf_counter()
     try:
-        llvm_bin = args.llvm_bin
-        if llvm_bin is None and args.python_env is not None:
-            llvm_bin = _llvm_bin_from_python_env(args.python_env)
-        if llvm_bin is None:
-            raw_env = os.environ.get("ROCKE_PYTHON_ENV")
-            raw_bin = os.environ.get("ROCKE_LLVM_BIN")
-            if raw_env:
-                llvm_bin = _llvm_bin_from_python_env(Path(raw_env))
-            elif raw_bin:
-                llvm_bin = Path(raw_bin)
         report, cache_hit = load_or_probe(
-            llvm_bin=llvm_bin,
+            comgr_lib=args.comgr_lib,
             processor=args.processor,
             cache_dir=args.cache_dir,
             refresh=args.refresh,
+            jobs=args.jobs,
+            timeout=args.timeout,
         )
         if args.validate:
             _validate_report(report)
         support._write_json(args.output, report)
-    except (OSError, ValueError, support.ProbeError) as exc:
+    except (OSError, TypeError, ValueError, support.ProbeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     if not args.quiet:
@@ -1160,11 +664,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.validate:
             print("schema validation: passed")
         print(f"elapsed: {time.perf_counter() - started:.3f} s")
-    return (
-        0
-        if all(x.get("status") == "known" for x in report["capabilities"].values())
-        else 1
-    )
+    outcomes = [
+        observation["outcome"]
+        for result in report["capabilities"].values()
+        for observation in result["value"]["observations"]
+    ]
+    return 0 if all(outcome != "error" for outcome in outcomes) else 1
 
 
 if __name__ == "__main__":
