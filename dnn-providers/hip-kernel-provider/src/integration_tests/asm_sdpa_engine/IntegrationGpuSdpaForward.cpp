@@ -11,6 +11,7 @@
 #include <hip_kernel_provider_common/SdpaConfigConstants.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -76,7 +77,8 @@ void fillSeqStarts(hipdnn_data_sdk::utilities::ITensor& tensor,
 }
 
 /**
- * @brief Test fixture that takes a GraphTestCase as parameter.
+ * @brief Test fixture that runs a GraphTestCase on ASM_SDPA_ENGINE and checks it against
+ * the CPU reference.
  */
 template <typename DataType>
 class IntegrationSdpaFwd : public IntegrationGraphVerificationHarness<DataType, GraphTestCase>
@@ -160,13 +162,6 @@ protected:
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
-        {
-            auto supportStatus = graph->is_supported_ext(this->_handle);
-            ASSERT_EQ(supportStatus.code, ErrorCode::OK)
-                << "No engines applicable for config: " << testCase.name << " - "
-                << supportStatus.get_message();
-        }
-
         // Group-mode cases fill their offset tables from K_GROUP_SEQ_LENS_Q/KV and are checked
         // against the CPU ragged reference. IntegrationGpuSdpaForwardRagged.cpp adds
         // frontend-built packed cases, fully masked rows included.
@@ -211,9 +206,9 @@ protected:
             }
         });
 
-        auto buildResult = graph->build(this->_handle);
-        ASSERT_EQ(buildResult.code, ErrorCode::OK) << buildResult.err_msg;
-
+        // Pinned to the ASM engine: other hip-kernel-provider engines serve some of these
+        // graphs, so a heuristic build could pass while this engine declines its own row.
+        ASSERT_NO_FATAL_FAILURE(this->buildPlansForEngine(*graph, ASM_SDPA_ENGINE_ID, {}));
         this->verifyBuiltGraph(context, 0);
     }
 
