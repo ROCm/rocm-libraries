@@ -535,6 +535,38 @@ namespace rocsparse
         }
     }
 
+    template <uint32_t SCALE_WG, typename I, typename J, typename Y, typename Z, typename T>
+    ROCSPARSE_KERNEL(SCALE_WG)
+    void csrmvn_adaptive_scale_long_rows_kernel(int64_t nblocks,
+                                                const I* __restrict__ row_blocks,
+                                                const J* __restrict__ wg_ids,
+                                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                                Y* __restrict__ y,
+                                                rocsparse_int   num_extra,
+                                                const T*        gamma_device_array,
+                                                const Z* const* z_arrays,
+                                                bool            is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * SCALE_WG;
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * SCALE_WG + hipThreadIdx_x;
+            gid < nblocks;
+            gid += stride)
+        {
+            const I row      = row_blocks[gid];
+            const I stop_row = row_blocks[gid + 1];
+            const J num_rows = static_cast<J>(stop_row - row);
+            const J wg       = wg_ids[gid];
+            // First workgroup of a row that is split across several workgroups. A row handled
+            // by one workgroup has num_rows >= 1 and wg == 0, and applies beta itself.
+            if(num_rows == 0 && wg == 0)
+            {
+                rocsparse::csrmv_apply_beta_extras(
+                    y, static_cast<int64_t>(row), beta, num_extra, gamma_device_array, z_arrays);
+            }
+        }
+    }
+
     template <uint32_t GEN_WG,
               typename I,
               typename J,
@@ -788,6 +820,29 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         // later launch only ever waits on a flag an earlier launch already set.
         const int64_t nblocks = static_cast<int64_t>(info->adaptive.size) - 1;
         const int64_t chunk   = rocsparse::get_grid_size_x(handle, nblocks, gen_wg);
+        // Scale the split rows before any workgroup atomic-adds into them. One thread per
+        // row block; rows that one workgroup owns are left for the adaptive kernel.
+        if(nblocks > 0)
+        {
+            constexpr uint32_t scale_wg = 256;
+            const int64_t      scale_blocks
+                = rocsparse::get_grid_size_x(handle, (nblocks + scale_wg - 1) / scale_wg, scale_wg);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::csrmvn_adaptive_scale_long_rows_kernel<scale_wg>),
+                dim3(scale_blocks),
+                dim3(scale_wg),
+                0,
+                stream,
+                nblocks,
+                static_cast<I*>(info->adaptive.row_blocks),
+                static_cast<J*>(info->adaptive.wg_ids),
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                y,
+                num_extra,
+                gamma_device_array,
+                z_array,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
+        }
         for(int64_t offset = 0; offset < nblocks; offset += chunk)
         {
             dim3 csrmvn_blocks(std::min(chunk, nblocks - offset));

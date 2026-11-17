@@ -26,88 +26,33 @@
 
 #include "rocsparse_common.hpp"
 
-// gfx12 and gfx13 order the stores before releasing other workgroups with __threadfence; from
-// gfx1250 on there is no s_waitcnt. SPIR-V uses __threadfence on every processor, so it stays
-// correct on processors newer than this list.
-#if defined(__GFX12__) || defined(__GFX13__) || defined(__SPIRV__)
-#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 1
-#else
-#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 0
-#endif
-
 namespace rocsparse
 {
-    // The other workgroups add into this row with atomic_add. The zero has to be published in
-    // that same atomic domain: a plain store stays invisible to those atomics, and a NaN left in
-    // y survives. 16-bit outputs are updated by a 32-bit compare-and-swap, so the zero uses that
-    // compare-and-swap too. On targets whose L2 is not coherent across XCDs, the store is drained
-    // before the caller releases the other workgroups.
-    template <typename T>
-    ROCSPARSE_DEVICE_ILF void csrmv_publish_row_zero(T* y, int64_t row, int64_t)
+    // y = beta * y + sum_i gamma_i * z_i for one row. beta == 0 does not read y, so a NaN
+    // already there does not reach the result. The caller runs this in its own kernel, before
+    // any workgroup atomic-adds into the same row.
+    template <typename Y, typename Z, typename T>
+    ROCSPARSE_DEVICE_ILF void csrmv_apply_beta_extras(Y*              y,
+                                                      int64_t         row,
+                                                      T               beta,
+                                                      rocsparse_int   num_extra,
+                                                      const T*        gamma_device_array,
+                                                      const Z* const* z_arrays)
     {
-        rocsparse::atomic_store(
-            y + row, static_cast<T>(0), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
+        T sum = static_cast<T>(0);
+        if(beta != static_cast<T>(0))
         {
-            rocsparse::wait_store_completion();
+            sum = beta * static_cast<T>(y[row]);
         }
-    }
-
-    ROCSPARSE_DEVICE_ILF void
-        csrmv_publish_packed16_zero(unsigned short* base, int64_t row, int64_t size)
-    {
-        if(row < 0 || row >= size)
+        for(rocsparse_int i = 0; i < num_extra; ++i)
         {
-            return;
-        }
-
-        // Match atomic_add_by_CAS: index from the 4-byte aligned address at or below base.
-        const int64_t shift = (reinterpret_cast<uintptr_t>(base) >> 1) & 1;
-        base -= shift;
-        row += shift;
-        size += shift;
-
-        unsigned short* addr      = base + row;
-        const int       is_second = static_cast<int>(row & 1);
-
-        // The unpaired last element has no neighbouring half inside the allocation, so it cannot
-        // share a 32-bit compare-and-swap. One lane publishes it.
-        if((size & 1) && row == size - 1)
-        {
-            *addr = 0;
-            if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
+            const T gamma = gamma_device_array[i];
+            if(gamma != static_cast<T>(0))
             {
-                rocsparse::wait_store_completion();
+                sum = rocsparse::fma<T>(gamma, rocsparse::nontemporal_load(z_arrays[i] + row), sum);
             }
-            return;
         }
-
-        unsigned int* word
-            = reinterpret_cast<unsigned int*>(reinterpret_cast<uintptr_t>(addr) & ~uintptr_t(3));
-        unsigned int old = *word;
-        unsigned int assumed;
-        do
-        {
-            assumed                = old;
-            const unsigned int neu = is_second ? (assumed & 0xffffu) : (assumed & 0xffff0000u);
-            old                    = atomicCAS(word, assumed, neu);
-        } while(assumed != old);
-
-        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
-        {
-            rocsparse::wait_store_completion();
-        }
-    }
-
-    ROCSPARSE_DEVICE_ILF void csrmv_publish_row_zero(_Float16* y, int64_t row, int64_t size)
-    {
-        csrmv_publish_packed16_zero(reinterpret_cast<unsigned short*>(y), row, size);
-    }
-
-    ROCSPARSE_DEVICE_ILF void
-        csrmv_publish_row_zero(rocsparse_bfloat16* y, int64_t row, int64_t size)
-    {
-        csrmv_publish_packed16_zero(reinterpret_cast<unsigned short*>(y), row, size);
+        y[row] = static_cast<Y>(sum);
     }
 
     template <uint32_t BLOCKSIZE,
@@ -630,71 +575,19 @@ namespace rocsparse
         }
         else
         {
-            // In CSR-LongRows, we have more than one workgroup calculating this row.
-            // The output values for those types of rows are stored using atomic_add, because
-            // more than one parallel workgroup's value makes up the final answer.
-            // Unfortunately, this makes it difficult to do y=Ax, rather than y=Ax+y, because
-            // the values still left in y will be added in using the atomic_add.
+            // CSR-LongRows. Several workgroups atomic-add into this row. Beta and the extra
+            // terms are already in y: csrmvn_adaptive_scale_long_rows ran first, on this stream.
+            // The flag only lets the other workgroups add after the first has started. It does
+            // not publish y.
             //
-            // Our solution is to have the first workgroup in one of these long-rows cases
-            // properly initialize the output vector. All the other workgroups working on this
-            // row will spin-loop until that workgroup finishes its work.
-
-            // First, figure out which workgroup you are in the row.
-            // You can use that to find the global ID for the first workgroup calculating
-            // this long row.
-            // row_blocks, wg_ids and wg_flags may start at a row-block offset when the
-            // host splits the row blocks over several launches, so first_wg_in_row is
-            // negative when the row started in an earlier launch.
+            // row_blocks, wg_ids and wg_flags may start at a row-block offset when the host
+            // splits the row blocks over several launches, so first_wg_in_row is negative when
+            // the row started in an earlier launch.
             J        first_wg_in_row = gid - wg_ids[gid];
             uint32_t compare_value   = wg_flags[gid];
 
-            // wg_flags[first_wg_in_row] in the first workgroup is the flag that everyone waits on.
             if(gid == first_wg_in_row && lid == 0)
             {
-                // The first workgroup handles the output initialization.
-                // y is not read when beta is 0, so that a NaN in y does not reach the result.
-                temp_sum = static_cast<T>(0);
-                if(beta != static_cast<T>(0))
-                {
-                    temp_sum = (beta - static_cast<T>(1)) * static_cast<T>(y[row]);
-                }
-                else
-                {
-                    rocsparse::csrmv_publish_row_zero(
-                        y, static_cast<int64_t>(row), static_cast<int64_t>(m));
-                }
-                // Add contributions from all extra vectors
-                for(rocsparse_int i = 0; i < num_extra; ++i)
-                {
-                    T gamma = gamma_device_array[i];
-                    if(gamma != static_cast<T>(0))
-                    {
-                        temp_sum = rocsparse::fma<T>(
-                            gamma, rocsparse::nontemporal_load(z_arrays[i] + row), temp_sum);
-                    }
-                }
-
-                // The zero above is an atomic store in the same domain as the waiters' atomic adds.
-                // This fence publishes it, and the read of y when beta is not 0, before the flag
-                // flips. The waiters take a matching acquire before their atomic updates of y.
-                // When beta is not 0 the atomics on y and the flag are the only communication, and
-                // workgroup scope only keeps the compiler from reordering them.
-#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
-                __threadfence();
-#else
-                if(beta == static_cast<T>(0))
-                {
-                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-                }
-                else
-                {
-                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                    __builtin_amdgcn_s_waitcnt(0);
-                }
-#endif
-
-                // Release other workgroups
                 atomicXor(&wg_flags[first_wg_in_row], 1U);
             }
 
@@ -728,13 +621,6 @@ namespace rocsparse
                 {
                     while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
                         ;
-
-                    // With beta = 0 the first workgroup published y with an atomic store. Take an
-                    // agent-scope acquire, matching its release, before the atomics on y.
-                    if(beta == static_cast<T>(0))
-                    {
-                        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
-                    }
 
                     // After you've passed the barrier, update your local flag to make sure that
                     // the next time through, you know what to wait on.
@@ -1348,6 +1234,13 @@ namespace rocsparse
                                                           const Z* const*      z_arrays,
                                                           rocsparse_index_base idx_base)
     {
+        // Beta and the extras are applied by csrmvn_lrb_scale_long_rows. They stay in the
+        // signature so the launch site matches the other LRB kernels.
+        (void)beta;
+        (void)num_extra;
+        (void)gamma_device_array;
+        (void)z_arrays;
+
         __shared__ T partialSums[BLOCKSIZE];
 
         const int lid = hipThreadIdx_x;
@@ -1362,10 +1255,9 @@ namespace rocsparse
             const J wg      = gid % num_wgs_per_row;
             const J row     = rows_bins[bin_start + row_idx];
 
-            // wg_flags contains the flag bits used so that the multiple WGs calculating a long row can
-            // know when the first workgroup for that row has finished initializing the output
-            // value. While this bit is the same as the first workgroup's flag bit, this
-            // workgroup will spin-loop.
+            // wg_flags lets the other workgroups add after the first workgroup of this row has
+            // started. Beta is not published through this flag. While this bit matches the first
+            // workgroup's flag bit, this workgroup spins.
 
             // TODO: Can the wg_flags-based coordination be done instead with cooperative-groups?
 
@@ -1378,58 +1270,14 @@ namespace rocsparse
 
             T temp_sum = static_cast<T>(0);
 
-            // In CSR-LongRows, we have more than one workgroup calculating this row.
-            // The output values for those types of rows are stored using atomic_add, because
-            // more than one parallel workgroup's value makes up the final answer.
-            // Unfortunately, this makes it difficult to do y=Ax, rather than y=Ax+y, because
-            // the values still left in y will be added in using the atomic_add.
-            //
-            // Our solution is to have the first workgroup in one of these long-rows cases
-            // properly initialize the output vector. All the other workgroups working on this
-            // row will spin-loop until that workgroup finishes its work.
-
-            // First, figure out which workgroup you are in the row.
-            // You can use that to find the global ID for the first workgroup calculating
-            // this long row.
+            // Several workgroups atomic-add into this row. Beta and the extra terms are already
+            // in y: csrmvn_lrb_scale_long_rows ran first, on this stream. The flag only lets the
+            // other workgroups add after the first has started. It does not publish y.
             const J        first_wg_in_row = gid - wg;
             const uint32_t compare_value   = wg_flags[gid];
 
-            // wg_flags[first_wg_in_row] in the first workgroup is the flag that everyone waits on.
             if(gid == first_wg_in_row && lid == 0)
             {
-                // The first workgroup handles the output initialization.
-                // y is not read when beta is 0, so that a NaN in y does not reach the result.
-                temp_sum = static_cast<T>(0);
-                if(beta != static_cast<T>(0))
-                {
-                    temp_sum = (beta - static_cast<T>(1)) * static_cast<T>(y[row]);
-                }
-                else
-                {
-                    rocsparse::csrmv_publish_row_zero(
-                        y, static_cast<int64_t>(row), static_cast<int64_t>(m));
-                }
-
-                // The zero above is an atomic store in the same domain as the waiters' atomic adds.
-                // This fence publishes it, and the read of y when beta is not 0, before the flag
-                // flips. The waiters take a matching acquire before their atomic updates of y.
-                // When beta is not 0 the atomics on y and the flag are the only communication, and
-                // workgroup scope only keeps the compiler from reordering them.
-#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
-                __threadfence();
-#else
-                if(beta == static_cast<T>(0))
-                {
-                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-                }
-                else
-                {
-                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                    __builtin_amdgcn_s_waitcnt(0);
-                }
-#endif
-
-                // Release other workgroups
                 atomicXor(&wg_flags[first_wg_in_row], 1U);
             }
 
@@ -1460,35 +1308,12 @@ namespace rocsparse
                     while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
                         ;
 
-                    // With beta = 0 the first workgroup published y with an atomic store. Take an
-                    // agent-scope acquire, matching its release, before the atomics on y.
-                    if(beta == static_cast<T>(0))
-                    {
-                        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
-                    }
-
                     // After you've passed the barrier, update your local flag to make sure that
                     // the next time through, you know what to wait on.
                     wg_flags[gid] ^= 1U;
                 }
 
-                T extra_sum = partialSums[0];
-
-                // Add contributions from all extra vectors (only for the first workgroup)
-                if(gid == first_wg_in_row)
-                {
-                    for(rocsparse_int i = 0; i < num_extra; ++i)
-                    {
-                        T gamma = gamma_device_array[i];
-                        if(gamma != static_cast<T>(0))
-                        {
-                            extra_sum = rocsparse::fma<T>(
-                                gamma, rocsparse::nontemporal_load(z_arrays[i] + row), extra_sum);
-                        }
-                    }
-                }
-
-                rocsparse::atomic_add(y, row, m, extra_sum);
+                rocsparse::atomic_add(y, row, m, partialSums[0]);
             }
         };
 
