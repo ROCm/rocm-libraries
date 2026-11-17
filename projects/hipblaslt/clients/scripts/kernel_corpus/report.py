@@ -43,6 +43,7 @@ STATUS_ORDER = (
     "crash",
     "timeout",
     "refused",
+    "expected_refusal",
     "skip",
     "unsupported",
     "deferred",
@@ -60,11 +61,18 @@ _ORACLE_REFUSAL = re.compile(
 )
 
 
+# hipblaslt-test throws, before it calls the library, for a pre-swizzled MX layout its data
+# generator cannot build (testing_matmul.hpp). The case then says nothing about the kernel.
+_CLIENT_LAYOUT_REFUSAL = re.compile(
+    r"Received uncaught exception: (HIPBLASLT_ORDER_\w+ requires|MX scales require)"
+)
+
+
 def classify_failure(message: str, fault: bool = False) -> str:
     """The outcome of a gtest FAILED case from its output."""
     if "NO solution found!" in message:
         return "refused"
-    if _ORACLE_REFUSAL.search(message) and not fault:
+    if (_ORACLE_REFUSAL.search(message) or _CLIENT_LAYOUT_REFUSAL.search(message)) and not fault:
         return "unsupported"
     return "fail"
 
@@ -88,9 +96,21 @@ def load_results(out: Path) -> dict[str, dict]:
 def case_from_row(row: dict) -> Optional[plan.Case]:
     if row.get("shape") is None or "types" not in row:
         return None
-    shape = plan.Shape(row["shape"], row["m"], row["n"], row["k"], row.get("batch", 1))
+    lda, ldb, ldd = row.get("ld") or (None, None, None)
+    shape = plan.Shape(
+        row["shape"], row["m"], row["n"], row["k"], row.get("batch", 1), lda, ldb, ldd
+    )
     trans = row.get("trans", "NN")
-    return plan.Case(row["index"], row.get("name", ""), shape, row["types"], trans[0], trans[1])
+    return plan.Case(
+        row["index"],
+        row.get("name", ""),
+        shape,
+        row["types"],
+        trans[0],
+        trans[1],
+        row.get("args") or {},
+        row.get("expect", "pass"),
+    )
 
 
 def first_line(text: str, needle: str = "") -> str:
@@ -109,7 +129,14 @@ def failure_reason(row: dict) -> str:
         return "hung (no output before the case timeout)"
     if row["status"] == "crash":
         return "process crashed"
-    for needle in ("fast_check", "mismatch", "expected", "Failure"):
+    for needle in (
+        "[runner]",
+        "post_bench_verify_iters failed",
+        "fast_check",
+        "mismatch",
+        "expected",
+        "Failure",
+    ):
         line = first_line(message, needle)
         if line:
             return line
@@ -136,8 +163,9 @@ def summarize(
             return "failing"
         if statuses["known_fail"]:
             return "known failing"
-        if statuses["pass"]:
-            return "passing" if statuses["pass"] == sum(statuses.values()) else "partly passing"
+        as_planned = statuses["pass"] + statuses["expected_refusal"]
+        if as_planned:
+            return "passing" if as_planned == sum(statuses.values()) else "partly passing"
         if statuses["refused"] and not statuses["skip"]:
             return "refused every case"
         return "not tested"
