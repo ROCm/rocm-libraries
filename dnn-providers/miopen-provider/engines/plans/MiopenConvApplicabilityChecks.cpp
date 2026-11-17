@@ -399,7 +399,9 @@ bool sumFits(int64_t a, int64_t b)
 // `dims` (non-negative, with a product that fits, see saturatingExtent) and any `strides`: it
 // sums the terms (dim - 1) * stride in dim order, starting from 0, and then adds 1 to the sum. The
 // check replays exactly that arithmetic, so it declines only strides that overflow it and accepts
-// every stride, negative ones included, that the helper evaluates without overflow.
+// every stride, negative ones included, that the helper evaluates without overflow. The test
+// PackingVerdictAgreesWithIsTensorPacked pins that the replay and the helper agree on strides that
+// do not overflow and have no broadcast axis.
 bool packingArithmeticFits(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     int64_t space = 0;
@@ -447,9 +449,11 @@ TensorInfo readTensor(const char* operation, const char* name, const TensorAttri
     // tensor has that many elements, so decline before computing anything. A zero dim does not
     // decline here, but that is not acceptance of every empty tensor: the canonical strides of a
     // zero dim are 0 for every dim before it, so a zero that is not the leading dim leaves a zero
-    // stride on an earlier dim of extent above 1, a broadcast axis. Such a tensor is never packed
-    // (isTensorPacked) and its stride order matches neither layout (classifyLayout), so the layout
-    // check below declines it. An empty leading dim with canonical strides is accepted.
+    // stride on every earlier dim. It declines only when one of those earlier dims has an extent
+    // above 1: that dim is then a broadcast axis, so the tensor is not packed (isTensorPacked) and
+    // its stride order matches neither layout (classifyLayout), and the layout check below
+    // declines it. When every earlier dim has extent 1 the tensor is packed with canonical
+    // strides, as is an empty leading dim, and is accepted.
     if(saturatingExtent(operation, name, attr) == std::numeric_limits<int64_t>::max())
     {
         decline(prefix + " has dims whose element count reaches the 64-bit limit");
