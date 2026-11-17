@@ -594,7 +594,8 @@ RING_CF_TILES = {
 }
 # Dilated 3x3 ring rows on the 16-bit 32 x 32 atoms of gfx908 to gfx942 (xcd 0) also at 4 blocks per
 # dispatch unit: gfx942 MI325X 128^2 d24 4.01 against 5.56 ms at 2, d36 4.58 / 4.73, 65^2 d12
-# 1.60 / 1.70; gfx90a 65^2 d36 9.44 / 9.50 (bpu only sets the split count: no new program).
+# 1.60 / 1.70; gfx90a 65^2 d36 9.44 / 9.50 (bpu only sets the split count: no new program). Both
+# layouts.
 BPU4_RING_ROWS = {"3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36"}
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
 # FMA tiles per filter row where FMA32's 32-position steps overflow the LDS (a stride-8 window
@@ -1341,7 +1342,7 @@ def build():
                         if (
                             tag in BPU4_RING_ROWS
                             and c["loop"] == 1
-                            and c["layout"] == CF
+                            and c["layout"] in (CF, CL)
                             and c["atom"] in ("mfma32_f16", "mfma32_bf16")
                             and not any(v["bpu"] == 4 for v in variants)
                         ):
