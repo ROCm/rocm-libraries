@@ -714,19 +714,27 @@ namespace
     void run_qr_uniform_scale(rocsparse_handle               handle,
                               rocsparse_gtsv_interleaved_alg alg,
                               int32_t                        m,
-                              double                         scale)
+                              double                         scale,
+                              bool                           zero_dl = false,
+                              bool                           zero_du = false)
     {
         std::ostringstream trace;
         trace << "qr alg=" << static_cast<int>(alg) << " m=" << m << " scale=" << std::scientific
               << scale;
+        if(zero_dl)
+            trace << " dl=0";
+        if(zero_du)
+            trace << " du=0";
         SCOPED_TRACE(trace.str());
 
         std::vector<T> dl(m), d(m), du(m), rhs(m), want(m);
         for(int32_t j = 0; j < m; ++j)
         {
-            dl[j]   = (j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale) : make_value<T>(0.0);
+            dl[j]   = (!zero_dl && j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale)
+                                           : make_value<T>(0.0);
             d[j]    = make_value<T>(4.0 * scale, 0.3 * scale);
-            du[j]   = (j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale) : make_value<T>(0.0);
+            du[j]   = (!zero_du && j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale)
+                                              : make_value<T>(0.0);
             want[j] = make_value<T>(static_cast<double>(j + 1) / 7.0,
                                     0.2 * static_cast<double>(j + 1) / 7.0);
         }
@@ -825,6 +833,21 @@ TEST_F(PrecondTridiagonal, interleaved_qr_uniform_scale_keeps_solution)
             run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0);
             run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e200);
             run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e-200);
+        }
+    }
+
+    // Every subset of {dl, du} is dropped. The diagonal stays nonzero, so the system
+    // stays nonsingular and the solution is known. Bits, from low to high, are dl, du.
+    for(const auto alg : algs)
+    {
+        for(int mask = 0; mask < 4; ++mask)
+        {
+            const bool zero_dl = mask & 1;
+            const bool zero_du = mask & 2;
+            run_qr_uniform_scale<float>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<double>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
         }
     }
 }

@@ -53,8 +53,17 @@ namespace
         std::vector<T> ds, dl, d, du, dw, rhs, want;
     };
 
+    // A true member drops that whole off-diagonal band. The diagonal is never dropped.
+    struct zero_bands_t
+    {
+        bool ds;
+        bool dl;
+        bool du;
+        bool dw;
+    };
+
     template <typename T>
-    scaled_system_t<T> make_scaled_system(int32_t m, double scale)
+    scaled_system_t<T> make_scaled_system(int32_t m, double scale, zero_bands_t zero = {})
     {
         scaled_system_t<T> s;
         s.ds.resize(m);
@@ -66,11 +75,15 @@ namespace
         s.want.resize(m);
         for(int32_t j = 0; j < m; ++j)
         {
-            s.ds[j] = (j >= 2) ? make_value<T>(-0.2 * scale, 0.1 * scale) : make_value<T>(0.0);
-            s.dl[j] = (j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale) : make_value<T>(0.0);
+            s.ds[j] = (!zero.ds && j >= 2) ? make_value<T>(-0.2 * scale, 0.1 * scale)
+                                           : make_value<T>(0.0);
+            s.dl[j] = (!zero.dl && j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale)
+                                           : make_value<T>(0.0);
             s.d[j]  = make_value<T>(4.0 * scale, 0.3 * scale);
-            s.du[j] = (j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale) : make_value<T>(0.0);
-            s.dw[j] = (j < m - 2) ? make_value<T>(0.3 * scale, 0.15 * scale) : make_value<T>(0.0);
+            s.du[j] = (!zero.du && j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale)
+                                              : make_value<T>(0.0);
+            s.dw[j] = (!zero.dw && j < m - 2) ? make_value<T>(0.3 * scale, 0.15 * scale)
+                                              : make_value<T>(0.0);
             s.want[j] = make_value<T>(static_cast<double>(j + 1) / 7.0,
                                       0.2 * static_cast<double>(j + 1) / 7.0);
         }
@@ -125,14 +138,23 @@ namespace
     void run_uniform_scale(rocsparse_handle               handle,
                            rocsparse_gpsv_interleaved_alg alg,
                            int32_t                        m,
-                           double                         scale)
+                           double                         scale,
+                           zero_bands_t                   zero = {})
     {
         std::ostringstream trace;
         trace << "api alg=" << static_cast<int>(alg) << " m=" << m << " scale=" << std::scientific
               << scale;
+        if(zero.ds)
+            trace << " ds=0";
+        if(zero.dl)
+            trace << " dl=0";
+        if(zero.du)
+            trace << " du=0";
+        if(zero.dw)
+            trace << " dw=0";
         SCOPED_TRACE(trace.str());
 
-        const auto       s = make_scaled_system<T>(m, scale);
+        const auto       s = make_scaled_system<T>(m, scale, zero);
         device_vector<T> dds{pad(s.ds)}, ddl{pad(s.dl)}, dd{pad(s.d)}, ddu{pad(s.du)},
             ddw{pad(s.dw)}, dx{pad(s.rhs)};
         ASSERT_TRUE(dds.ptr && ddl.ptr && dd.ptr && ddu.ptr && ddw.ptr && dx.ptr);
@@ -248,6 +270,26 @@ TEST_F(PrecondGpsvInterleaved, uniform_scale_keeps_solution)
             run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0);
             run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e200);
             run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e-200);
+        }
+    }
+
+    // Every subset of {ds, dl, du, dw} is dropped. The diagonal stays nonzero, so the
+    // system stays nonsingular and the solution is known. Bits, from low to high, are
+    // ds, dl, du, dw. ds = dl = 0 makes the first complex Givens rotation (0, 0), which
+    // used to divide by a zero hypotenuse, and skips the real Householder reflector.
+    for(const auto alg : algs)
+    {
+        for(int mask = 0; mask < 16; ++mask)
+        {
+            const zero_bands_t zero{static_cast<bool>(mask & 1),
+                                    static_cast<bool>(mask & 2),
+                                    static_cast<bool>(mask & 4),
+                                    static_cast<bool>(mask & 8)};
+
+            run_uniform_scale<float>(handle, alg, 4, 1.0, zero);
+            run_uniform_scale<double>(handle, alg, 4, 1.0, zero);
+            run_uniform_scale<rocsparse_float_complex>(handle, alg, 4, 1.0, zero);
+            run_uniform_scale<rocsparse_double_complex>(handle, alg, 4, 1.0, zero);
         }
     }
 }
