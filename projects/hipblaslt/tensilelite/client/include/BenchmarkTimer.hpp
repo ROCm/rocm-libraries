@@ -53,6 +53,19 @@ namespace TensileLite
                            Hardware const&          hardware,
                            float                    flushTimeUs);
 
+            // True when the arguments rule out any timed enqueue: no syncs, a zero enqueue cap,
+            // or no enqueues requested either by count or by flops.
+            static bool nothingIsTimed(po::variables_map const& args);
+
+            // True when validateWarmups waits for the last warmup: sync-after-warmups is set
+            // and something is timed. With nothing timed the sync protects nothing.
+            static bool syncsAfterWarmups(po::variables_map const& args);
+
+            // True when the warmup timing events may be read: postWarmup reads them when the
+            // skip-slow ratio is set, validateWarmups when syncsAfterWarmups(). Kept whenever
+            // something is timed.
+            static bool readsWarmupEvents(po::variables_map const& args);
+
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
             virtual void postBenchmarkRun() override;
@@ -114,6 +127,7 @@ namespace TensileLite
             const bool m_syncAfterWarmups = true;
             const int  m_sleepPercent;
             const bool m_csvExportExtraCols;
+            const bool m_nothingTimed;
 
             int m_numBenchmarksRun = 0;
 

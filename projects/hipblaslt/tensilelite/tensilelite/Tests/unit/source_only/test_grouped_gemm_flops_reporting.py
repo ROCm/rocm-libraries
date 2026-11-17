@@ -36,11 +36,10 @@ _BENCHMARK_TIMER_PATH = _REPO_ROOT / "client" / "src" / "BenchmarkTimer.cpp"
 _PROGRESS_LISTENER_PATH = _REPO_ROOT / "client" / "src" / "ProgressListener.cpp"
 
 _GROUPED_POST_SOLUTION_FLOPS_RE = re.compile(
-    r"if\(auto problem = dynamic_cast<ContractionProblemGroupedGemm\*>\(m_problem\)\)\s*\{"
-    r".*?flopCount = 0\.0;"
-    r".*?for\(auto& gemm : problem->gemms\)"
-    r".*?flopCount \+= gemm\.flopCount\(\);",
-    re.DOTALL,
+    r"double flopCount = 0;\s*"
+    r"if\(auto problem = dynamic_cast<ContractionProblemGroupedGemm\*>\(m_problem\)\)\s*\{\s*"
+    r"for\(auto& gemm : problem->gemms\)\s*"
+    r"flopCount \+= gemm\.flopCount\(\);",
 )
 
 _GROUPED_TOTAL_FLOPS_REPORT_RE = re.compile(
