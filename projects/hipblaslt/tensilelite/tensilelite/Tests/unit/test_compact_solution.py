@@ -163,6 +163,14 @@ def test_unknown_key_falls_back_and_promotes(parsed):
     compact["codeObjectFile"] = "later"
     assert compact._hydrated._state["codeObjectFile"] == "later"
 
+    # Mapping queries must keep using the promoted object too.
+    hydrated = compact.hydrate()
+    assert len(compact) == len(hydrated)
+    assert set(compact) == set(hydrated)
+    assert compact.keys() == hydrated.keys()
+    assert compact.hydrate() is hydrated
+    assert CS.fallbackReads == before + CS.PROMOTE_AFTER
+
 
 def test_pickle_round_trip_keeps_summary_absence_and_overlay(parsed):
     real, compact = _realAndCompact(parsed)

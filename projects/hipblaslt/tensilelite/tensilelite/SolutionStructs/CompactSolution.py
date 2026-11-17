@@ -217,6 +217,8 @@ class CompactSolution(Mapping):
         return sol
 
     def _fallback(self):
+        if self._hydrated is not None:
+            return self._hydrated
         global fallbackReads
         fallbackReads += 1
         self._misses += 1
