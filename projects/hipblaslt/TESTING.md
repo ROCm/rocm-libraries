@@ -57,7 +57,8 @@ the library logic YAML; the client GTest suite on gfx90a, gfx942, gfx950 and gfx
 Python unit and characterization suites, and their coverage floor; and `pre-commit`.
 
 **What does not gate, despite appearances.** The AddressSanitizer lanes run on every hipBLASLt pull
-request, but none of them is a required check. Pull requests are not benchmarked, so there is no
+request, but none of them is a required check. The JIT lane (build and tests on gfx942 and gfx950)
+runs on pull requests that touch JIT code and is not required either. Pull requests are not benchmarked, so there is no
 performance signal on a change to gate on. The gating job named `static-analysis` is a
 sensitive-word scan for disclosure rather than a code analyzer, and no static analysis runs on the
 C++ library on a pull request from any source.
@@ -686,7 +687,7 @@ the C++ build and test.
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
 | AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant PRs and pushes to `develop`, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
-| JIT build and tests (gfx942 / gfx950) | Yes, when a JIT path is touched | Component team / CI | Enforced by the `Component CI: hipBLASLt JIT` lane (`.github/workflows/component-ci-hipblaslt-jit.yml`, checks named `JIT (gfx942)` and `JIT (gfx950)`), which rolls up to the required `Component CI Summary`. It builds the host library with JIT on, runs the `jit-cpu` tests with every GPU hidden and the `jit-gpu` tests on one GPU runner per architecture, then builds without JIT and runs that build's `jit-cpu` tests. `component_ci.py` selects it from the changed paths, and a manual Component CI run includes it. A fork pull request skips the GPU jobs. Reproduce a failure locally from [clients/tests/jit/README.md](clients/tests/jit/README.md) |
+| JIT build and tests (gfx942 / gfx950) | Yes, when a JIT path is touched | Component team / CI | Enforced by the `Component CI: hipBLASLt JIT` lane (`.github/workflows/component-ci-hipblaslt-jit.yml`, checks named `JIT (gfx942)` and `JIT (gfx950)`), which rolls up to the required `Component CI Summary`. It builds the host library with `HIPBLASLT_ENABLE_JIT=ON`, then runs the `jit-cpu` tests with every GPU hidden and the `jit-gpu` tests, on one GPU runner per architecture. It then builds the library without JIT and runs that build's `jit-cpu` and `jit-gpu` tests the same way. `component_ci.py` selects it from the JIT sources and tests, the rocBLASLt call sites of the heuristic query, the TensileLite provider-row, caching, serialization and `ContractionSolution` sources, `GlobalParameters.py`, and the workflow file. A manual Component CI run includes it. A fork pull request skips the GPU jobs. Reproduce a failure locally from [clients/tests/jit/README.md](clients/tests/jit/README.md) |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Enforced by the `Component CI: TensileLite coverage` lane, which rolls up to the required `Component CI Summary`. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |

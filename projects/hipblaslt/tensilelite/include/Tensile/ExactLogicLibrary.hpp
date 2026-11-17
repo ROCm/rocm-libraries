@@ -35,6 +35,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ProviderRows.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <tensilelitehost/export.h>
@@ -310,6 +311,7 @@ namespace TensileLite
                 (forceDynamic == 1) ||
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
+            const auto providers = currentProviderRows();
 
             const bool meshbasedLib = Debug::Instance().useMeshBasedLibrary();
             bool       hasMeshBased = false;
@@ -337,6 +339,10 @@ namespace TensileLite
                     continue;
 
                 if(hasMeshBased && row.first.value->type() == "PredictionMatching")
+                    continue;
+
+                if(providers != ProviderRows::All
+                   && skipsProviderRow(providers, row.first.value->type()))
                     continue;
 
                 if(row.first(problem, hardware))

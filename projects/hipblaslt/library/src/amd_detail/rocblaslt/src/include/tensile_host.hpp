@@ -292,6 +292,20 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const&  prob,
                                   const TensileLite::ProblemOverride* tuningKey,
                                   bool*                               layoutRuledOut = nullptr);
 
+#ifdef HIPBLASLT_ENABLE_JIT
+// getBestSolutions for one result, ranked as a one-result heuristic query, so a
+// matmul that passed no algorithm can run a JIT index. count is 0 or 1.
+rocblaslt_status selectDefaultContractionAlgo(rocblaslt_handle                   handle,
+                                              RocblasltContractionProblem const& prob,
+                                              std::shared_ptr<void>              gemmData,
+                                              rocblaslt_matmul_heuristic_result& result,
+                                              int&                               count,
+                                              SolutionLookup lookup = SolutionLookup::PerDispatch,
+                                              const TensileLite::ProblemOverride* tuningKey
+                                              = nullptr,
+                                              bool* layoutRuledOut = nullptr);
+#endif
+
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
@@ -314,6 +328,10 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
                                        int                               requestedAlgoCount,
                                        size_t                            maxWorkSpaceBytes);
 
+#ifdef HIPBLASLT_ENABLE_JIT
+// The GEMM problem captured for gemmData, or null when this execution has none.
+const RocblasltContractionProblem* savedGemmProblem(const std::shared_ptr<void>& gemmData);
+#endif
 TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
