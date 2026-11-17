@@ -15,7 +15,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _SCRIPT = (
-    pathlib.Path(__file__).resolve().parents[3]
+    pathlib.Path(__file__).resolve().parents[4]
     / "scripts"
     / "check_no_absolute_imports.py"
 )

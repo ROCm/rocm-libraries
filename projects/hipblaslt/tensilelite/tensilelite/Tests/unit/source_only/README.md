@@ -9,7 +9,8 @@ classified these checkout dependencies here:
   `test_release_wheel_contents.py`;
 - developer Invoke workflows: `test_install_task.py`;
 - checkout-only developer scripts: `test_aggregate_timing.py`, `test_analyze_timing.py`,
-  `test_lcov_dir_summary.py`, `test_memwatch.py` and `test_precommit_affected_tests.py`;
+  `test_check_no_absolute_imports.py`, `test_lcov_dir_summary.py`, `test_memwatch.py` and
+  `test_precommit_affected_tests.py`;
 - source/AST and cross-component inspection: `test_canonical_imports.py`,
   `test_client_header_resolution.py`, `test_EnableESM2TrackValuVsrc.py`,
   `test_PlaceholderMerge.py`, and `test_specs_amdsmi.py`.
