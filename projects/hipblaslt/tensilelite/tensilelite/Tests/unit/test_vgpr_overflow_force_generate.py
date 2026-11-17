@@ -216,12 +216,12 @@ class TestForceGenerateKernel:
     def _writer(self, error, forceGenerateKernel):
         # _getKernelSource also records the kernel's own CustomKernel metadata, so a
         # SimpleNamespace standing in for a real writer must carry what that path
-        # reads: the arg-registration hook, the kernel name and the collected arg
-        # definitions. A real KernelWriter always has all three.
+        # reads: the arg-registration hook, the kernel name, the collected arg
+        # definitions and the arch caps. A real KernelWriter always has all four.
         return SimpleNamespace(
             _initKernel=lambda kernel, tPA, tPB: None,
             _registerKernelArgs=lambda kernel: None,
-            states=SimpleNamespace(kernelName="test_kernel"),
+            states=SimpleNamespace(kernelName="test_kernel", archCaps={}),
             kernelArgDefs=[],
             stringIdx=0,
             kernelBody=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),

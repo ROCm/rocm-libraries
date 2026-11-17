@@ -80,6 +80,7 @@ from .Common.ValidParameters import resolveSwInstructionPrefetch, \
 from .Common.LdsReadPlan import effective_lrvw_tile, effective_lrvw_unroll, \
   force_lrvw_tile_one
 from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
+from .SgprHazards import insertSgprHazardWaits
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -12798,7 +12799,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     else:
       (error, kb) = self.kernelBodySubtile(kernel, tensorParametersA, tensorParametersB)
 
-    fileString += str(kb)
+    kb = str(kb)
+    if self.states.archCaps.get("HasVALUReadSGPRHazard", 0):
+      kb, numWaits = insertSgprHazardWaits(kb)
+      print2(f"  {numWaits} s_wait_alu added for gfx12 SGPR read hazards")
+    fileString += kb
 
     if isPersistentDataParallel(kernel) or isStreamKSpatialCluster(kernel):
       # rocisa emits the outer ABI version. Persistent kernels with a newer
