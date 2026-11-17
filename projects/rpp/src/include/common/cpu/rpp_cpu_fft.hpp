@@ -279,8 +279,23 @@ inline void rpp_simd_fft_radix2_forward(Rpp64f* re, Rpp64f* im, Rpp32s len,
         const Rpp32s half = size >> 1;
         const Rpp32s step = len / size;
         for (Rpp32s i = 0; i < len; i += size) {
-            Rpp32s k = 0;
-            for (Rpp32s j = i; j < i + half; j++, k += step) {
+            // The first butterfly of every block uses tw[0], which is exactly 1, so its twiddle
+            // multiply is skipped. That is the whole of the size == 2 stage, half of size == 4,
+            // and len - 1 of the (len/2) * log2(len) butterflies overall.
+            {
+                Rpp64f* reLo = re + i * 4;
+                Rpp64f* imLo = im + i * 4;
+                Rpp64f* reHi = re + (i + half) * 4;
+                Rpp64f* imHi = im + (i + half) * 4;
+                const __m256d tr = _mm256_loadu_pd(reHi), ti = _mm256_loadu_pd(imHi);
+                const __m256d ur = _mm256_loadu_pd(reLo), ui = _mm256_loadu_pd(imLo);
+                _mm256_storeu_pd(reHi, _mm256_sub_pd(ur, tr));
+                _mm256_storeu_pd(imHi, _mm256_sub_pd(ui, ti));
+                _mm256_storeu_pd(reLo, _mm256_add_pd(ur, tr));
+                _mm256_storeu_pd(imLo, _mm256_add_pd(ui, ti));
+            }
+            Rpp32s k = step;
+            for (Rpp32s j = i + 1; j < i + half; j++, k += step) {
                 const __m256d wr = _mm256_set1_pd(tw[k].real());
                 const __m256d wi = _mm256_set1_pd(tw[k].imag());
                 Rpp64f* reLo = re + j * 4;
@@ -298,6 +313,26 @@ inline void rpp_simd_fft_radix2_forward(Rpp64f* re, Rpp64f* im, Rpp32s len,
             }
         }
     }
+}
+
+// One output bin of the real-input recombination: X = Ze + W * Zo, where Ze = (a + b) / 2 and
+// Zo = -i * (a - b) / 2. The caller passes b already conjugated.
+inline void rpp_simd_fft_recombine(const RppFftComplex& w, __m256d ar, __m256d ai, __m256d br,
+                                   __m256d bi, Rpp64f* outRe, Rpp64f* outIm) {
+    const __m256d zero = _mm256_setzero_pd();
+    const __m256d pointFive = _mm256_set1_pd(0.5);
+    const __m256d wr = _mm256_set1_pd(w.real());
+    const __m256d wi = _mm256_set1_pd(w.imag());
+    const __m256d zer = _mm256_mul_pd(pointFive, _mm256_add_pd(ar, br));
+    const __m256d zei = _mm256_mul_pd(pointFive, _mm256_add_pd(ai, bi));
+    const __m256d dr = _mm256_mul_pd(pointFive, _mm256_sub_pd(ar, br));
+    const __m256d di = _mm256_mul_pd(pointFive, _mm256_sub_pd(ai, bi));
+    const __m256d zor = di;  // Zo = -i * d
+    const __m256d zoi = _mm256_sub_pd(zero, dr);
+    _mm256_storeu_pd(
+        outRe, _mm256_sub_pd(_mm256_add_pd(zer, _mm256_mul_pd(wr, zor)), _mm256_mul_pd(wi, zoi)));
+    _mm256_storeu_pd(
+        outIm, _mm256_add_pd(_mm256_add_pd(zei, _mm256_mul_pd(wr, zoi)), _mm256_mul_pd(wi, zor)));
 }
 
 // SIMD counterpart of rpp_cpu_fft_forward_real: transforms four real signals of length n at
@@ -318,7 +353,35 @@ inline void rpp_simd_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* c
     }
 
     const Rpp32s h = n / 2;
-    for (Rpp32s k = 0; k < h; k++) {
+    // Packing is a 4 x h transpose with an even/odd split: lane l reads consecutive pairs from
+    // in[l] and they land interleaved across lanes. Four k at a time, so each lane contributes
+    // one 256-bit vector and a 4x4 transpose puts them in place. Widening float to double is
+    // exact, and the shuffles only move data, so this packs the same bits as the scalar form.
+    Rpp32s k = 0;
+    if (inLen >= n) {
+        for (; k + 4 <= h; k += 4) {
+            __m256d evenD[4], oddD[4];
+            for (Rpp32s l = 0; l < 4; l++) {
+                const __m128 v0 = _mm_loadu_ps(in[l] + 2 * k);
+                const __m128 v1 = _mm_loadu_ps(in[l] + 2 * k + 4);
+                evenD[l] = _mm256_cvtps_pd(_mm_shuffle_ps(v0, v1, _MM_SHUFFLE(2, 0, 2, 0)));
+                oddD[l] = _mm256_cvtps_pd(_mm_shuffle_ps(v0, v1, _MM_SHUFFLE(3, 1, 3, 1)));
+            }
+            for (Rpp32s pass = 0; pass < 2; pass++) {
+                const __m256d* src = pass ? oddD : evenD;
+                Rpp64f* dst = (pass ? scratchIm : scratchRe) + k * 4;
+                const __m256d t0 = _mm256_unpacklo_pd(src[0], src[1]);
+                const __m256d t1 = _mm256_unpackhi_pd(src[0], src[1]);
+                const __m256d t2 = _mm256_unpacklo_pd(src[2], src[3]);
+                const __m256d t3 = _mm256_unpackhi_pd(src[2], src[3]);
+                _mm256_storeu_pd(dst, _mm256_permute2f128_pd(t0, t2, 0x20));
+                _mm256_storeu_pd(dst + 4, _mm256_permute2f128_pd(t1, t3, 0x20));
+                _mm256_storeu_pd(dst + 8, _mm256_permute2f128_pd(t0, t2, 0x31));
+                _mm256_storeu_pd(dst + 12, _mm256_permute2f128_pd(t1, t3, 0x31));
+            }
+        }
+    }
+    for (; k < h; k++) {
         const Rpp32s e = 2 * k, o = e + 1;
         for (Rpp32s l = 0; l < 4; l++) {
             scratchRe[k * 4 + l] = (e < inLen) ? (Rpp64f)in[l][e] : 0.0;
@@ -335,24 +398,16 @@ inline void rpp_simd_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* c
     _mm256_storeu_pd(outRe + h * 4, _mm256_sub_pd(z0r, z0i));
     _mm256_storeu_pd(outIm + h * 4, zero);
 
-    const __m256d pointFive = _mm256_set1_pd(0.5);
-    for (Rpp32s k = 1; k < h; k++) {
-        const __m256d wr = _mm256_set1_pd(plan.twiddles[k].real());
-        const __m256d wi = _mm256_set1_pd(plan.twiddles[k].imag());
+    // Bins k and h - k are built from the same two scratch entries, so pairing them halves the
+    // loads. Each bin keeps its own twiddle and its own arithmetic, so the results are unchanged.
+    // Sequential walk over bins, loading both scratch entries each time. Pairing k with h - k
+    // halves the loads but splits the stores into two opposing streams, which measured slower.
+    for (k = 1; k < h; k++) {
         const __m256d ar = _mm256_loadu_pd(scratchRe + k * 4);
         const __m256d ai = _mm256_loadu_pd(scratchIm + k * 4);
         const __m256d br = _mm256_loadu_pd(scratchRe + (h - k) * 4);
         const __m256d bi = _mm256_sub_pd(zero, _mm256_loadu_pd(scratchIm + (h - k) * 4));
-        const __m256d zer = _mm256_mul_pd(pointFive, _mm256_add_pd(ar, br));
-        const __m256d zei = _mm256_mul_pd(pointFive, _mm256_add_pd(ai, bi));
-        const __m256d dr = _mm256_mul_pd(pointFive, _mm256_sub_pd(ar, br));
-        const __m256d di = _mm256_mul_pd(pointFive, _mm256_sub_pd(ai, bi));
-        const __m256d zor = di;  // Zo = -i * d
-        const __m256d zoi = _mm256_sub_pd(zero, dr);
-        _mm256_storeu_pd(outRe + k * 4, _mm256_sub_pd(_mm256_add_pd(zer, _mm256_mul_pd(wr, zor)),
-                                                      _mm256_mul_pd(wi, zoi)));
-        _mm256_storeu_pd(outIm + k * 4, _mm256_add_pd(_mm256_add_pd(zei, _mm256_mul_pd(wr, zoi)),
-                                                      _mm256_mul_pd(wi, zor)));
+        rpp_simd_fft_recombine(plan.twiddles[k], ar, ai, br, bi, outRe + k * 4, outIm + k * 4);
     }
 }
 
