@@ -297,7 +297,7 @@ absolute `k_out`. With `groups == 1` the group terms vanish (`cpg == C`,
 
 ### RDNA4 forward knobs (gfx1200 / gfx1201)
 
-- The RDNA4 AOT grid adds a tile_k 128 axis after the base geometries (all three directions); other arches are unchanged.
+- The RDNA4 AOT grid adds a tile_k 128 axis after the base geometries (forward only); other arches are unchanged.
 - `uniform_k_decode` (`ukd`): a K loop that carries the tile's `(c0, x, y)` as scalar iteration arguments when `cpg % tile_k == 0` (no magic division per load), followed by the plain loop for the other problems; WMMA `mem`, 2-D.
 - `regt_prefetch = 1` (`rtp1`, gfx12 RDNA only): the next K tile's global loads are issued into registers before the current tile's MMAs and stored to LDS after them; tiles past the reduction end read zero. Combines with `uniform_k_decode`.
 - `lds_swizzle` (`lxs`): unpadded A/B LDS rows whose 8-element chunks are XOR-permuted per row (`lds_col_xor_params`), applied by the tile stores and the fragment reads alike; WMMA `mem`, sync loaders, `tile_k` 16..128.

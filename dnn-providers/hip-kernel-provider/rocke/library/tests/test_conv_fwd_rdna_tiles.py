@@ -182,7 +182,7 @@ class TestFwdRdnaGrid(unittest.TestCase):
         n_knob = sum(1 for r in CACHE_FWD_RDNA4_KNOB_ROWS if r[2] == 128)
         self.assertEqual(len(jobs), len(plain) + n_knob)
 
-    def test_tile_k_128_axis_is_rdna4_only_and_appended(self):
+    def test_tile_k_128_axis_is_rdna4_forward_only_and_appended(self):
         from kernels.conv.aot_jobs import CACHE_TILE_K, _geometries, _grid_axes
         from rocke.core.arch import ArchTarget
 
@@ -197,7 +197,7 @@ class TestFwdRdnaGrid(unittest.TestCase):
                     t = ArchTarget.from_gfx(arch)
                     geos = list(_geometries(t, family, "fp16", "fp16", direction))
                     deep = [i for i, g in enumerate(geos) if g[2] == 128]
-                    self.assertEqual(bool(deep), rdna4)
+                    self.assertEqual(bool(deep), rdna4 and direction == "fwd")
                     if deep:
                         # One contiguous block after every geometry of the
                         # base product (the direction's tile and warp axes at
