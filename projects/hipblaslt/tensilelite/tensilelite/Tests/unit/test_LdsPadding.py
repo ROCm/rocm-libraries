@@ -234,6 +234,136 @@ def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                               xf32EmuPack=True, lrvwTile=vw) == pad
 
 
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+@pytest.mark.parametrize("entry", ["config", "valid_blocks"])
+def test_native_fp32_padding_rejects_unvalidated_tile_width(lrvwTile, entry):
+    kwargs = dict(mt=128, vw=4, lrvw=2, miWaveGroup=2,
+                  miInputPerThread=2, miWaveTile=4, matrixInstK=4,
+                  usesTDM=True, xf32EmuPack=False, lrvwTile=lrvwTile)
+    with pytest.raises(RuntimeError, match="native FP32.*lrvwTile=1.*LdsPadding.py"):
+        if entry == "config":
+            get_fp32_mt_config(key="pad", **kwargs)
+        else:
+            _L.get_fp32_valid_blocks(**kwargs)
+
+
+@pytest.fixture
+def fp32_lds_kernel(assembler, gfx1250_iim):
+    import copy
+    from codegen_harness import _init_rocisa_for, _prepare_kernel
+    from config_harness import _isolated_globals_with_isa
+    from tensilelite.Common.GlobalParameters import defaultSolution
+    from tensilelite.Common.Types import DebugConfig, IsaVersion
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Problem import ProblemType
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+
+    def make(*, xf32=False, vw=4, pad=-1, block=-1):
+        isa = IsaVersion(12, 5, 0)
+        mi = [16, 16, 32 if xf32 else 4, 1, 1, 4, 4, 2, 2]
+        problem = dict(OperationType="GEMM", DataType="S", DestDataType="S",
+                       ComputeDataType="S", F32XdlMathOp="X" if xf32 else "S",
+                       TransposeA=False, TransposeB=True, Batched=True)
+        problem = ProblemType(problem, False).state
+        params = copy.deepcopy(defaultSolution)
+        params.update(ProblemType=problem, ISA=isa, MatrixInstruction=mi,
+                      KernelLanguage="Assembly", WavefrontSize=32, DepthU=64,
+                      TDMInst=3, TransposeLDS=-1, SourceSwap=True,
+                      VectorWidthA=vw, VectorWidthB=vw, LocalReadVectorWidth=-1,
+                      GlobalReadVectorWidthA=1, GlobalReadVectorWidthB=1,
+                      LdsPadA=pad, LdsPadB=pad,
+                      LdsBlockSizePerPadA=block, LdsBlockSizePerPadB=block,
+                      PrefetchGlobalRead=2, PrefetchLocalRead=1,
+                      ScheduleIterAlg=4, StaggerU=0, GlobalSplitU=1)
+        params.update({"1LDSBuffer": 0})
+        params.update(matrixInstructionToMIParameters(
+            mi, isa, 32, problem, params["WorkGroup"], gfx1250_iim, True))
+        solution = Solution(params, False, True, False, assembler, gfx1250_iim)
+        assert solution["Valid"]
+        kernel, = generateKernelObjectsFromSolutions([solution])
+        _init_rocisa_for(kernel)
+        _prepare_kernel(kernel)
+        writer = KernelWriterAssembly(assembler, DebugConfig())
+        tPA, tPB = {}, {}
+        writer._initKernel(kernel, tPA, tPB)
+        return writer, kernel, {"A": tPA, "B": tPB}
+
+    with _isolated_globals_with_isa(gfx1250_iim):
+        yield make
+
+
+@pytest.mark.parametrize("xf32", [False, True])
+@pytest.mark.parametrize("vw", [1, 2, 4])
+def test_fp32_padding_supported_codegen_widths(fp32_lds_kernel, xf32, vw):
+    writer, kernel, tensors = fp32_lds_kernel(xf32=xf32, vw=vw)
+    expected = vw if xf32 else 1
+    assert kernel["UseF32XEmulation"] == xf32
+    for tc, tensor in tensors.items():
+        assert kernel[f"enableTDM{tc}"]
+        assert not kernel[f"UnrollMajorLDS{tc}"]
+        assert getattr(writer.states, f"lrvwTile{tc}") == expected
+        assert tensor["localReadInstruction"].inst.__name__ == f"DSLoadB{32 * expected}"
+
+
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+def test_native_fp32_solution_rejects_widened_read_policy(
+        fp32_lds_kernel, monkeypatch, lrvwTile):
+    import importlib
+    solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
+    monkeypatch.setattr(solution_module, "effective_lrvw_tile", lambda **kwargs: lrvwTile)
+    with pytest.raises(RuntimeError, match="native FP32.*lrvwTile=1.*LdsPadding.py"):
+        fp32_lds_kernel()
+
+
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+def test_native_fp32_codegen_rejects_matching_wide_instruction(
+        fp32_lds_kernel, lrvwTile):
+    writer, kernel, tensors = fp32_lds_kernel()
+    for tc, tensor in tensors.items():
+        assert kernel[f"LdsPad{tc}"] > 0
+        setattr(writer.states, f"lrvwTile{tc}", lrvwTile)
+        with pytest.raises(RuntimeError, match="native FP32.*lrvwTile=1.*LdsPadding.py"):
+            writer.initLocalReadMemoryInstruction(
+                writer.memoryInstructions, kernel, tensor, writer.states.bpr)
+        actual = tensor["localReadInstruction"]
+        assert actual.inst.__name__ == f"DSLoadB{32 * lrvwTile}", tc
+        assert actual.blockWidth == lrvwTile, tc
+
+
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+@pytest.mark.parametrize("block", [-1, 0])
+def test_native_fp32_zero_padding_allows_matching_wide_instruction(
+        fp32_lds_kernel, monkeypatch, lrvwTile, block):
+    import importlib
+    solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
+    monkeypatch.setattr(solution_module, "effective_lrvw_tile", lambda **kwargs: lrvwTile)
+    writer, kernel, tensors = fp32_lds_kernel(pad=0, block=block)
+    for tc, tensor in tensors.items():
+        assert kernel[f"LdsPad{tc}"] == 0
+        assert kernel[f"LdsBlockSizePerPad{tc}"] == 0
+        setattr(writer.states, f"lrvwTile{tc}", lrvwTile)
+        writer.initLocalReadMemoryInstruction(
+            writer.memoryInstructions, kernel, tensor, writer.states.bpr)
+        actual = tensor["localReadInstruction"]
+        assert actual.inst.__name__ == f"DSLoadB{32 * lrvwTile}", tc
+        assert actual.blockWidth == lrvwTile, tc
+
+
+def test_zero_padding_still_rejects_instruction_width_mismatch(
+        fp32_lds_kernel, monkeypatch):
+    writer, kernel, tensors = fp32_lds_kernel(pad=0)
+    b32_index = next(i for i, instruction in enumerate(writer.memoryInstructions["LocalRead"])
+                     if instruction.inst.__name__ == "DSLoadB32")
+    monkeypatch.setattr(writer, "selectMemoryInstruction", lambda *args: b32_index)
+    for tc, tensor in tensors.items():
+        setattr(writer.states, f"lrvwTile{tc}", 4)
+        with pytest.raises(RuntimeError, match=f"FP32 LDS padding/read instruction mismatch for {tc}"):
+            writer.initLocalReadMemoryInstruction(
+                writer.memoryInstructions, kernel, tensor, writer.states.bpr)
+
+
 # MX
 @pytest.mark.parametrize(
     "mxBlock, vw, perBlock, pad",

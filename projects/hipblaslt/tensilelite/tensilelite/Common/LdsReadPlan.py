@@ -126,3 +126,12 @@ def fp32_lds_read_bytes(lrvwTile: int) -> int:
   if lrvwTile not in (1, 2, 4):
     raise ValueError(f"FP32 LDS padding does not model lrvwTile={lrvwTile}")
   return lrvwTile * 4
+
+
+def validate_gfx1250_fp32_lds_read_width(lrvwTile: int,
+                                        useF32XEmulation: bool) -> None:
+  if not useF32XEmulation and lrvwTile != 1:
+    raise RuntimeError(
+        "gfx1250 tile-major TDM native FP32 LDS padding is only validated for "
+        f"lrvwTile=1 (got {lrvwTile}). Update LdsPadding.py and its regression "
+        "tests before enabling wider native FP32 local reads.")

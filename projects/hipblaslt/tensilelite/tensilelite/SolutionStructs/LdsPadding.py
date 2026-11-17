@@ -53,6 +53,7 @@ from ..Common.LdsReadPlan import (
     gfx1250_lds_offset_bytes,
     local_read_input_per_thread,
     make_local_read_loop_plan,
+    validate_gfx1250_fp32_lds_read_width,
 )
 
 # Common.ValidParameters reads these too, so a yaml can name what is picked here.
@@ -628,6 +629,8 @@ def _fp32_shapes(mt: int, vw: int, lrvw: int, miWaveGroup: int,
                  matrixInstK: int, usesTDM: bool,
                  xf32EmuPack: bool = False,
                  matrixInstM: int = 16, *, lrvwTile: int) -> tuple:
+  if usesTDM:
+    validate_gfx1250_fp32_lds_read_width(lrvwTile, xf32EmuPack)
   main = _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                      matrixInstK, usesTDM, xf32EmuPack, matrixInstM,
                      lrvwTile=lrvwTile)

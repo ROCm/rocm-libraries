@@ -5106,6 +5106,8 @@ class Solution(collections.abc.Mapping):
                                             tdmNumComponents=tdmNumComponents)
                   # Same rule as the pad above.
                   elif tmpBpe == 4 and state.get(f"enableTDM{tc}", False):
+                    if state[f"LdsPad{tc}"] == 0:
+                      return 0
                     LdsBlockSizePerPad = get_fp32_mt_config(mt, "perBlock",
                                             state[f"VectorWidth{tc}"], lrvw, miwg,
                                             miInputPerThread=state[f"MIInputPerThread{tc}"],
