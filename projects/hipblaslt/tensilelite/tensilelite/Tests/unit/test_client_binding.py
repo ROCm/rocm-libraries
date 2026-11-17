@@ -17,7 +17,8 @@ import tensilelite_configure_client as configure_client
 
 pytestmark = pytest.mark.unit
 
-_SOURCE_REVISION = Path(__file__).resolve().parents[2] / "_source_revision.py"
+# Installed test artifacts keep tests separate from the package's wheel.
+_SOURCE_REVISION = binding._package_dir() / "_source_revision.py"
 _SHA = "0123456789abcdef0123456789abcdef01234567"
 _OTHER_SHA = "89abcdef0123456789abcdef0123456789abcdef"
 _DIRTY = f"{_SHA}.dirty.00a1b2c3d4e5"
@@ -450,7 +451,7 @@ def _fake_query_client(path, revision):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "#!/bin/sh\n"
-        "case \"$1\" in\n"
+        'case "$1" in\n'
         f"  --source-revision) echo {revision} ;;\n"
         "  --build-rocm) echo '7.2.4 base' ;;\n"
         "esac\n",
@@ -479,7 +480,9 @@ def test_default_client_candidate_skips_a_client_from_another_commit(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="uses a POSIX test executable")
 def test_default_client_candidate_reports_every_client_from_another_commit(tmp_path):
     installation = _installation(tmp_path)
-    candidates = [tmp_path / name / binding.client_executable_name() for name in ("first", "second")]
+    candidates = [
+        tmp_path / name / binding.client_executable_name() for name in ("first", "second")
+    ]
     for candidate in candidates:
         _fake_query_client(candidate, _OTHER_SHA)
 
@@ -624,6 +627,7 @@ def test_exactly_one_source_revision_missing_rejects_pairing(
         assert expected_hint in message
     else:
         assert "tensilelite-configure-client" in message
+
 
 
 @pytest.mark.parametrize("editable", [False, True])
