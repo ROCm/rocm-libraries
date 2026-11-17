@@ -1515,9 +1515,11 @@ __device__ I laed4_alt(I n,
         for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
+            S zt = Z(j) * temp;
+            psi = psi + zt;
             dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            // weight each term by its serial prefix multiplicity (iterations remaining)
+            erretm = erretm + zt * S(ii - j + 1);
         }
         stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -1608,9 +1610,11 @@ __device__ I laed4_alt(I n,
         for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
+            S zt = Z(j) * temp;
+            psi = psi + zt;
             dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            // weight each term by its serial prefix multiplicity (iterations remaining)
+            erretm = erretm + zt * S(ii - j + 1);
         }
         stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -1695,9 +1699,11 @@ __device__ I laed4_alt(I n,
             for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
             {
                 temp = Z(j) / DELTA(j);
-                psi = psi + Z(j) * temp;
+                S zt = Z(j) * temp;
+                psi = psi + zt;
                 dpsi = dpsi + temp * temp;
-                erretm = erretm + psi;
+                // weight each term by its serial prefix multiplicity (iterations remaining)
+                erretm = erretm + zt * S(ii - j + 1);
             }
             stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
@@ -1825,9 +1831,11 @@ __device__ I laed4_alt(I n,
         for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
+            S zt = Z(j) * temp;
+            psi = psi + zt;
             dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            // weight each term by its serial prefix multiplicity (iterations remaining)
+            erretm = erretm + zt * S(iim1 - j + 1);
         }
         stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -1840,9 +1848,11 @@ __device__ I laed4_alt(I n,
         for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
-            phi = phi + Z(j) * temp;
+            S zt = Z(j) * temp;
+            phi = phi + zt;
             dphi = dphi + temp * temp;
-            erretm2 = erretm2 + phi;
+            // weight each term by its serial prefix multiplicity (iterations remaining)
+            erretm2 = erretm2 + zt * S(j - iip1 + 1);
         }
         stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
         erretm += erretm2;
@@ -2010,9 +2020,11 @@ __device__ I laed4_alt(I n,
         for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
+            S zt = Z(j) * temp;
+            psi = psi + zt;
             dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            // weight each term by its serial prefix multiplicity (iterations remaining)
+            erretm = erretm + zt * S(iim1 - j + 1);
         }
         stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -2025,9 +2037,11 @@ __device__ I laed4_alt(I n,
         for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
         {
             temp = Z(j) / DELTA(j);
-            phi = phi + Z(j) * temp;
+            S zt = Z(j) * temp;
+            phi = phi + zt;
             dphi = dphi + temp * temp;
-            erretm2 = erretm2 + phi;
+            // weight each term by its serial prefix multiplicity (iterations remaining)
+            erretm2 = erretm2 + zt * S(j - iip1 + 1);
         }
         stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
         erretm += erretm2;
@@ -2222,9 +2236,11 @@ __device__ I laed4_alt(I n,
             for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
             {
                 temp = Z(j) / DELTA(j);
-                psi = psi + Z(j) * temp;
+                S zt = Z(j) * temp;
+                psi = psi + zt;
                 dpsi = dpsi + temp * temp;
-                erretm = erretm + psi;
+                // weight each term by its serial prefix multiplicity (iterations remaining)
+                erretm = erretm + zt * S(iim1 - j + 1);
             }
             stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
@@ -2237,9 +2253,11 @@ __device__ I laed4_alt(I n,
             for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
             {
                 temp = Z(j) / DELTA(j);
-                phi = phi + Z(j) * temp;
+                S zt = Z(j) * temp;
+                phi = phi + zt;
                 dphi = dphi + temp * temp;
-                erretm2 = erretm2 + phi;
+                // weight each term by its serial prefix multiplicity (iterations remaining)
+                erretm2 = erretm2 + zt * S(j - iip1 + 1);
             }
             stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
             erretm += erretm2;
