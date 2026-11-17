@@ -2700,3 +2700,50 @@ TEST(GPU_HipdnnShimBNDeclined_FP32, UnsupportedProblemsAreDeclinedWithReason)
                                 "{1, C, H, W, ...}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Process exit
+
+namespace {
+
+miopenHandle_t exit_handle = nullptr;
+
+// Forwards one training call on a handle that an atexit handler destroys. The
+// handler is registered before that call, so it runs after the destructor of
+// every static the call creates, the plan cache included, and its miopenDestroy
+// then erases the handle's plans from a cache that must still be alive. Asking
+// whether forwarding is on loads hipDNN and its plugins first, so their statics
+// outlive the handler. Returns the exit code for the child process.
+int ForwardThenExitWithLiveHandle()
+{
+    static_cast<void>(hs::ForwardingEnabled());
+    if(std::atexit([] { miopenDestroy(exit_handle); }) != 0)
+        return 2;
+    if(miopenCreate(&exit_handle) != miopenStatusSuccess)
+        std::_Exit(3);
+
+    TrainData d;
+    SetUpTrain(d);
+    return TrainV1(miopen::deref(exit_handle), d) == miopenStatusSuccess ? 0 : 4;
+}
+
+} // namespace
+
+// MIOpen never frees its plan cache because a handle destroyed while the process
+// tears down still erases its plans from it. The call runs in a fresh process, so
+// the cache is created by the call itself: threadsafe death-test style re-execs
+// this binary instead of forking it.
+TEST(GPU_HipdnnShimBNExit_FP32, HandleDestroyedDuringTeardownExitsCleanly)
+{
+#ifdef GTEST_FLAG_SET
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+#else
+    GTEST_FLAG(death_test_style) = "threadsafe";
+#endif
+    // GoogleTest 1.11's EXPECT_EXIT switches over a two-value enum with a
+    // default label, and the warning lands on this expansion site.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcovered-switch-default"
+    EXPECT_EXIT(std::exit(ForwardThenExitWithLiveHandle()), testing::ExitedWithCode(0), "");
+#pragma clang diagnostic pop
+}
