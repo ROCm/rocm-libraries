@@ -136,6 +136,8 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_size the number of rows or columns of
 *               \p mat_A differs from \p mat_B. For blocked ELL, a descriptor
 *               whose rows or columns were rounded up past the dense size is rejected.
+*               The same status is returned when the workspace size for the blocked ELL
+*               block-row count does not fit in \p size_t.
 *
 *  \par Example
 *  \snippet example_rocsparse_dense_to_sparse.cpp doc example
