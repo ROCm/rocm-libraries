@@ -52,7 +52,7 @@ Two things about that diagram are worth saying out loud.
 
 **Folding only happens with hints off.** Hint-following exists to reproduce the producer's numbering. Folding two blocks the producer kept apart leaves them with no hint they agree on, so the run would stop reproducing anything, which is the one thing it is for.
 
-**A fold never decides whether a kernel colours.** Folding asks placement for one long run of registers where two shorter runs would have done. If that is what refused the colouring, the whole run is retried with folding off. A soft rule may make a colouring better; it may not make it impossible.
+**A fold never decides whether a kernel colours.** Folding asks placement for one long run of registers where two shorter runs would have done. If that is what refused the colouring, the whole run is retried with folding off. A soft rule may make a colouring better; it may not make it impossible. When the retry refuses too, its refusal is the one returned, with the folded attempt's own appended on a `with folding:` line, so a fold that ran and also failed does not read like no fold at all.
 
 ## 3. It places blocks, not values
 
@@ -134,7 +134,7 @@ flowchart LR
 
 That first row is the neat part: because folding means "one register", asking a rule about a key against *itself* asks exactly the right question. Nothing in the allocator needs to know what any rule means.
 
-Folding cannot produce a wrong colouring — two values are folded only when their ranges are disjoint at every register they would share. It can only ask more of placement, which is what the retry in section 2 is for.
+Folding cannot produce a wrong colouring — two values are folded only when their ranges are disjoint at every register they would share. It can only ask more of placement, which is what the retry in section 2 is for, and a refusal after that retry still says where the folded attempt stopped.
 
 ## 5. Order
 

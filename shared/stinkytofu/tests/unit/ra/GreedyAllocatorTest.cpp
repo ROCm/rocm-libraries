@@ -927,6 +927,33 @@ TEST_F(GreedyAllocatorTest, AFoldThatCannotBePlacedGivesWayRatherThanRefusing) {
         << coloured->toString();
 }
 
+TEST_F(GreedyAllocatorTest, ARetryThatAlsoRefusesStillSaysWhereTheFoldStopped) {
+    // The same function with only v0..v3 left. The folded block still has base
+    // 0 alone, which v0 holds, and once folding gives way the four-wide
+    // destination has no base either. The retry's refusal is the one the caller
+    // reads, so it has to carry the folded attempt's too, or a fold that ran and
+    // failed looks exactly like no fold at all.
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/60, /*src0=*/0, /*src1=*/0);
+    dsLoad(entry, /*dest=*/10, /*width=*/2, /*addr=*/50);
+    dsLoad(entry, /*dest=*/12, /*width=*/4, /*addr=*/11);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/61, /*src0=*/12, /*src1=*/13);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/62, /*src0=*/0, /*src1=*/0);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup paired(*func, RegClassSet::only(RegType::V), {},
+                           addressPairingWithOneWideBase());
+    keepOnlyFirstVgprs(paired, 4);
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(paired.context());
+
+    ASSERT_TRUE(coloured.hasError());
+    const std::string& error = coloured.getError();
+    EXPECT_TRUE(error.starts_with("@kernel: ")) << error;
+    EXPECT_TRUE(contains(error, "\n    with folding: no v register is free")) << error;
+    EXPECT_FALSE(contains(error, "with folding: @")) << error;
+}
+
 TEST_F(GreedyAllocatorTest, APairingPullsABlockOffTheRegisterFirstFitWouldTake) {
     // v300 is a live-in that stays at its register and dies at the add, so that
     // register is free for the destination afterwards. The destination has no
