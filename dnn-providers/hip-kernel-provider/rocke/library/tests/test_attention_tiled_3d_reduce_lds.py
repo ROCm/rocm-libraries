@@ -20,33 +20,18 @@ from pathlib import Path
 
 import pytest
 
+from . import hkp_pack_headers
 from ._compiler_test_utils import require_tools_or_skip
-
-# An installed test tree carries a copy of the two headers under ``hkp_packs/``
-# (the rocKE umbrella CMake project installs it); a source checkout reads the provider's.
-_PACKS_DIRS = (
-    Path(__file__).resolve().parent / "hkp_packs",
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "engines"
-    / "kernel_ingestor_engine"
-    / "packs",
-)
-# Named like hipdnn_assets.py's ``_INSTALLED``: the installed copy's root.
-_INSTALLED_PACKS_DIR = _PACKS_DIRS[0]
-_GEOMETRY_HEADERS = (
-    "Gfx950AttentionDenseGeometry.hpp",
-    "Gfx950AttentionUnified3DGeometry.hpp",
-)
 
 
 def _packs_dir(config) -> Path:
     """The headers' directory. Skips when neither copy exists, unless
     ``--rocke-require-hkp-pack-headers`` is given (the installed CTest entry passes it
-    whenever it installed the copy), so a broken header install fails instead."""
-    for d in _PACKS_DIRS:
-        if all((d / h).is_file() for h in _GEOMETRY_HEADERS):
-            return d
+    whenever it installed the copy, and so does ``run_all.py``), so a broken header
+    install fails instead."""
+    found = hkp_pack_headers.find()
+    if found is not None:
+        return found
     reason = "hip-kernel-provider pack headers are neither installed nor in a checkout"
     if config.getoption("--rocke-require-hkp-pack-headers"):
         pytest.fail(reason)
@@ -60,11 +45,11 @@ def test_installed_pack_headers_imply_require_flag(request):
     ``platform/tests/tools/test_sdpa_asset_cmake_contract.py`` checks the CMake
     wiring both ways; this is the in-lane half. A source checkout has no copy, so
     it skips."""
-    if not _INSTALLED_PACKS_DIR.is_dir():
+    if not hkp_pack_headers.installed_copy_present():
         pytest.skip("not an installed tree: no hkp_packs/ header copy")
     assert request.config.getoption(
         "--rocke-require-hkp-pack-headers"
-    ), f"{_INSTALLED_PACKS_DIR} is installed but --rocke-require-hkp-pack-headers was not given"
+    ), f"{hkp_pack_headers.INSTALLED} is installed but --rocke-require-hkp-pack-headers was not given"
 
 
 def _reduce(num_segments: int):
@@ -103,7 +88,7 @@ def _compiled_lds_bytes(kernel, arch: str) -> int:
         except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
             require_tools_or_skip(f"HSACO introspection tool unavailable: {e}")
     if lds is None:  # pragma: no cover - metadata shape drift
-        pytest.skip("could not parse group_segment_fixed_size from HSACO")
+        require_tools_or_skip("could not parse group_segment_fixed_size from HSACO")
     return lds
 
 
