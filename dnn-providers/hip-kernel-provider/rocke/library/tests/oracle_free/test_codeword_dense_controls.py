@@ -152,6 +152,13 @@ def test_one_row_past_a_query_tile_overruns_by_the_rest_of_the_tile(
     print(f"{label}: {format_codeword_result(result)}")
     block_m = codeword_schedule(subject).block_m
     overrun = (block_m - 1) * case.nhead_q * case.head_dim
+    # A kernel that bounds its stores by the query length is not defective, but
+    # it leaves this control without an overrun to show.
+    assert result.violations, (
+        f"{label}: every logical row is stored and nothing is written after the "
+        "tensor, so the kernel now bounds its stores by the query length; the "
+        "suffix channel then needs an emitted control in place of this one"
+    )
     assert result.safety == StoreSafety(0, overrun, 0, 0), (
         f"{label}: expected exactly {overrun} guard elements changed after the "
         f"tensor and nothing else; {format_codeword_result(result)}"

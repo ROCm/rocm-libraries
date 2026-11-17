@@ -253,6 +253,31 @@ def run_codeword_control(
         return run_codeword_case(arch, case, q, k, v, subject=subject)
 
 
+def row_bound_query_length(case: UniformCase, kernel_spec) -> int:
+    """Query length of the row-bound control: one row past one whole query tile.
+
+    The gate runs whatever schedule dispatch resolves. This control asks two
+    things more of it and refuses, as a failure, a schedule without them. Its
+    exact overrun is derived for the non-persistent runtime-shape grid, which is
+    sized with a ceiling and takes the query length as a kernel argument. And
+    the query tile must be shorter than the case, so that the control's rows are
+    the first rows of the case: past the last key a causal row has the legal
+    keys of the row before it, and the codeword cannot tell the two apart."""
+    if kernel_spec.persistent or not kernel_spec.runtime_shape:
+        raise AssertionError(
+            "the row-bound control requires the non-persistent runtime-shape "
+            f"grid, got persistent={kernel_spec.persistent!r}, "
+            f"runtime_shape={kernel_spec.runtime_shape!r}"
+        )
+    block_m = int(kernel_spec.block_m)
+    if block_m >= case.seqlen_q:
+        raise AssertionError(
+            "the row-bound control requires a query tile shorter than the case, "
+            f"got block_m={block_m} with seqlen_q={case.seqlen_q}"
+        )
+    return block_m + 1
+
+
 def row_bound_bypass_spec(arch: str, case: UniformCase):
     """The shipped kernel spec of ``case`` with one query row past a whole tile.
 
@@ -261,14 +286,8 @@ def row_bound_bypass_spec(arch: str, case: UniformCase):
     query length is overwritten on a copy of the constructed shipped spec: every
     other field, and with them the compiled kernel, stays the shipped one."""
     spec = resolve_codeword_subject(arch, case).tuning_spec.kernel_spec
-    if spec.persistent or not spec.runtime_shape:
-        raise AssertionError(
-            "the row-bound control requires the non-persistent runtime-shape "
-            f"grid, got persistent={spec.persistent!r}, "
-            f"runtime_shape={spec.runtime_shape!r}"
-        )
     mutant = copy.copy(spec)
-    object.__setattr__(mutant, "seqlen_q", int(spec.block_m) + 1)
+    object.__setattr__(mutant, "seqlen_q", row_bound_query_length(case, spec))
     return mutant
 
 

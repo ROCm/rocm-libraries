@@ -71,6 +71,7 @@ from ._codeword_controls import (
     lowered_ir,
     private_build,
     row_bound_bypass_spec,
+    row_bound_query_length,
 )
 from ._codeword_policy import (
     CODEWORD_KILL_MATRIX,
@@ -944,7 +945,17 @@ def test_masked_leading_tile_rows_keep_their_cell_under_the_residue_bound() -> N
     from its rounding boundaries than that bound. This holds on every tile
     geometry, and the causal case has no such row."""
     window, causal = _PAIRING_CASES
-    relative, residue = Fraction(1, (1 << 17) - 1), Fraction(1, 1 << 141)
+    relative = Fraction(1, (1 << 17) - 1)
+    # The residue is the masked keys' lane sum times the masked exponential. A
+    # lane's magnitudes total less than 2**14 over all keys, so the residue is
+    # below 2**-135 in the numerator and 2**-141 after the exact division by 64.
+    largest = max(
+        total for dim in range(window.head_dim) for total in _lane_totals(window, dim)
+    )
+    numerator_residue = Fraction(1, 1 << 135)
+    assert largest * Fraction(MASKED_EXPONENTIALS[1]) < numerator_residue
+    residue = numerator_residue / window.window
+    assert residue == Fraction(1, 1 << 141)
 
     def keeps_cell(value: Fraction) -> bool:
         bound = relative * abs(value) + residue
@@ -1759,6 +1770,34 @@ def test_emitted_control_refuses_what_it_cannot_keep_inside_the_tensor() -> None
         )
 
 
+def _fake_kernel_spec(**overrides) -> SimpleNamespace:
+    spec = SimpleNamespace(persistent=False, runtime_shape=True, block_m=128)
+    for name, value in overrides.items():
+        setattr(spec, name, value)
+    return spec
+
+
+def test_row_bound_control_states_what_it_requires_of_the_schedule() -> None:
+    """Unlike the gate, the row-bound control does not run on every schedule. It
+    follows the resolved query tile, and it refuses the persistent grid and a
+    query tile as long as the case, as a failure."""
+    window, causal = (case for _, case in CODEWORD_ROW_BOUND_CASES)
+    assert (window.mask, causal.mask) == ("window", "causal")
+    assert row_bound_query_length(causal, _fake_kernel_spec()) == 129
+    assert row_bound_query_length(causal, _fake_kernel_spec(block_m=64)) == 65
+    with pytest.raises(AssertionError, match=r"persistent=True"):
+        row_bound_query_length(causal, _fake_kernel_spec(persistent=True))
+    with pytest.raises(AssertionError, match=r"runtime_shape=False"):
+        row_bound_query_length(causal, _fake_kernel_spec(runtime_shape=False))
+    for case in (window, causal):
+        with pytest.raises(AssertionError, match=r"block_m=256 with seqlen_q=256"):
+            row_bound_query_length(case, _fake_kernel_spec(block_m=256))
+    # Why the tile must be shorter than the case: one row past 256 rows is past
+    # the last key, where a causal row keeps the legal keys of the row before.
+    with pytest.raises(ValueError, match=r"first rows 255 and 256"):
+        require_codeword_scope(replace(causal, seqlen_q=257))
+
+
 @pytest.mark.parametrize("control", CODEWORD_ROW_BOUND_CASES, ids=_subject_case_id)
 def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
     control: tuple[str, UniformCase],
@@ -1803,7 +1842,15 @@ def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
     require_codeword_scope(ragged)
     schedule = TileSchedule(int(shipped.block_m), int(shipped.block_n))
     layout = guard_layout(ragged, schedule)
-    assert (layout.guard, layout.logical) == (65536, 129 * 8 * 64)
+    # The counts follow the resolved query tile, so a retune of it moves them
+    # instead of failing here.
+    block_m, row = schedule.block_m, case.nhead_q * case.head_dim
+    suffix = (block_m - 1) * row
+    assert (layout.guard, layout.logical) == (block_m * row, (block_m + 1) * row)
+    assert suffix < layout.guard
+    # At the query tile of 128 rows that the derivation's tables are written for.
+    if block_m == _DERIVED_SCHEDULE.block_m:
+        assert (layout.guard, layout.logical, suffix) == (65536, 66048, 65024)
     raw = layout.new_buffer()
     raw[layout.guard : layout.guard + layout.logical] = codeword_target_bits(
         ragged
@@ -1813,5 +1860,5 @@ def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
         ragged, schedule, CodewordMutation.ROW_BOUND_BYPASS, stored
     )
     result = analyze_codeword(ragged, overrun, path_exact_admissible(ragged))
-    assert result.safety == StoreSafety(0, 65024, 0, 0)
+    assert result.safety == StoreSafety(0, suffix, 0, 0)
     assert result.channels == frozenset({Channel.SUFFIX})

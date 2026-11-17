@@ -83,7 +83,10 @@ def _judge_output(
     label: str, case: UniformCase, schedule: TileSchedule, output: GuardedOutput
 ) -> CodewordResult:
     """Require the exact verdict on one guarded output, and require every owned
-    mutation of that same output to be rejected through its channel."""
+    mutation of that same guarded output to be rejected through its channel.
+
+    Placement and store mutations act on the stored outputs. The numerical ones
+    replace them, so their rejection does not depend on what was stored."""
     admissible = path_exact_admissible(case)
     control = analyze_codeword(case, output, admissible)
     for mutation in applicable_mutations(case):

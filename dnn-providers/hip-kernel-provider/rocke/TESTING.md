@@ -225,7 +225,7 @@ the strategy's biggest holes live (see
   allocated between two guards. It requires every stored bit to equal the
   correctly rounded mean over the legal keys and four store-safety counts to
   be zero, so a wrong batch, head, row or dimension address, a dropped store or
-  a write outside the tensor fails it. Each owned mutation of the kernel's own
+  a write outside the tensor fails it. Each owned mutation of the kernel's guarded
   output must be rejected, and so must one privately built mutant kernel per
   seam, including the shipped kernel launched one query row past a whole tile.
 

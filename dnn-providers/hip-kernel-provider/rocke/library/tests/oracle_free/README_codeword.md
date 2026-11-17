@@ -137,9 +137,13 @@ presumed missing store.
 
 ## Mutation self-checks
 
-On every run, each owned mutation is applied to the kernel's own output and the
-analyzer must reject it through the channel named here, or the test fails. A
-mutation is applied only on the cases that can separate it.
+On every run, each owned mutation is applied to the kernel's guarded output and
+the analyzer must reject it through the channel named here, or the test fails.
+A placement or store mutation moves or removes the outputs the kernel stored.
+The three numerical ones (`v_token_plus_one` and the two denominator mutations)
+replace them with the outputs of the defective arithmetic, so they do not depend
+on what the kernel stored. A mutation is applied only on the cases that can
+separate it.
 
 | Mutation | Seam | Channel | Cases |
 |---|---|---|---|
@@ -206,7 +210,16 @@ the copy differs from the shipped spec in `seqlen_q` only, keeps the shipped
 launcher-cache key and lowers to the shipped IR. Q is padded to whole tiles.
 The launch must store every logical row correctly and change exactly
 `(block_m - 1) * Hq * D` guard elements after the tensor, 65024 on the `(8, 2)`
-cases, and nothing else.
+cases at a query tile of 128 rows, and nothing else.
+
+Unlike the gate, this control does not run on every schedule. `block_m` is read
+from the resolved spec, so a retune of it moves the expected count. But the
+count is derived for the non-persistent runtime-shape grid, and the query tile
+must be shorter than the case, so that the control's rows are the first rows of
+the case. A resolved spec on the persistent grid, or with `block_m` equal to the
+case's 256 rows, fails the control before any launch. So does a kernel that
+bounds its stores by the query length: it has no overrun to show, and the
+`suffix` channel then needs an emitted control.
 
 ## Scope
 
@@ -225,8 +238,8 @@ as a failure and never a skip, it refuses:
   not cover;
 - an architecture other than gfx942: the derivation is for that kernel body.
 
-Nothing about tuning is pinned, and no measured value defines or enlarges what
-is admitted.
+The gate pins nothing about tuning, and no measured value defines or enlarges
+what is admitted. The row-bound control is narrower, as stated with it.
 
 ### Limit of the codeword
 
