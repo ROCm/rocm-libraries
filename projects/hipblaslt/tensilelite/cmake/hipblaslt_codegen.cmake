@@ -272,8 +272,10 @@ function(create_device_library)
         TOOL_BIN_DIRS ${_tool_bin_dirs}
         ${_python_flags}
     )
+    set(_uses_configured_python FALSE)
     if(HIPBLASLT_PYTHON_COMMAND AND NOT _cdl_PYTHON_EXECUTABLE)
         set(_python_command ${HIPBLASLT_PYTHON_COMMAND})
+        set(_uses_configured_python TRUE)
     endif()
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
@@ -341,11 +343,22 @@ function(create_device_library)
     # Both codegen steps glob their logic inputs at run time, so without an
     # explicit file list nothing invalidates the stamps and edits ship stale
     # kernels. CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches
-    # edits. The generator itself is the unpacked wheel: its stamp changes
-    # only when the wheel does, which already depends on the generator sources.
+    # edits. The configured wheel command uses its unpack stamp; source-based
+    # commands, including explicit interpreter overrides, track source resources.
     file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
          "${_cdl_LOGIC_PATH}/*.yaml")
-    list(APPEND _codegen_dependencies ${_logic_files} ${HIPBLASLT_PYTHON_INPUTS})
+    set(_codegen_sources "")
+    if(_uses_configured_python AND HIPBLASLT_PYTHON_INPUTS)
+        list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_INPUTS})
+    else()
+        file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
+             "${_codegen_dir}/tensilelite/*.py"
+             "${_codegen_dir}/tensilelite/*.h"
+             "${_codegen_dir}/tensilelite/*.s")
+        list(FILTER _codegen_sources EXCLUDE REGEX "/tensilelite/Tests/")
+        list(APPEND _codegen_dependencies ${_codegen_sources})
+    endif()
+    list(APPEND _codegen_dependencies ${_logic_files})
 
     # ninja only compares mtimes of inputs that still exist, so a *removed* file
     # leaves the stamp clean (nothing is newer), as does a file added with an
@@ -354,7 +367,7 @@ function(create_device_library)
     # rewritten only when the set changes, and that rewrite dirties the stamp.
     # file(GLOB_RECURSE) orders results lexicographically.
     set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-inputs.manifest")
-    string(JOIN "\n" _manifest_content ${_logic_files})
+    string(JOIN "\n" _manifest_content ${_logic_files} ${_codegen_sources})
     # file(CONFIGURE) rewrites only when the content differs.
     file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_content}\n" @ONLY)
     list(APPEND _codegen_dependencies "${_manifest}")

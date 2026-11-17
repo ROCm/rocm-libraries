@@ -183,16 +183,6 @@ def test_codegen_imports_tensilelite_from_the_unpacked_wheel(tmp_path, therock):
     assert source_entries == ["/src/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor"]
 
 
-def test_codegen_depends_on_the_wheel_not_on_source_globs():
-    codegen = _CODEGEN_HELPER.read_text(encoding="utf-8")
-    python_cmake = _CMAKE_HELPER.read_text(encoding="utf-8")
-
-    assert "_codegen_sources" not in codegen
-    assert "${HIPBLASLT_PYTHON_INPUTS}" in codegen
-    assert "install_release_wheels.py" in python_cmake
-    assert "pip install" not in python_cmake
-
-
 def test_device_codegen_uses_the_configured_python_command(tmp_path):
     output = _configured_codegen_command(tmp_path)
 

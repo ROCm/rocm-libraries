@@ -8,6 +8,8 @@ classified these checkout dependencies here:
   `test_packaging_metadata.py`, `test_release_metadata.py`, and
   `test_release_wheel_contents.py`;
 - developer Invoke workflows: `test_install_task.py`;
+- CMake generation dependencies: `test_incremental_codegen_dependencies.py`
+  exercises source resources, canonical-wheel stamps and native ExtOps inputs;
 - checkout-only developer scripts: `test_aggregate_timing.py`, `test_analyze_timing.py`,
   `test_check_no_absolute_imports.py`, `test_lcov_dir_summary.py` and
   `test_precommit_affected_tests.py`;
