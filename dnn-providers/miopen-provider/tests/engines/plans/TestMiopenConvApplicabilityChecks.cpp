@@ -343,11 +343,6 @@ void expectDeclined(const ConvCase& tensors,
     }
 }
 
-void expectForwardAccepted(const TensorSpec& x, const TensorSpec& w, const TensorSpec& y)
-{
-    expectAccepted(forwardCase("forward", x, w, y), FORWARD_OPS);
-}
-
 void expectForwardDeclined(const TensorSpec& x,
                            const TensorSpec& w,
                            const TensorSpec& y,
