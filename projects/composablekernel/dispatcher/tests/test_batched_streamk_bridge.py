@@ -233,8 +233,14 @@ class TestBatchedCtypesSource(unittest.TestCase):
         text = self.SRC.read_text()
         self.assertIn("std::void_t<typename Kernel::StreamKGemmKernel>", text)
         self.assertIn("ck_tile::StreamKHostArgs args{", text)
-        self.assertIn('std::getenv("CK_TILE_STREAMK_BUDGET_PCT")', text)
         self.assertIn("k_batch must be 1", text)
+        # The budget is parsed as strictly as in the single-problem Stream-K lib.
+        self.assertIn('#include "streamk_budget_env.hpp"', text)
+        self.assertIn("parse_streamk_budget_pct(budget_pct)", text)
+        streamk_src = (self.SRC.parent / "streamk_gemm_ctypes_lib.cpp").read_text()
+        self.assertIn('#include "streamk_budget_env.hpp"', streamk_src)
+        budget_hdr = (self.SRC.parent / "streamk_budget_env.hpp").read_text()
+        self.assertIn('std::getenv("CK_TILE_STREAMK_BUDGET_PCT")', budget_hdr)
         self.assertEqual(gu.STREAMK_BUDGET_ENV, "CK_TILE_STREAMK_BUDGET_PCT")
 
 

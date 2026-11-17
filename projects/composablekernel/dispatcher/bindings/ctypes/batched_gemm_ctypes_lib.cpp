@@ -38,7 +38,6 @@
 
 #include <hip/hip_runtime.h>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -47,6 +46,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/gemm.hpp"
+#include "streamk_budget_env.hpp"
 
 // Kernel header included via -include compiler flag under
 // CK_TILE_SINGLE_KERNEL_INCLUDE. Defines: ADataType, BDataType, CDataType,
@@ -150,9 +150,13 @@ float launch_batched(const void* a,
                                             batch_stride_b,
                                             batch_stride_c,
                                             batch_count};
-        const char* budget = std::getenv("CK_TILE_STREAMK_BUDGET_PCT");
-        return Kernel::launch(
-            args, stream, budget != nullptr && *budget != '\0' ? std::atoi(budget) : 100);
+        int budget_pct = 100;
+        if(!parse_streamk_budget_pct(budget_pct))
+        {
+            throw std::invalid_argument(
+                "CK_TILE_STREAMK_BUDGET_PCT must be an integer in [1, 100]");
+        }
+        return Kernel::launch(args, stream, budget_pct);
     }
     else
     {
