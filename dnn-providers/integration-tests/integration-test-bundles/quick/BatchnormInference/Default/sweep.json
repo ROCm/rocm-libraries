@@ -2,19 +2,115 @@
   "version": 1,
   "cases": [
     {
-      "id": "1_3_224_fp16_nlc",
+      "id": "4_3_1_fp32_ncl",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "generator": "generate_batchnorm_inference_bundles",
+        "reference_source": "PyTorch batch_norm via generate_batchnorm_reference.py"
+      }
+    },
+    {
+      "id": "4_3_1_fp16_nlc",
       "values": {
         "io_data_type": "half",
         "tensors": [
           {
             "uid": 0,
             "dims": [
-              1,
+              4,
               3,
-              224
+              1
             ],
             "strides": [
-              672,
+              3,
               1,
               3
             ],
@@ -23,12 +119,12 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              4,
               3,
-              224
+              1
             ],
             "strides": [
-              672,
+              3,
               1,
               3
             ],
@@ -93,344 +189,12 @@
         ]
       },
       "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference1dFp16.Correctness/4",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference1dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference1dFp16.Correctness_4"
+        "generator": "generate_batchnorm_inference_bundles",
+        "reference_source": "PyTorch batch_norm via generate_batchnorm_reference.py"
       }
     },
     {
-      "id": "1_3_224_fp32_ncl",
-      "values": {
-        "io_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              3,
-              224
-            ],
-            "strides": [
-              672,
-              224,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              3,
-              224
-            ],
-            "strides": [
-              672,
-              224,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference1dFp32.Correctness/0",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference1dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference1dFp32.Correctness_0"
-      }
-    },
-    {
-      "id": "1_3_14_14_bfp16_nchw",
-      "values": {
-        "io_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              196,
-              14,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              196,
-              14,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference2dBfp16.Correctness/0",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference2dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference2dBfp16.Correctness_0"
-      }
-    },
-    {
-      "id": "1_3_14_14_fp32_nhwc",
-      "values": {
-        "io_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              1,
-              42,
-              3
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              1,
-              42,
-              3
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/6",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference2dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness_6"
-      }
-    },
-    {
-      "id": "2_3_3_1_1_bfp16_ndhwc",
+      "id": "2_3_1_1_bfp16_nchw_upcast",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -439,34 +203,30 @@
             "dims": [
               2,
               3,
-              3,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
               2,
               3,
-              3,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "bfloat16"
           },
@@ -476,12 +236,10 @@
               1,
               3,
               1,
-              1,
               1
             ],
             "strides": [
               3,
-              1,
               1,
               1,
               1
@@ -494,12 +252,10 @@
               1,
               3,
               1,
-              1,
               1
             ],
             "strides": [
               3,
-              1,
               1,
               1,
               1
@@ -512,12 +268,10 @@
               1,
               3,
               1,
-              1,
               1
             ],
             "strides": [
               3,
-              1,
               1,
               1,
               1
@@ -530,12 +284,10 @@
               1,
               3,
               1,
-              1,
               1
             ],
             "strides": [
               3,
-              1,
               1,
               1,
               1
@@ -545,13 +297,116 @@
         ]
       },
       "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference3dBfp16.Correctness/2",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference3dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference3dBfp16.Correctness_2"
+        "generator": "generate_batchnorm_inference_bundles",
+        "reference_source": "PyTorch batch_norm via generate_batchnorm_reference.py"
+      }
+    },
+    {
+      "id": "2_3_1_1_fp32_nhwc",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "generator": "generate_batchnorm_inference_bundles",
+        "reference_source": "PyTorch batch_norm via generate_batchnorm_reference.py"
       }
     },
     {
@@ -670,231 +525,17 @@
         ]
       },
       "metadata": {
-        "format_version": 1,
         "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference3dFp16.Correctness_0",
+        "format_version": 1,
         "generator_version": "1.0.0",
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference3dFp16.Correctness/0",
         "operation": "Smoke/IntegrationGpuBatchnormForwardInference3dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference3dFp16.Correctness_0"
+        "seed": 1
       }
     },
     {
-      "id": "1_3_224_fp16_nlc_upcast",
-      "values": {
-        "io_data_type": "half",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              3,
-              224
-            ],
-            "strides": [
-              672,
-              1,
-              3
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              3,
-              224
-            ],
-            "strides": [
-              672,
-              1,
-              3
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "ported from c++ tests",
-        "generator_version": "1.0.0",
-        "notes": "Ported from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference1dUpcastFp16: same case as bundle case 1_3_224_fp16_nlc with the output tensor data type widened to float",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference1dUpcastFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference1dUpcastFp16 (derived from 1_3_224_fp16_nlc)"
-      }
-    },
-    {
-      "id": "1_3_14_14_bfp16_nchw_upcast",
-      "values": {
-        "io_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              196,
-              14,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              196,
-              14,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "ported from c++ tests",
-        "generator_version": "1.0.0",
-        "notes": "Ported from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference2dUpcastBfp16: same case as bundle case 1_3_14_14_bfp16_nchw with the output tensor data type widened to float",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference2dUpcastBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference2dUpcastBfp16 (derived from 1_3_14_14_bfp16_nchw)"
-      }
-    },
-    {
-      "id": "2_3_3_1_1_bfp16_ndhwc_upcast",
+      "id": "2_3_3_1_1_bfp16_ndhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -914,7 +555,7 @@
               3,
               3
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 1,
@@ -1009,138 +650,13 @@
         ]
       },
       "metadata": {
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference3dBfp16.Correctness_2",
         "format_version": 1,
-        "generator": "ported from c++ tests",
         "generator_version": "1.0.0",
-        "notes": "Ported from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference3dUpcastBfp16: same case as bundle case 2_3_3_1_1_bfp16_ndhwc with the output tensor data type widened to float",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference3dUpcastBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference3dUpcastBfp16 (derived from 2_3_3_1_1_bfp16_ndhwc)"
-      }
-    },
-    {
-      "id": "2_3_3_1_1_fp16_ncdhw_upcast",
-      "values": {
-        "io_data_type": "half",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              3,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              9,
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              3,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              9,
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "ported from c++ tests",
-        "generator_version": "1.0.0",
-        "notes": "Ported from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference3dUpcastFp16: same case as bundle case 2_3_3_1_1_fp16_ncdhw with the output tensor data type widened to float",
-        "operation": "Smoke/IntegrationGpuBatchnormForwardInference3dUpcastFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference3dUpcastFp16 (derived from 2_3_3_1_1_fp16_ncdhw)"
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormForwardInference3dBfp16.Correctness/2",
+        "operation": "Smoke/IntegrationGpuBatchnormForwardInference3dBfp16",
+        "seed": 1
       }
     }
   ]
