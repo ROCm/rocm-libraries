@@ -26,6 +26,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaFwdUnservedAttributeCases.hpp"
@@ -255,6 +256,21 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAvailableKernels)
     }
 }
 
+// Whether the registry has the row a batch-mode causal bf16 hd128 graph runs on for archId:
+// the bottom-right causal batch row, selected by the same rule getKernelNameKey applies
+// (gfx942 also matches bf16_cvt, RTNE (0) for bf16). Top-left causal graphs with
+// S_q == S_kv run on it too.
+bool hasBatchCausalBf16Hd128Row(const std::string& archId)
+{
+    return std::any_of(cfg_fmha_fwd.begin(), cfg_fmha_fwd.end(), [&](const auto& entry) {
+        const auto& cfg = entry.second;
+        return cfg.arch == archId && cfg.dtype == "bf16" && cfg.hdim_q == 128 && cfg.hdim_v == 128
+               && cfg.mask == static_cast<int>(plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL)
+               && cfg.mode == static_cast<int>(hip_kernel_provider_common::BatchMode::BATCH)
+               && (archId == "gfx950" || cfg.bf16_cvt == 0);
+    });
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -268,9 +284,9 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         GTEST_SKIP();
     }
 
-    // causal_mask is top-left. At S_q == S_kv gfx942 serves it with the bottom-right causal
-    // batch kernels, stats included; gfx950 has causal kernels for group mode only.
-    const bool servesBatchCausal = deviceString == "gfx942";
+    // causal_mask is top-left. At S_q == S_kv the engine serves it, stats included, with
+    // the bottom-right causal batch row when the registry has one for this arch.
+    const bool servesBatchCausal = hasBatchCausalBf16Hd128Row(deviceString);
     const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
         {GraphTest{createSdpaFwdGraph(), "Valid test with q head dim 128"}, true},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 192}), "Valid test with q head dim 192"}, true},
@@ -511,6 +527,17 @@ flatbuffers::FlatBufferBuilder withBottomRightCausalMask(flatbuffers::FlatBuffer
     });
 }
 
+// Requests the top-left causal band (left bound unbounded, right bound 0).
+flatbuffers::FlatBufferBuilder withTopLeftCausalMask(flatbuffers::FlatBufferBuilder&& builder)
+{
+    return mutateGraph(std::move(builder), [](GraphT& graph) {
+        auto* attrs = graph.nodes.front()->attributes.AsSdpaAttributes();
+        attrs->right_bound = 0;
+        attrs->diagonal_alignment
+            = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    });
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -567,6 +594,15 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
                                            {"stats"}),
                    "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
                    "tensor"},
+         false},
+        // Both archs have a group-mode bottom-right causal bf16 hd128 row. A top-left
+        // causal mask must not run on it even when the maximum lengths are equal: the
+        // per-batch lengths in the offset tables can differ, and then the masks differ.
+        {GraphTest{withBottomRightCausalMask(createRaggedBshdSdpaFwdGraph()),
+                   "Group mode bottom-right causal (baseline for the top-left case)"},
+         true},
+        {GraphTest{withTopLeftCausalMask(createRaggedBshdSdpaFwdGraph()),
+                   "Group mode top-left causal with equal maximum S_q and S_kv"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
