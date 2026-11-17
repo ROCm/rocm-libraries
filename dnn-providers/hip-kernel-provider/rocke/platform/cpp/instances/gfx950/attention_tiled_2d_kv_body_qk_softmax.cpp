@@ -43,7 +43,8 @@
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* softcap_log2 / mfma_16x16x16 */
 #include "rocke/helper_rocke.helpers.attention.h" /* warp_xor_reduce_sum   */
 #include "rocke/helper_rocke.helpers.mfma_attention.h" /* 32x32x16_for_dtype    */
-#include "rocke/instance_gfx950_attention_tiled_2d.h" /* mfma_32x32_c_row/_col */
+#include "rocke/instance_attention_tiled_common_internal.h" /* rocke__mfma_32x32_c_row/_col */
+#include "rocke/instance_gfx950_attention_tiled_2d.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 /* ===================================================================== *
@@ -208,11 +209,11 @@ static rocke_value_t* fh_warp_xor_reduce_sum_32lane(rocke_gfx950_attn2d_build_ct
 /* 32x32 C-distribution row/col, gfx950 spelling. */
 static rocke_value_t* fh_c32_row(rocke_gfx950_attn2d_build_ctx_t* ctx, int reg)
 {
-    return rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row(ctx->b, ctx->lane, reg);
+    return rocke__mfma_32x32_c_row(ctx->b, ctx->lane, reg);
 }
 static rocke_value_t* fh_c32_col(rocke_gfx950_attn2d_build_ctx_t* ctx, int n_tile32)
 {
-    return rocke_gfx950_attention_tiled_2d_mfma_32x32_c_col(ctx->b, ctx->lane, n_tile32);
+    return rocke__mfma_32x32_c_col(ctx->b, ctx->lane, n_tile32);
 }
 
 /* ===================================================================== *

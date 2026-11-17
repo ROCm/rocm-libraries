@@ -55,6 +55,7 @@ from kernels.common._lse_store import (
 )
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
+from kernels.common._attention_tiled_shared import mfma_32x32_c_col, mfma_32x32_c_row
 
 from rocke.core.ir import (
     BF16,
@@ -70,7 +71,6 @@ from rocke.core.ir import (
     Type,
     Value,
 )
-from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
@@ -85,7 +85,6 @@ from rocke.helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
-from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -98,59 +97,6 @@ from rocke.helpers.transforms import (
 
 MFMA_M = 16
 MFMA_N = 16
-
-
-# CK-Tile C-accumulator warp distribution for the 32x32x16 MFMA atom. The
-# hand-rolled ``mfma_32x32x16_c_row/col`` lane arithmetic (in
-# ``helpers/attention.py``) is exactly the ``calculate_x`` of CK Tile's
-# ``CWarpDstrEncoding`` (``warp_gemm_attribute_mfma.hpp``): for one wavefront
-# the lane splits as ``(m_blk, n) = (lane // 32, lane % 32)`` and the per-lane
-# ``<16 x f32>`` accumulator slot ``i`` splits row-major over the two M Y dims
-# ``(kCM0PerLane, kCM1PerLane) = (4, 4)``. The distribution's ``calculate_x``
-# then yields ``row = (i // 4) * 8 + m_blk * 4 + (i % 4)`` and ``col = n`` --
-# the same mapping the scalar helpers produce, but emitted by the tile-
-# distribution algebra instead of open-coded ``div``/``mul``/``add`` (Phase-C
-# "adopt the vocabulary" adoption; the C layout is dtype-independent so the
-# f16 atom drives it for both fp16 and bf16). The 3D tiled kernel still imports
-# the scalar helpers from ``helpers/attention.py`` directly; this distribution-
-# driven form is local to the 2D kernel.
-_C32_DIST = make_static_tile_distribution(
-    make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16())
-)
-
-
-def _mfma_32x32_c_row(b, lane, elem_idx: int):
-    """MFMA-local output row for a ``32x32x16`` C element ``elem_idx`` (0..15).
-
-    Drives CK Tile's C-warp ``TileDistribution.calculate_x`` instead of the
-    hand-rolled ``row = (i//4)*8 + (lane//32)*4 + (i%4)`` lane arithmetic.
-    """
-    if not (0 <= elem_idx < 16):
-        raise ValueError(f"mfma_32x32x16 elem_idx must be 0..15, got {elem_idx}")
-    m_blk = b.div(lane, b.const_i32(32))
-    n = b.mod(lane, b.const_i32(32))
-    y0 = b.const_i32(elem_idx // 4)
-    y1 = b.const_i32(elem_idx % 4)
-    row, _col = _C32_DIST.calculate_x(b, ys=[y0, y1], ps=[[m_blk, n]])
-    return row
-
-
-def _mfma_32x32_c_col(b, lane, n_tile32: int = 0):
-    """MFMA-local output col for ``32x32x16`` C elements in N-tile ``n_tile32``.
-
-    The per-lane column is the N coordinate of CK Tile's C-warp distribution
-    (``lane % 32``); ``n_tile32 * 32`` is the 32-column tile base added on top.
-    Every per-lane accumulator slot shares this column, so the element index
-    does not enter the formula.
-    """
-    m_blk = b.div(lane, b.const_i32(32))
-    n = b.mod(lane, b.const_i32(32))
-    _row, col = _C32_DIST.calculate_x(
-        b, ys=[b.const_i32(0), b.const_i32(0)], ps=[[m_blk, n]]
-    )
-    if n_tile32 == 0:
-        return col
-    return b.add(b.const_i32(n_tile32 * 32), col)
 
 
 # Backwards-compatible aliases. The 3D tiled kernel currently imports these
@@ -1899,7 +1845,7 @@ def build_unified_attention_2d_tiled(
     def _state_row(r: int) -> Value:
         """Row represented by softmax state slot ``r`` in the active layout."""
         if USE_MFMA_32X32 and not TRANSPOSED_QK_32X32:
-            return _mfma_32x32_c_row(b, lane, r)
+            return mfma_32x32_c_row(b, lane, r)
         return _in_warp_row(r)
 
     def _bit2(v: Value, bit: int) -> Value:
@@ -3264,7 +3210,7 @@ def build_unified_attention_2d_tiled(
     hoist_causal_lim = []
     for reg in range(REGS_PER_LANE):
         if USE_MFMA_32X32:
-            row = b.add(wave_row_base, _mfma_32x32_c_row(b, lane, reg))
+            row = b.add(wave_row_base, mfma_32x32_c_row(b, lane, reg))
         else:
             row = b.add(wave_row_base, _in_warp_row(reg))
         qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
@@ -3298,7 +3244,7 @@ def build_unified_attention_2d_tiled(
         hoist_alibi = None
 
     if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_INVARIANT_HOIST:
-        st_q_row = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+        st_q_row = b.add(wave_row_base, mfma_32x32_c_col(b, lane, 0))
         st_qp = b.add(qb_start_pos, b.div(st_q_row, b.const_i32(NQK)))
         st_qh = b.add(
             b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(st_q_row, b.const_i32(NQK))
@@ -3410,7 +3356,7 @@ def build_unified_attention_2d_tiled(
             tile_off_g1 = None
 
         if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_MASK_ONCE:
-            st_q_row_iter = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+            st_q_row_iter = b.add(wave_row_base, mfma_32x32_c_col(b, lane, 0))
             st_qp_iter = b.add(qb_start_pos, b.div(st_q_row_iter, b.const_i32(NQK)))
             st_qh_iter = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)),
@@ -3703,7 +3649,7 @@ def build_unified_attention_2d_tiled(
                         # as the hoisted versions above; matches AITER
                         # ``unified_attention.py:317``.
                         q_row_t_alibi = b.add(
-                            wave_row_base, _mfma_32x32_c_col(b, lane, 0)
+                            wave_row_base, mfma_32x32_c_col(b, lane, 0)
                         )
                         qh_t_alibi = b.add(
                             b.mul(kv_head_idx, b.const_i32(NQK)),
@@ -3744,7 +3690,7 @@ def build_unified_attention_2d_tiled(
                             else:
                                 k_local = b.add(
                                     b.const_i32(n * 32),
-                                    _mfma_32x32_c_row(b, lane, reg),
+                                    mfma_32x32_c_row(b, lane, reg),
                                 )
                                 if TRANSPOSED_INVARIANT_HOIST:
                                     qp_r = st_qp
@@ -3756,7 +3702,7 @@ def build_unified_attention_2d_tiled(
                                     causal_lim = st_causal_lim_iter
                                 else:
                                     q_row_t = b.add(
-                                        wave_row_base, _mfma_32x32_c_col(b, lane, 0)
+                                        wave_row_base, mfma_32x32_c_col(b, lane, 0)
                                     )
                                     qp_r = b.add(
                                         qb_start_pos, b.div(q_row_t, b.const_i32(NQK))
@@ -4037,7 +3983,7 @@ def build_unified_attention_2d_tiled(
                 row_ok = hoist_row_ok[reg]
                 causal_lim = hoist_causal_lim[reg]
                 for n in range(QK_N_TILES):
-                    col_abs = b.add(tile_off, _mfma_32x32_c_col(b, lane, n))
+                    col_abs = b.add(tile_off, mfma_32x32_c_col(b, lane, n))
                     causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                     m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
@@ -4097,7 +4043,7 @@ def build_unified_attention_2d_tiled(
                 sum_p = zero_f
                 for n in range(QK_N_TILES):
                     p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
-                    col = _mfma_32x32_c_col(b, lane, n)
+                    col = mfma_32x32_c_col(b, lane, n)
                     b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
                     sum_p = b.fadd(sum_p, p)
                 l_local.append(_warp_xor_reduce_sum_32lane(b, sum_p))
@@ -4828,7 +4774,7 @@ def build_unified_attention_2d_tiled(
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
                     out_col_t = b.add(
-                        b.const_i32(n * 32), _mfma_32x32_c_row(b, lane, reg)
+                        b.const_i32(n * 32), mfma_32x32_c_row(b, lane, reg)
                     )
                     v = b.vec_extract(acc32, reg)
                     normalized = b.fmul(v, inv_l_t)
@@ -4876,7 +4822,7 @@ def build_unified_attention_2d_tiled(
             dim=b.const_i32(0),
         )
         if spec.emit_lse:
-            # State slot reg's row is wave_row_base + _mfma_32x32_c_row(lane, reg)
+            # State slot reg's row is wave_row_base + mfma_32x32_c_row(lane, reg)
             # (= hoist_row[reg]); all 32 lanes of a half agree, lane_col32 == 0
             # (lanes 0 and 32) writes.
             lse_writer32 = b.cmp_eq(lane_col32, b.const_i32(0))
@@ -4901,7 +4847,7 @@ def build_unified_attention_2d_tiled(
         for n in range(ACC_N_TILES):
             acc32 = _acc_final_get(n, 0)
             for reg in range(REGS_PER_LANE):
-                row = b.add(wave_row_base, _mfma_32x32_c_row(b, lane, reg))
+                row = b.add(wave_row_base, mfma_32x32_c_row(b, lane, reg))
                 col_in_stripe = lane_col32
                 v = b.vec_extract(acc32, reg)
                 normalized = b.fmul(v, rcp_l[reg])

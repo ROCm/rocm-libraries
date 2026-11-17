@@ -218,7 +218,7 @@ from kernels.common.attention_dense_spec import (
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
-from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._attention_tiled_shared import mfma_32x32_c_col, mfma_32x32_c_row
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
     paged_cache_bytes,
@@ -2127,14 +2127,14 @@ def _build_attention_dense_single_buffer(
             if not causal:
                 return
             tile_key0 = b.mul(tile_idx, b.const_i32(BN))
-            query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+            query_tok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
             if BR:
                 query_tok = b.add(query_tok, diag_off)
             win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
-                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                     if upper:
                         s_reg[nsub][i] = b.select(
                             b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
@@ -2668,7 +2668,7 @@ def _build_attention_dense_single_buffer(
                 b,
                 segment_params,
                 token=b.add(
-                    b.mul(bt, seqlen_q_p), b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+                    b.mul(bt, seqlen_q_p), b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
                 ),
                 head=hq,
                 num_heads=hq_p,
@@ -2695,7 +2695,7 @@ def _build_attention_dense_single_buffer(
             ),
             b.mul(hq, b.const_i32(D)),
         )
-        qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        qtok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
         # A sliding window can leave the last query rows (seqlen_q - seqlen_kv >= SW)

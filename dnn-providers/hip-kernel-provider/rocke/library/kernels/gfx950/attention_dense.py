@@ -116,7 +116,7 @@ from kernels.common.attention_dense_decode import (
     fastdiv_kernargs,
     make_fastdiv,
 )
-from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._attention_tiled_shared import mfma_32x32_c_col, mfma_32x32_c_row
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
     paged_cache_bytes,
@@ -1403,7 +1403,7 @@ def build_attention_dense(
         if not causal and not lower:
             return
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
-        query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        query_tok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
         if DIAG_OFF:
             query_tok = b.add(query_tok, b.const_i32(DIAG_OFF))
         # lower bound key: q - W + 1  (keep iff ktok > q - W)
@@ -1413,7 +1413,7 @@ def build_attention_dense(
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
             for i in range(16):
-                ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                 if upper and causal:
                     s_reg[nsub][i] = b.select(
                         b.cmp_le(ktok, up_tok), s_reg[nsub][i], neg_inf
@@ -1433,7 +1433,7 @@ def build_attention_dense(
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
             for i in range(16):
-                ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                 s_reg[nsub][i] = b.select(
                     b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                 )
@@ -1844,7 +1844,7 @@ def build_attention_dense(
     last_vbuf = b.mod(b.add(last_end, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
     o_acc = do_pv(o_acc, p_prev, last_vbuf)
     if KVS > 1:
-        qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        qtok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
         emit_segment_store(
             b,
             segment_params,
@@ -1889,7 +1889,7 @@ def build_attention_dense(
             b.mul(b.mul(bt, seqlen_q_p), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
-    qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+    qtok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
     d_half = b.mul(lane_h, b.const_i32(4))
     # The exact per-row "sees at least one key" predicate. LSE always needs it. A
@@ -2548,13 +2548,13 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             if not causal and not lower:
                 return
             tile_key0 = b.mul(tile_idx, b.const_i32(BN))
-            query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+            query_tok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
             win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
             up_tok = b.add(query_tok, b.const_i32(RIGHT)) if RIGHT else query_tok
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
-                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                     if upper and causal:
                         s_reg[nsub][i] = b.select(
                             b.cmp_le(ktok, up_tok), s_reg[nsub][i], neg_inf
@@ -2572,7 +2572,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
-                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                     s_reg[nsub][i] = b.select(
                         b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                     )
@@ -3033,7 +3033,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.mul(b.mul(bt_e, _sq()), _stride_q()),
             b.mul(hq_e, b.const_i32(D)),
         )
-        qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        qtok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
         # The exact per-row "sees at least one key" predicate. LSE always needs it. A

@@ -7,11 +7,6 @@
  * (rocke/instances/gfx950/attention_tiled_2d.py).
  *
  * SCOPE (this translation unit):
- *   - the two module-level 32x32 C-distribution helpers
- *       rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row / _col  (Python 79-133).
- *     The C distribution is dtype-independent and byte-identical to the gfx942
- *     sibling's rocke__mfma_32x32_c_row/_col (same _C32_DIST.calculate_x wiring),
- *     so these forward to that already-ported, byte-faithful implementation.
  *   - the admission gate (supports_tiled_2d, Python lines 588-703)
  *       rocke_gfx950_attention_tiled_2d_supports_args_default
  *       rocke_gfx950_attention_tiled_2d_supports
@@ -45,9 +40,10 @@
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* binary_search_seq_idx */
-#include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* rocke__mfma_32x32_c_* */
+#include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* spec type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join  */
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
+#include "rocke/instance_attention_tiled_common_internal.h" /* rocke_attn2d_c32_dist_reset */
 
 #include <math.h>
 #include <stdio.h>
@@ -96,28 +92,6 @@ static void rocke_g950_reason(char* reason, size_t reason_cap, const char* m)
 {
     (void)b;
     ckc::raise_status(st, msg ? msg : "");
-}
-
-/* ===================================================================== *
- *  Module-level 32x32 C-distribution helpers (Python lines 79-133).
- *
- *  The C-warp distribution of the f16 32x32x16 atom is dtype-independent and
- *  identical across gfx942/gfx950; the gfx942 sibling already ports it
- *  byte-faithfully (same div/mod consts, same _C32_DIST.calculate_x ys/ps
- *  wiring, same trailing N-tile add). Forward to it.
- * ===================================================================== */
-rocke_value_t* rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row(rocke_ir_builder_t* b,
-                                                                rocke_value_t* lane,
-                                                                int elem_idx)
-{
-    return rocke__mfma_32x32_c_row(b, lane, elem_idx);
-}
-
-rocke_value_t* rocke_gfx950_attention_tiled_2d_mfma_32x32_c_col(rocke_ir_builder_t* b,
-                                                                rocke_value_t* lane,
-                                                                int n_tile32)
-{
-    return rocke__mfma_32x32_c_col(b, lane, n_tile32);
 }
 
 /* ===================================================================== *

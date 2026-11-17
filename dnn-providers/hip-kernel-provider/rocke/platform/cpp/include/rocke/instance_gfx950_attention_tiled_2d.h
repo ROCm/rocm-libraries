@@ -12,7 +12,7 @@
  *                                                       attention_tiled_2d.h -- arch-parameterised,
  *                                                       reused verbatim here)
  *   spec.@property accessors                         rocke_attention_tiled_2d_spec_*  (same helper
- * hdr) _mfma_32x32_c_row / _mfma_32x32_c_col rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row/_col
+ * hdr)
  *   supports_tiled_2d(..., arch="gfx950")            rocke_gfx950_attention_tiled_2d_supports
  *   build_unified_attention_2d_tiled(spec, arch)     rocke_gfx950_build_unified_attention_2d_tiled
  *   (+ convenience: build -> lower .ll)              rocke_gfx950_attention_tiled_2d_lower_to_llvm
@@ -104,23 +104,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* ============================================================ *
- * Module-level 32x32 C-distribution helpers (Python lines 79-133)
- * ============================================================ *
- *
- * _mfma_32x32_c_row(b, lane, elem_idx) / _mfma_32x32_c_col(b, lane, n_tile32):
- * the per-lane output row/col of CK Tile's CWarpDstrEncoding for the f16
- * 32x32x16 atom, driven by the module-static _C32_DIST (Python line 97). Pure IR
- * emitters used by the 32x32 epilogue and P-permute. The C distribution is
- * dtype-independent (the f16 atom drives both fp16 and bf16). ``elem_idx`` must be
- * 0..15; ``n_tile32`` >= 0. These do not exist on gfx942. */
-rocke_value_t* rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row(rocke_ir_builder_t* b,
-                                                                rocke_value_t* lane,
-                                                                int elem_idx);
-rocke_value_t* rocke_gfx950_attention_tiled_2d_mfma_32x32_c_col(rocke_ir_builder_t* b,
-                                                                rocke_value_t* lane,
-                                                                int n_tile32);
 
 /* ============================================================ *
  * supports_tiled_2d(..., arch="gfx950")   (Python lines 588-703)

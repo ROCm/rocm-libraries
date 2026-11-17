@@ -56,7 +56,7 @@ rocke_value_t* rocke_gfx950_attn2d_in_warp_row(rocke_gfx950_attn2d_build_ctx_t* 
 rocke_value_t* rocke_gfx950_attn2d_state_row(rocke_gfx950_attn2d_build_ctx_t* ctx, int r)
 {
     if(ctx->USE_MFMA_32X32 && !ctx->TRANSPOSED_QK_32X32)
-        return rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row(ctx->b, ctx->lane, r);
+        return rocke__mfma_32x32_c_row(ctx->b, ctx->lane, r);
     return rocke_gfx950_attn2d_in_warp_row(ctx, r);
 }
 

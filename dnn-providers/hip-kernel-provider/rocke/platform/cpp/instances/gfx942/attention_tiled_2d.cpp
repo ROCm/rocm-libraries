@@ -5,23 +5,13 @@
  * task-named symbols from rocke/instances/gfx942/attention_tiled_2d.py.
  *
  * Ported: UnifiedAttention2DTiledSpec (-> rocke_attention_tiled_2d_spec_t +
- * default/validate/derived-property helpers), the build-head config derivation
- * (-> rocke_unified_attention_2d_tiled_config_from_spec), _mfma_32x32_c_row /
- * _mfma_32x32_c_col, and the kernel build entry (stub-to-link).
- *
- * The two 32x32 C helpers reproduce the Python builder-call sequence
- * byte-faithfully: same div/mod constants, same calculate_x ys/ps wiring, same
- * trailing add for the N-tile base. _C32_DIST (built once at Python module
- * import from make_static_tile_distribution(make_c_warp_dstr_encoding(
- * MfmaAtom.f16_32x32x16()))) is reproduced as a lazily-built, process-lifetime
- * cached distribution off rocke_mfma_atom("f16", 32, 32, 16).
+ * default/validate/derived-property helpers) and the build-head config
+ * derivation (-> rocke_unified_attention_2d_tiled_config_from_spec). The 32x32
+ * C-row/C-col helpers and their C32_DIST cache live in
+ * instances/common/attention_tiled_common.cpp (shared with gfx950).
  *
  * Lifetime: every IR node is arena-owned (rocke_ir_builder_t.arena). Nothing is
- * freed individually. The cached _C32_DIST is built on the first call's builder
- * arena and is dtype-independent host-side analysis state (the Python caches it
- * at module scope). Because the C builder/arena is freed at the end of each
- * build, the cache is per-build (not process-lifetime): rocke_attn2d_c32_dist_reset()
- * clears it at every build entry so build N+1 never reads build N's freed arena.
+ * freed individually.
  *
  * Error model: pure helpers return a sentinel (NULL/false); builder variants
  * latch the first Python ValueError/NotImplementedError onto the sticky-error
@@ -642,171 +632,12 @@ bool rocke_unified_attention_2d_tiled_config_from_spec(
     return true;
 }
 
-/* ------------------------------------------------------ _C32_DIST (cached) */
-/* make_static_tile_distribution(make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16()))
- * -- a host-side distribution the Python caches at module scope. Built lazily on
- * the first 32x32-C-helper call of a build.
- *
- * Re-entrancy: the cached rocke_tile_distribution_t (and all its inner nodes) is
- * arena-allocated off the *current build's* rocke_ir_builder. When that builder is
- * freed at the end of a build, this pointer dangles; reusing it on the next
- * build feeds freed memory into calculate_x. So the cache is per-build, not
- * process-lifetime: rocke_attn2d_c32_dist_reset() clears it at each build entry
- * (see the gfx942/gfx950 public entries). */
-static const rocke_tile_distribution_t* g_c32_dist = NULL;
-
-/* Re-entrancy reset: drop the dangling per-build cache before a new build. */
-void rocke_attn2d_c32_dist_reset(void)
-{
-    g_c32_dist = NULL;
-}
-
-static const rocke_tile_distribution_t* rocke_attn2d_c32_dist(rocke_ir_builder_t* b)
-{
-    const rocke_mfma_atom_t* atom;
-    const rocke_tile_distribution_encoding_t* enc;
-    const rocke_tile_distribution_t* dist;
-
-    if(g_c32_dist != NULL)
-    {
-        return g_c32_dist;
-    }
-    if(b == NULL)
-    {
-        return NULL;
-    }
-
-    atom = rocke_mfma_atom("f16", 32, 32, 16);
-    if(atom == NULL)
-    {
-        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "_C32_DIST: no f16 32x32x16 MFMA atom");
-        return NULL;
-    }
-    enc = rocke_make_c_warp_dstr_encoding(b, atom);
-    if(enc == NULL)
-    {
-        return NULL;
-    }
-    dist = rocke_make_static_tile_distribution(b, enc);
-    if(dist == NULL)
-    {
-        return NULL;
-    }
-    g_c32_dist = dist;
-    return g_c32_dist;
-}
-
-/* ------------------------------------------------ _mfma_32x32_c_row / _col */
-
-rocke_value_t* rocke__mfma_32x32_c_row(rocke_ir_builder_t* b, rocke_value_t* lane, int elem_idx)
-{
-    const rocke_tile_distribution_t* dist;
-    rocke_value_t* m_blk;
-    rocke_value_t* n;
-    rocke_value_t* ys[2];
-    rocke_value_t* ps0[2];
-    rocke_value_t* const* ps[1];
-    int ps_counts[1];
-    rocke_value_t* out_x[2];
-
-    if(b == NULL)
-    {
-        return NULL;
-    }
-    /* if not (0 <= elem_idx < 16): raise ValueError */
-    if(!(elem_idx >= 0 && elem_idx < 16))
-    {
-        return (rocke_value_t*)rocke_attn2d_set_err(
-            b, ROCKE_ERR_VALUE, "mfma_32x32x16 elem_idx must be 0..15, got %d", elem_idx);
-    }
-
-    dist = rocke_attn2d_c32_dist(b);
-    if(dist == NULL)
-    {
-        return NULL;
-    }
-
-    /* m_blk = b.div(lane, 32); n = b.mod(lane, 32) */
-    m_blk = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
-    n = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
-
-    /* y0 = const(elem_idx // 4); y1 = const(elem_idx % 4) */
-    ys[0] = rocke_b_const_i32(b, (int64_t)(elem_idx / 4));
-    ys[1] = rocke_b_const_i32(b, (int64_t)(elem_idx % 4));
-
-    /* ps=[[m_blk, n]] */
-    ps0[0] = m_blk;
-    ps0[1] = n;
-    ps[0] = ps0;
-    ps_counts[0] = 2;
-
-    /* row, _col = _C32_DIST.calculate_x(b, ys=[y0, y1], ps=[[m_blk, n]]) */
-    if(!rocke_tile_distribution_calculate_x(b, dist, ys, 2, ps, ps_counts, 1, out_x, 2))
-    {
-        return NULL;
-    }
-    return out_x[0]; /* row */
-}
-
-rocke_value_t* rocke__mfma_32x32_c_col(rocke_ir_builder_t* b, rocke_value_t* lane, int n_tile32)
-{
-    const rocke_tile_distribution_t* dist;
-    rocke_value_t* m_blk;
-    rocke_value_t* n;
-    rocke_value_t* ys[2];
-    rocke_value_t* ps0[2];
-    rocke_value_t* const* ps[1];
-    int ps_counts[1];
-    rocke_value_t* out_x[2];
-    rocke_value_t* col;
-
-    if(b == NULL)
-    {
-        return NULL;
-    }
-
-    dist = rocke_attn2d_c32_dist(b);
-    if(dist == NULL)
-    {
-        return NULL;
-    }
-
-    /* m_blk = b.div(lane, 32); n = b.mod(lane, 32) */
-    m_blk = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
-    n = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
-
-    /* ys=[const(0), const(0)] */
-    ys[0] = rocke_b_const_i32(b, 0);
-    ys[1] = rocke_b_const_i32(b, 0);
-
-    /* ps=[[m_blk, n]] */
-    ps0[0] = m_blk;
-    ps0[1] = n;
-    ps[0] = ps0;
-    ps_counts[0] = 2;
-
-    /* _row, col = _C32_DIST.calculate_x(b, ys=[0, 0], ps=[[m_blk, n]]) */
-    if(!rocke_tile_distribution_calculate_x(b, dist, ys, 2, ps, ps_counts, 1, out_x, 2))
-    {
-        return NULL;
-    }
-    col = out_x[1];
-
-    /* if n_tile32 == 0: return col; else return add(const(n_tile32*32), col) */
-    if(n_tile32 == 0)
-    {
-        return col;
-    }
-    return rocke_b_add(b, rocke_b_const_i32(b, (int64_t)(n_tile32 * 32)), col);
-}
-
 /* ------------------------------------------------- kernel build (stub) */
 
 /* NOTE: the kernel build entry ``rocke_build_unified_attention_2d_tiled_scalar``
  * formerly lived here as a STUB-TO-LINK placeholder. The faithful, full
  * IR-emitting port now lives in the chunked instance part-files
  * (instance_gfx942_attention_tiled_2d_*_public_entry_glue.c drives the phase
- * functions). This TU keeps only the host-side spec/config/derivation helpers
- * and the two 32x32 C-row/C-col helpers that the part-files consume
- * (rocke__mfma_32x32_c_row / rocke__mfma_32x32_c_col); the build entry is defined
- * once, by the part-file, to avoid a duplicate-symbol link error. */
+ * functions). This TU keeps only the host-side spec/config/derivation helpers;
+ * the build entry is defined once, by the part-file, to avoid a duplicate-symbol
+ * link error. */
