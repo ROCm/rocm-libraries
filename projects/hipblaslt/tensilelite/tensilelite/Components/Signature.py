@@ -455,6 +455,12 @@ class SignatureDefault(Signature):
             if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] :
                 signature.addArg(       "activationType", SVK.SIG_VALUE,               "u32")
 
+        # Second D output (OutputPeerD): the distance in bytes from D to the peer D, loaded with
+        # the other post-loop arguments. A distance and not an address, so that it is the same
+        # for a strided D and for a pointer-array D (where the D argument is the pointer array).
+        if kernel["ProblemType"]["OutputPeerD"]:
+            signature.addArg("DeltaPeerD", SVK.SIG_VALUE, "i64")
+
         # TODO- combine one workspace
         if (kernel["ProblemType"]["OutputAmaxD"]):
             signature.addArg(    "AddrAmaxOut", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
