@@ -83,6 +83,24 @@ namespace
         }
     }
 
+    // An interleaved layout gets a single lda * N buffer from testing_matmul, though its batches
+    // reach past it: M = lda = N = 8, stride = 4, batch_count = 2 spans 68 elements. The fills
+    // stop at 64, so the cells after the buffer stay NaN.
+    TEST(MafInitDevice_pre_checkin, interleaved_batches_stay_in_the_buffer)
+    {
+        const size_t M = 8, N = 8, lda = 8, stride = 4, batches = 2, allocated = lda * N;
+        const size_t total = M + lda * (N - 1) + (batches - 1) * stride;
+        for(auto init : {hipblaslt_initialization::maf1_0,
+                         hipblaslt_initialization::maf2_0,
+                         hipblaslt_initialization::maf2_0_unit_scale})
+        {
+            const auto h = fillFloat(ABC_dims::A, init, M, N, lda, stride, batches, total);
+            for(size_t k = 0; k < total; k++)
+                EXPECT_EQ(std::isnan(h[k]), k >= allocated)
+                    << hipblaslt_initialization2string(init) << " offset " << k;
+        }
+    }
+
     // maf1_0: element (i, j) of batch b holds sin (A) or cos (B, C) of the logical index
     // i + j * M + b * M * N, so ld padding and the batch stride do not shift it; padding cells
     // inside the filled extent are 0. A pointer-array batch passes its index as batch_index.
@@ -142,6 +160,37 @@ namespace
         const auto   h = fill<hip_bfloat16>(
             ABC_dims::A, hipblaslt_initialization::maf1_0, HIP_R_16BF, M, 1, M, 0, 1, M);
         EXPECT_EQ(static_cast<float>(h[11446]), -0.92578125f);
+    }
+
+    // maf2_0 rounds each double draw once to BF16. The FP64 fill of the same shape draws the same
+    // values, so every BF16 cell must equal its FP64 cell rounded to nearest even, computed here
+    // without going through float. About one draw in 2^17 lands where rounding to float first
+    // changes the result; 4M draws hit a few dozen, and must hit one or the check proves nothing.
+    TEST(MafInitDevice_pre_checkin, maf2_0_rounds_once_to_bf16)
+    {
+        const size_t M = 2048, N = 2048, total = M * N;
+        const auto   d = fill<double>(
+            ABC_dims::A, hipblaslt_initialization::maf2_0, HIP_R_64F, M, N, M, 0, 1, total);
+        const auto h = fill<hip_bfloat16>(
+            ABC_dims::A, hipblaslt_initialization::maf2_0, HIP_R_16BF, M, N, M, 0, 1, total);
+        // Nearest even with 8 significant bits; dividing by a power of two is exact.
+        auto bf16 = [](double v) {
+            if(v == 0)
+                return v;
+            const double ulp = std::ldexp(1.0, std::ilogb(v) - 7);
+            return std::nearbyint(v / ulp) * ulp;
+        };
+        size_t wrong = 0, viaFloatDiffers = 0;
+        for(size_t k = 0; k < total; k++)
+        {
+            const double once = bf16(d[k]);
+            if(static_cast<double>(static_cast<float>(h[k])) != once)
+                wrong++;
+            if(bf16(static_cast<float>(d[k])) != once)
+                viaFloatDiffers++;
+        }
+        EXPECT_EQ(wrong, 0u);
+        EXPECT_GT(viaFloatDiffers, 0u);
     }
 
     // maf2_0 draws N(0, 1) from seeded streams: the same matrix repeats exactly, while A, B, C,
