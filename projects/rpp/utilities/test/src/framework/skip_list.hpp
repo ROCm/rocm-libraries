@@ -50,6 +50,8 @@ inline constexpr const char* kSkipList[] = {
     "Image_DataExchange/BayerToRgbTest.Correctness/HIP_*",
 
     // ---- known kernel defects ---------------------------------------------------
+    // HIP ignores a nonzero referenceMagnitude (uses 1)
+    "Audio_Arithmetic/ToDecibelsTest.Correctness/HIP_*_ref2",
     "Image_Color/ColorCastTest.Correctness/*",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_PLN1_*_b0_c0_h0_s1",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0_h0_s0",
