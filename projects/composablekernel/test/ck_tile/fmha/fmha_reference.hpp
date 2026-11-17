@@ -65,6 +65,30 @@ struct Sequence
     std::function<float(std::size_t, std::size_t, std::size_t, float)> score_transform;
 };
 
+// FP8 P of the fp8bf16 pipelines: the kernel converts scale * P (P relative to its running row
+// maximum) to OCP e4m3 and divides O by the mass of the converted P. See accuracy_contract.md,
+// "FP8 P".
+struct QuantizedP
+{
+    int mantissa_bits       = 3;   // e4m3
+    int min_normal_exponent = -6;  // e4m3
+    double scale            = 256; // the pipeline's kPScale
+    // Whether the device convert keeps e4m3 subnormals (settled by native controls).
+    bool keeps_subnormals = true;
+
+    double UnitRoundoff() const { return std::ldexp(1.0, -mantissa_bits - 1); }
+    // P (relative to the row maximum) below which the converted value is subnormal.
+    double SubnormalThreshold() const { return std::ldexp(1.0, min_normal_exponent) / scale; }
+    // Largest loss of one key below the threshold: half a subnormal step when subnormals are kept;
+    // the key itself (all of its P, below the threshold) when they are flushed.
+    double SubnormalLoss() const
+    {
+        return keeps_subnormals ? std::ldexp(1.0, min_normal_exponent - mantissa_bits - 1) / scale
+                                : SubnormalThreshold();
+    }
+    bool operator==(const QuantizedP&) const = default;
+};
+
 struct ReferenceRow
 {
     std::size_t sequence;
@@ -77,11 +101,18 @@ struct ReferenceRow
     std::vector<double> absolute_contribution;
     std::vector<double> maximum_value;
     double score_roundoff = 0;
+    // With a quantized-P model only: over the keys whose P relative to the row maximum is below
+    // the subnormal threshold (widened by exp(4 * score_roundoff)), with w = min(P, loss):
+    // sum_k w * abs(V[k,d]) / L and sum_k w / L (L: the normalizing sum).
+    std::vector<double> subnormal_contribution;
+    double subnormal_mass = 0;
 };
 
 struct Reference
 {
     std::vector<ReferenceRow> rows;
+    // The quantized-P model the rows' subnormal sums were computed for.
+    std::optional<QuantizedP> quantized_p;
     std::size_t key_chunk_size = 128;
 };
 
@@ -104,11 +135,13 @@ struct Thresholds
 // See accuracy_contract.md for the FP32 budget assumptions and fault controls.
 struct AccuracyContract
 {
-    int mantissa_bits;
+    int mantissa_bits; // of O, and of P unless quantized_p is set
     std::size_t key_tile_size;
+    // FP8 P (fp8bf16 pipelines, BF16 O); the reference must be computed with the same model.
+    std::optional<QuantizedP> quantized_p = std::nullopt;
 
     double UnitRoundoff() const { return std::ldexp(1.0, -mantissa_bits - 1); }
-    bool RequiresStrict() const { return mantissa_bits == 10; }
+    bool RequiresStrict() const { return mantissa_bits == 10 && !quantized_p; }
     // FP16 half-subnormal spacing; BF16 permits flushing subnormals to zero.
     double AbsoluteRoundoff() const { return std::ldexp(1.0, mantissa_bits == 10 ? -25 : -126); }
 };
@@ -132,6 +165,7 @@ struct Metrics
     double max_lse_abs_error             = 0;
     double max_lse_relative_error        = 0;
     double max_component_ratio           = 0;
+    double max_component_limit           = 0;
     double max_row_relative_l2           = 0;
     double max_row_norm_drift            = 0;
     double max_head_gain                 = 0;
@@ -258,12 +292,25 @@ inline double ComponentLimit(const ReferenceRow& row,
     const double beta = 2 * Gamma(static_cast<double>(row.valid_keys)) +
                         Gamma(3 * device_tiles + 8) + Gamma(3 * reference_tiles + 8) +
                         std::expm1(4 * row.score_roundoff) + 4 * unit;
-    const double target        = std::abs(static_cast<double>(row.output[dim]));
-    const double contribution  = row.absolute_contribution[dim];
-    const double u             = contract.UnitRoundoff();
-    const double floor         = contract.AbsoluteRoundoff();
-    const double before_output = beta * contribution + Gamma(2) * target + u * contribution +
-                                 floor * row.valid_keys * row.maximum_value[dim];
+    const double target       = std::abs(static_cast<double>(row.output[dim]));
+    const double contribution = row.absolute_contribution[dim];
+    const double u            = contract.UnitRoundoff();
+    const double floor        = contract.AbsoluteRoundoff();
+    double p_rounding         = u * contribution + floor * row.valid_keys * row.maximum_value[dim];
+    if(contract.quantized_p)
+    {
+        // O = sum_k P'[k] V[k] / sum_k P'[k] with P' = P (1 + d) (normal keys, abs(d) <= u_P) or
+        // P' = P - e (keys below the subnormal threshold, 0 <= e <= min(P, loss)):
+        // O - r = sum_k (P' - P)(V - r) / sum_k P', and sum_k P' >= L (1 - u_P - subnormal_mass).
+        const double u_p         = contract.quantized_p->UnitRoundoff();
+        const double denominator = 1 - u_p - row.subnormal_mass;
+        if(!(denominator > 0.5))
+            throw std::invalid_argument("quantized-P subnormal mass exceeds its supported range");
+        p_rounding = (u_p * (contribution + target) + row.subnormal_contribution[dim] +
+                      row.subnormal_mass * target) /
+                     denominator;
+    }
+    const double before_output = beta * contribution + Gamma(2) * target + p_rounding;
     // Retain the cross term from rounding O after the P/FP32 error.
     return (1 + u) * before_output + u * target + floor;
 }
@@ -271,13 +318,18 @@ inline double ComponentLimit(const ReferenceRow& row,
 } // namespace detail
 
 // The score chunk and FP32 accumulators use O(key_chunk_size + Dq + Dv) scratch.
-// Only selected O rows are retained. No quantization of P occurs in this oracle.
-inline Reference Compute(const std::vector<Sequence>& sequences, std::size_t key_chunk_size = 128)
+// Only selected O rows are retained. No quantization of P occurs in this oracle; with a
+// quantized-P model a second pass over each row's keys sums the subnormal floor of the FP8
+// contract.
+inline Reference Compute(const std::vector<Sequence>& sequences,
+                         std::size_t key_chunk_size            = 128,
+                         std::optional<QuantizedP> quantized_p = std::nullopt)
 {
     if(key_chunk_size == 0)
         throw std::invalid_argument("attention key chunk must be nonzero");
     Reference reference;
     reference.key_chunk_size      = key_chunk_size;
+    reference.quantized_p         = quantized_p;
     const float negative_infinity = -std::numeric_limits<float>::infinity();
     for(std::size_t batch = 0; batch < sequences.size(); ++batch)
     {
@@ -306,6 +358,8 @@ inline Reference Compute(const std::vector<Sequence>& sequences, std::size_t key
                                     negative_infinity,
                                     std::vector<double>(sequence.value_dimension, 0),
                                     std::vector<double>(sequence.value_dimension, 0),
+                                    0,
+                                    std::vector<double>{},
                                     0};
                 for(std::size_t dim = 0; dim < sequence.query_dimension; ++dim)
                 {
@@ -313,6 +367,23 @@ inline Reference Compute(const std::vector<Sequence>& sequences, std::size_t key
                     if(!std::isfinite(query[dim]))
                         throw std::runtime_error("FP32 attention query overflow");
                 }
+                // The scaled, transformed FP32 score of a visible key and its sum of abs(q * k).
+                auto score_of = [&](std::size_t key, double& absolute_dot) {
+                    float dot    = 0;
+                    absolute_dot = 0;
+                    for(std::size_t dim = 0; dim < sequence.query_dimension; ++dim)
+                    {
+                        absolute_dot +=
+                            std::abs(static_cast<double>(query[dim]) *
+                                     sequence.k(kv_head, key, dim) * sequence.k_descale);
+                        dot = std::fma(
+                            query[dim], sequence.k(kv_head, key, dim) * sequence.k_descale, dot);
+                    }
+                    float score = dot * sequence.score_scale;
+                    if(sequence.score_transform)
+                        score = sequence.score_transform(head, row, key, score);
+                    return score;
+                };
                 float maximum = negative_infinity;
                 float sum     = 0;
                 for(std::size_t begin = 0; begin < sequence.key_length;)
@@ -324,22 +395,8 @@ inline Reference Compute(const std::vector<Sequence>& sequences, std::size_t key
                         scores[key] = negative_infinity;
                         if(detail::IsMasked(sequence, row, begin + key))
                             continue;
-                        float dot           = 0;
-                        double absolute_dot = 0;
-                        for(std::size_t dim = 0; dim < sequence.query_dimension; ++dim)
-                        {
-                            absolute_dot += std::abs(static_cast<double>(query[dim]) *
-                                                     sequence.k(kv_head, begin + key, dim) *
-                                                     sequence.k_descale);
-                            dot =
-                                std::fma(query[dim],
-                                         sequence.k(kv_head, begin + key, dim) * sequence.k_descale,
-                                         dot);
-                        }
-                        scores[key] = dot * sequence.score_scale;
-                        if(sequence.score_transform)
-                            scores[key] =
-                                sequence.score_transform(head, row, begin + key, scores[key]);
+                        double absolute_dot   = 0;
+                        scores[key]           = score_of(begin + key, absolute_dot);
                         result.score_roundoff = std::max(
                             result.score_roundoff,
                             std::abs(static_cast<double>(sequence.score_scale)) *
@@ -396,6 +453,40 @@ inline Reference Compute(const std::vector<Sequence>& sequences, std::size_t key
                         value *= rescale;
                     maximum = next_max;
                 }
+                if(quantized_p)
+                {
+                    // Second pass with the final maximum: the keys the device may convert to
+                    // e4m3 subnormals. The device's P is taken against a running maximum that
+                    // never exceeds the final one, so its P is at least this P; the score
+                    // difference between the two paths (up to 2 * eta each way) widens the bound.
+                    result.subnormal_contribution.assign(sequence.value_dimension, 0);
+                    const double threshold =
+                        quantized_p->SubnormalThreshold() * std::exp(4 * result.score_roundoff);
+                    const double loss = quantized_p->SubnormalLoss();
+                    for(std::size_t key = 0; sum != 0 && key < sequence.key_length; ++key)
+                    {
+                        if(detail::IsMasked(sequence, row, key))
+                            continue;
+                        double absolute_dot = 0;
+                        const double probability =
+                            std::exp(static_cast<double>(score_of(key, absolute_dot)) - maximum);
+                        if(!(probability < threshold))
+                            continue;
+                        const double weight = std::min(probability, loss);
+                        result.subnormal_mass += weight;
+                        for(std::size_t dim = 0; dim < sequence.value_dimension; ++dim)
+                            result.subnormal_contribution[dim] +=
+                                weight *
+                                std::abs(static_cast<double>(sequence.v(kv_head, key, dim)) *
+                                         sequence.v_descale);
+                    }
+                    if(sum != 0)
+                    {
+                        result.subnormal_mass /= sum;
+                        for(auto& value : result.subnormal_contribution)
+                            value /= sum;
+                    }
+                }
                 if(sum != 0)
                 {
                     for(auto& value : result.output)
@@ -432,6 +523,27 @@ inline Metrics Compare(const std::vector<Sequence>& sequences,
         throw std::invalid_argument("unsupported attention accuracy contract");
     if(contract && reference.key_chunk_size == 0)
         throw std::invalid_argument("missing attention reference chunk size");
+    if(contract && contract->quantized_p)
+    {
+        // FP8 P is tested with BF16 O (fp8bf16) and OCP e4m3 only; the scale is a power of two.
+        const auto& quantized = *contract->quantized_p;
+        int scale_exponent    = 0;
+        if(contract->mantissa_bits != 7 || quantized.mantissa_bits != 3 ||
+           quantized.min_normal_exponent != -6 || !(quantized.scale >= 1) ||
+           std::frexp(quantized.scale, &scale_exponent) != 0.5)
+            throw std::invalid_argument("unsupported quantized-P attention accuracy contract");
+        if(reference.quantized_p != contract->quantized_p)
+            throw std::invalid_argument(
+                "attention reference was computed without the contract's quantized-P model");
+        // The model divides O by the converted P mass alone: it has no sink term and no LSE.
+        for(const auto& sequence : sequences)
+            for(const auto sink : sequence.sink_logits)
+                if(std::isfinite(sink))
+                    throw std::invalid_argument("quantized-P attention contract has no sink model");
+        for(const auto& output : outputs)
+            if(output.lse)
+                throw std::invalid_argument("quantized-P attention contract has no LSE model");
+    }
     if(!std::isfinite(thresholds.max_abs_error) || thresholds.max_abs_error < 0 ||
        !std::isfinite(thresholds.min_row_cosine) || thresholds.min_row_cosine < -1 ||
        thresholds.min_row_cosine > 1 || !std::isfinite(thresholds.mean_row_cosine) ||
@@ -489,6 +601,14 @@ inline Metrics Compare(const std::vector<Sequence>& sequences,
                     expected.maximum_value.size() != sequence.value_dimension ||
                     !std::isfinite(expected.score_roundoff) || expected.score_roundoff < 0))
                     throw std::invalid_argument("attention reference accuracy metadata is missing");
+                if(contract && contract->quantized_p &&
+                   (expected.subnormal_contribution.size() != sequence.value_dimension ||
+                    !std::isfinite(expected.subnormal_mass) || expected.subnormal_mass < 0 ||
+                    !std::all_of(expected.subnormal_contribution.begin(),
+                                 expected.subnormal_contribution.end(),
+                                 [](double x) { return std::isfinite(x) && x >= 0; })))
+                    throw std::invalid_argument(
+                        "attention reference subnormal metadata is missing");
                 ++metrics.checked_rows;
                 double dot               = 0;
                 double actual_norm       = 0;
@@ -523,6 +643,7 @@ inline Metrics Compare(const std::vector<Sequence>& sequences,
                                                                     *contract);
                         if(!std::isfinite(limit))
                             throw std::invalid_argument("nonfinite attention accuracy budget");
+                        metrics.max_component_limit = std::max(metrics.max_component_limit, limit);
                         metrics.max_component_ratio = std::max(metrics.max_component_ratio,
                                                                detail::RelativeError(error, limit));
                         metrics.component_mismatch_count += error > limit;
@@ -610,10 +731,14 @@ inline Metrics Compare(const std::vector<Sequence>& sequences,
                             metrics.max_abs_error <= thresholds.max_abs_error &&
                             metrics.min_row_cosine >= thresholds.min_row_cosine &&
                             metrics.mean_row_cosine >= thresholds.mean_row_cosine;
-    metrics.contract_passed = contract.has_value() && metrics.nonfinite_output_count == 0 &&
-                              metrics.invalid_lse_count == 0 && metrics.lse_mismatch_count == 0 &&
-                              metrics.max_abs_error <= thresholds.max_abs_error &&
-                              metrics.component_mismatch_count == 0;
+    // A quantized-P contract caps each component by its own limit (accuracy_contract.md, "FP8 P";
+    // max_component_limit reports the largest): the fixed absolute cap is below correct FP8 output
+    // on rows with few keys.
+    metrics.contract_passed =
+        contract.has_value() && metrics.nonfinite_output_count == 0 &&
+        metrics.invalid_lse_count == 0 && metrics.lse_mismatch_count == 0 &&
+        (contract->quantized_p || metrics.max_abs_error <= thresholds.max_abs_error) &&
+        metrics.component_mismatch_count == 0;
     metrics.passed =
         contract ? metrics.contract_passed && (!contract->RequiresStrict() || metrics.strict_passed)
                  : metrics.strict_passed;
