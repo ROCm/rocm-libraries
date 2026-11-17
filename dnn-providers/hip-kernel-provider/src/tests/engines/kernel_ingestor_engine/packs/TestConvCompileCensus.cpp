@@ -35,10 +35,12 @@
  * name, wave size and compute units; no GPU is used), against the graphs of a coverage map
  * (HKP_CONV_CENSUS_MAP, hip_kernel_provider_conv_coverage_map.json), each row in its own
  * direction, dtype, layout and memory form, and of a sweep along what the configs bake (filter
- * geometry, stride, group width, dtype, layout, direction; HKP_CONV_CENSUS_SWEEP=0 leaves it
- * out); each forward graph also with a fused bias and clipped ReLU. Every config a graph admits is prepared through its pack's dispatch, which
- * builds the config's compile options; at most HKP_CONV_CENSUS_PER_CONFIG graphs a config and
- * architecture (default 8). Run it under conv/tools/rdna_generic/rtc_hook.c with HKP_RTC_DRY=1
+ * geometry, stride, group width, dtype, layout, direction) and of large dense problems (wide
+ * GEMMs, images past 2 GiB, long 1-D and large-filter problems, patch convolutions, images past
+ * 2^31 - 1 pixels); HKP_CONV_CENSUS_SWEEP=0 leaves them out. Each forward graph is also fused with
+ * a bias and a clipped ReLU. Every config a graph admits is prepared through its pack's dispatch,
+ * which builds the config's compile options; at most HKP_CONV_CENSUS_PER_CONFIG graphs a config
+ * and architecture (default 8). Run it under conv/tools/rdna_generic/rtc_hook.c with HKP_RTC_DRY=1
  * and HKP_RTC_LOG=<file>, so each distinct compile is logged and nothing is compiled or loaded,
  * and with HIPDNN_DISABLE_CACHE=1.
  *
@@ -371,6 +373,145 @@ void addSweepGraphs(std::vector<PoolGraph>& pool)
     }
 }
 
+/// Large dense problems: the configs whose host gates want a large GEMM (wide tiles, XCD swizzle,
+/// DMA staging, the three-bf16 forms' channel and tap floors), images past 2 GiB, and long 1-D
+/// and large-filter problems (FFT tiles).
+void addLargeGraphs(std::vector<PoolGraph>& pool)
+{
+    struct Large
+    {
+        std::vector<int64_t> input;
+        int64_t n;
+        int64_t c;
+    };
+    const std::vector<std::pair<std::vector<int64_t>, std::vector<Large>>> sets{
+        {{1, 1}, {{{112, 112}, 8, 512}, {{14, 14}, 32, 1024}, {{256, 256}, 64, 256}}},
+        {{3, 3}, {{{112, 112}, 8, 512}, {{14, 14}, 32, 1024}, {{256, 256}, 64, 256}}},
+        {{5, 5}, {{{128, 128}, 4, 256}}},
+        {{7, 7}, {{{128, 128}, 4, 256}, {{224, 224}, 8, 64}}},
+        {{11, 11}, {{{256, 256}, 2, 128}}},
+        {{3, 3, 3}, {{{16, 56, 56}, 2, 256}, {{8, 14, 14}, 8, 1024}}},
+        {{1, 3, 3}, {{{16, 56, 56}, 2, 256}}},
+        {{31}, {{{16384}, 8, 256}}},
+        {{63}, {{{16384}, 8, 128}}}};
+    const std::vector<DataType> types{DataType::FLOAT, DataType::HALF, DataType::BFLOAT16};
+    for(const auto& [filter, larges] : sets)
+    {
+        for(const auto& large : larges)
+        {
+            for(const int64_t stride : {1, 2})
+            {
+                for(const auto type : types)
+                {
+                    for(const bool channelsLast : {false, true})
+                    {
+                        for(const auto direction : {ConvDirection::FORWARD,
+                                                    ConvDirection::BACKWARD_DATA,
+                                                    ConvDirection::BACKWARD_WEIGHTS})
+                        {
+                            conv_naive_test::ConvShape shape;
+                            shape.n = large.n;
+                            shape.c = large.c;
+                            shape.k = large.c;
+                            shape.groups = 1;
+                            shape.filter = filter;
+                            shape.input = large.input;
+                            shape.prePadding.clear();
+                            shape.postPadding.clear();
+                            for(const auto f : filter)
+                            {
+                                shape.prePadding.push_back(f / 2);
+                                shape.postPadding.push_back(f / 2);
+                            }
+                            shape.stride.assign(filter.size(), stride);
+                            shape.dilation.assign(filter.size(), 1);
+                            shape.channelsLast = channelsLast;
+                            shape.dataType = type;
+                            std::ostringstream label;
+                            label << "large f" << nlohmann::json(filter).dump() << " x"
+                                  << nlohmann::json(large.input).dump() << " n" << large.n << " c"
+                                  << large.c << " s" << stride << " t" << static_cast<int>(type)
+                                  << (channelsLast ? " cl" : " cf") << " d"
+                                  << static_cast<int>(direction);
+                            addGraph(pool,
+                                     label.str(),
+                                     shape,
+                                     conv_naive_test::specFor(shape, direction));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Patch convolutions (stride equal to the filter, no padding: the patch-GEMM configs) and images
+/// past 2^31 - 1 pixels (the 64-bit-position configs).
+void addPatchAndHugeGraphs(std::vector<PoolGraph>& pool)
+{
+    struct Case
+    {
+        std::vector<int64_t> filter;
+        std::vector<int64_t> input;
+        std::vector<int64_t> stride;
+        std::vector<int64_t> pad;
+        int64_t n;
+        int64_t c;
+        int64_t k;
+    };
+    std::vector<Case> cases;
+    for(const int64_t p : {2, 4, 8, 14, 16})
+    {
+        for(const int64_t c : {3, 64, 256})
+        {
+            cases.push_back({{p, p}, {16 * p, 16 * p}, {p, p}, {0, 0}, 8, c, 768});
+        }
+    }
+    for(const int64_t c : {3, 64})
+    {
+        cases.push_back({{2, 16, 16}, {16, 224, 224}, {2, 16, 16}, {0, 0, 0}, 2, c, 768});
+    }
+    for(const int64_t c : {4, 16, 64})
+    {
+        cases.push_back({{3, 3}, {46400, 46400}, {1, 1}, {1, 1}, 1, c, c});
+        cases.push_back({{1, 1}, {46400, 46400}, {1, 1}, {0, 0}, 1, c, c});
+    }
+    const std::vector<DataType> types{DataType::FLOAT, DataType::HALF, DataType::BFLOAT16};
+    for(const auto& item : cases)
+    {
+        for(const auto type : types)
+        {
+            for(const bool channelsLast : {false, true})
+            {
+                for(const auto direction : {ConvDirection::FORWARD,
+                                            ConvDirection::BACKWARD_DATA,
+                                            ConvDirection::BACKWARD_WEIGHTS})
+                {
+                    conv_naive_test::ConvShape shape;
+                    shape.n = item.n;
+                    shape.c = item.c;
+                    shape.k = item.k;
+                    shape.groups = 1;
+                    shape.filter = item.filter;
+                    shape.input = item.input;
+                    shape.prePadding = item.pad;
+                    shape.postPadding = item.pad;
+                    shape.stride = item.stride;
+                    shape.dilation.assign(item.filter.size(), 1);
+                    shape.channelsLast = channelsLast;
+                    shape.dataType = type;
+                    std::ostringstream label;
+                    label << "patch/huge f" << nlohmann::json(item.filter).dump() << " x"
+                          << nlohmann::json(item.input).dump() << " c" << item.c << " t"
+                          << static_cast<int>(type) << (channelsLast ? " cl" : " cf") << " d"
+                          << static_cast<int>(direction);
+                    addGraph(pool, label.str(), shape, conv_naive_test::specFor(shape, direction));
+                }
+            }
+        }
+    }
+}
+
 TEST(TestConvCompileCensus, PreparesEveryAdmittedConfig)
 {
     const auto tree = envOr("HKP_CONV_CENSUS_TREE");
@@ -400,6 +541,8 @@ TEST(TestConvCompileCensus, PreparesEveryAdmittedConfig)
     if(envOr("HKP_CONV_CENSUS_SWEEP", "1") == "1")
     {
         addSweepGraphs(pool);
+        addLargeGraphs(pool);
+        addPatchAndHugeGraphs(pool);
     }
     ASSERT_FALSE(pool.empty()) << "no graphs in " << mapPath;
     registerNativeIngestorSymbols();
