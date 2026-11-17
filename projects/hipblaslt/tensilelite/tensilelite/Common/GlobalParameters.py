@@ -349,6 +349,18 @@ globalParameters["EnableMarker"] = False  # Enable TensileLite markers
 
 globalParameters["UseUserArgs"] = False
 
+# Run each problem split across N consecutive devices (e.g. the two partitions of an NPS2 card).
+# SplitDim M splits A and keeps B replicated; N splits B, replicates A and writes one shared D.
+globalParameters["SplitDevices"] = 1
+globalParameters["SplitDim"] = "M"
+# Where each tensor lives when split: "Replicated" (a copy on every device, the default) or
+# "Shared" (one copy that the other devices use over peer access: A, B and C are read from the
+# last device, whose slice is the largest; D is written on the first device).
+globalParameters["SplitPlacementA"] = "Replicated"
+globalParameters["SplitPlacementB"] = "Replicated"
+globalParameters["SplitPlacementC"] = "Replicated"
+globalParameters["SplitPlacementD"] = "Replicated"
+
 globalParameters["RotatingBufferSize"] = 0  # Size in MB
 globalParameters["RotatingMode"] = (
     0  # Default is 0, allocated in order A0B0C0D0..ANBNCNDN. 1 is in order A0 pad B0 pad .... AN pad BN pad.
