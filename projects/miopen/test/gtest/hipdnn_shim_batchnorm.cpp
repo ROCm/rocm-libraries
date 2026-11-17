@@ -2085,9 +2085,9 @@ struct RawProblem
         SetActivation(miopenActivationPASTHRU);
     }
 
-    void SetActivation(miopenActivationMode_t mode)
+    void SetActivation(miopenActivationMode_t activ_mode)
     {
-        EXPECT_EQ(miopenSetActivationDescriptor(activ.handle, mode, 0.1, 0.3, 0.0),
+        EXPECT_EQ(miopenSetActivationDescriptor(activ.handle, activ_mode, 0.1, 0.3, 0.0),
                   miopenStatusSuccess);
     }
 
