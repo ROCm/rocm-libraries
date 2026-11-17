@@ -1149,6 +1149,16 @@ TEST(TestLayernormValidator, LowerRankAffineAlignsToTrailingDimsOfXFprop)
     expectFprop(layout, true);
 }
 
+TEST(TestLayernormValidator, HigherRankAffineDeclinedFprop)
+{
+    // Declined before the normalized-dim checks, which index x's dims by the operand's rank.
+    LayoutCase layout;
+    layout.affineDims = {1, 1, 8, 4, 4};
+    layout.scaleStrides = {128, 128, 16, 4, 1};
+    layout.biasStrides = {128, 128, 16, 4, 1};
+    expectFprop(layout, true);
+}
+
 TEST(TestLayernormValidator, MatchingAffineLayoutAcceptedBprop)
 {
     expectBprop(LayoutCase{}, false);
@@ -1246,6 +1256,28 @@ TEST(TestLayernormValidator, StatOrderDifferentFromXDeclinedBprop)
         auto mutated = layout;
         mutated.invVarianceStrides = {1, 2, 1, 1};
         expectBprop(mutated, true);
+    }
+}
+
+TEST(TestLayernormValidator, HigherRankAffineOrStatDeclinedBprop)
+{
+    // Declined before the normalized-dim checks, which index x's dims by the operand's rank.
+    {
+        SCOPED_TRACE("affine");
+        LayoutCase layout;
+        layout.affineDims = {1, 1, 8, 4, 4};
+        layout.scaleStrides = {128, 128, 16, 4, 1};
+        layout.dscaleStrides = {128, 128, 16, 4, 1};
+        layout.dbiasStrides = {128, 128, 16, 4, 1};
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("stats");
+        LayoutCase layout;
+        layout.statDims = {2, 1, 1, 1, 1};
+        layout.meanStrides = {1, 1, 1, 1, 1};
+        layout.invVarianceStrides = {1, 1, 1, 1, 1};
+        expectBprop(layout, true);
     }
 }
 

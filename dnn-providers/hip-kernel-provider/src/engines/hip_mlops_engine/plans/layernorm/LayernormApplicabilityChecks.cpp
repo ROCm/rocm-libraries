@@ -327,12 +327,12 @@ void LayernormValidator::checkTensorConfigSupported(
 
     checkTensorLayoutsAndDimsSupported(ioAndStatTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
-    validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
-    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorMemoryOrderSupported(
         lnAttr.x_tensor_uid(),
         {{"scale", lnAttr.scale_tensor_uid()}, {"bias", lnAttr.bias_tensor_uid()}},
         fwdStatTensors);
+    validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
 }
 
 void LayernormValidator::checkTensorConfigSupported(
@@ -368,13 +368,13 @@ void LayernormValidator::checkTensorConfigSupported(
 
     checkTensorLayoutsAndDimsSupported(ioTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
-    validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
-    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorMemoryOrderSupported(lnAttr.x_tensor_uid(),
                                     {{"scale", lnAttr.scale_tensor_uid()},
                                      {"dscale", lnAttr.dscale_tensor_uid()},
                                      {"dbias", lnAttr.dbias_tensor_uid()}},
                                     bwdStatTensors);
+    validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
     checkDxDataTypeSupported(lnAttr.x_tensor_uid(), lnAttr.dx_tensor_uid());
 }
 
