@@ -341,7 +341,8 @@ namespace TensileLite
         // The real split once the iterations are divided up.
         items.itersPerWI = kGran * CeilDivide(CeilDivide(iters, items.split), kGran);
         items.split      = CeilDivide(iters, items.itersPerWI);
-        items.totalItems = (tiles - items.tiles) + items.tiles * items.split;
+        items.totalItems = static_cast<uint32_t>((tiles - items.tiles)
+                                                 + size_t{items.tiles} * items.split);
         return items;
     }
 
