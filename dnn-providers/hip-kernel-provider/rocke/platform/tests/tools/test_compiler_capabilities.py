@@ -220,16 +220,15 @@ def test_requests_use_comgr_isa_options_and_complete_modules() -> None:
     assert all(
         'target triple = "amdgcn-amd-amdhsa"' in request.ir_text for request in requests
     )
-    options = {
-        metadata[request.key][2]: request.options
+    assert len(requests) == 16
+    composite = {
+        metadata[request.key][0]: request.ir_text
         for request in requests
-        if metadata[request.key][0] == P._CAPABILITY_COMPILER_OPTIONS
+        if metadata[request.key][2] in {"v2i32", "as3", "current_9"}
     }
-    assert options["mfma_vgpr_form"] == (
-        "-O3",
-        "-mllvm",
-        "-amdgpu-mfma-vgpr-form",
-    )
+    assert composite[P._CAPABILITY_FP8_PACKING].count("define amdgpu_kernel") == 8
+    assert composite[P._CAPABILITY_NAMED_BARRIER].count("define amdgpu_kernel") == 4
+    assert composite[P._CAPABILITY_SCALED_MFMA].count("define amdgpu_kernel") == 2
 
 
 def test_rejection_and_crash_are_observations_not_inference(tmp_path: Path) -> None:

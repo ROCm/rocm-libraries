@@ -102,10 +102,13 @@ them without changing report semantics.
 The embedded LLVM version explains which compiler lineage was observed. It does
 not predict a capability and never substitutes for one.
 
-The schema and probe are replayed against 43 weekly public snapshots, three
-public release baselines, and five processor contexts. Historical evidence is
-invalidated and regenerated when the probe or schema digest changes; the checker
-pins exact candidate closure and published transition claims.
+The schema and probe are replayed against nine weekly transition endpoints,
+three public release baselines, and five processor contexts. The initial broad
+survey found no structural change at 37 of 42 adjacent weekly boundaries, so
+unchanged intermediate artifacts are not retained as a permanent replay tax.
+Historical evidence is invalidated and regenerated when the probe or schema
+digest changes; the checker pins exact candidate closure and published
+transition claims.
 
 ## Evolution
 

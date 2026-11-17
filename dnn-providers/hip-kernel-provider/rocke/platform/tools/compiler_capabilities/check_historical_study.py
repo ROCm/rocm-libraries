@@ -26,7 +26,7 @@ else:
 
 _ROOT = Path(__file__).resolve().parent
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_LOCAL_PATH_RE = re.compile(r"(?:/home/|/Users/|/tmp/|[A-Za-z]:\\)")
+_LOCAL_PATH_RE = re.compile(r"(?:/home/|/Users/|/tmp/|/root/|/opt/|[A-Za-z]:\\)")
 _HISTORICAL_PROCESSORS = ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250")
 
 
@@ -65,49 +65,24 @@ def _structural_vector(
     return vector
 
 
-def _generated_vector(
-    document: dict[str, object], row: dict[str, object]
-) -> dict[str, str]:
-    vector = {}
-    for processor, reference in row["reports"].items():
-        capabilities = document["vectors"][reference["vector"]]
-        observations = capabilities[probe._CAPABILITY_OPT_LEVELS]
-        outputs = reference["optimization_outputs"]
-        for entry in observations:
-            if entry["outcome"] == "accepted":
-                vector[f"{processor}|{entry['candidate']}"] = outputs[
-                    entry["candidate"]
-                ]
-            else:
-                vector[f"{processor}|{entry['candidate']}"] = entry["outcome"]
-    return vector
-
-
 def _boundaries(
     document: dict[str, object],
     rows: list[dict[str, object]],
-    *,
-    generated: bool = False,
 ) -> list[tuple[str, str, int, tuple[str, ...]]]:
     result = []
-    vector = _generated_vector if generated else _structural_vector
     for previous, current in itertools.pairwise(rows):
-        before = vector(document, previous)
-        after = vector(document, current)
+        before = _structural_vector(document, previous)
+        after = _structural_vector(document, current)
         changed = [key for key, value in before.items() if after.get(key) != value]
         if not changed:
             continue
-        capabilities = (
-            (probe._CAPABILITY_OPT_LEVELS,)
-            if generated
-            else tuple(
-                sorted(
-                    {
-                        key.split("|", 3)[1]
-                        for key in changed
-                        if "|effective_processor" not in key
-                    }
-                )
+        capabilities = tuple(
+            sorted(
+                {
+                    key.split("|", 3)[1]
+                    for key in changed
+                    if "|effective_processor" not in key
+                }
             )
         )
         result.append((previous["id"], current["id"], len(changed), capabilities))
@@ -119,7 +94,7 @@ def _validate_inputs(
 ) -> None:
     if inputs.get("format") != "rocke-comgr-historical-inputs/v1":
         raise StudyError("historical input format is stale")
-    if observations.get("format") != "rocke-comgr-historical-observations/v2":
+    if observations.get("format") != "rocke-comgr-historical-observations/v3":
         raise StudyError("historical observation format is stale")
     public_sources = inputs.get("public_sources")
     if (
@@ -135,7 +110,7 @@ def _validate_inputs(
         )
     if observations.get("public_sources") != public_sources:
         raise StudyError("historical public sources differ from the input manifest")
-    for group_name, expected_count in (("weekly", 43), ("releases", 3)):
+    for group_name, expected_count in (("weekly", 9), ("releases", 3)):
         input_rows = inputs.get(group_name)
         rows = observations.get(group_name)
         if not isinstance(input_rows, list) or not isinstance(rows, list):
@@ -188,9 +163,18 @@ def _validate_reports(observations: dict[str, object]) -> None:
     vectors = observations.get("vectors")
     if not isinstance(probe_info, dict) or not isinstance(vectors, dict):
         raise StudyError("historical probe or vector store is malformed")
-    for field in ("implementation_sha256", "schema_sha256"):
-        if _SHA256_RE.fullmatch(str(probe_info.get(field, ""))) is None:
+    expected_probe = {
+        "implementation_sha256": probe._implementation_sha256(),
+        "schema_sha256": probe._schema_sha256(),
+    }
+    for field, expected in expected_probe.items():
+        value = str(probe_info.get(field, ""))
+        if _SHA256_RE.fullmatch(value) is None:
             raise StudyError(f"historical study has no {field}")
+        if value != expected:
+            raise StudyError(
+                f"historical {field} differs from the checked-in probe source"
+            )
     for vector_id, capabilities in vectors.items():
         encoded = json.dumps(
             capabilities, sort_keys=True, separators=(",", ":")
@@ -231,7 +215,6 @@ def _validate_reports(observations: dict[str, object]) -> None:
             expected = probe._expected_observations(processor)
             if set(capabilities) != set(expected):
                 raise StudyError(f"{row['id']} {processor} capability set differs")
-            accepted_optimization = set()
             for name, corpus in expected.items():
                 entries = capabilities[name]
                 observed = [
@@ -244,20 +227,6 @@ def _validate_reports(observations: dict[str, object]) -> None:
                         raise StudyError(
                             f"{row['id']} {processor} {name} has incomplete outcome"
                         )
-                    if (
-                        name == probe._CAPABILITY_OPT_LEVELS
-                        and entry["outcome"] == "accepted"
-                    ):
-                        accepted_optimization.add(entry["candidate"])
-            outputs = reference.get("optimization_outputs")
-            if not isinstance(outputs, dict) or set(outputs) != accepted_optimization:
-                raise StudyError(
-                    f"{row['id']} {processor} optimization output set differs"
-                )
-            if any(
-                _SHA256_RE.fullmatch(str(value)) is None for value in outputs.values()
-            ):
-                raise StudyError(f"{row['id']} {processor} has malformed output digest")
             effective = reference.get("effective_processor")
             allowed = {processor}
             if generic := probe._GENERIC_PROCESSORS.get(processor):
@@ -294,7 +263,6 @@ def check(
     _validate_reports(observations)
     rows = observations["weekly"]
     structural = _boundaries(observations, rows)
-    generated = _boundaries(observations, rows, generated=True)
     published = _published_boundaries(study_path)
     expected_published = [(left, right, count) for left, right, count, _ in structural]
     if published != expected_published:
@@ -303,15 +271,12 @@ def check(
         )
     study = study_path.read_text(encoding="utf-8")
     churn = churn_path.read_text(encoding="utf-8")
-    claims = (
-        (study, f"{len(structural)} of the 42 adjacent weekly boundaries"),
-        (study, f"{len(generated)} of the 42"),
-        (churn, "five of 42"),
-        (churn, f"{len(generated)} boundaries"),
-    )
-    for document, claim in claims:
-        if claim not in document:
-            raise StudyError(f"published churn claim is stale: {claim!r}")
+    for document, claim in (
+        (study, "nine selected weekly snapshots"),
+        (churn, "nine selected weekly snapshots"),
+    ):
+        if claim not in re.sub(r"\s+", " ", document):
+            raise StudyError(f"published scope claim is stale: {claim!r}")
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

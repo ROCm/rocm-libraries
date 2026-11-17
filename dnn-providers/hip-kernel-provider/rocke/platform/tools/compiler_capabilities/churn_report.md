@@ -10,64 +10,63 @@
 
 ## Scope
 
-This report assesses the 43-weekly-snapshot, three-release-baseline,
-five-processor COMGR study recorded in
-[`historical_observations.json`](historical_observations.json). It distinguishes
-structural compatibility outcomes from generated-code fingerprints; neither is
-numeric or performance qualification.
+This report assesses the nine selected weekly snapshots, three release
+baselines, and five processor contexts recorded in
+[`historical_observations.json`](historical_observations.json). The selected
+weekly rows retain the first broad-survey sample and both sides of every observed
+structural transition. This is compiler-compatibility evidence, not numeric or
+performance qualification.
 
 ## Observed churn
 
-The structural capability vector changes at five of 42 adjacent weekly
-boundaries. The five distinct vectors are separated by changes in:
+The selected transition pairs contain four structural changes:
 
-- focused `-O0` code generation;
-- accepted buffer-resource ABI candidates;
-- named-barrier pointer candidates;
-- compiler crash versus normal rejection; and
-- parser-stage versus codegen-stage failure.
+- one changes accepted buffer-resource ABI candidates and named barriers; and
+- three change named-barrier address-space outcomes, including crash versus
+  normal rejection and parser-stage versus codegen-stage failure.
 
-The optimization-level HSACO fingerprint changes at 31 boundaries. Those
-changes are retained as routing evidence for deeper qualification, not promoted
-to configuration booleans.
+The initial 43-week survey found no structural change at 37 of 42 adjacent
+boundaries. Those unchanged intermediate artifacts do not remain in the
+maintained replay set.
+
+Generated HSACO digests are also excluded. A digest change can route a compiler
+to generated-code or resource qualification, but it is not a configuration
+capability.
 
 ## Interpretation work
 
 A new structural result requires bounded review:
 
 1. confirm the exact COMGR digest and public artifact;
-2. compare candidate outcome and failed stage per processor;
+2. compare candidate outcome and failed stage per affected processor;
 3. determine whether the change affects a form rocKE emits or may select;
-4. run complete production-kernel validity for any proposed selection change;
+4. run complete production-kernel validity for a proposed selection change;
 5. update Python and C++ policy together when emission changes; and
-6. run generated-code/resource and numeric qualification where the microprobe
-   cannot prove the required property.
+6. run generated-code, resource, and numeric qualification where a microprobe
+   cannot establish the required property.
 
-The report removes the previous work of reconciling Clang, `opt`, and COMGR
-identity. It does not remove qualification work and does not infer policy from
-acceptance.
+The report removes the need to correlate unrelated Clang, `opt`, and COMGR
+identities. It does not infer policy from acceptance.
 
 ## Steady-state assessment
 
-The current schema has nine independent capability families and 47–48 bounded
-candidates per processor. The candidate count is driven by known current and
-historical rocKE forms, not by LLVM's complete feature surface.
+The maintained report has six capability families and 15–16 bounded compiler
+jobs per processor. The previous broad matrix repeated global policy choices for
+every operation and included options, attributes, and output fingerprints that
+did not belong to the flavor-replacement decision.
 
-Schema growth is controlled by closure rules:
+Schema growth follows four rules:
 
-- add a candidate when rocKE emits a new form or archaeology exposes a real
-  compatibility distinction;
-- keep independently varying families separate;
-- retain processor and failed-stage context;
-- do not add general compiler-feature booleans unrelated to rocKE; and
-- retire settled probes after their migration consumers and supported compiler
-  window no longer need them.
+- add a candidate only for a production COMGR distinction rocKE must select;
+- group every operation controlled by one policy into one all-family candidate;
+- retain processor and failed-stage context; and
+- retire settled probes and unchanged historical samples.
 
 ## Decision
 
-Direct COMGR probing is practical as the evidence layer for replacing automatic
-LLVM-major profile inference. Production integration remains incremental:
+Direct COMGR probing remains the evidence layer for replacing automatic
+LLVM-major profile inference. Production integration stays incremental:
 evidence loading and normalized policy first, then one independently qualified
-emission decision per reviewable slice. Flavor modes remain temporary offline
-and fallback interfaces until every production consumer and artifact identity
-has migrated.
+emission decision per reviewable change. Legacy flavor modes remain temporary
+offline and fallback interfaces until each production consumer and artifact
+identity has migrated.

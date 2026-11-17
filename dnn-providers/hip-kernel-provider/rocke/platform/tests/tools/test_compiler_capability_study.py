@@ -68,6 +68,27 @@ def test_checker_rejects_missing_provenance_digest(
         study.check(inputs, changed, published, churn)
 
 
+@pytest.mark.parametrize("field", ["implementation_sha256", "schema_sha256"])
+def test_checker_rejects_probe_source_digest_drift(tmp_path: Path, field: str) -> None:
+    inputs, observations_path, published, churn = _paths()
+    observations = json.loads(observations_path.read_text())
+    observations["probe"][field] = "f" * 64
+    changed = _changed_json(observations_path, observations, tmp_path)
+    with pytest.raises(study.StudyError, match=f"historical {field} differs"):
+        study.check(inputs, changed, published, churn)
+
+
+def test_checker_rejects_machine_local_paths(tmp_path: Path) -> None:
+    inputs, observations_path, published, churn = _paths()
+    for index, local_path in enumerate(("/opt/rocm/lib", "/root/sdk/lib")):
+        observations = json.loads(observations_path.read_text())
+        observations["weekly"][0]["compiler"]["version_source"] = local_path
+        changed = tmp_path / f"observations-{index}.json"
+        changed.write_text(json.dumps(observations), encoding="utf-8")
+        with pytest.raises(study.StudyError, match="machine-local path"):
+            study.check(inputs, changed, published, churn)
+
+
 def test_checker_rejects_public_source_id_and_artifact_drift(tmp_path: Path) -> None:
     inputs_path, observations_path, published, churn = _paths()
     inputs = json.loads(inputs_path.read_text())
@@ -95,7 +116,7 @@ def test_checker_rejects_public_source_id_and_artifact_drift(tmp_path: Path) -> 
         study.check(inputs_path, changed, published, churn)
 
 
-def test_checker_rejects_corpus_and_generated_digest_drift(tmp_path: Path) -> None:
+def test_checker_rejects_corpus_digest_drift(tmp_path: Path) -> None:
     inputs, observations_path, published, churn = _paths()
     observations = json.loads(observations_path.read_text())
     reference = observations["weekly"][0]["reports"]["gfx950"]
@@ -108,19 +129,12 @@ def test_checker_rejects_corpus_and_generated_digest_drift(tmp_path: Path) -> No
     ):
         study.check(inputs, changed, published, churn)
 
-    observations = json.loads(observations_path.read_text())
-    outputs = observations["weekly"][0]["reports"]["gfx950"]["optimization_outputs"]
-    outputs[next(iter(outputs))] = "bad"
-    changed = _changed_json(observations_path, observations, tmp_path)
-    with pytest.raises(study.StudyError, match="output digest"):
-        study.check(inputs, changed, published, churn)
-
 
 def test_checker_rejects_stale_published_boundaries(tmp_path: Path) -> None:
     inputs, observations, published, churn = _paths()
     changed = tmp_path / "historical_study.md"
     changed.write_text(
-        published.read_text().replace("| W20 → W21 | 5 |", "| W20 → W21 | 4 |"),
+        published.read_text().replace("| W34 → W35 | 11 |", "| W34 → W35 | 10 |"),
         encoding="utf-8",
     )
     with pytest.raises(study.StudyError, match="published structural boundaries"):

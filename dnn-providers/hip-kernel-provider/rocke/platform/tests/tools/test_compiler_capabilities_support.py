@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -134,6 +135,19 @@ def test_worker_normal_rejection_is_distinct_from_process_crash(
     option_crash = support._probe_one(request, comgr_lib=None, timeout=10)
     assert option_crash.outcome == "crash"
     assert "Unknown command line argument" in option_crash.diagnostic
+
+
+@pytest.mark.parametrize("returncode", [0xC0000005, 0xC000001D, 0xC0000409])
+def test_worker_recognizes_windows_exception_statuses(returncode: int) -> None:
+    assert support._worker_crashed(returncode, "", "")
+    assert not support._worker_crashed(1, "ordinary failure", "")
+
+
+def test_sha256_streams_files_on_supported_python_versions(tmp_path: Path) -> None:
+    content = b"compiler identity" * 100_000
+    path = tmp_path / "libamd_comgr.so"
+    path.write_bytes(content)
+    assert support._sha256(path) == hashlib.sha256(content).hexdigest()
 
 
 def test_worker_timeout_is_bounded_and_classified(

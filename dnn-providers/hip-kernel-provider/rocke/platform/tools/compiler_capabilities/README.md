@@ -51,18 +51,26 @@ continues to use the guard unchanged.
 ## Observed contracts
 
 The bounded corpus covers the production decisions currently compressed into
-LLVM flavors and adjacent COMGR controls:
+LLVM flavors:
 
 - all four historical complete data layouts;
 - both buffer-resource spellings crossed with 32- and 64-bit counts;
-- both packed operand forms for every affected homogeneous and mixed fp8/bf8
-  MFMA family;
-- address spaces 3 and 15 for each pointer-taking named-barrier intrinsic;
-- current and historical scaled-MFMA call forms at both known shapes;
-- requested and explicitly catalogued generic processor names;
-- `-O0` through `-O3` on a focused codegen reproducer;
-- COMGR options rocKE may pass; and
-- function attributes rocKE may emit.
+- both packed operand policies across every affected homogeneous and mixed
+  fp8/bf8 MFMA family;
+- address spaces 3 and 15 across every pointer-taking named-barrier intrinsic;
+- current and historical scaled-MFMA call policies at both known shapes; and
+- requested and explicitly catalogued generic processor names.
+
+A policy-wide candidate is one compiler job containing every operation or shape
+that policy controls. It is accepted only when the complete family reaches an
+executable HSACO. This keeps the report at 15–16 jobs per processor instead of
+repeating one global choice for each member of its family.
+
+Optimization levels, free-form backend options, function attributes, and HSACO
+fingerprints are intentionally absent. Existing option tooling owns option-name
+acceptance; attribute acceptance does not prove that an attribute is honored;
+and generated-code changes belong to qualification, not configure-time feature
+selection.
 
 Candidate inputs are compiler archaeology owned by this probe. They are not
 imported from `rocke.core.llvm_profile`, because the probe is intended to
@@ -165,8 +173,11 @@ checks, and numeric testing.
 
 ## Historical validation
 
-The probe is replayed across 43 selected weekly public compiler snapshots,
-three public release baselines, and five processor contexts.
+The probe is replayed across nine selected weekly snapshots at the observed
+transition endpoints, three public release baselines, and five processor
+contexts. The initial broad survey showed that 37 of 42 adjacent weekly pairs
+had no structural change; unchanged intermediate weeks are therefore not a
+permanent replay obligation.
 [`replay_historical.py`](replay_historical.py) uses HTTP range requests to
 extract only COMGR and its required shared libraries from SDK wheels, downloads
 only the smaller COMGR package for release baselines, reuses duplicate artifacts,

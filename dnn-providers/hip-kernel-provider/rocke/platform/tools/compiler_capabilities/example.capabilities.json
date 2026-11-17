@@ -12,8 +12,8 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "gfx950",
             "outcome": "accepted"
@@ -26,60 +26,10 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "e4c09bbe6e0e436813e0281d5b7ad63adb612f37eb963717f7527ca084b752fa",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "gfx9-4-generic",
-            "outcome": "accepted"
-          }
-        ],
-        "route": "comgr_llvm_ir_to_hsaco"
-      }
-    },
-    "amdgpu.comgr.compiler_option.known_controls": {
-      "status": "known",
-      "value": {
-        "observations": [
-          {
-            "candidate": "slp_off",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "backend_option",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "mfma_vgpr_form",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "backend_option",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "iterative_ilp_scheduler",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "backend_option",
             "outcome": "accepted"
           }
         ],
@@ -98,8 +48,8 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "module",
             "outcome": "accepted"
@@ -112,8 +62,8 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "module",
             "outcome": "accepted"
@@ -126,8 +76,8 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "module",
             "outcome": "accepted"
@@ -140,60 +90,10 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "module",
-            "outcome": "accepted"
-          }
-        ],
-        "route": "comgr_llvm_ir_to_hsaco"
-      }
-    },
-    "amdgpu.comgr.function_attribute.known_controls": {
-      "status": "known",
-      "value": {
-        "observations": [
-          {
-            "candidate": "waves_per_eu_1",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "function_attribute",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "waves_per_eu_2",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "function_attribute",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "zero_agpr",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "function_attribute",
             "outcome": "accepted"
           }
         ],
@@ -206,10 +106,17 @@
         "observations": [
           {
             "candidate": "p1_i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
             "family": "make_buffer_resource",
-            "outcome": "rejected"
+            "outcome": "accepted"
           },
           {
             "candidate": "p1_i64",
@@ -219,18 +126,25 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "make_buffer_resource",
             "outcome": "accepted"
           },
           {
             "candidate": "p8_p1_i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
+            "evidence": {
+              "completed_stages": [
+                "compile_source_to_bc",
+                "codegen_bc_to_relocatable",
+                "link_relocatable_to_executable"
+              ],
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
+            },
             "family": "make_buffer_resource",
-            "outcome": "rejected"
+            "outcome": "accepted"
           },
           {
             "candidate": "p8_p1_i64",
@@ -240,8 +154,8 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
             "family": "make_buffer_resource",
             "outcome": "accepted"
@@ -262,39 +176,25 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
-            "family": "16x16x128",
+            "family": "all_mfma_f8f6f4",
             "outcome": "accepted"
           },
           {
             "candidate": "legacy_11",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "16x16x128",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "current_9",
             "evidence": {
               "completed_stages": [
                 "compile_source_to_bc",
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
-            "family": "32x32x64",
+            "family": "all_mfma_f8f6f4",
             "outcome": "accepted"
-          },
-          {
-            "candidate": "legacy_11",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "32x32x64",
-            "outcome": "rejected"
           }
         ],
         "route": "comgr_llvm_ir_to_hsaco"
@@ -306,33 +206,19 @@
         "observations": [
           {
             "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "16x16x32_fp8_fp8",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "i64",
             "evidence": {
               "completed_stages": [
                 "compile_source_to_bc",
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
-            "family": "16x16x32_fp8_fp8",
+            "family": "all_mfma_fp8_bf8",
             "outcome": "accepted"
           },
           {
-            "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "16x16x32_bf8_bf8",
-            "outcome": "rejected"
-          },
-          {
             "candidate": "i64",
             "evidence": {
               "completed_stages": [
@@ -340,136 +226,10 @@
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
-            "family": "16x16x32_bf8_bf8",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "16x16x32_fp8_bf8",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "i64",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "16x16x32_fp8_bf8",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "16x16x32_bf8_fp8",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "i64",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "16x16x32_bf8_fp8",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "32x32x16_fp8_fp8",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "i64",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "32x32x16_fp8_fp8",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "32x32x16_bf8_bf8",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "i64",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "32x32x16_bf8_bf8",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "32x32x16_fp8_bf8",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "i64",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "32x32x16_fp8_bf8",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "v2i32",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "32x32x16_bf8_fp8",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "i64",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "870060791fb727093c270dfefc66b325988e91214a8c148e2f39baa0817369fc",
-              "hsaco_size": 3808
-            },
-            "family": "32x32x16_bf8_fp8",
+            "family": "all_mfma_fp8_bf8",
             "outcome": "accepted"
           }
         ],
@@ -482,111 +242,30 @@
         "observations": [
           {
             "candidate": "as3",
-            "diagnostic": "COMGR probe worker crashed: COMGR probe worker exited with status -11",
-            "family": "s.barrier.init",
-            "outcome": "crash"
-          },
-          {
-            "candidate": "as15",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "s.barrier.init",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "as3",
-            "diagnostic": "COMGR probe worker crashed: COMGR probe worker exited with status -11",
-            "family": "s.barrier.signal.var",
-            "outcome": "crash"
-          },
-          {
-            "candidate": "as15",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "s.barrier.signal.var",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "as3",
-            "diagnostic": "COMGR probe worker crashed: COMGR probe worker exited with status -11",
-            "family": "s.barrier.join",
-            "outcome": "crash"
-          },
-          {
-            "candidate": "as15",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "s.barrier.join",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "as3",
-            "diagnostic": "COMGR probe worker crashed: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.s.wakeup.barrier",
-            "family": "s.wakeup.barrier",
-            "outcome": "crash"
-          },
-          {
-            "candidate": "as15",
-            "diagnostic": "do_action(COMPILE_SOURCE_TO_BC): status=1 (ERROR)",
-            "failed_stage": "compile_source_to_bc",
-            "family": "s.wakeup.barrier",
-            "outcome": "rejected"
-          }
-        ],
-        "route": "comgr_llvm_ir_to_hsaco"
-      }
-    },
-    "amdgpu.comgr.optimization_level_codegen": {
-      "status": "known",
-      "value": {
-        "observations": [
-          {
-            "candidate": "O0",
-            "diagnostic": "do_action(CODEGEN_BC_TO_RELOCATABLE): status=1 (ERROR)",
-            "failed_stage": "codegen_bc_to_relocatable",
-            "family": "uniform_half_extract",
-            "outcome": "rejected"
-          },
-          {
-            "candidate": "O1",
             "evidence": {
               "completed_stages": [
                 "compile_source_to_bc",
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "1f3614ed19a14a1db5896155bc918dc0cb7bdab3433442f74d38c0b5a4c8260c",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
-            "family": "uniform_half_extract",
+            "family": "all_named_barriers",
             "outcome": "accepted"
           },
           {
-            "candidate": "O2",
+            "candidate": "as15",
             "evidence": {
               "completed_stages": [
                 "compile_source_to_bc",
                 "codegen_bc_to_relocatable",
                 "link_relocatable_to_executable"
               ],
-              "hsaco_sha256": "1f3614ed19a14a1db5896155bc918dc0cb7bdab3433442f74d38c0b5a4c8260c",
-              "hsaco_size": 3808
+              "hsaco_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "hsaco_size": 64
             },
-            "family": "uniform_half_extract",
-            "outcome": "accepted"
-          },
-          {
-            "candidate": "O3",
-            "evidence": {
-              "completed_stages": [
-                "compile_source_to_bc",
-                "codegen_bc_to_relocatable",
-                "link_relocatable_to_executable"
-              ],
-              "hsaco_sha256": "1f3614ed19a14a1db5896155bc918dc0cb7bdab3433442f74d38c0b5a4c8260c",
-              "hsaco_size": 3808
-            },
-            "family": "uniform_half_extract",
+            "family": "all_named_barriers",
             "outcome": "accepted"
           }
         ],
@@ -603,13 +282,13 @@
     ],
     "query_library": null,
     "route": "comgr",
-    "sha256": "ff98e63e6b8677eb51376816f3e1169e377ac446e7bf4c5d247683a72f2f59eb",
-    "version_source": "LLVMGetVersion"
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "version_source": "example"
   },
   "probe": {
     "effective_processor": "gfx950",
-    "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
-    "implementation_sha256": "cc957d60eceb6c927c650c92e1715a9a05bfa95848644ae4f0082ef968f92df6",
+    "fingerprint": "4d8961158784726aa26f45ef574995e92d9cd9756e96a2cf818c67ee37cfff42",
+    "implementation_sha256": "9ea8b7d9aa2f205e617dd19be536b98ecc5f0f2a00db9d9f6bcd9eb4f893dd49",
     "name": "rocke-comgr-capabilities",
     "processor": "gfx950",
     "schema_sha256": "21c99cbac8781c3a2fffcb30792c29e8c7aa9dd627068c4a7f5c95909ef8cb99",

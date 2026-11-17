@@ -37,7 +37,7 @@ else:
     from compiler_capabilities import _probe_support as support
     from compiler_capabilities import probe
 
-_FORMAT = "rocke-comgr-historical-observations/v2"
+_FORMAT = "rocke-comgr-historical-observations/v3"
 _DEFAULT_PROCESSORS = ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250")
 
 
@@ -245,8 +245,6 @@ def _compact_report(report: dict[str, object]) -> dict[str, object]:
             }
             if "failed_stage" in entry:
                 compact["failed_stage"] = entry["failed_stage"]
-            if name == probe._CAPABILITY_OPT_LEVELS and entry["outcome"] == "accepted":
-                compact["output_sha256"] = entry["evidence"]["hsaco_sha256"]
             observations.append(compact)
         compact_capabilities[name] = observations
     return {
@@ -294,10 +292,6 @@ def _intern_reports(
                 "historical reports were produced by different probe/schema sources"
             )
         capabilities = json.loads(json.dumps(report["capabilities"]))
-        codegen = {}
-        for entry in capabilities[probe._CAPABILITY_OPT_LEVELS]:
-            if output_digest := entry.pop("output_sha256", None):
-                codegen[entry["candidate"]] = output_digest
         encoded = json.dumps(
             capabilities, sort_keys=True, separators=(",", ":")
         ).encode()
@@ -306,7 +300,6 @@ def _intern_reports(
         references[processor] = {
             "effective_processor": probe_info["effective_processor"],
             "vector": vector_id,
-            "optimization_outputs": codegen,
         }
     if compiler is None:
         raise support.ProbeError("historical artifact produced no processor reports")

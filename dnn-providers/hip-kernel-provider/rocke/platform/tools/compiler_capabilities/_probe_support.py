@@ -30,6 +30,10 @@ _FATAL_PROCESS_MARKERS = (
     "Assertion failed",
     "Unknown command line argument",
 )
+# Windows reports process exceptions as positive NTSTATUS values. The high bits
+# distinguish them from ordinary application exit codes.
+_NTSTATUS_EXCEPTION_MASK = 0xF0000000
+_NTSTATUS_EXCEPTION_PREFIX = 0xC0000000
 
 
 class ProbeError(RuntimeError):
@@ -68,8 +72,12 @@ class ProbeResult:
 
 
 def _sha256(path: Path) -> str:
+    # hashlib.file_digest is Python 3.11+, while rocKE supports Python 3.10.
+    digest = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _write_json(path: Path, document: dict[str, object]) -> None:
@@ -118,6 +126,8 @@ def _first_diagnostic(stderr: str, stdout: str, returncode: int | None) -> str:
 
 def _worker_crashed(returncode: int, stderr: str, stdout: str) -> bool:
     if returncode < 0:
+        return True
+    if (returncode & _NTSTATUS_EXCEPTION_MASK) == _NTSTATUS_EXCEPTION_PREFIX:
         return True
     output = stderr + "\n" + stdout
     return any(marker in output for marker in _FATAL_PROCESS_MARKERS)

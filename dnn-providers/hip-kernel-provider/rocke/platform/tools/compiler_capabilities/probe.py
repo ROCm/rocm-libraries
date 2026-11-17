@@ -39,10 +39,12 @@ _CAPABILITY_FP8_PACKING = "amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_ty
 _CAPABILITY_NAMED_BARRIER = "amdgpu.comgr.intrinsic.named_barrier.pointer_address_space"
 _CAPABILITY_SCALED_MFMA = "amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi"
 _CAPABILITY_PROCESSOR_NAMES = "amdgpu.comgr.accepts_processor_name"
-_CAPABILITY_OPT_LEVELS = "amdgpu.comgr.optimization_level_codegen"
-_CAPABILITY_COMPILER_OPTIONS = "amdgpu.comgr.compiler_option.known_controls"
-_CAPABILITY_FUNCTION_ATTRIBUTES = "amdgpu.comgr.function_attribute.known_controls"
 
+# L0, L1, and L3 are the complete layouts emitted by the current llvm20,
+# llvm22, and llvm23/llvm24 profiles, respectively. L2 is the observed
+# intermediate layout with ``m:e`` but without p10-p15; no current profile emits
+# it. Keep these as probe-owned archaeology rather than importing the policy
+# constants whose assumptions this evidence is intended to test.
 _LAYOUT_CANDIDATES = {
     "L0": (
         "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
@@ -186,6 +188,10 @@ def _fp8_packing_candidates() -> tuple[_IntrinsicCandidate, ...]:
 
 
 def _named_barrier_candidates() -> tuple[_IntrinsicCandidate, ...]:
+    # The current flavor profiles disagree on whether named-barrier pointers use
+    # LDS address space 3 or target-extension address space 15. Probe every
+    # pointer-taking operation through codegen rather than inferring one ABI from
+    # the compiler major.
     result = []
     for operation, has_count in (
         ("s.barrier.init", True),
@@ -213,6 +219,9 @@ def _named_barrier_candidates() -> tuple[_IntrinsicCandidate, ...]:
 
 
 def _scaled_mfma_candidates() -> tuple[_IntrinsicCandidate, ...]:
+    # rocKE's scaled-MFMA emitter has used both the 9-argument form and the
+    # earlier 11-argument form with two leading i1 operands. Keep both exact call
+    # ABIs so COMGR, rather than the current lowering policy, supplies the answer.
     result = []
     for shape, result_type in (
         ("16x16x128", "<4 x float>"),
@@ -259,31 +268,33 @@ def _scaled_mfma_candidates() -> tuple[_IntrinsicCandidate, ...]:
     return tuple(result)
 
 
-def _empty_module(layout: str | None = None, attribute: str | None = None) -> str:
+def _empty_module(layout: str | None = None) -> str:
     preamble = f'target triple = "{_TARGET_TRIPLE}"\n'
     if layout is not None:
         preamble = f'target datalayout = "{layout}"\n' + preamble
-    suffix = " #0" if attribute else ""
-    module = preamble + f"define amdgpu_kernel void @probe(){suffix} {{ ret void }}\n"
-    if attribute:
-        module += f'attributes #0 = {{ "{attribute}" }}\n'
-    return module
+    return preamble + "define amdgpu_kernel void @probe() { ret void }\n"
 
 
-def _codegen_reproducer() -> str:
+def _candidate_matrix_module(candidates: tuple[_IntrinsicCandidate, ...]) -> str:
+    """Compile a policy-wide ABI candidate as one all-or-nothing module."""
+    definitions = []
+    declarations = []
+    for index, item in enumerate(candidates):
+        arguments = ", ".join(f"{ty} {value}" for ty, value in item.call_args)
+        declaration = ", ".join(item.declaration_args)
+        call = f"call {item.result_type} @{item.intrinsic}({arguments})"
+        if item.result_type != "void":
+            call = f"%result{index} = " + call
+        definitions.append(
+            f"define amdgpu_kernel void @probe{index}() {{\n  {call}\n  ret void\n}}\n"
+        )
+        declarations.append(
+            f"declare {item.result_type} @{item.intrinsic}({declaration})\n"
+        )
     return (
         f'target triple = "{_TARGET_TRIPLE}"\n'
-        "@uniform = internal addrspace(4) constant <4 x half> zeroinitializer\n"
-        "define amdgpu_kernel void @probe(ptr addrspace(1) %out) {\n"
-        "  %v = load <4 x half>, ptr addrspace(4) @uniform, align 8\n"
-        "  %x0 = extractelement <4 x half> %v, i32 0\n"
-        "  %x1 = extractelement <4 x half> %v, i32 1\n"
-        "  %f0 = fpext half %x0 to float\n"
-        "  %f1 = fpext half %x1 to float\n"
-        "  %sum = fadd float %f0, %f1\n"
-        "  store float %sum, ptr addrspace(1) %out, align 4\n"
-        "  ret void\n"
-        "}\n"
+        + "".join(definitions)
+        + "".join(declarations)
     )
 
 
@@ -313,14 +324,43 @@ def _requests(
 
     for name, layout in _LAYOUT_CANDIDATES.items():
         add(_CAPABILITY_LAYOUT, "module", name, _empty_module(layout))
-    for capability, candidates in (
-        (_CAPABILITY_BUFFER_RESOURCE, _buffer_resource_candidates()),
-        (_CAPABILITY_FP8_PACKING, _fp8_packing_candidates()),
-        (_CAPABILITY_NAMED_BARRIER, _named_barrier_candidates()),
-        (_CAPABILITY_SCALED_MFMA, _scaled_mfma_candidates()),
+
+    # Buffer-resource spelling and count width are independent policy axes, so
+    # retain their four exact combinations.
+    for item in _buffer_resource_candidates():
+        add(_CAPABILITY_BUFFER_RESOURCE, item.family, item.candidate, item.module())
+
+    # The remaining choices are global lowering policies. Compile every affected
+    # intrinsic in one module per candidate: rocKE can select a candidate only
+    # when the complete family lowers, and one result avoids repeating the same
+    # policy question for every shape or operation.
+    for capability, family, candidates in (
+        (
+            _CAPABILITY_FP8_PACKING,
+            "all_mfma_fp8_bf8",
+            _fp8_packing_candidates(),
+        ),
+        (
+            _CAPABILITY_NAMED_BARRIER,
+            "all_named_barriers",
+            _named_barrier_candidates(),
+        ),
+        (
+            _CAPABILITY_SCALED_MFMA,
+            "all_mfma_f8f6f4",
+            _scaled_mfma_candidates(),
+        ),
     ):
+        by_candidate: dict[str, list[_IntrinsicCandidate]] = {}
         for item in candidates:
-            add(capability, item.family, item.candidate, item.module())
+            by_candidate.setdefault(item.candidate, []).append(item)
+        for candidate, members in by_candidate.items():
+            add(
+                capability,
+                family,
+                candidate,
+                _candidate_matrix_module(tuple(members)),
+            )
 
     add(_CAPABILITY_PROCESSOR_NAMES, processor, "requested", _empty_module())
     generic = _GENERIC_PROCESSORS.get(processor)
@@ -331,40 +371,6 @@ def _requests(
             "generic",
             _empty_module(),
             request_isa=f"{_TARGET_TRIPLE}--{generic}",
-        )
-    for level in ("O0", "O1", "O2", "O3"):
-        add(
-            _CAPABILITY_OPT_LEVELS,
-            "uniform_half_extract",
-            level,
-            _codegen_reproducer(),
-            options=(f"-{level}",),
-        )
-    for candidate, options in (
-        ("slp_off", ("-O3", "-fno-slp-vectorize")),
-        ("mfma_vgpr_form", ("-O3", "-mllvm", "-amdgpu-mfma-vgpr-form")),
-        (
-            "iterative_ilp_scheduler",
-            ("-O3", "-mllvm", "-amdgpu-sched-strategy=iterative-ilp"),
-        ),
-    ):
-        add(
-            _CAPABILITY_COMPILER_OPTIONS,
-            "backend_option",
-            candidate,
-            _empty_module(),
-            options=options,
-        )
-    for candidate, attribute in (
-        ("waves_per_eu_1", 'amdgpu-waves-per-eu"="1,1'),
-        ("waves_per_eu_2", 'amdgpu-waves-per-eu"="2,2'),
-        ("zero_agpr", 'amdgpu-agpr-alloc"="0'),
-    ):
-        add(
-            _CAPABILITY_FUNCTION_ATTRIBUTES,
-            "function_attribute",
-            candidate,
-            _empty_module(attribute=attribute),
         )
     return requests, metadata
 
@@ -538,26 +544,15 @@ def _expected_observations(processor: str) -> dict[str, list[tuple[str, str]]]:
             (item.family, item.candidate) for item in _buffer_resource_candidates()
         ],
         _CAPABILITY_FP8_PACKING: [
-            (item.family, item.candidate) for item in _fp8_packing_candidates()
+            ("all_mfma_fp8_bf8", candidate) for candidate in ("v2i32", "i64")
         ],
         _CAPABILITY_NAMED_BARRIER: [
-            (item.family, item.candidate) for item in _named_barrier_candidates()
+            ("all_named_barriers", candidate) for candidate in ("as3", "as15")
         ],
         _CAPABILITY_SCALED_MFMA: [
-            (item.family, item.candidate) for item in _scaled_mfma_candidates()
+            ("all_mfma_f8f6f4", candidate) for candidate in ("current_9", "legacy_11")
         ],
         _CAPABILITY_PROCESSOR_NAMES: [(processor, "requested")],
-        _CAPABILITY_OPT_LEVELS: [
-            ("uniform_half_extract", level) for level in ("O0", "O1", "O2", "O3")
-        ],
-        _CAPABILITY_COMPILER_OPTIONS: [
-            ("backend_option", name)
-            for name in ("slp_off", "mfma_vgpr_form", "iterative_ilp_scheduler")
-        ],
-        _CAPABILITY_FUNCTION_ATTRIBUTES: [
-            ("function_attribute", name)
-            for name in ("waves_per_eu_1", "waves_per_eu_2", "zero_agpr")
-        ],
     }
     generic = _GENERIC_PROCESSORS.get(processor)
     if generic:

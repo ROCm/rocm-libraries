@@ -116,10 +116,10 @@ scaled operations, named barriers, and inline assembly.
 
 ### Options and attributes
 
-rocKE passes optimization levels and selected backend options through COMGR
-action info and emits AMDGPU function attributes in LLVM IR. Each accepted
-option and attribute/value class is independent. An option-parser crash is a
-behavior, not `false` and not an ordinary recoverable rejection.
+Compiler-option acceptance already has a production COMGR measurement path in
+`gen_compiler_options.py`. Function-attribute parser acceptance does not show
+that an attribute changes generated code or metadata. Neither belongs in this
+flavor-replacement corpus; effect checks remain qualification work.
 
 ### Generated code and semantics
 
@@ -193,13 +193,10 @@ through COMGR's source-to-bitcode, codegen, and executable-link actions.
 | --- | --- |
 | `amdgpu.comgr.explicit_data_layout` | every complete layout rocKE currently or historically emitted |
 | `amdgpu.comgr.intrinsic.make_buffer_resource.abis` | every spelling × count width |
-| `amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type` | every affected family × packed type |
-| `amdgpu.comgr.intrinsic.named_barrier.pointer_address_space` | every pointer-taking operation × address space |
-| `amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi` | every known shape × historical/current call form |
+| `amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type` | one all-family module per packed type |
+| `amdgpu.comgr.intrinsic.named_barrier.pointer_address_space` | one all-operation module per address space |
+| `amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi` | one all-shape module per historical/current call form |
 | `amdgpu.comgr.accepts_processor_name` | requested processor plus its explicit catalogued generic candidate |
-| `amdgpu.comgr.optimization_level_codegen` | every optimization level rocKE passes |
-| `amdgpu.comgr.compiler_option.known_controls` | every option constructible by production helpers |
-| `amdgpu.comgr.function_attribute.known_controls` | every emitted attribute/value class |
 
 The checkout validator pins exact ordered coverage. Adding a production form
 without adding its candidate must fail a closure test in the integration slice.
@@ -235,10 +232,11 @@ numeric execution establish properties that microprobes cannot.
 2. **Operation-gate closure.** Every use of broad profile capabilities,
    ranked/exact flavor checks, and `minimum_llvm_flavor` maps to a named
    capability before migration.
-3. **Option closure.** Every option production can pass through COMGR appears in
-   the option corpus.
-4. **Attribute closure.** Every emitted AMDGPU attribute and material value class
-   appears in the attribute corpus.
+3. **Policy grouping.** A global lowering choice is one candidate containing
+   every operation or shape controlled by that choice.
+4. **Existing-owner reuse.** Compiler options stay in the existing production
+   COMGR option measurement; attributes require effect qualification, not a
+   parser-only duplicate.
 5. **Full-route fidelity.** Parser success alone is insufficient; accepted means
    an executable HSACO was returned.
 6. **Context fidelity.** COMGR library, target ISA, options, probe source, and
