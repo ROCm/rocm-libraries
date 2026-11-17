@@ -285,4 +285,85 @@ INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);
 INSTANTIATE(rocsparse_double_complex);
-void testing_bsrpad_value_extra(const Arguments& arg) {}
+void testing_bsrpad_value_extra(const Arguments& arg)
+{
+    // The padded diagonal entry of each case lies past offset INT32_MAX of bsr_val, so its
+    // offset must be computed in 64 bits. All blocks sit in the last block row, the last one
+    // on the diagonal, and only the last row of that block is padded, so the padded entry is
+    // the last entry of bsr_val. bsr_val is zero-filled on the device and only the padded
+    // entry and its predecessor are read back.
+    using T = float;
+
+    struct pad_case
+    {
+        rocsparse_int m, mb, nnzb, block_dim;
+    };
+
+    const pad_case cases[] = {
+        // One block: i * block_dim + i = 2147488280.
+        {46340, 1, 1, 46341},
+        // 513 blocks: block_index * block_dim * block_dim + i * block_dim + i = 2151677951.
+        {std::numeric_limits<int32_t>::max(), 1 << 20, 513, 2048},
+    };
+
+    rocsparse_local_handle    handle(arg);
+    rocsparse_local_mat_descr bsr_descr;
+
+    const T value = static_cast<T>(1);
+
+    for(const auto& c : cases)
+    {
+#ifdef GOOGLE_TEST
+        SCOPED_TRACE(testing::Message() << "m=" << c.m << " mb=" << c.mb << " nnzb=" << c.nnzb
+                                        << " block_dim=" << c.block_dim);
+#endif
+        std::vector<rocsparse_int> hbsr_row_ptr(c.mb + 1, 0);
+        std::vector<rocsparse_int> hbsr_col_ind(c.nnzb);
+        hbsr_row_ptr[c.mb] = c.nnzb;
+        for(rocsparse_int j = 0; j < c.nnzb; ++j)
+        {
+            hbsr_col_ind[j] = c.mb - c.nnzb + j;
+        }
+
+        const int64_t nval = static_cast<int64_t>(c.nnzb) * c.block_dim * c.block_dim;
+        const int64_t pad  = nval - 1;
+
+        device_vector<rocsparse_int> dbsr_row_ptr(c.mb + 1);
+        device_vector<rocsparse_int> dbsr_col_ind(c.nnzb);
+        device_vector<T>             dbsr_val(nval);
+
+        CHECK_HIP_ERROR(hipMemcpy(dbsr_row_ptr,
+                                  hbsr_row_ptr.data(),
+                                  sizeof(rocsparse_int) * (c.mb + 1),
+                                  hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dbsr_col_ind,
+                                  hbsr_col_ind.data(),
+                                  sizeof(rocsparse_int) * c.nnzb,
+                                  hipMemcpyHostToDevice));
+
+        for(const auto storage : {rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted})
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_storage_mode(bsr_descr, storage));
+            CHECK_HIP_ERROR(hipMemset(dbsr_val, 0, sizeof(T) * nval));
+
+            CHECK_ROCSPARSE_ERROR(testing::rocsparse_bsrpad_value<T>(handle,
+                                                                     c.m,
+                                                                     c.mb,
+                                                                     c.nnzb,
+                                                                     c.block_dim,
+                                                                     value,
+                                                                     bsr_descr,
+                                                                     dbsr_val,
+                                                                     dbsr_row_ptr,
+                                                                     dbsr_col_ind));
+            CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+            T hval[2];
+            CHECK_HIP_ERROR(hipMemcpy(
+                hval, static_cast<T*>(dbsr_val) + pad - 1, sizeof(T) * 2, hipMemcpyDeviceToHost));
+
+            unit_check_scalar<T>(static_cast<T>(0), hval[0]);
+            unit_check_scalar<T>(value, hval[1]);
+        }
+    }
+}

@@ -162,3 +162,11 @@ Tests:
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_random]
   graph_test: true
+
+# The padded diagonal entry lies past offset INT32_MAX of bsr_val, so the kernel
+# must compute it in 64 bits. Needs about 8.1 GiB of device data; skipped elsewhere.
+- name: bsrpad_value_extra
+  category: nightly
+  function: bsrpad_value_extra
+  host_memory_gb: 1
+  device_memory_gb: 9
