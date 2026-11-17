@@ -747,15 +747,8 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesBiasDataTypeDifferentFromInput)
 // intermediates and the bias are float, the input and output are half.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesFloatBiasOnHalfGraphWithFloatIntermediates)
 {
-    auto builder = cbaGraphOfDataType(DataType::HALF);
-    for(const char* name : {"bias", "y_conv", "y_bias"})
-    {
-        builder = editTensor(builder, name, [](auto& t) { t.data_type = DataType::FLOAT; });
-    }
-
-    EXPECT_THAT(layoutDeclineReason(builder),
-                ::testing::HasSubstr("Bias tensor data type FLOAT must equal the convolution "
-                                     "input data type HALF"));
+    EXPECT_THAT(layoutDeclineReason(test_conv_common::cbaGraphWithFloatBiasOnHalfGraph()),
+                ::testing::HasSubstr(test_conv_common::FLOAT_BIAS_ON_HALF_GRAPH_REASON));
 }
 
 // The bias data type is compared with the convolution input and with nothing else. With the input
@@ -1066,6 +1059,36 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithSaneDims)
 
             SCOPED_TRACE("rank " + std::to_string(shapes.x.size()) + layout + ", empty batch");
             expectAccepted({"empty batch", empty(shapes.y), base.w, empty(shapes.x)});
+        }
+    }
+}
+
+// A zero dim that is not the leading one is declined, though not for being zero: the canonical
+// strides of such a tensor are 0 for every dim before the zero, so those of them with an extent
+// above 1 are broadcast axes. The tensor is not packed and its stride order matches neither
+// layout, so every operation declines it by the layout rule, whichever of the three tensors it is
+// and in either layout. A zero in the leading dim is accepted (above). This pins the current
+// behaviour; it does not say that an empty channel or spatial extent has to be declined.
+TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNotLeading)
+{
+    for(const bool channelsLastLayout : {false, true})
+    {
+        const ConvCase base = uniformCase({convXDims, convWDims, convYDims}, channelsLastLayout);
+
+        for(size_t zeroIndex = 1; zeroIndex < convXDims.size(); ++zeroIndex)
+        {
+            auto dims = convXDims;
+            dims[zeroIndex] = 0;
+            const TensorSpec empty = channelsLastLayout ? channelsLast(dims) : channelsFirst(dims);
+            ASSERT_FALSE(isTensorPacked(empty.dims, empty.strides));
+
+            for(const Role role : ROLES)
+            {
+                SCOPED_TRACE((channelsLastLayout ? "channels-last " : "channels-first ")
+                             + vecToString(dims) + ", tensor "
+                             + std::to_string(static_cast<int>(role)));
+                expectDeclined(withTensorAt(base, role, empty), LAYOUT_REASON);
+            }
         }
     }
 }
@@ -1381,11 +1404,12 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesNonPackedChannelsLast)
     }
 }
 
-// A tensor with a broadcast axis (an extent above 1 with stride 0) is not packed (isTensorPacked),
-// and is judged like any other non-packed tensor: forward declines it with every non-packed
-// tensor, backward classifies it by its stride order and accepts it next to packed channels-first
-// tensors. This pins the behaviour that follows from that classification, unchanged from the
-// base; it is not a rule of its own for broadcast tensors.
+// A tensor with a broadcast axis (an extent above 1 with stride 0) is never packed
+// (isTensorPacked), and is judged like any other non-packed tensor: forward declines it with every
+// non-packed tensor, backward classifies it by its stride order and accepts it, as a non-packed
+// channels-first tensor, next to packed channels-first tensors. This pins how a zero-stride axis
+// is classified through isTensorPacked and the backward rules; it is not a rule of its own for
+// broadcast tensors and does not say that MIOpen computes such a convolution correctly.
 TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTensor)
 {
     const ConvCase base
@@ -1671,6 +1695,57 @@ TEST(TestMiopenConvApplicabilityChecks, StridesThatDoNotOverflowAreJudgedByLayou
     expectDeclined({"reversed dy", reversed, channelsFirst(convWDims), channelsFirst(convXDims)},
                    LAYOUT_REASON,
                    BACKWARD_OPS);
+}
+
+// Strides on the last values the packing arithmetic can represent are not declined for overflow:
+// the validators judge them by layout and packing, after the overflow bound. Each sits one step
+// from a declined row of overflowingStrides.
+// - [2, 1, 1] with [INT64_MAX - 1, 1, 1]: the factor (2 - 1) is exactly INT64_MAX / (INT64_MAX - 1)
+//   and the final sum (INT64_MAX - 1) + 1 is exactly INT64_MAX. The span is not the element count
+//   2, so the tensor is not packed; its stride order is channels-first, so forward declines it as
+//   not packed and backward accepts it.
+// - [2, 1, 1] with [INT64_MIN, 1, 1]: the term (2 - 1) * INT64_MIN is exactly INT64_MIN, as is
+//   the sum 0 + INT64_MIN. The tensor is not packed and its stride order (the two unit strides
+//   before INT64_MIN) is neither layout, so every operation declines it by the layout rule, not
+//   for overflow.
+TEST(TestMiopenConvApplicabilityChecks, StridesOnTheRepresentableLimitAreJudgedByLayoutAndPacking)
+{
+    constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
+    constexpr int64_t MIN_VALUE = std::numeric_limits<int64_t>::min();
+
+    const ConvCase base = uniformCase({convXDims, convWDims, convYDims}, false);
+    const TensorSpec spanReachesMax = withStrides({2, 1, 1}, {MAX_VALUE - 1, 1, 1});
+    const TensorSpec termIsMin = withStrides({2, 1, 1}, {MIN_VALUE, 1, 1});
+    ASSERT_FALSE(isTensorPacked(spanReachesMax.dims, spanReachesMax.strides));
+    ASSERT_FALSE(isTensorPacked(termIsMin.dims, termIsMin.strides));
+
+    for(const Role role : ROLES)
+    {
+        SCOPED_TRACE("tensor " + std::to_string(static_cast<int>(role)));
+
+        const ConvCase spanCase = withTensorAt(base, role, spanReachesMax);
+        expectDeclined(spanCase, PACKED_REASON, FORWARD_OPS);
+        expectAccepted(spanCase, BACKWARD_OPS);
+
+        expectDeclined(withTensorAt(base, role, termIsMin), LAYOUT_REASON);
+    }
+}
+
+// Dims whose element count is INT64_MAX - 1 are not declined as overflowing: the product
+// 3 * 3074457345618258602 is INT64_MAX - 1 and INT64_MAX / 3 is exactly 3074457345618258602, so
+// the last factor lands on the division that bounds the element count. The canonical
+// channels-first strides [INT64_MAX - 1, 3074457345618258602, 1] give terms and sums that all
+// fit, and the tensor is packed, so every operation accepts it.
+TEST(TestMiopenConvApplicabilityChecks, DimsWhoseElementCountIsJustBelowTheLimitAreAccepted)
+{
+    constexpr int64_t FACTOR = 3074457345618258602;
+    static_assert(3 * FACTOR == std::numeric_limits<int64_t>::max() - 1);
+    static_assert(std::numeric_limits<int64_t>::max() / 3 == FACTOR);
+
+    const TensorSpec nearlyUnbounded = channelsFirst({1, 3, FACTOR});
+    ASSERT_TRUE(isTensorPacked(nearlyUnbounded.dims, nearlyUnbounded.strides));
+    expectAccepted(
+        {"element count just below the limit", nearlyUnbounded, nearlyUnbounded, nearlyUnbounded});
 }
 
 // A negative dim has no element count: declined by name, not left to the stride arithmetic.

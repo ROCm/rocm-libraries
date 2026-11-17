@@ -1056,29 +1056,6 @@ flatbuffers::FlatBufferBuilder cbaGraphWithFinalOutputLayoutMismatch()
                          });
 }
 
-// The convolution and bias intermediates and the bias are float, the input and output are half:
-// the graph the node checks let through up to the bias data type rule.
-flatbuffers::FlatBufferBuilder cbaGraphWithFloatBiasOnHalfGraph()
-{
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
-
-    auto builder = mutateGraph(createValidConvFwdBiasActivGraph(),
-                               [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                                   for(auto& tensor : graph.tensors)
-                                   {
-                                       tensor->data_type = DataType::HALF;
-                                   }
-                               });
-    for(const char* name : {"bias", "y_conv", "y_bias"})
-    {
-        builder = editCbaTensor(
-            builder, name, [](hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& t) {
-                t.data_type = DataType::FLOAT;
-            });
-    }
-    return builder;
-}
-
 struct GraphWithDeclinedTensors
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -1090,9 +1067,8 @@ struct GraphWithDeclinedTensors
 std::vector<GraphWithDeclinedTensors> graphsWithDeclinedTensors()
 {
     std::vector<GraphWithDeclinedTensors> graphs;
-    graphs.push_back(
-        {cbaGraphWithFloatBiasOnHalfGraph(),
-         "Bias tensor data type FLOAT must equal the convolution input data type HALF"});
+    graphs.push_back({test_conv_common::cbaGraphWithFloatBiasOnHalfGraph(),
+                      test_conv_common::FLOAT_BIAS_ON_HALF_GRAPH_REASON});
     graphs.push_back({cbaGraphWithFinalOutputLayoutMismatch(),
                       "Fused convolution output must be packed in the same layout as the input"});
     return graphs;

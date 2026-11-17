@@ -5,10 +5,14 @@
 
 #include <cstdint>
 #include <ostream>
+#include <string>
 #include <vector>
 
+#include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 namespace test_conv_common
@@ -231,5 +235,28 @@ inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool
 inline const std::vector<int64_t> CONV_2D_X_DIMS = {2, 4, 8, 8};
 inline const std::vector<int64_t> CONV_2D_W_DIMS = {4, 4, 3, 3};
 inline const std::vector<int64_t> CONV_2D_Y_DIMS = {2, 4, 6, 6};
+
+// The reason the fused applicability check gives for the graph of cbaGraphWithFloatBiasOnHalfGraph.
+inline constexpr const char* FLOAT_BIAS_ON_HALF_GRAPH_REASON
+    = "Bias tensor data type FLOAT must equal the convolution input data type HALF";
+
+// A conv -> bias -> activation graph whose convolution and bias intermediates and bias are float
+// while the input, weights and final output are half: the graph the node checks of the fused
+// builder let through up to the bias data type rule.
+inline flatbuffers::FlatBufferBuilder cbaGraphWithFloatBiasOnHalfGraph()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(), [](GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                const bool isFloat = tensor->name == "bias" || tensor->name == "y_conv"
+                                     || tensor->name == "y_bias";
+                tensor->data_type = isFloat ? DataType::FLOAT : DataType::HALF;
+            }
+        });
+}
 
 } // namespace test_conv_common

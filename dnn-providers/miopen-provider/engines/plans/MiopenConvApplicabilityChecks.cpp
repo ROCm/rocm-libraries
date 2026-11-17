@@ -444,8 +444,12 @@ TensorInfo readTensor(const char* operation, const char* name, const TensorAttri
     // The packing and layout checks below multiply dims and strides in int64_t, in dim order and
     // in stride order; dims whose zero-as-one product does not fit would overflow there (signed
     // overflow is undefined behaviour), even when a zero dim makes the element count zero. No real
-    // tensor has that many elements, so decline before computing anything. A zero dim alone is
-    // accepted: an empty tensor is not declined here.
+    // tensor has that many elements, so decline before computing anything. A zero dim does not
+    // decline here, but that is not acceptance of every empty tensor: the canonical strides of a
+    // zero dim are 0 for every dim before it, so a zero that is not the leading dim leaves a zero
+    // stride on an earlier dim of extent above 1, a broadcast axis. Such a tensor is never packed
+    // (isTensorPacked) and its stride order matches neither layout (classifyLayout), so the layout
+    // check below declines it. An empty leading dim with canonical strides is accepted.
     if(saturatingExtent(operation, name, attr) == std::numeric_limits<int64_t>::max())
     {
         decline(prefix + " has dims whose element count reaches the 64-bit limit");
