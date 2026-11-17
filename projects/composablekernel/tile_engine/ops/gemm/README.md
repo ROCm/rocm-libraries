@@ -668,6 +668,18 @@ Op-local settings and search configs, under `batched_gemm/`:
 | `search/search_settings_gfx950.json`, `search/search_settings_gfx1250.json` | `tpe`, `shared` seed 0, 100 trials per problem, 8 per round, 1200 builds, `build_timeout_s` 300: every kernel gets the batched build's own limit, 300 s per codegen, compile and link step, so a search times a build out exactly when a full batched run does (without it, a round of native kernels would get the search's 180 s, set from gfx950 fp16 GEMM compile times, see "Build timeout"). No warm start: there is no heuristic model for batched GEMM; an earlier run's `winners.json` can serve as `warm_start.pairs_file`. |
 | `configs/search_config_gfx950.json` | Every value of `default_config.json`, plus 32-wide tiles, `tile_k` 32, the `64x4` warp tile and padding: a problem whose M, N or K no tile divides has candidates only with padding. |
 | `configs/search_config_gfx1250.json` | Every value of `default_config_gfx1250.json` (its six pipelines, `comp_tdm` and `comp_tdm_v2` included, and the `tdm` epilogue), plus 32-wide tiles and `tile_k` 32. |
+| `configs/narrow_m_config_gfx950.json`, `configs/narrow_n_config_gfx950.json` | An M or N block of 16 or 32 (`default_config.json` starts at 64), `tile_k` 32/64/128, the 16x16x32 warp tile, padding false and true: candidates for problems with a small M or N. |
+| `configs/narrow_1w2w_m_config_gfx950.json`, `configs/narrow_1w2w_n_config_gfx950.json` | The narrow blocks with 1- and 2-wave maps (1x1x1, 1x2x1, 2x1x1), the other side 16..256 (`_m`) or 64..256 (`_n`). The config's `extra_wave_maps` key adds the maps for that config only; the Tile Engine table allows 1x4x1, 2x2x1 and 4x1x1 on gfx950. |
+| `configs/narrow_w32_m_config_gfx950.json`, `configs/narrow_w32_n_config_gfx950.json` | A 32-wide M or N block with the 32x32x16 warp tile, one wave on the 32-wide side (`extra_wave_maps`), the other side 32..256 (`_m`) or 64..256 (`_n`), `tile_k` 32..256. |
+| `configs/narrow_k8_n_config_gfx950.json` | A 128x32x128 block with the 32x32x8 warp tile and 4x1x1 waves, for an N of 32 with a long K. |
+| `configs/k32_config_gfx950.json`, `configs/k32_w32_config_gfx950.json` | 64..256 blocks (192 included) with `tile_k` 32, the 16x16x32 and the 32x32x16 warp tile, for problems with a K of 32 or 40. |
+| `configs/pads_config_gfx950.json` | The default blocks (32x32x16 warp tile, `tile_k` 64), padded at native vector widths. |
+| `configs/w16_config_gfx950.json` | A 16-wave 256x256x32 block (4x4x1 through `extra_wave_maps`, 32x32x16 warp tile), for a K of 32 whose C row allows only 1- or 2-element stores. |
+
+Pass these configs next to `default_config.json`; a kernel that two configs list is built and
+measured once. `extra_wave_maps` takes only the maps the batched kernel builds on that arch
+(gfx950: 1x1x1, 1x2x1, 2x1x1, 4x4x1, all listed in `arch_specs.json`); any other map is a
+`ValueError`. Without the key a config expands exactly as before.
 
 ```bash
 RUN="batched_gemm/configs/default_config.json --arch gfx950 --dtype bf16 \
