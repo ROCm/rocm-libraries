@@ -17,11 +17,11 @@ namespace TensileLite
     {
         uint64_t magicNum;
         *magicShift = 33;
-        magicNum    = (1L << *magicShift) / x + 1;
+        magicNum    = (1ull << *magicShift) / x + 1;
         if((magicNum >> 32) != 0)
         {
             *magicShift = 31;
-            magicNum    = (1L << *magicShift) / x + 1;
+            magicNum    = (1ull << *magicShift) / x + 1;
         }
 
         assert(magicNum >> 32 == 0); // ensure magic number fits
@@ -110,7 +110,7 @@ namespace TensileLite
     {
         uint64_t  magicNum;
         const int smallMagicShift = 31;
-        magicNum                  = (1L << smallMagicShift) / x + 1;
+        magicNum                  = (1ull << smallMagicShift) / x + 1;
         assert(magicNum >> 32 == 0); // ensure magic number fits
         return static_cast<uint32_t>(magicNum);
     }
