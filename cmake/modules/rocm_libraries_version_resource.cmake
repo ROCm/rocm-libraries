@@ -18,8 +18,10 @@
 #
 # The .rc file is only rewritten when its content changes, so reconfiguring
 # does not relink the target. When no resource compiler is available
-# (CMAKE_RC_COMPILER unset, NOTFOUND or NOTREQUIRED, or RC not enabled) a
-# warning is printed and the target is built without a version resource.
+# (CMAKE_RC_COMPILER unset, NOTFOUND or NOTREQUIRED, or RC not enabled),
+# configuration fails, so a Windows build cannot ship a binary without the
+# resource. Set ROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE=OFF to warn instead
+# and build the target without one.
 #
 #   rocm_libraries_check_version_resources(DIRECTORY <dir>
 #       [EXCLUDE <target>...]
@@ -32,6 +34,9 @@
 # dependencies), under EXCLUDE_DIRECTORIES or listed in EXCLUDE are skipped.
 
 include_guard(GLOBAL)
+
+option(ROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE
+       "Fail configuration on Windows when a DLL or EXE version resource cannot be compiled" ON)
 
 # Escape VAR in place for an RC string literal: backslash is an escape there, and a doubled quote embeds a quote.
 macro(_rocm_libraries_version_resource_escape VAR)
@@ -93,6 +98,7 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
         message(FATAL_ERROR "rocm_libraries_add_version_resource: unexpected arguments: ${ARG_UNPARSED_ARGUMENTS}")
     endif()
     # Marked on every platform so rocm_libraries_check_version_resources works in Linux builds too.
+    # On Windows a marked target has its resource attached, unless the build opted out below.
     set_property(TARGET ${TARGET} PROPERTY ROCM_LIBRARIES_VERSION_RESOURCE TRUE)
     if(NOT WIN32)
         return()
@@ -104,6 +110,12 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
     if(rc_index EQUAL -1
        OR NOT CMAKE_RC_COMPILER
        OR CMAKE_RC_COMPILER MATCHES "NOTFOUND|NOTREQUIRED")
+        if(ROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE)
+            message(FATAL_ERROR "rocm_libraries_add_version_resource: no Windows resource compiler is available, "
+                                "so ${TARGET} would be built without a version resource. Install the Windows SDK "
+                                "or put llvm-rc on PATH, or configure with "
+                                "-DROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE=OFF to build without one.")
+        endif()
         message(WARNING "rocm_libraries_add_version_resource: no Windows resource compiler is available; "
                         "${TARGET} will be built without a version resource")
         return()
