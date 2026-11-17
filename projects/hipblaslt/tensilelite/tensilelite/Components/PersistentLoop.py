@@ -297,6 +297,7 @@ class PersistentKernelState:
         return module
 
     def papPackedRestoreIdentity(self, kernel):
+        """Reload the current tile identity saved by papPackedSaveIdentity."""
         module = Module("PAP packed restore current identity")
         first = 9 if isStreamK(kernel) else 8
         for lane, name in enumerate(self.papPackedIdentityNames(kernel), first):
@@ -857,6 +858,7 @@ class PersistentLoop(Component):
 
     def prefetchBorrowedIdentity(self, writer, kernel, tPA, tPB, processing, *,
                                  subtile=False, preloopGrModule=None, beforeIssue=None):
+        """Map the next tile in place and issue its loads, then restore the current tile identity."""
         module = Module("Persistent PAP borrowed identity")
         with writer.allocPapTileIdentity(kernel, subtile=subtile) as previous:
             module.add(writer.papCheckpointCurrentTileIdentity(kernel, previous, subtile=subtile))
@@ -876,6 +878,7 @@ class PersistentLoop(Component):
         return module
 
     def prefetchPreparedClassic(self, writer, kernel, tPA, tPB, processing, carrier, *, beforeIssue=None):
+        """Issue next-tile loads from NGLL-prepared addresses; map in place if they are absent or invalid."""
         if carrier.get("packed"):
             return self.prefetchPackedClassic(writer, kernel, tPA, tPB, processing, beforeIssue=beforeIssue)
         module = Module("Persistent PAP prepared address consumer")
@@ -911,6 +914,7 @@ class PersistentLoop(Component):
         return module
 
     def prefetchPackedClassic(self, writer, kernel, tPA, tPB, processing, *, beforeIssue=None):
+        """Packed prefetchPreparedClassic: read the next tile identity and addresses from payload VGPR lanes."""
         module = Module("PAP packed ordinary consumer")
         fallback = Label(writer.labels.getNameInc("PapPackedFallback"), "")
         ready = Label(writer.labels.getNameInc("PapPackedReady"), "")
