@@ -119,6 +119,17 @@ def test_a_split_joins_every_launch_unless_free_run_is_set(tmp_path, _restore_gp
     assert "split-free-run" not in _options(_write_ini(tmp_path, SplitFreeRun=True))
 
 
+def test_the_batch_split_is_written(tmp_path, _restore_gp):
+    options = _options(_write_ini(tmp_path, SplitDevices=2, SplitDim="B"))
+    assert options["split-devices"] == "2"
+    assert options["split-dim"] == "B"
+
+
+def test_a_batch_split_can_share_d(tmp_path, _restore_gp):
+    options = _options(_write_ini(tmp_path, SplitDevices=2, SplitDim="B", SplitPlacementD="Shared"))
+    assert options["split-placement"] == "RRRS"
+
+
 def test_each_tensor_has_its_own_placement(tmp_path, _restore_gp):
     options = _options(
         _write_ini(
@@ -142,7 +153,7 @@ def test_an_unknown_placement_is_refused(tmp_path, _restore_gp, tensor):
 
 @pytest.mark.parametrize(
     "splitDim, tensor",
-    [("M", "A"), ("M", "C"), ("N", "B"), ("N", "C")],
+    [("M", "A"), ("M", "C"), ("N", "B"), ("N", "C"), ("B", "A"), ("B", "B"), ("B", "C")],
 )
 def test_only_the_unsplit_operand_and_d_can_be_shared(tmp_path, _restore_gp, splitDim, tensor):
     # The client refuses the same placements (client/include/SplitPlacement.hpp).
