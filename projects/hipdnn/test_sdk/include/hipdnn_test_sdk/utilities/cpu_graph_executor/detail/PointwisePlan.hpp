@@ -78,8 +78,18 @@ struct PointwiseParams
     }
 };
 
+// A comparison rounds nothing into its boolean result, so the plan compares its operands exactly
+// (in double) instead of in the node's compute type.
+inline bool isComparisonPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode)
+{
+    using Mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+    return mode == Mode::CMP_EQ || mode == Mode::CMP_NEQ || mode == Mode::CMP_GT
+           || mode == Mode::CMP_GE || mode == Mode::CMP_LT || mode == Mode::CMP_LE;
+}
+
 // ComputeType is the node's compute_data_type: every operand is converted to it, the operation
 // is carried out in it (rounding once per operation) and the result is converted to OutputType.
+// Comparisons are the exception (see isComparisonPointwiseMode()).
 template <typename Input0Type,
           typename Input1Type,
           typename Input2Type,
@@ -144,9 +154,18 @@ private:
             auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                template pointwiseComputeAs<ComputeType>(
-                    _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+            if(isComparisonPointwiseMode(_params.mode))
+            {
+                utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
+                    pointwiseCompute(
+                        _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+            }
+            else
+            {
+                utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
+                    template pointwiseComputeAs<ComputeType>(
+                        _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+            }
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(_params.mode))
         {
