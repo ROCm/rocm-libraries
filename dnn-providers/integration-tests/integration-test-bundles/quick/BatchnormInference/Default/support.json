@@ -3,16 +3,12 @@
     "HIP_MLOPS_ENGINE": [
       {
         "cases": [
-          "1_3_14_14_bfp16_nchw",
-          "1_3_14_14_bfp16_nchw_upcast",
-          "1_3_14_14_fp32_nhwc",
-          "1_3_224_fp16_nlc",
-          "1_3_224_fp16_nlc_upcast",
-          "1_3_224_fp32_ncl",
+          "2_3_1_1_bfp16_nchw_upcast",
+          "2_3_1_1_fp32_nhwc",
           "2_3_3_1_1_bfp16_ndhwc",
-          "2_3_3_1_1_bfp16_ndhwc_upcast",
           "2_3_3_1_1_fp16_ncdhw",
-          "2_3_3_1_1_fp16_ncdhw_upcast"
+          "4_3_1_fp16_nlc",
+          "4_3_1_fp32_ncl"
         ],
         "support": {
           "gfx1100": [
@@ -46,12 +42,11 @@
     "MIOPEN_ENGINE": [
       {
         "cases": [
-          "1_3_14_14_bfp16_nchw",
-          "1_3_14_14_fp32_nhwc",
-          "1_3_224_fp16_nlc",
-          "1_3_224_fp32_ncl",
+          "2_3_1_1_fp32_nhwc",
           "2_3_3_1_1_bfp16_ndhwc",
-          "2_3_3_1_1_fp16_ncdhw"
+          "2_3_3_1_1_fp16_ncdhw",
+          "4_3_1_fp16_nlc",
+          "4_3_1_fp32_ncl"
         ],
         "support": {
           "gfx1030": [

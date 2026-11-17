@@ -391,3 +391,27 @@ python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_
 checked-in sweeps or the TOML block differ from the generator output. It also
 checks determinism, the legality of every written case, the all-pairs
 coverage, the TOML rows and the traceability of `metadata.plan_items`.
+
+## `generate_batchnorm_inference_bundles.py`
+
+Writes the BatchnormInference and BatchnormInferencePointwise sweeps and support sidecars from the
+BatchnormInference test plan (`docs/test-plans/batchnorm-inference.md`). Nobody edits those bundles by hand.
+
+| File | Holds |
+|---|---|
+| `batchnorm_inference_plan.py` | levels, shape catalog, layout/dtype/upcast combos, clip rotation, claim rules |
+| `generate_batchnorm_inference_bundles.py` | per-tier case ids, sweep and support writers, report |
+| `tests/test_generate_batchnorm_inference_bundles.py` | checks the checked-in bundles against the generator output, plus determinism and case-id rules |
+
+From the `rocm-libraries/` repo root:
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/generate_batchnorm_inference_bundles.py \
+  --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+  --report
+```
+
+- It writes `{quick,standard,comprehensive,full}/{BatchnormInference,BatchnormInferencePointwise}/Default/`
+  `sweep.json` and `support.json`. It reuses the checked-in `graph.template.json`.
+- `--dry-run` reports which files differ from the generator output and writes nothing.
+- `--report` prints the per-tier case counts.
