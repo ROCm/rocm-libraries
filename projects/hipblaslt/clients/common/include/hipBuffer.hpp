@@ -155,7 +155,8 @@ public:
         memory_pool<h_memory>::Restore(buffer);
     }
 
-    // Returns the memory to the pool early. The buffer must not be read afterwards.
+    // Returns the memory to the pool early. Afterwards buf() is null, so a stray read crashes
+    // instead of reading stale data, and memcheck() reports a failure.
     void release()
     {
         memory_pool<h_memory>::Restore(buffer);

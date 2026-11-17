@@ -3185,7 +3185,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             // With c_equal_d, hC restores the shared C/D buffer before each solution.
             hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
-            // hD_1 is allocated below, once hC has seeded hD_gold and can be released.
+            // hD_1 is allocated after this loop, once hC has seeded hD_gold and can be released.
             if(size_bias[i] * block_count != 0)
             {
                 hBias.emplace_back(Tbias, size_bias[i]);
@@ -3193,11 +3193,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
 
             // Only the epilogue reference reads these two; each is D in the compute type.
-            if(epilogue_on[i])
+            if(epilogue_on[i] != epilogue_reference)
             {
-                hD_gold_epl.emplace_back(Talpha, size_D_copy[i]);
-                hBias_gold_epl.emplace_back(Talpha, size_D_copy[i]); // Reduction for matrix D
+                hipblaslt_cerr << "epilogue_reference is out of step with epilogue_on" << std::endl;
+                CHECK_SUCCESS(false);
             }
+            // Without an epilogue they are empty, so that index i still means gemm i.
+            const size_t size_D_epl = epilogue_on[i] ? size_D_copy[i] : 0;
+            hD_gold_epl.emplace_back(Talpha, size_D_epl);
+            hBias_gold_epl.emplace_back(Talpha, size_D_epl); // Reduction for matrix D
 
             if(useDeviceAlpha)
                 hScaleAlphaVec.emplace_back(Talpha, size_scaleAlphaVec[i]);
@@ -3978,11 +3982,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(epilogue_on[i])
                     transform_buf(hD_gold[i], hD_gold_epl[i], To, Talpha);
             }
-            // Nothing reads hC again, so hD_1 takes its place instead of adding to it.
-            if(hD_1_follows_hC(i))
-                hC[i].release();
-            hD_1.emplace_back(To, size_D_copy[i]);
-            CHECK_HOST_ALLOCATION(host_allocation_failure(hD_1.back()));
             if(epilogue_on[i])
             {
                 EXPECT_HIPBLAS_STATUS(
@@ -4557,6 +4556,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleB_addr, sizeof(void*)));
             }
+        }
+    }
+
+    // Nothing reads a released hC again, so hD_1 takes its place instead of adding to the peak.
+    // This comes after the loop above because its allocation check scans every hC.
+    if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
+    {
+        for(int i = 0; i < gemm_count; i++)
+        {
+            if(hD_1_follows_hC(i))
+                hC[i].release();
+            hD_1.emplace_back(To, size_D_copy[i]);
+            CHECK_HOST_ALLOCATION(host_allocation_failure(hD_1.back()));
         }
     }
 
