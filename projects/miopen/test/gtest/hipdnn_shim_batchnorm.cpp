@@ -1656,6 +1656,58 @@ TEST(GPU_HipdnnShimBNTuning_FP32, DbUpdatePolicyRunsAsNone)
     }
 }
 
+// Used only by SearchAfterNoneOnSameShapeMatchesMiopen.
+const BN2DTestCase& SameShapeCase()
+{
+    static const BN2DTestCase same_shape_case{
+        3, 5, 7, 17, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    return same_shape_case;
+}
+
+// Switching a handle from None to Search does not tune a shape the handle has
+// already run: MIOpen returns the invoker it cached under None before it reads the
+// policy, and the policy is not part of the key the invoker is cached under
+// (ALMIOPEN-3381). The hipDNN path builds a new plan with the benchmarking knob on,
+// but the provider runs it on its own MIOpen handle, which holds the invoker from
+// the first call, so it does not search either. Once ALMIOPEN-3381 is fixed, the
+// second call searches in both modes and this test fails; expect a search then.
+TEST(GPU_HipdnnShimBNTuning_FP32, SearchAfterNoneOnSameShapeMatchesMiopen)
+{
+    const SearchLogScope search_log;
+    ForgetTuning(SameShapeCase());
+
+    const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
+    auto&& handle = miopen::deref(owned_handle.handle);
+
+    {
+        SCOPED_TRACE("none");
+        const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyNone);
+        TrainData d;
+        const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, SameShapeCase());
+        if(ExpectServed("same_shape_none_train", result))
+        {
+            EXPECT_FALSE(Searched(result)) << result.logged;
+            CheckTrain(handle, d, true, false);
+        }
+    }
+    {
+        SCOPED_TRACE("search");
+        const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
+        TrainData d;
+        const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, SameShapeCase());
+        if(ExpectServed("same_shape_search_train", result))
+        {
+            const bool searched = Searched(result);
+            ::testing::Test::RecordProperty("parity_searched_same_shape_search_train",
+                                            searched ? "true" : "false");
+            EXPECT_FALSE(searched) << "searched after the policy changed, so ALMIOPEN-3381 "
+                                      "may be fixed\n"
+                                   << result.logged;
+            CheckTrain(handle, d, true, false);
+        }
+    }
+}
+
 // Used only by FindEnforceUnderNonePolicyMatchesMiopen.
 const BN2DTestCase& FindEnforceCase()
 {
