@@ -125,7 +125,7 @@ inline std::optional<int64_t> elementCount(const fb::TensorAttributes* value)
 inline std::optional<std::vector<int64_t>> placed(const fb::TensorAttributes& value,
                                                   const std::vector<int64_t>& logical)
 {
-    if(value.strides() == nullptr || value.strides()->size() == 0)
+    if(value.strides() == nullptr || value.strides()->empty())
     {
         return logical; // Packed as written.
     }
@@ -314,15 +314,27 @@ inline void declareAttention(const fb::Graph& graph,
             contents.refuse(table, "its cache holds fewer blocks than the table has entries");
         }
     }
-    // UINT8, one bit per 128 x 128 tile (SEM-025): every byte 0xFF keeps every block.
+    // UINT8 [B, H, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)], one bit per 128 x 128 tile
+    // (SEM-025): every byte 0xFF keeps every block, when the mask covers every tile.
+    constexpr int64_t TILE = 128;
+    constexpr int64_t BITS = 8;
     const auto* mask = tensor(graph, op.block_mask_tensor_uid());
-    if(mask != nullptr && mask->data_type() == fb::DataType::UINT8)
+    const auto tileRows = extent(mask, 2);
+    const auto tileBytes = extent(mask, 3);
+    const bool narrow
+        = (queries && tileRows && *tileRows < (*queries + TILE - 1) / TILE)
+          || (keys && tileBytes && *tileBytes < ((*keys + TILE - 1) / TILE + BITS - 1) / BITS);
+    if(mask != nullptr && mask->data_type() != fb::DataType::UINT8)
     {
-        contents.fill(mask, 0xFF);
+        contents.refuse(mask, "a block mask is UINT8, one bit per tile");
+    }
+    else if(narrow)
+    {
+        contents.refuse(mask, "it covers fewer tiles than the declared queries and keys");
     }
     else
     {
-        contents.refuse(mask, "a block mask is UINT8, one bit per tile");
+        contents.fill(mask, 0xFF);
     }
 }
 
@@ -414,7 +426,8 @@ inline void declareRaggedOffsets(const fb::Graph& graph, ContentsBuilder& conten
 /// - GDN and KDA `cu_seqlens`: sequence n starts at n x T / N.
 /// An operand one of these rules cannot declare (an unknown extent, a ragged stride its
 /// multiplier does not divide, a cache with fewer blocks than its table has entries, a block
-/// mask that is not UINT8, two rules disagreeing) is in `refused`, and a run reading it fails.
+/// mask that is not UINT8 or covers fewer tiles than the declared queries and keys, two rules
+/// disagreeing) is in `refused`, and a run reading it fails.
 inline DeclaredContents declaredContents(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
 {
     detail::ContentsBuilder contents;

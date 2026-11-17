@@ -445,13 +445,23 @@ TEST(TestNumericalValidation, DeclaredContentsAreWrittenExactlyOrNotAtAll)
     EXPECT_EQ(offset, int64_t{1} << 40);
     EXPECT_EQ(declaredImage(DataType::BOOLEAN, 3, {1, 1, 1}), (std::vector<uint8_t>{1, 1, 1}));
     EXPECT_EQ(declaredImage(DataType::UINT8, 2, {200, 255}), (std::vector<uint8_t>{200, 255}));
-    EXPECT_EQ(declaredImage(DataType::INT8, 2, {-1, 127}), (std::vector<uint8_t>{0xFF, 127}));
+    EXPECT_EQ(declaredImage(DataType::INT8, 3, {-128, -1, 127}),
+              (std::vector<uint8_t>{0x80, 0xFF, 127}));
+    const auto lowest
+        = declaredImage(DataType::INT32, sizeof(int32_t), {std::numeric_limits<int32_t>::min()});
+    int32_t narrowest = 0;
+    ASSERT_EQ(lowest.size(), sizeof(narrowest));
+    std::memcpy(&narrowest, lowest.data(), sizeof(narrowest));
+    EXPECT_EQ(narrowest, std::numeric_limits<int32_t>::min());
 
     // A buffer holding another number of elements, a value the type cannot hold, a type that
     // is not an integer.
     EXPECT_TRUE(declaredImage(DataType::INT32, 3 * sizeof(int32_t), {7, 7}).empty());
     EXPECT_TRUE(declaredImage(DataType::INT32, 2 * sizeof(int32_t), {7}).empty());
     EXPECT_TRUE(declaredImage(DataType::INT32, sizeof(int32_t), {int64_t{1} << 40}).empty());
+    EXPECT_TRUE(declaredImage(DataType::INT32, sizeof(int32_t), {-(int64_t{1} << 40)}).empty());
+    EXPECT_TRUE(declaredImage(DataType::BOOLEAN, 1, {-1}).empty());
+    EXPECT_TRUE(declaredImage(DataType::INT8, 1, {-129}).empty());
     EXPECT_TRUE(declaredImage(DataType::BOOLEAN, 1, {2}).empty());
     EXPECT_TRUE(declaredImage(DataType::UINT8, 1, {256}).empty());
     EXPECT_TRUE(declaredImage(DataType::UINT8, 1, {-1}).empty());
