@@ -1,0 +1,99 @@
+{
+    "_comment": [
+        "gfx950 batched, a 128x32x128 block with the 32x32x8 warp tile and 4x1x1",
+        "waves (narrow_w32_n uses 32x32x16) for an N of 32 with a long K. pad_m/n/k false and true: an unpadded kernel for the problems it divides and padded ones at native vector widths for the rest.",
+        "Use next to default_config.json (kernel names that both list dedupe). Usage: python batched_gemm_full_benchmark.py batched_gemm/configs/default_config.json batched_gemm/configs/narrow_k8_n_config_gfx950.json --arch gfx950 --dtype bf16 --layout rcr"
+    ],
+    "tile_config": {
+        "tile_m": {
+            "values": [
+                128
+            ]
+        },
+        "tile_n": {
+            "values": [
+                32
+            ]
+        },
+        "tile_k": {
+            "values": [
+                128
+            ]
+        },
+        "warp_m": {
+            "values": [
+                4
+            ]
+        },
+        "warp_n": {
+            "values": [
+                1
+            ]
+        },
+        "warp_k": {
+            "values": [
+                1
+            ]
+        },
+        "warp_tile_m": {
+            "values": [
+                32
+            ]
+        },
+        "warp_tile_n": {
+            "values": [
+                32
+            ]
+        },
+        "warp_tile_k": {
+            "values": [
+                8
+            ]
+        }
+    },
+    "trait_config": {
+        "pipeline": {
+            "values": [
+                "compv3",
+                "compv4",
+                "mem"
+            ]
+        },
+        "scheduler": {
+            "values": [
+                "intrawave",
+                "interwave"
+            ]
+        },
+        "epilogue": {
+            "values": [
+                "cshuffle",
+                "default"
+            ]
+        },
+        "pad_m": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "pad_n": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "pad_k": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "persistent": {
+            "values": [
+                false
+            ]
+        }
+    },
+    "k_block_per_cu": 1
+}

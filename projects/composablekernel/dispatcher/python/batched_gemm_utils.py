@@ -741,9 +741,10 @@ def setup_multiple_batched_gemm_dispatchers(
 # "extra_wave_maps": {"<arch>": [[m, n, k], ...]} (the table's gfx950 maps are
 # 1x4x1, 2x2x1, 4x1x1). Only maps arch_specs.json lists for the arch, so the
 # codegen emits them: the 1- and 2-wave blocks of the gfx950 narrow tiles
-# (configs/narrow_1w2w_*_config_gfx950.json).
+# (configs/narrow_1w2w_*_config_gfx950.json) and the 16-wave 4x4x1 block
+# (configs/w16_config_gfx950.json).
 _BATCHED_EXTRA_WAVE_MAPS: Dict[str, Tuple[Tuple[int, int, int], ...]] = {
-    "gfx950": ((1, 1, 1), (1, 2, 1), (2, 1, 1)),
+    "gfx950": ((1, 1, 1), (1, 2, 1), (2, 1, 1), (4, 4, 1)),
 }
 
 

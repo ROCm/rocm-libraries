@@ -164,6 +164,15 @@ class TestBatchedExtraWaveMaps(unittest.TestCase):
             {(128, 32, (4, 1, 1)), (64, 32, (2, 1, 1)), (256, 32, (1, 1, 1))}, blocks
         )
 
+    def test_w16_and_narrow_k8_n(self):
+        w16 = _kernels(_CONFIG_DIR / "w16_config_gfx950.json")
+        self.assertEqual(
+            {(c.tile_m, c.tile_n, c.tile_k, _waves(c)) for c in w16}, {(256, 256, 32, (4, 4, 1))}
+        )
+        k8 = _kernels(_CONFIG_DIR / "narrow_k8_n_config_gfx950.json")
+        self.assertEqual({(c.tile_m, c.tile_n, c.tile_k, _waves(c), _warp_tile(c)) for c in k8},
+                         {(128, 32, 128, (4, 1, 1), (32, 32, 8))})
+
     def test_without_the_key_only_the_table_maps(self):
         kernels = self._expand_with("m", None)
         self.assertEqual({_waves(c) for c in kernels}, {(2, 2, 1)})
