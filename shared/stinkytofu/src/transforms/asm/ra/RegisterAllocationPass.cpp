@@ -37,6 +37,7 @@
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterSymbolSync.hpp"
 #include "stinkytofu/transforms/asm/ra/VgprMsbPrediction.hpp"
+#include "stinkytofu/transforms/asm/ra/VgprMsbStreamModel.hpp"
 #include "stinkytofu/transforms/asm/ssa/SSADestruction.hpp"
 
 #define DEBUG_TYPE "RegisterAllocationPass"
@@ -222,7 +223,8 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
                          const AllocationConstraints& constraints, const AllocationScope& scope,
                          const AllocationRules& rules, const AsmTargetRegisters& target,
                          const UnbankableChoice& unbankable, const char* allocator,
-                         const std::vector<Loop>& loops, VgprMsbMode msbMode) {
+                         const std::vector<Loop>& loops, VgprMsbMode msbMode,
+                         const PlanOutcome& plan) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
     const GfxArchID arch =
@@ -269,6 +271,13 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
         }
         if (!entries.empty()) text += " msb[" + entries + "]";
     }
+    // How many of the blocks a bank plan placed in a bank landed there, or that
+    // the colouring was made without the plan because placing by it was
+    // refused; the reason follows on a line of its own. Silent without a plan.
+    if (!plan.dropped.empty())
+        text += " plan[dropped]";
+    else if (plan.planned > 0)
+        text += " plan[" + std::to_string(plan.honoured) + "/" + std::to_string(plan.planned) + "]";
     // Which rules were in force, so a report can be read without knowing the
     // triple or how capabilities were configured. Silent when there are none,
     // which keeps every existing report byte-identical.
@@ -378,6 +387,8 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     if (!unbankable.allocateRefusal.empty())
         text +=
             "\n  held them because the allocate attempt was refused: " + unbankable.allocateRefusal;
+    if (!plan.dropped.empty())
+        text += "\n  coloured without the bank plan, which was refused: " + plan.dropped;
     return text;
 }
 
@@ -492,6 +503,16 @@ AllocationScope regionScopeOf(const AllocationConstraints& constraints,
                                  intervals.slots().blockEnd(regionEnd));
 }
 
+/// What a bank plan is made against: null unless the options ask for one and
+/// the target selects VGPR banks with s_set_vgpr_msb.
+std::unique_ptr<const BankCostModel> bankCostFor(const Function& function,
+                                                 const RegisterAllocationOptions& options,
+                                                 const std::vector<Loop>& loops) {
+    if (options.quadrant != RegisterAllocationOptions::Quadrant::Plan) return nullptr;
+    if (options.caps.vgprMsbMode == VgprMsbMode::None) return nullptr;
+    return std::make_unique<VgprMsbStreamModel>(function, loops);
+}
+
 /// Everything colouring a function takes that no allocator changes. Built once,
 /// so every allocator in a chain, and every attempt each one makes, shares it.
 struct ColouringRun {
@@ -504,6 +525,7 @@ struct ColouringRun {
           target(AsmTargetRegisters::forFunction(func)),
           constraints(markAndBuild(func, target, rules)),
           loops(detectLoops(func)),
+          bankCost(bankCostFor(func, opts, loops)),
           ruleIntervals(applyEarlyClobber(func, intervals, rules)),
           regionScope(regionScopeOf(constraints, ruleIntervals, opts.allocate, regionEnd)),
           unbankable(opts.unbankableOperands ==
@@ -520,6 +542,8 @@ struct ColouringRun {
     const AsmTargetRegisters target;
     const AllocationConstraints constraints;
     const std::vector<Loop> loops;
+    /// Prices VGPR banks for quadrant=plan; null otherwise.
+    const std::unique_ptr<const BankCostModel> bankCost;
     /// The ranges with early-clobber widening, which the allocator and the
     /// verifier read. Identical to `intervals` while no clobbersEarly rule is
     /// Active.
@@ -614,6 +638,9 @@ Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator
                                   run.loops, run.rules,         scope};
         context.preferProducerQuadrant =
             options.quadrant == RegisterAllocationOptions::Quadrant::Prefer;
+        PlanOutcome plan;
+        context.bankCost = run.bankCost.get();
+        context.planOutcome = &plan;
         if (!options.blockDumpPrefix.empty()) {
             context.blockDumpPath = options.blockDumpPrefix + allocator.name() + "." +
                                     unbankableOperandsName(attempt) + ".tsv";
@@ -637,7 +664,7 @@ Expected<AllocationResult> colourWith(const ColouringRun& run, RegisterAllocator
                 choice.allocateRefusal = withoutFunctionName(function, refusals.front());
             *report = shadowReport(function, *allocated, run.intervals, run.constraints, scope,
                                    run.rules, run.target, choice, allocator.name(), run.loops,
-                                   options.caps.vgprMsbMode);
+                                   options.caps.vgprMsbMode, plan);
         }
         if (options.applyToOperands) {
             if (std::optional<std::string> problem =

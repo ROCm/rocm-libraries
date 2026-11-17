@@ -258,8 +258,10 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
                 options.quadrant = Quadrant::Any;
             else if (value == "prefer")
                 options.quadrant = Quadrant::Prefer;
+            else if (value == "plan")
+                options.quadrant = Quadrant::Plan;
             else
-                return badValue("any or prefer");
+                return badValue("any, prefer or plan");
         } else if (key == "rules" || key == "noRule") {
             const std::vector<std::string> names = splitList(value, '+');
             if (names.empty()) return badValue("rule names joined with '+'");
@@ -323,7 +325,8 @@ std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& co
     if (options.unbankableOperands != defaults.unbankableOperands)
         words.push_back(std::string("unbankable=") +
                         unbankableOperandsName(options.unbankableOperands));
-    if (options.quadrant != defaults.quadrant) words.push_back("quadrant=prefer");
+    if (options.quadrant != defaults.quadrant)
+        words.push_back(options.quadrant == Quadrant::Plan ? "quadrant=plan" : "quadrant=prefer");
 
     std::vector<std::string> activate = sortedUnique(options.rules.activate);
     if (options.rules.activateAll) activate.insert(activate.begin(), "all");

@@ -41,8 +41,20 @@
 #include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationScope.hpp"
+#include "stinkytofu/transforms/asm/ra/BankCostModel.hpp"
 
 namespace stinkytofu {
+
+/// What a bank plan came to, for the report. Filled by an allocator that plans.
+struct PlanOutcome {
+    /// Blocks the plan gave a bank.
+    uint32_t planned = 0;
+    /// Of those, the blocks placed wholly inside it.
+    uint32_t honoured = 0;
+    /// Why placing by the plan was refused, when the colouring returned was
+    /// made without it.
+    std::string dropped;
+};
 
 /// Everything an allocator may read. Const on purpose: no allocator mutates IR.
 struct AllocationContext {
@@ -66,6 +78,14 @@ struct AllocationContext {
     /// the rest of the file (RegisterAllocationOptions::Quadrant::Prefer). A
     /// preference, not a constraint: a policy that ignores it is still correct.
     bool preferProducerQuadrant = false;
+
+    /// What a choice of VGPR banks costs (RegisterAllocationOptions::Quadrant::
+    /// Plan), or null for no plan. A policy that plans picks a bank for each
+    /// block before placing it; like the quadrant, a preference.
+    const BankCostModel* bankCost = nullptr;
+
+    /// Where a policy that plans says what its plan came to. May be null.
+    PlanOutcome* planOutcome = nullptr;
 
     /// When non-empty, the file a policy may write its placement table to
     /// (RegisterAllocationOptions::blockDumpPrefix).
