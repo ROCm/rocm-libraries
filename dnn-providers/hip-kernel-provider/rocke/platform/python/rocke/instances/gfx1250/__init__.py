@@ -23,6 +23,13 @@ from .block_scaled_gemm import (
     is_valid_spec as is_valid_block_scaled_gemm_spec,
 )
 from .fused_moe_fp8 import Gfx1250Fp8Moe, Gfx1250Fp8MoeSpec
+from .nvfp4_gemm import (
+    NvFp4GemmSpec,
+    build_nvfp4_gemm,
+    nvfp4_gemm_grid,
+    nvfp4_gemm_signature,
+    is_valid_spec as is_valid_nvfp4_gemm_spec,
+)
 from .fused_moe_mega_wmma import (
     FusedMegaWmmaSpec,
     build_moe_fused_mega_wmma,
@@ -55,6 +62,11 @@ from .qwen3_sampler import (
 from .wmma_gemm import WmmaGemmSpec, build_wmma_gemm, wmma_gemm_grid
 
 __all__ = [
+    "NvFp4GemmSpec",
+    "build_nvfp4_gemm",
+    "nvfp4_gemm_grid",
+    "nvfp4_gemm_signature",
+    "is_valid_nvfp4_gemm_spec",
     "BlockScaledGemmSpec",
     "block_scaled_gemm_grid",
     "block_scaled_gemm_signature",

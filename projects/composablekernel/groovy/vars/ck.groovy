@@ -674,6 +674,15 @@ def buildDockerFa(install_prefix){
     env.CK_FA_IMAGE = buildAndPushDockerImage(install_prefix, image_name, dockerExtraArgs, true)
 }
 
+def buildDockerFmhaPython(install_prefix){
+    def image_name = "${env.CK_DOCKERHUB_PRIVATE}:ck_fmha_python_${env.GIT_COMMIT.take(12)}_${env.BUILD_NUMBER}"
+    def dockerExtraArgs = " -f projects/composablekernel/Dockerfile.fmha_python"
+    dockerExtraArgs += " --build-arg BASE_DOCKER='${params.fmha_python_base_docker}'"
+    dockerExtraArgs += " --build-arg GPU_ARCHS='gfx1250'"
+    dockerExtraArgs += " --build-arg MAX_JOBS='${nthreads()}' . "
+    env.CK_FMHA_PYTHON_IMAGE = buildAndPushDockerImage(install_prefix, image_name, dockerExtraArgs, true)
+}
+
 def buildDocker(install_prefix){
     buildDockerBase(install_prefix)
     if (params.RUN_PYTORCH_TESTS.toBoolean()) {
@@ -684,6 +693,9 @@ def buildDocker(install_prefix){
     }
     if (params.RUN_FA_TESTS.toBoolean()) {
         buildDockerFa(install_prefix)
+    }
+    if (env.SHOULD_RUN_FMHA_PYTHON_TESTS.toBoolean()) {
+        buildDockerFmhaPython(install_prefix)
     }
 }
 
@@ -964,8 +976,9 @@ def cmake_build(Map conf=[:]){
             // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
             // So no ninja trace processing needed here
             if (!params.BUILD_INSTANCES_ONLY){
-                if (!runAllUnitTests && !setup_args.contains("gfx1250") ){
+                if (!runAllUnitTests){
                     // Smart Build: Run smart_build_and_test.sh
+                    if( !setup_args.contains("gfx1250") ){
                     sh """
                         export WORKSPACE_ROOT=${env.WORKSPACE}
                         export PARALLEL=32
@@ -975,13 +988,27 @@ def cmake_build(Map conf=[:]){
                         export NINJA_FTIME_TRACE=false
                         bash ../script/dependency-parser/smart_build_and_test.sh
                     """
+                    }
+                    else{ //add extra environment variables for gfx1250
+                    sh """
+                        export HSA_MODEL_LIB=/libhsakmtmodel.so
+                        export HSA_MODEL_TOPOLOGY=/topology/mi450
+                        export WORKSPACE_ROOT=${env.WORKSPACE}
+                        export PARALLEL=32
+                        export NINJA_JOBS=${nt}
+                        export ARCH_NAME=${arch_name}
+                        export PROCESS_NINJA_TRACE=false
+                        export NINJA_FTIME_TRACE=false
+                        bash ../script/dependency-parser/smart_build_and_smoke_test.sh
+                    """
+                    }
                 }
                 else{ //run all tests if runAllUnitTests = true
                     if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} install check"
                     }
-                    else{ //do not run tests on gfx1250, just build everything
+                    else{ //on gfx1250 ffm run only smoke tests because regression tests will take forever
                         echo "Building for gfx1250"
                         sh """
                             export HSA_MODEL_LIB=/libhsakmtmodel.so
@@ -1350,6 +1377,29 @@ def getFaTestsCmds() {
     return [
         "python3 -u -m pytest /home/jenkins/workspace/flash-attention/tests/test_flash_attn_ck.py"
     ]
+}
+
+def runFmhaPythonTests(String arch) {
+    def resultDir = "fmha-python-results-${arch}"
+    deleteDir()
+    try {
+        run_downstream_tests(
+            image: "${env.CK_FMHA_PYTHON_IMAGE}",
+            timeoutHours: 5,
+            execute_cmds: [
+                "mkdir -p ${resultDir}",
+                """#!/bin/bash
+set -euo pipefail
+python3 -u -m pytest /opt/ck/example/ck_tile/01_fmha/python/tests \
+    -q --tb=short -o cache_dir="\$PWD/${resultDir}/.pytest_cache" --junitxml=${resultDir}/pytest.xml 2>&1 | tee ${resultDir}/pytest.log
+"""
+            ])
+    } finally {
+        archiveArtifacts artifacts: "${resultDir}/*", allowEmptyArchive: true
+        if (fileExists("${resultDir}/pytest.xml")) {
+            junit testResults: "${resultDir}/pytest.xml"
+        }
+    }
 }
 
 // All static checks in one container on a single node: clang-format (always),

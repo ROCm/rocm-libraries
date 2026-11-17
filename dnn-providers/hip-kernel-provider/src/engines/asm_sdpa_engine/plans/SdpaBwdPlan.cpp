@@ -109,9 +109,10 @@ struct MhaBwdArgs
     // LSE input (Hs_lsed).
     //
     // In hip-kernel-provider the D buffer is carved from a contiguous
-    // workspace allocation, and the LSE stats tensor is created with
-    // contiguous strides for the same shape — so the stride values are
-    // always identical, preserving AITER's shared-stride convention.
+    // workspace allocation, and SdpaBwdPlanBuilder::buildPlan sets both strides
+    // to the packed [B, H_q, S_q] values. isApplicable declines any stats tensor
+    // that is not packed on every axis of size > 1, so these strides describe
+    // the LSE tensor too, preserving AITER's shared-stride convention.
     unsigned int nhead_stride_lsed;
     unsigned int batch_stride_lsed;
 
@@ -367,7 +368,7 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.nhead_stride_dv = p.dvStrideHead;
     a.batch_stride_dv = p.dvStrideBatch;
 
-    // LSE/D strides (from stats tensor strides)
+    // LSE/D strides: packed [B, H_q, S_q], derived from Q's dims by buildPlan
     a.nhead_stride_lsed = p.statsStrideHead;
     a.batch_stride_lsed = p.statsStrideBatch;
 
@@ -504,9 +505,9 @@ void SdpaBwdPlan::execute(const Handle& handle,
     }
 
     // 5. Resolve attention scale at execute time (runtime pass-by-value support).
-    const float resolvedScale
-        = static_cast<float>(hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
-            _params.attnScale, deviceBuffers, numDeviceBuffers)));
+    // Throws BAD_PARAM before the first launch for a scale the kernels mishandle.
+    const float resolvedScale = plan_utils::resolveSupportedAttnScale(
+        _params.attnScale, deviceBuffers, numDeviceBuffers, "SdpaBwdPlan::execute");
 
     // 6. Build convenience args struct (mirrors AITER mha_bwd_args).
     // Byte-stride uint32 overflow was already rejected by isApplicable.

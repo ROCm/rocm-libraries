@@ -204,3 +204,41 @@ def test_failed_kernels_are_not_probed(monkeypatch):
     stop.measure(fast, warmup=3, iters=10)
     assert stop.measure(wrong, warmup=3, iters=10, passed=False) == 100.0
     assert stop.best_ms == 1.0
+
+
+def test_staged_timing_reports_the_median_of_stalled_samples(monkeypatch):
+    """--timing staged: the pruning probes stay block launches; only the
+    reported number is measured one stalled launch at a time."""
+    fast, ok = object(), object()
+    block = _fake_timer(monkeypatch, {fast: 1.0, ok: 3.0})
+    staged = []
+
+    def fake_staged(fn, *, warmup, iters, stream=0):
+        staged.append((fn, warmup, iters))
+        base = {fast: 1.5, ok: 3.5}[fn]
+        return [base + 1.0, base, base - 0.1]
+
+    monkeypatch.setattr(rt_mod, "time_launches_staged", fake_staged)
+    stop = EarlyStop(5.0, after=1, timing="staged")
+    assert stop.measure(fast, warmup=3, iters=10) == 1.5
+    assert block == [] and staged == [(fast, 3, 10)]
+    # Engaged: the probe and the rest of the warmup are block, the loop staged.
+    assert stop.measure(ok, warmup=3, iters=10) == 3.5
+    assert block == [(ok, 0, 1), (ok, 0, 2)]
+    assert staged[-1] == (ok, 0, 10)
+
+
+def test_the_sweep_flag_picks_the_timing(monkeypatch):
+    import argparse
+
+    from benchmarks.common import batched_timing
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    _reset_handoff(monkeypatch)
+    parser = argparse.ArgumentParser()
+    batched_timing.add_timing_arg(parser)
+    assert parser.parse_args([]).timing == "staged"
+    args = parser.parse_args(["--timing", "block"])
+    args.early_stop, args.early_stop_after = 5.0, 1
+    problem = ConvProblem(N=1, Hi=8, Wi=8, C=8, K=8, Y=3, X=3, pH=1, pW=1)
+    assert EarlyStop.for_case(args, problem, "fp16", "fwd").timing == "block"

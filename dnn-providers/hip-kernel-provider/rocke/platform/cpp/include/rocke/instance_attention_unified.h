@@ -36,7 +36,7 @@
  *   build_unified_attention_reduce(spec)         rocke_build_unified_attention_reduce_scalar
  *   *.kernel_name()                              rocke_unified_attention_*_kernel_name
  *   (block_id grid extents)                      rocke_unified_attention_*_grid
- *   _attn_signature(include_bt_stride=False)     rocke_unified_attention_2d_scalar_signature
+ *   _attn_signature(include_bt_stride=True)      rocke_unified_attention_2d_scalar_signature
  *   supports_native_unified_attention(problem)   rocke_unified_attention_supports_scalar
  *   (build -> lower .ll convenience, NEW)        rocke_unified_attention_*_lower_to_llvm
  *

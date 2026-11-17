@@ -15,24 +15,46 @@
 # per-BB anchor grid point at 32640 falls inside the getpc window and triggers
 # the redirect.
 
-#--- getpc window redirect: wait + prefetch land BEFORE s_getpc_b64, chain stays intact.
-# The XNACK s_wait_xcnt 0 (4 B) precedes the redirected prefetch, so both sit before s_getpc_b64
-# and the getpc -> add fixup chain remains contiguous.
+#--- getpc window redirect: prefetch lands BEFORE s_getpc_b64, chain stays intact.
+# The preceding VALU leaves no open replay group, so the state-aware path emits no xcnt wait.
 # CHECK-LABEL: [.align 32628 padding=
-# CHECK: {{.*}}total=32632 bytes{{.*}}s_wait_xcnt{{.*}}(0)
-# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
-# CHECK: {{.*}}total=32644 bytes{{.*}}s_getpc_b64
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_getpc_b64
 # The getpc -> add fixup chain must be contiguous (no prefetch spliced inside it).
 # CHECK-NOT: s_prefetch_inst_pc_rel
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_add_u32
 # CHECK: {{.*}}total=32648 bytes{{.*}}s_add_u32
-# CHECK: {{.*}}total=32652 bytes{{.*}}s_add_u32
-# CHECK: {{.*}}total=32656 bytes{{.*}}v_add_f32
-# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+# CHECK: {{.*}}total=32652 bytes{{.*}}v_add_f32
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
 
 st.func @getpc_window_redirect() {
 ^entry:
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
   "st.asm_directive"(".align", "32628")
+  s[0:1] = "st.s_getpc_b64"() { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_add_u32"(s0, 4) { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_add_u32"(s0, 8) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- getpc window redirect after an SMEM load: the redirected prefetch still joins the open SMEM
+# group, so the wait goes before it, and the getpc -> add chain stays contiguous.
+# CHECK-LABEL: function "getpc_window_redirect_after_smem"
+# CHECK: {{.*}}total=32628 bytes{{.*}}s_load_b64
+# CHECK: {{.*}}total=32632 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_getpc_b64
+# CHECK-NOT: s_prefetch_inst_pc_rel
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_add_u32
+# CHECK: {{.*}}total=32652 bytes{{.*}}s_add_u32
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @getpc_window_redirect_after_smem() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32620")
+  s[8:9] = "st.s_load_b64"(s[2:3]) { issueCycles = 1, latencyCycles = 30 }
   s[0:1] = "st.s_getpc_b64"() { issueCycles = 1, latencyCycles = 1 }
   s0 = "st.s_add_u32"(s0, 4) { issueCycles = 1, latencyCycles = 1 }
   s0 = "st.s_add_u32"(s0, 8) { issueCycles = 1, latencyCycles = 1 }

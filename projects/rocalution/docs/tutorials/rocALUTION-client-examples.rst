@@ -9,7 +9,7 @@ rocALUTION client examples
 ****************************
 
 rocALUTION clients host a variety of different examples as well as a unit test package.
-To build rocALUTION with clients, see :ref:`install-rocalution`.
+To build rocALUTION with clients, see :doc:`Build rocALUTION from source <../install/rocALUTION-build-from-source>`.
 
 Examples
 =========

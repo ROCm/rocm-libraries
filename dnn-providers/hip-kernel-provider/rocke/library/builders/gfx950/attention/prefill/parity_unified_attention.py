@@ -367,6 +367,21 @@ def default_scenarios() -> List[Scenario]:
             dtype=torch.float16,
             sliding_window=256,
         ),
+        # single-sequence (num_seqs==1) long prefill, the exact
+        # cohort the gfx950 D128 sliding-window transposed-32x32 combo
+        # targets (_enable_single_batch_combo requires num_seqs==1). Added
+        # as bf16 to cover the dtype this change newly admits into that
+        # combo; the fp16 sibling is `sliding_d128_b16` above.
+        Scenario(
+            name="sliding_d128_b16_bf16_combo",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            dtype=torch.bfloat16,
+            sliding_window=4096,
+        ),
         Scenario(
             name="softcap_d128_b16",
             seq_lens=[(1, 1024), (1, 2048)],
@@ -1720,7 +1735,7 @@ def _run_rocke(
             supports_tiled_2d,
         )
         from kernels.common.attention_unified import (
-            _attn_signature,
+            _tiled_2d_signature,
             _attn_values,
             _spec_kv_addr_limit,
             _select_2d_compile_backend,
@@ -1760,9 +1775,7 @@ def _run_rocke(
             launcher = KernelLauncher(
                 hsaco=artifact.hsaco,
                 kernel_name=artifact.kernel_name,
-                signature=_attn_signature(
-                    dtype_str, include_bt_stride=True, include_qq_bias_stride=True
-                ),
+                signature=_tiled_2d_signature(_ARCH, dtype_str),
                 cache_key=("d256_fast_direct", spec.kernel_name()),
             )
             if probe_occupancy:
@@ -1833,9 +1846,7 @@ def _run_rocke(
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
             kernel_name=artifact.kernel_name,
-            signature=_attn_signature(
-                dtype_str, include_bt_stride=True, include_qq_bias_stride=True
-            ),
+            signature=_tiled_2d_signature(_ARCH, dtype_str),
             cache_key=("prod_2d_direct", spec.kernel_name()),
         )
         vals = _attn_values(

@@ -254,13 +254,13 @@ def test_ductile_backend_forwards_auto_pop_size_to_ga(monkeypatch, tmp_path, con
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.printExit",
+        "tensilelite.backends.ductile_backend.printExit",
         lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
     )
 
@@ -300,13 +300,13 @@ def test_ductile_backend_forwards_on_generation_end_callback_to_ga(monkeypatch, 
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.printExit",
+        "tensilelite.backends.ductile_backend.printExit",
         lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
     )
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
@@ -347,13 +347,13 @@ def test_save_iteration_csv_copies_results_into_ga_iters_dir(monkeypatch, tmp_pa
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [_fake_solution("sol0"), _fake_solution("sol1")],
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        "tensilelite.backends.ductile_backend.getSolutionNameMin",
         lambda solution, _splitgsu: solution.name,
     )
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
@@ -386,9 +386,9 @@ def test_save_iteration_csv_noop_when_no_results_file_yet(monkeypatch, tmp_path)
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
     )
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
@@ -1226,6 +1226,49 @@ def test_checkpoint_loading_failure_falls_back_to_fresh(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # Post-optimization verification — partial / all-fail paths
 # ---------------------------------------------------------------------------
+
+def test_verification_timing_excludes_nested_evaluation(monkeypatch, tmp_path):
+    import importlib
+
+    timing = importlib.import_module("tensilelite.Common.TimingInstrumentation")
+    buffer = []
+    monkeypatch.setattr(timing, "_timing_buffer", buffer)
+    monkeypatch.setitem(timing.globalParameters, "TimingInstrumentation", True)
+    clock_ns = [0]
+    monkeypatch.setattr(ductile_backend_mod.time, "perf_counter_ns", lambda: clock_ns[0])
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            # Earlier evaluations must not be subtracted again during verification.
+            self._evaluate([{"a": 0}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, best):
+            clock_ns[0] += 7_000_000
+            result = self._evaluate(best)
+            clock_ns[0] += 5_000_000
+            return result
+
+    def benchmark_runner(*args, **kwargs):
+        clock_ns[0] += 30_000_000
+        return str(csv_path), 0
+
+    monkeypatch.setattr(ductile_backend_mod, "GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(ductile_backend_mod, "_generate_ga_solutions",
+                        lambda *args, **kwargs: [types.SimpleNamespace()])
+    _patch_primitives(monkeypatch, _base_merged_config())
+    DuctileBackend().run({}, _make_benchmark_config(tmp_path), benchmark_runner)
+
+    # Verification takes 42 ms: 7 + 30 in the evaluation + 5. Its own work is 12 ms.
+    assert [record for record in buffer if record[0] == "python_ductile_verification"] == [
+        ("python_ductile_verification", 12.0)
+    ]
+
 
 def test_verification_all_fail_calls_exit(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
