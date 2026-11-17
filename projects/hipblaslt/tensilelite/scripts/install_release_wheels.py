@@ -76,6 +76,10 @@ def main(argv=None) -> int:
         args.copy_wheels.mkdir(parents=True, exist_ok=True)
         for wheel in wheels:
             shutil.copy2(wheel, args.copy_wheels / wheel.name)
+        published = {wheel.name for wheel in wheels}
+        for stale in args.copy_wheels.glob("tensilelite-*-py3-none-any.whl"):
+            if stale.name not in published:
+                stale.unlink()
     return 0
 
 
