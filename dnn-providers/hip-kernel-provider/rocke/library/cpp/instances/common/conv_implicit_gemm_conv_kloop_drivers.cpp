@@ -286,15 +286,6 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
     rocke_conv_set_final_accs(ctx, for_op.op->results, for_op.op->num_results);
 }
 
-/* Python _rpf_lds_barrier(b, arch): the in-loop barrier of the
- * register-prefetch K loops (regt_prefetch); orders the LDS accesses of the
- * tile before and after it, and leaves the prefetch's global loads in flight
- * (rocke_lds_barrier_keep_vmem). */
-void rocke_conv_rpf_lds_barrier(rocke_conv_build_ctx_t* ctx)
-{
-    rocke_lds_barrier_keep_vmem(ctx->b, ctx->arch);
-}
-
 /* ===================================================================== *
  * rocke_conv_emit_kloop_uniform_decode   (Python ``elif spec.uniform_k_decode:``)
  *
@@ -546,9 +537,9 @@ void rocke_conv_emit_kloop_uniform_decode(rocke_conv_build_ctx_t* ctx)
             ctx->k_off_capture = for_uk.iv;
             rocke_conv_emit_mfma_phase(
                 ctx, ctx->A_smem, ctx->B_smem, for_uk.iter_vars, n_acc, new_accs);
-            rocke_conv_rpf_lds_barrier(ctx);
+            rocke_lds_barrier_keep_vmem(ctx->b, ctx->arch);
             ukd_store(ctx, &a_staged, &b_staged);
-            rocke_conv_rpf_lds_barrier(ctx);
+            rocke_lds_barrier_keep_vmem(ctx->b, ctx->arch);
             for(i = 0; i < n_acc; ++i)
                 yields[i] = new_accs[i];
             yields[n_acc + 0] = nxt[0];
@@ -762,9 +753,9 @@ void rocke_conv_emit_kloop_regt_prefetch(rocke_conv_build_ctx_t* ctx)
         ctx->k_off_capture = for_op.iv;
         rocke_conv_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, for_op.iter_vars, n_acc, new_accs);
-        rocke_conv_rpf_lds_barrier(ctx);
+        rocke_lds_barrier_keep_vmem(ctx->b, ctx->arch);
         ukd_store(ctx, &a_staged, &b_staged);
-        rocke_conv_rpf_lds_barrier(ctx);
+        rocke_lds_barrier_keep_vmem(ctx->b, ctx->arch);
         rocke_b_scf_yield(b, new_accs, n_acc);
     }
     rocke_b_region_leave(b);

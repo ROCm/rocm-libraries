@@ -957,14 +957,6 @@ def fwd_group_fast_raster_reason(spec: ImplicitGemmConvSpec) -> Optional[str]:
     return None
 
 
-def _rpf_lds_barrier(b: IRBuilder, arch: str) -> None:
-    """The in-loop barrier of the register-prefetch K loops (regt_prefetch):
-    orders the LDS accesses of the tile before and after it, and leaves the
-    prefetch's global loads in flight (a full barrier -- on gfx12 RDNA also
-    the backend's own LDS-only one -- waits for them)."""
-    lds_barrier_keep_vmem(b, arch)
-
-
 def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
     """LDS a forward spec allocates: ``(total, a_b_bytes, c_bytes, double)``.
 
@@ -2844,9 +2836,9 @@ def _build_implicit_gemm_conv_impl(
                 b.sched_barrier(0)
                 k_off_capture[0] = k_uk
                 new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
-                _rpf_lds_barrier(b, arch)
+                lds_barrier_keep_vmem(b, arch)
                 _uk_store(_st)
-                _rpf_lds_barrier(b, arch)
+                lds_barrier_keep_vmem(b, arch)
                 b.scf_yield(*new_accs, *nxt)
         else:
             for_uk = b.scf_for_iter(_uk_lo, uk_end, c_block_k, uk_iter, iv_name="k_uk")
@@ -2930,11 +2922,11 @@ def _build_implicit_gemm_conv_impl(
             b.sched_barrier(0)
             k_off_capture[0] = k_rp
             new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
-            # The in-loop barriers order LDS only (_rpf_lds_barrier); each
+            # The in-loop barriers order LDS only (lds_barrier_keep_vmem); each
             # ds_store already waits for its own load's data.
-            _rpf_lds_barrier(b, arch)
+            lds_barrier_keep_vmem(b, arch)
             _store(_st)
-            _rpf_lds_barrier(b, arch)
+            lds_barrier_keep_vmem(b, arch)
             b.scf_yield(*new_accs)
         final_accs = list(for_op.results)
     elif not spec.async_dma:

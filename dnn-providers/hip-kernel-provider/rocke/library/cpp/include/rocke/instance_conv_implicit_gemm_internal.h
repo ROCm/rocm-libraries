@@ -843,10 +843,6 @@ void rocke_conv_emit_kloop_uniform_decode(rocke_conv_build_ctx_t* ctx);
  * issued before the MMAs, stored to LDS after them). */
 void rocke_conv_emit_kloop_regt_prefetch(rocke_conv_build_ctx_t* ctx);
 
-/* The in-loop LDS barrier of the register-prefetch K loops (Python
- * _rpf_lds_barrier). */
-void rocke_conv_rpf_lds_barrier(rocke_conv_build_ctx_t* ctx);
-
 /* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync.
  * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
