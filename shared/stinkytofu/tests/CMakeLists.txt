@@ -100,6 +100,7 @@ set(UNIT_ASM_TEST_FILES
     unit/ra/RegisterBudgetTest.cpp
     unit/ra/RegisterSymbolSyncTest.cpp
     unit/ra/VgprMsbPredictionTest.cpp
+    unit/ra/BankCostModelTest.cpp
     unit/ssa/AsmPrinterSSAFormTest.cpp
     unit/ssa/LiftAsmRegistersToSSATest.cpp
     unit/asm/DefUseAnalysisCleanupTest.cpp
