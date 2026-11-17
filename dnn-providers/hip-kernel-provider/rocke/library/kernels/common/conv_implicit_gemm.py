@@ -381,8 +381,7 @@ class ImplicitGemmConvSpec:
     #   1 -- single LDS buffer: MMA, barrier, store, barrier.
     # A tile at or past the reduction (or split-K slice) end -- the prefetch
     # issued on the last step -- is masked to the buffer resource's
-    # out-of-range sentinel and reads zero. The identity field
-    # (``regt_prefetch``) is shared with the wgrad register-prefetch loops.
+    # out-of-range sentinel and reads zero.
     # Default 0: every existing config emits byte-identical IR and keeps its
     # kernel name.
     regt_prefetch: int = 0
@@ -923,11 +922,6 @@ def fwd_regt_prefetch_reason(
         )
     if spec.pipeline != "mem":
         return f"regt_prefetch is the 'mem' pipeline's K loop (got {spec.pipeline!r})"
-    if spec.async_dma or spec.unroll_k:
-        return (
-            "regt_prefetch is its own K loop; it does not combine with "
-            "async_dma or unroll_k"
-        )
     if spec.split_k_cluster:
         return "regt_prefetch does not combine with split_k_cluster"
     return None
@@ -939,8 +933,6 @@ def fwd_lds_swizzle_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[
         return None
     if family != "wmma" or spec.pipeline != "mem":
         return "lds_swizzle is wired for the WMMA mem pipeline only"
-    if spec.async_dma or spec.unroll_k:
-        return "lds_swizzle needs the synchronous single-buffer loaders"
     if spec.lds_layout is not None or spec.lds_k_pad is not None:
         return "lds_swizzle sets the LDS layout itself (no lds_layout / lds_k_pad)"
     if spec.tile_k not in (16, 32, 64, 128):
@@ -1210,8 +1202,6 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             (spec.problem.is_3d, "3-D convolution"),
             (spec.problem.is_pointwise, "the pointwise fast path"),
             (spec.group_merge > 1, "group_merge"),
-            (spec.async_dma, "async_dma"),
-            (spec.unroll_k, "unroll_k"),
         ):
             if flag:
                 return False, f"uniform_k_decode does not support {label}"

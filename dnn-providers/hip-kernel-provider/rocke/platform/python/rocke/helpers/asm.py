@@ -251,10 +251,14 @@ def lds_barrier_keep_vmem(b: IRBuilder, arch: str) -> None:
     ``vmcnt`` / ``loadcnt`` included, so a register prefetch issued before the
     barrier is waited for at the barrier instead of where it is used. There
     the barrier is emitted as inline asm instead: the LDS wait plus the
-    barrier, convergent, with a memory clobber so the compiler keeps every LDS
-    access on its side of it. The asm is opaque to the wait-count pass, which
-    therefore adds no wait of its own. Every other target takes
-    :meth:`IRBuilder.sync_lds_only` unchanged.
+    barrier, with a memory clobber so the compiler keeps every LDS access on
+    its side of it. The asm is passed ``convergent=True`` at the IR level
+    (advisory); the LLVM lowerer intentionally does not render ``convergent``
+    as a keyword on the asm call expression because comgr rejects that syntax
+    — convergence is carried by the enclosing function's convergence tokens
+    instead. The asm is opaque to the wait-count pass, which therefore adds no
+    wait of its own. Every other target takes :meth:`IRBuilder.sync_lds_only`
+    unchanged.
     """
     body = _LDS_BARRIER_ASM.get(ArchTarget.from_gfx(arch).target_family)
     if body is None:

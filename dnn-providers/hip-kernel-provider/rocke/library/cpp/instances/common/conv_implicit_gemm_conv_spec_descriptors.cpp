@@ -1211,13 +1211,6 @@ static bool rocke_conv_fwd_regt_prefetch_ok(const rocke_implicit_gemm_conv_spec_
                         "regt_prefetch is the 'mem' pipeline's K loop (got '%s')",
                         s->pipeline != NULL ? s->pipeline : "None");
     }
-    if(s->async_dma || s->unroll_k)
-    {
-        ROCKE_SPEC_FAIL(reason,
-                        reason_cap,
-                        "regt_prefetch is its own K loop; it does not combine with "
-                        "async_dma or unroll_k");
-    }
     if(s->split_k_cluster)
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "regt_prefetch does not combine with split_k_cluster");
@@ -1500,8 +1493,6 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             {s->problem.is_3d, "3-D convolution"},
             {rocke_conv_problem_is_pointwise(&s->problem), "the pointwise fast path"},
             {s->group_merge > 1, "group_merge"},
-            {s->async_dma, "async_dma"},
-            {s->unroll_k, "unroll_k"},
         };
         for(size_t i = 0; i < sizeof(ukd_flags) / sizeof(ukd_flags[0]); ++i)
         {
@@ -1523,11 +1514,6 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         {
             ROCKE_SPEC_FAIL(
                 reason, reason_cap, "lds_swizzle is wired for the WMMA mem pipeline only");
-        }
-        if(s->async_dma || s->unroll_k)
-        {
-            ROCKE_SPEC_FAIL(
-                reason, reason_cap, "lds_swizzle needs the synchronous single-buffer loaders");
         }
         if(s->lds_layout != NULL || s->has_lds_k_pad)
         {

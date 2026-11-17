@@ -56,8 +56,20 @@ _REFUSED = (
     ("ukd_pointwise", dict(uniform_k_decode=True, pointwise=True), _ARCH),
     ("rtp2", dict(regt_prefetch=2), _ARCH),
     ("rtp_gfx1100", dict(regt_prefetch=1), "gfx1100"),
+    # rtp pipeline: regt_prefetch is the 'mem' pipeline's K loop.
+    ("rtp_wavelet", dict(regt_prefetch=1, pipeline="wavelet"), _ARCH),
+    # rtp split_k_cluster: regt_prefetch does not combine with split_k_cluster.
+    ("rtp_split_k_cluster", dict(regt_prefetch=1, split_k_cluster=1), _ARCH),
     ("lxs_k_pad", dict(lds_swizzle=True, lds_k_pad=0), _ARCH),
+    # lxs tile_k: lds_swizzle needs tile_k in 16/32/64/128 (got 24).
+    ("lxs_tile_k_bad", dict(lds_swizzle=True, tile_k=24), _ARCH),
     ("gfr_wavelet", dict(group_fast_raster=True, pipeline="wavelet"), _ARCH),
+    # gfr chiplet_swizzle: WMMA gate rejects chiplet_swizzle before gfr_reason fires.
+    (
+        "gfr_chiplet_swizzle",
+        dict(group_fast_raster=True, groups=2, chiplet_swizzle=True),
+        _ARCH,
+    ),
 )
 
 
@@ -113,6 +125,26 @@ class TestRdnaKnobSpecDict(unittest.TestCase):
         self.assertEqual(d["regt_prefetch"], 1)
         self.assertIs(d["lds_swizzle"], True)
         self.assertIs(d["group_fast_raster"], True)
+
+    def test_lxs_with_explicit_lds_layout_refused_by_bridge(self):
+        """lxs + explicit lds_layout is refused at the bridge level.
+
+        lds_layout is not forwarded to the C++ engine, so this combination
+        would silently lose lds_layout.  The bridge catches it before the
+        engine sees the dict."""
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+        from rocke.helpers.layouts import LdsLayout
+
+        import dataclasses
+
+        spec = dataclasses.replace(
+            _spec(lds_swizzle=True),
+            lds_layout=LdsLayout(logical_cols=32, k_pad=0),
+        )
+        with self.assertRaises(
+            ValueError, msg="lxs+lds_layout should raise ValueError"
+        ):
+            conv_implicit_gemm_spec_to_dict(spec)
 
 
 @unittest.skipIf(

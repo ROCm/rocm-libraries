@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include <iostream>
+#include <vector>
 
 #include <rocsparse/rocsparse.h>
 
@@ -47,92 +48,82 @@
 //! [doc example]
 int main()
 {
-    const int64_t            M        = 3;
-    const int64_t            N        = 2;
-    const rocsparse_order    order    = rocsparse_order_column;
-    const rocsparse_datatype datatype = rocsparse_datatype_f32_r;
-    const size_t             nbytes   = sizeof(float) * M * N;
-
-    const int64_t x_ld = (order == rocsparse_order_column) ? M : N;
-    const int64_t y_ld = (order == rocsparse_order_column) ? M : N;
-
-    float* x_host = (float*)malloc(nbytes);
-    float* y_host = (float*)malloc(nbytes);
-
-    memset(x_host, 255 - 1, nbytes);
-    memset(y_host, 255 - 1, nbytes);
-
-    for(int64_t j = 0; j < N; ++j)
-        for(int64_t i = 0; i < M; ++i)
-            x_host[j * x_ld + i] = i + M * j;
-
-    rocsparse_error*      p_error = NULL;
-    rocsparse_dnmat_descr Y       = NULL;
-    rocsparse_dnmat_descr X       = NULL;
-    rocsparse_handle      handle  = NULL;
-    void*                 x       = NULL;
-    void*                 y       = NULL;
-
-    hipStream_t stream = NULL;
-
-    HIP_CHECK(hipStreamCreate(&stream));
-    ROCSPARSE_CHECK(rocsparse_handle_create(&handle, stream, p_error));
-
+    // X is a 3 x 2 matrix stored in column order:
     //
-    // Create Y.
-    //
-    HIP_CHECK(hipMallocAsync(&y, nbytes, stream));
-    ROCSPARSE_CHECK(rocsparse_create_dnmat_descr(
-        &Y, M, N, (order == rocsparse_order_column) ? M : N, y, datatype, order));
+    //     X = [ 1 4 ]
+    //         [ 2 5 ]
+    //         [ 3 6 ]
+    int64_t            m     = 3;
+    int64_t            n     = 2;
+    std::vector<float> hX    = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    int64_t            ld_X  = m;
+    rocsparse_order    ord_X = rocsparse_order_column;
 
-    //
-    // Create x.
-    //
-    HIP_CHECK(hipMallocAsync(&x, nbytes, stream));
-    ROCSPARSE_CHECK(rocsparse_create_dnmat_descr(
-        &X, M, N, (order == rocsparse_order_column) ? M : N, x, datatype, order));
+    // Y is a 3 x 2 matrix stored in row order
+    std::vector<float> hY(m * n);
+    int64_t            ld_Y  = n;
+    rocsparse_order    ord_Y = rocsparse_order_row;
 
-    //
-    // Init x.
-    //
-    HIP_CHECK(hipMemcpyAsync(x, x_host, nbytes, hipMemcpyHostToDevice, stream));
+    // Scaling factor, in host memory
+    float alpha = 2.0f;
 
-    //
-    // Copy data with no scalar.
-    //
-    rocsparse_const_dnvec_descr no_scale = nullptr;
-    ROCSPARSE_CHECK(rocsparse_dnmat_copy_data(handle, no_scale, X, Y, p_error));
+    // Offload data to device
+    float* dX;
+    float* dY;
+    HIP_CHECK(hipMalloc(&dX, sizeof(float) * m * n));
+    HIP_CHECK(hipMalloc(&dY, sizeof(float) * m * n));
+    HIP_CHECK(hipMemcpy(dX, hX.data(), sizeof(float) * m * n, hipMemcpyHostToDevice));
 
-    //
-    // Verify.
-    //
+    rocsparse_handle handle;
+    ROCSPARSE_CHECK(rocsparse_create_handle(&handle));
 
-    HIP_CHECK(hipMemcpyAsync(y_host, y, nbytes, hipMemcpyDeviceToHost, stream));
+    // Create the dense matrices X and Y
+    rocsparse_dnmat_descr X;
+    rocsparse_dnmat_descr Y;
+    ROCSPARSE_CHECK(
+        rocsparse_create_dnmat_descr(&X, m, n, ld_X, dX, rocsparse_datatype_f32_r, ord_X));
+    ROCSPARSE_CHECK(
+        rocsparse_create_dnmat_descr(&Y, m, n, ld_Y, dY, rocsparse_datatype_f32_r, ord_Y));
 
-    HIP_CHECK(hipStreamSynchronize(stream));
+    // Create the scaling factor
+    rocsparse_dnvec_descr scale;
+    ROCSPARSE_CHECK(rocsparse_dnvec_descr_create_scalar(handle,
+                                                        &scale,
+                                                        rocsparse_pointer_mode_host,
+                                                        rocsparse_datatype_f32_r,
+                                                        &alpha,
+                                                        nullptr,
+                                                        nullptr));
 
-    ROCSPARSE_CHECK(rocsparse_destroy_dnmat_descr(Y));
-    ROCSPARSE_CHECK(rocsparse_destroy_dnmat_descr(X));
-    HIP_CHECK(hipFreeAsync(y, stream));
-    HIP_CHECK(hipFreeAsync(x, stream));
-    ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
-    HIP_CHECK(hipStreamDestroy(stream));
-    free(x_host);
+    // Compute Y = alpha * X
+    ROCSPARSE_CHECK(rocsparse_dnmat_copy_data(handle, scale, X, Y, nullptr));
 
-    int failed = 0;
-    for(int64_t j = 0; j < N; ++j)
+    // Copy result back to host
+    HIP_CHECK(hipMemcpy(hY.data(), dY, sizeof(float) * m * n, hipMemcpyDeviceToHost));
+
+    // Y = [ 2  8 ]
+    //     [ 4 10 ]
+    //     [ 6 12 ]
+    std::cout << "Y" << std::endl;
+    for(int64_t i = 0; i < m; ++i)
     {
-        for(int64_t i = 0; i < M; ++i)
+        for(int64_t j = 0; j < n; ++j)
         {
-            if(y_host[j * y_ld + i] != i + M * j)
-            {
-                failed = 1;
-                break;
-            }
+            std::cout << hY[i * ld_Y + j] << " ";
         }
+        std::cout << std::endl;
     }
 
-    free(y_host);
-    return failed;
+    // Clear rocSPARSE
+    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(scale));
+    ROCSPARSE_CHECK(rocsparse_destroy_dnmat_descr(X));
+    ROCSPARSE_CHECK(rocsparse_destroy_dnmat_descr(Y));
+    ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
+
+    // Clear device memory
+    HIP_CHECK(hipFree(dX));
+    HIP_CHECK(hipFree(dY));
+
+    return 0;
 }
 //! [doc example]

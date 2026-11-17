@@ -21,10 +21,15 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A` (`Disabled`, `GemmA2A` or `A2AGemm`), and the `tensilelite-client` option `--fused-gemm-a2a=1` is now `--fused-a2a=GemmA2A`. Device libraries and client configuration files from before this change must be regenerated.
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 
+### Changed
+
+* `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
+
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
 * Fixed `hipblasLtMatmul` and `hipblaslt_ext::Gemm::initialize` accepting an algo for a grouped GEMM solution, and `hipblaslt_ext::GroupedGemm::initialize` accepting one for a non-grouped solution. They now return `HIPBLAS_STATUS_INVALID_VALUE`.
+* Fixed `hipblaslt.h`, `hipblaslt-ext-op.h`, and `hipblaslt-local-kernel.h` failing to compile in a C translation unit. The C++ standard library includes, the default member initializers in `hipblasLtMatmulHeuristicResult_t`, the `static_cast` in the `*_INVALID` macros, and the C++-only `hipblaslt_e8.h` and `hipblaslt_e5m3.h` types now apply only to C++. In C, the `HIP_R_*_EXT` type ids are enumeration constants, so two C files that include the headers no longer fail to link with duplicate symbols. C++ consumers see no change.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 

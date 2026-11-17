@@ -92,7 +92,25 @@ def _conv_acc_epilogue_to_dict(epi: Any) -> Dict[str, Any]:
 def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`ImplicitGemmConvSpec` -> flat dict (problem nested). Optional
     fields (lds_k_pad/waves_per_eu/vector_size_*) are forwarded when set; the
-    binding leaves them at the engine default (Python ``None``) otherwise."""
+    binding leaves them at the engine default (Python ``None``) otherwise.
+
+    Raises :class:`ValueError` for combinations that cannot be represented in
+    the flat dict because one member of the pair is not forwarded:
+
+    * ``lds_swizzle=True`` with an explicit ``lds_layout``: the bridge drops
+      ``lds_layout``, so C++ would silently ignore it.  Python already rejects
+      this pair via :func:`~kernels.common.conv_implicit_gemm.fwd_lds_swizzle_reason`;
+      the bridge re-checks so that callers bypassing Python validation also
+      get a clear error.
+    """
+    if (
+        getattr(spec, "lds_swizzle", False)
+        and getattr(spec, "lds_layout", None) is not None
+    ):
+        raise ValueError(
+            f"lds_swizzle (lxs) cannot be used with an explicit lds_layout: "
+            f"the bridge does not forward lds_layout to the C++ engine"
+        )
     d = dict(
         problem=_conv_problem_to_dict(spec.problem),
         name=spec.name,
@@ -479,6 +497,17 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         pack_groups=spec.pack_groups,
         split_barrier=spec.split_barrier,
         wave_epilogue=spec.wave_epilogue,
+    )
+
+
+def conv_direct_dgrad_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DgradPpMfmaSpec` -> flat dict (the transposed forward-pass
+    problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        block_k=spec.block_k,
+        wave_size=spec.wave_size,
     )
 
 
@@ -1115,6 +1144,47 @@ def lower_conv_direct_dgrad_wmma(
         py_fn=py_fn,
         cpp_ll_fn=lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         cpp_ir_fn=lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_dgrad_pp_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`DgradPpMfmaSpec` (the gfx950 LDS-DMA ping-pong MFMA
+    direct dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dgrad_pp_mfma import build_dgrad_pp_mfma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_dgrad_pp_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    # The engine is imported on the C++ path only: backend="python" needs no
+    # rocke_library_engine.
+    def eng():
+        return import_engine(ENGINE_MODULE)
+
+    sd = conv_direct_dgrad_pp_mfma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_dgrad_pp_mfma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng().conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng().conv_direct_dgrad_pp_mfma_serialize_ir(sd, arch=arch),
         spec_name=name_of(spec),
     )
 
