@@ -46,6 +46,7 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
+    _binary_arity_error,
     _fcmp_error,
     _int_add_wrap_error,
     _int_cmp_error,
@@ -2555,6 +2556,9 @@ class _Lowerer:
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
+        arity_error = _binary_arity_error(op)
+        if arity_error:
+            raise ValueError(arity_error)
         operand_error = _integer_element_op_error(op) or _operand_types_op_error(op)
         if operand_error:
             raise TypeError(operand_error)

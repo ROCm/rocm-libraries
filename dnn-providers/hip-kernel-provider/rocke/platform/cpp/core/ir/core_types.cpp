@@ -1129,37 +1129,111 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
     return unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type, buf, cap);
 }
 
+/* ir._OPERAND_ORDINALS: the ordinal names of an op's operands. */
+static const char* const k_operand_ordinals[] = {"first", "second", "third"};
+
 const char* rocke_i_operand_types_error(const char* op_name,
-                                        const rocke_type_t* lhs_type,
-                                        const rocke_type_t* rhs_type,
+                                        const rocke_type_t* const* operand_types,
+                                        int num_operands,
                                         char* buf,
                                         size_t cap)
 {
+    const int num_ordinals = (int)(sizeof k_operand_ordinals / sizeof k_operand_ordinals[0]);
+    if(num_operands > num_ordinals)
+    {
+        snprintf(buf,
+                 cap,
+                 "%s operand rule failed - operands=%d, expected at most %d",
+                 op_name,
+                 num_operands,
+                 num_ordinals);
+        return buf;
+    }
     char what[ROCKE_ERR_MSG_CAP];
     snprintf(what, sizeof what, "%s operand", op_name);
-    const rocke_type_t* const operand_types[2] = {lhs_type, rhs_type};
-    for(int index = 0; index < 2; ++index)
+    for(int index = 0; index < num_operands; ++index)
     {
         if(rocke_i_untyped_value_message(operand_types[index], what, index, "an IR type", buf, cap))
         {
             return buf;
         }
     }
-    if(rocke_type_eq(lhs_type, rhs_type))
+    for(int index = 1; index < num_operands; ++index)
+    {
+        if(rocke_type_eq(operand_types[0], operand_types[index]))
+        {
+            continue;
+        }
+        char param[ROCKE_ERR_MSG_CAP];
+        char expected[ROCKE_ERR_MSG_CAP];
+        snprintf(param, sizeof param, "%s operand type", k_operand_ordinals[index]);
+        snprintf(
+            expected, sizeof expected, "the first operand's type '%s'", operand_types[0]->name);
+        return rocke_i_type_name_message(
+            op_name, param, operand_types[index]->name, expected, buf, cap);
+    }
+    return NULL;
+}
+
+void rocke_i_refuse_operand_types(rocke_ir_builder_t* b,
+                                  const char* op_name,
+                                  const rocke_value_t* const* operands,
+                                  int num_operands)
+{
+    /* The rule refuses more operands than it names before it reads a type. */
+    const rocke_type_t* operand_types[3] = {NULL, NULL, NULL};
+    for(int index = 0; index < num_operands && index < 3; ++index)
+    {
+        operand_types[index] = operands[index]->type;
+    }
+    char error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_operand_types_error(op_name, operand_types, num_operands, error, sizeof error))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", error);
+    }
+}
+
+const char* rocke_i_vector_operand_error(const char* op_name,
+                                         const rocke_type_t* operand_type,
+                                         char* buf,
+                                         size_t cap)
+{
+    if(rocke_i_is_vector(operand_type, NULL, -1))
     {
         return NULL;
     }
-    char expected[ROCKE_ERR_MSG_CAP];
-    snprintf(expected,
-             sizeof expected,
-             "the first operand's type '%s'",
-             lhs_type && lhs_type->name ? lhs_type->name : "?");
     return rocke_i_type_name_message(op_name,
-                                     "second operand type",
-                                     rhs_type && rhs_type->name ? rhs_type->name : "?",
-                                     expected,
+                                     "first operand type",
+                                     operand_type && operand_type->name ? operand_type->name
+                                                                        : "None",
+                                     "a vector type",
                                      buf,
                                      cap);
+}
+
+bool rocke_i_is_compare_op(rocke_opcode_t opcode)
+{
+    return opcode == ROCKE_OP_ARITH_CMP || opcode == ROCKE_OP_ARITH_FCMP
+           || opcode == ROCKE_OP_VECTOR_CMP;
+}
+
+const char* rocke_i_binary_arity_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(!rocke_i_is_same_type_binary_op(op->opcode) && !rocke_i_is_compare_op(op->opcode))
+    {
+        return NULL;
+    }
+    if(op->num_operands == 2 && op->num_results == 1)
+    {
+        return NULL;
+    }
+    snprintf(buf,
+             cap,
+             "%s failed - operands / results=%d / %d, expected 2 / 1",
+             rocke_opcode_name(op->opcode),
+             op->num_operands,
+             op->num_results);
+    return buf;
 }
 
 bool rocke_i_is_same_type_binary_op(rocke_opcode_t opcode)
@@ -1208,8 +1282,8 @@ const char* rocke_i_operand_types_op_error(const rocke_op_t* op, char* buf, size
     {
         return NULL;
     }
-    return rocke_i_operand_types_error(
-        rocke_opcode_name(op->opcode), op->operands[0]->type, op->operands[1]->type, buf, cap);
+    const rocke_type_t* const operand_types[2] = {op->operands[0]->type, op->operands[1]->type};
+    return rocke_i_operand_types_error(rocke_opcode_name(op->opcode), operand_types, 2, buf, cap);
 }
 
 rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
@@ -1222,7 +1296,8 @@ rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
     {
         return ROCKE_ERR_VALUE;
     }
-    if(rocke_i_operand_types_error("arith.cmp", lhs_type, rhs_type, buf, cap))
+    const rocke_type_t* const operand_types[2] = {lhs_type, rhs_type};
+    if(rocke_i_operand_types_error("arith.cmp", operand_types, 2, buf, cap))
     {
         return ROCKE_ERR_TYPE;
     }
@@ -1257,7 +1332,8 @@ rocke_status_t rocke_i_vector_cmp_error(const rocke_attr_map_t* attrs,
     {
         return ROCKE_ERR_VALUE;
     }
-    if(rocke_i_operand_types_error("vector.cmp", lhs_type, rhs_type, buf, cap))
+    const rocke_type_t* const operand_types[2] = {lhs_type, rhs_type};
+    if(rocke_i_operand_types_error("vector.cmp", operand_types, 2, buf, cap))
     {
         return ROCKE_ERR_TYPE;
     }
@@ -1282,7 +1358,8 @@ rocke_status_t rocke_i_fcmp_error(const rocke_attr_map_t* attrs,
     {
         return ROCKE_ERR_VALUE;
     }
-    if(rocke_i_operand_types_error("arith.fcmp", lhs_type, rhs_type, buf, cap))
+    const rocke_type_t* const operand_types[2] = {lhs_type, rhs_type};
+    if(rocke_i_operand_types_error("arith.fcmp", operand_types, 2, buf, cap))
     {
         return ROCKE_ERR_TYPE;
     }

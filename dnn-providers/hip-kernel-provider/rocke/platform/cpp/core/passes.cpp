@@ -531,10 +531,12 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
     /* Every foldable op takes 1..3 operands; a different arity cannot be one. */
     if(op->num_operands < 1 || op->num_operands > 3)
         return false;
-    /* A binary op whose operands differ in type is left for the verifier and the
-     * lowerings to refuse, not folded. */
+    /* A binary op or compare without two operands and one result, or with
+     * operands of two types, is left for the verifier and the lowerings to
+     * refuse, not folded. */
     char operand_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
+    if(rocke_i_binary_arity_op_error(op, operand_error, sizeof operand_error)
+       || rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
         return false;
     /* Python: ints = [_const_int(v) for v in op.operands]; if any None -> skip */
     for(i = 0; i < op->num_operands; i++)

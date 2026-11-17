@@ -285,7 +285,7 @@ static int is_unary_same_type(rocke_opcode_t o)
 
 static int is_cmp(rocke_opcode_t o)
 {
-    return o == ROCKE_OP_ARITH_CMP || o == ROCKE_OP_ARITH_FCMP;
+    return rocke_i_is_compare_op(o) && o != ROCKE_OP_VECTOR_CMP;
 }
 
 /* required attr keys per opcode -> returns NULL-terminated static list. */
@@ -396,18 +396,14 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         v_errf(v, op, "%s", tf32_error);
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
+    char arity_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_binary_arity_op_error(op, arity_error, sizeof arity_error))
+    {
+        v_errf(v, op, "%s", arity_error);
+        return;
+    }
     if(rocke_i_is_same_type_binary_op(o))
     {
-        if(op->num_operands != 2 || op->num_results != 1)
-        {
-            v_errf(v,
-                   op,
-                   "%s: expected 2 operands / 1 result, got %d / %d",
-                   name,
-                   op->num_operands,
-                   op->num_results);
-            return;
-        }
         const rocke_type_t* a = op->operands[0]->type;
         const rocke_type_t* r = op->results[0]->type;
         char operand_error[ROCKE_ERR_MSG_CAP];
@@ -469,11 +465,6 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     }
     else if(is_cmp(o))
     {
-        if(op->num_operands != 2 || op->num_results != 1)
-        {
-            v_errf(v, op, "%s: expected 2 operands / 1 result", name);
-            return;
-        }
         const rocke_type_t* a = op->operands[0]->type;
         const rocke_type_t* b = op->operands[1]->type;
         if(strcmp(tn(op->results[0]->type), "i1") != 0)
@@ -535,11 +526,6 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     }
     else if(o == ROCKE_OP_VECTOR_CMP)
     {
-        if(op->num_operands != 2 || op->num_results != 1)
-        {
-            v_errf(v, op, "%s: expected 2 operands / 1 result", name);
-            return;
-        }
         char cmp_buf[ROCKE_ERR_MSG_CAP];
         if(rocke_i_vector_cmp_error(
                &op->attrs, op->operands[0]->type, op->operands[1]->type, cmp_buf, sizeof cmp_buf)

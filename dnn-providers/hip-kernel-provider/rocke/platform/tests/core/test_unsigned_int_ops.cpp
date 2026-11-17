@@ -403,13 +403,11 @@ void case_integer_element_lowering_rule()
 
 /* Every same-type binary op (rocke_i_is_same_type_binary_op), with the builder
  * entry point that makes it and two operand types that differ; mirrors
- * test_lshr.py's _MIXED_TYPE_OPERANDS. umax and umin have no entry point here:
- * their builders take only two operands of one unsigned type and refuse
- * anything else with that rule's own text. */
+ * test_lshr.py's _MIXED_TYPE_OPERANDS. */
 struct MixedOperandsCase
 {
     rocke_opcode_t opcode;
-    binary_builder_t build; /* nullptr: not checked through a builder */
+    binary_builder_t build;
     const rocke_type_t* lhs_element;
     int lhs_lanes; /* 0 for a scalar */
     const rocke_type_t* rhs_element;
@@ -454,8 +452,8 @@ void case_mixed_operand_types()
         {ROCKE_OP_ARITH_LSHR, rocke_b_lshr, rocke_i64(), 0, rocke_i32(), 0},
         {ROCKE_OP_ARITH_SMAX, rocke_b_smax, rocke_i32(), 0, rocke_i64(), 0},
         {ROCKE_OP_ARITH_SMIN, rocke_b_smin, rocke_i64(), 0, rocke_i32(), 0},
-        {ROCKE_OP_ARITH_UMAX, nullptr, rocke_u8(), 0, rocke_i32(), 0},
-        {ROCKE_OP_ARITH_UMIN, nullptr, rocke_u8(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_UMAX, rocke_b_umax, rocke_u8(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_UMIN, rocke_b_umin, rocke_u8(), 0, rocke_i32(), 0},
         {ROCKE_OP_VECTOR_ADD, rocke_b_vector_add, rocke_i32(), 2, rocke_i32(), 4},
         {ROCKE_OP_VECTOR_SUB, rocke_b_vector_sub, rocke_i32(), 2, rocke_i16(), 2},
         {ROCKE_OP_VECTOR_MUL, rocke_b_vector_mul, rocke_f32(), 2, rocke_f16(), 2},
@@ -483,19 +481,16 @@ void case_mixed_operand_types()
                rocke_b_param(&b, "rhs", lanes_of(&b, c.rhs_element, c.rhs_lanes), nullptr)};
         const std::string want
             = operand_types_message(c.opcode, operands[0]->type, operands[1]->type);
-        if(c.build)
-            expect_builder_type_error(
-                [&](rocke_ir_builder_t* builder) {
-                    c.build(
-                        builder,
-                        rocke_b_param(
-                            builder, "lhs", lanes_of(builder, c.lhs_element, c.lhs_lanes), nullptr),
-                        rocke_b_param(builder,
-                                      "rhs",
-                                      lanes_of(builder, c.rhs_element, c.rhs_lanes),
-                                      nullptr));
-                },
-                want);
+        expect_builder_type_error(
+            [&](rocke_ir_builder_t* builder) {
+                c.build(
+                    builder,
+                    rocke_b_param(
+                        builder, "lhs", lanes_of(builder, c.lhs_element, c.lhs_lanes), nullptr),
+                    rocke_b_param(
+                        builder, "rhs", lanes_of(builder, c.rhs_element, c.rhs_lanes), nullptr));
+            },
+            want);
         rocke_i_op1(&b, c.opcode, operands, 2, operands[0]->type, nullptr, "mixed");
         rocke_b_ret(&b);
         const std::string errors = verify_errors(&b);
@@ -544,6 +539,39 @@ void case_vector_builders_refuse_a_scalar_first_operand()
             rocke_b_vector_cmp(b, "lt", scalar, scalar);
         },
         "vector.cmp failed - first operand type='i32', expected a vector type");
+    expect_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* scalar = rocke_b_param(b, "scalar", rocke_i32(), nullptr);
+            rocke_b_vector_fma(b, scalar, scalar, scalar);
+        },
+        "vector.fma failed - first operand type='i32', expected a vector type");
+}
+
+/* The lane-wise FMA takes three vectors of one type: its builder refuses the
+ * first operand that differs, by its ordinal, with the operand rule's text
+ * (test_lshr.py). */
+void case_vector_fma_refuses_operands_of_more_than_one_type()
+{
+    expect_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* first
+                = rocke_b_param(b, "first", rocke_vector_type(b, rocke_f32(), 2), nullptr);
+            rocke_value_t* other
+                = rocke_b_param(b, "other", rocke_vector_type(b, rocke_f16(), 2), nullptr);
+            rocke_b_vector_fma(b, first, other, first);
+        },
+        "vector.fma failed - second operand type='vec<f16x2>', expected the first operand's "
+        "type 'vec<f32x2>'");
+    expect_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* first
+                = rocke_b_param(b, "first", rocke_vector_type(b, rocke_f32(), 2), nullptr);
+            rocke_value_t* other
+                = rocke_b_param(b, "other", rocke_vector_type(b, rocke_f32(), 4), nullptr);
+            rocke_b_vector_fma(b, first, first, other);
+        },
+        "vector.fma failed - third operand type='vec<f32x4>', expected the first operand's "
+        "type 'vec<f32x2>'");
 }
 
 /* An i1 is a C++ bool in HIP, where ~ promotes to int (~true is -2, still
@@ -567,35 +595,146 @@ void case_hip_not_is_logical_on_i1()
     }
 }
 
-void expect_builder_refusal(bool add, const rocke_type_t* ta, const rocke_type_t* tb)
+bool folded_store_value(rocke_ir_builder_t* b, int64_t* out);
+
+/* A binary op or compare with one operand, written past the builders, is
+ * refused by the verifier, and by the LLVM and HIP lowerings with
+ * ROCKE_ERR_VALUE before they read the missing operand, with the arity rule's
+ * text; the folder leaves a one-operand add of a constant unfolded. The same
+ * cases as test_unsigned_int_ops.py. */
+void case_binary_arity_rule()
+{
+    const struct
+    {
+        rocke_opcode_t opcode;
+        const char* pred; /* nullptr: no pred attr */
+        bool vector;
+        bool float_operand;
+    } cases[] = {
+        {ROCKE_OP_ARITH_ADD, nullptr, false, false},
+        {ROCKE_OP_ARITH_CMP, "lt", false, false},
+        {ROCKE_OP_ARITH_FCMP, "olt", false, true},
+        {ROCKE_OP_VECTOR_CMP, "lt", true, false},
+    };
+    for(const auto& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_one_operand");
+        const rocke_type_t* element = c.float_operand ? rocke_f32() : rocke_i32();
+        const rocke_type_t* type = c.vector ? rocke_vector_type(&b, element, 2) : element;
+        const bool compare = rocke_i_is_compare_op(c.opcode);
+        const rocke_type_t* result_type
+            = !compare ? type : (c.vector ? rocke_vector_type(&b, rocke_i1(), 2) : rocke_i1());
+        rocke_value_t* operands[1] = {rocke_b_param(&b, "value", type, nullptr)};
+        rocke_attr_map_t attrs = rocke_i_attrs(&b);
+        if(c.pred)
+            rocke_attr_set_str(&b, &attrs, "pred", c.pred);
+        rocke_i_op1(&b, c.opcode, operands, 1, result_type, &attrs, "one");
+        rocke_b_ret(&b);
+        const std::string want = std::string(rocke_opcode_name(c.opcode))
+                                 + " failed - operands / results=1 / 1, expected 2 / 1";
+        const std::string errors = verify_errors(&b);
+        EXPECT(errors == want + "\n", "verifier: want '" + want + "', got '" + errors + "'");
+        const std::string lowered_want = both_lowerings_refuse(ROCKE_ERR_VALUE, want);
+        const std::string lowered = lowering_refusals(&b);
+        EXPECT(lowered == lowered_want, "want " + lowered_want + ", got " + lowered);
+        rocke_ir_builder_free(&b);
+    }
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_fold_one_operand");
+    rocke_value_t* out
+        = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_i32(), "global"), nullptr);
+    rocke_value_t* operands[1] = {rocke_b_const_i32(&b, 1)};
+    rocke_value_t* value
+        = rocke_i_op1(&b, ROCKE_OP_ARITH_ADD, operands, 1, rocke_i32(), nullptr, "one");
+    rocke_b_global_store(&b, out, rocke_b_const_i32(&b, 0), value, 4);
+    int64_t folded = -2;
+    EXPECT(!folded_store_value(&b, &folded), "a one-operand arith.add was folded");
+    rocke_ir_builder_free(&b);
+}
+
+/* add_nuw or cmp_ult of `ta` and `tb` must be refused with `status` and
+ * exactly `want`. */
+void expect_builder_refusal(bool add,
+                            const rocke_type_t* ta,
+                            const rocke_type_t* tb,
+                            rocke_status_t status,
+                            const std::string& want)
 {
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "unsigned_int_ops_refusal");
     rocke_value_t* a = rocke_b_param(&b, "a", ta, nullptr);
     rocke_value_t* c = rocke_b_param(&b, "b", tb, nullptr);
-    const char* op_name = add ? "add_nuw" : "cmp_ult";
-    const std::string want = std::string(op_name) + " expects two i32 or two i64 operands, got "
-                             + ta->name + " / " + tb->name;
+    std::string got = "no refusal";
     bool refused = false;
     try
     {
-        rocke_value_t* r = add ? rocke_b_add_nuw(&b, a, c) : rocke_b_cmp_ult(&b, a, c);
-        refused = r == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
-                  && want == rocke_ir_builder_error(&b);
+        add ? rocke_b_add_nuw(&b, a, c) : rocke_b_cmp_ult(&b, a, c);
     }
     catch(const ckc::Error& error)
     {
-        refused = error.code() == ROCKE_ERR_VALUE && want == error.what();
+        got = error.what();
+        refused = error.code() == status && want == got;
     }
-    EXPECT(refused, want);
+    EXPECT(refused, "want '" + want + "', got '" + got + "'");
     rocke_ir_builder_free(&b);
 }
 
+/* The unsigned forms take i32 or i64 operands (the nuw and ult rules,
+ * ROCKE_ERR_VALUE, checked first) of one type (the operand rule,
+ * ROCKE_ERR_TYPE), with the Python builders' texts. */
 void case_builder_refusals()
 {
-    expect_builder_refusal(true, rocke_f32(), rocke_f32());
-    expect_builder_refusal(false, rocke_i32(), rocke_i64());
-    expect_builder_refusal(true, rocke_i1(), rocke_i1());
+    expect_builder_refusal(true,
+                           rocke_f32(),
+                           rocke_f32(),
+                           ROCKE_ERR_VALUE,
+                           "arith.add: wrap 'nuw' needs i32 or i64 operands, got f32");
+    expect_builder_refusal(false,
+                           rocke_i32(),
+                           rocke_i64(),
+                           ROCKE_ERR_TYPE,
+                           "arith.cmp failed - second operand type='i64', expected the first "
+                           "operand's type 'i32'");
+    expect_builder_refusal(true,
+                           rocke_i32(),
+                           rocke_i64(),
+                           ROCKE_ERR_TYPE,
+                           "arith.add failed - second operand type='i64', expected the first "
+                           "operand's type 'i32'");
+    expect_builder_refusal(true,
+                           rocke_i1(),
+                           rocke_i1(),
+                           ROCKE_ERR_VALUE,
+                           "arith.add: wrap 'nuw' needs i32 or i64 operands, got i1");
+    expect_builder_refusal(false,
+                           rocke_f32(),
+                           rocke_f32(),
+                           ROCKE_ERR_VALUE,
+                           "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32");
+    expect_builder_refusal(true,
+                           rocke_i8(),
+                           rocke_i32(),
+                           ROCKE_ERR_VALUE,
+                           "arith.add: wrap 'nuw' needs i32 or i64 operands, got i8");
+    expect_builder_refusal(false,
+                           rocke_i8(),
+                           rocke_i32(),
+                           ROCKE_ERR_VALUE,
+                           "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8");
+}
+
+/* The operand rule names operands by ordinal, so it refuses more operands than
+ * it names before it reads any type (Python test_lshr.py). */
+void case_operand_rule_refuses_more_operands_than_it_names()
+{
+    const rocke_type_t* const operand_types[4]
+        = {rocke_f32(), rocke_f32(), rocke_f32(), rocke_f32()};
+    char error[ROCKE_ERR_MSG_CAP];
+    const char* got
+        = rocke_i_operand_types_error("vector.fma", operand_types, 4, error, sizeof error);
+    const std::string want = "vector.fma operand rule failed - operands=4, expected at most 3";
+    EXPECT(got && want == got, "want '" + want + "', got '" + (got ? got : "") + "'");
 }
 
 void case_verifier_accepts()
@@ -1345,7 +1484,10 @@ int main(int argc, char** argv)
     case_mixed_operand_types();
     case_builder_refuses_an_operand_with_no_type();
     case_vector_builders_refuse_a_scalar_first_operand();
+    case_vector_fma_refuses_operands_of_more_than_one_type();
     case_hip_not_is_logical_on_i1();
+    case_binary_arity_rule();
+    case_operand_rule_refuses_more_operands_than_it_names();
     case_compares_refused_by_the_ir_rule();
     case_compare_builders_refuse_what_the_ir_rule_refuses();
     case_builder_refusals();

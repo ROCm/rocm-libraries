@@ -49,6 +49,8 @@ from .ir import (
     _SAME_TYPE_BINARY_OPS,
     _ORPHAN_YIELD_ERROR,
     _assume_range_errors,
+    _binary_arity_error,
+    _COMPARE_OPS,
     param_fact_errors,
     _buffer_op_bytes,
     _if_else_error,
@@ -127,7 +129,7 @@ _UNARY_SAME_TYPE = {
 
 # Comparison ops: 2 operands, 1 i1 result; their compare rule requires a 'pred'
 # attr (_int_cmp_error, _fcmp_error).
-_CMP_OPS = {"arith.cmp", "arith.fcmp"}
+_CMP_OPS = _COMPARE_OPS - {"vector.cmp"}
 
 # The two block-size kernel attrs state one fact two ways; a kernel sets one.
 _BOTH_WORKGROUP_SIZES = (
@@ -335,14 +337,11 @@ class _Verifier:
         if error:
             self.err(error, op)
         name = op.name
+        arity_error = _binary_arity_error(op)
+        if arity_error:
+            self.err(arity_error, op)
+            return
         if name in _SAME_TYPE_BINARY_OPS:
-            if len(op.operands) != 2 or len(op.results) != 1:
-                self.err(
-                    f"{name}: expected 2 operands / 1 result, got "
-                    f"{len(op.operands)} / {len(op.results)}",
-                    op,
-                )
-                return
             a = op.operands[0]
             r = op.results[0]
             operand_types_error = _operand_types_op_error(op)
@@ -384,9 +383,6 @@ class _Verifier:
                     op,
                 )
         elif name in _CMP_OPS:
-            if len(op.operands) != 2 or len(op.results) != 1:
-                self.err(f"{name}: expected 2 operands / 1 result", op)
-                return
             a, b = op.operands
             if op.results[0].type.name != "i1":
                 self.err(
@@ -429,9 +425,6 @@ class _Verifier:
                     op,
                 )
         elif name == "vector.cmp":
-            if len(op.operands) != 2 or len(op.results) != 1:
-                self.err(f"{name}: expected 2 operands / 1 result", op)
-                return
             a, b = op.operands
             cmp_refusal = _vector_cmp_error(op.attrs, a.type, b.type)
             if cmp_refusal:
