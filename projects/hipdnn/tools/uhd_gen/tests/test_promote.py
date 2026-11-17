@@ -34,6 +34,7 @@ from uhd_gen.promote import (
     parse_uhd_ids,
     run_promote,
 )
+from uhd_gen.optional import safe_signature
 from uhd_gen.provenance import snapshot_provenance
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
@@ -48,11 +49,15 @@ OPAQUE_SIGNATURE = ("$graph.work",)
 pytestmark = pytest.mark.usefixtures("evaluator")
 
 
-@functools.cache
 def _hash(signature=KERNEL_SIGNATURE, encoding=None):
     """The features digest the loader recomputes."""
+    return _hash_of(json.dumps(list(signature), sort_keys=True), encoding)
+
+
+@functools.cache
+def _hash_of(signature: str, encoding):
     return compute_features_hash(
-        list(signature),
+        json.loads(signature),
         json.loads(encoding) if encoding else None,
         resolve_feature_evaluator(),
     )
@@ -1789,6 +1794,8 @@ def test_the_shipped_gfx950_rankers_signature_is_refused_for_reading_unexposed_k
         if not entry.startswith("$kernel.")
         or entry in ("$kernel.block_m", "$kernel.block_n")
     )
+    # Scorable on every graph too: a time model must read unknown work through a default.
+    admissible = tuple(safe_signature(list(admissible), metric)[0])
     build_plan(
         _attention_ranker(tmp_path / "admissible", tree, metric, admissible),
         tree,
@@ -1883,3 +1890,38 @@ def test_uhd_id_names_the_model_being_promoted_and_never_renames_it(tmp_path):
 def test_malformed_uhd_id_lists_are_refused(values, refusal):
     with pytest.raises(ValueError, match=refusal):
         parse_uhd_ids(values)
+
+
+def test_a_model_reading_an_optional_feature_bare_is_refused_before_any_write(tmp_path):
+    """RFC 0019 §6.2: a graph that leaves the scale unset would be unscorable."""
+    tree = _tree(tmp_path / "tree")
+    before = _files(tree)
+    model = _model(
+        tmp_path / "model",
+        tree,
+        signature=("$graph.nodes[0].attn_scale_value", "$kernel.block_size"),
+        metric="tflops",
+    )
+    with pytest.raises(PromoteError, match=r"attn_scale_value.*value_or_default"):
+        build_plan(model, tree)
+    assert _files(tree) == before
+
+
+@pytest.mark.parametrize("metric,installs", [("tflops", True), ("time", False)])
+def test_unknown_work_may_be_read_bare_only_by_a_model_of_a_metric_derived_from_it(
+    tmp_path, metric, installs
+):
+    """Where the work is unknown, so is throughput: a tflops model rightly reports nothing
+    there, but a time model must still score the graph."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(
+        tmp_path / "model",
+        tree,
+        signature=("$graph.flops", "$kernel.block_size"),
+        metric=metric,
+    )
+    if installs:
+        _apply(build_plan(model, tree))
+    else:
+        with pytest.raises(PromoteError, match=r"graph\.flops"):
+            build_plan(model, tree)
