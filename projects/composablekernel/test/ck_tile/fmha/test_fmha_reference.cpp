@@ -5,7 +5,10 @@
 
 #include "gtest/gtest.h"
 #include <array>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
+#include <random>
 #include <string>
 
 namespace {
@@ -640,6 +643,330 @@ void LargestKeyGainSensitivity()
     }
 }
 
+// ---- FP8 P (fp8bf16): the quantized-P contract against a CPU model of the device arithmetic ----
+
+// Round to nearest even onto the OCP e4m3 grid (3 mantissa bits, smallest normal 2^-6, largest
+// finite 448); below 2^-6 the subnormal grid 2^-9, or zero when subnormals are flushed.
+double RoundE4M3(double x, bool keep_subnormals = true)
+{
+    const double magnitude = std::abs(x);
+    if(magnitude == 0)
+        return 0;
+    if(magnitude >= 448)
+        return std::copysign(448.0, x);
+    int exponent = 0;
+    std::frexp(magnitude, &exponent); // magnitude in [2^(exponent-1), 2^exponent)
+    if(exponent - 1 < -6 && !keep_subnormals)
+        return 0;
+    const double step = std::ldexp(1.0, std::max(exponent - 1, -6) - 3);
+    return std::copysign(std::nearbyint(magnitude / step) * step, x);
+}
+
+// Round to nearest even onto the BF16 grid (finite values).
+float RoundBf16(float x)
+{
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &x, sizeof(bits));
+    bits += 0x7fffu + ((bits >> 16) & 1u);
+    bits &= 0xffff0000u;
+    std::memcpy(&x, &bits, sizeof(bits));
+    return x;
+}
+
+// The descales and the key-to-page mapping the modelled device uses (the controls perturb them).
+struct DeviceInputs
+{
+    float q_descale = 1, k_descale = 1, v_descale = 1;
+    // physical_key[k]: the key the device reads for logical key k (a wrong page-table entry).
+    std::vector<std::size_t> physical_key;
+};
+
+// The FP8 page tile's arithmetic on the CPU: per 128-key tile, FP32 scores with the descales folded
+// in, P against the running row maximum, scale * P converted to e4m3, O and the mass of the
+// converted P accumulated in FP32 with the online rescale, O / mass * v_descale rounded to BF16.
+void ModelFp8Device(Case& c, const ref::QuantizedP& quantized, const DeviceInputs& device)
+{
+    const auto& s       = c.sequence;
+    const std::size_t D = s.query_dimension, Dv = s.value_dimension;
+    const float scale_s = s.score_scale * device.q_descale * device.k_descale;
+    for(std::size_t head = 0; head < s.query_heads; ++head)
+    {
+        const auto kv_head = head / (s.query_heads / s.kv_heads);
+        for(std::size_t row = 0; row < s.query_length; ++row)
+        {
+            float maximum = -std::numeric_limits<float>::infinity();
+            float mass    = 0;
+            std::vector<float> o(Dv, 0);
+            for(std::size_t begin = 0; begin < s.key_length; begin += 128)
+            {
+                const auto end = std::min(begin + 128, s.key_length);
+                std::vector<float> score(end - begin, -std::numeric_limits<float>::infinity());
+                float tile_max = -std::numeric_limits<float>::infinity();
+                for(std::size_t key = begin; key < end; ++key)
+                {
+                    if(s.is_masked && s.is_masked(row, key))
+                        continue;
+                    const auto physical =
+                        device.physical_key.empty() ? key : device.physical_key[key];
+                    float dot = 0;
+                    for(std::size_t d = 0; d < D; ++d)
+                        dot = std::fma(s.q(head, row, d), s.k(kv_head, physical, d), dot);
+                    score[key - begin] = dot * scale_s;
+                    tile_max           = std::max(tile_max, score[key - begin]);
+                }
+                if(tile_max == -std::numeric_limits<float>::infinity())
+                    continue;
+                const float next    = std::max(maximum, tile_max);
+                const float rescale = mass == 0 ? 0 : std::exp(maximum - next);
+                mass *= rescale;
+                for(auto& value : o)
+                    value *= rescale;
+                for(std::size_t key = begin; key < end; ++key)
+                {
+                    if(score[key - begin] == -std::numeric_limits<float>::infinity())
+                        continue;
+                    const auto physical =
+                        device.physical_key.empty() ? key : device.physical_key[key];
+                    const double p       = std::exp(score[key - begin] - next);
+                    const auto converted = static_cast<float>(
+                        RoundE4M3(quantized.scale * p, quantized.keeps_subnormals) /
+                        quantized.scale);
+                    mass += converted;
+                    for(std::size_t d = 0; d < Dv; ++d)
+                        o[d] = std::fma(converted, s.v(kv_head, physical, d), o[d]);
+                }
+                maximum = next;
+            }
+            for(std::size_t d = 0; d < Dv; ++d)
+                c.o[(row * s.query_heads + head) * Dv + d] =
+                    mass == 0 ? 0 : RoundBf16(o[d] / mass * device.v_descale);
+            c.lse[head * s.query_length + row] = 0;
+        }
+    }
+}
+
+// FP8-representable random inputs: Q, K and V on the e4m3 grid with distinct non-unit descales.
+// q, k ~ U(-amplitude, amplitude) give scores with a standard deviation near
+// amplitude^2 / 3 * q_descale * k_descale * sqrt(D) * score_scale.
+void FillFp8(Case& c, float amplitude, unsigned seed)
+{
+    std::mt19937 generator(seed);
+    std::uniform_real_distribution<float> qk(-amplitude, amplitude), value(-1, 1);
+    for(auto& x : c.q)
+        x = static_cast<float>(RoundE4M3(qk(generator)));
+    for(auto& x : c.k)
+        x = static_cast<float>(RoundE4M3(qk(generator)));
+    for(auto& x : c.v)
+        x = static_cast<float>(RoundE4M3(value(generator)));
+    c.sequence.q_descale   = 0.75f;
+    c.sequence.k_descale   = 1.25f;
+    c.sequence.v_descale   = 0.625f;
+    c.sequence.score_scale = 1.0f / std::sqrt(static_cast<float>(c.sequence.query_dimension));
+}
+
+// SparseMarker V (as the page-tile gtests): V = 1 on the keys of the first, quarter, middle,
+// three-quarter and last 64-key pages, 0 elsewhere, so each output component is the softmax mass
+// of those pages and a fault involving one of them stays large at any K.
+void SparseMarkerV(Case& c)
+{
+    const std::size_t pages = (c.sequence.key_length + 63) / 64;
+    const std::size_t Dv    = c.sequence.value_dimension;
+    for(std::size_t key = 0; key < c.sequence.key_length; ++key)
+    {
+        const std::size_t page = key / 64;
+        const bool marked      = page == 0 || page == pages / 4 || page == (pages - 1) / 2 ||
+                            page == 3 * pages / 4 || page == pages - 1;
+        for(std::size_t d = 0; d < Dv; ++d)
+            c.v[key * Dv + d] = marked ? 1.0f : 0.0f;
+    }
+}
+
+DeviceInputs CorrectDevice(const Case& c)
+{
+    return {c.sequence.q_descale, c.sequence.k_descale, c.sequence.v_descale, {}};
+}
+
+ref::AccuracyContract Fp8Contract(bool keep_subnormals)
+{
+    ref::QuantizedP quantized;
+    quantized.keeps_subnormals = keep_subnormals;
+    return {7, 128, quantized};
+}
+
+// The FP8 page tile writes no LSE.
+ref::Output OutputWithoutLse(const Case& c)
+{
+    auto output = c.Output();
+    output.lse.reset();
+    return output;
+}
+
+ref::Metrics CompareFp8(const Case& c, const ref::Reference& reference, bool keep_subnormals)
+{
+    return ref::Compare(
+        {c.sequence}, reference, {OutputWithoutLse(c)}, {}, Fp8Contract(keep_subnormals));
+}
+
+void QuantizedPContract()
+{
+    ref::QuantizedP kept, flushed;
+    flushed.keeps_subnormals = false;
+    Near(kept.UnitRoundoff(), 0x1p-4, 0, "e4m3 half ULP");
+    Near(kept.SubnormalThreshold(), 0x1p-14, 0, "e4m3 normal range of 256 * P");
+    Near(kept.SubnormalLoss(), 0x1p-18, 0, "half an e4m3 subnormal step of 256 * P");
+    Near(flushed.SubnormalLoss(), 0x1p-14, 0, "a flushed key loses at most the threshold");
+    Near(RoundE4M3(1.0625), 1.0, 0, "e4m3 tie rounds to the even mantissa");
+    Near(RoundE4M3(1.1875), 1.25, 0, "e4m3 tie rounds to the even mantissa (up)");
+    Near(RoundE4M3(0x1p-8), 0x1p-8, 0, "e4m3 subnormal kept");
+    Near(RoundE4M3(0x1p-8, false), 0, 0, "e4m3 subnormal flushed");
+    Near(RoundE4M3(1000), 448, 0, "e4m3 saturates at its largest finite value");
+    Check(!Fp8Contract(true).RequiresStrict(), "the FP8 contract gates on the component ratio");
+
+    Case c(4, 300, 1, 1, 64, 8);
+    FillFp8(c, 2.5f, 1);
+    const auto kept_ref = ref::Compute({c.sequence}, 128, kept);
+    ModelFp8Device(c, kept, CorrectDevice(c));
+    Check(CompareFp8(c, kept_ref, true).contract_passed, "the modelled device passes");
+    const auto no_model = ref::Compute({c.sequence});
+    Reject([&] { CompareFp8(c, no_model, true); },
+           "a reference without the quantized-P model is rejected");
+    Reject([&] { CompareFp8(c, kept_ref, false); },
+           "a reference computed for another subnormal mode is rejected");
+    auto fp16_out          = Fp8Contract(true);
+    fp16_out.mantissa_bits = 10;
+    Reject([&] { ref::Compare({c.sequence}, kept_ref, {OutputWithoutLse(c)}, {}, fp16_out); },
+           "FP8 P is tested with BF16 O only");
+    auto odd_scale               = Fp8Contract(true);
+    odd_scale.quantized_p->scale = 200;
+    const auto odd_ref           = ref::Compute({c.sequence}, 128, odd_scale.quantized_p);
+    Reject([&] { ref::Compare({c.sequence}, odd_ref, {OutputWithoutLse(c)}, {}, odd_scale); },
+           "the P scale must be a power of two");
+    auto missing = kept_ref;
+    missing.rows[0].subnormal_contribution.clear();
+    Reject([&] { CompareFp8(c, missing, true); },
+           "missing subnormal metadata must not silently pass");
+    Reject([&] { ref::Compare({c.sequence}, kept_ref, {c.Output()}, {}, Fp8Contract(true)); },
+           "the FP8 P model has no LSE");
+    auto with_sink        = c.sequence;
+    with_sink.sink_logits = {0.0f};
+    const auto sink_ref   = ref::Compute({with_sink}, 128, kept);
+    Reject(
+        [&] { ref::Compare({with_sink}, sink_ref, {OutputWithoutLse(c)}, {}, Fp8Contract(true)); },
+        "the FP8 P model has no sink");
+
+    // Correct FP8 output exceeds the 16-bit absolute cap 2^-6 on short rows: two keys with V = -1
+    // and +1, 256 * P of the second key at 136.5, just above the e4m3 midpoint 136, so it converts
+    // to 144 (5.5 % high). Its own component limit bounds it.
+    Case pair(1, 2, 1, 1, 1, 1);
+    pair.q[0]                 = 1;
+    pair.k[0]                 = 0;
+    pair.k[1]                 = -1;
+    pair.v[0]                 = -1;
+    pair.v[1]                 = 1;
+    pair.sequence.score_scale = 0.6289f; // 256 * exp(-0.6289) = 136.50
+    const auto pair_ref       = ref::Compute({pair.sequence}, 128, kept);
+    ModelFp8Device(pair, kept, CorrectDevice(pair));
+    const auto pair_metrics = CompareFp8(pair, pair_ref, true);
+    std::cout << "FP8 two-key row: max abs error=" << pair_metrics.max_abs_error
+              << " max limit=" << pair_metrics.max_component_limit
+              << " max ratio=" << pair_metrics.max_component_ratio << '\n';
+    Check(pair_metrics.contract_passed && pair_metrics.max_abs_error > 0x1p-6,
+          "correct FP8 output above the 16-bit cap passes its component limit");
+}
+
+// The modelled device passes the contract, with subnormals kept or flushed, from rows of two keys
+// to 73728 keys (the longest chunk8k row: a 64K prefix and an 8K chunk).
+void Fp8ModelPassesContract()
+{
+    for(const bool keep : {true, false})
+    {
+        ref::QuantizedP quantized;
+        quantized.keeps_subnormals = keep;
+        for(const std::size_t keys : {2, 8, 61, 428, 3000, 32768, 73728})
+        {
+            Case c(4, keys, 2, 1, 64, 8);
+            FillFp8(c, 2.5f, static_cast<unsigned>(keys));
+            const auto reference = ref::Compute({c.sequence}, 128, quantized);
+            ModelFp8Device(c, quantized, CorrectDevice(c));
+            const auto metrics = CompareFp8(c, reference, keep);
+            std::cout << "FP8 model keep=" << keep << " K=" << keys
+                      << " max ratio=" << metrics.max_component_ratio
+                      << " max abs error=" << metrics.max_abs_error
+                      << " max limit=" << metrics.max_component_limit << '\n';
+            Check(metrics.contract_passed && metrics.passed && metrics.max_component_ratio <= 1,
+                  "the modelled FP8 device output passes the quantized-P contract");
+        }
+    }
+}
+
+// Every negative control fails through the component ratio where the contract is used: K = 3000
+// (Window long rows), 8192, 32768 (Deterministic) and 73728 (the longest chunk8k row). v descale
+// x1.25 and one wrong page on SparseMarker V at every K; on spread scores with random V, q / k
+// descale x1.5 at every K and x1.25 up to K = 8192 (from K = 32768 on, random V averages a 25 %
+// score-scale error into the budget).
+void Fp8ControlsFireAtLongK()
+{
+    for(const bool keep : {true, false})
+    {
+        ref::QuantizedP quantized;
+        quantized.keeps_subnormals = keep;
+        for(const std::size_t keys : {3000, 8192, 32768, 73728})
+        {
+            auto run = [&](Case& c, const DeviceInputs& device) {
+                const auto reference = ref::Compute({c.sequence}, 128, quantized);
+                ModelFp8Device(c, quantized, CorrectDevice(c));
+                Check(CompareFp8(c, reference, keep).contract_passed,
+                      "the unperturbed model passes on the control's data");
+                ModelFp8Device(c, quantized, device);
+                return CompareFp8(c, reference, keep);
+            };
+            Case spread(4, keys, 1, 1, 64, 8);
+            FillFp8(spread, 2.5f, static_cast<unsigned>(keys) + 7);
+            auto scaled = [&](float q_gain, float k_gain) {
+                auto device = CorrectDevice(spread);
+                device.q_descale *= q_gain;
+                device.k_descale *= k_gain;
+                return run(spread, device);
+            };
+            const auto q_metrics  = scaled(1.25f, 1);
+            const auto k_metrics  = scaled(1, 1.25f);
+            const auto q2_metrics = scaled(1.5f, 1);
+            const auto k2_metrics = scaled(1, 1.5f);
+            DeviceInputs device;
+
+            Case marker(4, keys, 1, 1, 64, 8);
+            FillFp8(marker, 2.5f, static_cast<unsigned>(keys) + 11);
+            SparseMarkerV(marker);
+            device = CorrectDevice(marker);
+            device.v_descale *= 1.25f;
+            const auto v_metrics = run(marker, device);
+            // The middle marked page's table entry points at the (unmarked) second page.
+            device = CorrectDevice(marker);
+            device.physical_key.resize(keys);
+            const std::size_t middle = ((keys + 63) / 64 - 1) / 2;
+            for(std::size_t key = 0; key < keys; ++key)
+                device.physical_key[key] =
+                    key / 64 == middle && 64 + key % 64 < keys ? 64 + key % 64 : key;
+            const auto page_metrics = run(marker, device);
+            std::cout << "FP8 controls keep=" << keep << " K=" << keys
+                      << " ratio q x1.25=" << q_metrics.max_component_ratio
+                      << " k x1.25=" << k_metrics.max_component_ratio
+                      << " q x1.5=" << q2_metrics.max_component_ratio
+                      << " k x1.5=" << k2_metrics.max_component_ratio
+                      << " v x1.25=" << v_metrics.max_component_ratio
+                      << " page=" << page_metrics.max_component_ratio << '\n';
+            auto fired = [](const ref::Metrics& metrics) {
+                return !metrics.contract_passed && metrics.max_component_ratio > 1;
+            };
+            Check(fired(q2_metrics) && fired(k2_metrics) && fired(v_metrics) && fired(page_metrics),
+                  "an FP8 negative control fails the component ratio at long K");
+            if(keys <= 8192)
+                Check(fired(q_metrics) && fired(k_metrics),
+                      "a 25 % score-scale error fails the component ratio up to K = 8192");
+        }
+    }
+}
+
 } // namespace
 
 TEST(FmhaReference, ZeroAndConstant) { EXPECT_NO_THROW(ZeroAndConstant()); }
@@ -661,3 +988,6 @@ TEST(FmhaReference, InvalidMetadataAndExtremeScores)
 TEST(FmhaReference, VirtualSink) { EXPECT_NO_THROW(VirtualSink()); }
 TEST(FmhaReference, ScaleAwareAccuracyContract) { EXPECT_NO_THROW(ScaleAwareAccuracyContract()); }
 TEST(FmhaReference, LargestKeyGainSensitivity) { EXPECT_NO_THROW(LargestKeyGainSensitivity()); }
+TEST(FmhaReference, QuantizedPContract) { EXPECT_NO_THROW(QuantizedPContract()); }
+TEST(FmhaReference, Fp8ModelPassesContract) { EXPECT_NO_THROW(Fp8ModelPassesContract()); }
+TEST(FmhaReference, Fp8ControlsFireAtLongK) { EXPECT_NO_THROW(Fp8ControlsFireAtLongK()); }

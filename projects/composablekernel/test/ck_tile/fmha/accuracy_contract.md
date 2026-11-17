@@ -13,8 +13,9 @@ max absolute O error <= 0.015625, minimum row cosine >= 0.99998, mean row cosine
 BF16 forward tests gate on the component contract; FP16 forward tests require
 both the component contract and the strict check. Historical strict failures
 are preserved in the external PR validation evidence.
-Both contracts retain the original absolute O error cap of 0.015625. A large
-contribution budget cannot override that cap.
+Both 16-bit contracts retain the original absolute O error cap of 0.015625. A large
+contribution budget cannot override that cap. The FP8 contract ("FP8 P" below) caps each
+component by its own limit instead.
 
 The cosine constants originated in the local FMHA tests before this test
 migration. They are not an upstream universal BF16 attention accuracy guarantee.
@@ -92,6 +93,72 @@ probability is normal. At K=32768 it contributes at most
 the dtype rounding term. FP16 still requires the original strict check.
 Conversion/WMMA subnormal handling requires native controls and code-object
 evidence; a compiler flush flag alone is insufficient evidence.
+
+## FP8 P (fp8bf16)
+
+The FP8 page tile (`fp8bf16`: FP8 Q/K/V/P, BF16 O) converts `kPScale * P` to OCP e4m3, with P
+taken against its running row maximum, and divides O by the mass of the converted P (the
+quantized row sum; no LSE, no sink). Its contract is `AccuracyContract{7, key_tile,
+QuantizedP{...}}`; the reference must be computed with the same `QuantizedP`
+(`Compute(sequences, chunk, quantized_p)`), otherwise `Compare` refuses it. The model has no sink
+term and no LSE: `Compare` also refuses an FP8 contract on a sequence with a finite sink logit or
+on an output with LSE.
+
+Per key the converted P' is either `P (1 + d)` with `abs(d) <= u_P = 2^-4` (round to nearest even
+in the normal range) or `P - e` with `0 <= e <= min(P, loss)` once `kPScale * P` is below e4m3's
+smallest normal `2^-6`, that is `P < t0 = 2^-6 / kPScale` (`2^-14` for `kPScale = 256`). `loss` is
+half a subnormal step (`2^-10 / kPScale = 2^-18`) when the convert keeps e4m3 subnormals and `t0`
+when it flushes them. With `L` the exact normalizer:
+
+```text
+O - r = sum_k (P'_k - P_k) (V_k - r) / sum_k P'_k
+S[d]  = sum_{k: P_k < t} min(P_k, loss) * abs(V[k,d]) / L
+S0    = sum_{k: P_k < t} min(P_k, loss) / L,          t = t0 * exp(4*eta)
+P_fp8 = (u_P * (A + abs(r)) + S[d] + S0 * abs(r)) / (1 - u_P - S0)
+E     = beta*A + gamma(2)*abs(r) + P_fp8
+limit = (1 + u_O)*E + u_O*abs(r) + 2^-126,            u_O = 2^-8 (BF16 O)
+```
+
+- The normalization term (`A + abs(r)` rather than `A`) is there because the kernel divides by the
+  converted mass: on one key of mass `m < 1/2` and value 1 among zeros, `sum_k P_k abs(V_k - r)`
+  is `2m(1 - m)`, more than `A = m`.
+- The floor counts only the keys that can be subnormal on the device. The device takes P against a
+  running maximum that never exceeds the final one, so its P is at least the reference's; the
+  score difference between the two paths widens the threshold by `exp(4*eta)`.
+- The floor is mass-weighted. A key loses at most its own mass, so the floor does not grow with the
+  number of small keys. An unweighted `floor * K * max(abs(V))` with the flushed floor `2^-14`
+  reaches `2 * max(abs(V))` at K = 32768, and with a score standard deviation near 2 an estimated
+  (Gaussian scores) few hundred keys per row at K = 3000, and thousands at K = 32768, are below
+  the threshold.
+- `keeps_subnormals` is set from native controls of the P convert
+  (`__builtin_amdgcn_cvt_scalef32_pk8_fp8_f32`), of the row-sum dequant and of the FP8 WMMA's
+  subnormal inputs; a compiler flush flag alone is not evidence.
+
+The fixed absolute O cap of 0.015625 does not apply to FP8 contracts: correct FP8 output on rows
+with a few keys exceeds it. In `QuantizedPContract`, a row of two keys with V = -1 and +1, whose
+second `256 * P` (136.5) converts to 144, misses the FP32 reference by 0.025 within its limit of
+0.088. Each component is capped by its own limit instead, `Metrics` reports the largest limit
+(`max_component_limit`), and the final gate is the component contract (`RequiresStrict()` is
+false).
+
+The host tests model the device arithmetic on the CPU (per 128-key tile: FP32 scores with the
+descales folded in, P against the running maximum, `kPScale * P` rounded onto the e4m3 grid with
+subnormals kept or flushed, FP32 accumulation of O and of the converted mass with the online
+rescale, `O / mass * v_descale` rounded to BF16). `Fp8ModelPassesContract` runs it from 2 to 73728
+keys. `Fp8ControlsFireAtLongK` requires the negative controls to fail through the component ratio,
+with subnormals kept and flushed, while the unperturbed model passes on the same data:
+
+- v descale x1.25 and one wrong page-table entry on SparseMarker V (V = 1 on five spread 64-key
+  pages, 0 elsewhere), at K = 3000 (the gtests' Window long rows), 8192, 32768 (Deterministic) and
+  73728 (the longest chunk8k row: a 64K prefix and an 8K chunk);
+- q and k descale x1.5 on scores with a standard deviation near 2 and random V, at the same K;
+- q and k descale x1.25 on that data up to K = 8192. From K = 32768 on, random V averages a 25 %
+  score-scale error into the budget (measured ratios 0.85-1.03 at K = 32768 and 73728): this is
+  the contract's detection limit for that error on that data, not a pass criterion.
+
+Random V does not serve the v and page controls: their effects shrink with K (one page carries
+about 64/K of the mass; v x1.25 moves O by 0.25 * abs(r), and abs(r) falls like
+`sigma_V / sqrt(K_eff)`) while the P term does not.
 
 ## Gain and cancellation controls
 
