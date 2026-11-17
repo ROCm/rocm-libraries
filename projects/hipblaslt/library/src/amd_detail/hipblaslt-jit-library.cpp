@@ -1,0 +1,1852 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "hipblaslt-jit-library.hpp"
+#include "hipblaslt-jit-code-object.hpp"
+#include "hipblaslt-jit-fs.hpp"
+#include "hipblaslt-jit-msgpack.hpp"
+#include "hipblaslt-jit-problem-type.hpp"
+#include "hipblaslt/hipblaslt-version.h"
+#include "rocblaslt_secure_env.hpp"
+#include <Tensile/CachingLibrary.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/DataTypes.hpp>
+#include <Tensile/ExactLogicLibrary.hpp>
+#include <Tensile/KernelArguments.hpp>
+#include <Tensile/PlaceholderLibrary.hpp>
+#include <Tensile/SingleSolutionLibrary.hpp>
+#include <Tensile/Tensile.hpp>
+#include <Tensile/hip/HipSolutionAdapter.hpp>
+#ifdef TENSILE_MSGPACK
+#include <Tensile/msgpack/SolutionState.hpp>
+#include <Tensile/msgpack/Writing.hpp>
+#endif
+#include <algorithm>
+#include <cctype>
+#include <new>
+#include <set>
+#include <stdexcept>
+#include <string_view>
+
+namespace hipblaslt_jit
+{
+    namespace
+    {
+        namespace fs = std::filesystem;
+
+        constexpr size_t fileLimit = size_t{1} << 30;
+        // A ceiling for waiting on another publisher's file writes, not a typical wait.
+        constexpr std::chrono::seconds publishLockTimeout{15};
+
+        using GemmRows = TensileLite::ProblemSelectionLibrary<TensileLite::ContractionProblemGemm,
+                                                              TensileLite::ContractionSolution>;
+        using GemmSolution = std::shared_ptr<TensileLite::ContractionSolution>;
+
+        const GemmRows* rowsOf(const GemmMaster& master)
+        {
+            auto library = master.library;
+            if(auto cache = std::dynamic_pointer_cast<
+                   TensileLite::CachingLibrary<TensileLite::ContractionProblemGemm,
+                                               TensileLite::ContractionSolution>>(library))
+                library = cache->library();
+            return dynamic_cast<const GemmRows*>(library.get());
+        }
+
+        Status failed(Stage stage, std::string message)
+        {
+            return {Status::Code::Failed, stage, std::move(message)};
+        }
+
+        template <class F>
+        Status staged(Stage stage, F&& f)
+        {
+            Status status;
+            try
+            {
+                status = f();
+            }
+            catch(const std::bad_alloc&)
+            {
+                status = failed(stage, "Out of memory");
+            }
+            catch(const std::exception& e)
+            {
+                status = failed(stage, e.what());
+            }
+            catch(...)
+            {
+                status = failed(stage, "Unknown exception");
+            }
+            if(!status.ok())
+                status.stage = stage;
+            return status;
+        }
+
+        // Escapes characters that are not safe in one path component. '=' introduces
+        // a two-digit hex byte, so the encoding does not collide with a literal.
+        std::string filesystemLiteral(std::string_view text)
+        {
+            std::string out;
+            out.reserve(text.size());
+            for(unsigned char c : text)
+            {
+                if(std::isalnum(c) || c == '_' || c == '-' || c == '.' || c == '+')
+                    out += static_cast<char>(c);
+                else
+                {
+                    constexpr char digits[] = "0123456789abcdef";
+                    out += '=';
+                    out += digits[c >> 4];
+                    out += digits[c & 0xf];
+                }
+            }
+            return out.empty() ? std::string("x") : out;
+        }
+
+        std::string pathComponent(std::string part)
+        {
+            if(part.empty() || part == "." || part == "..")
+                return "x" + part;
+            constexpr size_t width = 120;
+            if(part.size() <= width)
+                return part;
+            std::string nested;
+            for(size_t i = 0; i < part.size(); i += width)
+            {
+                if(!nested.empty())
+                    nested += '/';
+                auto piece = part.substr(i, width);
+                if(piece == "." || piece == "..")
+                    piece.insert(piece.begin(), 'x');
+                nested += piece;
+            }
+            return nested;
+        }
+
+        Status ensureEntryParents(const fs::path& root, const fs::path& file)
+        {
+            const auto relative = file.parent_path().lexically_relative(root);
+            if(relative.empty() || relative == ".")
+                return {};
+            fs::path current = root;
+            for(const auto& part : relative)
+            {
+                if(part == "." || part == "..")
+                    return failed(Stage::Publish, "An entry path escapes the library directory");
+                current /= part;
+                if(auto status = files::privateDirectory(current); !status.ok())
+                    return status;
+            }
+            return {};
+        }
+
+        template <class T>
+        void addOnce(std::vector<T*>& items, T* item)
+        {
+            if(std::find(items.begin(), items.end(), item) == items.end())
+                items.push_back(item);
+        }
+
+        // An absent file is an empty mapping. TensileLite reads a damaged
+        // mapping as an empty one, and this library never writes one empty.
+        Status readMapping(Stage stage, const fs::path& file, std::map<int, std::string>& mapping)
+        {
+            mapping.clear();
+            std::error_code error;
+            if(!fs::exists(file, error))
+                return {};
+            mapping = TensileLite::LoadLibraryMapping(file.string());
+            if(mapping.empty())
+                return failed(stage, "Cannot read the index mapping " + files::utf8String(file));
+            return {};
+        }
+
+        std::vector<uint8_t> encodeLibrary(const GemmMaster& library)
+        {
+#ifdef TENSILE_MSGPACK
+            return TensileLite::MessagePackWriteLibraryData(library);
+#else
+            throw std::runtime_error("Writing a library needs a MessagePack build of TensileLite");
+#endif
+        }
+
+        std::vector<uint8_t> encodeMapping(const std::map<int, std::string>& mapping)
+        {
+#ifdef TENSILE_MSGPACK
+            return TensileLite::MessagePackWriteLibraryMapping(mapping);
+#else
+            throw std::runtime_error("Writing a mapping needs a MessagePack build of TensileLite");
+#endif
+        }
+
+        // The file prefix a master row selects, or nullptr for a row that is
+        // not a placeholder.
+        const std::string* placeholderPrefix(const GemmRows::Row& row)
+        {
+            const auto placeholder = dynamic_cast<const TensileLite::PlaceholderLibrary<
+                TensileLite::ContractionProblemGemm,
+                TensileLite::ContractionSolution>*>(row.second.get());
+            return placeholder ? &placeholder->filePrefix : nullptr;
+        }
+
+        // A master row: exactly sizes and the solution's own problem predicate.
+        TensileLite::ProblemPredicate<TensileLite::ContractionProblemGemm>
+            rowPredicate(const std::vector<size_t>& sizes, const GemmSolution& solution)
+        {
+            using Gemm      = TensileLite::ContractionProblemGemm;
+            using Predicate = TensileLite::Predicates::Predicate<Gemm>;
+            using And       = TensileLite::Predicates::And<Gemm>;
+            std::vector<std::shared_ptr<Predicate>> terms;
+            for(size_t index = 0; index < sizes.size(); ++index)
+                terms.push_back(std::make_shared<TensileLite::Predicates::Contraction::SizeEqual>(
+                    index, sizes[index]));
+            if(const auto all = std::dynamic_pointer_cast<And>(solution->problemPredicate))
+                terms.insert(terms.end(), all->value.begin(), all->value.end());
+            else if(solution->problemPredicate)
+                terms.push_back(solution->problemPredicate);
+            return {std::make_shared<And>(terms)};
+        }
+
+        // An entry: every solution of one executable, each selected by its own
+        // problem predicate.
+        std::shared_ptr<GemmMaster> entryOf(const std::vector<GemmSolution>& solutions)
+        {
+            using Single = TensileLite::SingleSolutionLibrary<TensileLite::ContractionProblemGemm,
+                                                              TensileLite::ContractionSolution>;
+            auto rows  = std::make_shared<GemmRows>();
+            auto entry = std::make_shared<GemmMaster>();
+            for(const auto& solution : solutions)
+            {
+                entry->solutions.emplace(solution->index, solution);
+                rows->rows.emplace_back(solution->problemPredicate,
+                                        std::make_shared<Single>(solution));
+            }
+            entry->library = rows;
+            return entry;
+        }
+
+        msgpack_io::CacheKeyDocument documentOf(const CacheKey& key)
+        {
+            msgpack_io::CacheKeyDocument document;
+            document.backendId         = key.backendId;
+            document.backendVersion    = key.backendVersion;
+            document.targetId          = key.target.targetId();
+            document.wavefrontSize     = key.wavefrontSize;
+            document.codeObjectVersion = key.codeObjectVersion;
+            return document;
+        }
+
+        // Every stored field is required. A missing or different target,
+        // backend or code-object version rejects the directory. The folder
+        // name is not this check.
+        bool directoryAgrees(const msgpack_io::CacheKeyDocument& stored, const CacheKey& key)
+        {
+            if(!stored.hasTargetId || stored.targetId != key.target.targetId())
+                return false;
+            if(!stored.hasWavefront || stored.wavefrontSize != key.wavefrontSize)
+                return false;
+            if(!stored.hasBackendId || stored.backendId != key.backendId)
+                return false;
+            if(!stored.hasBackendVersion || stored.backendVersion != key.backendVersion)
+                return false;
+            if(!stored.hasCodeObjectVersion || stored.codeObjectVersion != key.codeObjectVersion)
+                return false;
+            return true;
+        }
+
+        bool knownSemantic(TensileLite::CustomArgSemantic semantic)
+        {
+            const auto index = static_cast<int>(semantic);
+            return index >= 0 && index < static_cast<int>(TensileLite::CustomArgSemantic::COUNT);
+        }
+
+        // The name KernelArguments::append resolves. alpha and beta stay
+        // lowercase: that spelling is how a custom kernel's scalar slot is
+        // selected. Every other argument is the CustomArgSemantic name.
+        std::string kernelArgumentName(TensileLite::CustomArgSemantic semantic)
+        {
+            if(semantic == TensileLite::CustomArgSemantic::Alpha)
+                return "alpha";
+            if(semantic == TensileLite::CustomArgSemantic::Beta)
+                return "beta";
+            return TensileLite::toString(semantic);
+        }
+
+        // KernelsFromAnywhere records argument semantics on CustomKernel.
+        // KernelArguments finds each one by name, so the set is the identity
+        // and argument order is not. False when a semantic does not resolve
+        // in this build or the record names none.
+        bool semanticNameHash(const TensileLite::CustomKernel& kernel, uint64_t& hash)
+        {
+            if(kernel.args.empty())
+                return false;
+            std::set<std::string> names;
+            TensileLite::KernelArguments bound(true);
+            for(const auto& arg : kernel.args)
+            {
+                if(!knownSemantic(arg.semantic))
+                    return false;
+                auto spelling = TensileLite::toString(arg.semantic);
+                try
+                {
+                    auto round = spelling;
+                    if(TensileLite::fromStringCustomArgSemantic(round) != arg.semantic)
+                        return false;
+                }
+                catch(const std::exception&)
+                {
+                    return false;
+                }
+                const auto name = kernelArgumentName(arg.semantic);
+                bound.template append<uint32_t>(name, 0);
+                names.insert(name);
+            }
+            if(names.empty())
+                return false;
+            hash = 14695981039346656037ull;
+            for(const auto& name : names)
+            {
+                for(unsigned char byte : name)
+                {
+                    hash ^= byte;
+                    hash *= 1099511628211ull;
+                }
+                hash ^= static_cast<unsigned char>('\n');
+                hash *= 1099511628211ull;
+            }
+            return true;
+        }
+
+        std::string hexHash(uint64_t hash)
+        {
+            constexpr char digits[] = "0123456789abcdef";
+            std::string    text(16, '0');
+            for(int shift = 15; shift >= 0; --shift)
+                text[15 - shift] = digits[(hash >> (shift * 4)) & 0xf];
+            return text;
+        }
+
+        bool parseHexHash(const std::string& text, uint64_t& hash)
+        {
+            if(text.size() != 16)
+                return false;
+            uint64_t value = 0;
+            for(unsigned char byte : text)
+            {
+                value <<= 4;
+                if(byte >= '0' && byte <= '9')
+                    value |= byte - '0';
+                else if(byte >= 'a' && byte <= 'f')
+                    value |= byte - 'a' + 10;
+                else
+                    return false;
+            }
+            hash = value;
+            return true;
+        }
+
+        // <prefix>.hash, one "index hex" line per solution. The hex is the
+        // content hash of that solution's KernelsFromAnywhere semantic-name set.
+        std::string semanticHashText(const std::vector<GemmSolution>& solutions)
+        {
+            std::string text;
+            for(const auto& solution : solutions)
+            {
+                uint64_t hash = 0;
+                if(!solution || !semanticNameHash(solution->customKernel, hash))
+                    return {};
+                text += std::to_string(solution->index);
+                text += ' ';
+                text += hexHash(hash);
+                text += '\n';
+            }
+            return text;
+        }
+
+        bool storedHashAgrees(const fs::path& file, int32_t index, uint64_t hash)
+        {
+            std::vector<uint8_t> bytes;
+            if(!files::readFile(file, fileLimit, bytes).ok() || bytes.empty())
+                return false;
+            std::istringstream input(std::string(bytes.begin(), bytes.end()));
+            std::string        line;
+            bool               saw = false;
+            while(std::getline(input, line))
+            {
+                if(line.empty())
+                    continue;
+                std::istringstream row(line);
+                long long          storedIndex = 0;
+                std::string        hex;
+                uint64_t           stored = 0;
+                if(!(row >> storedIndex >> hex) || !parseHexHash(hex, stored))
+                    return false;
+                if(storedIndex == index)
+                {
+                    if(stored != hash)
+                        return false;
+                    saw = true;
+                }
+            }
+            return saw;
+        }
+
+        // Target and code-object version come from the code object, not from
+        // the directory name. codeObjects remembers one path for this call.
+        bool codeObjectAgrees(const fs::path&              file,
+                              const CacheKey&              key,
+                              std::map<std::string, bool>& codeObjects)
+        {
+            const auto name  = files::utf8String(file);
+            const auto found = codeObjects.find(name);
+            if(found != codeObjects.end())
+                return found->second;
+            std::vector<uint8_t> bytes;
+            bool                 agrees = false;
+            if(files::readFile(file, fileLimit, bytes).ok())
+            {
+                const auto metadata = code_object::inspect(bytes);
+                agrees              = metadata.ok() && metadata.isaName == key.target.isaName()
+                         && metadata.codeObjectVersion == key.codeObjectVersion;
+            }
+            codeObjects.emplace(name, agrees);
+            return agrees;
+        }
+
+        // An entry is reusable when its CustomKernel semantic names still
+        // resolve, the stored content hash of that set agrees, and the code
+        // object's target and code-object version agree with key. A missing
+        // hash or a mismatch rejects the entry. Argument order is not read.
+        bool entryReusable(const fs::path&                         slice,
+                           const std::string&                      prefix,
+                           const TensileLite::ContractionSolution& solution,
+                           const CacheKey&                         key,
+                           std::map<std::string, bool>&            codeObjects)
+        {
+            uint64_t hash = 0;
+            if(solution.kernelName.empty() || !semanticNameHash(solution.customKernel, hash))
+                return false;
+            if(!storedHashAgrees(slice / (prefix + ".hash"), solution.index, hash))
+                return false;
+            return codeObjectAgrees(slice / (prefix + ".co"), key, codeObjects);
+        }
+
+        // custom.config inside the code object's .amdgpu_metadata, when it is
+        // the derived KernelsFromAnywhere state. Its semantic-name hash must
+        // equal each solution's. A note without that state is not a second
+        // argument list and is left to the solution record.
+        Status customConfigAgrees(const std::vector<uint8_t>&      elf,
+                                  const std::vector<GemmSolution>& solutions)
+        {
+#ifdef TENSILE_MSGPACK
+            const auto note = code_object::metadataNote(elf);
+            if(!note.ok())
+                return {};
+            try
+            {
+                const auto handle = msgpack::unpack(
+                    reinterpret_cast<const char*>(note.bytes.data()), note.bytes.size());
+                const auto&            metadata = handle.get();
+                const msgpack::object* state    = nullptr;
+                if(metadata.type == msgpack::type::MAP)
+                    for(uint32_t i = 0; i < metadata.via.map.size && !state; ++i)
+                    {
+                        const auto& entry = metadata.via.map.ptr[i];
+                        if(entry.key.type == msgpack::type::STR
+                           && entry.key.as<std::string>() == "custom.config")
+                            state = &entry.val;
+                    }
+                if(!state)
+                    return {};
+                const auto fromConfig = TensileLite::solutionFromState(*state);
+                uint64_t   configHash = 0;
+                if(!fromConfig || !semanticNameHash(fromConfig->customKernel, configHash))
+                    return failed(Stage::Publish,
+                                  "custom.config does not name KernelsFromAnywhere arguments");
+                for(const auto& solution : solutions)
+                {
+                    uint64_t hash = 0;
+                    if(!solution || !semanticNameHash(solution->customKernel, hash)
+                       || hash != configHash)
+                        return failed(Stage::Publish,
+                                      "The solution's KernelsFromAnywhere semantic names do not "
+                                      "match custom.config");
+                }
+                return {};
+            }
+            catch(const std::bad_alloc&)
+            {
+                throw;
+            }
+            catch(const std::exception&)
+            {
+                return {};
+            }
+#else
+            (void)elf;
+            (void)solutions;
+            return {};
+#endif
+        }
+
+        std::vector<std::string> olderRevisionNames(const fs::path&    schema,
+                                                    const std::string& current)
+        {
+            std::vector<std::string> older;
+            std::error_code          error;
+            for(fs::directory_iterator next(schema, error), end; !error && next != end;
+                next.increment(error))
+            {
+                if(!next->is_directory())
+                    continue;
+                const auto name = next->path().filename().string();
+                if(name != current)
+                    older.push_back(name);
+            }
+            std::sort(older.begin(), older.end());
+            return older;
+        }
+    }
+
+    CacheKey CacheKey::make(const DeviceTarget& target, const BackendInfo& backend, int codeObjectVersion)
+    {
+        CacheKey key;
+        key.target            = target;
+        key.wavefrontSize     = target.wavefrontSize;
+        key.backendId         = backend.id;
+        key.backendVersion    = backend.version;
+        key.codeObjectVersion = codeObjectVersion;
+        return key;
+    }
+
+    std::string CacheKey::directoryName() const
+    {
+        return filesystemLiteral(target.targetId()) + "_wf" + std::to_string(wavefrontSize) + "_"
+               + filesystemLiteral(backendId) + "_" + std::to_string(backendVersion);
+    }
+
+    std::string problemTypeKey(const TensileLite::ContractionProblemGemm& problem)
+    {
+        const auto fields = problemTypeFields(problem);
+        std::string key;
+        const auto add = [&](const std::string& token) {
+            if(!key.empty())
+                key += '.';
+            key += token;
+        };
+        const auto flag = [&](const char* name, bool value) {
+            add(std::string(name) + (value ? "1" : "0"));
+        };
+        const auto number = [&](const char* name, long long value) {
+            add(std::string(name) + std::to_string(value));
+        };
+        const auto dataType = [&](const char* name, rocisa::DataType value) {
+            number(name, static_cast<int>(value));
+        };
+        add("GEMM");
+        flag("sb", fields.stridedBatched);
+        flag("ta", fields.transA);
+        flag("tb", fields.transB);
+        dataType("dta", fields.aType);
+        dataType("dtb", fields.bType);
+        dataType("dtc", fields.cType);
+        dataType("dtd", fields.dType);
+        dataType("maca", fields.computeInputTypeA);
+        dataType("macb", fields.computeInputTypeB);
+        dataType("compute", fields.computeType);
+        dataType("f32", fields.f32XdlMathOp);
+        flag("hpa", fields.highPrecisionAccumulate);
+        number("bias", fields.useBias);
+        flag("e", fields.useE);
+        flag("grad", fields.useGradient);
+        add(std::string("scale") + filesystemLiteral(fields.useScaleAB.empty() ? "none" : fields.useScaleAB));
+        flag("scd", fields.useScaleCD);
+        number("sav", fields.useScaleAlphaVec);
+        flag("amax", fields.outputAmaxD);
+        number("mxa", fields.mxBlockA);
+        number("mxb", fields.mxBlockB);
+        number("sparse", fields.sparse);
+        flag("swa", fields.swizzleTensorA);
+        flag("swb", fields.swizzleTensorB);
+        flag("gate", fields.useGateResidual);
+        if(fields.mxBlockA)
+            dataType("mxsa", fields.mxTypeA);
+        if(fields.mxBlockB)
+            dataType("mxsb", fields.mxTypeB);
+        if(!fields.biasDataTypeWhiteList.empty())
+            dataType("biasdt", fields.biasDataTypeWhiteList.front());
+        if(!fields.biasSrcWhiteList.empty())
+            number("biassrc", fields.biasSrcWhiteList.front());
+        if(!fields.gateResidualDataTypeWhiteList.empty())
+            dataType("gatedt", fields.gateResidualDataTypeWhiteList.front());
+        if(fields.useE)
+            dataType("dte", fields.eType);
+        if(fields.activationType != TensileLite::ActivationType::None)
+            number("act", static_cast<unsigned>(fields.activationType));
+        if(fields.activationType != TensileLite::ActivationType::None)
+            dataType("actc", fields.activationComputeDataType);
+        add(std::string("id") + filesystemLiteral(fields.operationIdentifier));
+        flag("gg", fields.groupedGemm);
+        return key;
+    }
+
+    std::vector<size_t> problemSizes(const TensileLite::ContractionProblemGemm& problem)
+    {
+        std::vector<size_t> sizes;
+        const auto          count = problem.c().dimensions() + problem.boundIndices().size();
+        for(size_t index = 0; index < count; ++index)
+            sizes.push_back(problem.size(index));
+        return sizes;
+    }
+
+    std::string sliceKey(const TensileLite::ContractionProblemGemm& problem)
+    {
+        const auto abbrev = [](rocisa::DataType type) { return rocisa::TypeAbbrev(type); };
+        const auto single = [](rocisa::DataType type) {
+            return type == rocisa::DataType::Float;
+        };
+        std::string compute = abbrev(problem.computeInputTypeA());
+        if(problem.computeInputTypeA() != problem.computeInputTypeB())
+            compute += abbrev(problem.computeInputTypeB());
+        // Same tokens as TensileLite's lazy placeholder: operation identifier,
+        // then selection()'s datatype, scale and epilogue suffix.
+        std::string key = problem.operationIdentifier();
+        key += "_" + abbrev(problem.a().dataType()) + abbrev(problem.b().dataType());
+        key += "_" + abbrev(problem.c().dataType()) + compute;
+        if(problem.activationType() != TensileLite::ActivationType::None)
+        {
+            auto name = TensileLite::ToString(problem.activationType());
+            for(auto& character : name)
+                character = static_cast<char>(std::toupper(static_cast<unsigned char>(character)));
+            if(name == "ALL")
+                key += "_A";
+            else if(name == "HIPBLASLT_ALL")
+                key += "_HA";
+            else
+                key += "_" + name;
+        }
+        if(problem.mxBlockA())
+            key += "_MXA" + abbrev(problem.mxTypeA()) + "B" + std::to_string(problem.mxBlockA());
+        if(problem.mxBlockB())
+            key += "_MXB" + abbrev(problem.mxTypeB()) + "B" + std::to_string(problem.mxBlockB());
+        if(problem.swizzleTensorA())
+            key += "_STA";
+        if(problem.swizzleTensorB())
+            key += "_STB";
+        if(problem.useBias())
+            key += "_Bias";
+        if(problem.useE())
+            key += problem.useGradient() ? "_Grad" : "_Aux";
+        if(problem.groupedGemm())
+            key += "_GG";
+        else if(!problem.stridedBatched())
+            key += "_GB";
+        if(problem.useScaleAB() == "Scalar")
+            key += "_SAB";
+        else if(problem.useScaleAB() == "Vector")
+            key += "_SABV";
+        if(problem.useScaleCD())
+            key += "_SCD";
+        if(problem.useScaleAlphaVec())
+            key += "_SAV";
+        if(problem.sparse())
+        {
+            key += problem.sparse() == 2 ? "_SPB" : "_SPA";
+            key += "ML" + std::to_string(problem.metadataLayout());
+        }
+        if(!single(problem.f32XdlMathOp()) && single(problem.computeInputTypeA())
+           && single(problem.computeInputTypeB()))
+            key += "_M" + abbrev(problem.f32XdlMathOp());
+        if(problem.getUseDeviceUserArguments())
+            key += "_UA";
+        if(problem.useGateResidual())
+            key += "_GateRes";
+        return pathComponent(filesystemLiteral(key));
+    }
+
+    std::string entryPrefix(const std::string&              problemTypeKey,
+                            const std::vector<std::string>& kernelNames,
+                            const std::vector<size_t>&      sizes)
+    {
+        std::string kernels;
+        for(const auto& kernel : std::set<std::string>(kernelNames.begin(), kernelNames.end()))
+        {
+            if(!kernels.empty())
+                kernels += '+';
+            kernels += kernel;
+        }
+        std::string sizesText;
+        for(auto size : sizes)
+        {
+            if(!sizesText.empty())
+                sizesText += 'x';
+            sizesText += std::to_string(size);
+        }
+        return "k/" + pathComponent(filesystemLiteral(kernels)) + "/t/"
+               + pathComponent(filesystemLiteral(problemTypeKey)) + "/s/"
+               + pathComponent(filesystemLiteral(sizesText));
+    }
+
+    std::shared_ptr<TensileLite::ContractionSolution>
+        copySolution(const std::shared_ptr<TensileLite::ContractionSolution>& solution)
+    {
+        if(!solution)
+            return {};
+        const auto copied = std::dynamic_pointer_cast<GemmMaster>(
+            TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
+                encodeLibrary(*entryOf({solution}))));
+        if(!copied || copied->solutions.size() != 1)
+            throw std::runtime_error("Solution " + solution->solutionName
+                                     + " does not load from TensileLite's encoding");
+        return copied->solutions.begin()->second;
+    }
+
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> supportingSolutions(
+        const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+        const TensileLite::ContractionProblemGemm&                            problem,
+        const TensileLite::Hardware&                                          hardware,
+        size_t                                                                workspaceLimit)
+    {
+        auto limited = problem;
+        limited.setWorkspaceSize(workspaceLimit);
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> result;
+        for(const auto& solution : solutions)
+        {
+            if(!solution)
+                continue;
+            TensileLite::Task task(hardware, limited, *solution);
+            if(TensileLite::selectionPredicate(task, hardware, *solution, limited)
+               && solution->requiredWorkspaceSize(limited, hardware) <= workspaceLimit)
+                result.push_back(solution);
+        }
+        return result;
+    }
+    struct JitLibrary::Directory
+    {
+        struct Slice
+        {
+            fs::path                                          path;
+            std::mutex                                        mutex;
+            bool                                              loaded = false;
+            std::shared_ptr<GemmMaster>                       master;
+            files::FileIdentity                               masterFile, mappingFile;
+            std::map<int, TensileLite::hip::SolutionAdapter*> adapters;
+            // Code-object prefixes loaded on this device; a failed load is not
+            // recorded, so the next resolve() retries it. A prefix is written once
+            // and names one executable, so this survives refresh(), which publish
+            // calls after every new entry in the slice.
+            std::map<int, std::set<std::string>> loadedCodeObjects;
+
+            fs::path masterPath(const Target& target) const
+            {
+                return path / ("TensileLibrary_lazy_" + target.processorName() + ".dat");
+            }
+            fs::path mappingPath(const Target& target) const
+            {
+                return path / ("TensileLiteLibrary_lazy_" + target.processorName() + "_Mapping.dat");
+            }
+
+            // Loads this slice's master and mapping only. Callers hold mutex.
+            Status refresh(const Target& target)
+            {
+                const auto masterNow  = files::identify(masterPath(target));
+                const auto mappingNow = files::identify(mappingPath(target));
+                if(loaded && masterNow == masterFile && mappingNow == mappingFile)
+                    return {};
+                std::shared_ptr<GemmMaster> library;
+                if(masterNow.exists)
+                {
+                    const auto file = masterPath(target).string();
+                    library         = std::dynamic_pointer_cast<GemmMaster>(
+                        TensileLite::LoadLibraryFilePreload<TensileLite::ContractionProblemGemm>(
+                            file, {}));
+                    if(!library || !rowsOf(*library))
+                        return failed(Stage::Lookup, "Cannot load the JIT solution library " + file);
+                    if(!library->initLibraryMapping(file))
+                        return failed(Stage::Lookup, "Cannot load the index mapping of " + file);
+                }
+                master      = std::move(library);
+                masterFile  = masterNow;
+                mappingFile = mappingNow;
+                loaded      = true;
+                return {};
+            }
+
+            TensileLite::hip::SolutionAdapter* adapter(int device)
+            {
+                auto& slot = adapters[device];
+                if(!slot)
+                {
+                    // Leaked like TensileHost's adapters: copied algorithms and
+                    // captured graphs can launch after any owner is destroyed.
+                    slot = new TensileLite::hip::SolutionAdapter;
+                    slot->codeObjectDir(path.string());
+                }
+                return slot;
+            }
+        };
+
+        fs::path    path;
+        CacheKey    identity;
+        std::string revision;
+        bool        current = false; // this build's revision, searched before older ones
+        Status      failure; // a cache-key.msgpack this directory cannot use
+
+        std::mutex                                  sliceMutex;
+        std::map<std::string, std::unique_ptr<Slice>> slices;
+        std::mutex                                    indexMutex;
+        files::FileIdentity                           indexIdentity;
+        bool                                          indexKnown = false;
+        std::map<int, std::string>                    indexCache;
+
+        // Reads indices.msgpack again only when the file changes, then returns
+        // that one index's slice. name is empty when the index is absent.
+        Status sliceName(int32_t index, std::string& name)
+        {
+            std::lock_guard<std::mutex> lock(indexMutex);
+            const auto                  now = files::identify(indexMapPath());
+            if(!indexKnown || now != indexIdentity)
+            {
+                std::map<int, std::string> fresh;
+                if(now.exists)
+                {
+                    if(auto status = readMapping(Stage::Lookup, indexMapPath(), fresh);
+                       !status.ok())
+                        return status;
+                }
+                indexCache    = std::move(fresh);
+                indexIdentity = now;
+                indexKnown    = true;
+            }
+            name.clear();
+            const auto located = indexCache.find(index);
+            if(located != indexCache.end())
+                name = located->second;
+            return {};
+        }
+
+        fs::path keyPath() const
+        {
+            return path / "cache-key.msgpack";
+        }
+        fs::path staging() const
+        {
+            return path / "staging";
+        }
+        fs::path indexMapPath() const
+        {
+            return path / "indices.msgpack";
+        }
+        fs::path helperDirectory() const
+        {
+            return path / "helpers";
+        }
+        fs::path helperPath(const std::string& kernelName) const
+        {
+            return helperDirectory() / (pathComponent(filesystemLiteral(kernelName)) + ".o");
+        }
+        fs::path slicePath(const std::string& key) const
+        {
+            return path / "slices" / key;
+        }
+
+        // Does not create the directory. A query that misses reads nothing.
+        Slice* existingSlice(const std::string& key)
+        {
+            std::lock_guard<std::mutex> lock(sliceMutex);
+            const auto                  found = slices.find(key);
+            if(found != slices.end())
+                return found->second.get();
+            std::error_code error;
+            const auto      location = slicePath(key);
+            if(!fs::is_directory(location, error))
+                return nullptr;
+            auto opened  = std::make_unique<Slice>();
+            opened->path = location;
+            auto* raw    = opened.get();
+            slices.emplace(key, std::move(opened));
+            return raw;
+        }
+
+        Status makeSlice(const std::string& key, Slice*& out)
+        {
+            out = nullptr;
+            if(auto status = files::privateDirectory(path / "slices"); !status.ok())
+                return status;
+            const auto location = slicePath(key);
+            if(auto status = ensureEntryParents(path / "slices", location / "keep"); !status.ok())
+                return status;
+            if(auto status = files::privateDirectory(location); !status.ok())
+                return status;
+            std::lock_guard<std::mutex> lock(sliceMutex);
+            auto&                       slot = slices[key];
+            if(!slot)
+            {
+                slot       = std::make_unique<Slice>();
+                slot->path = location;
+            }
+            out = slot.get();
+            return {};
+        }
+
+        // Creates cache-key.msgpack once when create is set. A missing or
+        // different target, backend or code-object version makes the directory
+        // unusable. An older revision is only read: a missing record is not written.
+        Status checkKey(bool create) const
+        {
+            const auto           file = keyPath();
+            std::vector<uint8_t> bytes;
+            std::error_code      error;
+            if(!fs::exists(file, error))
+            {
+                if(!create)
+                    return failed(Stage::Configure,
+                                  files::utf8String(file) + " does not record a device or backend");
+                if(auto status = msgpack_io::writeCacheKey(documentOf(identity), bytes);
+                   !status.ok())
+                    return status;
+                if(auto status = files::writeAtomically(staging(), file, bytes); !status.ok())
+                    return status;
+            }
+            if(auto status = files::readFile(file, fileLimit, bytes); !status.ok())
+                return status;
+            msgpack_io::CacheKeyDocument stored;
+            if(auto status = msgpack_io::readCacheKey(bytes, stored); !status.ok())
+                return status;
+            if(!directoryAgrees(stored, identity))
+                return failed(Stage::Configure,
+                              files::utf8String(file) + " records a different device or backend");
+            return {};
+        }
+    };
+
+    JitLibrary::JitLibrary(fs::path root)
+        : m_root(root.lexically_normal())
+    {
+        if(!m_root.has_filename() && m_root.has_parent_path())
+            m_root = m_root.parent_path();
+    }
+
+    JitLibrary::~JitLibrary() = default;
+
+    // The revision names the build's directory, so without the generated header
+    // the bare macro name would stringify and every build would share one.
+#ifndef HIPBLASLT_VERSION_TWEAK
+#error "HIPBLASLT_VERSION_TWEAK (hipblaslt/hipblaslt-version.h) names this build's JIT directory"
+#endif
+
+    std::string JitLibrary::buildRevision()
+    {
+#define HIPBLASLT_JIT_TO_STR2(x) #x
+#define HIPBLASLT_JIT_TO_STR(x) HIPBLASLT_JIT_TO_STR2(x)
+        return HIPBLASLT_JIT_TO_STR(HIPBLASLT_VERSION_TWEAK);
+#undef HIPBLASLT_JIT_TO_STR
+#undef HIPBLASLT_JIT_TO_STR2
+    }
+
+    fs::path JitLibrary::buildDirectory() const
+    {
+        return m_root / ("v" + std::to_string(jitLibrarySchema))
+               / filesystemLiteral(buildRevision());
+    }
+
+    fs::path JitLibrary::directory(const CacheKey& key) const
+    {
+        return buildDirectory() / key.directoryName();
+    }
+
+    Status JitLibrary::checkRoot()
+    {
+        if(m_disabled.empty() && !m_checked)
+        {
+            if(rocblaslt_process_is_privileged())
+                m_disabled = "the process runs with elevated privileges";
+#ifndef TENSILE_MSGPACK
+            m_disabled = "hipBLASLt was built to read YAML libraries";
+#endif
+            if(m_disabled.empty() && buildRevision().empty())
+                m_disabled = "this hipBLASLt build has no git revision";
+            for(const auto& path : {m_root, buildDirectory().parent_path(), buildDirectory()})
+                if(m_disabled.empty())
+                    if(auto status = files::privateDirectory(path); !status.ok())
+                        m_disabled = status.message;
+            m_checked = true;
+        }
+        if(!m_disabled.empty())
+            return failed(Stage::Configure, "JIT solution library disabled: " + m_disabled);
+        return {};
+    }
+
+    JitLibrary::Directory* JitLibrary::open(const std::string& revision,
+                                            const std::string& name,
+                                            const CacheKey&    key,
+                                            bool               create,
+                                            Status&            why)
+    {
+        why = {};
+        // The code-object version shares the directory and is not part of its
+        // name. It is part of this slot so a different version is checked again.
+        const auto slotName = revision + "/" + name + "/" + std::to_string(key.codeObjectVersion);
+        auto&      slot     = m_directories[slotName];
+        if(!slot)
+        {
+            auto opened      = std::make_unique<Directory>();
+            opened->revision = revision;
+            opened->current  = revision == buildDirectory().filename().string();
+            opened->path     = buildDirectory().parent_path() / revision / name;
+            opened->identity = key;
+            std::error_code error;
+            if(!create && !fs::is_directory(opened->path, error))
+            {
+                m_directories.erase(slotName);
+                return nullptr;
+            }
+            if(create)
+            {
+                for(const auto& path : {opened->path, opened->staging()})
+                    if(auto status = files::privateDirectory(path); !status.ok())
+                    {
+                        m_directories.erase(slotName);
+                        why = failed(Stage::Configure,
+                                     "JIT solution library disabled: " + status.message);
+                        return nullptr;
+                    }
+            }
+            opened->failure = opened->checkKey(create);
+            slot            = std::move(opened);
+        }
+        why = slot->failure;
+        return why.ok() ? slot.get() : nullptr;
+    }
+
+    Status JitLibrary::attach(const CacheKey& key, int device, Directory*& attached)
+    {
+        attached = nullptr;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if(auto status = checkRoot(); !status.ok())
+            return status;
+        Status why;
+        attached = open(buildDirectory().filename().string(), key.directoryName(), key, true, why);
+        if(attached)
+            addOnce(m_routes[device], attached);
+        return why;
+    }
+
+    Status JitLibrary::acquireHelper(const CacheKey&                         key,
+                                     int                                     device,
+                                     const std::string&                      kernelName,
+                                     const std::function<Status(Artifact&)>& compile,
+                                     Artifact&                               out)
+    {
+        out = {};
+        if(kernelName.empty())
+            return failed(Stage::Build, "A helper has no kernel name");
+        Directory* directory = nullptr;
+        if(auto status = attach(key, device, directory); !status.ok())
+            return status;
+
+        const auto file   = directory->helperPath(kernelName);
+        auto       stored = [&](bool& present) -> Status {
+            std::error_code error;
+            present = fs::is_regular_file(file, error);
+            if(!present)
+                return {};
+            std::vector<uint8_t> bytes;
+            if(auto status = files::readFile(file, fileLimit, bytes); !status.ok())
+                return status;
+            out.name  = kernelName;
+            out.kind  = Artifact::Kind::Relocatable;
+            out.bytes = std::move(bytes);
+            return {};
+        };
+
+        bool present = false;
+        if(auto status = stored(present); !status.ok() || present)
+            return status;
+
+        Artifact compiled;
+        if(auto status = compile(compiled); !status.ok())
+            return status;
+        if(compiled.kind != Artifact::Kind::Relocatable || compiled.bytes.empty())
+            return failed(Stage::Build, "Helper " + kernelName + " produced no relocatable");
+        const auto defined = code_object::inspect(compiled.bytes);
+        const auto& names  = defined.kernelNames;
+        if(!defined.ok() || std::find(names.begin(), names.end(), kernelName) == names.end())
+            return failed(Stage::Build, "The relocatable built for helper " + kernelName
+                                            + " does not define it");
+        compiled.name = kernelName;
+
+        files::FileLock lock;
+        const auto      lockFile = buildDirectory() / "lock";
+        if(auto status = files::FileLock::acquire(lockFile, publishLockTimeout, lock);
+           !status.ok())
+            return status;
+        if(auto status = stored(present); !status.ok() || present)
+            return status;
+        if(auto status = files::privateDirectory(directory->helperDirectory()); !status.ok())
+            return status;
+        if(auto status = ensureEntryParents(directory->helperDirectory(), file); !status.ok())
+            return status;
+        if(auto status = files::writeAtomically(directory->staging(), file, compiled.bytes);
+           !status.ok())
+            return status;
+        out = std::move(compiled);
+        return {};
+    }
+
+    Status JitLibrary::lookup(const CacheKey&                           key,
+                              int                                       device,
+                              const TensileLite::ContractionProblemGemm& problem,
+                              const TensileLite::Hardware&              hardware,
+                              size_t                                    count,
+                              const std::vector<std::string>&           excludeKernels,
+                              std::vector<int32_t>&                     indices)
+    {
+        indices.clear();
+        return staged(Stage::Lookup, [&]() -> Status {
+            if(const auto reason = notImplemented(problem))
+                return {Status::Code::NotSupported, Stage::Lookup, reason};
+            if(!count)
+                return {};
+            const auto              revisionNow = buildDirectory().filename().string();
+            const auto              schema      = buildDirectory().parent_path();
+            std::vector<Directory*> directories;
+            std::vector<Directory*> owners;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if(auto status = checkRoot(); !status.ok())
+                    return status;
+                Status why;
+                auto*  current = open(revisionNow, key.directoryName(), key, true, why);
+                if(!current)
+                    return why.ok() ? failed(Stage::Lookup, "Cannot open the JIT solution library")
+                                    : why;
+                addOnce(m_routes[device], current);
+                directories.push_back(current);
+                owners.push_back(current);
+                // Other device directories of this revision can hold the same
+                // index. Their folder names are not enough: each is opened only
+                // when its stored key agrees. An index is owned only after that
+                // entry's content checks pass, below.
+                const auto prefix = filesystemLiteral(key.target.targetId()) + "_wf"
+                                    + std::to_string(key.wavefrontSize) + "_";
+                std::error_code error;
+                for(fs::directory_iterator next(buildDirectory(), error), end;
+                    !error && next != end;
+                    next.increment(error))
+                {
+                    if(!next->is_directory())
+                        continue;
+                    const auto name = next->path().filename().string();
+                    if(name == key.directoryName() || name.rfind(prefix, 0) != 0)
+                        continue;
+                    std::vector<uint8_t> bytes;
+                    if(!files::readFile(next->path() / "cache-key.msgpack", fileLimit, bytes).ok())
+                        continue;
+                    msgpack_io::CacheKeyDocument stored;
+                    if(!msgpack_io::readCacheKey(bytes, stored).ok() || !stored.hasBackendId
+                       || !stored.hasBackendVersion)
+                        continue;
+                    auto sibling           = key;
+                    sibling.backendId      = stored.backendId;
+                    sibling.backendVersion = static_cast<uint32_t>(stored.backendVersion);
+                    if(sibling.directoryName() != name || !directoryAgrees(stored, sibling))
+                        continue;
+                    Status siblingWhy;
+                    if(auto* opened = open(revisionNow, name, sibling, false, siblingWhy))
+                        owners.push_back(opened);
+                }
+                for(const auto& revision : olderRevisionNames(schema, revisionNow))
+                {
+                    if(!fs::is_directory(schema / revision / key.directoryName(), error))
+                        continue;
+                    Status olderWhy;
+                    auto*  opened = open(revision, key.directoryName(), key, false, olderWhy);
+                    if(!opened)
+                        continue;
+                    addOnce(m_routes[device], opened);
+                    directories.push_back(opened);
+                }
+            }
+            // Indices the current revision may return. A sibling directory
+            // contributes one only after its stored key and that entry's
+            // content checks pass, so a copied folder does not win by name.
+            std::set<int32_t>           owned;
+            std::map<std::string, bool> codeObjects;
+            for(auto* directory : owners)
+            {
+                std::map<int, std::string> mapping;
+                if(!readMapping(Stage::Lookup, directory->indexMapPath(), mapping).ok())
+                    continue;
+                for(const auto& item : mapping)
+                {
+                    auto* slice = directory->existingSlice(item.second);
+                    if(!slice)
+                        continue;
+                    std::lock_guard<std::mutex> guard(slice->mutex);
+                    if(!slice->refresh(directory->identity.target).ok() || !slice->master
+                       || !slice->master->libraryMapping.count(item.first))
+                        continue;
+                    const auto prefix = slice->master->libraryMapping.at(item.first);
+                    try
+                    {
+                        const auto loaded = std::dynamic_pointer_cast<GemmMaster>(
+                            TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
+                                (slice->path / (prefix + ".dat")).string()));
+                        if(!loaded)
+                            continue;
+                        const auto found = loaded->solutions.find(item.first);
+                        if(found != loaded->solutions.end() && found->second
+                           && entryReusable(slice->path,
+                                            prefix,
+                                            *found->second,
+                                            directory->identity,
+                                            codeObjects))
+                            owned.insert(item.first);
+                    }
+                    catch(const std::exception&)
+                    {
+                    }
+                }
+            }
+            const auto           sliceOfProblem = sliceKey(problem);
+            std::vector<int32_t> found;
+            for(auto* directory : directories)
+            {
+                if(found.size() >= count)
+                    break;
+                auto* slice = directory->existingSlice(sliceOfProblem);
+                if(!slice)
+                    continue;
+                std::lock_guard<std::mutex> lock(slice->mutex);
+                if(auto status = slice->refresh(directory->identity.target); !status.ok())
+                {
+                    if(directory->current)
+                        return status;
+                    continue;
+                }
+                auto master = slice->master;
+                if(!master)
+                    continue;
+                // The stock search cannot list every hit: single solution libraries lack
+                // findTopSolutions, and findAllSolutions skips the row predicates. A
+                // matching row's entry lists each of its solutions whose own
+                // predicates hold.
+                for(const auto& row : rowsOf(*master)->rows)
+                {
+                    if(found.size() >= count)
+                        break;
+                    if(!row.first(problem, hardware))
+                        continue;
+                    TensileLite::SolutionSet<TensileLite::ContractionSolution> solutions;
+                    try
+                    {
+                        solutions = row.second->findAllSolutions(problem, hardware);
+                    }
+                    catch(const std::exception& error)
+                    {
+                        if(!directory->current)
+                            continue;
+                        // This build wrote the entry, so a failure is a damaged library.
+                        return failed(Stage::Lookup,
+                                      "Cannot read a JIT solution library entry in "
+                                          + files::utf8String(slice->path) + ": " + error.what());
+                    }
+                    for(const auto& solution : solutions)
+                    {
+                        // Only a hand-edited file can hold an index the mapping cannot resolve.
+                        if(!solution || !TensileLite::isJitKernelIndex(solution->index)
+                           || !master->libraryMapping.count(solution->index)
+                           || excludedKernel(excludeKernels, solution->kernelName))
+                            continue;
+                        const auto prefix = master->libraryMapping.at(solution->index);
+                        // Current and older entries use the same checks. Current
+                        // wins an index only when its own entry passed above.
+                        if(!entryReusable(
+                               slice->path, prefix, *solution, directory->identity, codeObjects)
+                           || (!directory->current && owned.count(solution->index)))
+                            continue;
+                        found.push_back(solution->index);
+                        if(found.size() >= count)
+                            break;
+                    }
+                }
+            }
+            std::sort(found.begin(), found.end());
+            found.erase(std::unique(found.begin(), found.end()), found.end());
+            if(found.size() > count)
+                found.resize(count);
+            indices = std::move(found);
+            return {};
+        });
+    }
+
+    Status JitLibrary::publish(
+        const CacheKey&                                                       key,
+        int                                                                   device,
+        const TensileLite::ContractionProblemGemm&                            problem,
+        const Artifact&                                                       executable,
+        const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+        std::vector<int32_t>&                                                 indices)
+    {
+        indices.clear();
+        return staged(Stage::Publish, [&]() -> Status {
+            if(const auto reason = notImplemented(problem))
+                return {Status::Code::NotSupported, Stage::Publish, reason};
+            Directory* directory = nullptr;
+            if(auto status = attach(key, device, directory); !status.ok())
+                return status;
+            const auto& target = directory->identity.target;
+            if(executable.bytes.empty() || executable.kind != Artifact::Kind::Executable)
+                return failed(Stage::Publish, "A built solution has no executable");
+            if(solutions.empty())
+                return {};
+            const auto defined = code_object::inspect(executable.bytes);
+            if(!defined.ok())
+                return failed(Stage::Publish, "Cannot read the kernels of a built executable");
+            std::vector<GemmSolution> named; // one per solution name, in order
+            std::vector<size_t>       nameOf; // per solution, its position in named
+            std::vector<std::string>  kernels;
+            for(const auto& solution : solutions)
+            {
+                if(!solution || solution->kernelName.empty() || solution->solutionName.empty())
+                    return failed(Stage::Publish, "A built solution has no kernel or name");
+                if(std::find(defined.kernelNames.begin(),
+                             defined.kernelNames.end(),
+                             solution->kernelName)
+                   == defined.kernelNames.end())
+                    return failed(Stage::Publish,
+                                  "The executable does not define kernel " + solution->kernelName);
+                const auto same
+                    = std::find_if(named.begin(), named.end(), [&](const GemmSolution& other) {
+                          return other->solutionName == solution->solutionName;
+                      });
+                nameOf.push_back(static_cast<size_t>(same - named.begin()));
+                if(same == named.end())
+                    named.push_back(solution);
+                kernels.push_back(solution->kernelName);
+            }
+            const auto sizes  = problemSizes(problem);
+            const auto prefix = entryPrefix(problemTypeKey(problem), kernels, sizes);
+
+            files::FileLock lock;
+            const auto      lockFile = buildDirectory() / "lock";
+            if(auto status = files::FileLock::acquire(lockFile, publishLockTimeout, lock);
+               !status.ok())
+                return status;
+            if(auto status = directory->checkKey(true); !status.ok())
+                return status;
+            const auto sliceName = sliceKey(problem);
+            Directory::Slice* slice = nullptr;
+            if(auto status = directory->makeSlice(sliceName, slice); !status.ok())
+                return status;
+
+            const auto           staging   = directory->staging();
+            const auto           allocator = buildDirectory() / "allocator.dat";
+            std::vector<uint8_t> bytes;
+            std::error_code      error;
+            int64_t              next = TensileLite::JitKernelIndexBase;
+            if(fs::exists(allocator, error))
+            {
+                if(auto status = files::readFile(allocator, fileLimit, bytes); !status.ok())
+                    return status;
+                if(auto status = msgpack_io::readAllocator(bytes, next); !status.ok())
+                    return status;
+                if(next < TensileLite::JitKernelIndexBase
+                   || next > TensileLite::LocalKernelIndexBase)
+                    return failed(Stage::Publish,
+                                  files::utf8String(allocator) + " is outside the JIT range");
+            }
+            std::map<int, std::string> mapping;
+            if(auto status = readMapping(Stage::Publish, slice->mappingPath(target), mapping);
+               !status.ok())
+                return status;
+            std::shared_ptr<GemmMaster> master;
+            if(fs::exists(slice->masterPath(target), error))
+            {
+                const auto file = slice->masterPath(target).string();
+                master          = std::dynamic_pointer_cast<GemmMaster>(
+                    TensileLite::LoadLibraryFilePreload<TensileLite::ContractionProblemGemm>(
+                        file, {}));
+                if(!master || !rowsOf(*master))
+                    return failed(Stage::Publish, "Cannot load the JIT solution library " + file);
+            }
+
+            // The same kernels, problem type and sizes reuse the entry, and a
+            // solution already in it keeps its index. entry is in index order.
+            const auto entryFile = slice->path / (prefix + ".dat");
+            const bool present
+                = std::any_of(mapping.begin(), mapping.end(), [&](const auto& mapped) {
+                      return mapped.second == prefix;
+                  });
+            std::vector<GemmSolution> entry;
+            if(present)
+            {
+                const auto stored = std::dynamic_pointer_cast<GemmMaster>(
+                    TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
+                        entryFile.string()));
+                if(!stored)
+                    return failed(Stage::Publish,
+                                  "Cannot load the JIT solution library entry "
+                                      + files::utf8String(entryFile));
+                for(const auto& [index, solution] : stored->solutions)
+                    entry.push_back(solution);
+            }
+            std::vector<int32_t>      namedIndex;
+            std::vector<GemmSolution> added;
+            for(const auto& solution : named)
+            {
+                const auto same
+                    = std::find_if(entry.begin(), entry.end(), [&](const GemmSolution& stored) {
+                          return stored->solutionName == solution->solutionName;
+                      });
+                if(same != entry.end())
+                {
+                    namedIndex.push_back((*same)->index);
+                    continue;
+                }
+                if(next >= TensileLite::LocalKernelIndexBase)
+                    return failed(Stage::Publish, "The reserved JIT index range is exhausted");
+                auto copy   = copySolution(solution);
+                copy->index = static_cast<int32_t>(next++);
+                namedIndex.push_back(copy->index);
+                added.push_back(std::move(copy));
+            }
+            entry.insert(entry.end(), added.begin(), added.end());
+
+            if(!added.empty())
+            {
+                // Allocate first: a crash after this leaves a gap, never a reused index.
+                if(auto status = msgpack_io::writeAllocator(next, bytes); !status.ok())
+                    return status;
+                if(auto status = files::writeAtomically(staging, allocator, bytes); !status.ok())
+                    return status;
+            }
+
+            // The executable is already linked with any helpers.
+            if(!present)
+            {
+                if(auto status = customConfigAgrees(executable.bytes, named); !status.ok())
+                    return status;
+                const auto object = slice->path / (prefix + ".co");
+                if(auto status = ensureEntryParents(slice->path, object); !status.ok())
+                    return status;
+                if(auto status = files::writeAtomically(staging, object, executable.bytes);
+                   !status.ok())
+                    return status;
+            }
+
+            if(!added.empty())
+            {
+                bytes            = encodeLibrary(*entryOf(entry));
+                const auto check = std::dynamic_pointer_cast<GemmMaster>(
+                    TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(bytes));
+                const auto loads = [&](const GemmSolution& solution) {
+                    if(!check)
+                        return false;
+                    const auto found = check->solutions.find(solution->index);
+                    return found != check->solutions.end()
+                           && found->second->kernelName == solution->kernelName;
+                };
+                for(const auto& solution : entry)
+                    if(!loads(solution))
+                        return failed(Stage::Publish,
+                                      "The entry for " + solution->solutionName
+                                          + " does not load as solution "
+                                          + std::to_string(solution->index));
+                if(auto status = ensureEntryParents(slice->path, entryFile); !status.ok())
+                    return status;
+                if(auto status = files::writeAtomically(staging, entryFile, bytes); !status.ok())
+                    return status;
+            }
+
+            if(!present || !added.empty())
+            {
+                const auto text = semanticHashText(entry);
+                if(text.empty())
+                    return failed(Stage::Publish,
+                                  "A built solution has no KernelsFromAnywhere semantic names");
+                const auto hashFile = slice->path / (prefix + ".hash");
+                if(auto status = ensureEntryParents(slice->path, hashFile); !status.ok())
+                    return status;
+                const std::vector<uint8_t> hashBytes(text.begin(), text.end());
+                if(auto status = files::writeAtomically(staging, hashFile, hashBytes); !status.ok())
+                    return status;
+            }
+
+            // A crash can leave entry solutions the mappings do not name yet.
+            std::map<int, std::string> indexMap;
+            if(auto status = readMapping(Stage::Publish, directory->indexMapPath(), indexMap);
+               !status.ok())
+                return status;
+            bool mappingChanged = false, indexMapChanged = false;
+            for(const auto& solution : entry)
+            {
+                auto& mapped = mapping[solution->index];
+                mappingChanged |= mapped != prefix;
+                mapped = prefix;
+                auto& sliceOf = indexMap[solution->index];
+                indexMapChanged |= sliceOf != sliceName;
+                sliceOf = sliceName;
+            }
+            if(mappingChanged)
+                if(auto status = files::writeAtomically(
+                       staging, slice->mappingPath(target), encodeMapping(mapping));
+                   !status.ok())
+                    return status;
+            if(indexMapChanged)
+                if(auto status = files::writeAtomically(
+                       staging, directory->indexMapPath(), encodeMapping(indexMap));
+                   !status.ok())
+                    return status;
+
+            // One master row per entry solution, where the entry's rows were.
+            auto placeholder = std::make_shared<TensileLite::PlaceholderLibrary<
+                TensileLite::ContractionProblemGemm,
+                TensileLite::ContractionSolution>>();
+            placeholder->filePrefix = prefix;
+            std::vector<GemmRows::Row> ours, rows;
+            for(const auto& solution : entry)
+                ours.emplace_back(rowPredicate(sizes, solution), placeholder);
+            size_t stale = 0;
+            if(master)
+                for(const auto& row : rowsOf(*master)->rows)
+                {
+                    const auto* rowPrefix = placeholderPrefix(row);
+                    if(!rowPrefix || *rowPrefix != prefix)
+                        rows.push_back(row);
+                    else if(stale++ == 0)
+                        rows.insert(rows.end(), ours.begin(), ours.end());
+                }
+            if(stale == 0)
+                rows.insert(rows.end(), ours.begin(), ours.end());
+            if(!added.empty() || stale != entry.size())
+            {
+                auto updated     = std::make_shared<GemmMaster>();
+                updated->library = std::make_shared<GemmRows>(rows);
+                if(master)
+                    updated->version = master->version;
+                if(auto status = files::writeAtomically(
+                       staging, slice->masterPath(target), encodeLibrary(*updated));
+                   !status.ok())
+                    return status;
+            }
+
+            lock.release();
+
+            {
+                std::lock_guard<std::mutex> guard(slice->mutex);
+                if(auto status = slice->refresh(target); !status.ok())
+                    return status;
+            }
+            for(const auto position : nameOf)
+                indices.push_back(namedIndex[position]);
+            return {};
+        });
+    }
+
+    JitLibrary::View JitLibrary::resolve(int device, int32_t index, Status& why)
+    {
+        View view;
+        why = staged(Stage::Lookup, [&]() -> Status {
+            if(!TensileLite::isJitKernelIndex(index))
+                return failed(Stage::Lookup,
+                              "Solution index " + std::to_string(index)
+                                  + " is outside the reserved JIT range");
+            Status reloadFailure;
+            for(const bool reload : {false, true})
+            {
+                std::vector<Directory*> routes;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if(!m_disabled.empty())
+                        return failed(Stage::Lookup,
+                                      "JIT solution library disabled: " + m_disabled);
+                    const auto revisionNow = buildDirectory().filename().string();
+                    const auto schema      = buildDirectory().parent_path();
+                    auto       attached    = m_routes[device];
+                    for(auto* directory : attached)
+                    {
+                        if(!directory->current)
+                            continue;
+                        for(const auto& revision : olderRevisionNames(schema, revisionNow))
+                        {
+                            Status ignored;
+                            if(auto* opened = open(revision,
+                                                   directory->path.filename().string(),
+                                                   directory->identity,
+                                                   false,
+                                                   ignored))
+                                addOnce(m_routes[device], opened);
+                        }
+                    }
+                    routes = m_routes[device];
+                }
+                std::stable_partition(routes.begin(), routes.end(), [](const Directory* directory) {
+                    return directory->current;
+                });
+                std::map<std::string, bool> codeObjects;
+                auto                        passes = [&](Directory*         directory,
+                                  Directory::Slice*  slice,
+                                  const std::string& prefix) {
+                    try
+                    {
+                        const auto loaded = std::dynamic_pointer_cast<GemmMaster>(
+                            TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
+                                (slice->path / (prefix + ".dat")).string()));
+                        if(!loaded)
+                            return false;
+                        const auto found = loaded->solutions.find(index);
+                        if(found == loaded->solutions.end() || !found->second)
+                            return false;
+                        return entryReusable(
+                            slice->path, prefix, *found->second, directory->identity, codeObjects);
+                    }
+                    catch(const std::exception&)
+                    {
+                        return false;
+                    }
+                };
+                bool currentOwns = false;
+                for(auto* directory : routes)
+                {
+                    if(!directory->current)
+                        break;
+                    std::string sliceOf;
+                    if(!directory->sliceName(index, sliceOf).ok() || sliceOf.empty())
+                        continue;
+                    auto* slice = directory->existingSlice(sliceOf);
+                    if(!slice)
+                        continue;
+                    std::lock_guard<std::mutex> guard(slice->mutex);
+                    if(!slice->refresh(directory->identity.target).ok() || !slice->master
+                       || !slice->master->libraryMapping.count(index))
+                        continue;
+                    if(passes(directory, slice, slice->master->libraryMapping.at(index)))
+                        currentOwns = true;
+                }
+                for(auto* directory : routes)
+                {
+                    // Current wins only after its entry passed the content
+                    // checks. An older code object is not returned for that index.
+                    if(!directory->current && currentOwns)
+                        continue;
+                    std::string sliceOf;
+                    if(auto status = directory->sliceName(index, sliceOf); !status.ok())
+                    {
+                        reloadFailure = std::move(status);
+                        continue;
+                    }
+                    Directory::Slice* slice = nullptr;
+                    if(!sliceOf.empty())
+                        slice = directory->existingSlice(sliceOf);
+                    if(!slice)
+                        continue;
+                    std::lock_guard<std::mutex> lock(slice->mutex);
+                    if(reload)
+                        if(auto status = slice->refresh(directory->identity.target); !status.ok())
+                        {
+                            reloadFailure = std::move(status);
+                            continue;
+                        }
+                    if(slice->master && slice->master->libraryMapping.count(index))
+                    {
+                        auto*      adapter = slice->adapter(device);
+                        const auto prefix  = slice->master->libraryMapping.at(index);
+                        if(!passes(directory, slice, prefix))
+                            continue;
+                        auto&      loaded  = slice->loadedCodeObjects[device];
+                        if(!loaded.count(prefix))
+                        {
+                            const auto file = (slice->path / (prefix + ".co")).string();
+                            if(const auto error = adapter->loadCodeObjectFile(file);
+                               error != hipSuccess)
+                                return failed(Stage::Lookup,
+                                              "Cannot load JIT code object " + file + ": "
+                                                  + hipGetErrorString(error));
+                            loaded.insert(prefix);
+                        }
+                        view = {slice->master, adapter};
+                        return {};
+                    }
+                }
+            }
+            if(!reloadFailure.ok())
+                return reloadFailure;
+            return failed(Stage::Lookup,
+                          "JIT solution index " + std::to_string(index)
+                              + " is not in a JIT solution library for device "
+                              + std::to_string(device));
+        });
+        return view;
+    }
+
+    std::shared_ptr<TensileLite::ContractionSolution> JitLibrary::solutionByIndex(
+        int device, const TensileLite::Hardware& hardware, int32_t index, Status& why)
+    {
+        std::shared_ptr<TensileLite::ContractionSolution> solution;
+        const auto                                        view = resolve(device, index, why);
+        if(!view.master)
+            return solution;
+        why = staged(Stage::Lookup, [&]() -> Status {
+            solution = view.master->getSolutionByIndex(hardware, index);
+            if(!solution)
+                return failed(Stage::Lookup,
+                              "Cannot load JIT solution index " + std::to_string(index));
+            return {};
+        });
+        return solution;
+    }
+
+    namespace
+    {
+        struct ActiveQuery
+        {
+            bool                     engaged = false;
+            DeviceTarget             target;
+            BackendInfo              backend;
+            size_t                   workspace = 0;
+            std::vector<std::string> exclude;
+            Status                   failure;
+        };
+
+        ActiveQuery& activeQuery()
+        {
+            thread_local ActiveQuery query;
+            return query;
+        }
+    }
+
+    TensileLite::SolutionVector<TensileLite::ContractionSolution>
+        JitLibrary::solutionsFor(const TensileLite::ContractionProblemGemm& problem,
+                                 const TensileLite::Hardware&               hardware,
+                                 int                                        numSolutions)
+    {
+        using Solution = TensileLite::ContractionSolution;
+        TensileLite::SolutionVector<Solution> result;
+        auto&                                 query = activeQuery();
+        if(!query.engaged || numSolutions <= 0 || problem.groupedGemm())
+            return result;
+        auto problemCopy = problem;
+        problemCopy.setWorkspaceSize(query.workspace);
+        const auto key = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
+        std::vector<int32_t> indices;
+        query.failure = lookup(key,
+                               query.target.device,
+                               problemCopy,
+                               hardware,
+                               static_cast<size_t>(numSolutions),
+                               query.exclude,
+                               indices);
+        for(auto index : indices)
+        {
+            Status why;
+            auto   solution = solutionByIndex(query.target.device, hardware, index, why);
+            // A code object that will not load is a failed query, not a miss.
+            if(!why.ok())
+            {
+                query.failure = std::move(why);
+                return {};
+            }
+            if(solution)
+                result.push_back(std::move(solution));
+        }
+        return result;
+    }
+
+    void JitLibrary::beginQuery(const DeviceTarget&      target,
+                                const BackendInfo&       backend,
+                                size_t                   workspace,
+                                std::vector<std::string> excludeKernels)
+    {
+        auto& query     = activeQuery();
+        query           = {};
+        query.engaged   = true;
+        query.target    = target;
+        query.backend   = backend;
+        query.workspace = workspace;
+        query.exclude   = std::move(excludeKernels);
+    }
+
+    void JitLibrary::endQuery()
+    {
+        activeQuery() = {};
+    }
+
+    Status JitLibrary::queryStatus() const
+    {
+        return activeQuery().failure;
+    }
+
+    std::shared_ptr<TensileLite::ContractionSolution>
+        JitLibrary::getSolutionByIndex(TensileLite::ContractionProblemGemm const&,
+                                       TensileLite::Hardware const& hardware,
+                                       const int                    index) const
+    {
+        auto& query = activeQuery();
+        if(!query.engaged)
+            return {};
+        Status why;
+        auto   solution = const_cast<JitLibrary*>(this)->solutionByIndex(
+            query.target.device, hardware, index, why);
+        if(!why.ok())
+            query.failure = std::move(why);
+        return solution;
+    }
+
+    std::shared_ptr<TensileLite::ContractionSolution>
+        JitLibrary::findBestSolution(TensileLite::ContractionProblemGemm const& problem,
+                                     TensileLite::Hardware const&               hardware,
+                                     double*                                    fitness) const
+    {
+        auto found = findTopSolutions(problem, hardware, 1);
+        if(fitness)
+            *fitness = found.empty() ? 0.0 : 1.0;
+        return found.empty() ? nullptr : found.front();
+    }
+
+    TensileLite::SolutionSet<TensileLite::ContractionSolution>
+        JitLibrary::findAllSolutions(TensileLite::ContractionProblemGemm const& problem,
+                                     TensileLite::Hardware const&               hardware,
+                                     TensileLite::SolutionLibrarySearchType) const
+    {
+        auto found = const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, INT32_MAX);
+        TensileLite::SolutionSet<TensileLite::ContractionSolution> result;
+        result.insert(found.begin(), found.end());
+        return result;
+    }
+
+    TensileLite::SolutionSet<TensileLite::ContractionSolution> JitLibrary::findAllSolutionsGroupedGemm(
+        std::vector<TensileLite::ContractionProblemGemm> const&,
+        TensileLite::Hardware const&,
+        TensileLite::SolutionLibrarySearchType) const
+    {
+        return {};
+    }
+
+    std::string JitLibrary::type() const
+    {
+        return "Jit";
+    }
+
+    std::string JitLibrary::description() const
+    {
+        return "JIT solution library";
+    }
+
+    TensileLite::SolutionVector<TensileLite::ContractionSolution>
+        JitLibrary::findTopSolutions(TensileLite::ContractionProblemGemm const& problem,
+                                     TensileLite::Hardware const&               hardware,
+                                     int                                        numSolutions) const
+    {
+        return const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, numSolutions);
+    }
+
+    TensileLite::SolutionVector<TensileLite::ContractionSolution> JitLibrary::findTopSolutionsGroupedGemm(
+        std::vector<TensileLite::ContractionProblemGemm> const&,
+        TensileLite::Hardware const&,
+        int) const
+    {
+        return {};
+    }
+}
