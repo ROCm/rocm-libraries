@@ -29,6 +29,7 @@
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
 #include "elementwise_type_support.hpp"
+#include "handle.hpp"
 #include "logger.hpp"
 
 #include "hiptensor_options.hpp"
@@ -102,6 +103,12 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeD);
 
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    checkResult = hiptensor::checkHandleDevice(handle, "hiptensorElementwiseBinaryExecute");
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;

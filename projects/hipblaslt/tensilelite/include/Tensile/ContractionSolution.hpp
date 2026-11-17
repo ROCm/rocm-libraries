@@ -185,7 +185,8 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        X_MACRO(DeltaPeerD)
 
     enum class CustomArgSemantic
     {
@@ -433,6 +434,7 @@ namespace TensileLite
 
     struct SizeMapping
     {
+        int                    a2aSubRounds     = 1;
         bool                   activationFused  = true;
         int                    adaptiveGemm     = 0;
         int                    adaptiveGemmGSUA = 0;
@@ -1519,6 +1521,7 @@ namespace TensileLite
             bool             useInitialStridesCD       = false;
             bool             stridedBatched            = true;
             bool             outputAmaxD               = false;
+            bool             outputPeerD               = false;
             bool             groupedGemm               = false;
             ActivationType   activationType            = ActivationType::None;
             int              activationArgLength       = 0;
@@ -1533,7 +1536,7 @@ namespace TensileLite
             bool supportDeviceUserArguments = false;
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
-            bool fusedGemmA2A               = false;
+            FusedA2A fusedA2A                   = FusedA2A::Disabled;
             int  metadataLayout             = 0;
             // w4a16 group size, zero-point and encoding come from predicates and the problem;
             // a runtime-group kernel matches several group sizes.
