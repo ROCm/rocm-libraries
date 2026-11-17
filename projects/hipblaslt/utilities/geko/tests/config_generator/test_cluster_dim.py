@@ -97,3 +97,24 @@ def test_cluster_variants_share_their_mi_sampling_mass() -> None:
 def test_entries_without_cluster_dim_keep_their_cost() -> None:
     mi = [16, 16, 32, 1, 1, 8, 8, 2, 2]
     assert _cluster_variant_cost_offsets([_entry(mi), _entry(mi)]).tolist() == [0.0, 0.0]
+
+
+def test_source_swap_entries_keep_an_equal_share_per_value() -> None:
+    """SourceSwap-split entries are not merged into one MI variant set: each SourceSwap
+    value of an MI gets the same mass even when its tile keeps a different number of
+    ClusterDim shapes, and MIs that are split alike keep their relative mass."""
+    mi_a = [32, 16, 128, 1, 1, 8, 4, 2, 2]
+    mi_b = [16, 16, 32, 1, 1, 4, 4, 2, 4]
+
+    def ss(entry: dict, value: bool) -> dict:
+        return {**entry, "SourceSwap": ForkParameter(name="SourceSwap", values=[value])}
+
+    entries = [
+        ss(_entry(mi_a, (1, 1)), False), ss(_entry(mi_a, (2, 8)), False),
+        ss(_entry(mi_a, (1, 1)), True), ss(_entry(mi_a, (2, 2)), True),
+        ss(_entry(mi_a, (4, 4)), True),
+        ss(_entry(mi_b, (1, 1)), False), ss(_entry(mi_b, (1, 1)), True),
+    ]
+    weights = np.exp(-DUCTILE_COST_SCALE * _cluster_variant_cost_offsets(entries))
+    assert weights[0:2].sum() == pytest.approx(weights[2:5].sum())
+    assert weights[0:2].sum() == pytest.approx(weights[5]) == pytest.approx(weights[6])
