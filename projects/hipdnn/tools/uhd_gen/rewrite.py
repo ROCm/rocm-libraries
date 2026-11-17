@@ -24,11 +24,7 @@ from pathlib import Path
 import flatbuffers
 import numpy as np
 
-from .artifact import (
-    GBDT_MODEL_IDENTIFIER,
-    LINEAR_MODEL_IDENTIFIER,
-    MLP_MODEL_IDENTIFIER,
-)
+from .artifact import GBDT_MODEL_IDENTIFIER, LINEAR_MODEL_IDENTIFIER
 from .features import compute_features_hash, evaluate_feature_maps, signature_references
 from .optional import require_safe_signature, safe_signature
 from .promote import PromoteError, _score_metric, _serialize_json, _verify_artifact
@@ -41,7 +37,6 @@ logger = logging.getLogger(__name__)
 _ARTIFACT_ROOTS = {
     "tree_data": ("GbdtModel", GBDT_MODEL_IDENTIFIER),
     "linear_data": ("LinearModel", LINEAR_MODEL_IDENTIFIER),
-    "mlp_data": ("MlpModel", MLP_MODEL_IDENTIFIER),
 }
 
 

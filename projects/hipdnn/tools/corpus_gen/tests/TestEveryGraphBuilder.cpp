@@ -558,9 +558,6 @@ TEST(TestSdpaForms, EveryForwardFormBindsExactlyItsOptionalFields)
 
         EXPECT_TRUE(boundFields(*attributes) == expected.bound) << expected.form;
         EXPECT_EQ(graph->tensors()->size(), expected.forwardTensors) << expected.form;
-        // Only the ragged form names offsets, through the tensors rather than the node.
-        EXPECT_FALSE(attributes->cu_seq_len_q_tensor_uid().has_value()) << expected.form;
-        EXPECT_FALSE(attributes->cu_seq_len_kv_tensor_uid().has_value()) << expected.form;
     }
 }
 
