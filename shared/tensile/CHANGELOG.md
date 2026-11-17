@@ -2,6 +2,10 @@
 
 ## Tensile 4.50.0
 
+### Resolved issues
+
+- On Windows, library (`.dat`) and code-object files whose full path is 260 characters or more are now opened through their `\\?\` form, so they load without long paths being enabled.
+
 ## Tensile 4.49.0
 
 ## Tensile 4.48.0

@@ -91,6 +91,7 @@ target_sources(
           "${_CMAKE_CURRENT_BINARY_DIR}/ContractionProblemPredicates.hpp"
           "${_CMAKE_CURRENT_BINARY_DIR}/DataTypes_Int8.hpp"
           "${_CMAKE_CURRENT_BINARY_DIR}/Properties.hpp"
+          "${_CMAKE_CURRENT_BINARY_DIR}/LongPath.hpp"
           "${_CMAKE_CURRENT_BINARY_DIR}/Utils.hpp"
           "${_CMAKE_CURRENT_BINARY_DIR}/SolutionMapLibrary.hpp"
           "${_CMAKE_CURRENT_BINARY_DIR}/SolutionLibrary.hpp"

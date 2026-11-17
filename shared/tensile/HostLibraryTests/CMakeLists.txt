@@ -127,6 +127,7 @@ set(test_sources ${test_sources}
     DataTypes_test.cpp
     EmbeddedData_test.cpp
     KernelArguments_test.cpp
+    LongPath_test.cpp
     Predicates_test.cpp
     ProjectedPerformance_test.cpp
     DecisionTree_test.cpp

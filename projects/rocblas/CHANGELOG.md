@@ -29,6 +29,7 @@ rocBLAS documentation is available at
 * Fix Level 2 transposed `gemv` (`TransA != N`) failing its kernel launch when `n` is large enough that `grid.x * blockDim.x` reaches 2^32. HIP rejects that launch because the AQL grid size is 32 bits. The grid is now clamped to that limit, and the kernel walks the remaining columns in strides of `gridDim.x` using 64-bit indices.
 * Fix a crash on Windows when rocBLAS cannot find its Tensile library file and the deployment directory name contains a regex escape, such as `x-deploy`. The diagnostic that lists the library files built a `std::regex` from that path and threw `std::regex_error` instead of returning a status. Library filenames are now matched directly, and a missing directory no longer throws from the diagnostic itself.
 * Fix the rocBLAS library build on Python 3.12 when setuptools is not installed. `library/src/merge_archives.py` imported `distutils.spawn`, which that Python release removed from the standard library, so the archive merge step failed before parsing its arguments. The script now locates `ar` with `shutil.which`.
+* Fix rocBLAS aborting or failing to load Tensile kernels on Windows when a Tensile library or code-object file's full path is 260 characters or more and long paths are not enabled, for example with an install root of 107 characters or more. A library can't opt its process into long paths, so these files failed to open. Library, code-object, and search paths of that length are now used in their `\\?\` form.
 
 ## rocBLAS 5.8.0 for ROCm 10.2.0
 
