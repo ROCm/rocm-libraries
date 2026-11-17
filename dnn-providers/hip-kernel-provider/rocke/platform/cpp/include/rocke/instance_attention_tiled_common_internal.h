@@ -7,7 +7,9 @@
 #ifndef ROCKE_INSTANCE_ATTENTION_TILED_COMMON_INTERNAL_H
 #define ROCKE_INSTANCE_ATTENTION_TILED_COMMON_INTERNAL_H
 
-#include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t */
+#include <stdbool.h>
+
+#include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t, rocke_type_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +37,62 @@ rocke_value_t* rocke__mfma_32x32_c_col(rocke_ir_builder_t* b, rocke_value_t* lan
  * rebuilds the distribution against its own arena instead of reading freed
  * memory. Safe to call when nothing is cached (no-op). */
 void rocke_attn2d_c32_dist_reset(void);
+
+/* ------------------------------------------- tiled 2D lane map (TiledLaneMap) *
+ *
+ * Per-lane row map and register-P helpers of the tiled 2D kernels. Each arch
+ * fills one from its build ctx right before a call (pointer copies only, no IR).
+ * The lane_* values are the prologue-cached SSA values; a NULL one has not been
+ * emitted yet and the helper emits a fresh op in its place. */
+typedef struct rocke_attn_tiled_lane_map
+{
+    rocke_ir_builder_t* b;
+    rocke_value_t* lane;
+    rocke_value_t* lane_rg; /* lane / 16 */
+    rocke_value_t* lane_col; /* lane % 16 */
+    rocke_value_t* lane_col_div4;
+    rocke_value_t* lane_col_mod4;
+    rocke_value_t* lane_rg_is0;
+    rocke_value_t* lane_rg_is1;
+    rocke_value_t* lane_rg_is2;
+    const rocke_type_t* dtype;
+    bool use_mfma_32x32;
+    bool transposed_qk_32x32;
+} rocke_attn_tiled_lane_map_t;
+
+/* in_warp_row(r): lane_rg*4 + (r//4)*16 + r%4. */
+rocke_value_t* rocke_attn_tiled_in_warp_row(const rocke_attn_tiled_lane_map_t* lm, int r);
+/* state_row(r): softmax state slot r's row in the active layout. */
+rocke_value_t* rocke_attn_tiled_state_row(const rocke_attn_tiled_lane_map_t* lm, int r);
+/* bit2(v, bit): (v >> bit) & 1. */
+rocke_value_t* rocke_attn_tiled_bit2(rocke_ir_builder_t* b, rocke_value_t* v, int bit);
+/* select_lane_rg(v0..v3): pick v[lane_rg] for lane_rg in 0..3. */
+rocke_value_t* rocke_attn_tiled_select_lane_rg(const rocke_attn_tiled_lane_map_t* lm,
+                                               rocke_value_t* v0,
+                                               rocke_value_t* v1,
+                                               rocke_value_t* v2,
+                                               rocke_value_t* v3);
+/* permute_p_c_to_a16: C-distribution P (4 f32 regs) -> A16 layout; writes 4
+ * values to ``out`` and 4 to ``*out_n`` (when non-NULL). */
+void rocke_attn_tiled_permute_p_c_to_a16(const rocke_attn_tiled_lane_map_t* lm,
+                                         rocke_value_t* const* p_regs_f32,
+                                         int n,
+                                         rocke_value_t** out,
+                                         int* out_n);
+/* pack_p_a16 / pack_p_a32: pack permuted P to the MFMA A operand vector. */
+rocke_value_t* rocke_attn_tiled_pack_p_a16(const rocke_attn_tiled_lane_map_t* lm,
+                                           rocke_value_t* const* p_regs_f32,
+                                           int n);
+rocke_value_t* rocke_attn_tiled_pack_p_a32(const rocke_attn_tiled_lane_map_t* lm,
+                                           rocke_value_t* const* p_regs0_f32,
+                                           rocke_value_t* const* p_regs1_f32,
+                                           int n);
+
+/* AccLayout.idx: flat index of the (N-tile, M-atom) PV accumulator. */
+static inline int rocke_attn_tiled_acc_idx(int acc_m_atoms, int n, int atom)
+{
+    return n * acc_m_atoms + atom;
+}
 
 #ifdef __cplusplus
 }

@@ -341,73 +341,16 @@ void rocke_gfx950_attn2d_permute_p_c_to_a16(rocke_gfx950_attn2d_build_ctx_t* ctx
                                             rocke_value_t** out,
                                             int* out_n)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* lane_col_mod4 = (ctx->lane_col_mod4_v != NULL)
-                                       ? ctx->lane_col_mod4_v
-                                       : rocke_b_mod(b, fh_lane_col(ctx), rocke_b_const_i32(b, 4));
-    rocke_value_t* lane_col_div4 = (ctx->lane_col_div4_v != NULL)
-                                       ? ctx->lane_col_div4_v
-                                       : rocke_b_div(b, fh_lane_col(ctx), rocke_b_const_i32(b, 4));
-    rocke_value_t* lane_rg = fh_lane_rg(ctx);
-
-    rocke_value_t* vals[4];
-    int i;
-    for(i = 0; i < 4; ++i)
-        vals[i] = (i < n) ? p_regs_f32[i] : NULL;
-
-    /* Two bit-level transposes: swap C (lane_col_mod4) with R (reg index). */
-    for(int bit = 0; bit < 2; ++bit)
-    {
-        rocke_value_t* lane_bit = rocke_gfx950_attn2d_bit2(ctx, lane_col_mod4, bit);
-        int reg_bit = 1 << bit; /* 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle */
-        rocke_value_t* old[4];
-        for(i = 0; i < 4; ++i)
-            old[i] = vals[i];
-        for(int reg = 0; reg < 4; ++reg)
-        {
-            rocke_value_t* partner = rocke_b_warp_shuffle_xor_dpp(b, old[reg ^ reg_bit], reg_bit);
-            rocke_value_t* same_bit
-                = rocke_b_cmp_eq(b, lane_bit, rocke_b_const_i32(b, (reg >> bit) & 1));
-            vals[reg] = rocke_b_select(b, same_bit, old[reg], partner);
-        }
-    }
-
-    /* Lane-field swaps: exchange A (lane_rg) and B (lane_col_div4). */
-    {
-        const int bits[2] = {0, 1};
-        const int lane_xors[2] = {20, 40};
-        for(int j = 0; j < 2; ++j)
-        {
-            int bit = bits[j];
-            int lane_xor = lane_xors[j];
-            rocke_value_t* a_bit = rocke_gfx950_attn2d_bit2(ctx, lane_rg, bit);
-            rocke_value_t* b_bit = rocke_gfx950_attn2d_bit2(ctx, lane_col_div4, bit);
-            rocke_value_t* swap = rocke_b_cmp_ne(b, a_bit, b_bit);
-            for(i = 0; i < 4; ++i)
-                vals[i] = rocke_b_select(
-                    b, swap, rocke_b_warp_shuffle_xor(b, vals[i], lane_xor), vals[i]);
-        }
-    }
-
-    for(i = 0; i < 4; ++i)
-        out[i] = vals[i];
-    if(out_n != NULL)
-        *out_n = 4;
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx950_attn2d_lane_map(ctx);
+    rocke_attn_tiled_permute_p_c_to_a16(&lm, p_regs_f32, n, out, out_n);
 }
 
 rocke_value_t* rocke_gfx950_attn2d_pack_p_a16(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                               rocke_value_t* const* p_regs_f32,
                                               int n)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    const rocke_type_t* dtype = ctx->dtype;
-    rocke_value_t* permuted[4];
-    rocke_value_t* casted[4];
-    int out_n = 0;
-    rocke_gfx950_attn2d_permute_p_c_to_a16(ctx, p_regs_f32, n, permuted, &out_n);
-    for(int i = 0; i < 4; ++i)
-        casted[i] = rocke_b_cast_f32_to(b, permuted[i], dtype);
-    return rocke_b_vec_pack(b, casted, 4, dtype);
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx950_attn2d_lane_map(ctx);
+    return rocke_attn_tiled_pack_p_a16(&lm, p_regs_f32, n);
 }
 
 rocke_value_t* rocke_gfx950_attn2d_pack_p_a32(rocke_gfx950_attn2d_build_ctx_t* ctx,
@@ -415,33 +358,8 @@ rocke_value_t* rocke_gfx950_attn2d_pack_p_a32(rocke_gfx950_attn2d_build_ctx_t* c
                                               rocke_value_t* const* p_regs1_f32,
                                               int n)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    const rocke_type_t* dtype = ctx->dtype;
-    rocke_value_t* vals0[4];
-    rocke_value_t* vals1[4];
-    rocke_value_t* lohi[8];
-    int dummy = 0;
-    rocke_gfx950_attn2d_permute_p_c_to_a16(ctx, p_regs0_f32, n, vals0, &dummy);
-    rocke_gfx950_attn2d_permute_p_c_to_a16(ctx, p_regs1_f32, n, vals1, &dummy);
-    for(int j = 0; j < 4; ++j)
-    {
-        rocke_value_t* v0 = vals0[j];
-        rocke_value_t* v1 = vals1[j];
-        rocke_value_t* v0_x16 = rocke_b_warp_shuffle_xor(b, v0, 16);
-        rocke_value_t* v0_x32 = rocke_b_warp_shuffle_xor(b, v0, 32);
-        rocke_value_t* v0_x48 = rocke_b_warp_shuffle_xor(b, v0, 48);
-        rocke_value_t* v1_x16 = rocke_b_warp_shuffle_xor(b, v1, 16);
-        rocke_value_t* v1_x32 = rocke_b_warp_shuffle_xor(b, v1, 32);
-        rocke_value_t* v1_x48 = rocke_b_warp_shuffle_xor(b, v1, 48);
-        lohi[j] = rocke_gfx950_attn2d_select_lane_rg(ctx, v0, v0_x48, v1_x32, v1_x16);
-        lohi[4 + j] = rocke_gfx950_attn2d_select_lane_rg(ctx, v0_x16, v0_x32, v1_x48, v1);
-    }
-    {
-        rocke_value_t* casted[8];
-        for(int i = 0; i < 8; ++i)
-            casted[i] = rocke_b_cast_f32_to(b, lohi[i], dtype);
-        return rocke_b_vec_pack(b, casted, 8, dtype);
-    }
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx950_attn2d_lane_map(ctx);
+    return rocke_attn_tiled_pack_p_a32(&lm, p_regs0_f32, p_regs1_f32, n);
 }
 
 /* REGISTER_PV scratch: P kept in registers, flattened [reg][n] (stride

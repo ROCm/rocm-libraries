@@ -42,7 +42,12 @@ from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common._spec_checks import require_bool
-from kernels.common._attention_tiled_shared import mfma_32x32_c_col, mfma_32x32_c_row
+from kernels.common._attention_tiled_shared import (
+    AccLayout,
+    TiledLaneMap,
+    mfma_32x32_c_col,
+    mfma_32x32_c_row,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -2266,94 +2271,25 @@ def build_unified_attention_2d_tiled(
     lane_rg_is1 = b.cmp_eq(lane_rg, b.const_i32(1))
     lane_rg_is2 = b.cmp_eq(lane_rg, b.const_i32(2))
 
-    # ---- Per-lane row map ----
-    # For ``block_m_per_warp=16`` the lane owns 4 row slots within one
-    # 16-row atom (rows ``lane_rg*4 + r`` for ``r in 0..3``). For
-    # ``block_m_per_warp=32`` the lane owns 8 row slots across 2
-    # stacked atoms: reg ``r`` maps to ``(atom_idx, in_atom) =
-    # (r // 4, r % 4)`` and the in-warp row is
-    # ``atom_idx * 16 + lane_rg * 4 + in_atom``.
-    def _in_warp_row(r: int) -> Value:
-        atom_idx = r // 4
-        in_atom = r % 4
-        return b.add(
-            b.mul(lane_rg, b.const_i32(4)),
-            b.const_i32(atom_idx * 16 + in_atom),
-        )
-
-    def _state_row(r: int) -> Value:
-        """Row represented by softmax state slot ``r`` in the active layout."""
-        if USE_MFMA_32X32 and not TRANSPOSED_QK_32X32:
-            return mfma_32x32_c_row(b, lane, r)
-        return _in_warp_row(r)
-
-    def _bit2(v: Value, bit: int) -> Value:
-        return b.land(b.lshr(v, b.const_i32(bit)), b.const_i32(1))
-
-    def _select_lane_rg(v0: Value, v1: Value, v2: Value, v3: Value) -> Value:
-        return b.select(
-            lane_rg_is0, v0, b.select(lane_rg_is1, v1, b.select(lane_rg_is2, v2, v3))
-        )
-
-    def _permute_p_c_to_a16(p_regs_f32: list[Value]) -> list[Value]:
-        """Convert one 16-col P tile from 16x16 MFMA-C regs to PV-A regs.
-
-        Current production geometry (not the 32x32 migration) has QK C
-        indexed by lane fields ``(A=lane/16, B=(lane%16)/4, C=lane%4)``
-        and per-lane register ``R``:
-
-            P[row=A*4+R, col=B*4+C]
-
-        PV's A operand wants:
-
-            P[row=B*4+C, col=A*4+R]
-
-        so the transform is ``(A,B,C,R) -> (B,A,R,C)``. This is the same
-        register-P idea CK Tile uses to avoid an LDS bridge between two
-        GEMMs. Two bit-level transposes swap ``C`` with ``R`` inside a
-        lane quad; then lane-field swaps exchange ``A`` and ``B``.
-        """
-
-        vals = p_regs_f32
-        for bit in (0, 1):
-            lane_bit = _bit2(lane_col_mod4, bit)
-            reg_bit = 1 << bit  # 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle
-            old = vals
-            vals = []
-            for reg in range(4):
-                partner = b.warp_shuffle_xor_dpp(old[reg ^ reg_bit], reg_bit)
-                same_bit = b.cmp_eq(lane_bit, b.const_i32((reg >> bit) & 1))
-                vals.append(b.select(same_bit, old[reg], partner))
-
-        for bit, lane_xor in ((0, 20), (1, 40)):
-            a_bit = _bit2(lane_rg, bit)
-            b_bit = _bit2(lane_col_div4, bit)
-            swap = b.cmp_ne(a_bit, b_bit)
-            vals = [b.select(swap, b.warp_shuffle_xor(v, lane_xor), v) for v in vals]
-        return vals
-
-    def _pack_p_a16(p_regs_f32: list[Value]) -> Value:
-        return b.vec_pack(
-            [b.cast_f32_to(v, dtype) for v in _permute_p_c_to_a16(p_regs_f32)], dtype
-        )
-
-    def _pack_p_a32(p_regs0_f32: list[Value], p_regs1_f32: list[Value]) -> Value:
-        vals0 = _permute_p_c_to_a16(p_regs0_f32)
-        vals1 = _permute_p_c_to_a16(p_regs1_f32)
-        lo: list[Value] = []
-        hi: list[Value] = []
-        for j in range(4):
-            v0 = vals0[j]
-            v1 = vals1[j]
-            v0_x16 = b.warp_shuffle_xor(v0, 16)
-            v0_x32 = b.warp_shuffle_xor(v0, 32)
-            v0_x48 = b.warp_shuffle_xor(v0, 48)
-            v1_x16 = b.warp_shuffle_xor(v1, 16)
-            v1_x32 = b.warp_shuffle_xor(v1, 32)
-            v1_x48 = b.warp_shuffle_xor(v1, 48)
-            lo.append(_select_lane_rg(v0, v0_x48, v1_x32, v1_x16))
-            hi.append(_select_lane_rg(v0_x16, v0_x32, v1_x48, v1))
-        return b.vec_pack([b.cast_f32_to(v, dtype) for v in (lo + hi)], dtype)
+    # ---- Per-lane row map and register-P helpers ----
+    # Shared with the other arch's tiled 2D kernel; see TiledLaneMap.
+    lanes = TiledLaneMap(
+        b=b,
+        lane=lane,
+        lane_rg=lane_rg,
+        lane_col_div4=lane_col_div4,
+        lane_col_mod4=lane_col_mod4,
+        lane_rg_is0=lane_rg_is0,
+        lane_rg_is1=lane_rg_is1,
+        lane_rg_is2=lane_rg_is2,
+        dtype=dtype,
+        use_mfma_32x32=USE_MFMA_32X32,
+        transposed_qk_32x32=TRANSPOSED_QK_32X32,
+    )
+    _in_warp_row = lanes.in_warp_row
+    _state_row = lanes.state_row
+    _pack_p_a16 = lanes.pack_p_a16
+    _pack_p_a32 = lanes.pack_p_a32
 
     if USE_SINKS:
         m_inits = []
@@ -2389,8 +2325,8 @@ def build_unified_attention_2d_tiled(
     acc_zero = b.zero_vec_f32(16) if USE_MFMA_32X32 else b.zero_vec_f32(4)
     acc_inits = [acc_zero for _ in range(ACC_N_TILES * ACC_M_ATOMS)]
 
-    def _acc_idx(n: int, atom: int) -> int:
-        return n * ACC_M_ATOMS + atom
+    acc_layout = AccLayout(ACC_M_ATOMS)
+    _acc_idx = acc_layout.idx
 
     iter_args = []
     for r in range(SOFTMAX_STATE_SLOTS):
@@ -4104,8 +4040,7 @@ def build_unified_attention_2d_tiled(
         ]
 
         # acc_vals is flat indexed by (n * M_ATOMS_PER_WARP + atom).
-        def _acc_get(n: int, atom: int) -> Value:
-            return acc_vals[n * ACC_M_ATOMS + atom]
+        _acc_get = acc_layout.getter(acc_vals)
 
         cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
         # Single-buffered K: there is only slot 0, so the "next" buffer IS the
@@ -5590,8 +5525,7 @@ def build_unified_attention_2d_tiled(
         for atom in range(ACC_M_ATOMS)
     ]
 
-    def _acc_final_get(n: int, atom: int) -> Value:
-        return acc_final[n * ACC_M_ATOMS + atom]
+    _acc_final_get = acc_layout.getter(acc_final)
 
     # Per-row reciprocal of L (computed once, reused across stripes). Only an
     # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
