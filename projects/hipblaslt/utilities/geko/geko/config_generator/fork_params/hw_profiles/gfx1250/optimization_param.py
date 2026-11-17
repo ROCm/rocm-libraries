@@ -738,6 +738,16 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
+        """Both values, for every MI.
+
+        SourceSwap=True on a non-square MI (32x16) swaps the effective M and N, so
+        the kernel builds a different macro tile: [32, 16, 128, 1, 1, 8, 4, 2, 2]
+        is 512x128 unswapped and 256x256 swapped, the tile of the shipped
+        MXFP4/NVFP4 MAF kernel. When ClusterDim is coupled and some MI is
+        non-square, _GFX1250SourceSwapSplit gives each MI one group entry per
+        value, so the ClusterDim coupling ranks each on its own tile; otherwise
+        the parameter stays flat. Square MIs build the same tile either way.
+        """
         return self._make_param("SourceSwap", [False, True])
 
     @param
