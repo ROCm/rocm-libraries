@@ -21,93 +21,9 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "rocsparse_check_cholesky.hpp"
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
-
-// Check that the product of the IC factors L*L^H matches the original matrix A on the strictly
-// lower part of the pattern of A. The diagonal is skipped: it is sqrt(|d|), which breaks the
-// identity when A is not positive definite. `label` names the factor in the error message.
-template <typename T>
-static void check_csr_cholesky(rocsparse_int                     M,
-                               const host_vector<rocsparse_int>& csr_row_ptr,
-                               const host_vector<rocsparse_int>& csr_col_ind,
-                               const host_vector<T>&             A,
-                               const host_vector<T>&             L,
-                               rocsparse_index_base              base,
-                               const char*                       label)
-{
-    using R                = floating_data_t<T>;
-    const R       eps      = std::numeric_limits<R>::epsilon();
-    rocsparse_int failures = 0;
-
-    std::vector<rocsparse_int> diag(M, -1);
-    for(rocsparse_int i = 0; i < M; ++i)
-        for(rocsparse_int p = csr_row_ptr[i] - base; p < csr_row_ptr[i + 1] - base; ++p)
-            if(csr_col_ind[p] - base == i)
-                diag[i] = p;
-
-    std::vector<rocsparse_int> pos(M, -1);
-    for(rocsparse_int i = 0; i < M; ++i)
-    {
-        const rocsparse_int begin = csr_row_ptr[i] - base;
-        const rocsparse_int end   = csr_row_ptr[i + 1] - base;
-        for(rocsparse_int p = begin; p < end; ++p)
-            pos[csr_col_ind[p] - base] = p;
-
-        for(rocsparse_int p = begin; p < end; ++p)
-        {
-            const rocsparse_int j = csr_col_ind[p] - base;
-            if(j >= i || diag[j] == -1)
-                continue;
-
-            T             s     = L[p] * rocsparse_conj(L[diag[j]]);
-            R             bound = rocsparse_abs(A[p]) + rocsparse_abs(s);
-            rocsparse_int terms = 1;
-            // Columns are sorted, so the entries of row j before its diagonal are its k < j.
-            for(rocsparse_int q = csr_row_ptr[j] - base; q < diag[j]; ++q)
-            {
-                const rocsparse_int k = csr_col_ind[q] - base;
-                if(pos[k] != -1)
-                {
-                    const T t = L[pos[k]] * rocsparse_conj(L[q]);
-                    s         = s + t;
-                    bound += rocsparse_abs(t);
-                    ++terms;
-                }
-            }
-
-            // Backward error bound of a sum of `terms` products, (terms + 1) * eps * sum |t|,
-            // with a margin of 10.
-            const R err = rocsparse_abs(s - A[p]);
-            const R tol = 10 * (terms + 1) * eps * bound;
-            if(!(err <= tol))
-            {
-                if(failures == 0)
-                {
-                    std::cerr << "csric0 (" << label << "): (L * L^H)(" << i << ", " << j
-                              << ") = " << s << " differs from A(" << i << ", " << j
-                              << ") = " << A[p] << " by " << err << " > " << tol << " (" << terms
-                              << " terms, bound " << bound << ")" << std::endl;
-                }
-                ++failures;
-            }
-        }
-
-        for(rocsparse_int p = begin; p < end; ++p)
-            pos[csr_col_ind[p] - base] = -1;
-    }
-
-    if(failures != 0)
-    {
-        std::cerr << "csric0 (" << label << "): " << failures << " entries of L * L^H differ from A"
-                  << std::endl;
-#ifdef GOOGLE_TEST
-        FAIL();
-#else
-        exit(EXIT_FAILURE);
-#endif
-    }
-}
 
 template <typename T>
 static void test_csric0_matrix(rocsparse_local_handle&    handle,
@@ -315,15 +231,20 @@ static void test_csric0_matrix(rocsparse_local_handle&    handle,
                    return rocsparse_isnan(v) || rocsparse_isinf(v);
                }))
             {
-                check_csr_cholesky(
-                    M, hcsr_row_ptr, hcsr_col_ind, hcsr_val, hcsr_val_1, base, "pointer mode host");
                 check_csr_cholesky(M,
-                                   hcsr_row_ptr,
-                                   hcsr_col_ind,
-                                   hcsr_val,
-                                   hcsr_val_2,
+                                   hcsr_row_ptr.data(),
+                                   hcsr_col_ind.data(),
+                                   hcsr_val.data(),
+                                   hcsr_val_1.data(),
                                    base,
-                                   "pointer mode device");
+                                   "csric0, pointer mode host");
+                check_csr_cholesky(M,
+                                   hcsr_row_ptr.data(),
+                                   hcsr_col_ind.data(),
+                                   hcsr_val.data(),
+                                   hcsr_val_2.data(),
+                                   base,
+                                   "csric0, pointer mode device");
             }
         }
         else
