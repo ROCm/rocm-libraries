@@ -87,12 +87,12 @@ from rocke.core.ir import (
     Value,
     VectorType,
 )
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.io import concat_tree, smem_load_fragment
-from rocke.helpers.layouts import ConvKOuterFragmentReader
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -5940,7 +5940,7 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
 
 # The C++ engine stores the per-tap accumulators and the delta ring in
 # fixed-size arrays sized by ``ROCKE_DCONV_WGRAD_MAX_K{H,W}``
-# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
+# (``library/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
 # part of the spec contract rather than a C-side implementation detail: both
 # engines reject above it, or a KH=9 spec would build here and fail there.
 _WGRAD_MAX_KH = 8
@@ -12039,7 +12039,7 @@ class DirectDepthwiseSpec:
 
 # The C++ engine holds the KH x KW depthwise weights (regular and spatial
 # forward) in fixed-size register tables sized by ``ROCKE_DCONV_DW_MAX_K{H,W}``
-# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``): both engines'
+# (``library/cpp/include/rocke/instance_conv_direct_grouped.h``): both engines'
 # validators reject above it, so a spec that validates builds in either.
 _DW_MAX_KH = 32
 _DW_MAX_KW = 32
@@ -14162,8 +14162,17 @@ def is_valid_dgrad_4c_problem(problem: DirectConvProblem) -> tuple[bool, str]:
 
 
 def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem:
-    """The forward problem the 4c dgrad kernel runs: ``(dY, W_T) -> dX`` with
-    ``H = Ho, W = Wo, cpg' = kpg, kpg' = cpg, PAD' = KH-1-PAD`` (no check)."""
+    """The forward problem a single-kernel stride-1 dgrad runs (the 4c dgrad
+    and ``conv_direct_dgrad_pp_mfma``): ``(dY, W_T) -> dX`` with ``H = Ho,
+    W = Wo, cpg' = kpg, kpg' = cpg, PAD' = dil_h*(KH-1)-PAD`` and
+    ``pad_w' = dil_w*(KW-1)-PAD_W``. An implicit ``pad_w`` (-1) stays -1
+    when ``dil_w*(KW-1) == dil_h*(KH-1)`` (the column flip then equals the
+    row flip). A negative column flip, or a ``pad_w`` below -1, gives a
+    ``pad_w'`` below -1 (never the implicit -1), which the validators refuse.
+    The flipped padding is the general one, so the transposed
+    problem's ``Ho, Wo`` are the dgrad's ``H, W`` for any dilation (it is
+    ``KH-1-PAD`` at dilation 1). Stride and dilation are kept, so the forward
+    validators refuse a strided or dilated dgrad (no check here)."""
     p = problem
     return DirectConvProblem(
         N=p.N,
@@ -14174,10 +14183,25 @@ def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem
         kpg=p.cpg,
         KH=p.KH,
         KW=p.KW,
-        PAD=p.KH - 1 - p.PAD,
-        stride=1,
+        PAD=p.dil_h * (p.KH - 1) - p.PAD,
+        stride=p.stride,
         dtype=p.dtype,
+        dil_h=p.dil_h,
+        dil_w=p.dil_w,
+        pad_w=_dgrad_transposed_pad_w(p),
     )
+
+
+def _dgrad_transposed_pad_w(p: DirectConvProblem) -> int:
+    """``pad_w`` of :func:`dgrad_4c_transposed_problem`: the column flip
+    ``dil_w*(KW-1)-PAD_W``, left implicit (-1) when it equals the row flip.
+    A negative flip maps below -1, so it never reads as the implicit -1."""
+    if p.pad_w < -1:
+        return p.pad_w
+    if p.pad_w == -1 and p.dil_w * (p.KW - 1) == p.dil_h * (p.KH - 1):
+        return -1
+    flip = p.dil_w * (p.KW - 1) - p.PAD_W
+    return flip if flip >= 0 else min(flip, -2)
 
 
 def make_dgrad_4c_spec(

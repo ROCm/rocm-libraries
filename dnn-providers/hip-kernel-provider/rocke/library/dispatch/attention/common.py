@@ -78,6 +78,9 @@ FAMILY = "attention_unified"
 # v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
 # window as kernargs.
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
+# The query-side options of a packed request: each is an ``AttentionRequest``
+# field, the feature it reports, and the RDNA WMMA prefill spec field it sets.
+QUERY_SIDE_OPTIONS = ("dense_q", "seqused_q")
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
@@ -202,6 +205,16 @@ class AttentionRequest(OperatorRequest):
     # count. Reported as the ``runtime_head_dims`` feature, so only candidates
     # whose kernels implement it (RDNA WMMA) admit it.
     runtime_head_dims: bool = False
+    # Query-side options of a packed request (hipDNN's paged SDPA graphs).
+    # ``dense_q`` (paged only): Q / O (and LSE) are batch-strided
+    # ``[B, seqlen_q, Hq, D]`` with no ``cu_seqlens_q``. ``seqused_q`` (ragged
+    # or paged): an INT32 ``tensors["seqused_q"]`` gives each sequence's live
+    # query rows; with ``dense_q`` the rows past it are padding (O = 0, LSE =
+    # -inf), otherwise they belong to no sequence. Reported as the ``dense_q``
+    # / ``seqused_q`` features, so only candidates whose kernels implement them
+    # (the RDNA WMMA prefill) admit them.
+    dense_q: bool = False
+    seqused_q: bool = False
 
     def __post_init__(self) -> None:
         # ONE ``__post_init__``, normalizing both fields. Two of them is not two
@@ -219,6 +232,11 @@ class AttentionRequest(OperatorRequest):
 
     def normalized(self) -> dict:
         d = asdict(self)
+        # The query-side options join the identity only when set, so every
+        # request without them keeps the request_hash it had before they existed.
+        for name in QUERY_SIDE_OPTIONS:
+            if d[name] is False:
+                del d[name]
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
@@ -305,6 +323,9 @@ class AttentionRequest(OperatorRequest):
             active.add("lse")
         if self.runtime_head_dims:
             active.add("runtime_head_dims")
+        active.update(
+            name for name in QUERY_SIDE_OPTIONS if getattr(self, name) is True
+        )
         if bool(self.use_sinks):
             active.add("sinks")
         if bool(self.use_fp8):
@@ -411,6 +432,13 @@ def _request_errors(
             "runtime_head_dims must be a bool, got "
             f"{type(req.runtime_head_dims).__name__}"
         )
+    # Checked before any candidate coerces them: bool("false") is True, so a
+    # string flag would select an fp8 kernel, and bool(None) is False, so a
+    # missing encoding would pass as OCP instead of being refused.
+    for field in (*QUERY_SIDE_OPTIONS, "use_fp8", "fp8_fnuz"):
+        value = getattr(req, field)
+        if type(value) is not bool:
+            errors.append(f"{field} must be a bool, got {type(value).__name__}")
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
@@ -431,6 +459,10 @@ def _request_errors(
         errors.append(f"unsupported dense tensor layout {req.tensor_layout!r}")
     if layout in ("ragged", "paged") and tensor_layout != "auto":
         errors.append("tensor_layout is only valid for dense attention")
+    if req.dense_q is True and layout != "paged":
+        errors.append("dense_q requires layout='paged'")
+    if req.seqused_q is True and layout not in ("ragged", "paged"):
+        errors.append("seqused_q requires layout='ragged' or 'paged'")
     try:
         mask_type = _parse_attention_mask_type(req.mask_type)
     except ValueError as exc:
@@ -818,13 +850,13 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     use). Only the split-rule segment count and the dispatcher's K/V layout
     knobs read it, and a partitioned or smaller part passes its own ``num_cus``.
     """
-    from rocke.helpers.split_k import _ARCH_NUM_CUS
+    from rocke.helpers.split_k import ARCH_NUM_CUS
 
     num_cus = int(req.num_cus)
     if num_cus <= 0:
-        if req.arch not in _ARCH_NUM_CUS:
+        if req.arch not in ARCH_NUM_CUS:
             raise ValueError(f"no CU count known for {req.arch}; pass num_cus")
-        num_cus = _ARCH_NUM_CUS[req.arch]
+        num_cus = ARCH_NUM_CUS[req.arch]
     return _problem_with_num_cus(req, num_cus)
 
 
@@ -1004,12 +1036,19 @@ class AttentionTuningSpec:
                 return None
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
-            # An LSE-off reduce leaves out ``emit_lse``, so its key (and the
-            # spec_hash taken over it) is the one stored before the field existed.
+            # LSE fields at their defaults are left out (emit_lse off, lse_layout
+            # token-major), so those keys and the spec_hash taken over them are the
+            # ones stored before the fields existed. The RDNA WMMA prefill
+            # ``dense_q`` / ``seqused_q`` layout options (from the request's fields
+            # of the same names) are left out the same way while they are off.
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
-                if not (f.name == "emit_lse" and not spec.emit_lse)
+                if not (
+                    f.name in ("emit_lse", *QUERY_SIDE_OPTIONS)
+                    and not getattr(spec, f.name)
+                )
+                and not (f.name == "lse_layout" and spec.lse_layout == "token_major")
             )
 
         return (
@@ -1101,17 +1140,26 @@ class AttentionTuningSpec:
         return (64 * int(self.kernel_spec.num_warps), 1, 1)
 
     def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
-        """Specialize i32/i64 paged addressing once the physical cache is known.
+        """Retarget a paged spec to the physical cache once it is known.
 
-        Addressing width is a runtime specialization, not a configuration: it
-        changes :meth:`identity` (a different binary) but never ``tuning_id``,
+        Unified paths pick i32/i64 K/V addressing from it; dense paged bakes the
+        cache extent itself as its K/V buffer bound, so each cache size is its own
+        binary. Either way this is a runtime specialization, not a configuration:
+        it changes :meth:`identity` (a different binary) but never ``tuning_id``,
         so an id recorded after binding still replays from the request.
         """
         count = int(num_kv_blocks)
         if count < 0:
             raise ValueError("num_kv_blocks must be non-negative")
         if self.path == "dense":
-            return self  # contiguous K/V: nothing to retarget
+            if not self.kernel_spec.paged:
+                return self  # contiguous K/V: nothing to retarget
+            # The paged kernel bakes the cache extent as its K/V buffer bound.
+            return replace(
+                self,
+                kernel_spec=replace(self.kernel_spec, num_kv_blocks=count),
+                num_kv_blocks=count,
+            )
         kernel_spec = self.kernel_spec
         if not hasattr(kernel_spec, "use_i64_kv_addr"):
             return replace(self, num_kv_blocks=count)

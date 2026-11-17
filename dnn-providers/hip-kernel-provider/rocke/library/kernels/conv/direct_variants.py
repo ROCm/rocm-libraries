@@ -24,10 +24,13 @@ __all__ = [
     "DIRECT_DGRAD_TRANSPOSE",
     "DIRECT_DGRAD_TRANSPOSE_RTC",
     "DIRECT_DGRAD_PATCH_WMMA",
+    "DIRECT_DGRAD_PP_MFMA",
     "DIRECT_DGRAD_SMALLC_WMMA",
     "DIRECT_DGRAD_WMMA",
     "DIRECT_DEPTHWISE_WIN_FWD",
     "DIRECT_FWD_SMALLC_WMMA",
+    "DIRECT_FWD_SMALLC_MFMA",
+    "DIRECT_FWD_SMALLK_MFMA",
     "DIRECT_FWD_SMALLK_WMMA",
     "DIRECT_FWD_WMMA",
     "DIRECT_DW_FWD_WMMA",
@@ -66,17 +69,26 @@ DIRECT_DGRAD_REORGANIZE_RTC = "direct_dgrad_reorganize_rtc"
 DIRECT_MFMA_DGRAD = ("direct_grouped_dgrad_mfma", "direct_dgrad_mfma_rtc")
 # Wave32 WMMA direct dgrad (stride 1, dense and grouped, channels runtime).
 DIRECT_DGRAD_WMMA = "direct_dgrad_wmma"
+# Wave64 MFMA dense stride-1 dgrad (gfx950, channels runtime): LDS DMA
+# staging, a two-rank ping-pong schedule, and the original filter read flipped
+# and transposed in-kernel (no weight pre-pass).
+DIRECT_DGRAD_PP_MFMA = "direct_dgrad_pp_mfma"
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
-DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
+DIRECT_DGRAD_FPROP_SINGLE = (
+    "direct_grouped_dgrad_4c",
+    "direct_grouped_dgrad_fused",
+    DIRECT_DGRAD_PP_MFMA,
+)
 
 
 def direct_dgrad_kernarg_direction(algorithm: str) -> str:
     """Which problem orientation and :class:`ConvArgs` direction a direct dgrad
     instance's kernargs come from: ``"fwd"``, over the transposed problem, for a
-    FPROP_SINGLE algorithm (``direct_grouped_dgrad_4c``/``_fused``: a forward pass
-    over the transposed problem with no weight-transform helpers to gate on, reading
-    the original weights itself); ``"dgrad"`` otherwise.
+    FPROP_SINGLE algorithm (``direct_grouped_dgrad_4c``/``_fused`` and
+    ``direct_dgrad_pp_mfma``: a forward pass over the transposed problem with no
+    weight-transform helpers to gate on, reading the original weights itself);
+    ``"dgrad"`` otherwise.
 
     The one place every reader of :data:`DIRECT_DGRAD_FPROP_SINGLE` -- the
     dispatcher's ``launch_plan_for``/``_signature``, the AOT adapter
@@ -106,6 +118,12 @@ DIRECT_FWD_WMMA = "direct_fwd_wmma"
 # output channels as a GEMM over (r, s, k) followed by an overlap-add in LDS.
 DIRECT_FWD_SMALLC_WMMA = "direct_fwd_smallc_wmma"
 DIRECT_FWD_SMALLK_WMMA = "direct_fwd_smallk_wmma"
+# Wave64 MFMA (gfx950) port of the small-C stem forward: the same flattened
+# (r, s, c) GEMM on 16x16x32 MFMA, the input window staged by buffer loads.
+DIRECT_FWD_SMALLC_MFMA = "direct_fwd_smallc_mfma"
+# ... and of the few-output-channel forward: Z = X * W[(r, s, k), c] per window
+# pixel on 16x16x32 MFMA, then the overlap-add from fp32 LDS.
+DIRECT_FWD_SMALLK_MFMA = "direct_fwd_smallk_mfma"
 # Wave32 WMMA depthwise forward (stride 1): one-hot weights times 8 channels
 # per 16x16x32 WMMA (the Toeplitz form of the windowed depthwise dgrad).
 DIRECT_DW_FWD_WMMA = "direct_dw_fwd_wmma"
@@ -137,6 +155,7 @@ DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 PER_AXIS_PAD_VARIANTS = (
     DIRECT_DEPTHWISE_TILED_DGRAD,
     DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_SMALLK_MFMA,
     DIRECT_FWD_WMMA,
 )
 # variant -> (transpose helper, reorganize helper)
@@ -253,6 +272,17 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return DirectDgradWmmaSpec(
             problem=problem, name="rocke_direct_dgrad_wmma", **knobs
         )
+    if variant == DIRECT_DGRAD_PP_MFMA:
+        # The forward pass over the transposed problem (no problem check
+        # here: plan_for re-validates the spec on the real shape).
+        from kernels.common.conv_direct_dgrad_pp_mfma import (
+            DgradPpMfmaSpec,
+            dgrad_pp_mfma_problem,
+        )
+
+        return DgradPpMfmaSpec(
+            problem=dgrad_pp_mfma_problem(problem), name="rocke_dgrad_pp_mfma", **knobs
+        )
     if variant == DIRECT_DGRAD_PATCH_WMMA:
         from kernels.common.conv_dgrad_patch_wmma import DgradPatchWmmaSpec
 
@@ -273,6 +303,14 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         from kernels.common.conv_fwd_small_wmma import FwdSmallcWmmaSpec
 
         return FwdSmallcWmmaSpec(problem=problem, name="rocke_fwd_smallc_wmma", **knobs)
+    if variant == DIRECT_FWD_SMALLC_MFMA:
+        from kernels.common.conv_fwd_small_mfma import FwdSmallcMfmaSpec
+
+        return FwdSmallcMfmaSpec(problem=problem, name="rocke_fwd_smallc_mfma", **knobs)
+    if variant == DIRECT_FWD_SMALLK_MFMA:
+        from kernels.common.conv_fwd_small_mfma import FwdSmallkMfmaSpec
+
+        return FwdSmallkMfmaSpec(problem=problem, name="rocke_fwd_smallk_mfma", **knobs)
     if variant == DIRECT_FWD_SMALLK_WMMA:
         from kernels.common.conv_fwd_small_wmma import FwdSmallkWmmaSpec
 
@@ -711,6 +749,18 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             from kernels.common.conv_fwd_small_wmma import is_valid_fwd_smallc_spec
 
             return is_valid_fwd_smallc_spec(spec, arch=arch)
+        if variant == DIRECT_FWD_SMALLC_MFMA:
+            from kernels.common.conv_fwd_small_mfma import (
+                is_valid_fwd_smallc_mfma_spec,
+            )
+
+            return is_valid_fwd_smallc_mfma_spec(spec, arch=arch)
+        if variant == DIRECT_FWD_SMALLK_MFMA:
+            from kernels.common.conv_fwd_small_mfma import (
+                is_valid_fwd_smallk_mfma_spec,
+            )
+
+            return is_valid_fwd_smallk_mfma_spec(spec, arch=arch)
         if variant == DIRECT_FWD_SMALLK_WMMA:
             from kernels.common.conv_fwd_small_wmma import is_valid_fwd_smallk_spec
 
@@ -751,6 +801,12 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
         if variant == "direct_grouped_dgrad_4c":
             spec.validate()
             return dc.is_valid_spec_4c(spec, arch=arch)
+        if variant == DIRECT_DGRAD_PP_MFMA:
+            from kernels.common.conv_direct_dgrad_pp_mfma import (
+                is_valid_dgrad_pp_mfma_spec,
+            )
+
+            return is_valid_dgrad_pp_mfma_spec(spec, arch=arch)
         if variant == DIRECT_DGRAD_PATCH_WMMA:
             from kernels.common.conv_dgrad_patch_wmma import is_valid_dgrad_patch_spec
 
@@ -822,6 +878,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     """
     from kernels.common import conv_dgrad_patch_wmma as dpw
     from kernels.common import conv_dgrad_smallc_wmma as dsw
+    from kernels.common import conv_direct_dgrad_pp_mfma as dpp
     from kernels.common import conv_direct_dgrad_wmma as dwm
     from kernels.common import conv_direct_dw_fwd_wmma as dfw
     from kernels.common import conv_direct_fwd_gstream_wmma as fgs
@@ -834,6 +891,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_nongrouped as dn
     from kernels.common import conv_direct_wgrad_gather as wg
     from kernels.common import conv_direct_wgrad_tiled as wt
+    from kernels.common import conv_fwd_small_mfma as fsm
     from kernels.common import conv_fwd_small_wmma as fs
     from kernels.common.conv_wgrad_workspace_reduce import (
         build_conv_wgrad_workspace_reduce,
@@ -841,10 +899,13 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
 
     builders = {
         DIRECT_DGRAD_WMMA: dwm.build_direct_dgrad_wmma,
+        DIRECT_DGRAD_PP_MFMA: dpp.build_dgrad_pp_mfma,
         DIRECT_DGRAD_PATCH_WMMA: dpw.build_dgrad_patch_wmma,
         DIRECT_DGRAD_SMALLC_WMMA: dsw.build_dgrad_smallc_wmma,
         DIRECT_FWD_WMMA: fw.build_direct_fwd_wmma,
         DIRECT_FWD_SMALLC_WMMA: fs.build_fwd_smallc_wmma,
+        DIRECT_FWD_SMALLC_MFMA: fsm.build_fwd_smallc_mfma,
+        DIRECT_FWD_SMALLK_MFMA: fsm.build_fwd_smallk_mfma,
         DIRECT_FWD_SMALLK_WMMA: fs.build_fwd_smallk_wmma,
         DIRECT_DW_FWD_WMMA: dfw.build_dw_fwd_wmma,
         DIRECT_FWD_GSTREAM_WMMA: fgs.build_fwd_gstream_wmma,
@@ -975,6 +1036,14 @@ def direct_spec_for_problem(
         eff = dgrad_wmma_tile_efficiency(spec)
         if eff < 0.5:
             return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+    if variant == DIRECT_DGRAD_PP_MFMA:
+        from kernels.common.conv_direct_dgrad_pp_mfma import (
+            dgrad_pp_mfma_tile_efficiency,
+        )
+
+        eff = dgrad_pp_mfma_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
     if variant == DIRECT_DGRAD_PATCH_WMMA:
         from kernels.common.conv_dgrad_patch_wmma import dgrad_patch_tile_efficiency
 
@@ -1031,6 +1100,25 @@ def direct_spec_for_problem(
         if eff < 0.5:
             return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
         if variant == DIRECT_FWD_SMALLC_WMMA and spec.block_k > 2 * problem.kpg:
+            return None, (
+                f"block_k={spec.block_k} is over twice the {problem.kpg} output "
+                f"channels"
+            )
+    if variant == DIRECT_FWD_SMALLK_MFMA:
+        from kernels.common.conv_fwd_small_mfma import fwd_smallk_mfma_tile_efficiency
+
+        eff = fwd_smallk_mfma_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+    if variant == DIRECT_FWD_SMALLC_MFMA:
+        # As for the WMMA form: offered where at least half of the padded tile
+        # grid is real work and the output-channel block is not mostly past K.
+        from kernels.common.conv_fwd_small_mfma import fwd_smallc_mfma_tile_efficiency
+
+        eff = fwd_smallc_mfma_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+        if spec.block_k > 2 * problem.kpg:
             return None, (
                 f"block_k={spec.block_k} is over twice the {problem.kpg} output "
                 f"channels"
