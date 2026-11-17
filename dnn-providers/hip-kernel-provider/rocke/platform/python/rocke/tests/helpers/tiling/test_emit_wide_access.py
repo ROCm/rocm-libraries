@@ -26,15 +26,20 @@ import pytest
 
 pytest.importorskip("rocke.core.ir", reason="rocke IR substrate required")
 
-from rocke.core.ir import F16, F32
+from rocke.core.ir import F16, F32, FP4E2M1, FP6E2M3, U8
 from rocke.helpers.tiling import (
     InterleavedStyle,
     TileMma,
     Tiling,
     make_tensor_desc,
+    make_tile_desc,
     make_window,
 )
-from rocke.helpers.tiling.emit import _contiguous_run, _register_coord_offsets
+from rocke.helpers.tiling.emit import (
+    _contiguous_run,
+    _register_coord_offsets,
+    planned_global_access_units,
+)
 from rocke.helpers.tiling.lds_conflict import access_width
 
 
@@ -114,3 +119,35 @@ def test_every_access_run_holds_consecutive_positions(
         assert positions == list(
             range(positions[0], positions[0] + width)
         ), f"registers {start}..{start + width - 1} hold positions {positions}"
+
+
+@pytest.mark.parametrize(
+    "dtype,run,row_stride,planned",
+    [
+        # A 16-byte run of bytes or of halves: one 16-byte access.
+        (U8, 16, 256, 16),
+        (F16, 8, 256, 8),
+        # An odd row stride does not narrow it: a global access needs no alignment.
+        (F16, 8, 257, 8),
+        # The widest of 16/8/4/2 elements dividing a 12-element f16 run.
+        (F16, 12, 256, 4),
+        # Packed runs count whole-word groups: 32 fp4 elements are 4 words, 16 fp6 are 3.
+        (FP4E2M1, 32, 256, 4),
+        (FP6E2M3, 16, 256, 3),
+    ],
+)
+def test_the_planned_global_width_is_the_widest_access_dividing_the_run(
+    dtype, run: int, row_stride: int, planned: int
+) -> None:
+    tile = make_tile_desc(
+        shape=[64, run], thread_tile=[1, run], thread_dist=[64, 1], wave_size=64
+    )
+    tensor = make_tensor_desc((64, 256), (row_stride, 1), dtype)
+    assert planned_global_access_units(tile, make_window(tensor, (0, 0))) == planned
+
+
+def test_a_layout_with_no_stride_1_run_plans_one_element() -> None:
+    c_desc = _mma(interleaved=True).c_desc
+    tensor = _tensor(c_desc.shape, 0, F32)
+    window = make_window(tensor, (0, 0))
+    assert planned_global_access_units(c_desc, window) == 1

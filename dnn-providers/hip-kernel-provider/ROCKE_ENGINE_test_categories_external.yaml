@@ -279,6 +279,8 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
+      # Compiles kernels to check the backend's access widths: a performance check.
+      - "rocke_tiling_backend_width_pytest"
     labels:
       - "standard"
       - "comprehensive"

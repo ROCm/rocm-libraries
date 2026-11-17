@@ -19,6 +19,7 @@ about *where each element lives* comes from our encodings; the pure value object
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator, Sequence
 from typing import Any, Callable
 
 from ...core.dtypes import dtype_info
@@ -45,6 +46,7 @@ __all__ = [
     "lds_allocation",
     "lds_element_span",
     "load_fragment",
+    "planned_global_access_units",
     "store_fragment",
 ]
 
@@ -650,16 +652,48 @@ def _contiguous_run(
     other_strides = [
         stride for axis, stride in enumerate(window.tensor.strides) if axis != run_axis
     ]
-    # One load = dwordx4 = 16 bytes; longer runs -> N loads.
-    max_vw = 16 // _unit_bytes(dtype)
-    for vw in (16, 8, 4, 2):
+    return _widest_vector(length, _unit_bytes(dtype), other_strides)
+
+
+def _widest_vector(
+    run_units: int, unit_bytes: int, other_strides: Sequence[int] = ()
+) -> int:
+    """The widest vector access (16, 8, 4 or 2 storage units of `unit_bytes` each, at most 16
+    bytes: one ``dwordx4``) that divides a run of `run_units` units and every one of
+    `other_strides`, else 1. A longer run takes several such accesses."""
+    for units in (16, 8, 4, 2):
         if (
-            vw <= max_vw
-            and length % vw == 0
-            and all(stride % vw == 0 for stride in other_strides)
+            units * unit_bytes <= 16
+            and run_units % units == 0
+            and all(stride % units == 0 for stride in other_strides)
         ):
-            return vw
+            return units
     return 1
+
+
+def planned_global_access_units(tile_desc: TileDesc, window: TensorWindow) -> int:
+    """Storage units one global access of a lane's run of `window` should reach: the widest vector
+    of at most 16 bytes that divides the innermost stride-1 register run (:func:`_register_run`),
+    else 1. A packed sub-byte dtype's run is counted in 32-bit words, in whole-word groups.
+
+    It is a fact of the layout, not of how a verb emits the access: :func:`load_fragment` moves
+    the run in one wide load where its policy allows (:func:`_contiguous_run`: a dtype it moves
+    wide, a tile that cannot overhang, every other stride a multiple of the width), and otherwise,
+    as :func:`store_fragment` always does, one storage unit per access, addressed as the lane base
+    index plus a compile-time constant so the backend can merge the run to this width. Unlike
+    :func:`_contiguous_run`, the other strides do not narrow it: a run that starts unaligned is
+    still contiguous, and a global access needs no alignment. A masked access (a tile that may
+    overhang) does not reach it yet: each element is checked on its own.
+    """
+    run = _register_run(tile_desc, window)
+    if run is None:
+        return 1
+    dtype = window.tensor.dtype
+    if is_register_packed(dtype.name):
+        return _widest_word_group(
+            elements_to_storage(dtype.name, run[1]), storage_group(dtype.name)[1]
+        )
+    return _widest_vector(run[1], _unit_bytes(dtype))
 
 
 def _packed_access_units(
@@ -699,6 +733,15 @@ def _packed_access_units(
             return group_words
         # The origin moves every run start, as a stride does.
         other_stride_words.append(elements_to_storage(dtype.name, origin))
+    return _widest_word_group(run_words, group_words, other_stride_words)
+
+
+def _widest_word_group(
+    run_words: int, group_words: int, other_stride_words: Sequence[int] = ()
+) -> int:
+    """The widest access of whole `group_words`-word groups, at most 4 words (16 bytes), that
+    divides a run of `run_words` words and every one of `other_stride_words`. A run of whole
+    groups always admits one group."""
     for words in (4, 3, 2, 1):
         if (
             words % group_words == 0
@@ -1035,23 +1078,34 @@ def load_fragment(
             slots = storage_slots(dtype, tile_desc.register_count, register, step)
             value = move_registers_into(b, value, loaded, enumerate(slots))
         return Fragment(tile_desc, dtype, value)
-    align = _unit_bytes(dtype)
-    zero: Any = None  # the pad scalar, emitted lazily on the first clipped access
-    for register in range(0, tile_desc.register_count, step):
-        coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
-        positions = _positions(b, window, coords)
-        address = _unit_index(b, _address(b, window, positions), dtype)
-        slots = storage_slots(dtype, tile_desc.register_count, register, step)
-        # A wide access is only chosen for a tile that cannot overhang, so it never needs a mask; a
-        # packed whole-word group may, and is masked as a unit (its bound is whole groups).
-        mask = _clip_mask(b, window, positions, tile_desc.shape)
-        if mask is None and vw > 1:
-            # Contiguous stride-1 run -> single vectorised global load (global_load_dwordxN).
+    # _contiguous_run gives a wide width only to a tile that cannot overhang, except for a packed
+    # dtype, whose overhanging tile still moves one whole-word group per access, masked.
+    if vw > 1 and _tile_in_bounds(tile_desc, window):
+        # Contiguous stride-1 runs of a tile that cannot overhang: one vectorised global load per
+        # run (global_load_dwordxN), unmasked.
+        for register in range(0, tile_desc.register_count, step):
+            coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
+            address = _unit_index(
+                b, _address(b, window, _positions(b, window, coords)), dtype
+            )
             loaded = b.global_load_vN(
                 ptr, address, unit, vw, align=_access_align(vw, dtype)
             )
+            slots = storage_slots(dtype, tile_desc.register_count, register, step)
             value = move_registers_into(b, value, loaded, enumerate(slots))
-            continue
+        return Fragment(tile_desc, dtype, value)
+    # One load per storage unit (a packed whole-word group is masked as a unit), addressed as
+    # store_fragment addresses its stores: the lane base index once, then each register's
+    # compile-time offset, the form the backend vectorizers can merge (see store_fragment).
+    base_positions, base_index = _lane_base_index(b, window, tile_desc, thread)
+    base_index = _unit_index(b, base_index, dtype)
+    align = _unit_bytes(dtype)
+    zero: Any = None  # the pad scalar, emitted lazily on the first clipped access
+    for register in range(0, tile_desc.register_count, step):
+        positions = _register_positions(b, tile_desc, base_positions, register)
+        address = _register_index(b, window, tile_desc, base_index, register, dtype)
+        slots = storage_slots(dtype, tile_desc.register_count, register, step)
+        mask = _clip_mask(b, window, positions, tile_desc.shape)
         if mask is not None:
             if pad != 0:
                 # Only a zero clip pad is implemented; a per-stage pad (e.g. -inf for a max) is
@@ -1062,8 +1116,7 @@ def load_fragment(
                 )
             if zero is None:
                 zero = _zero_scalar(b, dtype)
-        for i, slot in enumerate(slots):
-            unit_address = address if i == 0 else b.add(address, b.const_i32(i))
+        for unit_address, slot in zip(_unit_addresses(b, address, len(slots)), slots):
             if mask is None:
                 loaded = b.global_load(ptr, unit_address, unit, align=align)
             else:
@@ -1072,6 +1125,14 @@ def load_fragment(
                 )
             value = b.vec_insert(value, loaded, slot)
     return Fragment(tile_desc, dtype, value)
+
+
+def _unit_addresses(b: Any, address: Any, count: int) -> Iterator[Any]:
+    """The addresses of `count` consecutive storage units from `address`: `address`, then
+    `address` plus each constant offset. Each is emitted as it is drawn, so the accesses that
+    consume them keep their place in the IR."""
+    for offset in range(count):
+        yield address if offset == 0 else b.add(address, b.const_i32(offset))
 
 
 def _stored_unit(b: Any, fragment: Fragment, slot: int, out_dtype: Any) -> Any:
@@ -1085,8 +1146,7 @@ def _global_store_units(
     b: Any, ptr: Any, address: Any, units: list[Any], align: int
 ) -> None:
     """Store `units` at consecutive storage-unit addresses from `address`, one scalar store each."""
-    for i, value in enumerate(units):
-        unit_address = address if i == 0 else b.add(address, b.const_i32(i))
+    for unit_address, value in zip(_unit_addresses(b, address, len(units)), units):
         b.global_store(ptr, unit_address, value, align=align)
 
 
