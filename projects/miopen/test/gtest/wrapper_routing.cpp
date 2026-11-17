@@ -742,11 +742,11 @@ miopenStatus_t miopenConvolutionForward()
 int RunNestedForwardedCall()
 {
 #ifdef _WIN32
-    _putenv_s("MIOPEN_HIPDNN_FORWARDING", "1");
-    _putenv_s("MIOPEN_DISABLE_HIPDNN_FOR", "");
+    _putenv_s(kForwardingEnvVar, "1");
+    _putenv_s(kDisableEnvVar, "");
 #else
-    setenv("MIOPEN_HIPDNN_FORWARDING", "1", 1);
-    unsetenv("MIOPEN_DISABLE_HIPDNN_FOR");
+    setenv(kForwardingEnvVar, "1", 1);
+    unsetenv(kDisableEnvVar);
 #endif
     const miopenStatus_t status = miopenConvolutionForward();
     std::fprintf(stderr,
