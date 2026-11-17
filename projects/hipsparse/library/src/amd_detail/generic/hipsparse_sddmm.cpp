@@ -42,6 +42,9 @@ hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t          handle,
                                  hipsparseSDDMMAlg_t        alg,
                                  void*                      tempBuffer)
 {
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sddmm((rocsparse_handle)handle,
                         hipsparse::hipOperationToHCCOperation(opA),
@@ -51,7 +54,7 @@ hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t          handle,
                         (rocsparse_const_dnmat_descr)matB,
                         beta,
                         to_rocsparse_spmat_descr(matC),
-                        hipsparse::hipDataTypeToHCCDataType(computeType),
+                        backend_data_type,
                         hipsparse::hipSDDMMAlgToHCCSDDMMAlg(alg),
                         tempBuffer));
 }
@@ -68,6 +71,9 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t          handle,
                                             hipsparseSDDMMAlg_t        alg,
                                             size_t*                    pBufferSizeInBytes)
 {
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sddmm_buffer_size((rocsparse_handle)handle,
                                     hipsparse::hipOperationToHCCOperation(opA),
@@ -77,7 +83,7 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t          handle,
                                     (rocsparse_const_dnmat_descr)matB,
                                     beta,
                                     to_rocsparse_spmat_descr(matC),
-                                    hipsparse::hipDataTypeToHCCDataType(computeType),
+                                    backend_data_type,
                                     hipsparse::hipSDDMMAlgToHCCSDDMMAlg(alg),
                                     pBufferSizeInBytes));
 }
@@ -94,6 +100,9 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t          handle,
                                             hipsparseSDDMMAlg_t        alg,
                                             void*                      tempBuffer)
 {
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sddmm_preprocess((rocsparse_handle)handle,
                                    hipsparse::hipOperationToHCCOperation(opA),
@@ -103,7 +112,7 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t          handle,
                                    (rocsparse_const_dnmat_descr)matB,
                                    beta,
                                    to_rocsparse_spmat_descr(matC),
-                                   hipsparse::hipDataTypeToHCCDataType(computeType),
+                                   backend_data_type,
                                    hipsparse::hipSDDMMAlgToHCCSDDMMAlg(alg),
                                    tempBuffer));
 }

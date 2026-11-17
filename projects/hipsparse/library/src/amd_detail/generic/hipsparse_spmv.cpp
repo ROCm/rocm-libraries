@@ -102,7 +102,8 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    const rocsparse_datatype  datatype  = hipsparse::hipDataTypeToHCCDataType(computeType);
+    rocsparse_datatype datatype;
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &datatype));
     const rocsparse_operation operation = hipsparse::hipOperationToHCCOperation(opA);
     rocsparse_spmv_alg        spmv_alg  = hipsparse::hipSpMVAlgToHCCSpMVAlg(alg);
 
@@ -186,7 +187,8 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    const rocsparse_datatype  datatype  = hipsparse::hipDataTypeToHCCDataType(computeType);
+    rocsparse_datatype datatype;
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &datatype));
     const rocsparse_operation operation = hipsparse::hipOperationToHCCOperation(opA);
     rocsparse_spmv_alg        spmv_alg  = hipsparse::hipSpMVAlgToHCCSpMVAlg(alg);
 
@@ -267,7 +269,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    const rocsparse_datatype  datatype  = hipsparse::hipDataTypeToHCCDataType(computeType);
+    rocsparse_datatype datatype;
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &datatype));
     const rocsparse_operation operation = hipsparse::hipOperationToHCCOperation(opA);
     rocsparse_spmv_alg        spmv_alg  = hipsparse::hipSpMVAlgToHCCSpMVAlg(alg);
 

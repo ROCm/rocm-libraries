@@ -159,6 +159,9 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
                                                  hipsparseCsr2CscAlg_t alg,
                                                  size_t*               pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCsr2cscEx2_bufferSize((cusparseHandle_t)handle,
                                       m,
@@ -170,7 +173,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
                                       cscVal,
                                       cscColPtr,
                                       cscRowInd,
-                                      hipsparse::hipDataTypeToCudaDataType(valType),
+                                      backend_data_type,
                                       hipsparse::hipActionToCudaAction(copyValues),
                                       hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
                                       hipsparse::hipCsr2CscAlgToCudaCsr2CscAlg(alg),
@@ -193,6 +196,9 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
                                       hipsparseCsr2CscAlg_t alg,
                                       void*                 buffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCsr2cscEx2((cusparseHandle_t)handle,
                            m,
@@ -204,7 +210,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
                            cscVal,
                            cscColPtr,
                            cscRowInd,
-                           hipsparse::hipDataTypeToCudaDataType(valType),
+                           backend_data_type,
                            hipsparse::hipActionToCudaAction(copyValues),
                            hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
                            hipsparse::hipCsr2CscAlgToCudaCsr2CscAlg(alg),

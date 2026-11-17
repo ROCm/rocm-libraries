@@ -267,7 +267,11 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t          handle,
             spgemmDescr->externalBuffer3,
             static_cast<char*>(spgemmDescr->externalBuffer3) + byteOffset3));
 
-        size_t bufferSize = (spgemmDescr->bufferSize4 - byteOffset4);
+        size_t              bufferSize = (spgemmDescr->bufferSize4 - byteOffset4);
+        rocsparse_datatype_ backend_data_type{};
+        RETURN_IF_HIPSPARSE_ERROR(
+            hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse_spgemm((rocsparse_handle)handle,
                              hipsparse::hipOperationToHCCOperation(opA),
@@ -278,7 +282,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t          handle,
                              nullptr,
                              to_rocsparse_const_spmat_descr(matC),
                              to_rocsparse_spmat_descr(matC),
-                             hipsparse::hipDataTypeToHCCDataType(computeType),
+                             backend_data_type,
                              hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
                              rocsparse_spgemm_stage_symbolic,
                              &bufferSize,
@@ -436,7 +440,10 @@ hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t          handle
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparseCsrSetPointers(matC, csrRowOffsetsC, csrColIndC, csrValuesCFromBuffer5));
 
-    size_t bufferSize = (spgemmDescr->bufferSize4 - byteOffset4);
+    size_t              bufferSize = (spgemmDescr->bufferSize4 - byteOffset4);
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_spgemm((rocsparse_handle)handle,
                          hipsparse::hipOperationToHCCOperation(opA),
@@ -447,7 +454,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t          handle
                          nullptr,
                          to_rocsparse_const_spmat_descr(matC),
                          to_rocsparse_spmat_descr(matC),
-                         hipsparse::hipDataTypeToHCCDataType(computeType),
+                         backend_data_type,
                          hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
                          rocsparse_spgemm_stage_numeric,
                          &bufferSize,

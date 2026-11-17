@@ -38,6 +38,15 @@
         }                                                                         \
     }
 
+#define RETURN_IF_HIPSPARSE_ERROR(INPUT_STATUS_FOR_CHECK)                \
+    {                                                                    \
+        hipsparseStatus_t TMP_STATUS_FOR_CHECK = INPUT_STATUS_FOR_CHECK; \
+        if(TMP_STATUS_FOR_CHECK != HIPSPARSE_STATUS_SUCCESS)             \
+        {                                                                \
+            return TMP_STATUS_FOR_CHECK;                                 \
+        }                                                                \
+    }
+
 namespace hipsparse
 {
     inline hipsparseStatus_t hipCUSPARSEStatusToHIPStatus(cusparseStatus_t cuStatus)
@@ -449,28 +458,41 @@ namespace hipsparse
 #endif
 
 #if CUDART_VERSION > 10000
-    inline cudaDataType hipDataTypeToCudaDataType(hipDataType datatype)
+    inline hipsparseStatus_t hipDataTypeToCudaDataType(hipDataType datatype, cudaDataType* out)
     {
         switch(datatype)
         {
         case HIP_R_8I:
-            return CUDA_R_8I;
+            *out = CUDA_R_8I;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_32I:
-            return CUDA_R_32I;
+            *out = CUDA_R_32I;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_16F:
-            return CUDA_R_16F;
+            *out = CUDA_R_16F;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_16BF:
-            return CUDA_R_16BF;
+            *out = CUDA_R_16BF;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_32F:
-            return CUDA_R_32F;
+            *out = CUDA_R_32F;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_64F:
-            return CUDA_R_64F;
+            *out = CUDA_R_64F;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_C_32F:
-            return CUDA_C_32F;
+            *out = CUDA_C_32F;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_C_64F:
-            return CUDA_C_64F;
+            *out = CUDA_C_64F;
+            return HIPSPARSE_STATUS_SUCCESS;
+        case HIP_R_8U:
+        case HIP_C_8U:
+        case HIP_R_32U:
+        case HIP_C_32U:
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
         default:
-            throw "Non existent hipDataType";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 

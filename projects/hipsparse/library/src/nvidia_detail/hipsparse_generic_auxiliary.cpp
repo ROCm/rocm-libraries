@@ -38,6 +38,9 @@ hipsparseStatus_t hipsparseCreateSpVec(hipsparseSpVecDescr_t* spVecDescr,
                                        hipsparseIndexBase_t   idxBase,
                                        hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateSpVec((cusparseSpVecDescr_t*)spVecDescr,
                             size,
@@ -46,7 +49,7 @@ hipsparseStatus_t hipsparseCreateSpVec(hipsparseSpVecDescr_t* spVecDescr,
                             values,
                             hipsparse::hipIndexTypeToCudaIndexType(idxType),
                             hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                            hipsparse::hipDataTypeToCudaDataType(valueType)));
+                            backend_data_type));
 }
 #endif
 
@@ -60,6 +63,9 @@ hipsparseStatus_t hipsparseCreateConstSpVec(hipsparseConstSpVecDescr_t* spVecDes
                                             hipsparseIndexBase_t        idxBase,
                                             hipDataType                 valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstSpVec((cusparseConstSpVecDescr_t*)spVecDescr,
                                  size,
@@ -68,7 +74,7 @@ hipsparseStatus_t hipsparseCreateConstSpVec(hipsparseConstSpVecDescr_t* spVecDes
                                  values,
                                  hipsparse::hipIndexTypeToCudaIndexType(idxType),
                                  hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                                 hipsparse::hipDataTypeToCudaDataType(valueType)));
+                                 backend_data_type));
 }
 #endif
 
@@ -202,6 +208,9 @@ hipsparseStatus_t hipsparseCreateCoo(hipsparseSpMatDescr_t* spMatDescr,
                                      hipsparseIndexBase_t   idxBase,
                                      hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateCoo((cusparseSpMatDescr_t*)spMatDescr,
                           rows,
@@ -212,7 +221,7 @@ hipsparseStatus_t hipsparseCreateCoo(hipsparseSpMatDescr_t* spMatDescr,
                           cooValues,
                           hipsparse::hipIndexTypeToCudaIndexType(cooIdxType),
                           hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                          hipsparse::hipDataTypeToCudaDataType(valueType)));
+                          backend_data_type));
 }
 #endif
 
@@ -228,6 +237,9 @@ hipsparseStatus_t hipsparseCreateConstCoo(hipsparseConstSpMatDescr_t* spMatDescr
                                           hipsparseIndexBase_t        idxBase,
                                           hipDataType                 valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstCoo((cusparseConstSpMatDescr_t*)spMatDescr,
                                rows,
@@ -238,7 +250,7 @@ hipsparseStatus_t hipsparseCreateConstCoo(hipsparseConstSpMatDescr_t* spMatDescr
                                cooValues,
                                hipsparse::hipIndexTypeToCudaIndexType(cooIdxType),
                                hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                               hipsparse::hipDataTypeToCudaDataType(valueType)));
+                               backend_data_type));
 }
 #endif
 
@@ -253,6 +265,9 @@ hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
                                         hipsparseIndexBase_t   idxBase,
                                         hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateCooAoS((cusparseSpMatDescr_t*)spMatDescr,
                              rows,
@@ -262,7 +277,7 @@ hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
                              cooValues,
                              hipsparse::hipIndexTypeToCudaIndexType(cooIdxType),
                              hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                             hipsparse::hipDataTypeToCudaDataType(valueType)));
+                             backend_data_type));
 }
 #endif
 
@@ -279,6 +294,9 @@ hipsparseStatus_t hipsparseCreateCsr(hipsparseSpMatDescr_t* spMatDescr,
                                      hipsparseIndexBase_t   idxBase,
                                      hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateCsr((cusparseSpMatDescr_t*)spMatDescr,
                           rows,
@@ -290,7 +308,7 @@ hipsparseStatus_t hipsparseCreateCsr(hipsparseSpMatDescr_t* spMatDescr,
                           hipsparse::hipIndexTypeToCudaIndexType(csrRowOffsetsType),
                           hipsparse::hipIndexTypeToCudaIndexType(csrColIndType),
                           hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                          hipsparse::hipDataTypeToCudaDataType(valueType)));
+                          backend_data_type));
 }
 #endif
 
@@ -307,6 +325,9 @@ hipsparseStatus_t hipsparseCreateConstCsr(hipsparseConstSpMatDescr_t* spMatDescr
                                           hipsparseIndexBase_t        idxBase,
                                           hipDataType                 valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstCsr((cusparseConstSpMatDescr_t*)spMatDescr,
                                rows,
@@ -318,7 +339,7 @@ hipsparseStatus_t hipsparseCreateConstCsr(hipsparseConstSpMatDescr_t* spMatDescr
                                hipsparse::hipIndexTypeToCudaIndexType(csrRowOffsetsType),
                                hipsparse::hipIndexTypeToCudaIndexType(csrColIndType),
                                hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                               hipsparse::hipDataTypeToCudaDataType(valueType)));
+                               backend_data_type));
 }
 #endif
 
@@ -335,6 +356,9 @@ hipsparseStatus_t hipsparseCreateCsc(hipsparseSpMatDescr_t* spMatDescr,
                                      hipsparseIndexBase_t   idxBase,
                                      hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateCsc((cusparseSpMatDescr_t*)spMatDescr,
                           rows,
@@ -346,7 +370,7 @@ hipsparseStatus_t hipsparseCreateCsc(hipsparseSpMatDescr_t* spMatDescr,
                           hipsparse::hipIndexTypeToCudaIndexType(cscColOffsetsType),
                           hipsparse::hipIndexTypeToCudaIndexType(cscRowIndType),
                           hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                          hipsparse::hipDataTypeToCudaDataType(valueType)));
+                          backend_data_type));
 }
 #endif
 
@@ -363,6 +387,9 @@ hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr
                                           hipsparseIndexBase_t        idxBase,
                                           hipDataType                 valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstCsc((cusparseConstSpMatDescr_t*)spMatDescr,
                                rows,
@@ -374,7 +401,7 @@ hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr
                                hipsparse::hipIndexTypeToCudaIndexType(cscColOffsetsType),
                                hipsparse::hipIndexTypeToCudaIndexType(cscRowIndType),
                                hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                               hipsparse::hipDataTypeToCudaDataType(valueType)));
+                               backend_data_type));
 }
 #endif
 
@@ -390,6 +417,9 @@ hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
                                             hipsparseIndexBase_t   idxBase,
                                             hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateBlockedEll((cusparseSpMatDescr_t*)spMatDescr,
                                  rows,
@@ -400,7 +430,7 @@ hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
                                  ellValue,
                                  hipsparse::hipIndexTypeToCudaIndexType(ellIdxType),
                                  hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                                 hipsparse::hipDataTypeToCudaDataType(valueType)));
+                                 backend_data_type));
 }
 #endif
 
@@ -416,6 +446,9 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
                                                  hipsparseIndexBase_t        idxBase,
                                                  hipDataType                 valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstBlockedEll((cusparseConstSpMatDescr_t*)spMatDescr,
                                       rows,
@@ -426,7 +459,7 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
                                       ellValue,
                                       hipsparse::hipIndexTypeToCudaIndexType(ellIdxType),
                                       hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                                      hipsparse::hipDataTypeToCudaDataType(valueType)));
+                                      backend_data_type));
 }
 #endif
 
@@ -445,6 +478,9 @@ hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
                                            hipsparseIndexBase_t   idxBase,
                                            hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateSlicedEll((cusparseSpMatDescr_t*)spMatDescr,
                                 rows,
@@ -458,7 +494,7 @@ hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
                                 hipsparse::hipIndexTypeToCudaIndexType(sellSliceOffsetsType),
                                 hipsparse::hipIndexTypeToCudaIndexType(sellColIndType),
                                 hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                                hipsparse::hipDataTypeToCudaDataType(valueType)));
+                                backend_data_type));
 }
 #endif
 
@@ -477,6 +513,9 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
                                                 hipsparseIndexBase_t        idxBase,
                                                 hipDataType                 valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstSlicedEll((cusparseConstSpMatDescr_t*)spMatDescr,
                                      rows,
@@ -490,7 +529,7 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
                                      hipsparse::hipIndexTypeToCudaIndexType(sellSliceOffsetsType),
                                      hipsparse::hipIndexTypeToCudaIndexType(sellColIndType),
                                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                                     hipsparse::hipDataTypeToCudaDataType(valueType)));
+                                     backend_data_type));
 }
 #endif
 
@@ -513,6 +552,9 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      hipDataType            valueType,
                                      hipsparseOrder_t       order)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateBsr((cusparseSpMatDescr_t*)spMatDescr,
                           mb,
@@ -526,7 +568,7 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                           hipsparse::hipIndexTypeToCudaIndexType(bsrRowPtrType),
                           hipsparse::hipIndexTypeToCudaIndexType(bsrColIndType),
                           hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                          hipsparse::hipDataTypeToCudaDataType(valueType),
+                          backend_data_type,
                           hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif
@@ -547,6 +589,9 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
                                           hipDataType                 valueType,
                                           hipsparseOrder_t            order)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstBsr((cusparseConstSpMatDescr_t*)spMatDescr,
                                mb,
@@ -560,7 +605,7 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
                                hipsparse::hipIndexTypeToCudaIndexType(bsrRowPtrType),
                                hipsparse::hipIndexTypeToCudaIndexType(bsrColIndType),
                                hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                               hipsparse::hipDataTypeToCudaDataType(valueType),
+                               backend_data_type,
                                hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif
@@ -1146,11 +1191,11 @@ hipsparseStatus_t hipsparseCreateDnVec(hipsparseDnVecDescr_t* dnVecDescr,
                                        void*                  values,
                                        hipDataType            valueType)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCreateDnVec((cusparseDnVecDescr_t*)dnVecDescr,
-                            size,
-                            values,
-                            hipsparse::hipDataTypeToCudaDataType(valueType)));
+        cusparseCreateDnVec((cusparseDnVecDescr_t*)dnVecDescr, size, values, backend_data_type));
 }
 #endif
 
@@ -1160,11 +1205,11 @@ hipsparseStatus_t hipsparseCreateConstDnVec(hipsparseConstDnVecDescr_t* dnVecDes
                                             const void*                 values,
                                             hipDataType                 valueType)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCreateConstDnVec((cusparseConstDnVecDescr_t*)dnVecDescr,
-                                 size,
-                                 values,
-                                 hipsparse::hipDataTypeToCudaDataType(valueType)));
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreateConstDnVec(
+        (cusparseConstDnVecDescr_t*)dnVecDescr, size, values, backend_data_type));
 }
 #endif
 
@@ -1255,13 +1300,16 @@ hipsparseStatus_t hipsparseCreateDnMat(hipsparseDnMatDescr_t* dnMatDescr,
                                        hipDataType            valueType,
                                        hipsparseOrder_t       order)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateDnMat((cusparseDnMatDescr_t*)dnMatDescr,
                             rows,
                             cols,
                             ld,
                             values,
-                            hipsparse::hipDataTypeToCudaDataType(valueType),
+                            backend_data_type,
                             hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif
@@ -1275,13 +1323,16 @@ hipsparseStatus_t hipsparseCreateConstDnMat(hipsparseConstDnMatDescr_t* dnMatDes
                                             hipDataType                 valueType,
                                             hipsparseOrder_t            order)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valueType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstDnMat((cusparseConstDnMatDescr_t*)dnMatDescr,
                                  rows,
                                  cols,
                                  ld,
                                  values,
-                                 hipsparse::hipDataTypeToCudaDataType(valueType),
+                                 backend_data_type,
                                  hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif

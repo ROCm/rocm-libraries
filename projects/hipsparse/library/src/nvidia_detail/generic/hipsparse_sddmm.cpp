@@ -41,6 +41,10 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t          handle,
                                             hipsparseSDDMMAlg_t        alg,
                                             size_t*                    pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSDDMM_bufferSize((cusparseHandle_t)handle,
                                  hipsparse::hipOperationToCudaOperation(opA),
@@ -50,7 +54,7 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t          handle,
                                  (cusparseConstDnMatDescr_t)matB,
                                  beta,
                                  (cusparseSpMatDescr_t)matC,
-                                 hipsparse::hipDataTypeToCudaDataType(computeType),
+                                 backend_data_type,
                                  hipsparse::hipSDDMMAlgToCudaSDDMMAlg(alg),
                                  pBufferSizeInBytes));
 }
@@ -67,6 +71,10 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
                                             hipsparseSDDMMAlg_t         alg,
                                             size_t*                     pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSDDMM_bufferSize((cusparseHandle_t)handle,
                                  hipsparse::hipOperationToCudaOperation(opA),
@@ -76,7 +84,7 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
                                  (const cusparseDnMatDescr_t)matB,
                                  beta,
                                  (cusparseSpMatDescr_t)matC,
-                                 hipsparse::hipDataTypeToCudaDataType(computeType),
+                                 backend_data_type,
                                  hipsparse::hipSDDMMAlgToCudaSDDMMAlg(alg),
                                  pBufferSizeInBytes));
 }
@@ -95,6 +103,10 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t          handle,
                                             hipsparseSDDMMAlg_t        alg,
                                             void*                      tempBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSDDMM_preprocess((cusparseHandle_t)handle,
                                  hipsparse::hipOperationToCudaOperation(opA),
@@ -104,7 +116,7 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t          handle,
                                  (cusparseConstDnMatDescr_t)matB,
                                  beta,
                                  (cusparseSpMatDescr_t)matC,
-                                 hipsparse::hipDataTypeToCudaDataType(computeType),
+                                 backend_data_type,
                                  hipsparse::hipSDDMMAlgToCudaSDDMMAlg(alg),
                                  tempBuffer));
 }
@@ -121,6 +133,10 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
                                             hipsparseSDDMMAlg_t         alg,
                                             void*                       tempBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSDDMM_preprocess((cusparseHandle_t)handle,
                                  hipsparse::hipOperationToCudaOperation(opA),
@@ -130,7 +146,7 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
                                  (const cusparseDnMatDescr_t)matB,
                                  beta,
                                  (cusparseSpMatDescr_t)matC,
-                                 hipsparse::hipDataTypeToCudaDataType(computeType),
+                                 backend_data_type,
                                  hipsparse::hipSDDMMAlgToCudaSDDMMAlg(alg),
                                  tempBuffer));
 }
@@ -149,6 +165,10 @@ hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t          handle,
                                  hipsparseSDDMMAlg_t        alg,
                                  void*                      tempBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSDDMM((cusparseHandle_t)handle,
                       hipsparse::hipOperationToCudaOperation(opA),
@@ -158,7 +178,7 @@ hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t          handle,
                       (cusparseConstDnMatDescr_t)matB,
                       beta,
                       (cusparseSpMatDescr_t)matC,
-                      hipsparse::hipDataTypeToCudaDataType(computeType),
+                      backend_data_type,
                       hipsparse::hipSDDMMAlgToCudaSDDMMAlg(alg),
                       tempBuffer));
 }
@@ -175,6 +195,10 @@ hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t           handle,
                                  hipsparseSDDMMAlg_t         alg,
                                  void*                       tempBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSDDMM((cusparseHandle_t)handle,
                       hipsparse::hipOperationToCudaOperation(opA),
@@ -184,7 +208,7 @@ hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t           handle,
                       (const cusparseDnMatDescr_t)matB,
                       beta,
                       (cusparseSpMatDescr_t)matC,
-                      hipsparse::hipDataTypeToCudaDataType(computeType),
+                      backend_data_type,
                       hipsparse::hipSDDMMAlgToCudaSDDMMAlg(alg),
                       tempBuffer));
 }

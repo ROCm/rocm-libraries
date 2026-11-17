@@ -58,13 +58,45 @@ hipsparseStatus_t hipsparseDestroy(hipsparseHandle_t handle)
         rocsparse_destroy_handle((rocsparse_handle)handle));
 }
 
+static bool is_known_hipsparse_status(hipsparseStatus_t status)
+{
+    switch(status)
+    {
+    case HIPSPARSE_STATUS_SUCCESS:
+    case HIPSPARSE_STATUS_NOT_INITIALIZED:
+    case HIPSPARSE_STATUS_ALLOC_FAILED:
+    case HIPSPARSE_STATUS_INVALID_VALUE:
+    case HIPSPARSE_STATUS_ARCH_MISMATCH:
+    case HIPSPARSE_STATUS_MAPPING_ERROR:
+    case HIPSPARSE_STATUS_EXECUTION_FAILED:
+    case HIPSPARSE_STATUS_INTERNAL_ERROR:
+    case HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+    case HIPSPARSE_STATUS_ZERO_PIVOT:
+    case HIPSPARSE_STATUS_NOT_SUPPORTED:
+    case HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES:
+        return true;
+    default:
+        return false;
+    }
+}
+
 const char* hipsparseGetErrorName(hipsparseStatus_t status)
 {
+    if(!is_known_hipsparse_status(status))
+    {
+        return "Unrecognized status code";
+    }
+
     return rocsparse_get_status_name(hipsparse::hipSPARSEStatusToRocSPARSEStatus(status));
 }
 
 const char* hipsparseGetErrorString(hipsparseStatus_t status)
 {
+    if(!is_known_hipsparse_status(status))
+    {
+        return "Unrecognized status code";
+    }
+
     return rocsparse_get_status_description(hipsparse::hipSPARSEStatusToRocSPARSEStatus(status));
 }
 
@@ -165,6 +197,17 @@ hipsparseStatus_t hipsparseCopyMatDescr(hipsparseMatDescr_t dest, const hipspars
 
 hipsparseStatus_t hipsparseSetMatType(hipsparseMatDescr_t descrA, hipsparseMatrixType_t type)
 {
+    switch(type)
+    {
+    case HIPSPARSE_MATRIX_TYPE_GENERAL:
+    case HIPSPARSE_MATRIX_TYPE_SYMMETRIC:
+    case HIPSPARSE_MATRIX_TYPE_HERMITIAN:
+    case HIPSPARSE_MATRIX_TYPE_TRIANGULAR:
+        break;
+    default:
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_type(
         (rocsparse_mat_descr)descrA, hipsparse::hipMatTypeToHCCMatType(type)));
 }
@@ -176,6 +219,15 @@ hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatFillMode(hipsparseMatDescr_t descrA, hipsparseFillMode_t fillMode)
 {
+    switch(fillMode)
+    {
+    case HIPSPARSE_FILL_MODE_LOWER:
+    case HIPSPARSE_FILL_MODE_UPPER:
+        break;
+    default:
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_fill_mode(
         (rocsparse_mat_descr)descrA, hipsparse::hipFillModeToHCCFillMode(fillMode)));
 }
@@ -188,6 +240,15 @@ hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatDiagType(hipsparseMatDescr_t descrA, hipsparseDiagType_t diagType)
 {
+    switch(diagType)
+    {
+    case HIPSPARSE_DIAG_TYPE_UNIT:
+    case HIPSPARSE_DIAG_TYPE_NON_UNIT:
+        break;
+    default:
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_diag_type(
         (rocsparse_mat_descr)descrA, hipsparse::hipDiagTypeToHCCDiagType(diagType)));
 }
@@ -200,6 +261,15 @@ hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatIndexBase(hipsparseMatDescr_t descrA, hipsparseIndexBase_t base)
 {
+    switch(base)
+    {
+    case HIPSPARSE_INDEX_BASE_ZERO:
+    case HIPSPARSE_INDEX_BASE_ONE:
+        break;
+    default:
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_index_base(
         (rocsparse_mat_descr)descrA, hipsparse::hipBaseToHCCBase(base)));
 }

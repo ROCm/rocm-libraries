@@ -437,28 +437,42 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_datatype_ hipDataTypeToHCCDataType(hipDataType datatype)
+    inline hipsparseStatus_t hipDataTypeToHCCDataType(hipDataType          datatype,
+                                                      rocsparse_datatype_* out)
     {
         switch(datatype)
         {
         case HIP_R_8I:
-            return rocsparse_datatype_i8_r;
+            *out = rocsparse_datatype_i8_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_32I:
-            return rocsparse_datatype_i32_r;
+            *out = rocsparse_datatype_i32_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_16F:
-            return rocsparse_datatype_f16_r;
+            *out = rocsparse_datatype_f16_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_16BF:
-            return rocsparse_datatype_bf16_r;
+            *out = rocsparse_datatype_bf16_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_32F:
-            return rocsparse_datatype_f32_r;
+            *out = rocsparse_datatype_f32_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_64F:
-            return rocsparse_datatype_f64_r;
+            *out = rocsparse_datatype_f64_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_C_32F:
-            return rocsparse_datatype_f32_c;
+            *out = rocsparse_datatype_f32_c;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_C_64F:
-            return rocsparse_datatype_f64_c;
+            *out = rocsparse_datatype_f64_c;
+            return HIPSPARSE_STATUS_SUCCESS;
+        case HIP_R_8U:
+        case HIP_C_8U:
+        case HIP_R_32U:
+        case HIP_C_32U:
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
         default:
-            throw "Non existent hipDataType";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -716,8 +730,8 @@ public:
         bool                 is_implicit_stage_analysis_called{};
         bool                 is_stage_compute_subsequent{};
 
-        Entry()             = default;
-        Entry(const Entry&) = delete;
+        Entry()                        = default;
+        Entry(const Entry&)            = delete;
         Entry& operator=(const Entry&) = delete;
         Entry(Entry&& other) noexcept;
         Entry& operator=(Entry&&) = delete;

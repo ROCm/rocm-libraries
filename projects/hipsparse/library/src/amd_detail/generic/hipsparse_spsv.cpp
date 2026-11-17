@@ -63,6 +63,9 @@ hipsparseStatus_t hipsparseSpSV_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpSVDescr_t        spsvDescr,
                                            size_t*                     pBufferSizeInBytes)
 {
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spsv((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opA),
@@ -70,7 +73,7 @@ hipsparseStatus_t hipsparseSpSV_bufferSize(hipsparseHandle_t           handle,
                        to_rocsparse_const_spmat_descr(matA),
                        (rocsparse_const_dnvec_descr)x,
                        (const rocsparse_dnvec_descr)y,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        hipsparse::hipSpSVAlgToHCCSpSVAlg(alg),
                        rocsparse_spsv_stage_buffer_size,
                        pBufferSizeInBytes,
@@ -93,13 +96,16 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spsv((rocsparse_handle)handle,
                                              hipsparse::hipOperationToHCCOperation(opA),
                                              alpha,
                                              to_rocsparse_const_spmat_descr(matA),
                                              (rocsparse_const_dnvec_descr)x,
                                              (const rocsparse_dnvec_descr)y,
-                                             hipsparse::hipDataTypeToHCCDataType(computeType),
+                                             backend_data_type,
                                              hipsparse::hipSpSVAlgToHCCSpSVAlg(alg),
                                              rocsparse_spsv_stage_preprocess,
                                              nullptr,
@@ -122,6 +128,9 @@ hipsparseStatus_t hipsparseSpSV_solve(hipsparseHandle_t           handle,
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spsv((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opA),
@@ -129,7 +138,7 @@ hipsparseStatus_t hipsparseSpSV_solve(hipsparseHandle_t           handle,
                        to_rocsparse_const_spmat_descr(matA),
                        (rocsparse_const_dnvec_descr)x,
                        (const rocsparse_dnvec_descr)y,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        hipsparse::hipSpSVAlgToHCCSpSVAlg(alg),
                        rocsparse_spsv_stage_compute,
                        nullptr,
