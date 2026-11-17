@@ -238,7 +238,6 @@
         4.0,
         0.0,
         -0.125,
-        1048576.0,
         0.0001
       ]
     },
@@ -315,8 +314,11 @@
     "dims_bias": "[bias_b, bias_h, bias_q, skv] if bias_rank == 4 else ([bias_h, bias_q, skv] if bias_rank == 3 else [bias_q, skv])",
     "stride_bias": "[bias_h*bias_q*pitch, bias_q*pitch, pitch, 1] if bias_rank == 4 else ([bias_q*pitch, pitch, 1] if bias_rank == 3 else [pitch, 1])",
     "dims_dbias": "[bias_b, bias_h, bias_q, skv] if bias_rank == 4 else ([bias_h, bias_q, skv] if bias_rank == 3 else [bias_q, skv])",
-    "bias_lo": "-1 if bias_dom == 'default' else (-8 if bias_dom == 'wide' else -30000)",
-    "bias_hi": "1 if bias_dom == 'default' else (8 if bias_dom == 'wide' else 30000)"
+    "bias_lo": "-1 if bias_dom == 'default' else (-8 if bias_dom == 'wide' else -1000)",
+    "bias_hi": "1 if bias_dom == 'default' else (8 if bias_dom == 'wide' else 1000)",
+    "bias_mag": "1 if bias_dom == 'default' else (8 if bias_dom == 'wide' else 1000)",
+    "dom_mag": "0.5 if domain == 'constant' else (8 if domain in ['large', 'wide'] else (4 if domain == 'positive' else (0.01 if domain == 'narrow' else (0 if domain in ['zeros', 'subnormal'] else 1))))",
+    "s_max": "abs(scale) * dqk * dom_mag * dom_mag + bias_mag"
   },
   "constraints": [
     {
@@ -334,6 +336,10 @@
     {
       "rule": "b*hq*sq*skv*(dqk+dv) <= 2**29",
       "reason": "GPU reference cost ceiling, as SdpaBackward.space.json: the case time is linear above 2**26 and the CPU backward reference is serial, so 2**29 keeps the worst drawn case near 24 s (measured on a gfx942 host for the ASM region space)"
+    },
+    {
+      "rule": "s_max <= (168 if dtype == 'float' else (8388 if dtype == 'half' else 16777))",
+      "reason": "the largest score |S| (bounded by |scale| * dqk * mag^2, plus |bias|) must keep |S| * 2^-24 below a tenth of the dtype's tolerance: the backward computes P = exp(S - LSE) from a given fp32 LSE, and two correct fp32 computations of S differ by |S| * 2^-24, which exp() passes on to P and the gradients. Beyond that bound the oracle cannot tell a correct engine from a wrong one (scale 2^20 with scores near 1e9 gave NaN in every engine that did not produce the LSE itself)"
     }
   ],
   "case": {

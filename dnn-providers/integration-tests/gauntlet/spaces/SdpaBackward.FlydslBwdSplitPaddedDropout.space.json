@@ -209,7 +209,6 @@
         4.0,
         0.0,
         -0.125,
-        1048576.0,
         0.0001
       ]
     },
@@ -287,7 +286,9 @@
     "lens_q": "[lq0] if b == 1 else ([lq0, lq1] if b == 2 else [lq0, lq1, lq2])",
     "lens_kv": "[lk0] if b == 1 else ([lk0, lk1] if b == 2 else [lk0, lk1, lk2])",
     "pad_ok": "(mask == 'none') or ((lq0 <= lk0) and (b < 2 or lq1 <= lk1) and (b < 3 or lq2 <= lk2))",
-    "rows_see_a_key": "pad_ok"
+    "rows_see_a_key": "pad_ok",
+    "dom_mag": "0.5 if domain == 'constant' else (8 if domain in ['large', 'wide'] else (4 if domain == 'positive' else (0.01 if domain == 'narrow' else (0 if domain in ['zeros', 'subnormal'] else 1))))",
+    "s_max": "abs(scale) * dqk * dom_mag * dom_mag + 0"
   },
   "constraints": [
     {
@@ -297,6 +298,10 @@
     {
       "rule": "b*hq*sq*skv*(dqk+dv) <= 2**29",
       "reason": "GPU reference cost ceiling, as SdpaBackward.space.json: the case time is linear above 2**26 and the CPU backward reference is serial, so 2**29 keeps the worst drawn case near 24 s (measured on a gfx942 host for the ASM region space)"
+    },
+    {
+      "rule": "s_max <= (168 if dtype == 'float' else (8388 if dtype == 'half' else 16777))",
+      "reason": "the largest score |S| (bounded by |scale| * dqk * mag^2, plus |bias|) must keep |S| * 2^-24 below a tenth of the dtype's tolerance: the backward computes P = exp(S - LSE) from a given fp32 LSE, and two correct fp32 computations of S differ by |S| * 2^-24, which exp() passes on to P and the gradients. Beyond that bound the oracle cannot tell a correct engine from a wrong one (scale 2^20 with scores near 1e9 gave NaN in every engine that did not produce the LSE itself)"
     }
   ],
   "case": {
