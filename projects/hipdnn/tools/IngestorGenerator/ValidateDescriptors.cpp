@@ -28,7 +28,6 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/NativeRegistry.hpp>
-#include <hipdnn_plugin_sdk/heuristics/OptionalFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
@@ -39,6 +38,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+#include <hipdnn_tools/OptionalFeatures.hpp>
 
 /**
  * @file ValidateDescriptors.cpp
@@ -740,7 +740,7 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                 // RFC 0019 section 6.2: a feature a valid graph may leave unbound must be read
                 // through value_or_default or behind present, or that graph is unscorable. A
                 // warning until the shipped models are migrated (uhd_gen rewrite-signature).
-                const auto unguarded = hipdnn_plugin_sdk::heuristics::unguardedOptionalReferences(
+                const auto unguarded = hipdnn_tools::unguardedOptionalReferences(
                     model->featuresSignature, model->score.metric);
                 if(!unguarded.empty())
                 {

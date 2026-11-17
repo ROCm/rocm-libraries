@@ -2,11 +2,15 @@
 # SPDX-License-Identifier:  MIT
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # Headers both command-line tools below share; tools-internal, never installed.
+    # Headers the command-line tools share; tools-internal, never installed. Includes the
+    # operand table and optional-feature analysis only the UHD tools read (OptionalFeatures.hpp).
     add_library(hipdnn_tools_common INTERFACE)
     target_include_directories(hipdnn_tools_common
         INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>)
     target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk hipdnn_flatbuffers_sdk)
+    if(NOT HIPDNN_SKIP_TESTS)
+        add_subdirectory(common/tests)
+    endif()
 
     # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
     # training tooling.
@@ -18,7 +22,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
     target_compile_options(hipdnn_uhd_features PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
+    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk hipdnn_tools_common)
     target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
     clang_tidy_check(hipdnn_uhd_features)
     install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -302,7 +306,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     add_executable(hipdnn_validate_descriptors IngestorGenerator/ValidateDescriptors.cpp)
     target_compile_definitions(hipdnn_validate_descriptors PRIVATE __HIP_PLATFORM_AMD__)
-    target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
+    target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hipdnn_tools_common hip::host)
     install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # Smoke test: run the validator over a real descriptor bundle and assert it reports
