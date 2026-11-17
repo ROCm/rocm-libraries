@@ -113,7 +113,7 @@ inline bool shaped(const Tensor* value, size_t minimumRank)
 }
 
 /// A shaped floating-point operand: the matrix-product families (Matmul, convolutions,
-/// attention) count floating-point multiply-adds only.
+/// attention, the MoE grouped matmuls, GDN and KDA) count floating-point multiply-adds only.
 inline bool dimensions(const Tensor* value, size_t minimumRank)
 {
     return value != nullptr && floatingPoint(value->data_type()) && shaped(value, minimumRank);
@@ -207,22 +207,123 @@ inline int64_t bandPairs(int64_t sq,
     return pairs;
 }
 
+/// The keys per sequence an attention node declares, and which of K and V are paged: a paged
+/// side is a cache [blocks, heads, block size, D], an unpaged one [B, heads, keys, D].
+struct KeyExtent
+{
+    int64_t keys = 0;
+    bool pagedK = false;
+    bool pagedV = false;
+};
+
+/// The keys of an unpaged node: K's sequence extent.
+template <typename TAttention>
+std::optional<KeyExtent> denseKeys(const Graph& graph, const TAttention& op)
+{
+    const auto* k = tensor(graph, op.k_tensor_uid());
+    if(!shaped(k, 4) || k->dims()->size() != 4)
+    {
+        return std::nullopt;
+    }
+    return KeyExtent{k->dims()->Get(2)};
+}
+
+/// The keys per sequence an SDPA forward node declares, inferred as cuDNN and the test SDK
+/// references (`sdpaPagedMaxSeqKv`) do. Either K or V may be paged alone, each side with its
+/// own table [B, 1, pages, 1] and block size. The keys are `max_seq_len_kv` when stated; else
+/// an unpaged K's, then V's, sequence extent; else the attention mask's last extent; else
+/// rng_dump's; else the smaller of the paged sides' pages x block size. Nullopt when they
+/// cannot be read or exceed a paged side's capacity: the work is then unknown. The bench
+/// writes `seq_len_kv`, `cu_seq_len_kv` and the page tables from the same keys.
+inline std::optional<KeyExtent>
+    keyExtent(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
+{
+    const auto tableK = op.page_table_k_tensor_uid();
+    const auto tableV = op.page_table_v_tensor_uid();
+    if(!tableK && !tableV)
+    {
+        return denseKeys(graph, op);
+    }
+    const auto capacity = [&graph](int64_t table, int64_t cache) -> std::optional<int64_t> {
+        const auto* pages = tensor(graph, table);
+        const auto* blocks = tensor(graph, cache);
+        if(!shaped(pages, 3) || !shaped(blocks, 4))
+        {
+            return std::nullopt;
+        }
+        return pages->dims()->Get(2) * blocks->dims()->Get(2);
+    };
+    const auto lastExtent = [&graph](int64_t uid) -> std::optional<int64_t> {
+        const auto* value = tensor(graph, uid);
+        if(!shaped(value, 1))
+        {
+            return std::nullopt;
+        }
+        return value->dims()->Get(value->dims()->size() - 1);
+    };
+    std::optional<int64_t> capacityK;
+    std::optional<int64_t> capacityV;
+    if(tableK)
+    {
+        capacityK = capacity(*tableK, op.k_tensor_uid());
+    }
+    if(tableV)
+    {
+        capacityV = capacity(*tableV, op.v_tensor_uid());
+    }
+    if((tableK && !capacityK) || (tableV && !capacityV))
+    {
+        return std::nullopt;
+    }
+    std::optional<int64_t> keys;
+    if(op.max_seq_len_kv())
+    {
+        keys = static_cast<int64_t>(*op.max_seq_len_kv());
+    }
+    else if(!tableK || !tableV)
+    {
+        const auto* unpaged = tensor(graph, tableK ? op.v_tensor_uid() : op.k_tensor_uid());
+        if(shaped(unpaged, 4) && unpaged->dims()->size() == 4)
+        {
+            keys = unpaged->dims()->Get(2);
+        }
+    }
+    else if(op.attn_mask_tensor_uid())
+    {
+        keys = lastExtent(*op.attn_mask_tensor_uid());
+    }
+    else if(op.rng_dump_tensor_uid())
+    {
+        keys = lastExtent(*op.rng_dump_tensor_uid());
+    }
+    else
+    {
+        keys = std::min(*capacityK, *capacityV);
+    }
+    if(!keys || *keys <= 0 || (capacityK && *keys > *capacityK)
+       || (capacityV && *keys > *capacityV))
+    {
+        return std::nullopt;
+    }
+    return KeyExtent{*keys, tableK.has_value(), tableV.has_value()};
+}
+
 /// Attention's logical work: the QK^T and PV multiply-adds over the score pairs its band keeps,
 /// for the problem the graph declares (RFC 0019 section 6.8). Where operand contents decide how
 /// much of it runs (sequence lengths, ragged offsets, cu_seq_len, page tables, block masks) this
 /// is the declared extent, which `data_dependent` marks. Elementwise work on the scores (scale,
 /// bias, ALiBi, softmax, dropout, sinks, FP8 scaling) is not counted, as softmax never was.
-/// @p keys replaces K's sequence extent: a paged cache's declared keys per sequence.
+/// @p extent gives the keys per sequence and which sides are paged caches.
 template <typename TAttention>
 std::optional<double>
-    attentionFlops(const Graph& graph, const TAttention& op, std::optional<int64_t> keys = {})
+    attentionFlops(const Graph& graph, const TAttention& op, const std::optional<KeyExtent>& extent)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     const auto* q = tensor(graph, op.q_tensor_uid());
     const auto* k = tensor(graph, op.k_tensor_uid());
     const auto* v = tensor(graph, op.v_tensor_uid());
     const auto* o = tensor(graph, op.o_tensor_uid());
-    if(!dimensions(q, 4) || !dimensions(k, 4) || !dimensions(v, 4) || !dimensions(o, 4)
+    if(!extent || !dimensions(q, 4) || !dimensions(k, 4) || !dimensions(v, 4) || !dimensions(o, 4)
        || q->dims()->size() != 4 || k->dims()->size() != 4 || v->dims()->size() != 4
        || o->dims()->size() != 4)
     {
@@ -233,33 +334,45 @@ std::optional<double>
     const auto sq = q->dims()->Get(2);
     const auto dq = q->dims()->Get(3);
     const auto dv = v->dims()->Get(3);
-    // A paged cache holds pages, not sequences, along K and V's first two axes.
-    const bool paged = keys.has_value();
-    const auto sk = paged ? *keys : k->dims()->Get(2);
-    if(sk <= 0
-       || (!paged
-           && (k->dims()->Get(0) != batch || v->dims()->Get(0) != batch || v->dims()->Get(2) != sk))
-       || k->dims()->Get(1) != v->dims()->Get(1) || heads % k->dims()->Get(1) != 0
-       || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads || o->dims()->Get(2) != sq
-       || k->dims()->Get(3) != dq || o->dims()->Get(3) != dv)
+    const auto sk = extent->keys;
+    // A paged cache holds blocks, not sequences, along its first and third axes.
+    const auto unpagedMatches = [batch, sk](const Tensor& side) {
+        return side.dims()->Get(0) == batch && side.dims()->Get(2) == sk;
+    };
+    if(sk <= 0 || (!extent->pagedK && !unpagedMatches(*k))
+       || (!extent->pagedV && !unpagedMatches(*v)) || k->dims()->Get(1) != v->dims()->Get(1)
+       || heads % k->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
+       || o->dims()->Get(2) != sq || k->dims()->Get(3) != dq || o->dims()->Get(3) != dv)
     {
         return std::nullopt;
     }
-    const bool causal = op.causal_mask() || op.causal_mask_bottom_right()
-                        || (op.right_bound() && *op.right_bound() == 0);
-    const bool bottomRight = op.causal_mask_bottom_right()
-                             || op.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT;
-    // A negative bound is unbounded, as an absent one is.
+    // The deprecated causal flags compose as cuDNN's setters do (SEM-002, the references'
+    // extractDiagonalBandParams): a flag means right_bound 0 unless one of at least 0 is
+    // stated, and causal_mask_bottom_right also means BOTTOM_RIGHT. The frontend rejects a band
+    // outside hipDNN's domain (SEM-005: left_bound 0, a bound below -1, both flags), so its
+    // work is unknown.
     std::optional<int64_t> left = op.left_bound();
+    std::optional<int64_t> right = op.right_bound();
+    if((left && (*left == 0 || *left < -1)) || (right && *right < -1)
+       || (op.causal_mask() && op.causal_mask_bottom_right()))
+    {
+        return std::nullopt;
+    }
+    // -1 is unbounded, as an absent bound is.
     if(left && *left < 0)
     {
         left.reset();
     }
-    std::optional<int64_t> right = causal ? std::optional<int64_t>{0} : op.right_bound();
     if(right && *right < 0)
     {
         right.reset();
     }
+    if(!right && (op.causal_mask() || op.causal_mask_bottom_right()))
+    {
+        right = 0;
+    }
+    const bool bottomRight = op.causal_mask_bottom_right()
+                             || op.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT;
     const auto pairs = bandPairs(sq, sk, bottomRight ? sk - sq : 0, left, right);
     return 2.0 * static_cast<double>(batch) * static_cast<double>(heads)
            * static_cast<double>(pairs) * (static_cast<double>(dq) + static_cast<double>(dv));
@@ -331,40 +444,10 @@ inline std::optional<double>
                             tensor(graph, op.dy_tensor_uid()));
 }
 
-/// The keys per sequence a paged cache declares (K and V [pages, heads, page size, D]):
-/// `max_seq_len_kv` when stated, else the page table's pages per sequence ([B, 1, pages, 1])
-/// times the page size. An empty value for an unpaged node, whose keys are K's own; nullopt
-/// when a paged node's keys cannot be read, which leaves its work unknown.
-inline std::optional<std::optional<int64_t>>
-    pagedKeys(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
-{
-    const auto table = op.page_table_k_tensor_uid();
-    if(!table)
-    {
-        return std::optional<int64_t>{};
-    }
-    if(op.max_seq_len_kv() && *op.max_seq_len_kv() > 0)
-    {
-        return std::optional<int64_t>{*op.max_seq_len_kv()};
-    }
-    const auto* pages = tensor(graph, *table);
-    const auto* k = tensor(graph, op.k_tensor_uid());
-    if(!shaped(pages, 3) || !shaped(k, 4))
-    {
-        return std::nullopt;
-    }
-    return std::optional<int64_t>{pages->dims()->Get(2) * k->dims()->Get(2)};
-}
-
 inline std::optional<double>
     nodeFlops(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
 {
-    const auto keys = pagedKeys(graph, op);
-    if(!keys)
-    {
-        return std::nullopt;
-    }
-    return attentionFlops(graph, op, *keys);
+    return attentionFlops(graph, op, keyExtent(graph, op));
 }
 
 /// FlashAttention's convention: 2.5x the forward, which recomputes QK^T and adds the dV,
@@ -374,7 +457,7 @@ inline std::optional<double>
     nodeFlops(const Graph& graph,
               const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& op)
 {
-    const auto forward = attentionFlops(graph, op);
+    const auto forward = attentionFlops(graph, op, denseKeys(graph, op));
     if(!forward)
     {
         return std::nullopt;
@@ -831,10 +914,9 @@ private:
     bool _dataDependent = false;
 };
 
-/// Publishes @p node's operands, `<prefix>.data_dependent`, and derived SDPA flags; returns
-/// the `data_dependent` verdict. Publishes nothing and returns false for a node without
-/// attributes or of an unknown type.
-inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
+/// Publishes @p node's operands, `<prefix>.data_dependent`, and derived SDPA flags. Publishes
+/// nothing for a node without attributes or of an unknown type.
+inline void bindNodeFeatures(uhd::FeatureExtractionContext& features,
                              const Graph& graph,
                              const Node& node,
                              const std::string& prefix)
@@ -842,7 +924,7 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
     NodeFeatureBinder binder(features, graph, prefix);
     if(!hipdnn_flatbuffers_sdk::data_objects::node_operands::visit(node, binder))
     {
-        return false;
+        return;
     }
     features.bind(prefix + ".data_dependent", binder.dataDependent());
     // Derived flags, not schema fields; shipped SDPA models read both.
@@ -853,7 +935,6 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
                       op->seq_len_q_tensor_uid().has_value()
                           || op->seq_len_kv_tensor_uid().has_value());
     }
-    return binder.dataDependent();
 }
 } // namespace detail
 
@@ -928,7 +1009,7 @@ inline uhd::FeatureExtractionContext
             features.bind(prefix + ".type", static_cast<int64_t>(node.attributes_type()));
             features.bind(prefix + ".compute_data_type",
                           static_cast<int64_t>(node.compute_data_type()));
-            static_cast<void>(detail::bindNodeFeatures(features, raw, node, prefix));
+            detail::bindNodeFeatures(features, raw, node, prefix);
             const auto work = detail::logicalFlops(raw, node);
             // A type this build predates has no name to publish under.
             const auto type = static_cast<size_t>(node.attributes_type());

@@ -1134,14 +1134,123 @@ TEST(TestEngineFeatures, AttentionCountsTheDeclaredExtentWhenOperandContentsDeci
         EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.SdpaAttributes").get<double>(), 32256.0);
     }
 
-    // Two pages of K's 7 per sequence: 14 keys for each of the 3 queries.
+    // Two pages of 7 per sequence on each side: 14 keys for each of the 3 queries.
     auto wider = attentionGraph(pagedAttributes);
     wider.tensors[5]->dims = {2, 1, 2, 1};
+    wider.tensors[6]->dims = {2, 1, 2, 1};
     EXPECT_DOUBLE_EQ(features(wider).at("graph.flops").get<double>(), 2.0 * 2 * 8 * 42 * 48);
+    // Only K's table is wider: V holds 7 keys per sequence, so 7 are declared.
+    wider.tensors[6]->dims = {2, 1, 1, 1};
+    EXPECT_DOUBLE_EQ(features(wider).at("graph.flops").get<double>(), 32256.0);
     // A stated max_seq_len_kv is the declared keys: 5 for each of the 3 queries.
     pagedAttributes.max_seq_len_kv = 5;
     EXPECT_DOUBLE_EQ(features(attentionGraph(pagedAttributes)).at("graph.flops").get<double>(),
                      2.0 * 2 * 8 * 15 * 48);
+}
+
+/// Q [2, 8, 3, 16] and O [2, 8, 3, 32] (uids 1 and 4) around K (uid 2) and V (uid 3); a
+/// table of K (uid 5) and of V (uid 6) when given, and @p mask (uid 7) when given.
+GraphT pagedGraph(const SdpaAttributesT& sdpa,
+                  std::vector<int64_t> k,
+                  std::vector<int64_t> v,
+                  std::vector<int64_t> tableK = {2, 1, 1, 1},
+                  std::vector<int64_t> tableV = {2, 1, 1, 1},
+                  std::vector<int64_t> mask = {2, 8, 3, 1})
+{
+    GraphT graph;
+    addTensor(graph, 1, {2, 8, 3, 16});
+    addTensor(graph, 2, std::move(k));
+    addTensor(graph, 3, std::move(v));
+    addTensor(graph, 4, {2, 8, 3, 32});
+    addTensor(graph, 5, std::move(tableK));
+    addTensor(graph, 6, std::move(tableV));
+    addTensor(graph, 7, std::move(mask));
+    addNode(graph, sdpa, DataType::FLOAT);
+    return graph;
+}
+
+// The keys of a paged node are inferred as cuDNN and the references (sdpaPagedMaxSeqKv) do:
+// either side may be paged alone with its own block size, and the keys never exceed what a
+// paged side holds.
+TEST(TestEngineFeatures, PagedKeysAreInferredAsTheReferencesDo)
+{
+    const auto paged = [](bool pageK, bool pageV) {
+        auto sdpa = attention();
+        if(pageK)
+        {
+            sdpa.page_table_k_tensor_uid = 5;
+        }
+        if(pageV)
+        {
+            sdpa.page_table_v_tensor_uid = 6;
+        }
+        return sdpa;
+    };
+    // 2 * B (2) * H (8) * pairs * (Dq + Dv) (48), every query seeing every key.
+    const auto flopsFor
+        = [](int64_t keys) { return 2.0 * 2 * 8 * 3 * static_cast<double>(keys) * 48; };
+    struct Case
+    {
+        const char* name;
+        GraphT graph;
+        std::optional<double> flops;
+    };
+    auto bothWithMax = paged(true, true);
+    bothWithMax.max_seq_len_kv = 20;
+    auto bothWithMask = paged(true, true);
+    bothWithMask.attn_mask_tensor_uid = 7;
+    auto unreadable = paged(true, true);
+    unreadable.page_table_k_tensor_uid = 99;
+    auto bottomRight = paged(true, true);
+    bottomRight.diagonal_alignment = DiagonalAlignment::BOTTOM_RIGHT;
+    bottomRight.right_bound = 0;
+    std::vector<Case> cases;
+    // K: 3 pages of 4 (12 keys); V: 5 pages of 2 (10 keys): the smaller.
+    cases.push_back(
+        {"unequal block sizes",
+         pagedGraph(paged(true, true), {6, 2, 4, 16}, {10, 2, 2, 32}, {2, 1, 3, 1}, {2, 1, 5, 1}),
+         flopsFor(10)});
+    cases.push_back({"V alone, K's 8 keys fit",
+                     pagedGraph(paged(false, true), {2, 2, 8, 16}, {4, 2, 4, 32}, {}, {2, 1, 2, 1}),
+                     flopsFor(8)});
+    cases.push_back({"V alone, K's 9 keys do not fit",
+                     pagedGraph(paged(false, true), {2, 2, 9, 16}, {4, 2, 4, 32}, {}, {2, 1, 2, 1}),
+                     std::nullopt});
+    cases.push_back({"K alone, V's 10 keys",
+                     pagedGraph(paged(true, false), {6, 2, 4, 16}, {2, 2, 10, 32}, {2, 1, 3, 1}),
+                     flopsFor(10)});
+    cases.push_back(
+        {"the mask's keys",
+         pagedGraph(
+             bothWithMask, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}, {2, 8, 3, 10}),
+         flopsFor(10)});
+    cases.push_back(
+        {"a maximum beyond the cache",
+         pagedGraph(bothWithMax, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}),
+         std::nullopt});
+    cases.push_back(
+        {"an unreadable table",
+         pagedGraph(unreadable, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}),
+         std::nullopt});
+    // 12 keys, bottom-right causal: rows keep 10, 11 and 12 keys.
+    cases.push_back(
+        {"bottom-right over the paged keys",
+         pagedGraph(bottomRight, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}),
+         2.0 * 2 * 8 * 33 * 48});
+    for(const auto& [name, graph, flops] : cases)
+    {
+        SCOPED_TRACE(name);
+        const auto published = features(graph);
+        if(flops)
+        {
+            EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), *flops);
+        }
+        else
+        {
+            EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+            EXPECT_FALSE(published.contains("graph.flops"));
+        }
+    }
 }
 
 TEST(TestEngineFeatures, RaggedOperandCountsItsDeclaredExtent)
@@ -1170,6 +1279,71 @@ GraphT single(std::vector<std::vector<int64_t>> shapes, TAttributes attributes)
     }
     addNode(graph, std::move(attributes));
     return graph;
+}
+
+/// The causal top-left backward of RectangularCausalAttention's shapes, with operands 10-13
+/// ([2, 1, 1, 1]) for the optional ones a variation sets.
+GraphT backwardGraph(void (*vary)(SdpaBackwardAttributesT&))
+{
+    SdpaBackwardAttributesT sdpa;
+    sdpa.q_tensor_uid = 1;
+    sdpa.k_tensor_uid = 2;
+    sdpa.v_tensor_uid = 3;
+    sdpa.o_tensor_uid = 4;
+    sdpa.do_tensor_uid = 5;
+    sdpa.stats_tensor_uid = 6;
+    sdpa.dq_tensor_uid = 7;
+    sdpa.dk_tensor_uid = 8;
+    sdpa.dv_tensor_uid = 9;
+    sdpa.causal_mask = true;
+    vary(sdpa);
+    return single({{2, 8, 3, 16},
+                   {2, 2, 7, 16},
+                   {2, 2, 7, 32},
+                   {2, 8, 3, 32},
+                   {2, 8, 3, 32},
+                   {2, 8, 3, 1},
+                   {2, 8, 3, 16},
+                   {2, 2, 7, 16},
+                   {2, 2, 7, 32},
+                   {2, 1, 1, 1},
+                   {2, 1, 1, 1},
+                   {2, 1, 1, 1},
+                   {2, 1, 1, 1}},
+                  sdpa);
+}
+
+// The backward counts 2.5x the forward over the same band; a bias gradient and inverse-scaled
+// dropout are elementwise, and valid lengths leave the declared extent.
+TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOperands)
+{
+    using Variation = void (*)(SdpaBackwardAttributesT&);
+    const std::vector<std::tuple<const char*, Variation, double, bool>> variations = {
+        {"causal", [](SdpaBackwardAttributesT&) {}, 23040.0, false},
+        {"bias gradient and dropout",
+         [](SdpaBackwardAttributesT& op) {
+             op.dbias_tensor_uid = 10;
+             op.dropout_scale_inv_tensor_uid = 11;
+         },
+         23040.0,
+         false},
+        // Rows 0-2 keep keys [0, 0], [0, 1], [1, 2]: 5 pairs, 2.5 x 7680.
+        {"causal window", [](SdpaBackwardAttributesT& op) { op.left_bound = 2; }, 19200.0, false},
+        {"valid lengths",
+         [](SdpaBackwardAttributesT& op) {
+             op.seq_len_q_tensor_uid = 12;
+             op.seq_len_kv_tensor_uid = 13;
+         },
+         23040.0,
+         true},
+    };
+    for(const auto& [name, vary, flops, dataDependent] : variations)
+    {
+        SCOPED_TRACE(name);
+        const auto published = features(backwardGraph(vary));
+        EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), flops);
+        EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), dataDependent);
+    }
 }
 
 TEST(TestEngineFeatures, WorkOfLaterTypesCountsTheDeclaredExtent)
@@ -1248,6 +1422,61 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
              return single({{2, 8, 7, 16}, {2, 2, 3, 16}, {2, 2, 3, 32}, {2, 8, 7, 32}}, sdpa);
          },
          9216.0},
+        // Rows 0-6 of 7 reach keys up to their own, never past key 2: 1 + 2 + 5 x 3 pairs.
+        {"causal top-left with more queries than keys",
+         [] {
+             auto sdpa = attention();
+             sdpa.causal_mask = true;
+             return single({{2, 8, 7, 16}, {2, 2, 3, 16}, {2, 2, 3, 32}, {2, 8, 7, 32}}, sdpa);
+         },
+         27648.0},
+        // Diagonals 4-6, two keys up to each and every key past it: [3, 6], [4, 6], [5, 6].
+        {"bottom-right window",
+         [] {
+             auto sdpa = attention();
+             sdpa.diagonal_alignment = DiagonalAlignment::BOTTOM_RIGHT;
+             sdpa.left_bound = 2;
+             return attentionGraph(sdpa);
+         },
+         13824.0},
+        // Diagonals 4-6: rows keep keys [2, 5], [3, 6], [4, 6].
+        {"bottom-right band",
+         [] {
+             auto sdpa = attention();
+             sdpa.diagonal_alignment = DiagonalAlignment::BOTTOM_RIGHT;
+             sdpa.left_bound = 3;
+             sdpa.right_bound = 1;
+             return attentionGraph(sdpa);
+         },
+         16896.0},
+        // The deprecated flag composes with a stated right bound (SEM-002): rows 0-2 keep keys
+        // [0, 2], [0, 3], [0, 4].
+        {"causal flag with a right bound",
+         [] {
+             auto sdpa = attention();
+             sdpa.causal_mask = true;
+             sdpa.right_bound = 2;
+             return attentionGraph(sdpa);
+         },
+         18432.0},
+        // Diagonals 4-6, one key past each: rows keep 6, 7 and 7 keys.
+        {"bottom-right flag with a right bound",
+         [] {
+             auto sdpa = attention();
+             sdpa.causal_mask_bottom_right = true;
+             sdpa.right_bound = 1;
+             return attentionGraph(sdpa);
+         },
+         30720.0},
+        // causal_mask keeps the stated alignment.
+        {"causal flag with bottom-right alignment",
+         [] {
+             auto sdpa = attention();
+             sdpa.causal_mask = true;
+             sdpa.diagonal_alignment = DiagonalAlignment::BOTTOM_RIGHT;
+             return attentionGraph(sdpa);
+         },
+         27648.0},
     };
     for(const auto& [name, make, flops] : cases)
     {
@@ -1615,11 +1844,41 @@ TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
     ResampleFwdAttributesT windowless;
     windowless.x_tensor_uid = 1;
     windowless.y_tensor_uid = 2;
-    const std::array<std::pair<const char*, GraphT>, 3> cases = {{
-        {"empty extent", layernorm({0, 64})},
-        {"negative extent", layernorm({-1, 64})},
-        {"no window", single({{2, 8, 8, 8}, {2, 8, 4, 4}}, windowless)},
-    }};
+    MoeGroupedMatmulAttributesT moe;
+    moe.token_tensor_uid = 1;
+    moe.weight_tensor_uid = 2;
+    moe.first_token_offset_tensor_uid = 3;
+    moe.output_tensor_uid = 4;
+    MoeGroupedMatmulBwdAttributesT moeBackward;
+    moeBackward.doutput_tensor_uid = 1;
+    moeBackward.token_tensor_uid = 2;
+    moeBackward.first_token_offset_tensor_uid = 3;
+    moeBackward.dweight_tensor_uid = 4;
+    GdnAttributesT gdn;
+    gdn.q_tensor_uid = 1;
+    gdn.o_tensor_uid = 2;
+    // Bands outside hipDNN's domain (SEM-005), which the frontend rejects.
+    const auto band = [](void (*vary)(SdpaAttributesT&)) {
+        auto sdpa = attention();
+        vary(sdpa);
+        return attentionGraph(sdpa);
+    };
+    std::vector<std::pair<const char*, GraphT>> cases;
+    cases.emplace_back("empty extent", layernorm({0, 64}));
+    cases.emplace_back("negative extent", layernorm({-1, 64}));
+    cases.emplace_back("no window", single({{2, 8, 8, 8}, {2, 8, 4, 4}}, windowless));
+    cases.emplace_back("MoE token K against weight K",
+                       single({{1, 32, 60}, {4, 64, 128}, {4}, {1, 32, 128}}, moe));
+    cases.emplace_back("MoE backward rows",
+                       single({{1, 31, 128}, {1, 32, 64}, {4}, {4, 64, 128}}, moeBackward));
+    cases.emplace_back("GDN output tokens", single({{16, 2, 8}, {15, 4, 6}}, gdn));
+    cases.emplace_back("left_bound 0", band([](SdpaAttributesT& op) { op.left_bound = 0; }));
+    cases.emplace_back("left_bound -2", band([](SdpaAttributesT& op) { op.left_bound = -2; }));
+    cases.emplace_back("right_bound -2", band([](SdpaAttributesT& op) { op.right_bound = -2; }));
+    cases.emplace_back("both causal flags", band([](SdpaAttributesT& op) {
+                           op.causal_mask = true;
+                           op.causal_mask_bottom_right = true;
+                       }));
     for(const auto& [name, graph] : cases)
     {
         SCOPED_TRACE(name);
@@ -1677,8 +1936,17 @@ TEST(TestEngineFeatures, OverrideShapesCountTheDeclaredShapes)
 {
     auto graph = convBiasReluGraph();
     graph.is_override_shape_enabled = true;
-    EXPECT_EQ(features(graph), features(convBiasReluGraph()));
-    EXPECT_DOUBLE_EQ(features(graph).at("graph.flops").get<double>(), 87600.0);
+    // The shared cache keys on graph content, which ignores the override flag: each form is
+    // computed on a cleared cache, so neither answers for the other.
+    hipdnn_plugin_sdk::heuristics::problemFeatureCache().clear();
+    const auto overridden = features(graph);
+    hipdnn_plugin_sdk::heuristics::problemFeatureCache().clear();
+    const auto fixed = features(convBiasReluGraph());
+    EXPECT_EQ(overridden, fixed);
+    EXPECT_DOUBLE_EQ(overridden.at("graph.flops").get<double>(), 87600.0);
+    EXPECT_DOUBLE_EQ(overridden.at("graph.flops_by_type.ConvolutionFwdAttributes").get<double>(),
+                     86400.0);
+    EXPECT_TRUE(overridden.contains("graph.logical_bytes"));
 }
 
 /// Owns a packed graph and the wrapper over it, as a plugin receives one.

@@ -1667,9 +1667,17 @@ the trainer, and the runtime compute the same number.
    instead would cost every variable-length, paged, ragged and routed graph its `tflops` label and its
    work features. Collection runs exactly that problem: `hipdnn_bench` writes each such operand's
    declared contents (`InputDomain.hpp`, `declaredContents`): full valid lengths, cumulative lengths
-   of full sequences, ragged offsets of the dense layout, a page of its own for every table entry,
-   a mask keeping every block, and every routed row spread over the groups. Without that, a timing
-   buffer's zeros would run lengths of 0 and time a near-empty problem against the declared work.
+   of full sequences (GDN and KDA split their tokens evenly over the sequences), ragged offsets of the
+   dense layout (values at their stride positions when the tensor is gapped), a page of its own for
+   every table entry, a mask keeping every block (every byte of the bit-packed `UINT8` mask 0xFF), and
+   every routed row spread over the groups. Without that, a timing buffer's zeros would run lengths of
+   0 and time a near-empty problem against the declared work, so an operand whose declared contents
+   cannot be derived — a ragged stride its multiplier does not divide, two rules disagreeing on a
+   shared tensor, a page cache with fewer blocks than table entries, an unknown extent, a block mask
+   that is not `UINT8` — fails the run with an error naming it rather than keeping the generic fill.
+   A measured `tflops` (a benchmark record's) of such a graph divides the declared count by the time
+   of the caller's actual contents, so it can exceed a dense-equivalent rate and is not comparable
+   with a model estimate.
 5. **One formula per node type**, over the operand roles of
    [Section 6.7](#67-per-node-operand-features):
 
@@ -1689,7 +1697,7 @@ the trainer, and the runtime compute the same number.
    | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
    | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
    | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
-   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` sums, per query row, the keys inside its band: causal mask, `left_bound`, `right_bound` and diagonal alignment (cuDNN's band, SEM-001), `Sq·Sk` when unbounded. A paged cache's `Sk` is `max_seq_len_kv` when stated, else the page table's pages per sequence × the page size. Bias, ALiBi, softmax, dropout, sinks and FP8 scaling are elementwise on the scores and not counted. |
+   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` sums, per query row, the keys inside its band: causal mask, `left_bound`, `right_bound` and diagonal alignment (cuDNN's band, SEM-001), `Sq·Sk` when unbounded. The deprecated `causal_mask` and `causal_mask_bottom_right` compose as cuDNN's setters do: a flag gives `right_bound` when it is ≥ 0, else 0; `causal_mask_bottom_right` forces bottom-right alignment, `causal_mask` keeps `diagonal_alignment`. `left_bound` of 0, a bound below -1, or both deprecated flags leave the work unknown, as the frontend rejects them. A paged cache's `Sk` is inferred as cuDNN does: `max_seq_len_kv` when stated, else a non-paged K's (then V's) sequence length, else the `attn_mask` last dim, else the `rng_dump` last dim, else the smaller of the two sides' page-table pages × page size. K or V may be paged alone, each with its own block size; the extent must fit every paged side's capacity and match a dense side's sequence extent, else the work is unknown. Bias, ALiBi, softmax, dropout, sinks and FP8 scaling are elementwise on the scores and not counted. |
    | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
    | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
    | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
@@ -1699,9 +1707,9 @@ the trainer, and the runtime compute the same number.
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
-   shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
-   floating-point operands. So 24 of the 25 node types have a static count; whether a given graph has one
-   is still rule 3's to decide.
+   shapes that do not compose. The convolutions, Matmul, SDPA forward and backward, the MoE grouped
+   matmuls, GDN and KDA also require floating-point operands. So 24 of the 25 node types have a static
+   count; whether a given graph has one is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
      tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
@@ -3199,8 +3207,8 @@ Caveats:
   kernels.
 - **Not every op has a clean closed form.** Ragged or data-dependent work (variable-length sequences,
   page tables, MoE routing) is counted at its declared extent, and `data_dependent` says the count is a
-  bound ([Section 6.8](#68-the-work-model)); a UHD that needs the work actually done can compute it
-  inline in the signature from the published operands.
+  bound ([Section 6.8](#68-the-work-model)); contents are device data, so a UHD ranks on the bound and
+  `data_dependent`, not on the work actually done.
 - **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
   bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
   per-op template) prunes it. Auto-derivation proposes; data or a template trims.
@@ -3771,8 +3779,9 @@ dependency-gated and land only when a concrete need appears.
   refused ([Section 6.9](#69-feature-semantics-revision)).
 
 - **Work model:** The conventions by which the plugin SDK counts a graph's logical FLOPs and bytes —
-  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work unknown — published as
-  `$graph.flops`, `$graph.logical_bytes`, and the features built from them
+  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work counted at its declared
+  extent and marked `data_dependent` — published as `$graph.flops`, `$graph.logical_bytes`, and the
+  features built from them
   ([Section 6.8](#68-the-work-model)).
 
 - **Dispatch-only field:** A KMD field that is *not* a knob, and therefore not in the UHD's feature set —

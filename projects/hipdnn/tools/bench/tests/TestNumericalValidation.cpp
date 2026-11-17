@@ -444,13 +444,21 @@ TEST(TestNumericalValidation, DeclaredContentsAreWrittenExactlyOrNotAtAll)
     std::memcpy(&offset, wide.data(), sizeof(offset));
     EXPECT_EQ(offset, int64_t{1} << 40);
     EXPECT_EQ(declaredImage(DataType::BOOLEAN, 3, {1, 1, 1}), (std::vector<uint8_t>{1, 1, 1}));
+    EXPECT_EQ(declaredImage(DataType::UINT8, 2, {200, 255}), (std::vector<uint8_t>{200, 255}));
+    EXPECT_EQ(declaredImage(DataType::INT8, 2, {-1, 127}), (std::vector<uint8_t>{0xFF, 127}));
 
     // A buffer holding another number of elements, a value the type cannot hold, a type that
     // is not an integer.
     EXPECT_TRUE(declaredImage(DataType::INT32, 3 * sizeof(int32_t), {7, 7}).empty());
+    EXPECT_TRUE(declaredImage(DataType::INT32, 2 * sizeof(int32_t), {7}).empty());
     EXPECT_TRUE(declaredImage(DataType::INT32, sizeof(int32_t), {int64_t{1} << 40}).empty());
     EXPECT_TRUE(declaredImage(DataType::BOOLEAN, 1, {2}).empty());
+    EXPECT_TRUE(declaredImage(DataType::UINT8, 1, {256}).empty());
+    EXPECT_TRUE(declaredImage(DataType::UINT8, 1, {-1}).empty());
+    EXPECT_TRUE(declaredImage(DataType::INT8, 1, {128}).empty());
     EXPECT_TRUE(declaredImage(DataType::FLOAT, sizeof(float), {1}).empty());
+    EXPECT_TRUE(declaredImage(DataType::FP4_E2M1, 1, {1}).empty());
+    EXPECT_TRUE(declaredImage(DataType::NOT_SET, 1, {1}).empty());
 }
 
 TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
