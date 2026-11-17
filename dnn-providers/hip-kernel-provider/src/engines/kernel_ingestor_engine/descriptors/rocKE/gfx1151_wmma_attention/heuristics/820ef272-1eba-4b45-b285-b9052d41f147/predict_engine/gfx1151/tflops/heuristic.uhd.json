@@ -14,10 +14,20 @@
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
     "$graph.logical_bytes",
-    "$graph.nodes[0].attn_scale_value",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_scale_value",
+        1.0
+      ]
+    },
     "$graph.nodes[0].diagonal_alignment",
     "$graph.nodes[0].flops",
-    "$graph.nodes[0].generate_stats",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_stats",
+        false
+      ]
+    },
     "$graph.nodes[0].k.data_type",
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
@@ -88,7 +98,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:ff2ead9106d205cb",
+  "features_hash": "sha256:4ba38f2038d2c197",
   "trained_against": {
     "ued": {
       "id": "820ef272-1eba-4b45-b285-b9052d41f147",
@@ -115,6 +125,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "856e851ea215d90b057eb610e7a255269c8c1048d12f7034a18053bad6a46f4e"
+    "hash": "184d0f43e088730ca813fb4c07f83ff1d14e37056325d8cf48a7794ab406400d"
   }
 }

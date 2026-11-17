@@ -12,7 +12,12 @@
     "$graph.logical_bytes",
     "$graph.nodes[0].diagonal_alignment",
     "$graph.nodes[0].flops",
-    "$graph.nodes[0].generate_stats",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_stats",
+        false
+      ]
+    },
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
     "$graph.nodes[0].k.dims[2]",
@@ -258,7 +263,7 @@
       ]
     }
   ],
-  "features_hash": "sha256:ba4694f2ae35d7ce",
+  "features_hash": "sha256:ebe770e9a1503599",
   "trained_against": {
     "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/c64baaf0b167b621",
     "feature_semantics_revision": 1,
@@ -301,6 +306,6 @@
   },
   "tree_data": {
     "artifact": "asm_sdpa_engine_tflops.bin",
-    "hash": "33e06430a4229ddc0d51af70a4f89b5934262160703a5b31a59a493bff9be8e0"
+    "hash": "70f7ceffa841534b8aeaf0c9fd632976d04e48ce9aeac32da49f5aff85f6cc12"
   }
 }

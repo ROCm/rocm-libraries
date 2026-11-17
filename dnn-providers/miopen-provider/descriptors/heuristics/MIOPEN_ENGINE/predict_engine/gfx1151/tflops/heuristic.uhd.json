@@ -3582,13 +3582,23 @@
                 },
                 {
                   "==": [
-                    "$graph.nodes[0].stride[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].stride[0]",
+                        1
+                      ]
+                    },
                     1
                   ]
                 },
                 {
                   "==": [
-                    "$graph.nodes[0].dilation[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dilation[0]",
+                        1
+                      ]
+                    },
                     1
                   ]
                 }
@@ -3692,7 +3702,7 @@
       ]
     }
   ],
-  "features_hash": "sha256:e1d1709f77c78b47",
+  "features_hash": "sha256:6893b682f7682821",
   "trained_against": {
     "selector_revision": "miopen-provider/0.2.0/MIOPEN_ENGINE-untuned-v2/miopen-3.6.3",
     "feature_semantics_revision": 1
@@ -3705,6 +3715,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "3b978c00e286003e194ba5217046e13a09c23b1d6a8be58916e95073d996bbe6"
+    "hash": "4c407b21dd5d2821dd81d57fc98246db2c49655728ec21241063af059683bae5"
   }
 }

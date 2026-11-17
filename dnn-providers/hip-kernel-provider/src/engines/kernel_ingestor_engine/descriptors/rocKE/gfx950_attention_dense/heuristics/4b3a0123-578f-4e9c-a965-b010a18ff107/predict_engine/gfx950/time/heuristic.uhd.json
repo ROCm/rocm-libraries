@@ -6,13 +6,43 @@
   "features_signature": [
     "$gfx950_attention_dense.causal",
     "$gfx950_attention_dense.scale_bits",
-    "$graph.arithmetic_intensity",
-    "$graph.flops",
-    "$graph.flops_by_type.SdpaAttributes",
-    "$graph.logical_bytes",
-    "$graph.nodes[0].attn_scale_value",
+    {
+      "value_or_default": [
+        "$graph.arithmetic_intensity",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.flops",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.flops_by_type.SdpaAttributes",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.logical_bytes",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_scale_value",
+        1.0
+      ]
+    },
     "$graph.nodes[0].diagonal_alignment",
-    "$graph.nodes[0].flops",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].flops",
+        -1
+      ]
+    },
     "$graph.nodes[0].k.data_type",
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
@@ -82,7 +112,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:c1266b26869a60b4",
+  "features_hash": "sha256:4a6f87c307925ba1",
   "trained_against": {
     "ued": {
       "id": "4b3a0123-578f-4e9c-a965-b010a18ff107",
@@ -109,6 +139,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "62286e2d681f10ad282e48711c6ad8511ba2bd835341c81f59397b25c8b45e96"
+    "hash": "6351ba04df694c6e88bef2566492f69426bfcf5aefe1f52ae42c62ba637f6928"
   }
 }
