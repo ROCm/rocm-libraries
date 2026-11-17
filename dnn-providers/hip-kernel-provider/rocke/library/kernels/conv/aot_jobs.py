@@ -333,7 +333,10 @@ CACHE_WGRAD_DEEPK_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
     (64, 64, 512, 4, 4),
     (128, 128, 128, 4, 4),
 )
-# Only gfx1250 has the LDS for them (a 64x64x512 16-bit tile pair is 128 KB).
+# Arches where the deep-K geometries were measured and validated. The LDS fit
+# is enforced independently by is_valid_wgrad_spec (a 64x64x512 16-bit tile
+# pair is 128 KB; RDNA parts cap at 64 KB and the validator refuses them).
+# This set records the arches that were actually tested, not the LDS limit.
 CACHE_WGRAD_DEEPK_ARCHES: Tuple[str, ...] = ("gfx1250",)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
