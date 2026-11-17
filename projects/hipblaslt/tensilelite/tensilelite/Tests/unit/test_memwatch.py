@@ -542,3 +542,62 @@ def test_a_log_that_fails_on_a_short_line_is_an_error(tmp_path):
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "could not handle the command's output" in proc.stderr
     assert out.exists()
+
+
+def test_a_survivor_in_its_own_process_group_is_still_terminated(tmp_path):
+    marker = tmp_path / "pid"
+    # The worker leaves the root's process group (process_group=0 makes it a
+    # group leader) but stays in the session, and holds no pipe.
+    child = (
+        "import subprocess, pathlib\n"
+        "p = subprocess.Popen(['sleep', '60'], process_group=0, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
+    )
+    argv, out = _memwatch(tmp_path, "--grace", "0.1")
+    t0 = time.monotonic()
+    proc = subprocess.run(
+        [*argv, sys.executable, "-c", child], capture_output=True, text=True, timeout=60
+    )
+    assert time.monotonic() - t0 < 20
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "still running" in proc.stderr and "could not terminate" not in proc.stderr
+    assert json.loads(out.read_text())["warnings"] == []
+    assert _is_gone(
+        int(marker.read_text())
+    ), "a worker in its own process group survived"
+
+
+def test_a_failing_stdout_destination_terminates_the_command(tmp_path):
+    marker = tmp_path / "pid"
+    child = (
+        "import os, time, pathlib\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "print('hello', flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    out = tmp_path / "summary.json"
+    t0 = time.monotonic()
+    with open("/dev/full", "w") as devfull:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(MEMWATCH),
+                "--interval",
+                "0.05",
+                "--out",
+                str(out),
+                "--",
+                sys.executable,
+                "-c",
+                child,
+            ],
+            stdout=devfull,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+        )
+    assert time.monotonic() - t0 < 20, "memwatch kept running with an unwritable stdout"
+    assert (
+        proc.returncode != 0 and "could not handle the command's output" in proc.stderr
+    ), proc.stderr
+    assert _is_gone(int(marker.read_text()))

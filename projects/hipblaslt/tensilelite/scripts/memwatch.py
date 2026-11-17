@@ -453,29 +453,31 @@ class OutputPump(threading.Thread):
                     self.log.flush()
                 if self.echo:
                     sys.stdout.write(line)
+                    sys.stdout.flush()
             except Exception as e:  # noqa: BLE001 - any output failure ends the run
                 self.error = e
                 self.on_error()
 
 
 class RunResult:
-    def __init__(self, sampler, proc, elapsed, error):
+    def __init__(self, sampler, proc, elapsed, error, leftover):
         self.sampler = sampler
         self.proc = proc
         self.elapsed = elapsed
         self.error = error
+        self.leftover = leftover  # {pid: starttime} that survived the cleanup
 
 
 def live_members(root: int):
-    """Pids in the command's tree that are still alive (not zombies), root excluded."""
+    """{pid: starttime} of the command's tree members still alive (not zombies), root excluded."""
     table = proc_table()
-    return [
-        pid
+    return {
+        pid: table[pid][1]
         for pid in tree_members(root, table)
         if pid != root
         and pid in table
         and (len(table[pid]) < 4 or table[pid][3] != "Z")
-    ]
+    }
 
 
 def _signal_group(pgid: int, sig) -> None:
@@ -485,19 +487,37 @@ def _signal_group(pgid: int, sig) -> None:
         pass
 
 
-def _terminate_group(pgid: int, root_alive, timeout: float = 5.0) -> None:
-    """SIGTERM the group, wait up to ``timeout``, then SIGKILL and wait again.
+def _signal_tree(root: int, sig) -> None:
+    """Send ``sig`` to the root's process group and to every live member of its
+    tree individually: a descendant may have made its own process group while
+    staying in the session. Each pid is checked against its recorded start
+    time first so a pid recycled since discovery is never signalled."""
+    _signal_group(root, sig)
+    members = live_members(root)
+    table = proc_table()
+    for pid, start in members.items():
+        if pid in table and table[pid][1] == start:
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+
+def _terminate_tree(root: int, root_alive, timeout: float = 5.0):
+    """SIGTERM the tree, wait up to ``timeout``, then SIGKILL and wait again.
 
     ``root_alive()`` reports whether the root still runs; once it is gone the
-    wait is on the other members of the tree.
+    wait is on the other members. Returns the members still alive at the end,
+    empty when the cleanup succeeded.
     """
     for sig in (signal.SIGTERM, signal.SIGKILL):
-        _signal_group(pgid, sig)
+        _signal_tree(root, sig)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if not root_alive() and not live_members(pgid):
-                return
+            if not root_alive() and not live_members(root):
+                return {}
             time.sleep(0.1)
+    return live_members(root)
 
 
 def run_command(cmd, interval, csv_path, log_path, echo, grace):
@@ -513,7 +533,9 @@ def run_command(cmd, interval, csv_path, log_path, echo, grace):
        bounded SIGTERM-then-SIGKILL;
     4. once the root is gone, give the processes still alive in its session
        ``grace`` seconds (they are not part of a build that finished
-       normally), then terminate them the same way;
+       normally), then terminate them the same way, each signalled directly
+       in case it left the root's process group; any that survive SIGKILL are
+       reported and make the exit status nonzero;
     5. close the log; a flush or close failure counts as an output error.
 
     Raises OSError if the log cannot be opened or the command cannot start.
@@ -542,6 +564,7 @@ def run_command(cmd, interval, csv_path, log_path, echo, grace):
     sampler.start()
     t0 = time.monotonic()
     error = None
+    leftover = {}
     try:
         pump = OutputPump(
             proc.stdout,
@@ -567,7 +590,7 @@ def run_command(cmd, interval, csv_path, log_path, echo, grace):
                 break
             except subprocess.TimeoutExpired:
                 if pump.error is not None:
-                    _terminate_group(pgid, lambda: proc.poll() is None)
+                    leftover = _terminate_tree(pgid, lambda: proc.poll() is None)
                     proc.wait()
                     break
         elapsed = time.monotonic() - t0
@@ -580,11 +603,11 @@ def run_command(cmd, interval, csv_path, log_path, echo, grace):
             time.sleep(0.1)
         if live_members(pgid):
             print(
-                f"memwatch: command exited but processes of its group are still "
+                f"memwatch: command exited but processes of its session are still "
                 f"running after {grace:g}s; terminating them",
                 file=sys.stderr,
             )
-            _terminate_group(pgid, lambda: False)
+            leftover = _terminate_tree(pgid, lambda: False)
         pump.join(5)
         error = pump.error
     finally:
@@ -596,7 +619,7 @@ def run_command(cmd, interval, csv_path, log_path, echo, grace):
             except OSError as e:
                 if error is None:
                     error = e
-    return RunResult(sampler, proc, elapsed, error)
+    return RunResult(sampler, proc, elapsed, error, leftover)
 
 
 def main(argv=None):
@@ -643,6 +666,12 @@ def main(argv=None):
     sampler, proc, elapsed = run.sampler, run.proc, run.elapsed
 
     summary = sampler.summary(elapsed, proc.returncode, cmd)
+    if run.leftover:
+        pids = ", ".join(str(pid) for pid in sorted(run.leftover))
+        summary["warnings"].append(
+            f"could not terminate {len(run.leftover)} process(es) of the command's "
+            f"tree after SIGKILL: pid {pids}; they are still running"
+        )
     with open(args.out, "w") as f:
         json.dump(summary, f, indent=2)
     sampler.write_csv()
@@ -685,6 +714,8 @@ def main(argv=None):
             "the command was terminated",
             file=sys.stderr,
         )
+        return exit_status(proc.returncode) or 1
+    if run.leftover:
         return exit_status(proc.returncode) or 1
     return exit_status(proc.returncode)
 
