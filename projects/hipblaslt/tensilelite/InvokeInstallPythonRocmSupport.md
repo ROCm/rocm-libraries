@@ -1,270 +1,159 @@
 # Supporting Python ROCm venvs in `invoke install`
 
-## Status
+## Status (2026-11-17)
 
-This is an implementation design for making the TensileLite source-development
-workflow support an active Python ROCm environment. It describes the required
-behavior and tests; it does not mean that `tasks.py` implements this behavior
-yet.
+Native build-root selection is implemented in #15579. Complete native-build
+support for the Python ROCm SDK remains follow-up work. The installed Python
+SDK runtime already has a separate implementation in #11023/#11024, enabled
+for the SDK in #11032.
 
-**Implemented so far: the conventional-prefix model.** `tasks.py` now has the
-`_resolve_rocm_build_environment(rocm_path) -> RocmBuildEnvironment` seam. The
-root comes from `--rocm-path`, then a nonempty `ROCM_PATH` (an empty one is an
-error), then the existing `rocm-sdk path --root` / `/opt/rocm` fallback. That
-root supplies the compilers, `-DROCM_PATH` and `-DCMAKE_PREFIX_PATH` to every
-native configure — rocisa, the standalone StinkyTofu binding, `build-client`
-(overriding the preset's `/opt/rocm`), and `build-coverage` — and `install`
-resolves it once for rocisa and the client. The editable install and the client
-binding read no ROCm: the package is a development build labelled with its
-commit. rocisa receives no `-DCMAKE_PREFIX_PATH`, because scikit-build-core owns
-that variable; rocisa's CMake appends `ROCM_PATH` to it instead. Mocked
-command-capture tests in `test_install_task.py` cover the selection order, the
-empty-`ROCM_PATH` failure, and each configure.
+The current native-build contract is:
 
-**Not implemented yet:** the Python SDK build model (`rocm_sdk_core` detection,
-venv-script tools, `rocm-sdk path --root/--cmake`, the core/devel base-version
-check and its devel-payload diagnostic), `ROCmCMakeBuildTools_DIR`, GPU
-auto-detection through the selected environment, the `VIRTUAL_ENV` guard, and
-the two integration lanes.
+- `--rocm-path` selects a native build installation. Otherwise use nonempty
+  `ROCM_PATH` (set but empty is an error), then the existing
+  `rocm-sdk path --root` discovery, then `/opt/rocm`.
+- `RocmBuildEnvironment` supplies the selected root, compiler paths, CMake
+  inputs and subprocess environment. The root overrides the client preset's
+  `/opt/rocm`. rocisa lets scikit-build-core manage `CMAKE_PREFIX_PATH`;
+  its CMake adds the selected `ROCM_PATH` to package search.
+- Each public native task reports `Using ROCm at <root> (from <source>)`.
+  `install` resolves and reports once, then shares that environment with its
+  rocisa, client and optional StinkyTofu native build helpers.
+- `build-client` runs both selected compilers with `--version`, with a
+  five-second timeout, for every root source. Missing or unusable compilers
+  fail before that task cleans its build directory or invokes CMake.
+- Automatic client/coverage targets and StinkyTofu provisioning use the
+  selected root's GPU tools and subprocess `ROCM_PATH`. They do not borrow
+  tools from another root or ambient `PATH` if selected tools are absent.
+  Explicit targets and forced StinkyTofu choices remain authoritative;
+  standalone forced-off provisioning needs no ROCm installation.
+- GPU detection preserves the existing `amdgpu-arch` enumeration plus
+  `rocminfo` stepping restoration. An `offload-arch`-only replacement loses
+  the `gfx1250-strict` revision on toolchains that report only the base ISA.
 
-## Scope
+`install --rocm-path` does not save a runtime ROCm root. It warns once when a
+nonempty exported `ROCM_PATH` resolves to a different directory; relative and
+symlink aliases of the same root stay quiet. The parent environment remains
+unchanged. Editable TensileLite installation and client binding receive no
+ROCm environment override or identity. Binding stores the client path only.
 
-`invoke install` is intentionally different from a normal TensileLite wheel
-runtime or code-generation invocation. It is the one-command source-development
-workflow that:
+## Source development and runtime are separate selections
 
-1. installs development requirements into the active Python interpreter;
-2. builds and editable-installs `rocisa`;
-3. builds `tensilelite-client` and its native dependencies;
-4. installs TensileLite editably; and
-5. binds that exact client to the editable installation.
+`invoke install` installs development requirements in its active interpreter,
+builds/editable-installs rocisa, builds the native client, editable-installs
+TensileLite, and binds that exact client. Native compilation needs a coherent
+development prefix. Later Python processes select their runtime independently.
 
-The normal Python ROCm adapter must remain client-free and root-free for import,
-compatibility validation, and generator commands. This proposal adds the
-separate native-development capability needed by `invoke install`; it does not
-make `rocm[devel]` a runtime dependency of the TensileLite wheel.
+| Concern | Python SDK runtime | Conventional-prefix runtime | Invoke native build |
+| --- | --- | --- | --- |
+| Selection | `rocm_sdk_core` in active interpreter first | Used when active SDK is absent | Flag, environment, SDK CLI root, default |
+| Identity | Full `rocm_sdk_core.__version__` | Selected prefix metadata | Client records its build ROCm separately |
+| Tool lookup | Interpreter and user script locations | Selected prefix tool locations | Compilers and GPU tools under selected build root |
+| Development root | Not required | Conventional installation | Required for native CMake dependencies |
 
-## Why a Python ROCm venv needs `rocm[devel]` here
+An active-interpreter SDK runtime wins even with a conflicting conventional
+`ROCM_PATH`. Missing SDK tools or an incompatible SDK do not authorize runtime
+to borrow another installation. That runtime rule does not replace Invoke's
+explicit native-build selection order. Raw CMake builds receive their own build
+inputs; Invoke passes its chosen native root to CMake explicitly.
 
-The ROCm core wheel already provides the public console-script trampolines used
-by the Python runtime, including `amdclang`, `amdclang++`,
-`clang-offload-bundler`, `offload-arch`, and `hipconfig`. Those tools are enough
-for the supported Python SDK runtime and generator contract.
+The downstream client check validates the client's recorded build ROCm against
+the selected process runtime. A different directory alone does not establish
+incompatibility. Source-development compatibility continues to follow Q134;
+no persistent root or new compatibility override is added here.
 
-`invoke install` also compiles native C++ code. Its CMake projects need a
-coherent ROCm development prefix containing headers, CMake/package-config
-metadata, and the associated imported or static libraries:
+## Identity requirements superseded by Q121/Q134
 
-- `rocisa` runs `find_package(hip REQUIRED)` and links `hip::host`.
-- `tensilelite-client` links `hip::host`, `hip::device`, `rocisa`, the
-  TensileLite host library, and, on Linux, `amd_smi`.
-- StinkyTofu requires `amd_comgr` through `find_package(amd_comgr CONFIG)`.
+[PythonBuildGrillingDecisions.md](PythonBuildGrillingDecisions.md), Q121 and
+Q134, and the [packaging identity plan](docs/PackagingIdentityPlan.md) are the
+current identity contract. They supersede this proposal's earlier requirements
+for ROCm-stamped editable wheel/client versions, identity propagation to pip and
+binding, and a new standalone `TENSILELITE_ROCM_VERSION` CMake override.
 
-`rocm-sdk-devel` provides that `ROCM_PATH`-style CMake development tree. Its
-public `rocm-sdk path --root` and `rocm-sdk path --cmake` interfaces therefore
-require a matching devel payload. A normal installed-wheel environment such as
-`rocm[libraries,device-*]` remains valid for runtime and generator work, but a
-full native source-development setup needs a matching
+- A standalone source wheel/editable distribution is `+g<sha>[.dirty]` and
+  makes no ROCm distribution-identity claim.
+- Wheel/client pairing uses source revision. The client separately reports
+  `--build-rocm`; its distribution version need not equal the Python package's.
+- TheRock passes its explicit publication identity for canonical wheel/native
+  metadata through the existing frontend. No replacement override is added.
+- Editable package installation and binding use the caller's environment.
+  Only the native build subprocesses receive the selected build environment.
+
+A future SDK build adapter may use the full SDK publication identity to verify
+and report its inputs. It must not reintroduce source-wheel ROCm stamping or
+require Python/client distribution-version equality.
+
+## Why a Python ROCm source build needs development payloads
+
+The core package supplies interpreter-local compiler/tool trampolines for the
+supported runtime and generator contract. Native CMake projects also need
+headers, CMake/pkg-config metadata and associated libraries:
+
+- rocisa finds HIP and links `hip::host`.
+- The client links HIP, rocisa, TensileLite host libraries and, on Linux,
+  `amd_smi`.
+- StinkyTofu finds `amd_comgr`.
+
+`rocm-sdk-devel` supplies the development tree. Its public
+`rocm-sdk path --root` and `rocm-sdk path --cmake` discovery requires a matching
+devel payload. Runtime/generator use of `rocm[libraries,device-*]` remains
+valid without devel. Native source development needs a matching
 `rocm[libraries,devel,device-*]` environment.
 
-## Existing contracts to preserve
+## Follow-up: complete Python SDK native-build support
 
-The current branch already defines two mutually exclusive runtime models:
+The existing root-discovery fallback is not a complete interpreter-local SDK
+build adapter. The remaining work is:
 
-| Concern | Python SDK packages | Conventional ROCm prefix |
-| --- | --- | --- |
-| ROCm identity | Exact `rocm_sdk_core.__version__` | `<root>/.info/version` base version |
-| Tool lookup | Active interpreter scripts, then user scripts | `<root>/bin` and `<root>/lib/llvm/bin` |
-| Root discovery | None for runtime | `ROCM_PATH`, `/opt/rocm`, then `hipconfig` |
-| Fallback rule | Never borrow a prefix tool or ambient `PATH` tool | Never inspect Python package payloads |
+1. Detect `rocm_sdk_core` and resolve public SDK scripts from the active
+   interpreter's normal/user script locations. Use that exact `rocm-sdk`
+   script for `path --root` and `path --cmake`.
+2. Check that the core package and development prefix have matching `A.B.C`
+   base versions. Fail early with an actionable matching-devel diagnostic
+   when the root, CMake metadata or required native payloads are unavailable.
+3. Supply the SDK's development root, CMake search prefix and compiler
+   trampolines through the existing build-environment seam. Set
+   `ROCmCMakeBuildTools_DIR` when the corresponding package is present.
+4. Check that `VIRTUAL_ENV`, when set, matches Invoke's interpreter, and keep
+   pip installs in that interpreter with `sys.executable -m pip`.
+5. Add actual SDK native-build integration lanes in matching environments
+   with and without devel, alongside focused command-capture regressions.
 
-This distinction matters for nightly and RC builds: a Python package can carry
-the full identity `10.1.0aYYYYMMDD`, while its development root's
-`.info/version` contains only `10.1.0`. The full Python identity must be used
-for both the editable TensileLite distribution and the client version. The root
-base version is useful only to confirm that the development root belongs to the
-same ROCm compatibility line.
+The old proposal put an active SDK ahead of `--rocm-path` and rejected roots
+outside its development tree. That precedence is not the implemented contract.
+A future adapter must reconcile SDK selection with the explicit build-only
+flag before changing precedence; #15579 retains the selected current order.
+Runtime continues to select the active-interpreter SDK independently.
 
-The existing StinkyTofu task is the closest source-build precedent. It obtains
-the materialized root with `rocm-sdk path --root` and CMake package locations
-with `rocm-sdk path --cmake`. TensileLite should reuse those public discovery
-interfaces, but not its `ROCM_PATH`-first or ambient-tool precedence: an active
-Python SDK must remain the selected model.
+Selected-build GPU detection is implemented now. Any future interpreter-script
+adapter must preserve stepping restoration when its enumerator reports only
+`gfx1250`; it cannot substitute `offload-arch` alone. Generic runtime detection
+callers retain their existing behavior.
 
-## Target selection behavior
+## Validation
 
-Add one private bootstrap-safe seam in `tasks.py`:
+The #15579 owner task suite passes **49 cases**. Tests cover all root sources,
+original-source reporting, compiler failures before client cleanup/CMake,
+root aliases and warning behavior, shared native environment, explicit targets,
+forced provisioning choices and preserved parent environment. Real executable
+fixtures cover distinct selected/ambient installations, SDK CLI discovery,
+selected-root GPU results and stepping restoration, and missing selected tools
+without borrowing ambient tools. Fifteen new regressions fail on the original
+owner branch.
 
-```python
-_resolve_rocm_build_environment(rocm_path) -> RocmBuildEnvironment
-```
+Relevant existing GPU/tool/stepping cases pass **19 cases**. The broad stepping
+module has 919 passes and four inherited StreamK fence expectation failures;
+the original owner branch reproduces the identical failures. No tests were
+weakened. Required pre-commit and separate Black/flake8 checks pass. These tests
+are collected by the shared coverage-unit CI lane after publication.
 
-`RocmBuildEnvironment` hides the two layouts behind a single interface. It
-contains the full distribution identity, native CMake root, CMake prefix,
-absolute C/C++ compiler paths, executable search paths, and a diagnostic
-source. It should also provide the command environment and CMake arguments used
-by its callers so the layout knowledge does not leak into every task.
+This batch has no actual HIP/client build, SDK native integration run or target
+GPU numerical result. Fixtures prove selection, environments and generated
+commands. The final stack's runtime tests exercise synthetic active-SDK and
+conventional installations; they do not prove complete SDK native builds.
 
-The resolver follows this order:
-
-1. If the active interpreter imports `rocm_sdk_core`, select the Python SDK
-   build model.
-2. Otherwise select the existing conventional-prefix model:
-   `--rocm-path`, nonempty `ROCM_PATH`, then `/opt/rocm`.
-
-An active Python SDK ignores an ambient `ROCM_PATH`. If `--rocm-path` is passed
-while a Python SDK is active, it must either resolve to the SDK's own discovered
-development root or fail clearly. It must never combine a Python SDK version or
-compiler trampoline with an unrelated conventional root.
-
-### Python SDK build model
-
-The Python SDK implementation must:
-
-1. Read the full identity from `rocm_sdk_core.__version__`.
-2. Resolve `amdclang`, `amdclang++`, `offload-arch`, and `rocm-sdk` only from
-   the active interpreter's normal and user script directories. Do not use
-   `shutil.which()` for these selected tools.
-3. Invoke that exact `rocm-sdk` script for `path --root` and `path --cmake`.
-4. Verify that the root's `.info/version` has the same `A.B.C` base as the
-   Python core package. Keep the full package identity as the wheel/client
-   identity.
-5. Fail before any native build if the root or CMake prefix is unavailable.
-   The error should explain that `invoke install` needs matching
-   `rocm[libraries,devel,device-<target>]` in the active environment.
-
-### Conventional-prefix build model
-
-The conventional-prefix model preserves the existing selection order:
-
-1. Select the root from `--rocm-path`, `ROCM_PATH`, or `/opt/rocm`.
-2. Resolve compilers from the selected root.
-
-*Revised 2026-11-11 (Q121, Q134 in `PythonBuildGrillingDecisions.md`):* invoke
-passes no ROCm identity to the package build, which is versioned `+g<sha>`; the
-client records the selected root's identity as its build ROCm
-(`tensilelite-client --build-rocm`).
-
-The selected conventional root must also be authoritative at every native CMake
-configure. Pass it explicitly as `-DROCM_PATH=<root>` and pass its resolved CMake
-search prefix as `-DCMAKE_PREFIX_PATH=<prefix>`, in addition to the selected
-compiler paths. Compiler-only overrides are insufficient: an inherited preset
-prefix can otherwise resolve packages and build identity from `/opt/rocm` or an
-unrelated ambient SDK.
-
-## Required task changes
-
-Refactor these task paths to accept one `RocmBuildEnvironment` rather than a
-loosely related `rocm_path` string:
-
-- `rocisa` and `_pip_install_rocisa`;
-- `_build_and_install_stinkytofu`;
-- `build_client`;
-- `install`; and
-- `build_coverage`.
-
-`install` resolves the environment once, then calls private raw helpers so that
-rocisa, the client, editable package installation, and client binding all use
-the same selection.
-
-For a Python SDK source build, every native CMake invocation must receive:
-
-```text
--DROCM_PATH=<rocm-sdk path --root>
--DCMAKE_PREFIX_PATH=<rocm-sdk path --cmake>
--DCMAKE_C_COMPILER=<active Python scripts>/amdclang
--DCMAKE_CXX_COMPILER=<active Python scripts>/amdclang++
-```
-
-Set `ROCmCMakeBuildTools_DIR` from the resolved development root when the
-corresponding CMake package is present. Pass the same environment only to build
-subprocesses; do not permanently mutate the user's shell environment or make a
-runtime import rely on `ROCM_PATH`.
-
-`_build_and_install_stinkytofu` must stop preferring arbitrary `PATH` results.
-Its compilers come from the resolved build environment. `_pip_install_rocisa`
-must run `sys.executable -m pip`, so rocisa lands in the same interpreter whose
-ROCm SDK was selected. Add a guard that rejects a system-wide `invoke` process
-when `VIRTUAL_ENV` points at a different interpreter.
-
-GPU auto-detection must also use the selected environment. Prefer its
-`offload-arch` trampoline, then its `amdgpu-arch` compatibility fallback, rather
-than unqualified `rocm_agent_enumerator` lookup.
-
-## Required CMake companion change
-
-Updating `tasks.py` alone is insufficient for nightly Python ROCm builds.
-
-The top-level hipBLASLt CMake configuration currently derives
-`HIPBLASLT_BUILD_ROCM_VERSION` from `<root>/.info/version` for standalone
-builds. That value forms `TENSILELITE_DISTRIBUTION_VERSION`, which is embedded
-in `tensilelite-client --version`.
-
-Add a narrow standalone CMake cache input:
-
-```text
-TENSILELITE_ROCM_VERSION=<full Python SDK publication identity>
-```
-
-`hipblaslt_resolve_build_rocm_version()` must honor this input before falling
-back to the root marker. The Python SDK task passes the full
-`rocm_sdk_core.__version__` value. TheRock continues to own its identity through
-`THEROCK_PACKAGE_VERSION`; the new standalone override must not weaken that
-contract.
-
-This prevents the following incorrect mixed identity:
-
-```text
-Python SDK / editable wheel:  <component>+rocm10.1.0aYYYYMMDD
-CMake-built client:           <component>+rocm10.1.0
-```
-
-The correct fix is to preserve the full identity through CMake. Do not suppress
-or weaken the existing client-version validation to make this mismatch pass.
-
-## Tests
-
-Extend `tensilelite/Tests/unit/source_only/test_install_task.py` with mocked
-Python SDK and prefix environments covering:
-
-1. Python SDK selection ahead of a conflicting ambient `ROCM_PATH`.
-2. Full nightly identity propagation to editable pip, CMake, and client binding.
-3. Exact venv compiler paths, SDK development root, and CMake prefix passed to
-   StinkyTofu, rocisa, and client CMake commands.
-4. Missing devel root/CMake prefix failing without a fallback to `/opt/rocm`.
-5. A Python core/devel base-version mismatch failing clearly.
-6. Unchanged conventional-prefix behavior when Python ROCm is absent.
-7. An empty `ROCM_PATH` failing in conventional-prefix mode.
-8. An explicit conventional-prefix `--rocm-path` winning over a conflicting
-   ambient `ROCM_PATH`, with the selected root, CMake prefix, compilers, package
-   identity, editable-install environment, and binding environment agreeing.
-
-Add a command-capture test for `build_client` that proves it overrides the
-inherited `/opt/rocm` CMake preset with the selected root and CMake prefix.
-Extend the CMake source-only identity tests to prove that the explicit Python
-SDK identity wins for standalone builds while TheRock still requires and uses
-`THEROCK_PACKAGE_VERSION`.
-
-Finally, add two integration lanes:
-
-1. A fresh matching `rocm[libraries,devel,device-<target>]` venv with a
-   deliberately conflicting `ROCM_PATH`. Run `invoke install --gpu-targets ...`
-   and verify that `tensilelite-client --version` equals the installed
-   `tensilelite` distribution version.
-2. A fresh `rocm[libraries,device-<target>]` venv without devel. Verify that
-   `invoke install` fails early with the actionable devel-payload diagnostic.
-
-Mocked command-capture tests are the required regression gate for root
-consistency. A one-root smoke test confirms only its happy path; a conventional-
-prefix end-to-end test that proves root precedence needs two independently valid
-ROCm development prefixes.
-
-## Non-goals
-
-- Do not make `rocm[devel]` a dependency of the normal TensileLite runtime,
-  import path, or generator commands.
-- Do not import `tensilelite._rocm` from `tasks.py` during source bootstrap.
-- Do not borrow an individual tool from `/opt/rocm` or ambient `PATH` after a
-  Python SDK has been selected.
-- Do not downgrade a full Python ROCm publication identity to a root base
-  version, and do not relax client-version validation.
+The future integration lanes should verify source-revision pairing and the
+client's build-ROCm compatibility, rather than wheel/client version equality.
+Use independently valid roots for end-to-end precedence checks. Keep native
+source-build integration separate from the existing no-devel SDK runtime smoke
+lane and from tests of shipped hipBLASLt GPU binaries.

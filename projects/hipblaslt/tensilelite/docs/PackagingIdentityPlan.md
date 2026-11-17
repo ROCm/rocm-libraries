@@ -21,6 +21,14 @@ Section 1.5 records their scope and validation. TheRock PRs and the reply to
 archana remain pending. TheRock branches merged cleanly onto `main` as checked
 on 2026-11-11; a full TheRock build has not run.
 
+**Local review update (2026-11-17):** #11018 and #11019 review batches are
+committed locally. All six #15579 resolutions are implemented or recorded in
+local documentation/drafts, and descendants are restacked without updating
+`develop`. No changes from these review batches have been pushed or posted.
+Complete Python SDK native-build support remains follow-up work; the runtime
+SDK adapter is already implemented separately. Section 1.5 records the #15579
+validation and its limits. The preceding status and SHA table are historical.
+
 The table below is the state at the start of the review.
 
 | Ref | SHA (2026-11-10) |
@@ -254,30 +262,32 @@ Restack only.
   - Rewrite `test_client_binding.py` (about 25 version literals) and
     `test_install_task.py`.
 
-### R0 (new branch) `users/alvasile/AIHPBLAS-3989-invoke-selected-rocm-root`
+### R0 / #15579 `users/alvasile/AIHPBLAS-3989-invoke-selected-rocm-root`
 
-A new PR stacked directly on #11019, built from commit `9afc018` ("build(tensilelite):
-use one selected ROCm root for every native configure"), which currently sits on
-the docs branch #11254. Not gated; it lands with the lower stack.
+Implemented on #15579, directly above #11019; it lands with the lower stack
+without a TheRock gate. It was extracted from the former docs-branch code.
 
-- **Keep:** `_resolve_rocm_build_environment()` and `RocmBuildEnvironment` in
-  `tasks.py`. One root (`--rocm-path` → non-empty `ROCM_PATH`, empty is an error →
-  `rocm-sdk path --root` → `/opt/rocm`) supplies the compilers, `-DROCM_PATH` and
-  `-DCMAKE_PREFIX_PATH` for rocisa, the StinkyTofu binding, `build-client`,
-  `build-coverage` and `install`; `install` resolves it once for all its steps. Keep
-  `test_install_task.py`.
-- **Drop:** `env["TENSILELITE_ROCM_VERSION"] = _rocm_base_version(rocm)` in
-  `install` (decisions 1 and 5: invoke passes no identity, so the editable install
-  is `+g<sha>`). Add a test that `install` passes no `TENSILELITE_ROCM_VERSION`.
-- **Stays on #11254:** the commit's 20 lines in `InvokeInstallPythonRocmSupport.md`.
-- **Why here:** `invoke install` first exists in #11019, so this is the lowest
-  branch the change applies to. Before it, tasks picked ROCm independently (the
-  preset's `/opt/rocm` for `build-client`, `_detect_rocm()` for `build-coverage`,
-  `ROCM_PATH`/`/opt/rocm` for `install`), so one `invoke install` could compile
-  rocisa and the client against different installs. Decision 14's client build ROCm
-  is only true if every native build uses the same root.
-- **Expected conflict:** #11021's `tasks.install` identity change, which decision 1
-  removes anyway.
+- One `RocmBuildEnvironment` selects `--rocm-path`, then nonempty `ROCM_PATH`
+  (empty is an error), then `rocm-sdk path --root`, then `/opt/rocm`. It supplies
+  native compilers, root and CMake package-search inputs. `install` resolves
+  and reports once, and shares that environment with private native helpers.
+- Public native tasks report root/source. Both client compilers are checked
+  for every source before client cleanup/CMake. Automatic client/coverage GPU
+  targets and StinkyTofu provisioning use selected-root tools, preserving
+  `amdgpu-arch` plus `rocminfo` stepping restoration and avoiding ambient tools.
+- `--rocm-path` selects builds only. `install` warns on a different nonempty
+  exported `ROCM_PATH`, but saves no runtime root. Python installation and
+  binding keep the caller environment; binding saves only the client path.
+  Source wheels remain `+g<sha>[.dirty]` (Q121); client build ROCm is separate
+  (Q134).
+- Runtime selection in #11023/#11024/#11032 remains active-interpreter SDK
+  first, then conventional-prefix selection. Complete interpreter-local SDK
+  native-build support is still the follow-up in
+  [InvokeInstallPythonRocmSupport.md](../InvokeInstallPythonRocmSupport.md).
+  Its old editable identity/env requirements are superseded by Q121/Q134.
+- Ownership stays here because #11019 introduces `invoke install`; the native
+  selection policy belongs immediately above that workflow, with later runtime
+  adapters retaining process selection.
 
 ### #11020 `release-wheel-installed-artifacts` (introduces CMake wheel builds, artifact unpacking, and the compatibility package)
 
@@ -905,7 +915,7 @@ its PR (rocm-libraries#10975) is still open. Read it before designing F1's wheel
 stage, so the two stages use one pattern for building, staging and validating a
 wheel.
 
-## 1.5 Implementation notes (updated 2026-11-12)
+## 1.5 Implementation notes (updated 2026-11-17)
 
 Where the implementation went beyond or differs from section 1.2:
 
@@ -956,9 +966,23 @@ Where the implementation went beyond or differs from section 1.2:
   locally against nightly `10.3.0a20261111`, it selected `PythonRocm` and failed
   only on the missing `clang-offload-bundler` console script, as expected until T2
   is in a nightly.
-- **Open gap:** with `ROCM_PATH` unset, CMake's build-root resolver falls back to
-  `/opt/rocm`, not to `rocm-sdk path --root`. A client built in a pip-SDK venv
-  records the full SDK identity only when `ROCM_PATH` points at the SDK root.
+- **Raw CMake / SDK build gap:** raw CMake does not discover the materialized SDK
+  development root; Invoke passes its selected root explicitly. The client
+  build-ROCm helper can report the active SDK's full identity when that selected
+  root is the build Python's own SDK. Complete interpreter-local SDK native
+  build discovery, core/devel checks and integration lanes remain follow-up.
+- **#15579 review batch (2026-11-17):** native selection diagnostics, mismatch
+  warning, compiler preflight for all sources and selected-root GPU detection
+  are implemented locally. The owner task suite passed 49 cases; relevant
+  existing GPU/tool/stepping cases passed 19. Fifteen new regressions fail on
+  the original owner branch. The full stepping module passed 919 cases with
+  four identical baseline StreamK fence expectation failures, left unchanged.
+  #11025 retains its explicit source-task loader and passed 54 install-task
+  cases after the restack. Required pre-commit and separate Black/flake8 checks
+  pass. Executable fixtures prove tool/env selection and generated arguments;
+  this batch has no actual native HIP/client build or GPU numerical result.
+  The independent GPT-6.1-Sol verification found no remaining actionable issue
+  after repairing a forced-off StinkyTofu regression.
 
 ---
 
