@@ -120,29 +120,22 @@ std::vector<KernelDefinition>
         dtype, pack, target, GFX942_CONV_DGRAD_AOT.kernelMatcher);
 }
 
+/// The first gfx942 catalog instance of @p variant (dgrad_matcher_test::variantEntry).
 const catalog::Entry& variantEntry(
     const std::string& variant,
     const std::function<bool(const catalog::Entry&)>& pick
     = [](const catalog::Entry&) { return true; },
     const std::string& dtype = "fp16")
 {
-    return catalog::firstEntry(
-        dtype,
-        [&](const catalog::Entry& e) { return e.text("direct_variant") == variant && pick(e); },
-        dgrad::GFX942);
+    return hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test::variantEntry(
+        dgrad::GFX942, variant, pick, dtype);
 }
 
+/// The gfx942 catalog's helpers (dgrad_matcher_test::helperEntries).
 std::vector<const catalog::Entry*> helperEntries(const std::string& dtype = "fp16")
 {
-    std::vector<const catalog::Entry*> helpers;
-    for(const auto& entry : catalog::catalog(dtype, dgrad::GFX942))
-    {
-        if(entry.isHelper())
-        {
-            helpers.push_back(&entry);
-        }
-    }
-    return helpers;
+    return hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test::helperEntries(
+        dgrad::GFX942, dtype);
 }
 
 /// @p entry with every helper of its dtype, in pack @p pack, prepared.
@@ -155,36 +148,6 @@ std::vector<KernelDefinition> withHelpers(const catalog::Entry& entry, uint8_t p
     }
     prepare(kernels);
     return kernels;
-}
-
-DgradShape depthwiseShape(int64_t channels = 96)
-{
-    DgradShape shape;
-    shape.c = shape.k = shape.groups = channels;
-    return shape;
-}
-
-/// A grouped problem tall enough for every fused row: an xcd_tiles row needs eight image
-/// row bands.
-DgradShape groupedShape(int64_t cpg, int64_t groups)
-{
-    DgradShape shape;
-    shape.n = 16;
-    shape.h = shape.w = 28;
-    shape.c = shape.k = cpg * groups;
-    shape.groups = groups;
-    return shape;
-}
-
-/// The dense c4k320 problem the MFMA rows serve.
-DgradShape mfmaShape()
-{
-    DgradShape shape;
-    shape.n = 1;
-    shape.c = 4;
-    shape.k = 320;
-    shape.h = shape.w = 32;
-    return shape;
 }
 
 /// The shipped c4k320 MFMA row rebuilt as a single-wave binary baking K/groups = @p kpg,
