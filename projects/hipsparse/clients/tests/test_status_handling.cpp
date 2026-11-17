@@ -105,6 +105,8 @@ TEST_P(status_handling, dnvec_rejects_unsupported_datatype)
     EXPECT_EQ(descr, nullptr);
     EXPECT_EQ(hipsparseCreateDnVec(&descr, 1, &value, HIP_R_32U), HIPSPARSE_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(descr, nullptr);
+    EXPECT_EQ(hipsparseCreateDnVec(&descr, 1, &value, HIP_C_16F), HIPSPARSE_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(descr, nullptr);
     EXPECT_EQ(hipsparseCreateDnVec(&descr, 1, &value, not_a_type), HIPSPARSE_STATUS_INVALID_VALUE);
     EXPECT_EQ(descr, nullptr);
 
@@ -119,6 +121,9 @@ TEST_P(status_handling, dnvec_rejects_unsupported_datatype)
     EXPECT_EQ(hipsparseCreateConstDnVec(&const_descr, 1, &value, HIP_R_32U),
               HIPSPARSE_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(const_descr, nullptr);
+    EXPECT_EQ(hipsparseCreateConstDnVec(&const_descr, 1, &value, HIP_C_16F),
+              HIPSPARSE_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(const_descr, nullptr);
     EXPECT_EQ(hipsparseCreateConstDnVec(&const_descr, 1, &value, not_a_type),
               HIPSPARSE_STATUS_INVALID_VALUE);
     EXPECT_EQ(const_descr, nullptr);
@@ -127,6 +132,67 @@ TEST_P(status_handling, dnvec_rejects_unsupported_datatype)
               HIPSPARSE_STATUS_SUCCESS);
     EXPECT_EQ(hipsparseDestroyDnVec(const_descr), HIPSPARSE_STATUS_SUCCESS);
 #endif
+#endif
+}
+
+TEST_P(status_handling, spmat_rejects_unsupported_datatype)
+{
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+    const hipDataType not_a_type = static_cast<hipDataType>(-1);
+
+    hipsparseSpMatDescr_t coo = nullptr;
+    EXPECT_EQ(hipsparseCreateCoo(&coo,
+                                 1,
+                                 1,
+                                 0,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 HIPSPARSE_INDEX_32I,
+                                 HIPSPARSE_INDEX_BASE_ZERO,
+                                 HIP_R_8U),
+              HIPSPARSE_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(coo, nullptr);
+    EXPECT_EQ(hipsparseCreateCoo(&coo,
+                                 1,
+                                 1,
+                                 0,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 HIPSPARSE_INDEX_32I,
+                                 HIPSPARSE_INDEX_BASE_ZERO,
+                                 not_a_type),
+              HIPSPARSE_STATUS_INVALID_VALUE);
+    EXPECT_EQ(coo, nullptr);
+
+    hipsparseSpMatDescr_t csr = nullptr;
+    EXPECT_EQ(hipsparseCreateCsr(&csr,
+                                 1,
+                                 1,
+                                 0,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 HIPSPARSE_INDEX_32I,
+                                 HIPSPARSE_INDEX_32I,
+                                 HIPSPARSE_INDEX_BASE_ZERO,
+                                 HIP_R_8U),
+              HIPSPARSE_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(csr, nullptr);
+    EXPECT_EQ(hipsparseCreateCsr(&csr,
+                                 1,
+                                 1,
+                                 0,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 HIPSPARSE_INDEX_32I,
+                                 HIPSPARSE_INDEX_32I,
+                                 HIPSPARSE_INDEX_BASE_ZERO,
+                                 not_a_type),
+              HIPSPARSE_STATUS_INVALID_VALUE);
+    EXPECT_EQ(csr, nullptr);
 #endif
 }
 

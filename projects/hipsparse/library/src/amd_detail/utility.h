@@ -466,10 +466,42 @@ namespace hipsparse
         case HIP_C_64F:
             *out = rocsparse_datatype_f64_c;
             return HIPSPARSE_STATUS_SUCCESS;
-        case HIP_R_8U:
+        case HIP_C_16F:
+        case HIP_C_8I:
         case HIP_C_8U:
+        case HIP_R_8U:
+        case HIP_C_32I:
         case HIP_R_32U:
         case HIP_C_32U:
+        case HIP_C_16BF:
+#if !defined(CUDART_VERSION) || CUDART_VERSION >= 11000
+        case HIP_R_4I:
+        case HIP_C_4I:
+        case HIP_R_4U:
+        case HIP_C_4U:
+        case HIP_R_16I:
+        case HIP_C_16I:
+        case HIP_R_16U:
+        case HIP_C_16U:
+        case HIP_R_64I:
+        case HIP_C_64I:
+        case HIP_R_64U:
+        case HIP_C_64U:
+#endif
+#if !defined(CUDART_VERSION) || CUDART_VERSION >= 11080
+        case HIP_R_8F_E4M3:
+        case HIP_R_8F_E5M2:
+#endif
+#if !defined(CUDART_VERSION) || CUDART_VERSION >= 12080
+        case HIP_R_8F_UE8M0:
+        case HIP_R_6F_E2M3:
+        case HIP_R_6F_E3M2:
+        case HIP_R_4F_E2M1:
+#endif
+#if !defined(CUDART_VERSION)
+        case HIP_R_8F_E4M3_FNUZ:
+        case HIP_R_8F_E5M2_FNUZ:
+#endif
             return HIPSPARSE_STATUS_NOT_SUPPORTED;
         default:
             return HIPSPARSE_STATUS_INVALID_VALUE;
