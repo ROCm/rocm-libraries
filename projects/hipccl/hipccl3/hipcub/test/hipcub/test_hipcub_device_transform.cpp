@@ -29,6 +29,7 @@
 #include <gtest/gtest.h>
 
 #include _HIPCUB_LIBCXX_INCLUDE(devices)
+#include _HIPCUB_LIBCXX_INCLUDE(iterator)
 #include _HIPCUB_LIBCXX_INCLUDE(stream)
 #include _HIPCUB_STD_INCLUDE(tuple)
 
@@ -901,6 +902,117 @@ TYPED_TEST(HipcubDeviceTransformTests, BinaryToTernaryTransform)
                     test_utils::assert_near(output3[i],
                                             std::get<2>(e),
                                             test_utils::precision<output_type>::value));
+            }
+        }
+    }
+}
+
+template<typename T, typename U>
+struct binary_to_ternary_flag_transform_t
+{
+    T    expected;
+
+    _CCCL_DEVICE
+    auto operator()(T a, T b) const
+    {
+        if(a == expected && b == expected)
+        {
+            return _HIPCUB_STD::tuple<U, U, U>{1, 1, 1};
+        }
+        return _HIPCUB_STD::tuple<U, U, U>{0, 0, 0};
+    }
+};
+
+struct mul2_op_t
+{
+    template<typename T>
+    _CCCL_HOST_DEVICE
+    constexpr T operator()(T t)
+    {
+        return 2 * t;
+    }
+};
+
+TEST(HipcubDeviceTransformTests, BinaryToTernaryTransformIterators)
+{
+
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type        = size_t;
+    using output_type       = size_t;
+    using output_op_type    = mul2_op_t;
+    using transform_op_type = binary_to_ternary_flag_transform_t<input_type, output_type>;
+    using InputIterator     = test_utils::counting_iterator<input_type>;
+
+    hipStream_t stream = 0; // default
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            const auto expected = test_utils::get_random_value<input_type>(0, size - 1, seed_value);
+            const auto flag_expected_op = transform_op_type{expected};
+            SCOPED_TRACE(testing::Message() << "expected = " << expected);
+
+            // Device pointers
+            const InputIterator d_input1{0};
+            const InputIterator d_input2{0};
+            output_type*        d_output1;
+            output_type*        d_output2;
+            output_type*        d_output3;
+
+            // Allocate memory
+            size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output1, num_output_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output2, num_output_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output3, num_output_bytes));
+
+            auto d_output1_it
+                = _HIPCUB_LIBCXX::transform_output_iterator(d_output1, output_op_type{});
+            auto d_output2_it
+                = _HIPCUB_LIBCXX::transform_output_iterator(d_output2, output_op_type{});
+            auto d_output3_it
+                = _HIPCUB_LIBCXX::transform_output_iterator(d_output3, output_op_type{});
+
+            // Run
+            HIP_CHECK(hipcub::DeviceTransform::Transform(
+                _HIPCUB_STD::make_tuple(d_input1, d_input2),
+                _HIPCUB_STD::make_tuple(d_output1_it, d_output2_it, d_output3_it),
+                size,
+                flag_expected_op,
+                stream));
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            std::vector<output_type> output1(size);
+            std::vector<output_type> output2(size);
+            std::vector<output_type> output3(size);
+            HIP_CHECK(hipMemcpy(output1.data(), d_output1, num_output_bytes, hipMemcpyDeviceToHost))
+            HIP_CHECK(hipMemcpy(output2.data(), d_output2, num_output_bytes, hipMemcpyDeviceToHost))
+            HIP_CHECK(hipMemcpy(output3.data(), d_output3, num_output_bytes, hipMemcpyDeviceToHost))
+
+            HIP_CHECK(hipFree(d_output1));
+            HIP_CHECK(hipFree(d_output2));
+            HIP_CHECK(hipFree(d_output3));
+
+            // Check if output values are as expected
+            for(decltype(size) i = 0; i < size; ++i)
+            {
+                output_type expected_output = 2 * (i == expected);
+                ASSERT_EQ(output1[i], expected_output);
+                ASSERT_EQ(output2[i], expected_output);
+                ASSERT_EQ(output3[i], expected_output);
             }
         }
     }
