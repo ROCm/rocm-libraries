@@ -896,64 +896,67 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                       "page tile writer supports the ordinary linear page path only");
         (void)gather_index_view;
         if constexpr(KVKind_ != FmhaPageTileKVKind::kLinear)
-        {
             tdm_issue_vectorized(config, lds_window);
-            return;
-        }
-
-        static_assert(WindowLengths{}.at(number<0>{}) <= 128);
-        static_assert(WindowLengths{}.at(number<1>{}) <= 64);
-        static_assert(Alignment_ > 0 && 64 % Alignment_ == 0);
-
-        // Missing terminal prefetches use physical page zero and a zero-row
-        // descriptor. They still issue the scheduled TDM for tensor waits.
-        // The origin is non-negative and 128-aligned (the mask's tile range). Column 0 holds by
-        // construction: both windows are created and moved with column 0, and the issue below uses
-        // only origin_[0].
-
-        // The core already supplies the correct ordinary DRAM distribution and window
-        // lengths, and this path must FORWARD them instead of rebuilding one. It applies
-        // to PageSize_ == 128 ONLY (page == tile): for P256/P1024 the physical page holds
-        // several logical tiles, so the pointer must also be rebased by the within-page
-        // slice offset (logical_tile_origin % P). That rebase lives in the helper writer,
-        // which is why the verbatim path is restricted here.
-        if constexpr(PageSize_ == 128)
-        {
-            static_assert(!std::is_void_v<Distribution>);
-            const index_t valid_tokens =
-                clamp(page_id_.owned[0].valid_rows, index_t{0}, index_t{128});
-            const index_t physical_page =
-                valid_tokens > 0 ? page_id_.owned[0].physical_page : index_t{0};
-            const long_index_t element_offset =
-                static_cast<long_index_t>(physical_page) * page_stride_;
-            const DataType* page_ptr = pool_ptr_ + element_offset;
-            // The column extent is the full head dimension.
-            const auto page_naive = make_naive_tensor_view<address_space_enum::global>(
-                page_ptr,
-                make_tuple(valid_tokens, index_t{HeadDim_}),
-                make_tuple(token_stride_, index_t{1}),
-                number<Alignment_>{},
-                number<1>{});
-            static_assert(decltype(page_naive)::get_num_of_dimension() == 2);
-            const auto page_view = pad_tensor_view(
-                page_naive, make_tuple(number<128>{}, number<HeadDim_>{}), sequence<true, false>{});
-            const auto page_window =
-                make_tile_window(page_view, WindowLengths{}, {0, 0}, Distribution{});
-            load_tile_tdm(config, lds_window, page_window);
-        }
         else
         {
-            const long_index_t tile_origin = logical_tile_origin_of(0, origin_[0]);
-            FmhaBatchPrefillLinearPageTileWriter<PageSize_, HeadDim_>::Load(
-                pool_ptr_,
-                page_stride_,
-                token_stride_,
-                static_cast<index_t>(tile_origin),
-                page_id_,
-                config,
-                lds_window,
-                number<Alignment_>{},
-                bool_constant<RematerializeStride>{});
+            // The linear layout only: its checks and the page tile writer (16-bit rows) do not
+            // apply to the vectorized windows.
+            static_assert(WindowLengths{}.at(number<0>{}) <= 128);
+            static_assert(WindowLengths{}.at(number<1>{}) <= 64);
+            static_assert(Alignment_ > 0 && 64 % Alignment_ == 0);
+
+            // Missing terminal prefetches use physical page zero and a zero-row
+            // descriptor. They still issue the scheduled TDM for tensor waits.
+            // The origin is non-negative and 128-aligned (the mask's tile range). Column 0 holds by
+            // construction: both windows are created and moved with column 0, and the issue below
+            // uses only origin_[0].
+
+            // The core already supplies the correct ordinary DRAM distribution and window
+            // lengths, and this path must FORWARD them instead of rebuilding one. It applies
+            // to PageSize_ == 128 ONLY (page == tile): for P256/P1024 the physical page holds
+            // several logical tiles, so the pointer must also be rebased by the within-page
+            // slice offset (logical_tile_origin % P). That rebase lives in the helper writer,
+            // which is why the verbatim path is restricted here.
+            if constexpr(PageSize_ == 128)
+            {
+                static_assert(!std::is_void_v<Distribution>);
+                const index_t valid_tokens =
+                    clamp(page_id_.owned[0].valid_rows, index_t{0}, index_t{128});
+                const index_t physical_page =
+                    valid_tokens > 0 ? page_id_.owned[0].physical_page : index_t{0};
+                const long_index_t element_offset =
+                    static_cast<long_index_t>(physical_page) * page_stride_;
+                const DataType* page_ptr = pool_ptr_ + element_offset;
+                // The column extent is the full head dimension.
+                const auto page_naive = make_naive_tensor_view<address_space_enum::global>(
+                    page_ptr,
+                    make_tuple(valid_tokens, index_t{HeadDim_}),
+                    make_tuple(token_stride_, index_t{1}),
+                    number<Alignment_>{},
+                    number<1>{});
+                static_assert(decltype(page_naive)::get_num_of_dimension() == 2);
+                const auto page_view =
+                    pad_tensor_view(page_naive,
+                                    make_tuple(number<128>{}, number<HeadDim_>{}),
+                                    sequence<true, false>{});
+                const auto page_window =
+                    make_tile_window(page_view, WindowLengths{}, {0, 0}, Distribution{});
+                load_tile_tdm(config, lds_window, page_window);
+            }
+            else
+            {
+                const long_index_t tile_origin = logical_tile_origin_of(0, origin_[0]);
+                FmhaBatchPrefillLinearPageTileWriter<PageSize_, HeadDim_>::Load(
+                    pool_ptr_,
+                    page_stride_,
+                    token_stride_,
+                    static_cast<index_t>(tile_origin),
+                    page_id_,
+                    config,
+                    lds_window,
+                    number<Alignment_>{},
+                    bool_constant<RematerializeStride>{});
+            }
         }
     }
 };

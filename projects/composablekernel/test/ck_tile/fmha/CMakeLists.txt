@@ -414,6 +414,15 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
                 CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG=1)
         endforeach()
     endforeach()
+
+    # FP8 page tile (fp8bf16): the policy's operand pairing on the window's LDS tiles, and the
+    # native FP8 conversions and WMMA on subnormals, with the page-tile gtests' flags.
+    foreach(name IN ITEMS operand_layout native_controls)
+        set(target test_ck_tile_fmha_batch_prefill_fp8_${name})
+        add_qr_tdm_sched_gtest(${target} test_batch_prefill_fp8_${name}.cpp)
+        target_compile_options(${target} PRIVATE -Wno-float-equal
+            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+    endforeach()
 endif()
 
 # The independent arithmetic reference is a host test on every FMHA architecture.

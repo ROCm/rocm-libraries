@@ -132,7 +132,10 @@ limit = (1 + u_O)*E + u_O*abs(r) + 2^-126,            u_O = 2^-8 (BF16 O)
   the threshold.
 - `keeps_subnormals` is set from native controls of the P convert
   (`__builtin_amdgcn_cvt_scalef32_pk8_fp8_f32`), of the row-sum dequant and of the FP8 WMMA's
-  subnormal inputs; a compiler flush flag alone is not evidence.
+  subnormal inputs; a compiler flush flag alone is not evidence. On gfx1250, with the page-tile
+  gtests' `-fgpu-flush-denormals-to-zero`, all three keep e4m3 subnormals and the convert rounds
+  to nearest even (`test_batch_prefill_fp8_native_controls`), so the FP8 tests use
+  `keeps_subnormals = true` (`loss = 2^-18`).
 
 The fixed absolute O cap of 0.015625 does not apply to FP8 contracts: correct FP8 output on rows
 with a few keys exceeds it. In `QuantizedPContract`, a row of two keys with V = -1 and +1, whose
