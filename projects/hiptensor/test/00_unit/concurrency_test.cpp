@@ -584,6 +584,20 @@ namespace
         return std::make_unique<Reduction>();
     }
 
+    // Runs a cleanup function when the scope exits, including through a failed
+    // ASSERT_* or GTEST_SKIP, which return from the test body early.
+    template <typename F>
+    struct ScopeExit
+    {
+        F mFn;
+        ~ScopeExit()
+        {
+            mFn();
+        }
+    };
+    template <typename F>
+    ScopeExit(F) -> ScopeExit<F>;
+
     struct ThreadState
     {
         std::vector<DeviceBuffer> inputs;
@@ -654,17 +668,27 @@ TEST_P(ConcurrencyTest, MatchesSingleThreadedResult)
     hiptensorHandle_t handle = nullptr;
     ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
 
+    std::vector<ThreadState> threads(kThreads);
+    ScopeExit                cleanup{[&] {
+        for(auto& ts : threads)
+        {
+            if(ts.plan)
+                hiptensorDestroyPlan(ts.plan);
+            if(ts.stream)
+                (void)hipStreamDestroy(ts.stream);
+        }
+        opCase->destroy();
+        hiptensorDestroy(handle);
+    }};
+
     auto status = opCase->create(handle);
     if(isSkipStatus(status))
     {
-        opCase->destroy();
-        hiptensorDestroy(handle);
         GTEST_SKIP() << caseName << ": " << skipReason(status);
     }
     ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
 
-    std::size_t const        outBytes = opCase->outputElements() * sizeof(float);
-    std::vector<ThreadState> threads(kThreads);
+    std::size_t const outBytes = opCase->outputElements() * sizeof(float);
 
     // Set up each thread in turn. Each plan after the first is created after the
     // first call has run, so every plan adopts the same cached kernel.
@@ -818,16 +842,6 @@ TEST_P(ConcurrencyTest, MatchesSingleThreadedResult)
             EXPECT_EQ(ts.wrong, 0);
         }
     }
-
-    for(auto& ts : threads)
-    {
-        if(ts.plan)
-            hiptensorDestroyPlan(ts.plan);
-        if(ts.stream)
-            (void)hipStreamDestroy(ts.stream);
-    }
-    opCase->destroy();
-    hiptensorDestroy(handle);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -855,11 +869,14 @@ TEST(ConcurrencyPlanCreationTest, ConcurrentBruteForceSelection)
     ScaleContraction  opCase;
     hiptensorHandle_t handle = nullptr;
     ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit cleanup{[&] {
+        opCase.destroy();
+        hiptensorDestroy(handle);
+    }};
+
     auto status = opCase.create(handle);
     if(isSkipStatus(status))
     {
-        opCase.destroy();
-        hiptensorDestroy(handle);
         GTEST_SKIP() << skipReason(status);
     }
     ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
@@ -872,6 +889,10 @@ TEST(ConcurrencyPlanCreationTest, ConcurrentBruteForceSelection)
         hiptensorPlan_t plan = nullptr;
         uint64_t        ws   = 0;
         status = createPlan(handle, opCase.mOp, HIPTENSOR_CACHE_MODE_NONE, &plan, &ws);
+        ScopeExit destroyPlan{[&] {
+            if(plan)
+                hiptensorDestroyPlan(plan);
+        }};
         if(isSkipStatus(status))
         {
             GTEST_SKIP() << skipReason(status);
@@ -894,7 +915,6 @@ TEST(ConcurrencyPlanCreationTest, ConcurrentBruteForceSelection)
             ASSERT_EQ(hipMemcpy(references[t].data(), out.mPtr, outBytes, hipMemcpyDeviceToHost),
                       hipSuccess);
         }
-        hiptensorDestroyPlan(plan);
     }
 
     std::vector<hiptensorStatus_t> createStatus(kThreads, HIPTENSOR_STATUS_SUCCESS);
@@ -953,9 +973,6 @@ TEST(ConcurrencyPlanCreationTest, ConcurrentBruteForceSelection)
             << hiptensorGetErrorString(execStatus[t]);
         EXPECT_TRUE(matches[t]);
     }
-
-    opCase.destroy();
-    hiptensorDestroy(handle);
 }
 
 // Several threads estimate the workspace at the same time. A preference owned by a
@@ -966,11 +983,14 @@ TEST(ConcurrencyWorkspaceTest, ConcurrentWorkspaceEstimate)
     ScaleContraction  opCase;
     hiptensorHandle_t handle = nullptr;
     ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit cleanup{[&] {
+        opCase.destroy();
+        hiptensorDestroy(handle);
+    }};
+
     auto status = opCase.create(handle);
     if(isSkipStatus(status))
     {
-        opCase.destroy();
-        hiptensorDestroy(handle);
         GTEST_SKIP() << skipReason(status);
     }
     ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
@@ -978,6 +998,10 @@ TEST(ConcurrencyWorkspaceTest, ConcurrentWorkspaceEstimate)
     hiptensorPlan_t plan = nullptr;
     uint64_t        ws   = 0;
     status = createPlan(handle, opCase.mOp, HIPTENSOR_CACHE_MODE_PEDANTIC, &plan, &ws);
+    ScopeExit destroyPlan{[&] {
+        if(plan)
+            hiptensorDestroyPlan(plan);
+    }};
     if(isSkipStatus(status))
     {
         GTEST_SKIP() << skipReason(status);
@@ -1033,8 +1057,4 @@ TEST(ConcurrencyWorkspaceTest, ConcurrentWorkspaceEstimate)
     }
 
     EXPECT_EQ(mismatches.load(), 0);
-
-    hiptensorDestroyPlan(plan);
-    opCase.destroy();
-    hiptensorDestroy(handle);
 }

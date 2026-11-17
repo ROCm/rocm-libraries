@@ -49,7 +49,6 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
 
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_BinaryOp);
 
     hiptensorOperationDescriptor_t    opDes      = plan->mOpDesc;
     const hiptensorTensorDescriptor_t descA      = opDes->mDescA;
@@ -238,7 +237,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
 
             plan->mPref->mSolution.store(pSolution);
             autotuneMgr->saveAutotune<hiptensor::ElementwiseSolution>(
-                hiptensor::AutotuneOps::Autotune_BinaryOp, time, handle, plan);
+                hiptensor::AutotuneOps::Autotune_BinaryOp, pSolution, time, handle, plan);
 
             return HIPTENSOR_STATUS_SUCCESS;
         }

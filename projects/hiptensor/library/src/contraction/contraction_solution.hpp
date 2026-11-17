@@ -155,6 +155,10 @@ namespace hiptensor
     protected:
         // Kernel Params
         std::unique_ptr<ContractionSolutionParams>                  mParams;
+        // Shared by every thread that runs this kernel. const methods such as makeArgs
+        // can still call non-const CK methods on it (e.g. IsSupportedArgument), because
+        // unique_ptr does not propagate const. Only call methods that leave the device op
+        // unchanged: per-call state, including scratch buffers, belongs in the argument.
         std::unique_ptr<ck::tensor_operation::device::BaseOperator> mDeviceOp;
     };
 

@@ -26,8 +26,11 @@
 
 #pragma once
 
+#include <cstdint>
+#include <limits>
+#include <map>
 #include <mutex>
-#include <unordered_map>
+#include <tuple>
 #include <vector>
 
 #include "data_types.hpp"
@@ -49,14 +52,22 @@ namespace hiptensor
     class PlancacheAutotuneMgr : public LazySingleton<PlancacheAutotuneMgr>
     {
     private:
-        std::unordered_map<AutotuneOps, bool>
-            mAutotuneStarted; //If autotune process has been started
-        std::unordered_map<AutotuneOps, uint32_t> mCallCount; //Number of calling a function
-        std::unordered_map<AutotuneOps, std::pair<float, void*>>
-            mBestSolution; //The best solution pair (run time <--> solution)
+        // Incremental autotune state of one problem
+        struct AutotuneState
+        {
+            uint32_t mCallCount    = 0; //Number of calls timed so far
+            float    mBestTime     = std::numeric_limits<float>::max();
+            void*    mBestSolution = nullptr; //Fastest solution timed so far
+        };
+
+        // Autotune state is tracked per operation, plan cache and problem, so concurrent calls
+        // on different problems or handles do not mix their timings. An entry is created on
+        // first use and erased once its result is written to the plan cache.
+        using AutotuneKey = std::tuple<AutotuneOps, std::uintptr_t, PlanCache::HashId>;
+        std::map<AutotuneKey, AutotuneState> mAutotuneStates;
 
         // The manager is process-wide and every execute call goes through it,
-        // so all access to the maps above must hold this lock.
+        // so all access to the map above must hold this lock.
         std::mutex mMutex;
 
         //Singleton: only one instance
@@ -66,23 +77,18 @@ namespace hiptensor
         PlancacheAutotuneMgr& operator=(PlancacheAutotuneMgr const&) = delete;
         PlancacheAutotuneMgr& operator=(PlancacheAutotuneMgr&&)      = delete;
 
+        static AutotuneKey makeKey(const AutotuneOps       autotuneType,
+                                   const hiptensorHandle_t handle,
+                                   const hiptensorPlan_t   plan)
+        {
+            auto* planCache = handle->getPlanCache();
+            return {autotuneType,
+                    reinterpret_cast<std::uintptr_t>(planCache),
+                    planCache->getHashID(plan->mOpDesc)};
+        }
+
     public:
         friend std::unique_ptr<PlancacheAutotuneMgr> std::make_unique<PlancacheAutotuneMgr>();
-
-        //Start the autotune by setting initial status
-        void startAutotune(const AutotuneOps autotuneType)
-        {
-            std::scoped_lock lock(mMutex);
-
-            auto started = mAutotuneStarted.find(autotuneType);
-            if(started == mAutotuneStarted.end() || started->second == false)
-            {
-                mAutotuneStarted[autotuneType] = true;
-                mCallCount[autotuneType]       = 0;
-                mBestSolution[autotuneType]
-                    = std::make_pair(std::numeric_limits<float>::max(), nullptr);
-            }
-        }
 
         //Set current solution to try in autotune
         template <typename T>
@@ -122,10 +128,12 @@ namespace hiptensor
             }
             else if(plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
             {
+                auto key = makeKey(autotuneType, handle, plan);
+
                 std::scoped_lock lock(mMutex);
 
                 //If there is no solution in the Plan Cache, we may need to do autotuning based on the number of calling this function
-                uint32_t callCount = mCallCount[autotuneType];
+                uint32_t callCount = mAutotuneStates[key].mCallCount;
                 if(callCount < plan->mPref->mIncrementalCount)
                 {
                     //If the number of calling this function is less than the number of different candidates to explore,
@@ -137,13 +145,19 @@ namespace hiptensor
             }
         }
 
-        //Check and save autotune results to Plan Cache
+        //Check and save autotune results to Plan Cache.
+        //solution is the kernel that produced time. Callers pass the solution they ran rather
+        //than letting this re-read the plan, which another thread sharing the plan may have
+        //changed in the meantime.
         template <typename T>
         void saveAutotune(const AutotuneOps       autotuneType,
+                          T*                      solution,
                           float                   time,
                           const hiptensorHandle_t handle,
                           const hiptensorPlan_t   plan)
         {
+            if(solution == nullptr)
+                return;
             if(handle->getPlanCache() == nullptr)
                 return;
             if(plan->mPref == nullptr)
@@ -151,39 +165,38 @@ namespace hiptensor
             if(plan->mPref->mCacheMode != HIPTENSOR_CACHE_MODE_PEDANTIC)
                 return;
 
-            std::scoped_lock lock(mMutex);
-
-            if(plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
+            if(plan->mPref->mAutotuneMode != HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
             {
-                //For Plan Cache autotuning, remember the best performace solution
-                float minTime = mBestSolution[autotuneType].first;
-                if(time < minTime)
-                {
-                    mBestSolution[autotuneType].first  = time;
-                    mBestSolution[autotuneType].second = plan->mPref->mSolution.load();
-                }
-
-                //Count the number of calling this function for Plan Cache autotuning
-                mCallCount[autotuneType]++;
+                //There is no autotuning: add the solution that ran to the Plan Cache.
+                auto hashID = handle->getPlanCache()->getHashID(plan->mOpDesc);
+                handle->getPlanCache()->addCacheLine(hashID, solution->uid());
+                return;
             }
 
-            //When the number of calling this function is equal to the number of different candidates to explore
-            //or there is no autotuning, add the best solution to the Plan Cache.
-            if(mCallCount[autotuneType] >= plan->mPref->mIncrementalCount
-               || plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_NONE)
-            {
-                hiptensor::PlanCache::HashId hashID
-                    = handle->getPlanCache()->getHashID(plan->mOpDesc);
-                T* solution = (T*)mBestSolution[autotuneType].second;
-                if(solution == nullptr)
-                    solution = (T*)(plan->mPref->mSolution.load());
-                handle->getPlanCache()->addCacheLine(hashID, solution->uid());
+            auto key = makeKey(autotuneType, handle, plan);
 
-                //reset callCount for next round of autotuning
-                mAutotuneStarted[autotuneType] = false;
-                mCallCount[autotuneType]       = 0;
-                mBestSolution[autotuneType]
-                    = std::make_pair(std::numeric_limits<float>::max(), nullptr);
+            std::scoped_lock lock(mMutex);
+
+            //For Plan Cache autotuning, remember the best performace solution
+            auto& state = mAutotuneStates[key];
+            if(time < state.mBestTime)
+            {
+                state.mBestTime     = time;
+                state.mBestSolution = solution;
+            }
+
+            //Count the number of calling this function for Plan Cache autotuning
+            state.mCallCount++;
+
+            //When the number of calling this function is equal to the number of different candidates to explore,
+            //add the best solution to the Plan Cache.
+            if(state.mCallCount >= plan->mPref->mIncrementalCount)
+            {
+                handle->getPlanCache()->addCacheLine(std::get<2>(key),
+                                                     static_cast<T*>(state.mBestSolution)->uid());
+
+                //Reset for the next round of autotuning
+                mAutotuneStates.erase(key);
             }
         }
     };

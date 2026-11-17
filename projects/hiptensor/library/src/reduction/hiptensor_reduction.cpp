@@ -172,7 +172,6 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
 
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_Redution);
 
     hiptensorOperationDescriptor_t    opDes       = plan->mOpDesc;
     const hiptensorTensorDescriptor_t descA       = opDes->mDescA;
@@ -425,7 +424,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
 
             plan->mPref->mSolution.store(pSolution);
             autotuneMgr->saveAutotune<hiptensor::ReductionSolution>(
-                hiptensor::AutotuneOps::Autotune_Redution, time, handle, plan);
+                hiptensor::AutotuneOps::Autotune_Redution, pSolution, time, handle, plan);
 
             return HIPTENSOR_STATUS_SUCCESS;
         }

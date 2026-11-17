@@ -348,7 +348,6 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
 
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_Contraction);
 
     // Log API access
     char msg[512];
@@ -427,6 +426,13 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     }
 
     auto* cSolution = static_cast<hiptensor::ContractionSolution*>(plan->mPref->mSolution.load());
+    if(cSolution == nullptr)
+    {
+        snprintf(msg, sizeof(msg), "Contraction plan has null solution");
+        logger->logError("hiptensorContraction", msg);
+        return HIPTENSOR_STATUS_INTERNAL_ERROR;
+    }
+
     hiptensorStatus_t             errorCode = HIPTENSOR_STATUS_SUCCESS;
     float                         time      = 0.0f;
     hiptensor::ContractionMetrics problemMetrics;
@@ -548,8 +554,11 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
         logger->logError("hiptensorContraction", msg);
     }
 
-    autotuneMgr->saveAutotune<hiptensor::ContractionSolution>(
-        hiptensor::AutotuneOps::Autotune_Contraction, time, handle, plan);
+    if(errorCode == HIPTENSOR_STATUS_SUCCESS)
+    {
+        autotuneMgr->saveAutotune<hiptensor::ContractionSolution>(
+            hiptensor::AutotuneOps::Autotune_Contraction, cSolution, time, handle, plan);
+    }
 
     return errorCode;
 }
@@ -1454,10 +1463,9 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
-    // Plan Cache autotune: begin a new round (or continue an existing one).
+    // Plan Cache autotune
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_ContractionTrinary);
 
     // Log API access
     char msg[512];
@@ -1711,7 +1719,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     // Plan Cache autotune: record execution time and, once enough
     // samples have been collected, persist the fastest solution to the cache.
     autotuneMgr->saveAutotune<hiptensor::ContractionSolution>(
-        hiptensor::AutotuneOps::Autotune_ContractionTrinary, totalTime, handle, plan);
+        hiptensor::AutotuneOps::Autotune_ContractionTrinary, solution, totalTime, handle, plan);
 
     return errorCode;
 }
