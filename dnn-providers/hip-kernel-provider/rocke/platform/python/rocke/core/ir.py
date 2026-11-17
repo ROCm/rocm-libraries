@@ -933,16 +933,31 @@ def is_packed_only(t: "Type") -> bool:
     return elem is not None and elem.name in _PACKED_ONLY_SCALARS
 
 
+def _packed_only_value_error(op_name: str, value_type: Type) -> str | None:
+    """The error for an ``op_name`` result or parameter of type ``value_type``
+    whose elements are packed-only (:func:`is_packed_only`), or None. Its
+    callers refuse it as a ``TypeError``."""
+    if not is_packed_only(value_type):
+        return None
+    element = (
+        value_type.elem
+        if isinstance(value_type, (VectorType, SmemType))
+        else value_type
+    )
+    return (
+        f"{op_name}: {element.name} values travel packed in 32-bit words and have "
+        "no scalar or vector form -- keep them in i32 storage and unpack "
+        "explicitly"
+    )
+
+
 def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
-    """Refuse an ``op_name`` result or parameter of type ``t`` whose elements
-    are packed-only (:func:`is_packed_only`)."""
-    if is_packed_only(t):
-        elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
-        raise TypeError(
-            f"{op_name}: {elem.name} values travel packed in 32-bit words and have "
-            "no scalar or vector form -- keep them in i32 storage and unpack "
-            "explicitly"
-        )
+    """Raise ``TypeError`` with :func:`_packed_only_value_error`'s text for
+    an ``op_name`` result or parameter of type ``t`` whose elements are
+    packed-only."""
+    error = _packed_only_value_error(op_name, t)
+    if error is not None:
+        raise TypeError(error)
 
 
 # Value names. The builder names every value it makes "%<hint>_<n>": the hint the
@@ -1953,7 +1968,7 @@ _LOOP_EARLY_YIELD_ERROR = (
 
 # The ops whose regions take the scf.yield ops directly in them: an scf.for
 # carries its body's yield into the next trip, and an scf.if_else applies its own
-# rule (_if_else_yields) to its branches. Every other region, the kernel body
+# rule (_if_else_error) to its branches. Every other region, the kernel body
 # and an scf.if branch among them, passes a yield on to nothing.
 _YIELD_OWNING_OPS = ("scf.for", "scf.if_else")
 
@@ -2083,7 +2098,7 @@ def _untyped_value_message(
 
     The builders and the IR parser type every value, but a value built or
     edited by hand can lack a type. The loop rule (:func:`_scf_for_error`) and
-    the if/else rule (:func:`_if_else_yields`) check each value with it before
+    the if/else rule (:func:`_if_else_error`) check each value with it before
     they read its type's name, and both report it as a ``TypeError`` (a missing
     type is the wrong kind of object), as the if/else builder refuses a result
     type. The C++ engine (``untyped_value_message`` in
@@ -2232,7 +2247,7 @@ def _scf_for_error(op: Op) -> ValueError | TypeError | None:
 def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
     """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`), every
     ``scf.if`` (:func:`_scf_if_error`) and every ``scf.if_else``
-    (:func:`_if_else_yields`) among ``ops`` and nested in them.
+    (:func:`_if_else_error`) among ``ops`` and nested in them.
 
     A lowering calls it on a loop body it does not lower (an unrolled loop of
     zero trips), so that body's malformed loop, scf.if or if/else is refused as
@@ -2249,43 +2264,47 @@ def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
             if error is not None:
                 raise ValueError(error)
         elif op.name == "scf.if_else":
-            _if_else_yields(op)
+            refusal = _if_else_error(op)
+            if refusal is not None:
+                raise refusal
         for region in op.regions:
             _refuse_malformed_control_flow(region.ops)
 
 
-def _refuse_if_else_result_type(index: int, result_type: object) -> None:
-    """Refuse an ``scf.if_else`` result ``index`` of type ``result_type`` that
-    an if/else cannot carry.
+def _if_else_result_type_error(
+    index: int, result_type: object
+) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of an ``scf.if_else`` result
+    ``index`` of type ``result_type`` that an if/else cannot carry, or None.
 
     A result needs a type (:func:`_untyped_value_message`, ``TypeError``);
     this comes first, so no later rule reads a missing type. A packed-only type has
-    no value form (:func:`_refuse_packed_only_value`, ``TypeError``). An LDS
+    no value form (:func:`_packed_only_value_error`, ``TypeError``). An LDS
     allocation is a name the lowerings resolve to its base, not a value:
     neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
     one (``ValueError``). The packed-only rule comes before the LDS rule, so an
     LDS tile of i4 gets its ``TypeError``. The builder and
-    :func:`_if_else_yields` use this rule, and the C++ engine
+    :func:`_if_else_error` use this rule, and the C++ engine
     (``rocke_i_check_if_else_result_type``) reports the same type and text.
     """
     error = _untyped_value_message(
         result_type, "scf.if_else result", index, "an IR type"
-    )
+    ) or _packed_only_value_error("scf.if_else", result_type)
     if error is not None:
-        raise TypeError(error)
-    _refuse_packed_only_value("scf.if_else", result_type)
+        return TypeError(error)
     if isinstance(result_type, SmemType):
-        raise ValueError(
+        return ValueError(
             f"scf.if_else result {index} is an LDS allocation, which an if/else "
             "cannot carry; allocate before the if/else and yield an offset into "
             "the allocation instead"
         )
+    return None
 
 
-def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
-    """The ``scf.yield`` that ends branch ``branch`` (0 then, 1 else) of the
-    ``scf.if_else`` ``op``, whose condition and branch counts
-    :func:`_if_else_yields` has checked; None when ``op`` has no results.
+def _if_else_branch_yield_error(op: Op, branch: int) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of branch ``branch`` (0 then, 1
+    else) of the ``scf.if_else`` ``op``, whose condition and branch counts
+    :func:`_if_else_error` has checked, or None when it is sound.
 
     Only the ``scf.yield`` that ends a branch of an if/else with results has
     its values taken, so a branch holds no other ``scf.yield``, directly or in
@@ -2295,7 +2314,7 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
     one value per result, of the result's type, and never a buffer descriptor
     (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
     (HIP) that holds a result can hold the lowered descriptor. A yielded value
-    with no type (:func:`_untyped_value_message`) is a ``TypeError``, raised
+    with no type (:func:`_untyped_value_message`) is a ``TypeError``, returned
     before any rule reads its type; every other refusal is a ``ValueError``.
     """
     name = _IF_ELSE_BRANCHES[branch]
@@ -2303,30 +2322,30 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
     region = op.regions[branch]
     if not count:
         if _orphan_yield(region.ops) is not None:
-            raise ValueError(
+            return ValueError(
                 f"scf.if_else has no results, so its {name} branch cannot "
                 "contain scf.yield"
             )
         return None
     if not region.ops or region.ops[-1].name != "scf.yield":
-        raise ValueError(
+        return ValueError(
             f"scf.if_else has {count} results, so its {name} branch must end in "
             f"scf.yield of {count} values"
         )
     if _orphan_yield(region.ops[:-1]) is not None:
-        raise ValueError(
+        return ValueError(
             f"scf.if_else has {count} results, so its {name} branch must yield "
             "only at its end"
         )
     yld = region.ops[-1]
     if len(yld.operands) != count:
-        raise ValueError(
+        return ValueError(
             f"scf.if_else has {count} results, but its {name} branch yields "
             f"{len(yld.operands)} values"
         )
     for index, (result, value) in enumerate(zip(op.results, yld.operands)):
         if _is_buffer_descriptor(value):
-            raise ValueError(
+            return ValueError(
                 f"scf.if_else result {index}: its {name} branch yields a buffer "
                 "descriptor, which an if/else cannot carry; yield the values the "
                 "descriptor is built from and build it after the if/else"
@@ -2335,35 +2354,54 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
             value.type, f"scf.if_else {name} branch yield", index, result.type.name
         )
         if error is not None:
-            raise TypeError(error)
+            return TypeError(error)
         if value.type != result.type:
-            raise ValueError(
+            return ValueError(
                 f"scf.if_else result {index} is {result.type.name}, but its {name} "
                 f"branch yields {value.type.name}"
             )
-    return yld
+    return None
 
 
-def _if_else_yields(op: Op) -> tuple[Op | None, Op | None]:
-    """The ``scf.yield`` that ends the then and the else branch of the
-    ``scf.if_else`` ``op``; both None when ``op`` has no results.
+def _if_else_error(op: Op) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of the ``scf.if_else`` ``op``, or
+    None when it is sound.
 
     Every ``scf.if_else`` has one condition and two branches, and each result
-    is a type an if/else can carry (:func:`_refuse_if_else_result_type`); each
-    branch then follows :func:`_if_else_branch_yield`. The builder, the
+    is a type an if/else can carry (:func:`_if_else_result_type_error`); each
+    branch then follows :func:`_if_else_branch_yield_error`. The builder, the
     verifier and every lowering refuse anything else with these types and
     texts, in both engines (``rocke_i_if_else_yields``). The counts are checked
     first, as serialized IR reaches the verifier and the lowerings without
     passing the builder.
     """
     if len(op.operands) != 1 or len(op.regions) != 2:
-        raise ValueError(
+        return ValueError(
             f"scf.if_else: expected 1 condition / 2 branches, got "
             f"{len(op.operands)} / {len(op.regions)}"
         )
     for index, result in enumerate(op.results):
-        _refuse_if_else_result_type(index, result.type)
-    return _if_else_branch_yield(op, 0), _if_else_branch_yield(op, 1)
+        refusal = _if_else_result_type_error(index, result.type)
+        if refusal is not None:
+            return refusal
+    for branch in range(len(_IF_ELSE_BRANCHES)):
+        refusal = _if_else_branch_yield_error(op, branch)
+        if refusal is not None:
+            return refusal
+    return None
+
+
+def _if_else_yields(op: Op) -> tuple[Op | None, Op | None]:
+    """The ``scf.yield`` that ends the then and the else branch of the
+    ``scf.if_else`` ``op``; both None when ``op`` has no results. Raises the
+    refusal of :func:`_if_else_error` first, so the lowerings read only a
+    sound if/else."""
+    refusal = _if_else_error(op)
+    if refusal is not None:
+        raise refusal
+    if not op.results:
+        return None, None
+    return op.regions[0].ops[-1], op.regions[1].ops[-1]
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -8374,7 +8412,9 @@ class IRBuilder:
         a branch of an if/else without results that holds an ``scf_yield``.
         """
         for index, result_type in enumerate(result_types):
-            _refuse_if_else_result_type(index, result_type)
+            refusal = _if_else_result_type_error(index, result_type)
+            if refusal is not None:
+                raise refusal
         results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
@@ -8616,7 +8656,9 @@ class _IfElseBuilder:
         # The regions were already popped by their own context managers. Once
         # both branches are built, refuse one that does not yield the results.
         if exc_type is None:
-            _if_else_yields(self.op)
+            refusal = _if_else_error(self.op)
+            if refusal is not None:
+                raise refusal
 
     @property
     def results(self) -> List[Value]:
