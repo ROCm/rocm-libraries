@@ -1072,7 +1072,7 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                     assert "0xd480e408" in src  # {-(64 + 8) : -(1024 + 8)}
             seen.add(kernel["BaseName"])
     assert len(seen) == 49
-    assert len(grouped) == 5
+    assert len(grouped) == 9
 
 
 @pytest.mark.parametrize("zeroPoint", [False, True])
