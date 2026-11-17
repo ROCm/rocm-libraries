@@ -682,9 +682,11 @@ namespace
             part.buffer_offset_c += n_base * prob.col_stride_c;
             part.buffer_offset_d += n_base * prob.col_stride_d;
 
-            // the GSU workspace was allocated for the whole problem
+            // the GSU workspace was allocated for the whole problem, and the math op
+            // may have fallen back from XF32 to FP32 when the solution was selected
             auto tensile_part = ConstructTensileProblem(part);
             tensile_part.setWorkspaceSize(tensile_prob.workspaceSize());
+            tensile_part.setF32XdlMathOp(tensile_prob.f32XdlMathOp());
             if(!solution.canSolve(tensile_part, hardware))
                 return rocblas_status_not_implemented;
 
