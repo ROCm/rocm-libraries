@@ -8,8 +8,9 @@
 extern "C" {
 #endif
 /* Versioned bounded T32 decode builders. Old spec POD layouts are unchanged.
- * Callers provide truthful allocation bounds, matching grids, and stream ordering.
- * Device metadata failures produce NaN for the affected sequence via the paired reducer. */
+ * Callers provide truthful allocation bounds, matching grids, and stream
+ * ordering. Device metadata failures produce NaN for the affected sequence via
+ * the paired reducer. */
 rocke_kernel_def_t* rocke_build_paged_decode_bounded_v1_gfx942(
     rocke_ir_builder_t*, const rocke_unified_attention_3d_tiled_spec_t*, const char*);
 rocke_kernel_def_t* rocke_build_paged_decode_reduce_bounded_v1_gfx942(

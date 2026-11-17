@@ -41,7 +41,7 @@ def paged_kv_page(b, safe_token, page):
 
 
 def paged_kv_byte_offset(b, physical, row, head, dim, hd, page, heads):
-    """Flatten checked physical coordinates with explicit two-byte KV strides."""
+    """Flatten caller-valid or device-checked coordinates with two-byte KV strides."""
     desc = TensorDescriptor.naive(
         "paged_kv_bytes",
         lengths=(1, page, heads, hd),
@@ -57,6 +57,15 @@ def paged_kv_byte_offset(b, physical, row, head, dim, hd, page, heads):
 def paged_kv_offset(
     b, table, seq_base, head, tile, linear, length, hd, page, tile_size, heads
 ):
+    """Emit an unbounded gather offset from caller-valid device metadata.
+
+    Lengths and table indices must fit the declared capacity and i32 arithmetic;
+    referenced physical IDs must index both pools. Speculative tokens still
+    read logical page zero, so that table entry must be readable and valid.
+    This helper masks token tails, not physical-ID range violations. Supported
+    runtime gather launches require a marked pair and use PagedBounds.offset;
+    raw callers retain the metadata validity and synchronization obligations.
+    """
     token, dim = paged_kv_token(b, tile, linear, hd, tile_size)
     valid = b.cmp_lt(token, length)
     safe_token = b.select(valid, token, b.const_i32(0))

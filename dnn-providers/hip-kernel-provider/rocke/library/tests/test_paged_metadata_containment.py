@@ -159,7 +159,7 @@ def test_candidate_pair_bounds_and_signature(arch, page):
     from dispatch.attention import AttentionRequest, dispatch_attention
     from dispatch.attention.common import _problem
     from kernels.common.attention_paged_decode import paged_metadata_bounds
-    from kernels.common.attention_unified import _3d_signature, _reduce_signature
+    from kernels.common.attention_unified import _tiled_3d_signatures
 
     req = AttentionRequest(
         batch=3,
@@ -192,8 +192,7 @@ def test_candidate_pair_bounds_and_signature(arch, page):
         selected.spec.reduce_spec, arch=arch
     )
     # Kernel/signature order is a launch ABI, not just a parameter count.
-    sig = _3d_signature("fp16", metadata_containment=True)
-    redsig = _reduce_signature("fp16", metadata_containment=True)
+    sig, redsig = _tiled_3d_signatures(arch, "fp16", metadata_containment=True)
     assert [p.name for p in segment.params] == [p["name"] for p in sig]
     assert [p.name for p in reducer.params] == [p["name"] for p in redsig]
 

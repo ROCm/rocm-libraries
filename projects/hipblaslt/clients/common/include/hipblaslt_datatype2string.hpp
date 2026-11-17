@@ -81,6 +81,7 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE8M0:
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
         return HIP_R_8F_UE8M0;
     case hipblaslt_scaling_format::Block_32_UE4M3:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -90,6 +91,27 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
         return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
     default:
         return HIP_R_8F_UE8M0;
+    }
+}
+
+// Short MX scale element-format token for test names ("UE8M0"/"UE4M3"/"UE5M3").
+// Pairs with blockSize() to build a self-describing "_SAMX_<block>_<fmt>" test-name suffix.
+inline const char* mxScaleFormatName(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return "UE8M0";
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+        return "UE4M3";
+    case hipblaslt_scaling_format::Block_32_UE5M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
+        return "UE5M3";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -154,6 +176,7 @@ inline bool isBlockScaling(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE5M3:
     case hipblaslt_scaling_format::Block_16_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
         return true;
     default:
         return false;
@@ -168,6 +191,7 @@ inline int blockSize(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE4M3:
     case hipblaslt_scaling_format::Block_32_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
         return 32;
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -198,18 +222,30 @@ inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scalin
 // Scale entries per batch, before multiplying by the batch count. kAlongRows
 // identifies the reduction dimension in the raw matrix (transposed A or normal B).
 // Dimensions must be nonnegative and s must be a block-scaling format. The
-// rocRoller and preswizzled paths require the TN layout: kAlongRows must be true
-// (transA=T or transB=N). The alternate layout supports either orientation.
-// The explicit preswizzled format requires gfx950 padding even without rocRoller.
+// preswizzled format always stores K blocks by M or N with gfx950 padding, in
+// either orientation. The rocRoller path requires the TN layout: kAlongRows must
+// be true (transA=T or transB=N). The alternate layout supports either orientation.
 inline size_t blockScaleBufferSize(int64_t                  dataRow,
                                    int64_t                  dataCol,
                                    hipblaslt_scaling_format s,
                                    bool                     kAlongRows,
                                    bool                     mxUseRocroller)
 {
-    if(mxUseRocroller || s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+    if(s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        return kAlongRows ? scaleBufferSize(dataRow, dataCol, s)
+                          : scaleBufferSize(dataCol, dataRow, s);
+
+    // Whole 128-row by 4-K-block tiles.
+    if(s == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT)
     {
-        assert(kAlongRows && "rocRoller and preswizzled scales require K along the rows");
+        size_t const kBlocks = ((kAlongRows ? dataRow : dataCol) + 127) / 128 * 4;
+        size_t const mnDim   = ((kAlongRows ? dataCol : dataRow) + 127) / 128 * 128;
+        return kBlocks * mnDim;
+    }
+
+    if(mxUseRocroller)
+    {
+        assert(kAlongRows && "rocRoller scales require K along the rows");
         return scaleBufferSize(dataRow, dataCol, s);
     }
 

@@ -13,7 +13,7 @@ content check at bind time.
 
 from dataclasses import replace
 
-from kernels.common.attention_unified import _3d_signature, _num_segments
+from kernels.common.attention_unified import _tiled_3d_signatures, _num_segments
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 
 from .bindings import bind_tuning_attention_torch, validate_tuning_attention_contract
@@ -22,6 +22,7 @@ from .common import (
     AttentionMaskType,
     AttentionTuningSpec,
     _parse_attention_mask_type,
+    attention_band,
     _problem,
     _request_errors,
     _selector_matches,
@@ -47,6 +48,11 @@ def make_candidate():
             == AttentionMaskType.TOP_LEFT_CAUSAL
         ):
             return False, "decode uses bottom-right causal alignment"
+        band = attention_band(req)
+        if band.top_left:
+            return False, "decode uses bottom-right causal alignment"
+        if not band.is_causal:
+            return False, "bounded decode requires causal right_bound=0"
         if req.nhead_q // req.nhead_k not in (1, 2, 4, 8, 16):
             return False, "GQA ratio must divide 16"
         if req.kv_block_size != 1 and not (
@@ -135,9 +141,9 @@ def make_candidate():
         select_spec=select,
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
         build=lambda spec, arch: spec.build(arch),
-        signature=lambda spec: _3d_signature(
-            spec.kernel_spec.dtype, metadata_containment=True
-        ),
+        signature=lambda spec: _tiled_3d_signatures(
+            spec.arch, spec.kernel_spec.dtype, metadata_containment=True
+        )[0],
         grid=lambda spec, req: spec.launch_grid(_problem(req)),
         block=lambda spec: spec.launch_block(),
         bind_torch=bind,

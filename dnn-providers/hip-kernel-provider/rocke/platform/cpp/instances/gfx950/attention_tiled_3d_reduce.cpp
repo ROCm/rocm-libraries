@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "rocke/instance_gfx950_attention_tiled_3d_internal.h"
+#include "rocke/instance_lse_store_internal.h"
 
 /* ============================================================ *
  * Per-slot caches shared between reduce_max_pass and reduce_combine_pass.
@@ -43,8 +44,8 @@
  * ============================================================ */
 static rocke_value_t** s_seg_sv = NULL; /* sv      per lane slot              */
 static rocke_value_t** s_seg_in_rng = NULL; /* in_rng  per lane slot (NULL=None)  */
-static rocke_value_t** s_seg_sv_safe = NULL; /* sv_safe per lane slot              */
-static rocke_value_t** s_seg_max = NULL; /* seg_max_cache per lane slot        */
+static rocke_value_t** s_seg_sv_safe = NULL; /* sv_safe per lane slot */
+static rocke_value_t** s_seg_max = NULL; /* seg_max_cache per lane slot     */
 static rocke_value_t** s_seg_l = NULL; /* seg_l_cache   per lane slot        */
 static int s_seg_slots = 0; /* SEG_PER_LANE captured by pass 1    */
 
@@ -124,8 +125,8 @@ static rocke_value_t* rocke__red_out_offset(rocke_gfx950_attention_tiled_3d_buil
  * and the factor_lds smem alloc. Also stamps the kernel attrs
  * (max_workgroup_size, optional waves_per_eu, lines 1015-1017). The heavy
  * lifting (cfg derivation + the HALFS_PER_THREAD*THREADS == HD assert) is done
- * by the peer rocke_gfx950_attn_tiled_3d_reduce_config_from_spec; this threads it
- * into the ctx.
+ * by the peer rocke_gfx950_attn_tiled_3d_reduce_config_from_spec; this threads
+ * it into the ctx.
  * ============================================================ */
 void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx)
@@ -135,7 +136,6 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     const rocke_gfx950_attn_tiled_3d_config_t* cfg = &ctx->cfg;
     rocke_param_opts_t opts;
 
-    int NUM_QH = cfg->NUM_QH;
     int NUM_SEG = cfg->NUM_SEG;
     int HD = cfg->HD;
 
@@ -189,12 +189,29 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     ctx->red_seq_lens
         = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
-    /* ---- grid ids + thread (lines 1029-1031) ---- */
+    /* RUNTIME_KERNARG_FIELDS : the query head count */
+    ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
     if(ctx->metadata_containment)
     {
         ctx->bounds.status = rocke_bounds_ptr_param(b, "metadata_status_ptr", true);
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
     }
+
+    /* lse_ptr : ptr<f32, global>, noalias, writeonly, align=4 (emit_lse only) */
+    ctx->red_lse = NULL;
+    if(spec != NULL && spec->emit_lse)
+    {
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->red_lse = rocke_b_param(b, "lse_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+    }
+
+    /* ---- grid ids + thread (lines 1029-1031) ---- */
     ctx->q_token = rocke_b_block_id_x(b);
     ctx->q_head = rocke_b_block_id_y(b);
     ctx->tid = rocke_b_thread_id_x(b);
@@ -224,32 +241,40 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
                             ctx->cfg.HD,
                             ctx->cfg.NUM_QH,
                             ctx->cfg.NUM_KV,
-                            ctx->cfg.NUM_SEG);
+                            ctx->cfg.NUM_SEG,
+                            ctx->red_lse);
     ctx->neg_inf = rocke_b_const_f32(b, -INFINITY);
     ctx->zero_f = rocke_b_const_f32(b, 0.0);
 
-    /* ---- descriptors (lines 1042-1056) ---- */
+    /* ---- descriptors (lines 1042-1056) ----
+   * The head count is a kernarg, so each token stride is too. */
     {
-        int ml_lengths[3] = {1 << 30, NUM_QH, NUM_SEG};
-        const char* ml_coords[3] = {"token", "head", "seg"};
-        ctx->ml_desc_red
-            = rocke_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
+        static const char* const ml_coords[3] = {"token", "head", "seg"};
+        rocke_value_t* ml_dyn[3]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, NUM_SEG)), NULL, NULL};
+        const int ml_static[3] = {1, NUM_SEG, 1};
+        ctx->ml_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_ml", ml_coords, 3, ml_dyn, ml_static);
     }
     {
-        int sa_lengths[4] = {1 << 30, NUM_QH, NUM_SEG, HD};
-        const char* sa_coords[4] = {"token", "head", "seg", "dim"};
-        ctx->seg_acc_desc_red
-            = rocke_tensor_descriptor_naive(b, "segm_output", sa_lengths, 4, NULL, sa_coords, 4);
+        static const char* const sa_coords[4] = {"token", "head", "seg", "dim"};
+        rocke_value_t* sa_dyn[4]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, NUM_SEG * HD)), NULL, NULL, NULL};
+        const int sa_static[4] = {1, NUM_SEG * HD, HD, 1};
+        ctx->seg_acc_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_output", sa_coords, 4, sa_dyn, sa_static);
     }
     {
-        int out_lengths[3] = {1 << 30, NUM_QH, HD};
-        const char* out_coords[3] = {"token", "head", "dim"};
-        ctx->out_desc_red
-            = rocke_tensor_descriptor_naive(b, "out", out_lengths, 3, NULL, out_coords, 3);
+        static const char* const out_coords[3] = {"token", "head", "dim"};
+        rocke_value_t* out_dyn[3]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, HD)), NULL, NULL};
+        const int out_static[3] = {1, HD, 1};
+        ctx->out_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "out", out_coords, 3, out_dyn, out_static);
     }
 
     /* ---- base_ml = ml_desc_red.offset(token=q_token, head=q_head, seg=0) ----
-     * (line 1061) */
+   * (line 1061) */
     zero_i32 = rocke_b_const_i32(b, 0);
     ctx->base_ml = rocke__red_ml_offset(ctx, ctx->q_token, ctx->q_head, zero_i32);
 
@@ -275,9 +300,8 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
  *       if in_rng is not None:
  *           ms = select(in_rng, ms, neg_inf)
  *           ls = select(in_rng, ls, zero_f)
- *       ms = select(fcmp("ogt", ls, zero_f), ms, neg_inf)   # empty segment -> -inf
- *       cache (sv, in_rng, sv_safe), ms, ls
- *       local_max = fmax(local_max, ms)
+ *       ms = select(fcmp("ogt", ls, zero_f), ms, neg_inf)   # empty segment ->
+ * -inf cache (sv, in_rng, sv_safe), ms, ls local_max = fmax(local_max, ms)
  *   overall_max = _wave64_reduce_max(local_max)
  * ============================================================ */
 void rocke_gfx950_attention_tiled_3d_reduce_max_pass(
@@ -346,9 +370,9 @@ void rocke_gfx950_attention_tiled_3d_reduce_max_pass(
         }
 
         /* A segment whose tiles were all masked for this row stores max=0 with
-         * sum=0. Its max carries no mass, so it must not set overall_max (it
-         * would underflow every real segment's factor) nor get a factor in
-         * pass 2: treat it as -inf. fcmp is emitted before select, as in Python. */
+     * sum=0. Its max carries no mass, so it must not set overall_max (it
+     * would underflow every real segment's factor) nor get a factor in
+     * pass 2: treat it as -inf. fcmp is emitted before select, as in Python. */
         has_mass = rocke_b_fcmp(b, "ogt", ls, ctx->zero_f);
         ms = rocke_b_select(b, has_mass, ms, ctx->neg_inf);
 
@@ -452,14 +476,12 @@ void rocke_gfx950_attention_tiled_3d_reduce_combine_pass(
  *
  *   for li in range(HALFS_PER_THREAD):
  *       d = add(mul(const_i32(li), const_i32(THREADS)), tid)
- *       acc_loop = scf_for_iter(0, NUM_SEG, 1, [("ac{li}", zero_f)], iv_name="s_acc{li}")
- *       with acc_loop as (sv, (ac,)):
- *           factor = smem_load_vN_f32(factor_lds, sv, n=1)
- *           factor_s = vec_extract(factor, 0)
- *           idx_acc, _ = seg_acc_desc_red.offset(token=q_token, head=q_head, seg=sv, dim=d)
- *           ov = global_load_f32(seg_out, idx_acc)
- *           scf_yield(fadd(ac, fmul(ov, factor_s)))
- *       scalar_out_f32 = fmul(acc_loop.results[0], inv_l)
+ *       acc_loop = scf_for_iter(0, NUM_SEG, 1, [("ac{li}", zero_f)],
+ * iv_name="s_acc{li}") with acc_loop as (sv, (ac,)): factor =
+ * smem_load_vN_f32(factor_lds, sv, n=1) factor_s = vec_extract(factor, 0)
+ *           idx_acc, _ = seg_acc_desc_red.offset(token=q_token, head=q_head,
+ * seg=sv, dim=d) ov = global_load_f32(seg_out, idx_acc) scf_yield(fadd(ac,
+ * fmul(ov, factor_s))) scalar_out_f32 = fmul(acc_loop.results[0], inv_l)
  *       scalar_out = cast_f32_to(scalar_out_f32, dtype)
  *       out_idx, _ = out_desc_red.offset(token=q_token, head=q_head, dim=d)
  *       global_store(out, out_idx, scalar_out, align=2)
@@ -536,5 +558,27 @@ void rocke_gfx950_attention_tiled_3d_reduce_normalize_pass(
 
         out_idx = rocke__red_out_offset(ctx, ctx->q_token, ctx->q_head, d);
         rocke_b_global_store(b, ctx->out, out_idx, scalar_out, 2);
+    }
+
+    /* emit_lse: every lane holds the same butterfly-reduced overall_max/expsum,
+   * so lane 0 writes. overall_max is in log2 units; lse_store converts to
+   * natural log and writes -inf for a row with no mass (sum 0); a NaN sum
+   * keeps NaN, as O does (!(l == 0), never l > 0). One builder call per
+   * statement, in Python order. */
+    if(ctx->reduce_spec != NULL && ctx->reduce_spec->emit_lse)
+    {
+        rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+        rocke_value_t* is_writer = rocke_b_cmp_eq(b, ctx->tid, c0);
+        rocke_if_t guard = rocke_b_scf_if(b, is_writer);
+        rocke_b_region_enter(b, guard.then_region);
+        {
+            rocke_value_t* nqh = ctx->num_qh_p;
+            rocke_value_t* row = rocke_b_mul(b, ctx->q_token, nqh);
+            rocke_value_t* lse_index = rocke_b_add(b, row, ctx->q_head);
+            rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->overall_expsum);
+            rocke_lse_store(
+                b, ctx->red_lse, lse_index, ctx->overall_max, ctx->overall_expsum, has_mass);
+        }
+        rocke_b_region_leave(b);
     }
 }

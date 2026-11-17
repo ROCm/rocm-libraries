@@ -45,9 +45,10 @@ gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPOR
 ### `Value`
 
 ```text
-name : "%v42" or "%A"
-type : Type
-op   : Optional[Op]   # producer
+name  : "%v42" or "%A"
+type  : Type
+op    : Optional[Op]      # producer
+param : Optional[Param]   # the declaration, for a kernel parameter's Value
 ```
 
 `Value.__bool__` raises `TypeError`. This is the central safety rail:
@@ -73,13 +74,21 @@ loc       : Optional[str]
 
 ```text
 Region(label, ops)
-Param(name, type, attrs)
+Param(name, type, attrs, declared_before)
 KernelDef(name, params, body, attrs)
 ```
 
+`Param.attrs` holds the pointer attributes and the integer facts a declaration states (below);
+`declared_before` is the parameters declared before it, the only ones its relations may name.
+
 Kernel attributes consumed by lowering:
 
-- `max_workgroup_size` (int, default 256) — emitted as `"amdgpu-flat-work-group-size"="64,N"`.
+- `max_workgroup_size` (int, default 256) -- an upper bound on the launch block size, emitted as
+  `"amdgpu-flat-work-group-size"="64,N"`.
+- `workgroup_size` (int) -- the exact launch block size. It lowers exactly as `max_workgroup_size` of the same
+  value does: both engines read the block size through one accessor (`KernelDef.max_workgroup_size`,
+  `rocke_kernel_max_workgroup_size`), which returns `workgroup_size` when it is set. A kernel sets at most one of
+  the two; both verifiers refuse a kernel that sets both.
 - `waves_per_eu` (int or `(lo, hi)` tuple) — emitted as `"amdgpu-waves-per-eu"`.
 
 ## IRBuilder API
@@ -96,7 +105,7 @@ const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
-zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / i16 / i32
+zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / u8 / i16 / i32
 ```
 
 ### Arithmetic / compare / cast
@@ -286,25 +295,168 @@ scf_yield(*values)
 ### Parameters and naming
 
 ```text
-param(name, type, **attrs) -> Value
+param(name, type, *, ge=, gt=, le=, lt=, eq=, multiple_of=,
+      noalias=, readonly=, writeonly=, nocapture=, nonnull=, align=, dereferenceable=, addr_space=) -> Value
 get_param(name) -> Value
 ```
 
-Pointer attributes consumed by LLVM lowering:
+Every keyword is optional and keyword-only; a misspelled one is a `TypeError`.
+
+Pointer attributes consumed by LLVM lowering (on a pointer parameter only):
 
 ```text
 noalias        -> noalias
 readonly       -> readonly
 writeonly      -> writeonly + nocapture
-align=N        -> align N
+nonnull        -> nonnull
+nocapture=False -> drops the default nocapture
+align=N        -> align N              (N a power of two)
 dereferenceable=N -> dereferenceable(N)
+addr_space     -> "constant" lowers the pointer as ptr addrspace(4)
 ```
 
 Verified by `test_param_metadata_lowers_to_llvm_arg_attrs` in `tests/test_rocke.py`.
 
+Facts on an integer parameter, which the GPU trusts and a launcher built by
+`KernelLauncher.from_artifact` checks on the host before each launch (no other launch path checks them;
+see `runtime/compile_launch_and_manifest.md`). They emit nothing:
+
+```text
+ge / gt  -> value >= / > bound      (at most one of the two)
+le / lt  -> value <= / < bound      (at most one of the two)
+eq       -> value == bound          (a baked length; excludes every other word)
+multiple_of=n -> value % n == 0     (an int n >= 1)
+```
+
+A bound is an int, an earlier parameter's Value, or `sum_of` / `product_of` / `quotient_of` /
+`difference_of` (`rocke.core.intexpr`) over those. The declaration order is the kernel's argument
+order, so a relation sits on the parameter declared last among its terms; `quotient_of` and
+`difference_of` move a product or a sum to that side:
+
+```python
+M   = b.param("M",   I32, ge=1, le=1 << 20, multiple_of=64)
+N   = b.param("N",   I32, ge=1, le=1 << 20)
+ldc = b.param("ldc", I32, ge=N, le=1 << 20, multiple_of=8)
+sb  = b.param("sb",  I32, ge=product_of(M, ldc))
+```
+
+A side with no word has the type's limit; there is no hidden default. `quotient_of` needs its
+divisor's stated lower bound to be at least 1 and its dividend's at least 0. An int bound is
+stored as an int; a relation as the canonical JSON of its intexpr tree
+(`{"mul":[{"param":"M"},{"param":"ldc"}]}`), which every serializer carries as a string. The
+builder refuses what a declaration cannot state (a word on the wrong type, two lower bounds, a
+bound computed in the kernel) with a `ValueError`; both verifiers apply the same rules to
+`Param.attrs`, and also refuse a relation that names a parameter declared later. The C++ builder
+takes the same facts in `rocke_param_opts_t.facts` (`rocke_int_facts_t`), a relation as its JSON
+text.
+
+A C++ caller may also pass a parameter's Value as a bound (`rocke_int_bound_t.value_bound`); it is
+stored as that parameter's relation.
+
+The host checks the facts through `KernelLauncher.from_artifact`, which reads them as the kernel's
+parameter contract (`rocke.runtime.parameter_contract`; see `runtime/compile_launch_and_manifest.md`).
+
+### Values only the GPU can see: `gpu_checked_value`
+
+```python
+gpu_checked_value(value, *, ge=None, gt=None, le=None, lt=None, multiple_of=None) -> Value
+```
+
+Always emitted: no build mode drops it; a false fact fails the launch. It is for a value the host
+cannot check -- one computed from a memory load or a block id -- and returns `value` carrying the
+stated facts. The facts live only on the returned Value, so pass that Value on:
+
+```python
+T     = b.param("T", I32, ge=0, le=MAX_T)
+start = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s, I32)), ge=0, le=T)
+end   = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s1, I32)), ge=0, le=T)
+seqlen = b.gpu_checked_value(b.sub(end, start), ge=0, le=T)
+```
+
+A lane whose value breaks a fact stops at the check, before anything uses the value: it stores 1
+to the kernel's GPU-check word (`rocke_gpu_check_failed_<kernel>`, an i32 global in the code
+object, zero at load) and returns from the kernel. A wave all of whose lanes have returned has
+ended, and an ended wave does not hold the others at a workgroup barrier, so the launch completes
+with no trap for any OS to handle. (The GPU tests in `tests/core/test_gpu_checked_value.py` run
+on Linux on the processors its `_RUN_ON` lists and are skipped on other GPUs until they have
+run there; a workgroup returning before a gfx1250 cluster barrier has not run on hardware yet.) `rocke.runtime` then fails the launch with
+`GpuCheckFailed`, and the process keeps the GPU.
+
+**A false fact fails the launch, and every output of that launch is undefined**, not only what the
+returned lanes would have written. The lanes that go on can read what a returned lane never wrote
+(LDS, a cross-lane read, a matrix-core operand) and compute wrong values, even wrong addresses,
+from it; a store made before the check is not undone.
+
+**Check before any cross-workgroup protocol, and in every wave that uses the value.** A wave or
+workgroup that returns at a check never signals anything after it, so a kernel in which one waits
+on another's flag, semaphore or counter (a stream-K fix-up, a persistent work queue, a hand-off
+between waves) hangs when the one it waits on has returned. Run the check before a wave or
+workgroup joins any such protocol, so that one that fails leaves before anyone waits on it. And run
+it in every wave that uses the value: a wave that only receives the value from one that checked it
+(through LDS, say) does not stop, and goes on to use the value or wait for the wave that left.
+
+**How the runtime reads the word.** `rocke.runtime` notes the word at each launch it makes and
+reads it, with a copy queued on the stream, at its next wait on that stream:
+`Runtime.launch_blocking`, a fenced `KernelLauncher` call, `stream_sync`, `wait_stream`, `sync`,
+`release_pending_for_stream` and `check_gpu_checks`. Every stream shares the one word, so when two
+streams both have an unread launch of the kernel, a set word fails both their waits: it cannot say
+which launch failed. The wait does not clear the word. The first launch after every noted launch
+has been read clears it, queued ahead of the launch on its stream, so no failure of a noted launch
+is lost between a read and a clear, and a word left set by a launch the runtime never saw is not
+blamed on the next one.
+
+**What is not checked.** A wait outside the runtime (`torch.cuda.synchronize()`, an event) reads
+nothing: call `Runtime.check_gpu_checks(stream)` after it. Nothing reads the word after a graph
+replay, so the runtime refuses to queue a checked kernel on a stream that is being captured
+(`GpuCheckCaptureRefused`). A launch of the code object outside `rocke.runtime` is never noted, so
+nothing reads the word for it and its failure is silent. That is why `hkp_pack`,
+`write_artifact` and both engines' recipe launch plans refuse a kernel that holds a check.
+
+The check does not trap. A taken trap does not let the process carry on (what it does on each
+platform, and on which processors it is the simulated trap: `tile.trap` in
+[op_vocabulary.md](../reference/op_vocabulary.md)).
+
+So the check is a last line of defence for a value the host cannot see, not a way to reject input;
+make bad input impossible upstream.
+
+The words are the parameter words without `eq`; at least one is required, and exactly the stated
+sides are checked. A bound is an int or one Value of the value's type whose facts are stated (a
+parameter, or a Value `gpu_checked_value` returned); `sum_of`, `product_of`, `quotient_of` and
+`difference_of` are host expressions and are refused. It emits one signed compare per stated side
+(one unsigned compare for `0 <= v < n` with an int `n`, by `one_unsigned_compare_checks`, the rule
+every emitted bound check follows: compare, never form a subtraction that can wrap), `scf.if` on
+the failure holding `tile.gpu_check_failed`, and an `arith.assume_range` marker with
+`by = "gpu_checked_value"`. `tile.gpu_check_failed` lowers to
+`store atomic i32 1, ptr addrspace(1) @rocke_gpu_check_failed_<kernel> syncscope("agent") monotonic`
+and `ret void`, ending its block like `cf.return` (HIP: `__hip_atomic_store` on a `__device__ int`
+and `return;`). A per-lane value is checked per lane; a wave-uniform value (`readfirstlane`) stops
+its whole wave.
+
+It refuses, naming the fix (`rocke.core.value_sources` holds the two walks):
+
+- a value the host already checks: a kernel parameter (state the fact on its declaration), a
+  value computed only from parameters and constants, or one computed from thread ids (state
+  `workgroup_size`). A value *depends on* a leaf through any operand, conditions and loop-carried
+  values included; one that depends on a load or a block id is GPU-only and accepted.
+- a value an unchecked load reaches through an `add`, `sub`, `mul`, `div` or `mod` on its data
+  path (every operand except a select's or branch's condition and a loop's upper bound): that
+  arithmetic can wrap, become poison or divide by zero before the check. Check the loaded value
+  first and compute with the returned Values. A load that only feeds a compare (the binary-search
+  shape) does not count.
+
+The C++ builder is `rocke_b_gpu_checked_value(b, value, &facts)` with a `rocke_int_facts_t`,
+giving the same IR and texts; it builds the marker through the internal `rocke_b_assume_range`
+(`ir_internal.h`).
+
+`rocke.core.facts.stated_facts_of(value)` reads the facts stated for a Value -- by its parameter
+declaration or by the range marker that produced it, `gpu_checked_value`'s included -- and
+resolves each Value bound to numbers through that Value's own facts: `ldc ge N` with `N ge 1`
+gives `ldc >= 1`. It never runs the IR range walk.
+
 ## IR Printer
 
-`core/ir_print.py::print_ir(kernel)` emits MLIR-style textual IR for inspection and manifest artifacts. It is not parsed back into the compiler. The production input to `core/lower_llvm.py::lower_kernel_to_llvm` is the `KernelDef` object, not this text.
+`core/ir_print.py::print_ir(kernel)` emits MLIR-style textual IR for inspection and manifest artifacts. A
+parameter's facts print after its type: `%ldc: i32 {ge = %N, le = 1048576, multiple_of = 8}`. It is not parsed back into the compiler. The production input to `core/lower_llvm.py::lower_kernel_to_llvm` is the `KernelDef` object, not this text.
 
 ## Conservative Passes
 
@@ -314,7 +466,8 @@ Verified by `test_param_metadata_lowers_to_llvm_arg_attrs` in `tests/test_rocke.
 - common subexpression elimination on pure ops with one result;
 - dead-pure-op elimination (recursive into nested regions).
 
-It never removes or reorders side-effecting operations. `PassStats` records `constants_folded`, `common_subexpressions`, `dead_ops_removed`.
+It never removes or reorders side-effecting operations, and it keeps every parameter's facts and every range
+marker. `PassStats` records `constants_folded`, `common_subexpressions`, `dead_ops_removed`.
 
 ## IR Design Rules
 

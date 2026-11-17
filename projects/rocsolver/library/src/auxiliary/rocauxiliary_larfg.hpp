@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     November 2017
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,34 +38,73 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+// Used in larfg to set tau and beta to generate a Householder reflector.
+//
+// On entry:
+//      alpha is x[0]
+//      norms is norm( x[1:n-1] )^2
+// On exit:
+//      tau   is Householder scalar, tau = (beta - x[0]) / beta.
+//            In real case, this is 2 / (v^T v).
+//      norms is scaling factor, 1 / (alpha - norm( x )), to normalize v[0] = 1.
+//      if beta is null:
+//          Like LAPACK, store beta in place over alpha.
+//          alpha is [+-] norm( x ), sign chosen to avoid cancellation.
+//      else:
+//          Store explicit 1 in alpha (which is x[0]), and store beta separately.
+//          alpha is 1.
+//          beta  is [+-] norm( x ).
+//
+// If norms == 0 and imag(alpha) == 0 on input, LAPACK sets tau = 0, so
+// Householder reflector H = I and triangular factor T is singular,
+// which causes issues in larft_inverse. Instead, we set tau = 2,
+// so H = [ -1  0 ], and T is non-singular.
+//        [  0  I ]
+//
 template <typename T, typename S, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 {
     const auto ignore_beta = (beta == nullptr);
     if(norms[0] > 0)
     {
-        T n = sqrt(norms[0] + alpha[0] * alpha[0]);
-        n = alpha[0] >= 0 ? -n : n;
+        T norm = sqrt(norms[0] + alpha[0] * alpha[0]);
+        norm = alpha[0] >= 0 ? -norm : norm;
 
         // scaling factor:
-        norms[0] = 1.0 / (alpha[0] - n);
+        norms[0] = 1.0 / (alpha[0] - norm);
 
         // tau:
-        tau[0] = (n - alpha[0]) / n;
+        tau[0] = (norm - alpha[0]) / norm;
 
         // beta:
         if(ignore_beta)
         {
-            alpha[0] = n;
+            alpha[0] = norm;
         }
         else
         {
-            beta[0] = n;
+            beta[0] = norm;
             alpha[0] = 1;
         }
     }
     else
     {
+#ifdef ROCSOLVER_ENABLE_LARFG_TAU2
+        // Set tau = 2. Differs from LAPACK, which sets tau = 0, H = I.
+        norms[0] = 1;
+        tau[0] = 2;
+
+        // beta:
+        if(ignore_beta)
+        {
+            alpha[0] = -alpha[0];
+        }
+        else
+        {
+            beta[0] = -alpha[0];
+            alpha[0] = 1;
+        }
+#else
         norms[0] = 1;
         tau[0] = 0;
 
@@ -75,51 +114,67 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
             beta[0] = alpha[0];
             alpha[0] = 1;
         }
+#endif
     }
 }
 
 template <typename T, typename S, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
 __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 {
-    S r, rr, ri, ar, ai;
+    S r, rr, ri, ar, ai, ai2;
 
     ar = alpha[0].real();
     ai = alpha[0].imag();
-    S m = ai * ai;
+    ai2 = ai * ai;
 
     const auto ignore_beta = (beta == nullptr);
-    if(norms[0].real() > 0 || m > 0)
+    if(norms[0].real() > 0 || ai2 > 0)
     {
-        m += ar * ar;
-        S n = sqrt(norms[0].real() + m);
-        n = ar >= 0 ? -n : n;
+        S norm = sqrt(norms[0].real() + ai2 + ar * ar);
+        norm = ar >= 0 ? -norm : norm;
 
         // scaling factor:
-        //    norms[0] = 1.0 / (alpha[0] - n);
-        r = (ar - n) * (ar - n) + ai * ai;
-        rr = (ar - n) / r;
+        //    norms[0] = 1.0 / (alpha[0] - norm);
+        r = (ar - norm) * (ar - norm) + ai2;
+        rr = (ar - norm) / r;
         ri = -ai / r;
         norms[0] = rocblas_complex_num<S>(rr, ri);
 
         // tau:
-        //    tau[0] = (n - alpha[0]) / n;
-        rr = (n - ar) / n;
-        ri = -ai / n;
+        //    tau[0] = (norm - alpha[0]) / norm;
+        rr = (norm - ar) / norm;
+        ri = -ai / norm;
         tau[0] = rocblas_complex_num<S>(rr, ri);
 
         // beta:
         if(ignore_beta)
         {
-            alpha[0] = n;
+            alpha[0] = norm;
         }
         else
         {
-            beta[0] = n;
+            beta[0] = norm;
             alpha[0] = 1;
         }
     }
     else
     {
+#ifdef ROCSOLVER_ENABLE_LARFG_TAU2
+        // Set tau = 2. Differs from LAPACK, which sets tau = 0, H = I.
+        norms[0] = 1;
+        tau[0] = 2;
+
+        // beta:
+        if(ignore_beta)
+        {
+            alpha[0] = -alpha[0];
+        }
+        else
+        {
+            beta[0] = -alpha[0].real();
+            alpha[0] = 1;
+        }
+#else
         norms[0] = 1;
         tau[0] = 0;
 
@@ -129,6 +184,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
             beta[0] = alpha[0].real();
             alpha[0] = 1;
         }
+#endif
     }
 }
 
@@ -153,33 +209,109 @@ ROCSOLVER_KERNEL void set_taubeta(T* tauA,
     run_set_taubeta<T, S>(tau, norms + bid, alpha, beta);
 }
 
+/******************* Host functions ********************************************/
+/*******************************************************************************/
+
+template <typename T, typename I>
+bool larfg_use_kernel(const hipDeviceProp_t& props, const I n)
+{
+/*! \brief Overrides the size at which rocSOLVER switches from
+    the kernel to the BLAS implementation when executing LARFG.
+    Define LARFG_SSKER_MAX_N to set a constant switch value. */
+#ifndef LARFG_SSKER_MAX_N
+    //
+    // Use measured bounds for tested devices, otherwise use default bounds.
+    //
+    std::string deviceArch(props.gcnArchName);
+
+    if(deviceArch.find("gfx90a") != std::string::npos)
+    {
+        if constexpr(std::is_same_v<float, T>)
+        {
+            return n <= 27136;
+        }
+        else if constexpr(std::is_same_v<double, T>)
+        {
+            return n <= 20992;
+        }
+        else if constexpr(std::is_same_v<rocblas_float_complex, T>)
+        {
+            return n <= 18944;
+        }
+        else if constexpr(std::is_same_v<rocblas_double_complex, T>)
+        {
+            return n <= 20992;
+        }
+    }
+    else if(deviceArch.find("gfx942") != std::string::npos)
+    {
+        if constexpr(std::is_same_v<float, T>)
+        {
+            return n <= 98304;
+        }
+        else if constexpr(std::is_same_v<double, T>)
+        {
+            return n <= 57344;
+        }
+        else if constexpr(std::is_same_v<rocblas_float_complex, T>)
+        {
+            return n <= 81920;
+        }
+        else if constexpr(std::is_same_v<rocblas_double_complex, T>)
+        {
+            return n <= 57344;
+        }
+    }
+    else if(deviceArch.find("gfx950") != std::string::npos)
+    {
+        if constexpr(std::is_same_v<float, T>)
+        {
+            return n <= 27136;
+        }
+        else if constexpr(std::is_same_v<double, T>)
+        {
+            return n <= 20992;
+        }
+        else if constexpr(std::is_same_v<rocblas_float_complex, T>)
+        {
+            return n <= 18944;
+        }
+        else if constexpr(std::is_same_v<rocblas_double_complex, T>)
+        {
+            return n <= 12800;
+        }
+    }
+
+    return n <= LARFG_SSKER_DEFAULT_MAX_N;
+#else
+    return n <= LARFG_SSKER_MAX_N;
+#endif // LARFG_SSKER_MAX_N
+}
+
 template <typename T, typename I>
 rocblas_status rocsolver_larfg_getMemorySize(const I n,
                                              const I batch_count,
                                              size_t* size_work,
                                              size_t* size_norms)
 {
+    *size_norms = 0;
+    *size_work = 0;
+
     // if quick return no workspace needed
     if(n == 0 || batch_count == 0)
     {
-        *size_norms = 0;
-        *size_work = 0;
         return rocblas_status_success;
     }
 
-    // if small size no workspace needed
-    if(n <= LARFG_SSKER_MAX_N)
-    {
-        *size_norms = 0;
-        *size_work = 0;
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
 
-        // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
-        int device;
-        HIP_CHECK(hipGetDevice(&device));
-        hipDeviceProp_t props;
-        HIP_CHECK(hipGetDeviceProperties(&props, device));
-        if(props.warpSize >= 64)
-            return rocblas_status_success;
+    // if small size no workspace needed
+    if(larfg_use_kernel<T>(props, n))
+    {
+        return rocblas_status_success;
     }
 
     // size of space to store norms
@@ -247,32 +379,12 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // if n==1 return tau=0
-    dim3 gridReset(1, batch_count, 1);
-    dim3 setDiag(batch_count, 1, 1);
-    dim3 threads(1, 1, 1);
-    if(n == 1 && !COMPLEX)
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(larfg_use_kernel<T>(*props, n))
     {
-        ROCSOLVER_LAUNCH_KERNEL(reset_batch_info<T>, gridReset, threads, 0, stream, tau, strideP, 1,
-                                0);
-        if(beta != nullptr)
-        {
-            ROCSOLVER_LAUNCH_KERNEL((set_diag<T>), setDiag, threads, 0, stream, beta, shiftb,
-                                    strideb, alpha, shifta, n, stridex, (I)1, true);
-        }
-        return rocblas_status_success;
-    }
-
-    // if n is small, use small-size kernel
-    if(true)
-    {
-        // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
-        const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
-        if(props->warpSize >= 64)
-        {
-            return larfg_run_small(handle, n, alpha, shifta, stridex, beta, shiftb, strideb, x,
-                                   shiftx, incx, stridex, tau, strideP, batch_count);
-        }
+        // Use small-size kernel; no workspace needed.
+        return larfg_run_small(handle, n, alpha, shifta, stridex, beta, shiftb, strideb, x, shiftx,
+                               incx, stridex, tau, strideP, batch_count);
     }
 
     // everything must be executed with scalars on the device
@@ -282,7 +394,7 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     rocblasCall_dot<COMPLEX, T>(handle, n - 1, x, shiftx, incx, stridex, x, shiftx, incx, stridex,
                                 batch_count, norms, work);
 
-    // set value of tau and beta and scalling factor for vector x
+    // set value of tau and beta and scaling factor for vector x
     // alpha <- beta, norms <- scaling
     ROCSOLVER_LAUNCH_KERNEL((set_taubeta<T, I>), dim3(batch_count), dim3(1), 0, stream, tau,
                             strideP, norms, alpha, shifta, stridex, beta, shiftb, strideb);

@@ -85,11 +85,15 @@ static inline rocke_value_t* rocke_paged_kv_byte_offset(rocke_ir_builder_t* b,
     return offset;
 }
 
-/* Mirror of library/kernels/common/_attention_paged_kv.py. Host admission checks
- * structural pool representability. Valid lengths, query offsets and referenced
- * physical page IDs remain caller-owned, including after mutation/graph replay.
- * Optional synchronized binding content validation must be repeated after
- * mutation; table-index guards do not validate referenced physical page IDs. */
+/* Mirror of library/kernels/common/_attention_paged_kv.py. Host admission
+ * checks structural pool representability. Valid lengths, query offsets and
+ * referenced physical page IDs remain caller-owned, including after
+ * mutation/graph replay. Optional synchronized binding content validation must
+ * be repeated after mutation; table-index guards do not validate referenced
+ * physical page IDs. Speculative tokens still read logical page zero: that
+ * entry must be valid. Raw callers keep index arithmetic representable and
+ * runtime heads consistent with the fixed pool geometry. Supported gather
+ * launches use the bounded twin. */
 static inline rocke_value_t* rocke_paged_kv_offset(rocke_ir_builder_t* b,
                                                    rocke_value_t* table,
                                                    rocke_value_t* seq_base,

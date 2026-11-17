@@ -332,10 +332,10 @@ def test_valid_shared_request_and_default_semantics(arch):
     result = dispatch_attention(req)
     assert result.spec is not None
     assert req.dims()["kv_block_size"] == 16
-    from rocke.helpers.split_k import _ARCH_NUM_CUS
+    from rocke.helpers.split_k import ARCH_NUM_CUS
 
-    if arch in _ARCH_NUM_CUS:
-        assert _tuning_problem(req).num_cus == _ARCH_NUM_CUS[arch]
+    if arch in ARCH_NUM_CUS:
+        assert _tuning_problem(req).num_cus == ARCH_NUM_CUS[arch]
     else:
         with pytest.raises(ValueError, match="pass num_cus"):
             _tuning_problem(req)

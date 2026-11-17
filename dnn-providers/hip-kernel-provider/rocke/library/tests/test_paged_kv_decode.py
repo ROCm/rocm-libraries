@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from rocke.core.lower_llvm import LLVM_FLAVORS
+from rocke.core.ir_golden import check_golden_flavors, golden_subdocument
 from kernels.common.attention_paged_decode import BUFFER_LIMIT, validate_paged_decode
 from tests.parity.attention_paged_kv_emit import CONFIG_COUNT, build, spec_for_index
 from tests._paged_decode_support import (
@@ -48,14 +49,12 @@ def flavor(request):
 
 def test_paged_python_golden(paged_emission, flavor):
     idx, _spec, _arch, expected = paged_emission
-    golden = json.loads(
-        (
-            Path(__file__).parent / "golden" / "attention_paged_kv_ir_sha256.json"
-        ).read_text()
-    )
-    assert set(golden) == set(LLVM_FLAVORS)
-    assert set(golden[flavor]) == {str(i) for i in range(CONFIG_COUNT)}
-    assert hashlib.sha256(expected.encode()).hexdigest() == golden[flavor][str(idx)]
+    path = Path(__file__).parent / "golden" / "attention_paged_kv_ir_sha256.json"
+    assert not check_golden_flavors(path)
+    golden = json.loads(path.read_text())
+    cases = golden_subdocument(golden, flavor)["cases"]
+    assert set(cases) == {str(i) for i in range(CONFIG_COUNT)}
+    assert hashlib.sha256(expected.encode()).hexdigest() == cases[str(idx)]["sha256"]
 
 
 def test_paged_native_parity(paged_emission):
@@ -66,20 +65,19 @@ def test_paged_native_parity(paged_emission):
     if not hasattr(spec, "block_size"):
         assert engine.paged_decode_reduce_lower_llvm(asdict(spec), arch) == expected
         return
-    if arch == "gfx950":
-        m = import_module(f"kernels.{arch}.attention_tiled_3d")
-        reduce = m.UnifiedAttentionReduceTiledSpec(
-            head_size=spec.head_size,
-            num_query_heads=8,
-            num_kv_heads=2,
-            dtype=spec.dtype,
-            num_segments=8,
-            waves_per_eu=3,
-            metadata_containment=spec.metadata_containment,
-        )
-        expected += _lower_kernel_to_llvm_python(
-            m.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
-        )
+    m = import_module(f"kernels.{arch}.attention_tiled_3d")
+    reduce = m.UnifiedAttentionReduceTiledSpec(
+        head_size=spec.head_size,
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype=spec.dtype,
+        num_segments=8,
+        waves_per_eu=3,
+        metadata_containment=spec.metadata_containment,
+    )
+    expected += _lower_kernel_to_llvm_python(
+        m.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
+    )
     assert (
         getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(asdict(spec), arch)
         == expected
@@ -870,7 +868,13 @@ def test_automatic_page_one_workspace_and_cache_contract(arch):
     )
     assert au.attention_3d_workspace_nbytes(problem, arch=arch) == expected
     key = au._tiled_3d_cache_key(problem, arch)
-    assert key[-2:] == ("metadata_containment", True)
+    assert key[-5:] == (
+        "metadata_containment",
+        True,
+        problem.num_query_heads,
+        problem.num_kv_heads,
+        problem.sliding_window,
+    )
     legacy = replace(problem, block_size=32)
     assert au._tiled_3d_cache_key(legacy, arch)[-2:] != key[-2:]
 
@@ -914,12 +918,9 @@ def test_automatic_page_one_pipeline_compiles_matching_abi(arch, monkeypatch):
         "v_span_bytes",
     ]
     assert red_names[-2:] == ["metadata_status_ptr", "num_seqs"]
-    assert launchers[0]["signature"] == au._3d_signature(
-        problem.dtype, metadata_containment=True
-    )
-    assert launchers[1]["signature"] == au._reduce_signature(
-        problem.dtype, metadata_containment=True
-    )
+    signatures = au._tiled_3d_signatures(arch, problem.dtype, metadata_containment=True)
+    assert launchers[0]["signature"] == signatures[0]
+    assert launchers[1]["signature"] == signatures[1]
     assert prepared.seg_config.grid[0] == problem.num_seqs
     assert (
         au._get_3d_pipeline(problem, key, au._num_segments(problem, arch), arch=arch)
@@ -974,7 +975,10 @@ GATHER_GEOMETRIES = [
 ]
 
 
-@pytest.mark.parametrize("arch,page", GATHER_GEOMETRIES)
+@pytest.mark.parametrize(
+    "arch,page",
+    [geometry for geometry in GATHER_GEOMETRIES if geometry != ("gfx950", 16)],
+)
 @pytest.mark.parametrize("structural", [False, True])
 @pytest.mark.parametrize("allow_unsupported", [False, True])
 def test_runtime_rejects_unbounded_gather_pair(
@@ -992,6 +996,70 @@ def test_runtime_rejects_unbounded_gather_pair(
     au = _forbid_paged_launch(arch, monkeypatch)
     with pytest.raises(ValueError, match="metadata containment"):
         au.run_unified_attention_torch(**args)
+
+
+def test_gfx950_legacy_t2x_prefill_preserves_dma_and_bounded_optin():
+    from kernels.common._attention_kv_loader import (
+        AttentionKVLoaderKind,
+        resolve_attention_kv_loader,
+    )
+    from dispatch.attention.tuning_specs import (
+        ExplicitAttention3DConfig,
+        make_explicit_attention_3d_specs,
+    )
+
+    problem, _ = inputs(16)
+    prefill = replace(problem, max_seqlen_q=64, total_q=problem.num_seqs * 64)
+    segment, reducer = make_explicit_attention_3d_specs(
+        prefill,
+        ExplicitAttention3DConfig(num_segments=8, tile_policy="2x"),
+        arch="gfx950",
+    )
+    assert segment.tile_size == 32
+    assert not segment.uses_paged_gather
+    assert not segment.metadata_containment and not reducer.metadata_containment
+    assert (
+        resolve_attention_kv_loader("gfx950", "paged", 16, 32)
+        is AttentionKVLoaderKind.PAGED_MULTI_PAGE
+    )
+    bounded, bounded_reduce = make_explicit_attention_3d_specs(
+        problem,
+        ExplicitAttention3DConfig(num_segments=8, tile_policy="32"),
+        arch="gfx950",
+    )
+    assert bounded.uses_paged_gather and bounded.metadata_containment
+    assert bounded_reduce.metadata_containment
+
+
+def test_gfx950_paged_candidate_cannot_bind_a_disabled_marker():
+    from dispatch.attention import AttentionRequest, dispatch_attention
+
+    request = AttentionRequest(
+        batch=3,
+        nhead_q=8,
+        nhead_k=2,
+        seqlen_q=1,
+        seqlen_k=33,
+        hdim_q=64,
+        hdim_v=64,
+        arch="gfx950",
+        dtype="fp16",
+        kv_block_size=16,
+        algorithm="paged_decode_t32",
+    )
+    selected = dispatch_attention(request)
+    disabled = replace(
+        selected.spec,
+        kernel_spec=replace(selected.spec.kernel_spec, metadata_containment=False),
+        reduce_spec=replace(selected.spec.reduce_spec, metadata_containment=False),
+    )
+    problem, tensors = inputs(16)
+    values = dict(
+        zip(("q", "k", "v", "out", "cu_seqlens_q", "seqused_k", "block_table"), tensors)
+    )
+    values["problem"] = replace(problem, clamp_arch="gfx950")
+    with pytest.raises(ValueError, match="requires a paged tile-32 segment spec"):
+        selected.candidate.bind_torch(request, disabled, values)
 
 
 @pytest.mark.parametrize("arch,page", GATHER_GEOMETRIES)
@@ -1430,7 +1498,9 @@ def test_paged_binding_rejects_malformed_skip(paged_binding_case, value, monkeyp
         pytest.fail("malformed skip reached tensor validation")
 
     monkeypatch.setattr(bindings, "validate_tuning_attention_tensors", forbidden)
-    with pytest.raises(TypeError, match="unsafe_skip_paged_value_validation"):
+    with pytest.raises(
+        ValueError, match="unsafe_skip_paged_value_validation must be a bool"
+    ):
         result.candidate.bind_torch(
             req, result.spec, tensors, unsafe_skip_paged_value_validation=value
         )
@@ -1813,11 +1883,10 @@ def test_paged_feature_native_parity(arch, page, dtype, feature, flavor, monkeyp
     expected = _lower_kernel_to_llvm_python(
         module.build_unified_attention_3d_tiled(spec.kernel_spec, arch=arch), arch=arch
     )
-    if arch == "gfx950":
-        expected += _lower_kernel_to_llvm_python(
-            module.build_unified_attention_reduce_tiled(spec.reduce_spec, arch=arch),
-            arch=arch,
-        )
+    expected += _lower_kernel_to_llvm_python(
+        module.build_unified_attention_reduce_tiled(spec.reduce_spec, arch=arch),
+        arch=arch,
+    )
     assert (
         getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(
             asdict(spec.kernel_spec), arch

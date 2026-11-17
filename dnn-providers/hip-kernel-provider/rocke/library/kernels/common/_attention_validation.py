@@ -82,6 +82,8 @@ def validate_attention_request_types(request):
             "use_attn_bias",
             "emit_lse",
             "runtime_head_dims",
+            "dense_q",
+            "seqused_q",
             "window_bottom_right",
         ),
         require_attention_bool,
@@ -212,6 +214,8 @@ def validate_attention_3d_spec_types(spec, *, reducer=False, complete=False):
         or hasattr(spec, "causal_top_left")
         or hasattr(spec, "right_bound")
     )
+    if (complete and gfx950) or hasattr(spec, "emit_lse"):
+        require_attention_bool(_field(spec, "emit_lse", label), "emit_lse")
     _fields(
         spec,
         ("use_additive_bias", "causal_top_left"),

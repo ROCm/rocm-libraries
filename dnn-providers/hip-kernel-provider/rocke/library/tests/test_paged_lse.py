@@ -12,7 +12,11 @@ from dispatch.attention import AttentionRequest, dispatch_attention
 from dispatch.attention import bindings
 from dispatch.attention.common import _problem
 from kernels.common import attention_unified as au
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
+from rocke.core.lower_llvm import (
+    LLVM_FLAVORS,
+    _lower_kernel_to_llvm_python,
+    lower_kernel_to_llvm,
+)
 from tests._paged_decode_support import Tensor, inputs
 
 
@@ -76,6 +80,7 @@ def test_all_four_reducer_abis(arch, bounded, lse):
         "segm_max_ptr",
         "segm_expsum_ptr",
         "seq_lens_ptr",
+        "num_query_heads",
     ]
     if bounded:
         expected += ["metadata_status_ptr", "num_seqs"]
@@ -84,15 +89,15 @@ def test_all_four_reducer_abis(arch, bounded, lse):
     assert [p.name for p in kernel.params] == expected
     assert [
         p["name"]
-        for p in au._reduce_signature(
-            "fp16", metadata_containment=bounded, emit_lse=lse
-        )
+        for p in au._tiled_3d_signatures(
+            arch, "fp16", metadata_containment=bounded, emit_lse=lse
+        )[1]
     ] == expected
     assert ("bounds_v1" in spec.kernel_name()) == bounded
     assert spec.kernel_name().endswith("_lse") == lse
 
 
-@pytest.mark.parametrize("page,policy,bounded", [(32, "1x", False), (16, "2x", True)])
+@pytest.mark.parametrize("page,policy,bounded", [(32, "1x", False), (16, "2x", False)])
 @pytest.mark.parametrize("lse", [False, True])
 def test_tuning_dispatch_signature_matches_segment(page, policy, bounded, lse):
     from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
@@ -203,8 +208,8 @@ def test_strict_cpp_lowering_python_authored_bounded_lse(
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-@pytest.mark.parametrize("lse", [True, None, 0, 1, "false"])
-def test_native_builders_reject_enabled_or_malformed_lse(arch, lse):
+@pytest.mark.parametrize("lse", [None, 0, 1, "false"])
+def test_native_builders_reject_malformed_lse(arch, lse):
     engine = pytest.importorskip("rocke_engine")
     mod = import_module(f"kernels.{arch}.attention_tiled_3d")
     reducer = mod.UnifiedAttentionReduceTiledSpec(
@@ -224,6 +229,60 @@ def test_native_builders_reject_enabled_or_malformed_lse(arch, lse):
     fields["emit_lse"] = lse
     with pytest.raises(ValueError, match="emit_lse"):
         getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(fields, arch)
+
+
+@pytest.mark.parametrize("bad", [None, 0, 1, "false"])
+def test_gfx950_segment_rejects_malformed_lse(bad):
+    selected = dispatch_attention(request("gfx950")).spec
+    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+        replace(selected.kernel_spec, emit_lse=bad)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("dim", [64, 128, 256])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_native_bounded_lse_builder_matches_python(
+    arch, dim, dtype, flavor, monkeypatch
+):
+    engine = pytest.importorskip("rocke_engine")
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    mod = import_module(f"kernels.{arch}.attention_tiled_3d")
+    reducer = mod.UnifiedAttentionReduceTiledSpec(
+        head_size=dim,
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype=dtype,
+        num_segments=4,
+        metadata_containment=True,
+        emit_lse=True,
+    )
+    kernel = mod.build_unified_attention_reduce_tiled(reducer, arch=arch)
+    names = [param.name for param in kernel.params]
+    assert names.index("metadata_status_ptr") < names.index("lse_ptr")
+    expected = _lower_kernel_to_llvm_python(kernel, arch=arch)
+    assert engine.paged_decode_reduce_lower_llvm(asdict(reducer), arch) == expected
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_native_segment_pairs_bounded_lse_reducer(arch, flavor, monkeypatch):
+    engine = pytest.importorskip("rocke_engine")
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    selected = dispatch_attention(request(arch, emit_lse=True)).spec
+    mod = import_module(f"kernels.{arch}.attention_tiled_3d")
+    expected = _lower_kernel_to_llvm_python(
+        mod.build_unified_attention_3d_tiled(selected.kernel_spec, arch=arch), arch=arch
+    ) + _lower_kernel_to_llvm_python(
+        mod.build_unified_attention_reduce_tiled(selected.reduce_spec, arch=arch),
+        arch=arch,
+    )
+    fields = asdict(selected.kernel_spec)
+    fields["reduce_emit_lse"] = True
+    assert (
+        getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(fields, arch)
+        == expected
+    )
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])

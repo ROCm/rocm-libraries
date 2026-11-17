@@ -9,7 +9,8 @@
  * SCOPE (this translation unit): the "segment loop + epilogue" slice of
  *   build_unified_attention_3d_tiled (lines 253-950):
  *
- *   rocke_gfx950_attention_tiled_3d_emit_loop_init        lines 536-562, 715-718
+ *   rocke_gfx950_attention_tiled_3d_emit_loop_init        lines 536-562,
+ * 715-718
  *       - sinks-conditioned m_init / acc_inits / cur_buf_init carry
  *       - async DMA infra + paged-KV descriptor (via emit_async_infra)
  *       - first K load (_issue_k(tile_start, 0))
@@ -73,9 +74,9 @@ static rocke_value_t* rocke__mfma_16x16x16(rocke_ir_builder_t* b,
     return rocke_mfma_16x16x16_for_dtype(b, dtype, a, bv, c);
 }
 
-/* _row_reduce(x, op): combine x over the 4 lanes {l, l^16, l^32, l^48} that hold
- * the 4 token groups of one query row: ds_swizzle xor 16, then permlane32_swap.
- * op is fmax when is_max, else fadd. */
+/* _row_reduce(x, op): combine x over the 4 lanes {l, l^16, l^32, l^48} that
+ * hold the 4 token groups of one query row: ds_swizzle xor 16, then
+ * permlane32_swap. op is fmax when is_max, else fadd. */
 static rocke_value_t* rocke__row_reduce(rocke_ir_builder_t* b, rocke_value_t* x, bool is_max)
 {
     const rocke_type_t* i32 = rocke_i32();
@@ -116,7 +117,7 @@ void rocke_gfx950_attention_tiled_3d_emit_loop_init(
         rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, cfg->NQK));
         rocke_value_t* qh_mod = rocke_b_mod(b, ctx->lane_col, rocke_b_const_i32(b, cfg->NQK));
         rocke_value_t* qh = rocke_b_add(b, qh_mul, qh_mod);
-        rocke_value_t* qh_in = rocke_b_cmp_lt(b, qh, rocke_b_const_i32(b, cfg->NUM_QH));
+        rocke_value_t* qh_in = rocke_b_cmp_lt(b, qh, ctx->num_qh_p);
         rocke_value_t* sink_h = rocke_b_global_load(b, ctx->sinks, qh, dtype, 2);
         rocke_value_t* sink_f = rocke_b_fmul(b, rocke_b_cast_to_f32(b, sink_h), ctx->rcp_ln2);
         rocke_value_t* sink_with_mask = rocke_b_select(b, qh_in, sink_f, ctx->neg_inf);
@@ -137,15 +138,16 @@ void rocke_gfx950_attention_tiled_3d_emit_loop_init(
     }
 
     /* ---- async DMA infra + paged-KV descriptor (lines 564-601) ----
-     * Emitted here (not in emit_prologue) so the SSA op order matches Python's
-     * single linear build: acc_zero precedes the buffer rsrc / seq_base / desc. */
+   * Emitted here (not in emit_prologue) so the SSA op order matches Python's
+   * single linear build: acc_zero precedes the buffer rsrc / seq_base / desc.
+   */
     rocke_gfx950_attention_tiled_3d_emit_async_infra(ctx);
 
     /* ---- first K load + cur_buf_init (lines 715-718) ---- */
     if(cfg->WAVE_PAGE_ID_LOAD)
     {
         /* The wave holds a 64-page window of the segment's page table, one id
-         * per lane; a tile never straddles two windows. */
+     * per lane; a tile never straddles two windows. */
         ctx->seg_first_page
             = rocke_b_mul(b, ctx->tile_start, rocke_b_const_i32(b, cfg->N_BLOCKS_PER_TILE));
         ctx->first_page_id_window
@@ -175,8 +177,8 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
     int n, k, reg;
 
     /* iter_args: m, l, acc0..accN-1, cur_buf
-     * (+ pid0..pid{NB-1}: the current tile's page ids when PAGE_IDS)
-     * (+ pid_window: the page-id window when WAVE_PAGE_ID_LOAD) */
+   * (+ pid0..pid{NB-1}: the current tile's page ids when PAGE_IDS)
+   * (+ pid_window: the page-id window when WAVE_PAGE_ID_LOAD) */
     int num_ml = 2;
     int num_pid = cfg->PAGE_IDS ? cfg->N_BLOCKS_PER_TILE : 0;
     int num_win = cfg->WAVE_PAGE_ID_LOAD ? 1 : 0;
@@ -235,8 +237,8 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
     }
 
     /* LICM hoist: the lane's query-row invariants, constant across all KV tiles.
-     * qp, qh, row_ok, and causal_lim depend only on CTA-level constants and the
-     * lane's query row (lane_col); the ALiBi slope is per query head. */
+   * qp, qh, row_ok, and causal_lim depend only on CTA-level constants and the
+   * lane's query row (lane_col); the ALiBi slope is per query head. */
     {
         rocke_value_t* qp_div = rocke_b_div(b, ctx->lane_col, rocke_b_const_i32(b, cfg->NQK));
         rocke_value_t* qh_mul;
@@ -248,21 +250,27 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         qh_mod = rocke_b_mod(b, ctx->lane_col, rocke_b_const_i32(b, cfg->NQK));
         ctx->row_qh = rocke_b_add(b, qh_mul, qh_mod);
         ok_a = rocke_b_cmp_lt(b, ctx->row_qp, ctx->cur_batch_q_len);
-        ok_b = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
+        ok_b = rocke_b_cmp_lt(b, ctx->row_qh, ctx->num_qh_p);
         ctx->row_ok = rocke_b_land(b, ok_a, ok_b);
+        /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+        if(cfg->BLOCK_Q * cfg->NQK < cfg->BLOCK_M)
+        {
+            rocke_value_t* vr = rocke_b_const_i32(b, cfg->BLOCK_Q * cfg->NQK);
+            rocke_value_t* row_vr = rocke_b_cmp_lt(b, ctx->lane_col, vr);
+            ctx->row_ok = rocke_b_land(b, ctx->row_ok, row_vr);
+        }
         ctx->row_causal_lim = rocke_b_add(b, ctx->context_len, ctx->row_qp);
         ctx->row_alibi = NULL;
         if(cfg->USE_ALIBI)
         {
-            rocke_value_t* qh_ok
-                = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, ctx->row_qh, ctx->num_qh_p);
             ctx->row_alibi = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, ctx->row_qh, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
         }
     }
 
     /* The QK B operand (Q^T) is read from LDS once; every tile's MFMAs take it
-     * from registers. */
+   * from registers. */
     rocke_value_t** Q_kits = (rocke_value_t**)rocke_arena_alloc(
         &b->arena, (size_t)cfg->QK_K_ITERS * sizeof(rocke_value_t*));
     if(Q_kits == NULL)
@@ -319,7 +327,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t** new_acc;
 
         /* masked / p_regs [(n, reg)] indexed n*4+reg; filled reg-major (the
-         * Python dict insertion order), which is also the reduction order. */
+     * Python dict insertion order), which is also the reduction order. */
         rocke_value_t** masked;
         rocke_value_t** p_regs;
 
@@ -371,11 +379,12 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         else if(cfg->PAGE_IDS)
         {
             /* Loaded here, before this tile's V copies, so the load overlaps
-             * the QK below; the next K copies still wait for it. */
+       * the QK below; the next K copies still wait for it. */
             rocke_gfx950_attention_tiled_3d_tile_page_ids(ctx, safe_next_tile, nxt_page_ids);
         }
 
-        /* ---------------- QK: S^T = K Q^T (16x16x32, K-step 32) ---------------- */
+        /* ---------------- QK: S^T = K Q^T (16x16x32, K-step 32) ----------------
+     */
         for(n = 0; n < cfg->QK_N_TILES; n++)
         {
             rocke_value_t* acc_v = rocke_b_zero_vec_f32(b, 4);
@@ -465,14 +474,14 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         }
 
         /* ---------------- online (m,l) update ----------------
-         * Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-         * other 3 lanes. m_new is the running max (m_val included), so
-         * alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
-         * tile-local max would overflow alpha once a tile scores ~128 log2 units
-         * below an earlier one. Until the row has an unmasked key (or, in
-         * segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
-         * instead, so P and alpha are 0, not NaN. A row with neither in the
-         * segment stores m = -inf, which the reduce kernel weights by 0. */
+     * Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
+     * other 3 lanes. m_new is the running max (m_val included), so
+     * alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+     * tile-local max would overflow alpha once a tile scores ~128 log2 units
+     * below an earlier one. Until the row has an unmasked key (or, in
+     * segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+     * instead, so P and alpha are 0, not NaN. A row with neither in the
+     * segment stores m = -inf, which the reduce kernel weights by 0. */
         {
             rocke_value_t* local_max = ctx->neg_inf;
             rocke_value_t* tile_max;
@@ -518,11 +527,11 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         }
 
         /* ---------------- PV: O^T = V^T P^T ----------------
-         * A = V^T (head-dim rows n*16 + 0..15 via the transpose read), B = P^T
-         * straight from this lane's registers. Two 16-token blocks share one
-         * 16x16x32 MFMA (same cost as one 16x16x16 on gfx950): A and B list the
-         * two blocks' tokens in the same order, which is all the k-sum needs. An
-         * odd last block uses 16x16x16. */
+     * A = V^T (head-dim rows n*16 + 0..15 via the transpose read), B = P^T
+     * straight from this lane's registers. Two 16-token blocks share one
+     * 16x16x32 MFMA (same cost as one 16x16x16 on gfx950): A and B list the
+     * two blocks' tokens in the same order, which is all the k-sum needs. An
+     * odd last block uses 16x16x16. */
         for(n = 0; n < cfg->PV_N_TILES; n++)
         {
             rocke_value_t* scaled_comps[4];
@@ -609,7 +618,8 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
     }
     rocke_b_region_leave(b);
 
-    /* ---------------- stash final (m,l,acc) into ctx (lines 901-904) ---------- */
+    /* ---------------- stash final (m,l,acc) into ctx (lines 901-904) ----------
+   */
     {
         rocke_value_t** final = kvloop.op->results;
         ctx->m_final = final[0];

@@ -22,12 +22,12 @@ static inline rocke_attention_kv_loader_kind_t
     return tile > page ? ROCKE_ATTN_KV_PAGED_TOKEN_GATHER : ROCKE_ATTN_KV_PAGED_DESCRIPTOR;
 }
 
-static inline rocke_attention_kv_loader_kind_t
-    rocke_gfx950_resolve_attention_kv_loader(bool strided_kv, int page, int tile, bool i64_addr)
+static inline rocke_attention_kv_loader_kind_t rocke_gfx950_resolve_attention_kv_loader(
+    bool strided_kv, int page, int tile, bool i64_addr, bool bounded)
 {
     if(strided_kv)
         return ROCKE_ATTN_KV_STRIDED;
-    if(page >= 16 && tile > page && (tile != 32 || i64_addr))
+    if(page >= 16 && tile > page && (tile != 32 || i64_addr || !bounded))
         return ROCKE_ATTN_KV_PAGED_MULTI_PAGE;
     return tile != page ? ROCKE_ATTN_KV_PAGED_TOKEN_GATHER : ROCKE_ATTN_KV_PAGED_DESCRIPTOR;
 }

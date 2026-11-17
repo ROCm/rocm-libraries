@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 #ifndef ROCKE_INSTANCE_ATTENTION_PAGED_BOUNDS_INTERNAL_H
 #define ROCKE_INSTANCE_ATTENTION_PAGED_BOUNDS_INTERNAL_H
+#include "rocke/arch_target.h"
 #include "rocke/instance_attention_paged_kv_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Reject unsupported bounded geometry before computed spec properties. */
@@ -24,6 +27,71 @@ static inline bool rocke_bounds_geometry(int hd,
         return false;
     const int ratio = qh / kh;
     return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
+}
+
+/* Mirror of _validate_paged_segment_lds for admitted fp16/bf16 T32 geometry. */
+static inline bool rocke_bounds_validate_segment_lds(rocke_ir_builder_t* b,
+                                                     const char* arch,
+                                                     int head_size,
+                                                     int tile_size)
+{
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
+    if(target == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown bounded LDS target '%s'", arch);
+        return false;
+    }
+    const long bytes = ((16L + 3L * tile_size) * head_size * 2L + 64L * 4L + 15L) & ~15L;
+    if(!rocke_arch_fits_lds(target, bytes))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "bounded segment requires %ld B LDS, exceeds %s capacity %d B",
+                        bytes,
+                        arch,
+                        target->lds_capacity_bytes);
+        return false;
+    }
+    return true;
+}
+
+/* Mirror of _paged_identity_tag: fixed metadata geometry is not a runtime
+ * stride. */
+static inline bool rocke_paged_append_identity(char* name,
+                                               size_t capacity,
+                                               int query_heads,
+                                               int kv_heads,
+                                               bool bounded,
+                                               int sliding_window,
+                                               bool trailing_lse)
+{
+    size_t length = strlen(name);
+    if(length >= capacity)
+        return false;
+    if(trailing_lse)
+    {
+        if(length < 4 || strcmp(name + length - 4, "_lse") != 0)
+            return false;
+        length -= 4;
+    }
+    const char* kind = bounded ? "bounds_v1" : "gather";
+    const char* suffix = trailing_lse ? "_lse" : "";
+    const int written = sliding_window >= 0 ? snprintf(name + length,
+                                                       capacity - length,
+                                                       "_%s_h%dkv%d_sw%d%s",
+                                                       kind,
+                                                       query_heads,
+                                                       kv_heads,
+                                                       sliding_window,
+                                                       suffix)
+                                            : snprintf(name + length,
+                                                       capacity - length,
+                                                       "_%s_h%dkv%d%s",
+                                                       kind,
+                                                       query_heads,
+                                                       kv_heads,
+                                                       suffix);
+    return written >= 0 && (size_t)written < capacity - length;
 }
 
 /* Mirror of library/kernels/common/_attention_paged_bounds.py.
@@ -391,7 +459,8 @@ static inline void rocke_bounds_reject(rocke_ir_builder_t* B,
                                        int hd,
                                        int nqh,
                                        int nkh,
-                                       int segments)
+                                       int segments,
+                                       rocke_value_t* lse)
 {
     rocke_value_t* t1 = rocke_b_const_i32(B, 0);
     rocke_value_t* t2 = rocke_b_const_i32(B, 0);
@@ -443,6 +512,19 @@ static inline void rocke_bounds_reject(rocke_ir_builder_t* B,
             rocke_value_t* dim = t26;
             rocke_value_t* t27 = rocke_b_add(B, base_out, dim);
             rocke_b_global_store(B, out, t27, nan, 2);
+        }
+        if(lse != NULL)
+        {
+            rocke_value_t* zero = rocke_b_const_i32(B, 0);
+            rocke_value_t* first_lane = rocke_b_cmp_eq(B, tid, zero);
+            rocke_if_t store = rocke_b_scf_if(B, first_lane);
+            rocke_b_region_enter(B, store.then_region);
+            rocke_value_t* heads = rocke_b_const_i32(B, nqh);
+            rocke_value_t* row_base = rocke_b_mul(B, seq, heads);
+            rocke_value_t* row = rocke_b_add(B, row_base, head);
+            rocke_value_t* nan_lse = rocke_b_const_f32(B, NAN);
+            rocke_b_global_store(B, lse, row, nan_lse, 4);
+            rocke_b_region_leave(B);
         }
         rocke_b_ret(B);
         rocke_b_region_leave(B);

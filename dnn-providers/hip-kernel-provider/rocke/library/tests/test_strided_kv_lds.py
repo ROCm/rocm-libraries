@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from dispatch.attention import AttentionRequest, dispatch_attention
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from dispatch.attention.strided_decode import make_candidate
 from kernels.common import attention_unified as au
 from rocke.core.arch import ArchTarget
@@ -67,7 +67,7 @@ def test_gfx942_d256_t32_fits_at_every_strided_entry(dtype, monkeypatch):
     from kernels.common.attention_kv_cache import StridedKvCacheLayout
 
     req = _request(dtype=dtype)
-    problem = _problem(req)
+    problem = attention_problem(req)
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
     assert make_candidate().admits(req)[0]
     spec = dispatch_attention(req).spec
@@ -100,7 +100,7 @@ def test_explicit_smaller_tile_uses_actual_footprint(dtype, monkeypatch):
 
     req = _request(dtype=dtype)
     spec = _explicit(req, 16)
-    problem = _problem(req)
+    problem = attention_problem(req)
     au._validate_strided_3d_spec(problem, spec)
     assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec) == 32768
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
@@ -160,7 +160,7 @@ def test_reducer_budget_is_independent_and_allows_exact_capacity():
             reduce_spec=replace(spec.reduce_spec, num_segments=count),
         )
         if fits:
-            au._validate_strided_3d_spec(_problem(req), candidate)
+            au._validate_strided_3d_spec(attention_problem(req), candidate)
         else:
             with pytest.raises(ValueError, match="reducer requires.*capacity"):
-                au._validate_strided_3d_spec(_problem(req), candidate)
+                au._validate_strided_3d_spec(attention_problem(req), candidate)

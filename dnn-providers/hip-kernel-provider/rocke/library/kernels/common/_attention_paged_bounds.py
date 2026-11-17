@@ -168,6 +168,45 @@ class PagedBounds:
         return b.select(live, offset, b.const_i32(0x7FFFFFFF))
 
 
+def _paged_segment_lds_bytes(spec) -> int:
+    """Q, two K tiles, one V tile, and the 64 lane-private failure flags."""
+    from rocke.core.dtypes import dtype_info
+
+    bits = dtype_info(spec.dtype_ir.name).encoded_bits
+    if bits % 8:
+        raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
+    size = (spec.block_m + 3 * spec.tile_size) * spec.head_size * (bits // 8)
+    size += 64 * 4
+    return (size + 15) & ~15
+
+
+def _validate_paged_segment_lds(spec, arch: str) -> None:
+    """Check a validated bounded segment against the selected architecture facts."""
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    size = _paged_segment_lds_bytes(spec)
+    if not target.fits_lds(size):
+        raise ValueError(
+            f"bounded segment requires {size} B LDS, exceeds {arch} capacity "
+            f"{target.lds_capacity_bytes} B"
+        )
+
+
+def _paged_identity_tag(
+    query_heads: int,
+    kv_heads: int,
+    *,
+    bounded: bool,
+    sliding_window: int | None = None,
+) -> str:
+    """Name the fixed metadata geometry separately from runtime tensor strides."""
+    tag = f"{'bounds_v1' if bounded else 'gather'}_h{query_heads}kv{kv_heads}"
+    if sliding_window is not None:
+        tag += f"_sw{sliding_window}"
+    return tag
+
+
 def neutral_segment(
     b, seq, head, seg, tid, out, maximum, expsum, hd, nqk, nqh, segments
 ):

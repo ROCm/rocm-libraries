@@ -46,7 +46,8 @@ def test_loader_boundary_engine_agreement(
         kv_layout=layout,
     )
     gather = layout == "paged" and (
-        (page, tile) in ((1, 32), (16, 32))
+        (page, tile) == (1, 32)
+        or (arch == "gfx942" and (page, tile) == (16, 32))
         or (arch == "gfx950" and (page, tile) == (64, 32))
     )
     expected_kind = (
@@ -55,7 +56,11 @@ def test_loader_boundary_engine_agreement(
         else (
             AttentionKVLoaderKind.PAGED_TOKEN_GATHER
             if gather
-            else AttentionKVLoaderKind.PAGED_DESCRIPTOR
+            else (
+                AttentionKVLoaderKind.PAGED_MULTI_PAGE
+                if arch == "gfx950" and tile > page
+                else AttentionKVLoaderKind.PAGED_DESCRIPTOR
+            )
         )
     )
     assert resolve_attention_kv_loader(arch, layout, page, tile) is expected_kind
@@ -102,10 +107,9 @@ def test_loader_boundary_engine_agreement(
     expected = _lower_kernel_to_llvm_python(
         module.build_unified_attention_3d_tiled(segment, arch=arch), arch=arch
     )
-    if arch == "gfx950":
-        expected += _lower_kernel_to_llvm_python(
-            module.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
-        )
+    expected += _lower_kernel_to_llvm_python(
+        module.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
+    )
     assert (
         getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(asdict(segment), arch)
         == expected
@@ -170,17 +174,16 @@ def test_descriptor_transport_native_parity(arch, transport, flavor, monkeypatch
     expected = _lower_kernel_to_llvm_python(
         module.build_unified_attention_3d_tiled(segment, arch=arch), arch=arch
     )
-    if arch == "gfx950":
-        reduce = module.UnifiedAttentionReduceTiledSpec(
-            head_size=128,
-            num_query_heads=8,
-            num_kv_heads=2,
-            dtype="bf16",
-            num_segments=8,
-        )
-        expected += _lower_kernel_to_llvm_python(
-            module.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
-        )
+    reduce = module.UnifiedAttentionReduceTiledSpec(
+        head_size=128,
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype="bf16",
+        num_segments=8,
+    )
+    expected += _lower_kernel_to_llvm_python(
+        module.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
+    )
     assert (
         getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(asdict(segment), arch)
         == expected

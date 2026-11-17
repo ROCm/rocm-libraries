@@ -50,6 +50,9 @@ from codegen_common import (
 from codegen_common import (
     CommonTypeMappings,
     gfx1250_fp32_tile_reject_reason,
+    comp_tdm_pc_lds_limit,
+    gfx1250_lds_operand_bytes,
+    gfx1250_lds_operand_transposed,
     gfx1250_pipeline_reject_reason,
 )
 
@@ -278,6 +281,8 @@ except ImportError:
         "preshuffle_tdm": 32768,
         # Mandatory double buffering (num_lds_buffers = 2), so half the budget.
         "comp_async": 32768,
+        # Ring of four LDS slots (producer/consumer TDM), so a quarter.
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "default": 65536,
     }
@@ -314,6 +319,9 @@ except ImportError:
         ("comp_tdm_v2", "tdm", "interwave"),
         ("comp_tdm_v2", "cshuffle", "interwave"),
         ("comp_tdm_v2", "default", "interwave"),
+        ("comp_tdm_pc", "tdm", "interwave"),
+        ("comp_tdm_pc", "cshuffle", "interwave"),
+        ("comp_tdm_pc", "default", "interwave"),
     }
 
     DTYPE_COMBINATIONS = {
@@ -331,7 +339,7 @@ except ImportError:
 
 # Tensor Data Mover pipelines. They exist only on gfx1250; elsewhere the TDM
 # instructions are no-ops and the kernel silently produces zeros.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
 TDM_ARCH = "gfx1250"
 
 
@@ -429,6 +437,9 @@ class KernelConfig:
     # choice (mem, compv3, compv5, compv6); the ones that always double already
     # carry it in their per-pipeline budget.
     double_smem_buffer: bool = False
+
+    # comp_tdm_pc ring slots; 0 is the policy default (the per-pipeline budget).
+    num_slots: int = 0
 
     # Layout (for whole-workgroup cover validation)
     layout: str = "rcr"
@@ -632,6 +643,7 @@ class ArchFilter:
         pad_m: Optional[bool] = None,
         pad_n: Optional[bool] = None,
         pad_k: Optional[bool] = None,
+        num_slots: int = 0,
     ) -> bool:
         """
         Quick validation check for a kernel configuration.
@@ -649,6 +661,7 @@ class ArchFilter:
                      Affects validation rules for tile constraints.
                      Defaults to GEMM if not specified.
             pad_m, pad_n, pad_k: Padding traits; None skips the pad rules.
+            num_slots: comp_tdm_pc ring slots; 0 is the default ring.
 
         Returns:
             True if configuration is valid for this architecture
@@ -675,6 +688,7 @@ class ArchFilter:
             pad_m=pad_m,
             pad_n=pad_n,
             pad_k=pad_k,
+            num_slots=num_slots,
         )
         return self.validate_kernel(config).valid
 
@@ -856,23 +870,28 @@ class ArchFilter:
     def _validate_gfx1250_pipeline(
         self, config: KernelConfig, result: ValidationResult
     ):
-        """Validate the gfx1250 pipelines (comp_async, comp_tdm, comp_tdm_v2)
+        """Validate the gfx1250 pipelines (comp_async, comp_tdm*)
         and the TDM epilogue.
 
         The rules come from codegen_common.gfx1250_pipeline_reject_reason, the
         single source of truth shared with unified_gemm_codegen and
         python/gemm_utils: TDM pipelines are gfx1250-only (off gfx1250 the TDM
         instructions compile to no-ops and the kernel silently writes zeros),
-        need the TDM epilogue (and vice versa), intrawave, unpadded tiles and,
-        for comp_tdm_v2, exactly four waves; only the plain and preshuffle GEMM
-        operators can use them. Non-MX comp_async GEMM on gfx1250 needs the cshuffle
+        need the TDM epilogue (and vice versa; plain GEMM may also pair
+        codegen_common.GEMM_TDM_CSHUFFLE_PIPELINES with cshuffle), intrawave,
+        unpadded tiles and, for comp_tdm_v2, exactly four waves, for
+        comp_tdm_pc, at most 256 fp32 accumulators per lane; only the plain and
+        preshuffle GEMM operators can use them, plus Stream-K GEMM (below).
+        Non-MX comp_async GEMM on gfx1250 needs the cshuffle
         epilogue, an rc A/B layout, pad_m=pad_n=pad_k=True and, for fp8/bf8,
-        warp_tile_k >= 128.
+        warp_tile_k >= 128 and a 16x16 warp tile (32x32 does not compile).
+        Stream-K GEMM can use codegen_common.STREAMK_GFX1250_PIPELINES, whose
+        epilogue rules are codegen_common.streamk_trait_reject_reason's.
 
-        comp_async is only gated for the GEMM operator on gfx1250: other
-        operators (e.g. grouped convolution) and architectures use it under
-        their own rules. Pad rules are skipped while the pads are unknown
-        (None). KernelConfig has no persistent field, so the TDM
+        comp_async is only gated for the GEMM and Stream-K operators on
+        gfx1250: other operators (e.g. grouped convolution) and architectures
+        use it under their own rules. Pad rules are skipped while the pads are
+        unknown (None). KernelConfig has no persistent field, so the TDM
         "no persistent kernel" rule is enforced only by the codegen and
         python/gemm_utils, which see the persistent trait.
         """
@@ -880,10 +899,11 @@ class ArchFilter:
             OperatorType.GEMM,
             OperatorType.GEMM_PRESHUFFLE,
         )
+        is_streamk = config.operator == OperatorType.GEMM_STREAMK
         if (
             config.pipeline == "comp_async"
             and config.epilogue != "tdm"
-            and (self.gpu_arch.split(":")[0] != TDM_ARCH or not is_gemm)
+            and (self.gpu_arch.split(":")[0] != TDM_ARCH or not (is_gemm or is_streamk))
         ):
             return
         pads = (config.pad_m, config.pad_n, config.pad_k)
@@ -894,12 +914,19 @@ class ArchFilter:
             config.scheduler,
             num_waves=config.warp_m * config.warp_n * config.warp_k,
             warp_tile_k=config.warp_tile_k,
+            warp_tile_m=config.warp_tile_m,
+            warp_tile_n=config.warp_tile_n,
             dtype_a=config.datatype_a,
             dtype_b=config.datatype_b,
             layout=config.layout,
-            variant_supported=is_gemm,
+            variant_supported=is_gemm or is_streamk,
             variant_name=f"operator={config.operator.value}",
             pads=None if None in pads else tuple(bool(p) for p in pads),
+            tile_mn=(config.tile_m, config.tile_n),
+            warp_k=config.warp_k,
+            streamk=is_streamk,
+            # The publish lag does not reach this filter; the codegen checks it.
+            ring=(config.num_slots, 0),
         )
         if reason:
             result.add_error(reason)
@@ -926,14 +953,21 @@ class ArchFilter:
             and config.operator in (OperatorType.GEMM, OperatorType.GEMM_PRESHUFFLE)
         )
         if uses_gfx1250_base_lds:
-            # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
-            # descriptors: each group of rows spanning at least 256 bytes is
-            # followed by 16 padding bytes (same accounting as the Tile Engine
-            # validate_lds_capacity).
-            a_lds_layer = max(1, 256 // (config.tile_k * elem_size_a))
-            b_lds_layer = max(1, 256 // (config.tile_k * elem_size_b))
-            matrix_a_size += max(0, config.tile_m // a_lds_layer - 1) * 16
-            matrix_b_size += max(0, config.tile_n // b_lds_layer - 1) * 16
+            # TDM and non-MX comp_async use the gfx1250 base LDS descriptors,
+            # whose padding depends on whether the operand is transpose-loaded
+            # (same accounting as the Tile Engine validate_lds_capacity).
+            matrix_a_size = gfx1250_lds_operand_bytes(
+                config.tile_m,
+                config.tile_k,
+                elem_size_a,
+                gfx1250_lds_operand_transposed("a", config.datatype_a, config.layout),
+            )
+            matrix_b_size = gfx1250_lds_operand_bytes(
+                config.tile_n,
+                config.tile_k,
+                elem_size_b_staged,
+                gfx1250_lds_operand_transposed("b", config.datatype_b, config.layout),
+            )
         total_lds = matrix_a_size + matrix_b_size
 
         # The budget depends on the target, not just the pipeline: a tile that
@@ -941,6 +975,11 @@ class ArchFilter:
         max_lds = get_lds_limit(
             self.gpu_arch, config.pipeline, config.double_smem_buffer
         )
+        if config.num_slots:
+            # A non-default comp_tdm_pc ring splits the LDS over its own slots.
+            max_lds = comp_tdm_pc_lds_limit(
+                get_lds_limit(self.gpu_arch, "default"), config.num_slots
+            )
 
         if total_lds > max_lds:
             staging = " double-buffered" if config.double_smem_buffer else ""

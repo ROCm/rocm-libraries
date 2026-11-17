@@ -25,7 +25,9 @@ from kernels.common._attention_validation import (
     validate_attention_problem_types,
 )
 
+from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
 from kernels.common.attention_unified import (
+    _GFX942_4WARP_LSE_REFUSAL,
     UnifiedAttentionProblem,
     _kv_block_bytes,
     _kv_cache_policy_3d,
@@ -235,6 +237,7 @@ _SEMANTIC_FIELDS = frozenset(
         "causal_top_left",
         "right_bound",
         "emit_lse",
+        "lse_layout",
     }
 )
 
@@ -286,6 +289,8 @@ def make_explicit_attention_2d_spec(
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
+    if problem.emit_lse and config.builder_kind == "gfx942_4warp_gqa":
+        raise ValueError(_GFX942_4WARP_LSE_REFUSAL)
     if config.num_warps not in NUM_WARPS:
         raise ValueError(f"num_warps must be one of {NUM_WARPS}")
     if config.block_m_per_warp not in BLOCK_M_PER_WARP:
@@ -310,6 +315,9 @@ def make_explicit_attention_2d_spec(
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
         waves_per_eu=config.waves_per_eu,
+        # The output the caller asked for, never a tuning knob (see
+        # _SEMANTIC_FIELDS); passed only when on, so LSE-off specs are as before.
+        **({"emit_lse": True} if problem.emit_lse else {}),
         **knobs,
     )
 
@@ -401,6 +409,8 @@ def make_explicit_attention_3d_specs(
             problem.block_size,
             tile,
             use_i64_kv_addr=semantic["use_i64_kv_addr"],
+            # Literal T32 is the new opt-in; legacy 2x P16/T32 keeps page DMA.
+            metadata_containment=config.tile_policy.strip().lower() == "32",
         )
         is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
     )
@@ -430,18 +440,9 @@ def make_explicit_attention_3d_specs(
     )
     if not ok:
         raise ValueError(f"unsupported explicit 3D attention config: {why}")
-    reduce = reduce_type(
-        head_size=problem.head_size,
-        num_query_heads=problem.num_query_heads,
-        num_kv_heads=problem.num_kv_heads,
-        dtype=problem.dtype,
-        num_segments=num_segments,
-        waves_per_eu=config.waves_per_eu,
-        metadata_containment=containment,
-        # The output the caller asked for, never a tuning knob (see
-        # _SEMANTIC_FIELDS): every swept geometry keeps it.
-        emit_lse=problem.emit_lse,
-    )
+    # Use the kernel's segment-to-reducer derivation so launch and packed-module
+    # signatures agree, including containment and the caller's LSE output.
+    reduce = split_kv_reduce_spec(reduce_type, segment, emit_lse=problem.emit_lse)
     return segment, reduce
 
 

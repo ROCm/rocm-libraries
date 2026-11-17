@@ -7,8 +7,8 @@
 resolution, id uniqueness, replay and portability for representative tiles in
 every mode. The rest pins what is specific to this family: the knob space each
 mode exposes, that it holds one kernel per configuration, that ``auto`` is
-each tile's base configuration, and that out-of-scope knobs are dropped while
-illegal ones are refused.
+one configuration of that space (its case's knob stack on the case's tile),
+and that out-of-scope knobs are dropped while illegal ones are refused.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from dispatch.gdn import (
     request_errors,
 )
 from dispatch.gdn import gfx950, rules
-from dispatch.gdn.gfx950 import ARCH
+from dispatch.gdn.gfx950 import ARCH, auto_default, spec_id_for
 from rocke.dispatch.core import PinRefused
 from rocke.dispatch.tuning import sweep_level
 from rocke.dispatch.tuning.testing import assert_tuning_contract, representative
@@ -41,6 +41,9 @@ _REFUSED = (
     {"waves_per_eu": None},
     {"waves_per_eu": 4.0},
     {"dpp_reduce": "true"},
+    # Refused even where row_loads is out of scope, never read as a value.
+    {"row_loads": "early"},
+    {"row_loads": 1},
     {"num_warps": 4},
     {"fuse_conv": True},
     {"not_a_knob": True},
@@ -89,6 +92,14 @@ _CASES = (
         # norm_gate_once and out_lds need fuse_out_norm: out of scope, dropped.
         {"conv_once": False, "norm_gate_once": True, "out_lds": True},
     ),
+    (
+        # One wave with fuse_conv: row_loads is in scope; "auto" restates the
+        # base, and so does "late" without conv_once (auto's order there).
+        "gdn_decode_gfx950_kda_nw1_wtk8_bpv1",
+        _req(gate_kind="kda", state_dtype="f32", **_FUSED),
+        _req(5, heads=8, gate_kind="kda", state_dtype="f32", **_FUSED),
+        {"row_loads": "late", "conv_once": False},
+    ),
 )
 
 
@@ -113,7 +124,10 @@ def _expected_configs_per_tile(req: GdnDecodeRequest, kernel) -> int:
     in-group sum has an xor-4 stage, xcd_remap, stream_rows where a lane owns
     several state rows, interleave_cols with an f32 state and more than one K
     lane, out_lds with fuse_out_norm, and the two production waves_per_eu
-    values (0 and 4)."""
+    values (0 and 4). One wave with fuse_conv adds row_loads' forced order
+    where it is not auto's: one per knob set at each waves_per_eu value
+    ("first", except "late" with conv_once at DK = DV = 128 and WTK 4 / 8 at
+    waves_per_eu 0, where auto loads first)."""
     hints = 2 * 2
     if req.fuse_conv:
         conv = 3 if req.fuse_out_norm else 2
@@ -126,7 +140,9 @@ def _expected_configs_per_tile(req: GdnDecodeRequest, kernel) -> int:
     ic = 2 if req.state_dtype == "f32" and kernel.warp_threads_k > 1 else 1
     olds = 2 if req.fuse_out_norm else 1
     xcd = 2
-    return hints * conv * dpp * xcd * stream * ic * olds * 2
+    knob_sets = hints * dpp * xcd * stream * ic * olds * conv
+    orders = 2 if req.fuse_conv and kernel.num_warps == 1 else 1
+    return knob_sets * 2 * orders
 
 
 _MODES = (
@@ -175,29 +191,52 @@ def test_every_canonical_configuration_is_registered_once(req):
 
 
 @pytest.mark.parametrize("req", _MODES)
-def test_auto_is_the_auto_tile_base_configuration(req):
+def test_auto_is_its_case_stack_on_the_case_tile(req):
+    """``auto`` is a registered configuration, not a new one: the case's
+    knobs pinned on the case's tile give the same spec, and the knobs it
+    records are the stack less the knobs this request cannot read."""
     auto = dispatch_gdn_decode(req)
-    assert auto.spec.knobs == ()
-    assert auto.spec.tuning_id.startswith(f"{auto.candidate.spec_id}_wpe0@")
+    default = auto_default(req)
+    spec_id = spec_id_for(default.tile, req.gate_kind)
+    assert auto.candidate.spec_id == spec_id
+    wpe = default.knobs.get("waves_per_eu", 0)
+    assert auto.spec.tuning_id.startswith(f"{spec_id}_wpe{wpe}@")
+    assert dict(auto.spec.knobs).items() <= dict(default.knobs).items()
     kernel = auto.spec.kernel_spec
-    for name in ("state_load_hint", "state_store_hint"):
-        assert getattr(kernel, name) == "default"
-    for name in (
-        "dpp_reduce",
-        "xcd_remap",
-        "stream_rows",
-        "interleave_cols",
-        "conv_once",
-        "norm_gate_once",
-        "out_lds",
-    ):
-        assert getattr(kernel, name) is False, name
-    assert kernel.waves_per_eu == 0
+    for name, value in auto.spec.knobs:
+        assert getattr(kernel, name) == value, name
+    stack_pin = replace(req, spec_id=spec_id, tuning_knobs=dict(default.knobs))
+    assert dispatch_gdn_decode(stack_pin).spec == auto.spec
+    # One of the tile's enumerated configurations.
+    assert auto.spec in {
+        r.spec for r in dispatch_gdn_decode_all(req) if r.candidate.spec_id == spec_id
+    }
     # The result's request is pinned to what ran, so it replays it.
     assert (auto.request.spec_id, auto.request.tuning_id) == (
         auto.candidate.spec_id,
         auto.spec.tuning_id,
     )
+    assert auto.request.tuning_knobs == auto.spec.knobs
+    assert dispatch_gdn_decode(auto.request).spec == auto.spec
+
+
+@pytest.mark.parametrize("state_dtype", ("bf16", "f16"))
+def test_norm_only_auto_drops_norm_gate_once_with_conv_once(state_dtype):
+    """The GDN fused bf16 row carries conv_once and norm_gate_once. On a
+    norm-only request conv_once is out of scope, and norm_gate_once without
+    it is refused by the kernel, so auto drops both and runs the rest of
+    the row instead of raising."""
+    req = _req(gate_kind="gdn", state_dtype=state_dtype, heads=16, fuse_out_norm=True)
+    default = auto_default(req)
+    assert default.knobs.get("conv_once") and default.knobs.get("norm_gate_once")
+    auto = dispatch_gdn_decode(req)
+    assert auto.candidate.spec_id == spec_id_for(default.tile, "gdn")
+    expected = {
+        k: v
+        for k, v in default.knobs.items()
+        if k not in ("conv_once", "norm_gate_once")
+    }
+    assert dict(auto.spec.knobs) == expected
     assert dispatch_gdn_decode(auto.request).spec == auto.spec
 
 
@@ -253,12 +292,13 @@ def test_out_of_scope_knobs_are_dropped_not_refused():
         ("nw2_wtk16_bpv8", {"interleave_cols": True}),  # 2-byte state
         ("nw1_wtk4_bpv4", {"dpp_reduce": True}),  # no xor-4 stage
         ("nw8_wtk16_bpv4", {"stream_rows": True}),  # one state row per lane
+        ("nw1_wtk4_bpv4", {"row_loads": "first"}),  # no fuse_conv
     ):
         got = dispatch_gdn_decode(replace(plain, spec_id=spec_id, tuning_knobs=knobs))
         base = dispatch_gdn_decode(replace(plain, spec_id=spec_id))
         assert got.spec == base.spec, (spec_id, knobs)
         assert got.spec.knobs == ()
-        note = f"dropped out-of-scope tuning_knobs {sorted(knobs)}"
+        note = f"dropped tuning_knobs that change no code here {sorted(knobs)}"
         assert any(note in line for line in got.explanation), got.explanation
         assert not any("dropped" in line for line in base.explanation)
 
@@ -276,7 +316,7 @@ def test_in_scope_knobs_are_not_reported_as_dropped():
     )
     assert dict(part.spec.knobs) == {"dpp_reduce": True}
     assert any(
-        "dropped out-of-scope tuning_knobs ['conv_once']" in line
+        "dropped tuning_knobs that change no code here ['conv_once']" in line
         for line in part.explanation
     ), part.explanation
     full = dispatch_gdn_decode(
@@ -284,6 +324,93 @@ def test_in_scope_knobs_are_not_reported_as_dropped():
     )
     assert dict(full.spec.knobs) == {"dpp_reduce": True}
     assert not any("dropped" in line for line in full.explanation)
+
+
+def test_a_restating_row_loads_is_reported_as_dropped_for_an_aliased_flag():
+    """The restated order is judged on the knobs as the kit types them, so
+    ``conv_once: 1`` reads as ``True`` and the dropped ``row_loads`` is named
+    exactly as with ``conv_once: True``."""
+    plain = _req(gate_kind="gdn", heads=16, **_FUSED)
+    for conv_once in (True, 1):
+        got = dispatch_gdn_decode(
+            replace(
+                plain,
+                spec_id="nw1_wtk8_bpv1",
+                tuning_knobs={"conv_once": conv_once, "row_loads": "first"},
+            )
+        )
+        assert dict(got.spec.knobs) == {"conv_once": True}, conv_once
+        note = "dropped tuning_knobs that change no code here ['row_loads']"
+        assert any(note in line for line in got.explanation), (
+            conv_once,
+            got.explanation,
+        )
+
+
+def test_row_loads_is_one_configuration_per_order_auto_does_not_choose():
+    """On a single-wave fuse_conv tile, a forced order that is auto's own (for
+    its knobs and waves_per_eu) is dropped like an out-of-scope knob, and the
+    other one is a configuration of its own; at every waves_per_eu value the
+    walk lists the latter and never lists auto's kernel twice."""
+    req = _req(gate_kind="kda", state_dtype="f32", **_FUSED)
+    spec_id = "kda_nw1_wtk8_bpv1"
+
+    def pin(**knobs):
+        return dispatch_gdn_decode(replace(req, spec_id=spec_id, tuning_knobs=knobs))
+
+    co = {"conv_once": True}
+    for restated, base in (
+        ({"row_loads": "late"}, {}),
+        ({**co, "row_loads": "first"}, co),
+        ({**co, "row_loads": "late", "waves_per_eu": 4}, {**co, "waves_per_eu": 4}),
+    ):
+        assert pin(**restated).spec == pin(**base).spec, restated
+    for forced, base in (
+        ({"row_loads": "first"}, {}),
+        ({**co, "row_loads": "late"}, co),
+        ({**co, "row_loads": "first", "waves_per_eu": 4}, {**co, "waves_per_eu": 4}),
+    ):
+        got = pin(**forced)
+        assert dict(got.spec.knobs) == forced, forced
+        assert (
+            got.spec.kernel_spec.kernel_name()
+            != pin(**base).spec.kernel_spec.kernel_name()
+        )
+    for level, floors in (("production", (4,)), ("full", range(1, 9))):
+        listed = {}
+        for row in dispatch_gdn_decode_all(req, sweep_level=level):
+            if row.candidate.spec_id == spec_id:
+                knobs = dict(row.spec.knobs)
+                listed.setdefault(
+                    (knobs.get("conv_once", False), knobs.get("waves_per_eu", 0)),
+                    set(),
+                ).add(knobs.get("row_loads", "auto"))
+        want = {(False, 0): {"auto", "first"}, (True, 0): {"auto", "late"}}
+        for wpe in floors:
+            want[(False, wpe)] = want[(True, wpe)] = {"auto", "first"}
+        assert listed == want, level
+
+
+def test_an_out_of_range_waves_per_eu_is_refused_by_name_on_a_stored_id():
+    """Whether a ``row_loads`` restates auto is judged only on a legal spec:
+    a stored id replayed with ``waves_per_eu`` 9 (where auto would load late)
+    is refused for the range, as the same knobs without the id are."""
+    req = _req(gate_kind="kda", state_dtype="f32", **_FUSED)
+    spec_id = "kda_nw1_wtk8_bpv1"
+    knobs = {"conv_once": True, "row_loads": "late"}
+    recorded = dispatch_gdn_decode(replace(req, spec_id=spec_id, tuning_knobs=knobs))
+    for tid in (recorded.spec.tuning_id, "auto"):
+        bad = replace(
+            req,
+            spec_id=spec_id,
+            tuning_id=tid,
+            tuning_knobs={**knobs, "waves_per_eu": 9},
+        )
+        with pytest.raises(PinRefused) as raised:
+            dispatch_gdn_decode(bad)
+        message = str(raised.value)
+        assert "waves_per_eu must be in [0, 8], got 9" in message, (tid, message)
+        assert "out of scope" not in message, (tid, message)
 
 
 @pytest.mark.parametrize(
@@ -306,8 +433,31 @@ def test_in_scope_knobs_are_not_reported_as_dropped():
             _req(gate_kind="kda"),
             "conv_once",
         ),
+        # Recorded where auto loads first (conv_once, WTK 8, DK = DV = 128);
+        # at DK = DV = 64 auto loads late, so "late" changes no code there.
+        (
+            "nw1_wtk8_bpv1",
+            {"conv_once": True, "row_loads": "late"},
+            _req(gate_kind="gdn", heads=16, **_FUSED),
+            _req(gate_kind="gdn", heads=16, head_k_dim=64, head_v_dim=64, **_FUSED),
+            "row_loads",
+        ),
+        # Recorded where auto loads late (DK = DV = 64); at DK = DV = 128 auto
+        # loads first, so "first" restates it there.
+        (
+            "nw1_wtk8_bpv1",
+            {"conv_once": True, "row_loads": "first"},
+            _req(gate_kind="gdn", heads=16, head_k_dim=64, head_v_dim=64, **_FUSED),
+            _req(gate_kind="gdn", heads=16, **_FUSED),
+            "row_loads",
+        ),
     ),
-    ids=("dv64_drops_stream_rows", "bf16_plain_drops_f32_fused_knobs"),
+    ids=(
+        "dv64_drops_stream_rows",
+        "bf16_plain_drops_f32_fused_knobs",
+        "d64_drops_auto_row_loads",
+        "d128_drops_restating_first",
+    ),
 )
 def test_a_stored_tuning_id_does_not_travel_where_scope_drops_a_knob(
     spec_id, knobs, recorded_on, moved_to, dropped
@@ -328,6 +478,17 @@ def test_a_stored_tuning_id_does_not_travel_where_scope_drops_a_knob(
     )
     with pytest.raises(PinRefused) as raised:
         dispatch_gdn_decode(stored)
+    message = str(raised.value)
+    assert "out of scope" in message and dropped in message, message
+    assert "stale" not in message, message
+    # An aliased value (1 for True) names the same configuration, so it is
+    # refused under the same name.
+    aliased = replace(
+        stored,
+        tuning_knobs={k: 1 if v is True else v for k, v in knobs.items()},
+    )
+    with pytest.raises(PinRefused) as raised:
+        dispatch_gdn_decode(aliased)
     message = str(raised.value)
     assert "out of scope" in message and dropped in message, message
     assert "stale" not in message, message
@@ -517,9 +678,9 @@ def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
     req = _req(gate_kind="gdn")
     spec_id = "nw2_wtk16_bpv8"
 
-    def listed():
+    def listed(level):
         by_knobs: dict = {}
-        for row in dispatch_gdn_decode_all(req):
+        for row in dispatch_gdn_decode_all(req, sweep_level=level):
             if row.candidate.spec_id != spec_id:
                 continue
             knobs = dict(row.spec.knobs)
@@ -527,9 +688,11 @@ def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
             by_knobs.setdefault(tuple(sorted(knobs.items())), set()).add(wpe)
         return by_knobs
 
-    production = listed()
+    production = listed("production")
+    full = listed("full")
+    # The argument decides, not the caller's ambient level.
     with sweep_level("full"):
-        full = listed()
+        assert listed("production") == production
     assert set(production) == set(full)
     assert all(values == {0, 4} for values in production.values())
     assert all(values == set(range(9)) for values in full.values())
@@ -539,6 +702,24 @@ def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
         )
         assert pinned.spec.kernel_spec.waves_per_eu == wpe
         assert pinned.spec.tuning_id.startswith(f"{spec_id}_wpe{wpe}@")
+
+
+def test_full_level_samples_per_tile_reproducibly_and_production_ignores_it():
+    """``tuning_sample`` draws at most that many configurations per tile at
+    ``full``, the same ones for the same ``seed``; ``production`` ignores it."""
+    req = _req(gate_kind="kda")
+    sampled = dispatch_gdn_decode_all(req, sweep_level="full", tuning_sample=3, seed=7)
+    per_tile: dict = {}
+    for row in sampled:
+        per_tile[row.candidate.spec_id] = per_tile.get(row.candidate.spec_id, 0) + 1
+    assert per_tile and max(per_tile.values()) <= 3
+    again = dispatch_gdn_decode_all(req, sweep_level="full", tuning_sample=3, seed=7)
+    assert [r.spec.tuning_id for r in again] == [r.spec.tuning_id for r in sampled]
+    assert dispatch_gdn_decode_all(
+        req, sweep_level="production", tuning_sample=3
+    ) == dispatch_gdn_decode_all(req)
+    with pytest.raises(ValueError, match="sweep level"):
+        dispatch_gdn_decode_all(req, sweep_level="everything")
 
 
 def test_illegal_pins_are_refused_with_the_candidate_reason():
@@ -552,6 +733,8 @@ def test_illegal_pins_are_refused_with_the_candidate_reason():
         ({"blocks_per_v_dim": 2}, "not tunable"),
         ({"not_a_knob": True}, "not tunable"),
         ({"dpp_reduce": "yes"}, "dpp_reduce"),
+        ({"row_loads": "early"}, "row_loads"),
+        ({"row_loads": True}, "row_loads"),
         # Legal only with conv_once on: the kernel validator refuses it.
         ({"norm_gate_once": True}, "norm_gate_once requires conv_once"),
     ):

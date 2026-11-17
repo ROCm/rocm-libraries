@@ -624,6 +624,29 @@ inline double norm_check_general(char        norm_type,
     }
 }
 
+// The types the norm_check_general overloads above compare; for any other they return 0.
+inline bool norm_check_general_supports(hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+    case HIP_R_64F:
+    case HIP_C_32F:
+    case HIP_C_64F:
+    case HIP_R_16F:
+    case HIP_R_16BF:
+    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E5M2_FNUZ:
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E5M2:
+    case HIP_R_32I:
+    case HIP_R_8I:
+        return true;
+    default:
+        return false;
+    }
+}
+
 template <typename T>
 bool norm_check(double norm_error)
 {
@@ -693,11 +716,11 @@ inline bool norm_check(double norm_error, hipDataType type)
     return tol > 0.0 && norm_error < tol;
 }
 
-inline bool norm_check(double               norm_error,
-                       hipDataType          outputType,
-                       hipblasComputeType_t compute_type,
-                       hipDataType          inputTypeA = static_cast<hipDataType>(-1),
-                       hipDataType          inputTypeB = static_cast<hipDataType>(-1))
+// The norm_error limit for a GEMM; 0 means no limit is known for these types.
+inline double norm_tolerance(hipDataType          outputType,
+                             hipblasComputeType_t compute_type,
+                             hipDataType          inputTypeA = static_cast<hipDataType>(-1),
+                             hipDataType          inputTypeB = static_cast<hipDataType>(-1))
 {
     double tol = norm_tolerance(outputType);
 
@@ -709,5 +732,15 @@ inline bool norm_check(double               norm_error,
     if(static_cast<int>(inputTypeB) >= 0)
         tol = std::max(tol, norm_tolerance(inputTypeB));
 
+    return tol;
+}
+
+inline bool norm_check(double               norm_error,
+                       hipDataType          outputType,
+                       hipblasComputeType_t compute_type,
+                       hipDataType          inputTypeA = static_cast<hipDataType>(-1),
+                       hipDataType          inputTypeB = static_cast<hipDataType>(-1))
+{
+    double tol = norm_tolerance(outputType, compute_type, inputTypeA, inputTypeB);
     return tol > 0.0 && norm_error < tol;
 }

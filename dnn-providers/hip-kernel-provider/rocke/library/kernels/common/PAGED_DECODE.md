@@ -1,5 +1,13 @@
 # Tiled decode KV loading
 
+## Contents
+
+- [Admission and addressing](#admission-and-addressing)
+- [Bounded metadata containment](#bounded-metadata-containment)
+- [Selection and validation](#selection-and-validation)
+- [Tuning-store migration](#tuning-store-migration)
+- [Optional LSE with bounded decode](#optional-lse-with-bounded-decode)
+
 The gfx942 and gfx950 segment kernels distinguish cache page size `P` from
 compute tile size `T`. Both consume logical token tiles and stage the existing
 `[T,D]` K/V LDS operands. Transfer width and split-KV segment length remain
@@ -22,9 +30,12 @@ emission for a configuration that previously exceeded the target LDS limit.
 - The token-mapped loader supports `T=32` with `P=1,16` on both targets, and
   `P=64` on gfx950. It resolves each logical token through the shared K/V page
   table. Different lanes can reference nonadjacent physical pages.
-- gfx950 retains whole-page DMA for larger tiles that are multiples of the
-  physical page size, including `T=48,80,96,112` for `P=16` and `T=96` for
-  `P=32`. These legacy paths retain their caller-validity contract and require
+- gfx950 retains whole-page DMA for unmarked multi-page tiles, including
+  legacy `P=16,T=32` (`tile_policy="2x"`) and larger tiles such as
+  `T=48,80,96,112` for `P=16` and `T=96` for `P=32`. Literal T32 opt-in and
+  the paged candidate use marked token gather at P16/T32 instead. The old
+  unmarked path remains available for prefill and other legacy configurations.
+  These legacy paths retain their caller-validity contract and require
   finite physical-page padding. The existing async-call and LDS limits apply.
 
 `tile_size_override` now applies to both targets. With no override, existing
@@ -80,8 +91,9 @@ their byte offsets. The descriptor `indirect` transform alone does not provide
 those physical-ID checks or failure reporting.
 
 Explicit gfx942/gfx950 paged 3D specs must expose valid page/tile geometry and
-a boolean `uses_paged_gather` that agrees with it: `T > P` on gfx942, `T != P`
-on gfx950. Gather also requires `use_wide_kv_load` to be present and exactly
+a boolean `uses_paged_gather` that agrees with the internal resolver: `T > P`
+on gfx942, and unequal page/tile geometry on gfx950 except its preserved
+unmarked whole-page DMA paths. Gather also requires `use_wide_kv_load` to be present and exactly
 boolean `False`, before and after retargeting. The effective tile must agree with `tile_size_override`, including
 the default tile when no override is set. Address-width retargeting must preserve
 the architecture, path and loader geometry. The returned gather spec is validated
@@ -129,7 +141,8 @@ Runtime token-gather launches require both containment markers; disabled,
 missing or mismatched markers reject before retargeting or launch, including
 unsupported tuning overrides. Explicit disabled markers are not rewritten.
 Unmarked page-contained legacy routes retain their caller-validity contract.
-Kernel names append `_bounds_v1`; installed shared C
+Kernel names retain the `_bounds_v1` marker and encode their fixed metadata
+head geometry, with the segment's exact checked window. Installed shared C
 spec POD layouts remain unchanged. Raw native callers select the versioned
 builders in [the bounded builder header](../../../platform/cpp/include/rocke/instance_attention_paged_decode_bounded.h).
 
@@ -141,7 +154,8 @@ wide K/V and wave page-ID loading. Actual K/V tensor view spans become buffer
 bounds. Host structure checks also cover rounded token/workspace/status spans
 and nonoverlapping input/output/metadata views. Feature inputs must remain
 separate from these views and internal workspace; raw C callers must supply
-truthful allocation bounds, matching launch grids and valid lifetimes.
+truthful allocation bounds, representable index arithmetic, matching launch
+grids and valid lifetimes.
 
 Each segment derives Q and scratch rows from its trusted CTA sequence index.
 Live query offsets only check consistency with `[0,1,...,B]`; lengths are checked
@@ -155,7 +169,9 @@ error diagnostic for inputs that already contain nonfinite numeric values.
 
 Each CTA overwrites one `[B,Hkv,S]` int32 status slot every execution, including
 neutral exits. Sixty-four lane-private sticky LDS flags add 256 bytes per CTA;
-a final wave reduction publishes failure after outstanding DMA completes. The
+a final wave reduction publishes failure after outstanding DMA completes.
+Both native and Python bounded builders charge this allocation together with
+Q, two K tiles and one V tile against the selected architecture's LDS capacity. The
 reducer scans all status slots for its sequence before reading partial output.
 There is no status-clear kernel, atomic, or hidden host synchronization. Ordered
 metadata changes between launches/replays are supported. Concurrent GPU writes
@@ -236,6 +252,25 @@ Python 3D dictionary adapter validates supplied types before C++ casts; its
 partial-dictionary API preserves missing/`None` defaults. The typed C ABI layout
 and valid kernel emission are unchanged.
 
+### Tuning-store migration
+
+Declared loader/containment defaults change explicit gfx942/gfx950 split-KV
+tuning fingerprints, including legacy LSE-off configurations whose numerical
+algorithm is unchanged. Previously stored bare tuning IDs can therefore raise
+`PinRefused`. Drop stale IDs, reselect or re-sweep the affected 3D candidate,
+and record the new ID together with its valid knob dictionary. Do not patch
+an ID string to force replay; verify the new pair's ABI and geometry. Newly
+selected pins retain round-trip identity, and unpinned routing identities are
+unchanged. This does not re-key unrelated candidate families.
+
+Generic legacy kernels keep runtime head/window sharing. Bounded metadata and
+raw token-gather helpers still specialize their metadata geometry to the spec:
+status indexing, checked-window predicates and gather pool strides retain
+those exact fields. Their names and cache identities include the fields they
+bake. Raw token-gather callers must pass runtime head values that agree with
+its fixed pool geometry; bounded callers must also match the checked window.
+Normal launch admission enforces spec/problem agreement before compilation.
+
 ### Optional LSE with bounded decode
 
 Admitted gfx942/gfx950 Python decode paths accept `emit_lse=True` and a caller-owned
@@ -247,14 +282,28 @@ before compilation. LSE remains unsupported with sinks, strided KV, and paths
 that cannot write it.
 
 The reducer arguments are `output_ptr`, `segm_output_ptr`, `segm_max_ptr`,
-`segm_expsum_ptr`, `seq_lens_ptr`, followed by `metadata_status_ptr`, `num_seqs`
-when containment is enabled, and finally `lse_ptr` when LSE is enabled. Kernel
-names and cache identities distinguish both flags. Invalid consumed metadata
+`segm_expsum_ptr`, `seq_lens_ptr`, runtime `num_query_heads`, followed by
+`metadata_status_ptr`, `num_seqs` when containment is enabled, and finally
+`lse_ptr` when LSE is enabled. The segment likewise places runtime
+`num_query_heads`, `num_kv_heads` and `sliding_window` before its containment
+parameters. Kernel names and cache identities distinguish both flags.
+Invalid consumed metadata
 writes NaN to both O and LSE for the affected sequence; valid keyless rows write
 O=0 and natural-log LSE=-inf. Window-excluded pages remain unaudited. An ordered
 valid replay recovers both outputs, and graph ownership retains the LSE buffer.
 
-Native C++ 3D builders accept absent/false LSE only and explicitly reject enabled
-or malformed LSE fields. The dedicated 98-case native paged registry remains
-LSE-off. Strict C++ lowering of Python-authored bounded-LSE IR and representative
-bounded-LSE goldens are separate coverage from native kernel construction.
+Native C++ 3D reducers also support enabled LSE, including the same guarded
+NaN store on metadata failure. The dictionary adapter rejects malformed
+`emit_lse` and `reduce_emit_lse` flags before casts; the latter selects the
+paired reducer's output without changing a segment-only builder's semantics.
+The dedicated 98-case paged registry remains LSE-off. Native bounded-LSE
+builder parity, paired adapter checks and representative bounded-LSE goldens
+provide additional emission coverage.
+
+The [Torch-free runtime cohort](../../tests/test_paged_bounded_runtime_numeric.py)
+launches the selected bounded pipeline on NumPy-backed HIP buffers. It compares
+shuffled pages and ordered invalid-to-valid recovery against independent
+float64 SDPA, checks window-excluded invalid pages, empty rows, affected and
+unaffected sequences, LSE and output canaries. It is separate from Torch binding,
+prepared-execution and graph coverage; an unavailable-GPU skip is not numerical
+validation.

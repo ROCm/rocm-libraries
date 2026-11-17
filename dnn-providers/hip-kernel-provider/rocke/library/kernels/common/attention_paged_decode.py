@@ -275,6 +275,7 @@ def validate_paged_loader_geometry(
         page,
         tile,
         use_i64_kv_addr=getattr(spec, "use_i64_kv_addr", False),
+        metadata_containment=getattr(spec, "metadata_containment", False),
     )
     gather = loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
     if values["uses_paged_gather"] != gather:
