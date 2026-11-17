@@ -2102,14 +2102,14 @@ def test_post_kernels_require_kern_args_version_3(tmp_path):
 ])
 def test_post_kernel_symbols_checked_against_metadata(tmp_path, symbols, descriptors, match):
     write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, symbols, descriptors)
-    with pytest.raises(RuntimeError, match=match):
+    with pytest.raises(ValueError, match=match):
         getCustomKernelConfig("sk_main", {}, str(tmp_path))
 
 
 def test_post_kernel_threads_checked_against_max_flat_workgroup_size(tmp_path):
     write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG,
                        ["sk_main", "sk_main_streamKReduce"], maxThreads=128)
-    with pytest.raises(RuntimeError, match="exceed its .max_flat_workgroup_size 128"):
+    with pytest.raises(ValueError, match="exceed its .max_flat_workgroup_size 128"):
         getCustomKernelConfig("sk_main", {}, str(tmp_path))
 
 

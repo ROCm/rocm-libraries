@@ -557,21 +557,21 @@ def validatePostKernelSymbols(kernelName, postKernels, directory=None):
     contents = getCustomKernelContents(kernelName, directory)
     first = re.search(r"^\s*\.amdhsa_kernel\s+(\S+)", contents, re.MULTILINE)
     if first and first.group(1) != kernelName:
-        raise RuntimeError(f"Custom kernel '{kernelName}' must be the first .amdhsa_kernel, not '{first.group(1)}'")
+        raise ValueError(f"Custom kernel '{kernelName}' must be the first .amdhsa_kernel, not '{first.group(1)}'")
     fullYaml = _readEmbeddedYaml(kernelName, directory)
     kernels = (fullYaml.get("amdhsa.kernels") if isinstance(fullYaml, dict) else None) or []
     names = [k.get(".name") for k in kernels if isinstance(k, dict)]
     if not names or names[0] != kernelName:
-        raise RuntimeError(f"Custom kernel '{kernelName}' must be the first amdhsa.kernels entry")
+        raise ValueError(f"Custom kernel '{kernelName}' must be the first amdhsa.kernels entry")
     for post in postKernels:
         if post["name"] not in names:
-            raise RuntimeError(f"Post kernel '{post['name']}' is not in the amdhsa.kernels of '{kernelName}'")
+            raise ValueError(f"Post kernel '{post['name']}' is not in the amdhsa.kernels of '{kernelName}'")
         meta = kernels[names.index(post["name"])]
         maxThreads = meta.get(".max_flat_workgroup_size")
         threads = post["threads"][0] * post["threads"][1] * post["threads"][2]
         if maxThreads is not None and threads > maxThreads:
-            raise RuntimeError(f"Post kernel '{post['name']}' threads {post['threads']} exceed "
-                               f"its .max_flat_workgroup_size {maxThreads}")
+            raise ValueError(f"Post kernel '{post['name']}' threads {post['threads']} exceed "
+                             f"its .max_flat_workgroup_size {maxThreads}")
 
 
 def _hasRocRollerWgmArgs(args):

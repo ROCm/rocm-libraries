@@ -1203,6 +1203,9 @@ TEST(PersistentArgumentLayout, HandwrittenClampKeepsUniformSummationOrder)
     ASSERT_EQ(launch.grid, 3u * 4 * 2);
     EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
     EXPECT_EQ(quietSolve(solution, problem, solveInputs(), device).size(), 1u);
+    // The check counts tiles on the custom macrotile, as the launch does.
+    solution.sizeMapping.macroTile = TensileLite::dim3(64, 64, 1);
+    EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
 
     // A tree-capable kernel never clamps, and an undeclared kernel stays refused.
     ContractionSolution tree;
@@ -1215,7 +1218,8 @@ TEST(PersistentArgumentLayout, HandwrittenClampKeepsUniformSummationOrder)
 }
 
 // Parallel needs two workgroups per tile and a K unit per workgroup; a grid
-// short of either demotes, which clamps a kernel without tree support.
+// short of either demotes, which clamps a kernel without tree support and
+// runs tree, sized and packed as such, on a kernel with it.
 TEST(PersistentArgumentLayout, HandwrittenParallelOnlyClampsUnusableSplits)
 {
     auto problem = clusterProblem(257, 385, 65537, 2);
@@ -1237,6 +1241,10 @@ TEST(PersistentArgumentLayout, HandwrittenParallelOnlyClampsUnusableSplits)
         const auto tree = both.resolvePersistentSettings(problem, device);
         EXPECT_EQ(tree.reduction, origami::reduction_t::tree);
         EXPECT_EQ(tree.grid, fixedGrid);
+        EXPECT_EQ(both.requiredWorkspaceSize(problem, device), tree.workspaceBytes);
+        const auto calls = quietSolve(both, problem, solveInputs(), device);
+        ASSERT_EQ(calls.size(), 1u);
+        EXPECT_EQ(value<uint32_t>(calls[0].args, "SKSplitFactor"), 0u);
     }
 }
 

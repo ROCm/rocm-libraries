@@ -5132,11 +5132,7 @@ namespace TensileLite
             throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
         if(version == 2 && outerVersion != 3)
             throw std::runtime_error("StreamK cluster argument layout version 2 requires KernArgsVersion=3");
-        // Layout 3 is layout 0 plus Stream-K post kernels. Runtimes that
-        // validate the persistent-loop layout reject version 3 at load, which
-        // drops the whole library file. Runtimes that do not ignore it and the
-        // post kernels but force tree reduction for handwritten kernels, so
-        // only a kernel without `tree` support computes wrong results there.
+        // Layout 3 is layout 0 plus post kernels; older runtimes reject it at load.
         if(version == 3 && (outerVersion != 3 || customKernel.postKernels.empty()))
             throw std::runtime_error(
                 "Argument layout version 3 requires KernArgsVersion=3 and post kernels");
@@ -7253,8 +7249,9 @@ namespace TensileLite
 
             // Batch-inclusive tile count, matching the value the StreamK
             // resolution and the kernel-arg packing both use.
-            const size_t tiles = usesStreamKSpatialCluster()
-                ? launch.clusterSchedule.blocks : problem.getNumTiles(sizeMapping, 1);
+            const size_t tiles = usesStreamKSpatialCluster() ? launch.clusterSchedule.blocks
+                                 : handwrittenCustomKernel() ? launch.totalTiles
+                                                             : problem.getNumTiles(sizeMapping, 1);
 
             if(launch.reduction == origami::reduction_t::parallel)
             {
