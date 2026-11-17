@@ -143,17 +143,17 @@ const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
 bool rocke_i_is_packed_only(const rocke_type_t* t);
 
 /* The refusal of an `op_name` value of type `t` whose elements are packed-only
- * (rocke_i_is_packed_only), written to `buf`, or NULL when `t` is not; the text
- * of core/ir.py::_refuse_packed_only_value. NULL-safe. */
+ * (rocke_i_is_packed_only), written to `buf`, or NULL when `t` is not; the twin
+ * of core/ir.py::_packed_only_value_error. NULL-safe. */
 const char* rocke_i_packed_only_value_error(const char* op_name,
                                             const rocke_type_t* t,
                                             char* buf,
                                             size_t cap);
 
 /* Throw ckc::TypeError with rocke_i_packed_only_value_error's text when
- * rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
- * which states the rule. rocke_i_op calls it for every result and rocke_b_param
- * for every parameter, so no builder makes such a value. NULL-safe. */
+ * rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value.
+ * rocke_i_op calls it for every result and rocke_b_param for every parameter,
+ * so no builder makes such a value. NULL-safe. */
 void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t);
 
 /* Throw ckc::TypeError when `t` is unsigned (rocke_type_is_unsigned) and
@@ -422,9 +422,9 @@ bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
 #define ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT "launch it through KernelLauncher.from_artifact"
 
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
- * (Python core/ir.py::_refuse_if_else_result_type, which raises where this
- * returns): ROCKE_OK, or the status of the Python exception with its text
- * written to `err`. A missing type (NULL or unnamed) is refused first, then a
+ * (Python core/ir.py::_if_else_result_type_error, which returns the exception
+ * whose status this returns): ROCKE_OK, or that status with its text written
+ * to `err`. A missing type (NULL or unnamed) is refused first, then a
  * packed-only type (both ROCKE_ERR_TYPE), then an LDS allocation
  * (ROCKE_ERR_VALUE). The builder and rocke_i_if_else_yields use it. */
 rocke_status_t rocke_i_check_if_else_result_type(int index,

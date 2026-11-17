@@ -3246,7 +3246,7 @@ rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* er
     return ROCKE_OK;
 }
 
-/* Python core/ir.py::_refuse_if_else_result_type; the types and texts are the
+/* Python core/ir.py::_if_else_result_type_error; the types and texts are the
  * Python engine's. A result with no type is refused first
  * (untyped_value_message), before its name is read; a packed-only type has no
  * value form; an LDS allocation is a name the lowerings resolve to its base,
@@ -3276,15 +3276,17 @@ rocke_status_t rocke_i_check_if_else_result_type(int index,
     return ROCKE_OK;
 }
 
-/* Python core/ir.py::_if_else_branch_yield: the scf.yield that ends branch
- * `branch` (0 then, 1 else) of the scf.if_else `op`, whose condition and branch
- * counts and result types rocke_i_if_else_yields has checked, in `*out_yield`
- * (NULL when `op` has no results). Only that closing scf.yield has its values
- * taken, so a branch holds no other, directly or in a region nested in it that
- * takes no yields (rocke_i_orphan_yield). Returns ROCKE_OK, or the status of the
- * Python engine's exception with its refusal written into `err`: a TypeError
- * for a yielded value with no type (untyped_value_message), raised before any
- * rule reads its type, and a ValueError for every other refusal. */
+/* Python core/ir.py::_if_else_branch_yield_error, which returns the refusal
+ * only, and _if_else_yields, which reads the closing yield: the scf.yield that
+ * ends branch `branch` (0 then, 1 else) of the scf.if_else `op`, whose
+ * condition and branch counts and result types rocke_i_if_else_yields has
+ * checked, in `*out_yield` (NULL when `op` has no results). Only that closing
+ * scf.yield has its values taken, so a branch holds no other, directly or in a
+ * region nested in it that takes no yields (rocke_i_orphan_yield). Returns
+ * ROCKE_OK, or the status of the Python engine's exception with its refusal
+ * written into `err`: a TypeError for a yielded value with no type
+ * (untyped_value_message), returned before any rule reads its type, and a
+ * ValueError for every other refusal. */
 static rocke_status_t if_else_branch_yield(
     const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap)
 {
