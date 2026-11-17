@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <utility>
 #include "common.hpp"
 
 namespace {
@@ -456,4 +457,48 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
     REQUIRE(origami::streamk::select_grid_size(
                 p, make_hardware(950), c, origami::grid_selection_t::k_split_aware) == 768);
   }
+}
+
+TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split", "[streamk]") {
+  // One tile row of `tiles` columns on 256 CUs, unbounded workspace. Returns
+  // origami's reduction and the k_split_aware grid sized for that reduction.
+  auto pick = [](size_t tiles, size_t ipt, bool needs_divisor, size_t num_cus = 0) {
+    constexpr size_t MT_M = 256, MT_N = 32, MT_K = 128;
+    auto p                      = make_problem(MT_M, MT_N * tiles, MT_K * ipt);
+    p.num_cus                   = num_cus;
+    auto c                      = make_config(MT_M, MT_N, MT_K);
+    c.workspace_size            = std::numeric_limits<size_t>::max();
+    c.workspace_size_per_elem_c = 4;
+    c.tree_split_needs_divisor  = needs_divisor;
+    const auto hw               = make_hardware(950);
+    const auto algo             = origami::grid_selection_t::k_split_aware;
+    c.reduction_strategy        = origami::streamk::select_reduction(p, hw, c, algo);
+    return std::make_pair(c.reduction_strategy, origami::streamk::select_grid_size(p, hw, c, algo));
+  };
+  using origami::reduction_t;
+  using R = std::pair<reduction_t, size_t>;
+
+  // Default: parallel only up to cu_count / 4 = 64 tiles.
+  REQUIRE(pick(64, 4096, false) == R{reduction_t::parallel, 256});
+  REQUIRE(pick(128, 4225, false) == R{reduction_t::tree, 256});
+  REQUIRE(pick(161, 708, false) == R{reduction_t::tree, 161});
+
+  // At or below cu_count / 4 tiles the flag changes nothing.
+  REQUIRE(pick(64, 4096, true) == R{reduction_t::parallel, 256});
+  REQUIRE(pick(1, 1811, true) == pick(1, 1811, false));
+
+  // Above it: parallel, smallest F that best fills the last of <= 2 waves.
+  REQUIRE(pick(76, 235, true) == R{reduction_t::parallel, 76 * 3});
+  REQUIRE(pick(128, 4225, true) == R{reduction_t::parallel, 128 * 2});
+  REQUIRE(pick(161, 708, true) == R{reduction_t::parallel, 161 * 3});
+  // F = 1 already fills the wave: no split (the caller demotes to tree).
+  REQUIRE(pick(247, 5770, true) == R{reduction_t::parallel, 247});
+  REQUIRE(pick(100, 64, true) == R{reduction_t::parallel, 100 * 5});
+
+  // Still tree below MinItersForParallel and at or above the CU count.
+  REQUIRE(pick(128, 63, true).first == reduction_t::tree);
+  REQUIRE(pick(256, 4096, true).first == reduction_t::tree);
+
+  // A genuine CU cap keeps the one-wave split.
+  REQUIRE(pick(80, 4096, true, 200) == R{reduction_t::parallel, 160});
 }

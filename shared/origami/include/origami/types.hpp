@@ -622,6 +622,12 @@ struct config_t {
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
+  /// The kernel's tree reduction can only split a tile's K iterations into
+  /// equal parts (no per-tile extra iterations), while it also completes
+  /// parallel reduction. k_split_aware then admits parallel reduction for any
+  /// tile count below the CU count and sizes that split by wave fill.
+  bool tree_split_needs_divisor = false;
+
   /// Prediction mode for latency estimation.
   prediction_modes_t prediction_mode = prediction_modes_t::estimation;
 
