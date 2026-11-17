@@ -541,21 +541,35 @@ class TestXRunAndRasRefusals(unittest.TestCase):
         base.update(kw)
         return _wgrad(**base)
 
+    def _assert_only_x_run_refuses(self, **kw):
+        """The spec validates without x_run and is refused for x_run alone."""
+        self._xrun_spec(x_run=False, **kw).validate()
+        with self.assertRaisesRegex(ValueError, "x_run widens the sync X loader"):
+            self._xrun_spec(x_run=True, **kw).validate()
+
     def test_x_run_refused_with_async_dma(self):
-        with self.assertRaises(ValueError):
-            self._xrun_spec(async_dma=True).validate()
+        # async_dma rides on lds_k_outer, which needs the deeper 32-wide atom.
+        self._assert_only_x_run_refuses(
+            async_dma=True, lds_k_outer=True, tile_k=32, warp_tile_k=32
+        )
 
     def test_x_run_refused_with_lds_k_outer(self):
-        with self.assertRaises(ValueError):
-            self._xrun_spec(lds_k_outer=True, warp_tile_k=16).validate()
+        self._assert_only_x_run_refuses(lds_k_outer=True, tile_k=32, warp_tile_k=32)
 
     def test_x_run_refused_with_group_merge(self):
-        with self.assertRaises(ValueError):
-            self._xrun_spec(group_merge=2).validate()
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        # group_merge is depthwise-only (and divides the groups); wave64.
+        dw = ConvProblem(N=2, Hi=64, Wi=64, C=8, K=8, Y=3, X=3, pH=1, pW=1, groups=8)
+        self._assert_only_x_run_refuses(
+            problem=dw, group_merge=2, wave_size=64, tile_k=32, warp_tile_k=32
+        )
 
     def test_x_run_refused_with_stream_k(self):
-        with self.assertRaises(ValueError):
-            self._xrun_spec(streamk="full").validate()
+        # dp_sk is a stream-K mode ("full" is not), wave64.
+        self._assert_only_x_run_refuses(
+            streamk="dp_sk", wave_size=64, tile_k=32, warp_tile_k=32
+        )
 
     def test_x_run_refused_with_3d(self):
         from kernels.common._conv_implicit_gemm_common import ConvProblem
@@ -578,7 +592,7 @@ class TestXRunAndRasRefusals(unittest.TestCase):
             pW=1,
             dD=1,
         )
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "x_run widens the sync X loader"):
             self._xrun_spec(problem=p3d).validate()
 
     def test_ras_refused_with_3d(self):
