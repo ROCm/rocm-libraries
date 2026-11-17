@@ -33,6 +33,8 @@ namespace rocsparse
     // Threads per block of every bsrsv solve launch.
     static constexpr uint32_t bsrsv_solve_block_size = 128;
 
+    // Writes the analysis and the zero pivot into bsrsv_info. Reuse may borrow
+    // the bsric0, bsrilu0 or bsrsm analysis held by info.
     template <typename T, typename I, typename J>
     rocsparse_status bsrsv_analysis_template(rocsparse_handle          handle,
                                              rocsparse_direction       dir,
@@ -45,6 +47,7 @@ namespace rocsparse
                                              const J*                  bsr_col_ind,
                                              rocsparse_int             block_dim,
                                              rocsparse_mat_info        info,
+                                             rocsparse_bsrsv_info      bsrsv_info,
                                              rocsparse_analysis_policy analysis,
                                              rocsparse_solve_policy    solve,
                                              void*                     temp_buffer);

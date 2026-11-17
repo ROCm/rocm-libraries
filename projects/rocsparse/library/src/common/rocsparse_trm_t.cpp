@@ -213,32 +213,23 @@ void rocsparse::trm_t::clear_ellsv_info()
     this->destroy_ellsv_info();
 }
 
-void rocsparse::trm_t::detach_borrowed_bsrsv(rocsparse_operation operation,
-                                             rocsparse_fill_mode fill_mode)
+bool rocsparse::trm_t::holds_bsrsv_donor(const rocsparse::trm_info_t* trm) const
 {
-    auto* bsrsv = this->m_bsrsv_info.get();
-    if(bsrsv == nullptr)
+    if(trm == nullptr)
     {
-        return;
+        return false;
     }
 
-    rocsparse::trm_info_t* slot = bsrsv->get(operation, fill_mode);
-    if(slot == nullptr)
-    {
-        return;
-    }
-
-    // Reuse borrows from these three routines only.
     const rocsparse::trm_data_t* donors[]
         = {this->m_bsric0_info.get(), this->m_bsrilu0_info.get(), this->m_bsrsm_info.get()};
     for(const rocsparse::trm_data_t* donor : donors)
     {
-        if(donor != nullptr && donor->holds(slot))
+        if(donor != nullptr && donor->holds(trm))
         {
-            bsrsv->set(operation, fill_mode, nullptr);
-            return;
+            return true;
         }
     }
+    return false;
 }
 
 void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)

@@ -89,8 +89,7 @@ namespace rocsparse
                  rocsparse_fill_mode    fill_mode,
                  rocsparse::trm_info_t* trm_info);
 
-        // True when one of this analysis slots holds trm, so trm is an alias that
-        // this container does not own.
+        // True when one of this container's analysis slots points at trm.
         bool holds(const rocsparse::trm_info_t* trm) const
         {
             for(const rocsparse::trm_info_t* slot : this->m_data)

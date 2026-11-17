@@ -118,7 +118,6 @@ namespace rocsparse
     const bool bsrsv_wide = !bsrsv_legacy_indices                                                 \
                             || rocsparse::bsrsv_solve_needs_wide(static_cast<int64_t>(mb),        \
                                                                  static_cast<int64_t>(block_dim), \
-                                                                 static_cast<int64_t>(nnzb),      \
                                                                  bsrsv_num_blocks,                \
                                                                  static_cast<int64_t>(bsrsv_grid))
 

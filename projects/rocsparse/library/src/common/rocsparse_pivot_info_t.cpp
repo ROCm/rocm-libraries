@@ -35,8 +35,8 @@ rocsparse_status rocsparse::pivot_info_t::create_zero_pivot_async(int64_t       
 }
 
 rocsparse_status
-    rocsparse::pivot_info_t::drop_zero_pivot_if_indextype_async(rocsparse_indextype indextype,
-                                                                hipStream_t         stream)
+    rocsparse::pivot_info_t::drop_zero_pivot_unless_indextype_async(rocsparse_indextype indextype,
+                                                                    hipStream_t         stream)
 {
     if(this->get_position() != nullptr && this->get_indextype() != indextype)
     {

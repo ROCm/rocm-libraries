@@ -37,17 +37,19 @@
 // a contiguous chunk of the row-map slots, so a clamped grid still covers
 // every block row and the done-flag spins stay in topological order.
 //
-// The narrow kernels in bsrsv_device.h are left unchanged. Their 32/32
-// instantiation is the legacy launch.
+// The narrow kernels in bsrsv_device.h keep their rocsparse_int signatures.
+// Their 32/32 instantiation is the legacy launch.
 
 namespace rocsparse
 {
-    // True when the narrow (rocsparse_int) kernels would be wrong: the grid
-    // does not cover every virtual block, mb itself does not fit in
-    // rocsparse_int, a vector offset row * block_dim does not fit, or the
-    // diagonal offset block_dim * block_dim * j (j < nnzb) does not fit.
-    __host__ __forceinline__ bool bsrsv_solve_needs_wide(
-        int64_t mb, int64_t block_dim, int64_t nnzb, int64_t num_blocks, int64_t grid_x)
+    // True when the wide kernels run instead of the narrow (rocsparse_int)
+    // ones: the grid does not cover every virtual block, mb itself does not fit
+    // in rocsparse_int, a vector offset row * block_dim does not fit, or the
+    // in-block offset bi * block_dim does not fit. The block value offset
+    // block_dim * block_dim * j is formed in int64_t by BSR_IND on both paths,
+    // so nnzb does not decide.
+    __host__ __forceinline__ bool
+        bsrsv_solve_needs_wide(int64_t mb, int64_t block_dim, int64_t num_blocks, int64_t grid_x)
     {
         if(mb <= 0 || block_dim <= 0 || num_blocks <= 0)
         {
@@ -71,12 +73,7 @@ namespace rocsparse
         }
 
         // block_dim * block_dim <= narrow_max is tested without forming the product.
-        if(block_dim > narrow_max / block_dim)
-        {
-            return true;
-        }
-
-        return nnzb > narrow_max / (block_dim * block_dim);
+        return block_dim > narrow_max / block_dim;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>

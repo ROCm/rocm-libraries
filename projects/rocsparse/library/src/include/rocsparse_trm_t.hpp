@@ -100,9 +100,9 @@ namespace rocsparse
         void clear_bsric0_info();
         void clear_ellsv_info();
 
-        // Null one bsrsv slot when it aliases an analysis another routine owns,
-        // so a later recreate does not delete that analysis.
-        void detach_borrowed_bsrsv(rocsparse_operation operation, rocsparse_fill_mode fill_mode);
+        // True when trm is an analysis held by bsric0, bsrilu0 or bsrsm, the
+        // routines whose analysis bsrsv reuse borrows.
+        bool holds_bsrsv_donor(const rocsparse::trm_info_t* trm) const;
 
     public:
         trm_t() = default;

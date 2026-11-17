@@ -42,6 +42,7 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
                                                     const J*                  bsr_col_ind,
                                                     rocsparse_int             block_dim,
                                                     rocsparse_mat_info        info,
+                                                    rocsparse_bsrsv_info      bsrsv_info,
                                                     rocsparse_analysis_policy analysis,
                                                     rocsparse_solve_policy    solve,
                                                     void*                     temp_buffer)
@@ -53,6 +54,7 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
 
     ROCSPARSE_CHECKARG_POINTER(5, descr);
     ROCSPARSE_CHECKARG_POINTER(10, info);
+    ROCSPARSE_CHECKARG_POINTER(10, bsrsv_info);
 
     // Logging
     rocsparse::log_trace(handle,
@@ -122,7 +124,7 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
 
     if(analysis == rocsparse_analysis_policy_reuse)
     {
-        auto                     trm   = info->get_bsrsv_info(trans, descr->fill_mode);
+        auto                     trm   = bsrsv_info->get(trans, descr->fill_mode);
         rocsparse::pivot_info_t* donor = nullptr;
 
         // donor is the container that owns a borrowed analysis. Its zero pivot holds
@@ -155,14 +157,12 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
             // can fail after it has already reset the destination to "no pivot". If the
             // alias were stored first, a retry would find this slot, leave donor null,
             // and keep that reset pivot, so a structural zero from the donor would be lost.
-            auto bsrsv_info = info->get_bsrsv_info();
             if(donor != nullptr && donor->get_position() != nullptr)
             {
-                // Copy the donor's pivot, with the donor's index type.
-                RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_if_indextype_async(
+                RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_unless_indextype_async(
                     donor->get_indextype(), handle->stream));
                 RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->copy_pivot_info_async(donor, handle->stream));
-                info->set_bsrsv_info(trans, descr->fill_mode, trm);
+                bsrsv_info->set(trans, descr->fill_mode, trm);
                 return rocsparse_status_success;
             }
 
@@ -174,23 +174,22 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
             if(bsrsv_info->get_position() != nullptr
                && bsrsv_info->get_indextype() == rocsparse::get_indextype<J>())
             {
-                info->set_bsrsv_info(trans, descr->fill_mode, trm);
+                bsrsv_info->set(trans, descr->fill_mode, trm);
                 return rocsparse_status_success;
             }
         }
     }
 
-    auto bsrsv_info = info->get_bsrsv_info();
-
-    // Reuse stores a raw alias of a bsric0, bsrilu0 or bsrsm analysis in this
-    // slot. recreate deletes whatever the slot holds, so drop the alias first
+    // Reuse stores a raw alias of a bsric0, bsrilu0 or bsrsm analysis of info in
+    // this slot. recreate deletes whatever the slot holds, so drop the alias first
     // and leave the analysis with the routine that created it. An analysis
-    // this routine owns stays in the slot and is replaced.
-    info->detach_borrowed_bsrsv(trans, descr->fill_mode);
+    // bsrsv_info owns stays in the slot and is replaced.
+    if(info->holds_bsrsv_donor(bsrsv_info->get(trans, descr->fill_mode)))
+    {
+        bsrsv_info->set(trans, descr->fill_mode, nullptr);
+    }
 
-    // The new analysis writes its pivot with index type J. Drop a pivot of
-    // another type first, since recreate does not retype it in place.
-    RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_if_indextype_async(
+    RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_unless_indextype_async(
         rocsparse::get_indextype<J>(), handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->recreate(
@@ -200,43 +199,45 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
 }
 
 // bsrsv_analysis
-#define C_IMPL(NAME, TYPE)                                                          \
-    extern "C" rocsparse_status NAME(rocsparse_handle          handle,              \
-                                     rocsparse_direction       dir,                 \
-                                     rocsparse_operation       trans,               \
-                                     rocsparse_int             mb,                  \
-                                     rocsparse_int             nnzb,                \
-                                     const rocsparse_mat_descr descr,               \
-                                     const TYPE*               bsr_val,             \
-                                     const rocsparse_int*      bsr_row_ptr,         \
-                                     const rocsparse_int*      bsr_col_ind,         \
-                                     rocsparse_int             block_dim,           \
-                                     rocsparse_mat_info        info,                \
-                                     rocsparse_analysis_policy analysis,            \
-                                     rocsparse_solve_policy    solve,               \
-                                     void*                     temp_buffer)         \
-    try                                                                             \
-    {                                                                               \
-        ROCSPARSE_ROUTINE_TRACE;                                                    \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_analysis_template(handle,        \
-                                                                     dir,           \
-                                                                     trans,         \
-                                                                     mb,            \
-                                                                     nnzb,          \
-                                                                     descr,         \
-                                                                     bsr_val,       \
-                                                                     bsr_row_ptr,   \
-                                                                     bsr_col_ind,   \
-                                                                     block_dim,     \
-                                                                     info,          \
-                                                                     analysis,      \
-                                                                     solve,         \
-                                                                     temp_buffer)); \
-        return rocsparse_status_success;                                            \
-    }                                                                               \
-    catch(...)                                                                      \
-    {                                                                               \
-        RETURN_ROCSPARSE_EXCEPTION();                                               \
+#define C_IMPL(NAME, TYPE)                                                  \
+    extern "C" rocsparse_status NAME(rocsparse_handle          handle,      \
+                                     rocsparse_direction       dir,         \
+                                     rocsparse_operation       trans,       \
+                                     rocsparse_int             mb,          \
+                                     rocsparse_int             nnzb,        \
+                                     const rocsparse_mat_descr descr,       \
+                                     const TYPE*               bsr_val,     \
+                                     const rocsparse_int*      bsr_row_ptr, \
+                                     const rocsparse_int*      bsr_col_ind, \
+                                     rocsparse_int             block_dim,   \
+                                     rocsparse_mat_info        info,        \
+                                     rocsparse_analysis_policy analysis,    \
+                                     rocsparse_solve_policy    solve,       \
+                                     void*                     temp_buffer) \
+    try                                                                     \
+    {                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                            \
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_analysis_template(       \
+            handle,                                                         \
+            dir,                                                            \
+            trans,                                                          \
+            mb,                                                             \
+            nnzb,                                                           \
+            descr,                                                          \
+            bsr_val,                                                        \
+            bsr_row_ptr,                                                    \
+            bsr_col_ind,                                                    \
+            block_dim,                                                      \
+            info,                                                           \
+            (info != nullptr) ? info->get_bsrsv_info() : nullptr,           \
+            analysis,                                                       \
+            solve,                                                          \
+            temp_buffer));                                                  \
+        return rocsparse_status_success;                                    \
+    }                                                                       \
+    catch(...)                                                              \
+    {                                                                       \
+        RETURN_ROCSPARSE_EXCEPTION();                                       \
     }
 
 #define ROCSPARSE_BSRSV_ANALYSIS_INST(T, I, J)                             \
@@ -252,6 +253,7 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
         const J*,                                                          \
         rocsparse_int,                                                     \
         rocsparse_mat_info,                                                \
+        rocsparse_bsrsv_info,                                              \
         rocsparse_analysis_policy,                                         \
         rocsparse_solve_policy,                                            \
         void*)

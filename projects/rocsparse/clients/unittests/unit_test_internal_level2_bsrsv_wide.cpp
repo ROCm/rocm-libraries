@@ -37,7 +37,8 @@
 // when get_grid_size_x clamps, and they instantiate (i32, i32), (i64, i32)
 // and (i64, i64). The public rocsparse_sbsrsv_solve tests shrink
 // maxGridSize[0] so the host is the one that picks the wide kernel, including
-// the transposed gather.
+// the transposed gather. The transposed analysis and gather at the 64-bit
+// widths run through bsrsv_solve_core.
 
 #include "unit_test_utils.hpp"
 
@@ -184,6 +185,36 @@ namespace
                 {
                     continue;
                 }
+                b.col_ind.push_back(a.col_ind[j]);
+                b.val.insert(b.val.end(),
+                             a.val.begin() + blk * static_cast<size_t>(j),
+                             a.val.begin() + blk * static_cast<size_t>(j + 1));
+            }
+            b.row_ptr.push_back(static_cast<I>(b.col_ind.size()));
+        }
+        a = b;
+    }
+
+    // Adds a kOffAsym block at column row - 3 to every block row of a zero-based
+    // lower matrix that has one, so the transposed permutation is not a shift.
+    template <typename I, typename J>
+    void add_far_lower_block(test_matrix<I, J>& a)
+    {
+        constexpr int32_t offset = 3;
+        constexpr size_t  blk    = static_cast<size_t>(kBlockDim) * kBlockDim;
+        test_matrix<I, J> b      = a;
+        b.row_ptr.assign(1, static_cast<I>(0));
+        b.col_ind.clear();
+        b.val.clear();
+        for(int32_t row = 0; row < kMb; ++row)
+        {
+            if(row >= offset)
+            {
+                b.col_ind.push_back(static_cast<J>(row - offset));
+                append_block(b.val, kOffAsym, a.dir);
+            }
+            for(I j = a.row_ptr[row]; j < a.row_ptr[row + 1]; ++j)
+            {
                 b.col_ind.push_back(a.col_ind[j]);
                 b.val.insert(b.val.end(),
                              a.val.begin() + blk * static_cast<size_t>(j),
@@ -662,11 +693,19 @@ namespace
         return pivot;
     }
 
+    // The routines whose lower analysis bsrsv reuse borrows.
+    enum class donor_t
+    {
+        bsric0,
+        bsrilu0,
+        bsrsm
+    };
+
     // One block-lower matrix with 32-bit and 64-bit indices on one handle, matrix
-    // descriptor and mat_info, and a buffer large enough for bsric0 and for bsrsv
-    // at either width and fill mode. The bsrsv analyses of both fill modes share
-    // one zero pivot, which is how an analysis of one width retypes the pivot that
-    // another analysis left.
+    // descriptor and mat_info, and a buffer large enough for every donor and for
+    // bsrsv at either width, fill mode and operation. The bsrsv analyses of both
+    // fill modes share one zero pivot, which is how an analysis of one width
+    // retypes the pivot that another analysis left.
     class internal_level2_bsrsv_wide : public ::testing::Test
     {
     protected:
@@ -686,13 +725,18 @@ namespace
         std::unique_ptr<rocsparse_ut::device_vector<char>>    d_buffer;
 
         // With missing_row >= 0 that block row has no diagonal block, which the
-        // analyses report as a structural zero.
-        void build(int32_t missing_row = -1)
+        // analyses report as a structural zero. far_block adds the blocks of
+        // add_far_lower_block.
+        void build(int32_t missing_row = -1, bool far_block = false)
         {
             a32 = build_matrix<int32_t, int32_t>(true);
             if(missing_row >= 0)
             {
                 remove_diagonal_block(a32, missing_row);
+            }
+            if(far_block)
+            {
+                add_far_lower_block(a32);
             }
             a64 = widen(a32);
 
@@ -723,15 +767,25 @@ namespace
             {
                 ASSERT_EQ(rocsparse_set_mat_fill_mode(objects.descr, fill),
                           rocsparse_status_success);
-                size_t b32 = 0;
-                size_t b64 = 0;
-                ASSERT_EQ((buffer_size<int32_t, int32_t>(&b32)), rocsparse_status_success);
-                ASSERT_EQ((buffer_size<int64_t, int64_t>(&b64)), rocsparse_status_success);
-                bytes = std::max(bytes, std::max(b32, b64));
+                for(const auto trans : {rocsparse_operation_none, rocsparse_operation_transpose})
+                {
+                    size_t b32    = 0;
+                    size_t b64_32 = 0;
+                    size_t b64    = 0;
+                    ASSERT_EQ((buffer_size<int32_t, int32_t>(&b32, trans)),
+                              rocsparse_status_success);
+                    ASSERT_EQ((buffer_size<int64_t, int32_t>(&b64_32, trans)),
+                              rocsparse_status_success);
+                    ASSERT_EQ((buffer_size<int64_t, int64_t>(&b64, trans)),
+                              rocsparse_status_success);
+                    bytes = std::max({bytes, b32, b64_32, b64});
+                }
             }
             ASSERT_EQ(rocsparse_set_mat_fill_mode(objects.descr, rocsparse_fill_mode_lower),
                       rocsparse_status_success);
-            size_t ic0_bytes = 0;
+            size_t ic0_bytes  = 0;
+            size_t ilu0_bytes = 0;
+            size_t sm_bytes   = 0;
             ASSERT_EQ(rocsparse_sbsric0_buffer_size(objects.handle,
                                                     rocsparse_direction_row,
                                                     kMb,
@@ -744,7 +798,34 @@ namespace
                                                     objects.info,
                                                     &ic0_bytes),
                       rocsparse_status_success);
-            bytes = std::max(bytes, ic0_bytes);
+            ASSERT_EQ(rocsparse_sbsrilu0_buffer_size(objects.handle,
+                                                     rocsparse_direction_row,
+                                                     kMb,
+                                                     a32.nnzb(),
+                                                     objects.descr,
+                                                     d_val->ptr,
+                                                     d_row32->ptr,
+                                                     d_col32->ptr,
+                                                     kBlockDim,
+                                                     objects.info,
+                                                     &ilu0_bytes),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_sbsrsm_buffer_size(objects.handle,
+                                                   rocsparse_direction_row,
+                                                   rocsparse_operation_none,
+                                                   rocsparse_operation_none,
+                                                   kMb,
+                                                   1,
+                                                   a32.nnzb(),
+                                                   objects.descr,
+                                                   d_val->ptr,
+                                                   d_row32->ptr,
+                                                   d_col32->ptr,
+                                                   kBlockDim,
+                                                   objects.info,
+                                                   &sm_bytes),
+                      rocsparse_status_success);
+            bytes = std::max({bytes, ic0_bytes, ilu0_bytes, sm_bytes});
 
             d_buffer = std::make_unique<rocsparse_ut::device_vector<char>>(
                 std::vector<char>(bytes + 1, 0));
@@ -778,11 +859,11 @@ namespace
         }
 
         template <typename I, typename J>
-        rocsparse_status buffer_size(size_t* bytes)
+        rocsparse_status buffer_size(size_t* bytes, rocsparse_operation trans)
         {
             return rocsparse::bsrsv_buffer_size_template<test_T, I, J>(objects.handle,
                                                                        rocsparse_direction_row,
-                                                                       rocsparse_operation_none,
+                                                                       trans,
                                                                        static_cast<J>(kMb),
                                                                        static_cast<I>(a32.nnzb()),
                                                                        objects.descr,
@@ -794,31 +875,39 @@ namespace
                                                                        bytes);
         }
 
+        // Writes into dest, or into the bsrsv container of objects.info when dest
+        // is null. The donors always come from objects.info.
         template <typename I, typename J>
-        rocsparse_status analysis(rocsparse_fill_mode fill, rocsparse_analysis_policy policy)
+        rocsparse_status analysis(rocsparse_fill_mode       fill,
+                                  rocsparse_analysis_policy policy,
+                                  rocsparse_operation       trans = rocsparse_operation_none,
+                                  rocsparse_bsrsv_info      dest  = nullptr)
         {
             const rocsparse_status status = rocsparse_set_mat_fill_mode(objects.descr, fill);
             if(status != rocsparse_status_success)
             {
                 return status;
             }
-            return rocsparse::bsrsv_analysis_template<test_T, I, J>(objects.handle,
-                                                                    rocsparse_direction_row,
-                                                                    rocsparse_operation_none,
-                                                                    static_cast<J>(kMb),
-                                                                    static_cast<I>(a32.nnzb()),
-                                                                    objects.descr,
-                                                                    d_val->ptr,
-                                                                    row_ptr<I>(),
-                                                                    col_ind<J>(),
-                                                                    kBlockDim,
-                                                                    objects.info,
-                                                                    policy,
-                                                                    rocsparse_solve_policy_auto,
-                                                                    d_buffer->ptr);
+            return rocsparse::bsrsv_analysis_template<test_T, I, J>(
+                objects.handle,
+                rocsparse_direction_row,
+                trans,
+                static_cast<J>(kMb),
+                static_cast<I>(a32.nnzb()),
+                objects.descr,
+                d_val->ptr,
+                row_ptr<I>(),
+                col_ind<J>(),
+                kBlockDim,
+                objects.info,
+                (dest != nullptr) ? dest : objects.info->get_bsrsv_info(),
+                policy,
+                rocsparse_solve_policy_auto,
+                d_buffer->ptr);
         }
 
-        rocsparse_status bsric0_analysis()
+        // Lower analysis of donor, which bsrsv reuse may borrow.
+        rocsparse_status donor_analysis(donor_t donor)
         {
             const rocsparse_status status
                 = rocsparse_set_mat_fill_mode(objects.descr, rocsparse_fill_mode_lower);
@@ -826,26 +915,147 @@ namespace
             {
                 return status;
             }
-            return rocsparse_sbsric0_analysis(objects.handle,
-                                              rocsparse_direction_row,
-                                              kMb,
-                                              a32.nnzb(),
-                                              objects.descr,
-                                              d_val->ptr,
-                                              d_row32->ptr,
-                                              d_col32->ptr,
-                                              kBlockDim,
-                                              objects.info,
-                                              rocsparse_analysis_policy_force,
-                                              rocsparse_solve_policy_auto,
-                                              d_buffer->ptr);
+            switch(donor)
+            {
+            case donor_t::bsric0:
+                return rocsparse_sbsric0_analysis(objects.handle,
+                                                  rocsparse_direction_row,
+                                                  kMb,
+                                                  a32.nnzb(),
+                                                  objects.descr,
+                                                  d_val->ptr,
+                                                  d_row32->ptr,
+                                                  d_col32->ptr,
+                                                  kBlockDim,
+                                                  objects.info,
+                                                  rocsparse_analysis_policy_force,
+                                                  rocsparse_solve_policy_auto,
+                                                  d_buffer->ptr);
+            case donor_t::bsrilu0:
+                return rocsparse_sbsrilu0_analysis(objects.handle,
+                                                   rocsparse_direction_row,
+                                                   kMb,
+                                                   a32.nnzb(),
+                                                   objects.descr,
+                                                   d_val->ptr,
+                                                   d_row32->ptr,
+                                                   d_col32->ptr,
+                                                   kBlockDim,
+                                                   objects.info,
+                                                   rocsparse_analysis_policy_force,
+                                                   rocsparse_solve_policy_auto,
+                                                   d_buffer->ptr);
+            case donor_t::bsrsm:
+                return rocsparse_sbsrsm_analysis(objects.handle,
+                                                 rocsparse_direction_row,
+                                                 rocsparse_operation_none,
+                                                 rocsparse_operation_none,
+                                                 kMb,
+                                                 1,
+                                                 a32.nnzb(),
+                                                 objects.descr,
+                                                 d_val->ptr,
+                                                 d_row32->ptr,
+                                                 d_col32->ptr,
+                                                 kBlockDim,
+                                                 objects.info,
+                                                 rocsparse_analysis_policy_force,
+                                                 rocsparse_solve_policy_auto,
+                                                 d_buffer->ptr);
+            }
+            return rocsparse_status_internal_error;
+        }
+
+        rocsparse::trm_info_t* donor_slot(donor_t donor)
+        {
+            switch(donor)
+            {
+            case donor_t::bsric0:
+                return objects.info->get_bsric0_info(rocsparse_operation_none,
+                                                     rocsparse_fill_mode_lower);
+            case donor_t::bsrilu0:
+                return objects.info->get_bsrilu0_info(rocsparse_operation_none,
+                                                      rocsparse_fill_mode_lower);
+            case donor_t::bsrsm:
+                return objects.info->get_bsrsm_info(rocsparse_operation_none,
+                                                    rocsparse_fill_mode_lower);
+            }
+            return nullptr;
+        }
+
+        rocsparse_status donor_clear(donor_t donor)
+        {
+            switch(donor)
+            {
+            case donor_t::bsric0:
+                return rocsparse_bsric0_clear(objects.handle, objects.info);
+            case donor_t::bsrilu0:
+                return rocsparse_bsrilu0_clear(objects.handle, objects.info);
+            case donor_t::bsrsm:
+                return rocsparse_bsrsm_clear(objects.handle, objects.info);
+            }
+            return rocsparse_status_internal_error;
+        }
+
+        // bsrsv reuse borrows the donor's analysis, and a later bsrsv force must
+        // build its own analysis instead of deleting the borrowed one. The force
+        // would otherwise free the borrowed analysis and allocate the new one,
+        // often at the same address, so the check is that both analyses are alive
+        // at once.
+        void expect_force_keeps_borrowed(donor_t donor)
+        {
+            ASSERT_NO_FATAL_FAILURE(build());
+            ASSERT_EQ(donor_analysis(donor), rocsparse_status_success);
+            ASSERT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
+                                                  rocsparse_analysis_policy_reuse)),
+                      rocsparse_status_success);
+
+            rocsparse::trm_info_t* const borrowed = donor_slot(donor);
+            ASSERT_NE(borrowed, nullptr);
+            EXPECT_EQ(
+                objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
+                borrowed);
+
+            ASSERT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
+                                                  rocsparse_analysis_policy_force)),
+                      rocsparse_status_success);
+            rocsparse::trm_info_t* const own
+                = objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+            EXPECT_NE(own, nullptr);
+            EXPECT_NE(own, borrowed);
+            EXPECT_EQ(donor_slot(donor), borrowed);
+
+            ASSERT_EQ(donor_clear(donor), rocsparse_status_success);
+        }
+
+        // Block row 3 has no diagonal block. The donor's analysis finds it, and
+        // the solve on the borrowed analysis must report row 3, not success. A
+        // reuse that missed the donor would rebuild and report the same row, so
+        // the slot must hold the donor's analysis.
+        void expect_reuse_reports_structural_zero(donor_t donor)
+        {
+            ASSERT_NO_FATAL_FAILURE(build(3));
+            ASSERT_EQ(donor_analysis(donor), rocsparse_status_success);
+            ASSERT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
+                                                  rocsparse_analysis_policy_reuse)),
+                      rocsparse_status_success);
+            ASSERT_NE(donor_slot(donor), nullptr);
+            EXPECT_EQ(
+                objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
+                donor_slot(donor));
+            ASSERT_EQ(solve_public(), rocsparse_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            expect_public_zero_pivot(3);
+            ASSERT_EQ(donor_clear(donor), rocsparse_status_success);
         }
 
         // Lower solve through bsrsv_solve_core, the entry rocsparse_sptrsv is going
         // to use, with the analysis and pivot given explicitly. y is reset first.
         template <typename I, typename J>
-        rocsparse_status
-            solve_core(rocsparse::trm_info_t* trm, rocsparse_indextype pivot_type, J* pivot)
+        rocsparse_status solve_core(rocsparse::trm_info_t* trm,
+                                    rocsparse_indextype    pivot_type,
+                                    J*                     pivot,
+                                    rocsparse_operation    trans = rocsparse_operation_none)
         {
             if(hipMemcpy(
                    d_y->ptr,
@@ -865,7 +1075,7 @@ namespace
             const test_T alpha = kAlpha;
             return rocsparse::bsrsv_solve_core<test_T, I, J>(objects.handle,
                                                              rocsparse_direction_row,
-                                                             rocsparse_operation_none,
+                                                             trans,
                                                              static_cast<J>(kMb),
                                                              static_cast<I>(a32.nnzb()),
                                                              &alpha,
@@ -958,29 +1168,53 @@ namespace
                       rocsparse_status_zero_pivot);
             EXPECT_EQ(position, row);
         }
+
+        // Transposed analysis and solve of the lower matrix through the core
+        // entry, checked against the host solve of A^T y = kAlpha x.
+        template <typename I, typename J>
+        void expect_core_transpose()
+        {
+            SCOPED_TRACE(::testing::Message() << "I " << sizeof(I) * 8 << " J " << sizeof(J) * 8);
+            ASSERT_EQ((analysis<I, J>(rocsparse_fill_mode_lower,
+                                      rocsparse_analysis_policy_force,
+                                      rocsparse_operation_transpose)),
+                      rocsparse_status_success);
+            auto* container = objects.info->get_bsrsv_info();
+            ASSERT_EQ((solve_core<I, J>(objects.info->get_bsrsv_info(rocsparse_operation_transpose,
+                                                                     rocsparse_fill_mode_lower),
+                                        container->get_indextype(),
+                                        static_cast<J*>(container->get_position()),
+                                        rocsparse_operation_transpose)),
+                      rocsparse_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            expect_solution(
+                rocsparse_ut::to_host(*d_y),
+                reference(a32, true, rocsparse_operation_transpose, rocsparse_diag_type_non_unit));
+            EXPECT_EQ(stored_pivot<J>(), std::numeric_limits<J>::max());
+        }
     };
 }
 
-TEST_F(internal_level2_bsrsv_wide, general_i32_chunk)
+TEST_F(internal_level2_bsrsv_wide, solve_i32_chunk)
 {
     expect_wide<int32_t, int32_t>(true, 1);
     expect_wide<int32_t, int32_t>(false, 1);
 }
 
-TEST_F(internal_level2_bsrsv_wide, general_i32_full_grid)
+TEST_F(internal_level2_bsrsv_wide, solve_i32_full_grid)
 {
     // Block 128 and 8 block rows: 2 virtual blocks on wave32, 4 on wave64.
     // A grid of 2 is exact on wave32 and a two-chunk walk on wave64.
     expect_wide<int32_t, int32_t>(true, 2);
 }
 
-TEST_F(internal_level2_bsrsv_wide, general_i64_i32_chunk)
+TEST_F(internal_level2_bsrsv_wide, solve_i64_i32_chunk)
 {
     expect_wide<int64_t, int32_t>(true, 1);
     expect_wide<int64_t, int32_t>(false, 1);
 }
 
-TEST_F(internal_level2_bsrsv_wide, general_i64_chunk)
+TEST_F(internal_level2_bsrsv_wide, solve_i64_chunk)
 {
     expect_wide<int64_t, int64_t>(true, 1);
     expect_wide<int64_t, int64_t>(false, 1);
@@ -1038,29 +1272,23 @@ TEST_F(internal_level2_bsrsv_wide, needs_wide_predicate_boundaries)
     const int64_t i32max = std::numeric_limits<int32_t>::max();
 
     // Exact grid and small sizes stay narrow.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 4, 4));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 4));
     // Grid one short of the virtual blocks is wide.
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 4, 3));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 3));
     // Empty problems never need the wide path.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(0, 2, 4, 0, 0));
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(8, 2, 0, 4, 4));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(0, 2, 0, 0));
 
     // mb at and past INT32_MAX.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(i32max, 1, 1, i32max, i32max));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(i32max + 1, 1, 1, i32max + 1, i32max + 1));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(i32max, 1, i32max, i32max));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(i32max + 1, 1, i32max + 1, i32max + 1));
 
     // mb * block_dim at and past INT32_MAX (1048576 * 2047 fits, 1048576 * 2048 does not).
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1048576, 2047, 1, 1048576, 1048576));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1048576, 2048, 1, 1048576, 1048576));
-
-    // Diagonal offset block_dim * block_dim * j, j < nnzb. 40 * 40 * 1342177 fits in
-    // INT32_MAX and one more block does not. This is the case the grid alone missed.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(10000, 40, 1342177, 10000, 10000));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(10000, 40, 1342178, 10000, 10000));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1048576, 2047, 1048576, 1048576));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1048576, 2048, 1048576, 1048576));
 
     // block_dim * block_dim alone: 46340^2 fits, 46341^2 does not.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1, 46340, 1, 1, 1));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1, 46341, 1, 1, 1));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1, 46340, 1, 1));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1, 46341, 1, 1));
 }
 
 TEST_F(internal_level2_bsrsv_wide, public_lower_narrow_and_clamped)
@@ -1088,47 +1316,31 @@ TEST_F(internal_level2_bsrsv_wide, public_singular_pivot_clamped)
     // wave32 launch takes the general kernel. Both report the block row. A
     // 128-thread block solves the first 4 map slots on wave32 and 2 on wave64,
     // so the singular rows sit past them: lower row 6 is map slot 6, and upper
-    // row 1 is map slot 6 as well. A narrow kernel on the clamped grid never
-    // reaches them.
+    // row 1 is map slot 6 as well. Only the walk over the later chunks reaches
+    // them.
     EXPECT_EQ(public_singular_pivot(true, 6), static_cast<rocsparse_int>(6));
     EXPECT_EQ(public_singular_pivot(false, 1), static_cast<rocsparse_int>(1));
 }
 
-// bsric0 builds the analysis, bsrsv reuse borrows it, and a later bsrsv force
-// must build its own analysis instead of deleting the borrowed one. The force
-// would otherwise free the borrowed analysis and allocate the new one, often at
-// the same address, so the check is that both analyses are alive at once.
 TEST_F(internal_level2_bsrsv_wide, force_keeps_borrowed_bsric0_analysis)
 {
-    ASSERT_NO_FATAL_FAILURE(build());
-    ASSERT_EQ(bsric0_analysis(), rocsparse_status_success);
-    ASSERT_EQ(
-        (analysis<int32_t, int32_t>(rocsparse_fill_mode_lower, rocsparse_analysis_policy_reuse)),
-        rocsparse_status_success);
+    expect_force_keeps_borrowed(donor_t::bsric0);
+}
 
-    rocsparse::trm_info_t* const borrowed
-        = objects.info->get_bsric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-    ASSERT_NE(borrowed, nullptr);
-    EXPECT_EQ(objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
-              borrowed);
+TEST_F(internal_level2_bsrsv_wide, force_keeps_borrowed_bsrilu0_analysis)
+{
+    expect_force_keeps_borrowed(donor_t::bsrilu0);
+}
 
-    ASSERT_EQ(
-        (analysis<int32_t, int32_t>(rocsparse_fill_mode_lower, rocsparse_analysis_policy_force)),
-        rocsparse_status_success);
-    rocsparse::trm_info_t* const own
-        = objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-    EXPECT_NE(own, nullptr);
-    EXPECT_NE(own, borrowed);
-    EXPECT_EQ(objects.info->get_bsric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
-              borrowed);
-
-    ASSERT_EQ(rocsparse_bsric0_clear(objects.handle, objects.info), rocsparse_status_success);
+TEST_F(internal_level2_bsrsv_wide, force_keeps_borrowed_bsrsm_analysis)
+{
+    expect_force_keeps_borrowed(donor_t::bsrsm);
 }
 
 TEST_F(internal_level2_bsrsv_wide, reuse_borrowed_bsric0_solves)
 {
     ASSERT_NO_FATAL_FAILURE(build());
-    ASSERT_EQ(bsric0_analysis(), rocsparse_status_success);
+    ASSERT_EQ(donor_analysis(donor_t::bsric0), rocsparse_status_success);
     ASSERT_EQ(
         (analysis<int32_t, int32_t>(rocsparse_fill_mode_lower, rocsparse_analysis_policy_reuse)),
         rocsparse_status_success);
@@ -1141,19 +1353,70 @@ TEST_F(internal_level2_bsrsv_wide, reuse_borrowed_bsric0_solves)
     ASSERT_EQ(rocsparse_bsric0_clear(objects.handle, objects.info), rocsparse_status_success);
 }
 
-TEST_F(internal_level2_bsrsv_wide, reuse_borrowed_structural_zero_reported)
+TEST_F(internal_level2_bsrsv_wide, reuse_borrowed_bsric0_structural_zero_reported)
 {
-    // Block row 3 has no diagonal block. The donor's analysis finds it and the
-    // borrowed solve must report row 3, not success.
+    expect_reuse_reports_structural_zero(donor_t::bsric0);
+}
+
+TEST_F(internal_level2_bsrsv_wide, reuse_borrowed_bsrilu0_structural_zero_reported)
+{
+    expect_reuse_reports_structural_zero(donor_t::bsrilu0);
+}
+
+TEST_F(internal_level2_bsrsv_wide, reuse_borrowed_bsrsm_structural_zero_reported)
+{
+    expect_reuse_reports_structural_zero(donor_t::bsrsm);
+}
+
+// The analysis goes to a container other than the one in the mat_info that
+// holds the donor. Reuse borrows the bsric0 analysis into it, copies the
+// donor's pivot with the structural zero, and leaves the bsrsv container of
+// the mat_info alone.
+TEST_F(internal_level2_bsrsv_wide, reuse_borrows_into_separate_destination)
+{
     ASSERT_NO_FATAL_FAILURE(build(3));
-    ASSERT_EQ(bsric0_analysis(), rocsparse_status_success);
-    ASSERT_EQ(
-        (analysis<int32_t, int32_t>(rocsparse_fill_mode_lower, rocsparse_analysis_policy_reuse)),
-        rocsparse_status_success);
-    ASSERT_EQ(solve_public(), rocsparse_status_success);
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-    expect_public_zero_pivot(3);
-    ASSERT_EQ(rocsparse_bsric0_clear(objects.handle, objects.info), rocsparse_status_success);
+    ASSERT_EQ(donor_analysis(donor_t::bsric0), rocsparse_status_success);
+
+    rocsparse_mat_info dest_info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&dest_info), rocsparse_status_success);
+    rocsparse_bsrsv_info dest = dest_info->get_bsrsv_info();
+
+    EXPECT_EQ((analysis<int32_t, int32_t>(rocsparse_fill_mode_lower,
+                                          rocsparse_analysis_policy_reuse,
+                                          rocsparse_operation_none,
+                                          dest)),
+              rocsparse_status_success);
+    EXPECT_EQ(dest->get(rocsparse_operation_none, rocsparse_fill_mode_lower),
+              donor_slot(donor_t::bsric0));
+    EXPECT_EQ(objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower),
+              nullptr);
+
+    int32_t pivot = -2;
+    EXPECT_EQ(dest->get_indextype(), rocsparse_indextype_i32);
+    EXPECT_NE(dest->get_position(), nullptr);
+    if(dest->get_position() != nullptr)
+    {
+        EXPECT_EQ(hipMemcpy(&pivot, dest->get_position(), sizeof(pivot), hipMemcpyDeviceToHost),
+                  hipSuccess);
+    }
+    EXPECT_EQ(pivot, 3);
+
+    // dest_info does not own the borrowed analysis, so drop the alias before
+    // destroying it.
+    dest->set(rocsparse_operation_none, rocsparse_fill_mode_lower, nullptr);
+    EXPECT_EQ(rocsparse_destroy_mat_info(dest_info), rocsparse_status_success);
+    ASSERT_EQ(donor_clear(donor_t::bsric0), rocsparse_status_success);
+}
+
+// The extra block at column r - 3 makes the transposed permutation more than a
+// shift, so a gather launched with the narrow index types at a 64-bit width
+// reads the wrong values.
+TEST_F(internal_level2_bsrsv_wide, solve_core_transpose_all_widths)
+{
+    ASSERT_NO_FATAL_FAILURE(build(-1, true));
+    ASSERT_NO_FATAL_FAILURE((expect_core_transpose<int32_t, int32_t>()));
+    ASSERT_NO_FATAL_FAILURE((expect_core_transpose<int64_t, int32_t>()));
+    ASSERT_NO_FATAL_FAILURE((expect_core_transpose<int64_t, int64_t>()));
 }
 
 // An analysis at one width, then at another, on the same mat_info. The pivot
@@ -1300,7 +1563,7 @@ TEST_F(internal_level2_bsrsv_wide, reuse_drops_mismatched_pivot)
         rocsparse_status_success);
     EXPECT_EQ(pivot_type(), rocsparse_indextype_i64);
 
-    ASSERT_EQ(bsric0_analysis(), rocsparse_status_success);
+    ASSERT_EQ(donor_analysis(donor_t::bsric0), rocsparse_status_success);
     ASSERT_EQ(
         (analysis<int32_t, int32_t>(rocsparse_fill_mode_lower, rocsparse_analysis_policy_reuse)),
         rocsparse_status_success);
