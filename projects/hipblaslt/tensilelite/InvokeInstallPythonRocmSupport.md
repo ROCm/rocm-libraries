@@ -141,6 +141,13 @@ selected-root GPU results and stepping restoration, and missing selected tools
 without borrowing ambient tools. Fifteen new regressions fail on the original
 owner branch.
 
+The two existing source-only GPU-target tests were adapted to selected-root
+detection and compiler preflight, preserving feature-stripping assertions;
+the combined owner task/target suite passes **51 cases**. Final stack source,
+binding and runtime validation passes **565 cases**, with one optional actual
+installed-artifact-root check skipped. This source-tree run does not cover the
+separate installed-artifact binding fixture issue tracked for #15580.
+
 Relevant existing GPU/tool/stepping cases pass **19 cases**. The broad stepping
 module has 919 passes and four inherited StreamK fence expectation failures;
 the original owner branch reproduces the identical failures. No tests were
