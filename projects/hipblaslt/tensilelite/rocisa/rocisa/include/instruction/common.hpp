@@ -5563,11 +5563,12 @@ namespace rocisa
                     const InstructionInput&           src1,
                     const std::shared_ptr<Container>& src2    = std::make_shared<VCC>(),
                     std::optional<SDWAModifiers>      sdwa    = std::nullopt,
-                    const std::string&                comment = "")
+                    const std::string&                comment = "",
+                    std::optional<DPPModifiers>       dpp     = std::nullopt)
             : CommonInstruction(InstType::INST_B32,
                                 dst,
                                 {src0, src1, src2},
-                                std::nullopt,
+                                dpp,
                                 sdwa,
                                 std::nullopt,
                                 comment)

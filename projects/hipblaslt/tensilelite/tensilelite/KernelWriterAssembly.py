@@ -20244,6 +20244,7 @@ class KernelWriterAssembly(KernelWriter):
     vgprAddrScratch: int = -1     # per-store scratch: holds (addrDVgpr scaled + lane_group*8) without modifying addrDVgpr
     vgprPairPackRing: int = -1    # base of the paired-store pack ring (numPairPackQuads 4-vgpr quads)
     numPairPackQuads: int = 1     # quads in that ring; 1 puts every paired store on vgprBf16Temp
+    vgprCachelineAlignTmp: int = -1         # one scratch vgpr for the store cacheline align's blend (storeCachelineAlignEnabled)
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
@@ -21034,6 +21035,7 @@ class KernelWriterAssembly(KernelWriter):
       cvtVgprStruct  = None
       cvtVgpr        = None
       pairRing       = -1
+      cachelineAlignTmp        = -1
       # No hoisted lane math until emitSubtileStoreLaneMath below says otherwise; a
       # stale True would make batches skip a computation that never ran.
       self.states.subtileHoistedLaneGroupDelta = False
@@ -21059,7 +21061,7 @@ class KernelWriterAssembly(KernelWriter):
         #        plsin scalar and col128 windows never share an offset.  In the default
         #        path only one feature is live, so the window does not grow beyond that
         #        feature's own need.
-        from .Components.GlobalWriteBatch import plsinStorePermlane16Active
+        from .Components.GlobalWriteBatch import plsinStorePermlane16Active, storeCachelineAlignEnabled
         # Running cursor over the cvt block.  +0..+6 are the shared staging window; each
         # active feature appends its own disjoint sub-window, so no two offsets collide.
         base = 7 if kernel.get("UseSubtileImpl") else 4
@@ -21085,13 +21087,18 @@ class KernelWriterAssembly(KernelWriter):
         # off numElementsPerBatch, which has a hard floor at MIWaveTile[0] (see _pairPackQuad).
         pairRing = self.vgprPool.checkOutAligned(4 * (pairQuads - 1), 2, tag="subtilePairPackRing") \
                    if pairQuads > 1 else -1
+        # The store cacheline align blends in place and needs one temp. Nothing more: any further
+        # register here comes off the store batch and can drop it to single elements.
+        cachelineAlignTmp = self.vgprPool.checkOut(1, tag="subtileCachelineAlignTmp") \
+                  if (permForRing and storeCachelineAlignEnabled(kernel)) else -1
         cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
                                                vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
                                                vgprPermAddr=(cvtVgpr+4) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprLaneGroupDelta=(cvtVgpr+5) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprPairPackRing=pairRing, \
-                                               numPairPackQuads=pairQuads)
+                                               numPairPackQuads=pairQuads, \
+                                               vgprCachelineAlignTmp=cachelineAlignTmp)
         module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")
@@ -21416,6 +21423,8 @@ class KernelWriterAssembly(KernelWriter):
         self.vgprPool.checkIn(cvtVgpr)
         if pairRing >= 0:
           self.vgprPool.checkIn(pairRing)
+        if cachelineAlignTmp >= 0:
+          self.vgprPool.checkIn(cachelineAlignTmp)
       # The hoisted values die with the cvtVgpr block.
       self.states.subtileHoistedLaneGroupDelta = False
       self.states.subtileHoistedPermAddr = False
