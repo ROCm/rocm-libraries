@@ -131,7 +131,8 @@ function(create_individual_gemm_universal_target datatype layout trait tile_conf
     ck_tile_gemm_split_trait("${trait}" pipeline epilogue scheduler)
     ck_tile_gemm_pipeline_compile_options(${target_name} "${pipeline}")
 
-    add_dependencies(benchmark_gemm_universal_${pipeline}_pipeline ${target_name})
+    ck_tile_gemm_pipeline_group("${pipeline}" pipeline_group)
+    add_dependencies(benchmark_gemm_universal_${pipeline_group}_pipeline ${target_name})
     add_dependencies(benchmark_gemm_universal_${epilogue}_epilogue ${target_name})
     add_dependencies(benchmark_gemm_universal_${scheduler}_scheduler ${target_name})
 endfunction()

@@ -35,6 +35,12 @@ Shapes:
       rtol for bf16 — a vacuous assertion. The atomic side of this regime is
       already covered in C++ by test_streamk_registry.py.
 
+On gfx1250, bf16 also builds four 16-wave comp_tdm_v3 CShuffle linear/tree
+drivers (persistent and non-persistent). They check reduced workgroup budgets,
+active Stream-K and Full-DP, poisoned external workspace reuse, buffer guards,
+and invalid budget/null workspace rejection. Each driver runs 8 cases with
+3 different input phases; the C++ source explains the exact reference values.
+
 Tolerance is CK's own split-K-aware bound, ported from
 ``dispatcher/examples/gemm/cpp/streamk_driver_common.hpp`` +
 ``include/ck_tile/host/check_err.hpp`` — asserted element-wise, not as a
@@ -52,14 +58,21 @@ import itertools
 import logging
 import math
 import os
+import subprocess
 import sys
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from ctypes_utils import detect_gpu_arch
+from ctypes_utils import (
+    _generate_single_kernel_subprocess,
+    detect_gpu_arch,
+    get_codegen_path,
+)
 from gemm_utils import (
     GemmKernelConfig,
     GemmProblem,
@@ -67,6 +80,7 @@ from gemm_utils import (
     numpy_dtype_for,
     output_dtype_for,
     setup_multiple_gemm_dispatchers,
+    _build_compile_jobs,
 )
 
 log = logging.getLogger("streamk_gpu")
@@ -325,6 +339,53 @@ def _build_matrix(dtypes, gfx_arch):
     return cases
 
 
+def _verify_workspace(gfx_arch):
+    """Exercise generated external-workspace launches in isolated GPU processes."""
+    driver = Path(__file__).with_name("streamk_workspace_driver.cpp")
+    results = []
+    with tempfile.TemporaryDirectory(prefix="streamk_workspace_") as tmp:
+        for strategy, persistent in itertools.product(("linear", "tree"), PERSISTENT):
+            config = replace(
+                _make_config("bf16", strategy, gfx_arch, "comp_tdm_v3", persistent),
+                epilogue="cshuffle", tile_m=256, tile_n=256, tile_k=128,
+                wave_m=4, wave_n=4,
+            )
+            label = f"workspace/{strategy}/persistent={persistent}"
+            ok, header, error = _generate_single_kernel_subprocess({
+                "python": sys.executable,
+                "codegen_script": str(get_codegen_path()),
+                "output_dir": tmp,
+                "dtype": config.dtype_a,
+                "layout": config.layout,
+                "gpu_target": gfx_arch,
+                "tile_config_json": config.to_codegen_json(),
+                "hpp_glob_pattern": config.name + ".hpp",
+                "variant": "stream_k",
+            })
+            if not ok:
+                results.append((label, FAIL, f"{label}: codegen failed: {error}"))
+                continue
+            # Reuse the bridge's flags, substituting the standalone driver for
+            # the final source/-o/object arguments and compiling an executable.
+            job, _ = _build_compile_jobs(config, Path(header))
+            command = [arg for arg in job["compile_cmd"][:-3] if arg != "-c"]
+            executable = Path(tmp) / config.name
+            command += [str(driver), "-o", str(executable)]
+            try:
+                subprocess.run(command, check=True, capture_output=True, text=True, timeout=300)
+                run = subprocess.run(
+                    [str(executable)], check=True, capture_output=True, text=True, timeout=120
+                )
+                log.info("%s\n%s", label, run.stdout)
+                results.append((label, PASS, f"{label}: 8 cases / 24 launches passed"))
+            except subprocess.CalledProcessError as exc:
+                results.append((label, FAIL, f"{label}: exit {exc.returncode}\n"
+                                f"{exc.stdout}\n{exc.stderr}"))
+            except subprocess.TimeoutExpired as exc:
+                results.append((label, FAIL, f"{label}: timeout after {exc.timeout}s"))
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Stream-K GPU correctness tests (atomic / linear / tree)"
@@ -416,7 +477,14 @@ def main():
         print(f"  [{status:4s}] {detail}")
     print(f"\n{passed}/{len(results)} passed")
 
-    return 0 if passed == len(results) else 1
+    if passed != len(results):
+        return 1
+    if gfx == TDM_ARCH and "bf16" in dtypes:
+        workspace_results = _verify_workspace(gfx)
+        for _, status, detail in workspace_results:
+            print(f"  [{status:4s}] {detail}")
+        return 0 if all(status == PASS for _, status, _ in workspace_results) else 1
+    return 0
 
 
 if __name__ == "__main__":

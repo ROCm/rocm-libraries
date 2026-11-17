@@ -139,7 +139,9 @@ def _get_arch() -> str:
 
     arch = ""
     try:
-        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+        out = subprocess.check_output(
+            ["rocminfo"], text=True, stderr=subprocess.DEVNULL
+        )
         for line in out.splitlines():
             if "Name:" in line and "gfx" in line:
                 arch = line.split()[-1].strip()
@@ -414,7 +416,9 @@ class GpuBatchedGemmRunner:
     def __init__(self, lib_path: Path, arch: Optional[str] = None):
         self.lib = BatchedGemmDispatcherLib(lib_path)
         if not self.lib.initialize():
-            raise RuntimeError(f"Failed to initialize batched dispatcher .so: {lib_path}")
+            raise RuntimeError(
+                f"Failed to initialize batched dispatcher .so: {lib_path}"
+            )
         names = self.lib.kernel_names
         self._kernel_name = names[0] if names else "unknown"
         # fp8/bf8 encoding must match the arch the .so was compiled for; `arch`
@@ -828,7 +832,12 @@ def expand_sweep(
     elif reduction_strategies:
         raise ValueError(f"reduction_strategies needs a Stream-K config, not {config_path}")
     base_configs = _gu.expand_sweep(
-        config_path, arch, dtype=dtype, layout=layout, variant=variant, **vector_kwargs
+        config_path,
+        arch,
+        dtype=dtype,
+        layout=layout,
+        variant=variant,
+        **vector_kwargs,
     )
     out: List[BatchedGemmKernelConfig] = []
     seen: set = set()

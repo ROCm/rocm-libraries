@@ -636,10 +636,33 @@ TYPED_TEST(backend_csr_preconditioners,
     const Csr<T> G = csr_of(*A);
     ASSERT_EQ(G.row_offset, diagonal.row_offset);
     EXPECT_NEAR(G.val[0], static_cast<T>(1) / std::sqrt(dense(ref)[0]), tol<T>());
-
-    KNOWN_BUG("a row with only the diagonal in the pattern is set to 1 / a_ii only if the "
-              "diagonal is the first entry of the row of A");
     expect_near(G, fsai(ref, diagonal), tol<T>());
+}
+
+// A pattern row whose one entry is left of the diagonal is no valid FSAI pattern, but
+// its entry in column j comes from a_jj, which is what the general formula gives for a
+// single entry; the rows of A from the second on start left of the diagonal, and the
+// diagonal entries of A differ
+TYPED_TEST(backend_csr_preconditioners,
+           fsai_of_a_one_entry_pattern_row_uses_the_diagonal_of_its_column)
+{
+    using T = typename TypeParam::value_type;
+    REQUIRE_APPROXIMATE_INVERSE(this->backend());
+
+    const Csr<T> ref = spd<T>(10);
+    const Csr<T> subdiagonal
+        = pattern_of<T>(ref.n, [](int i, int j) { return i == 0 ? j == 0 : j == i - 1; });
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto P = this->make(subdiagonal);
+    ASSERT_NE(P, nullptr);
+    ASSERT_TRUE(A->FSAI(1, P.get()));
+
+    const Csr<T> G = csr_of(*A);
+    ASSERT_EQ(G.row_offset, subdiagonal.row_offset);
+    EXPECT_NEAR(G.val[1], static_cast<T>(1) / std::sqrt(dense(ref)[0]), tol<T>());
+    expect_near(G, fsai(ref, subdiagonal), tol<T>());
 }
 
 // Column i of the result minimizes ||A m - e_i|| over the pattern of column i of A
@@ -697,9 +720,7 @@ TYPED_TEST(backend_csr_preconditioners,
 
 // With L = [B 0 0; 0 B 0; 0 B 1], the first sweep of the L^T solve leaves the
 // residual 1 in row 1 and 2^-10 in row 2, so a tolerance of 2^-9 needs more
-// sweeps. The L solve converges in 3 sweeps, which bounds the L^T solve on the host
-// (a known bug), but 3 suffice here. B is 2^20, or 2^12 in float, where B + 2^-10 must be
-// exact.
+// sweeps. B is 2^20, or 2^12 in float, where B + 2^-10 must be exact.
 TYPED_TEST(backend_csr_preconditioners,
            iterative_ll_solve_stops_once_every_residual_is_below_the_tolerance)
 {
@@ -729,11 +750,6 @@ TYPED_TEST(backend_csr_preconditioners,
     ASSERT_TRUE(A->ItLLSolve(10, std::ldexp(1.0, -9), true, *in, out.get()));
     A->ItLLAnalyseClear();
 
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG("the stopping test of the transposed solve takes the largest correction of "
-                  "the previous rows instead of the largest residual");
-    }
     expect_near(values_of(*out), expected, tol<T>());
 }
 

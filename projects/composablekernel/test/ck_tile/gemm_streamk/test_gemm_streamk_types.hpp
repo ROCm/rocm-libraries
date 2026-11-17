@@ -26,6 +26,8 @@ using NonPersistent = std::false_type;
 using Mem    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::Mem>;
 using CompV3 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV3>;
 using CompV4 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV4>;
+using CompTDMProducerConsumer =
+    ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMProducerConsumer>;
 
 // Reduction Strategies
 using Atomic = ck_tile::integral_constant<ck_tile::StreamKReductionStrategy,

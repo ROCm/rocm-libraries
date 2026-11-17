@@ -25,6 +25,7 @@ import itertools
 import json
 import logging
 import math
+import re
 import concurrent.futures
 from dataclasses import dataclass
 from pathlib import Path
@@ -947,9 +948,7 @@ _GEMM_LAYOUTS = frozenset(a + b + c for a in "rc" for b in "rc" for c in "rc")
 #: The ones Stream-K can build (streamk_c_reject_reason; width 0 reads no dtype).
 STREAMK_GEMM_LAYOUTS = tuple(
     sorted(
-        lay
-        for lay in _GEMM_LAYOUTS
-        if not streamk_c_reject_reason(None, 0, "", lay[2])
+        lay for lay in _GEMM_LAYOUTS if not streamk_c_reject_reason(None, 0, "", lay[2])
     )
 )
 
@@ -1415,9 +1414,10 @@ def gemm_pipeline_skips_launch_checks(pipeline: str) -> bool:
     For these ``UniversalGemmKernel::IsSupportedArgument`` accepts every problem
     without checking tile divisibility or vector alignment: TDM clips each box to
     the tensor's real extent and moves A/B/C at width 1, so an unpadded kernel
-    serves any M, N, K. The exception is a non-TDM (CShuffle) epilogue, which
-    Stream-K allows: its C store does not clip, so the contiguous C extent must
-    be a tile multiple. Pairing and the dispatcher's own gate follow the kernel.
+    serves any M, N, K. The exception is a non-TDM (CShuffle) epilogue, used by
+    ``comp_tdm_v3`` and Stream-K: its C store does not clip, so an unpadded
+    contiguous C extent must be a tile multiple. Pairing and the dispatcher's own
+    gate follow the kernel.
     """
     return pipeline in TDM_PIPELINES
 
@@ -1456,8 +1456,8 @@ GFX1250_FP32_ACC_REJECT_REASON = (
 # comp_tdm_pc (producer/consumer TDM): the C tile lives on the consumer waves
 # only (the two producer waves hold no accumulator), one fp32 VGPR per element.
 # Past 256 accumulators per lane occupancy collapses; same cap as the Tile
-# Engine MAX_ACC_VGPRS_PER_LANE. The plain and batched GEMM kernels arm the
-# pipeline's named barriers; Stream-K does not run it.
+# Engine MAX_ACC_VGPRS_PER_LANE. The plain, batched and Stream-K GEMM kernels
+# arm the pipeline's named barriers.
 COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE = 256
 # BlockGemm and the epilogue spread the C tile over warp_m x warp_n waves only,
 # with no K-wave reduction, so a K wave would be a consumer whose work is lost.
@@ -1465,6 +1465,73 @@ COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE = 256
 COMP_TDM_PC_WARP_K_REJECT_REASON = (
     "comp_tdm_pc requires warp_k=1: the consumer waves have no K-wave reduction"
 )
+# TDM pipelines whose plain GEMM may also store C through the cshuffle epilogue,
+# which can accumulate split-K partials (TdmEpilogue overwrites C). Mirrors
+# GEMM_TDM_CSHUFFLE_PIPELINES in tile_engine/ops/gemm/gemm_validation_utils.py.
+GEMM_TDM_CSHUFFLE_PIPELINES = ("comp_tdm_pc",)
+
+# comp_tdm_pc ring shape (GemmPipelineAgBgCrCompTDMProducerConsumerPolicy<NumSlots,
+# PublishLag>). Configs name a non-default ring as a pipeline variant,
+# "comp_tdm_pc_s{slots}l{lag}"; plain "comp_tdm_pc" is the policy default <4, 0>.
+# Traits carry the ring as (num_slots, publish_lag) with num_slots=0 meaning the
+# default, so default kernels keep their names. Two producer waves need
+# 3 * NumSlots named barriers out of 15 (ring_spec), which caps the ring at 5 slots.
+COMP_TDM_PC = "comp_tdm_pc"
+COMP_TDM_PC_DEFAULT_RING = (4, 0)
+COMP_TDM_PC_MIN_SLOTS = 2
+COMP_TDM_PC_MAX_SLOTS = 5
+_COMP_TDM_PC_RING_RE = re.compile(rf"^{COMP_TDM_PC}_s(\d+)l(\d+)$")
+
+
+def split_pipeline_ring(pipeline: str) -> Tuple[str, int, int]:
+    """(base pipeline, num_slots, publish_lag) of a pipeline name.
+
+    "comp_tdm_pc_s2l1" -> ("comp_tdm_pc", 2, 1). The default ring and every other
+    pipeline give num_slots = publish_lag = 0. The ring is not validated here; see
+    comp_tdm_pc_ring_reject_reason.
+    """
+    m = _COMP_TDM_PC_RING_RE.match(pipeline)
+    if not m:
+        return pipeline, 0, 0
+    ring = (int(m.group(1)), int(m.group(2)))
+    return (
+        (COMP_TDM_PC, 0, 0)
+        if ring == COMP_TDM_PC_DEFAULT_RING
+        else (COMP_TDM_PC, *ring)
+    )
+
+
+def pipeline_ring_suffix(num_slots: int, publish_lag: int) -> str:
+    """Name suffix of a non-default comp_tdm_pc ring ("" for the default).
+
+    Must match KernelKey::encode_identifier() in kernel_key.hpp.
+    """
+    return f"_s{num_slots}l{publish_lag}" if num_slots else ""
+
+
+def comp_tdm_pc_ring_reject_reason(
+    pipeline: str, num_slots: int, publish_lag: int
+) -> str:
+    """Why a (pipeline, ring) pair is rejected ("" when accepted)."""
+    if not num_slots:
+        return "" if not publish_lag else "publish_lag needs an explicit num_slots"
+    if pipeline != COMP_TDM_PC:
+        return f"num_slots/publish_lag only apply to {COMP_TDM_PC}, got pipeline={pipeline}"
+    if not COMP_TDM_PC_MIN_SLOTS <= num_slots <= COMP_TDM_PC_MAX_SLOTS:
+        return (
+            f"{COMP_TDM_PC} num_slots={num_slots} is outside "
+            f"[{COMP_TDM_PC_MIN_SLOTS}, {COMP_TDM_PC_MAX_SLOTS}] (3 * num_slots named "
+            "barriers must fit in 15)"
+        )
+    if not 0 <= publish_lag < num_slots:
+        return f"{COMP_TDM_PC} publish_lag={publish_lag} must be in [0, num_slots={num_slots})"
+    return ""
+
+
+def comp_tdm_pc_lds_limit(lds_total: int, num_slots: int) -> int:
+    """A+B staging budget of one comp_tdm_pc slot: the LDS split over the ring."""
+    return lds_total // (num_slots or COMP_TDM_PC_DEFAULT_RING[0])
+
 
 # comp_tdm_v3 (GemmPipelineAgBgCrCompTDMV3). Same rules as the Tile Engine
 # (tile_engine/ops/gemm/gemm_validation_utils.py; tests/test_gfx1250_gate_equivalence.py
@@ -1477,7 +1544,10 @@ COMP_TDM_PC_WARP_K_REJECT_REASON = (
 # gemm_universal build and the comp_tdm_v3 gtests do.
 COMP_TDM_V3 = "comp_tdm_v3"
 TDM_PIPELINE_EPILOGUE = {COMP_TDM_V3: "cshuffle"}
-PIPELINE_EXTRA_WARP_COMBINATIONS = {COMP_TDM_V3: {GFX1250_ARCH: [[4, 4, 1]]}}
+try:
+    from arch_specs_generated import PIPELINE_EXTRA_WARP_COMBINATIONS
+except ImportError:
+    PIPELINE_EXTRA_WARP_COMBINATIONS = {COMP_TDM_V3: {GFX1250_ARCH: [[4, 4, 1]]}}
 PIPELINE_EXTRA_COMPILE_FLAGS = {COMP_TDM_V3: ("-mllvm", "-enable-post-misched=1")}
 COMP_TDM_V3_WAVES = ((2, 2, 1), (4, 4, 1))
 COMP_TDM_V3_8BIT_DTYPES = ("fp8", "bf8")
@@ -1539,11 +1609,12 @@ def comp_tdm_v3_reject_reason(
 # through the epilogue, so it needs an epilogue that accumulates (CShuffle); the TDM
 # epilogue overwrites C. Linear and tree reduction sum the partials in a workspace and
 # store C once, so either epilogue works; the TDM one also clips a ragged N/M tile.
-# comp_tdm, comp_tdm_v2 and comp_tdm_v3 are the gfx1250-only pipelines StreamKKernel
-# has been validated with.
+# comp_tdm, comp_tdm_v2, comp_tdm_pc and comp_tdm_v3 are the gfx1250-only pipelines
+# StreamKKernel has been validated with.
 STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
-STREAMK_GFX1250_PIPELINES = ("comp_tdm", "comp_tdm_v2", COMP_TDM_V3)
-# StreamKKernel static_asserts a row-major C for these pipelines.
+STREAMK_GFX1250_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc", COMP_TDM_V3)
+# StreamKKernel static_asserts a row-major C for these pipelines, and the
+# CShuffle epilogue stores nothing else (streamk_c_reject_reason).
 STREAMK_TDM_C_LAYOUT_REJECT_REASON = (
     "stream_k with a TDM pipeline supports row-major C only"
 )
@@ -1706,11 +1777,13 @@ def gfx1250_pipeline_reject_reason(
     pads: Optional[Tuple[bool, bool, bool]] = None,
     warp_tile_m: int = 0,
     warp_tile_n: int = 0,
+    batched: bool = False,
     tile_mn: Optional[Tuple[int, int]] = None,
     warp_k: Optional[int] = None,
     streamk: bool = False,
     waves: Optional[Sequence[int]] = None,
     tile_k: Optional[int] = None,
+    ring: Tuple[int, int] = (0, 0),
 ) -> str:
     """Why a comp_async / comp_tdm* / tdm-epilogue (or gfx1250 compv5) GEMM config is rejected.
 
@@ -1721,13 +1794,18 @@ def gfx1250_pipeline_reject_reason(
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
     support (only plain, batched and preshuffle GEMM are, and Stream-K GEMM for
-    STREAMK_GFX1250_PIPELINES). ``pads`` is
-    (pad_m, pad_n, pad_k); None means unknown and skips the
-    pad rules. ``tile_mn``
-    (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
-    ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it); ``waves``
-    (warp_m, warp_n, warp_k) the comp_tdm_v3 wave-map rule and ``tile_k`` its K-tile
-    rule (None skips them).
+    STREAMK_GFX1250_PIPELINES). ``pads``
+    is (pad_m, pad_n, pad_k); None means unknown and skips the pad rules.
+    ``batched`` marks the batched GEMM variant, which does not take the cshuffle
+    pairing below, and ``tile_mn`` (tile_m, tile_n) enables the comp_tdm_pc
+    accumulator rule (None skips it). ``warp_k`` enables the comp_tdm_pc
+    warp_k=1 rule (None skips it); ``waves`` (warp_m, warp_n, warp_k) enables
+    the comp_tdm_v3 wave-map rule and ``tile_k`` its K-tile rule (None skips them).
+    A TDM pipeline needs tdm_pipeline_epilogue(pipeline) ("cshuffle" for
+    comp_tdm_v3, "tdm" otherwise), except that plain GEMM may also pair
+    GEMM_TDM_CSHUFFLE_PIPELINES with cshuffle. ``ring`` is the comp_tdm_pc
+    (num_slots, publish_lag); (0, 0) is the default ring, and a non-default
+    ring on any other pipeline is rejected.
     ``streamk`` marks the Stream-K variant: only STREAMK_GFX1250_PIPELINES are
     accepted, with a row-major C and warp_k=1, and the epilogue rules are
     streamk_trait_reject_reason's (they depend on the reduction strategy); Stream-K
@@ -1737,6 +1815,9 @@ def gfx1250_pipeline_reject_reason(
     ``warp_tile_n`` of 0 (unknown) skip the 8-bit warp_tile_m/n rule.
     """
     is_tdm = pipeline in TDM_PIPELINES
+    ring_reason = comp_tdm_pc_ring_reject_reason(pipeline, *ring)
+    if ring_reason:
+        return ring_reason
     if pipeline == "compv5" and normalize_gfx_arch(gpu_target).lower() == GFX1250_ARCH:
         return GFX1250_COMPV5_REJECT_REASON
     if pipeline not in GFX1250_ONLY_PIPELINES and epilogue != "tdm":
@@ -1753,9 +1834,17 @@ def gfx1250_pipeline_reject_reason(
         return f"pipeline={pipeline} is not supported for {variant_name}"
     if is_tdm:
         # StreamKKernel takes a TDM pipeline with either epilogue and persistent or not;
-        # streamk_trait_reject_reason decides the epilogue per reduction strategy.
+        # streamk_trait_reject_reason decides the epilogue per reduction strategy. Plain
+        # GEMM also takes cshuffle for GEMM_TDM_CSHUFFLE_PIPELINES; batched GEMM does not
+        # (GEMM_TDM_CSHUFFLE_OPS in the Tile Engine), and preshuffle has no comp_tdm_pc
+        # or comp_tdm_v3 kernel at all.
         want_epilogue = tdm_pipeline_epilogue(pipeline)
-        if not streamk and epilogue != want_epilogue:
+        cshuffle_ok = (
+            epilogue == "cshuffle"
+            and pipeline in GEMM_TDM_CSHUFFLE_PIPELINES
+            and not batched
+        )
+        if not streamk and epilogue != want_epilogue and not cshuffle_ok:
             return f"pipeline={pipeline} requires epilogue={want_epilogue}"
         if not streamk and persistent:
             return f"pipeline={pipeline} does not support the persistent kernel"
@@ -1832,9 +1921,7 @@ PRESHUFFLE_GFX1250_PIPELINES = (
 PRESHUFFLE_GFX1250_LAYOUT = "rcr"
 # The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
 # packed buffer and a partial K tile packs the wrong elements.
-PRESHUFFLE_PAD_NK_REJECT_REASON = (
-    "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
-)
+PRESHUFFLE_PAD_NK_REJECT_REASON = "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
 # These block GEMMs ignore K warps while the launch still counts them, so the
 # extra waves run as M warps past the tile and corrupt C (comp_tdm* only survive
 # through their TDM store), on every arch.
@@ -1853,7 +1940,9 @@ def packed_b_pipeline_reject_reason(pipeline: str, preshuffle: bool) -> str:
     preshuffle variant performs; any other GEMM would compute from unpacked B.
     """
     if pipeline in PACKED_B_PIPELINES and not preshuffle:
-        return f"{pipeline} reads preshuffled B, so only the preshuffle variant can use it"
+        return (
+            f"{pipeline} reads preshuffled B, so only the preshuffle variant can use it"
+        )
     return ""
 
 
@@ -1896,7 +1985,9 @@ def preshuffle_pipeline_reject_reason(
     pads = (pad_m, pad_n, pad_k)
     if pipeline not in PRESHUFFLE_GFX1250_PIPELINES:
         pad_nk = is_true(pad_n) or is_true(pad_k)
-        return PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and arch == GFX1250_ARCH else ""
+        return (
+            PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and arch == GFX1250_ARCH else ""
+        )
     if arch and arch != GFX1250_ARCH:
         return f"pipeline {pipeline!r} requires {GFX1250_ARCH}, got {arch!r}"
     # rcr also covers the comp_async A row-major / B col-major requirement.
@@ -1909,7 +2000,11 @@ def preshuffle_pipeline_reject_reason(
         return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
     if pipeline != "comp_async" and any(is_true(p) for p in pads):
         return TDM_PAD_REJECT_REASON
-    if pipeline == "comp_async" and None not in pads and not all(is_true(p) for p in pads):
+    if (
+        pipeline == "comp_async"
+        and None not in pads
+        and not all(is_true(p) for p in pads)
+    ):
         return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
     if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
         return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
@@ -2071,14 +2166,33 @@ def warp_size_for_arch(gpu_target: str) -> int:
 
 
 def preshuffle_tile_reject_reason(
-    pipeline, gpu_target, dtype, tile_m, tile_n, tile_k, warp_m, warp_n, warp_k,
-    warp_tile_m, warp_tile_n, warp_tile_k,
+    pipeline,
+    gpu_target,
+    dtype,
+    tile_m,
+    tile_n,
+    tile_k,
+    warp_m,
+    warp_n,
+    warp_k,
+    warp_tile_m,
+    warp_tile_n,
+    warp_tile_k,
 ) -> str:
     """Tile rules the preshuffle kernels static_assert on; "" when the tile is valid."""
     warp_size = warp_size_for_arch(gpu_target)
     if pipeline in PACKED_B_PIPELINES and not is_preshuffle_config_valid(
-        tile_m, tile_n, tile_k, warp_m, warp_n, warp_k, warp_tile_m, warp_tile_n,
-        warp_tile_k, dtype, warp_size,
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
+        dtype,
+        warp_size,
     ):
         return (
             f"preshuffle {pipeline} packed-B M0/M1/M2 or vector-load rule rejects "

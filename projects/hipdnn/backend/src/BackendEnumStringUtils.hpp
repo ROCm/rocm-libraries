@@ -8,6 +8,7 @@
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnBackendBehaviorNote.h"
 #include "HipdnnBackendDescriptorType.h"
+#include "HipdnnBackendNumericalNote.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
@@ -205,6 +206,37 @@ inline const char* hipdnnGetBehaviorNoteString(hipdnnBackendBehaviorNote_t note)
         return "HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT";
     default:
         return "HIPDNN_BEHAVIOR_NOTE_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetNumericalNoteString(hipdnnBackendNumericalNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_NUMERICAL_NOTE_TENSOR_CORE:
+        return "HIPDNN_NUMERICAL_NOTE_TENSOR_CORE";
+    case HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS:
+        return "HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS";
+    case HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION:
+        return "HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION";
+    case HIPDNN_NUMERICAL_NOTE_FFT:
+        return "HIPDNN_NUMERICAL_NOTE_FFT";
+    case HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC:
+        return "HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC";
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD:
+        return "HIPDNN_NUMERICAL_NOTE_WINOGRAD";
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4:
+        return "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4";
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6:
+        return "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6";
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13:
+        return "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13";
+    case HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP:
+        return "HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP";
+    case HIPDNN_NUMERICAL_NOTE_TYPE_COUNT:
+        return "HIPDNN_NUMERICAL_NOTE_TYPE_COUNT";
+    default:
+        return "HIPDNN_NUMERICAL_NOTE_UNKNOWN";
     }
 }
 
@@ -736,6 +768,10 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT";
     case HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT:
         return "HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT";
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC:
+        return "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC";
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC:
+        return "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC";
 
     // Layernorm operation attributes
     case HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT:

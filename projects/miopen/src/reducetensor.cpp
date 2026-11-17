@@ -36,6 +36,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 
 // headers from composable kernel, to get consistent ID mapping
@@ -553,10 +554,19 @@ std::size_t ReduceTensorDescriptor::GetWorkspaceSize(const Handle& handle,
         (reduceOp == MIOPEN_REDUCE_TENSOR_MIN || reduceOp == MIOPEN_REDUCE_TENSOR_MAX ||
          reduceOp == MIOPEN_REDUCE_TENSOR_AMAX);
 
-    std::size_t wsSizeInBytes =
-        !need_indices ? workspace_size * detail::GetDataTypeSize(inDesc.GetType())
-                      : workspace_size * (detail::GetDataTypeSize(inDesc.GetType()) + sizeof(int)) +
-                            64 + sizeof(int) + workspaceAlignRequirementBytes;
+    // Reject the input types the size of which is unknown, as before.
+    std::ignore = detail::GetDataTypeSize(inDesc.GetType());
+
+    // The partial results of the blocks of a multi-block reduction are stored in the compute type:
+    // the input type is too narrow for them (a sum of FP16 elements overflows long before the
+    // final result does). A reduction without partial results does not depend on the compute type
+    // here.
+    const std::size_t partialSize =
+        workspace_size > 0 ? detail::GetDataTypeSize(this->reduceTensorCompType_) : 0;
+
+    std::size_t wsSizeInBytes = !need_indices ? workspace_size * partialSize
+                                              : workspace_size * (partialSize + sizeof(int)) + 64 +
+                                                    sizeof(int) + workspaceAlignRequirementBytes;
 
     // dynamic reduction use one additional page for storing tensor descriptors
     wsSizeInBytes += 4096;
@@ -646,10 +656,12 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
 
     if(need_indices && workspace != nullptr)
     {
-        auto aTypeSize      = detail::GetDataTypeSize(aDesc.GetType());
+        // the indices follow the partial values, which are stored in the compute type (see
+        // GetWorkspaceSize())
+        auto partialSize    = detail::GetDataTypeSize(compType);
         auto workspace_size = configurator.getWorkspaceSize(invariantLength, toReduceLength);
 
-        ws_buf2_bytes_offset = ((workspace_size * aTypeSize + 63) / 64) * 64;
+        ws_buf2_bytes_offset = ((workspace_size * partialSize + 63) / 64) * 64;
     };
 
     const ReductionMethod_t reduceImpl =

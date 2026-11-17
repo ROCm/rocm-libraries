@@ -229,8 +229,6 @@ struct BatchedGemmKernel
 
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
-        // A pipeline with named barriers (comp_tdm_pc) takes the token that arms them; the token
-        // is empty for any other pipeline.
         UniversalGemmKernel::RunGemm({a_ptr},
                                      {b_ptr},
                                      {/*ds_ptr*/},

@@ -119,6 +119,35 @@ def resolve_pipeline_lds_budget_aliases(specs: Dict[str, Any]) -> Dict[str, str]
     return aliases
 
 
+def resolve_pipeline_extra_warp_configs(
+    specs: Dict[str, Any],
+) -> Dict[str, Dict[str, list]]:
+    """Return {pipeline: {arch: [[wm, wn, wk], ...]}} from pipeline_extra_warp_configs."""
+    raw = specs.get("pipeline_extra_warp_configs", {})
+    archs = specs["architectures"]
+    resolved: Dict[str, Dict[str, list]] = {}
+    for pipeline, per_arch in raw.items():
+        if pipeline.startswith("_"):
+            continue
+        if pipeline not in CommonTypeMappings.PIPELINE_TO_DISPATCHER:
+            raise ValueError(
+                f"pipeline_extra_warp_configs['{pipeline}'] is not in "
+                f"CommonTypeMappings.PIPELINE_TO_DISPATCHER."
+            )
+        arch_map: Dict[str, list] = {}
+        for arch, combos in per_arch.items():
+            if arch.startswith("_"):
+                continue
+            if arch not in archs:
+                raise ValueError(
+                    f"pipeline_extra_warp_configs['{pipeline}'] references "
+                    f"unknown architecture '{arch}'."
+                )
+            arch_map[arch] = [list(c) for c in combos]
+        resolved[pipeline] = arch_map
+    return resolved
+
+
 def generate_python_module(specs: Dict[str, Any], output_path: Path):
     """Generate Python module from arch specs."""
 
@@ -128,6 +157,7 @@ def generate_python_module(specs: Dict[str, Any], output_path: Path):
     archs = specs["architectures"]
     element_sizes = specs["element_sizes"]
     lds_budgets = resolve_pipeline_lds_budgets(specs)
+    extra_warps = resolve_pipeline_extra_warp_configs(specs)
     unsupported = specs["unsupported_trait_combos"]["combinations"]
 
     # Build warp configs dict
@@ -135,6 +165,14 @@ def generate_python_module(specs: Dict[str, Any], output_path: Path):
     for arch, data in archs.items():
         warp_configs_str += f'    "{arch}": {data["warp_configs"]},\n'
     warp_configs_str += "}"
+
+    extra_warps_str = "{\n"
+    for pipeline, per_arch in extra_warps.items():
+        extra_warps_str += f'    "{pipeline}": {{\n'
+        for arch, combos in per_arch.items():
+            extra_warps_str += f'        "{arch}": {combos},\n'
+        extra_warps_str += "    },\n"
+    extra_warps_str += "}"
 
     # Build warp tile combos dict
     warp_tile_str = "{\n"
@@ -237,6 +275,9 @@ ELEMENT_SIZE_MAP: Dict[str, float] = {element_sizes}
 
 # Supported warp configurations per architecture [warp_m, warp_n, warp_k]
 WARP_SUPPORTED_COMBINATIONS: Dict[str, List[List[int]]] = {warp_configs_str}
+
+# Pipeline-specific extra warp configurations: pipeline -> arch -> [[warp_m, warp_n, warp_k], ...]
+PIPELINE_EXTRA_WARP_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {extra_warps_str}
 
 # Supported warp tile combinations: arch -> dtype_key -> [[warp_tile_m, n, k], ...]
 WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {warp_tile_str}
@@ -395,6 +436,21 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
         warp_config_cases.append(
             f"        case GpuArch::{enum_name}: return {{{configs}}};"
         )
+
+    extra_warp_cases = []
+    for pipeline, per_arch in resolve_pipeline_extra_warp_configs(specs).items():
+        pipe_enum = CommonTypeMappings.PIPELINE_TO_DISPATCHER[pipeline]
+        for arch, combos in per_arch.items():
+            arch_enum = f"GpuArch::{arch.upper().replace('GFX', 'GFX_')}"
+            pushes = "\n        ".join(
+                f"configs.push_back({{{c[0]}, {c[1]}, {c[2]}}});" for c in combos
+            )
+            extra_warp_cases.append(
+                f"    if (pipeline == {pipe_enum} && arch == {arch_enum}) {{\n"
+                f"        {pushes}\n"
+                f"    }}"
+            )
+    extra_warp_body = ("\n" + "\n".join(extra_warp_cases)) if extra_warp_cases else ""
 
     # Build element size switch
     # Include all data types defined in kernel_key.hpp DataType enum
@@ -574,6 +630,14 @@ inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch) {{
 {chr(10).join(warp_config_cases)}
         default: return {{}};
     }}
+}}
+
+inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch, [[maybe_unused]] Pipeline pipeline) {{
+    auto configs = get_supported_warp_configs(arch);
+    if (configs.empty()) {{
+        return configs;
+    }}{extra_warp_body}
+    return configs;
 }}
 
 // =============================================================================
