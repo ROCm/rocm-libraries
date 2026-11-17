@@ -1431,10 +1431,10 @@ namespace
 
         const std::vector<int32_t> idx(8, sentinel_i);
         const std::vector<float>   val(8, sentinel_v);
-        DevBuf<int32_t> d_idx(idx);
-        DevBuf<int32_t> d_col(idx);
-        DevBuf<float>   d_val(val);
-        DevBuf<float>   d_dense(
+        DevBuf<int32_t>            d_idx(idx);
+        DevBuf<int32_t>            d_col(idx);
+        DevBuf<float>              d_val(val);
+        DevBuf<float>              d_dense(
             std::vector<float>(static_cast<size_t>(dense_rows * dense_cols), 1.0f));
 
         Dnmat mat_A;
@@ -1494,16 +1494,10 @@ namespace
         }
         else if(format == rocsparse_format_ell)
         {
-            ASSERT_EQ(rocsparse_create_ell_descr(&mat_B,
-                                                 sparse_rows,
-                                                 sparse_cols,
-                                                 d_col.get(),
-                                                 d_val.get(),
-                                                 2,
-                                                 i32,
-                                                 base0,
-                                                 f32),
-                      st_ok);
+            ASSERT_EQ(
+                rocsparse_create_ell_descr(
+                    &mat_B, sparse_rows, sparse_cols, d_col.get(), d_val.get(), 2, i32, base0, f32),
+                st_ok);
         }
         else if(format == rocsparse_format_bell)
         {
@@ -1530,18 +1524,15 @@ namespace
         const int64_t ell_width_before = mat_B.get()->ell_width;
 
         size_t buffer_size = sentinel_b;
-        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
-                                            mat_A,
-                                            mat_B,
-                                            rocsparse_dense_to_sparse_alg_default,
-                                            &buffer_size,
-                                            nullptr),
-                  st_size)
+        ASSERT_EQ(
+            rocsparse_dense_to_sparse(
+                handle, mat_A, mat_B, rocsparse_dense_to_sparse_alg_default, &buffer_size, nullptr),
+            st_size)
             << "buffer-size query";
         EXPECT_EQ(buffer_size, sentinel_b);
 
         DevBuf<char> temp(64);
-        size_t compute_buffer_size = sentinel_b;
+        size_t       compute_buffer_size = sentinel_b;
         ASSERT_EQ(rocsparse_dense_to_sparse(handle,
                                             mat_A,
                                             mat_B,
@@ -1552,13 +1543,10 @@ namespace
             << "compute";
         EXPECT_EQ(compute_buffer_size, sentinel_b);
 
-        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
-                                            mat_A,
-                                            mat_B,
-                                            rocsparse_dense_to_sparse_alg_default,
-                                            nullptr,
-                                            temp.get()),
-                  st_size)
+        ASSERT_EQ(
+            rocsparse_dense_to_sparse(
+                handle, mat_A, mat_B, rocsparse_dense_to_sparse_alg_default, nullptr, temp.get()),
+            st_size)
             << "analysis";
 
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
