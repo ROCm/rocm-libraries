@@ -197,9 +197,9 @@ Restack only.
     TheRock manifest (full), `.info/version` (base), or `unknown`.
   - A new `tensilelite-client --build-rocm` prints `<identity> <full|base|unknown>`
     on one line, under the same no-GPU, five-second rules.
-  - `hipblaslt_resolve_build_rocm_root()` and the `.info/version`/manifest
-    configure dependencies therefore stay on this branch, but feed only the client.
-    They never feed the wheel's version (decision 1).
+  - `hipblaslt_resolve_build_rocm_root()` stays on this branch. The metadata
+    prerequisite reads its `.info/version`/manifest for the client at build time.
+    This native build-root value never feeds the wheel version (decision 1).
   - A CTest checks `--build-rocm` against the saved build value. The reviewed
     TheRock gfx942/gfx950 toolchain roots supplied `10.3.0 base` through
     `.info/version`, without the auxiliary full manifest. This precision cannot
@@ -288,6 +288,9 @@ the docs branch #11254. Not gated; it lands with the lower stack.
   Derive the version-dependent filename at build time and publish the selected
   basename plus metadata in the stable `tensilelite-release-wheels/.published`
   manifest. Validate a new wheel before replacing the published selection.
+  Check publication on every requested build; a missing wheel is rebuilt even
+  when its manifest survives. Unchanged metadata and declared source inputs
+  retain the wheel and manifest timestamps.
   Respect an explicit `SOURCE_DATE_EPOCH`; otherwise use the resolved commit's
   timestamp when Git is available.
   - **Required, not optional** (audit): the staged copy under the build directory
@@ -914,8 +917,11 @@ Where the implementation went beyond or differs from section 1.2:
   revision, optional explicit identity). The build helper derives the filename
   and saves the selection in `.published`; source-only commits rebuild the stamp
   even when an explicit ROCm label keeps the filename unchanged.
-- **#11021:** an unpacked sdist keeps the version in its `PKG-INFO`, so a TheRock
-  identity survives sdist → wheel; passing a different identity there is an error.
+- **#11021:** the backend and combined metadata query share the saved sdist
+  `PKG-INFO` version, so release/development ROCm identity survives both ordinary
+  sdist → wheel and canonical staging. A conflicting explicit identity is an
+  error. Python sdists contain wheel inputs; native client templates/build helpers
+  are provided separately when testing pairing with a compiled client.
 - **#11022:** codegen depends on the unpacked wheel through the new CMake variable
   `HIPBLASLT_PYTHON_INPUTS`. Unpacking depends on `.published`, rather than a
   configure-time filename, and removes stale wheel-owned extracted files.
