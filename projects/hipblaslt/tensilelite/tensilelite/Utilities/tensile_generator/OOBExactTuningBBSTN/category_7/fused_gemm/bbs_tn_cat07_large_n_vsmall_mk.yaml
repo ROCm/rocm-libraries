@@ -21,12 +21,13 @@ GlobalParameters:
   NumWarmups: 50
   EnqueuesPerSync: 1000   # fastest size runs ~6.2 us; keeps every size >= 4 ms per sync
   SleepPercent: 50
-  # PrintWinnersOnly: True
+  PrintWinnersOnly: True
   Architecture: gfx1250
   # KeepBuildTmp: True
   PrintLevel: 2
   SkipSlowSolutionRatio: 0.0
   RotatingBufferSize: 384
+  CSVExportWinner: True
 
 
 BenchmarkProblems:
@@ -56,29 +57,52 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         # MIWaveGroup [1,4]: MT0 = 16*WT0 (16/32/64/112/128), MT1 = 64*WT1 (128/256/384/512)
+        # Entry 1: every tile, plain data parallel.
+        # Entry 2: tiles up to 256x256 as persistent data parallel, with
+        # ReuseAcrossPersistent (RAP) off and on. RAP keeps A for the whole K in
+        # VGPRs and reuses it on every tile the workgroup visits, so larger tiles
+        # do not build. With bias and ScaleAlphaVec a RAP kernel holds
+        # PrefetchGlobalRead + 1 = 3 k-tiles, so it only runs for K <= 3 * DepthU.
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1,  1, 2,  1, 4]
-          - [16, 16, 32, 1,  1,  1, 4,  1, 4]
-          - [16, 16, 32, 1,  1,  1, 6,  1, 4]
-          - [16, 16, 32, 1,  1,  1, 8,  1, 4]
-          - [16, 16, 32, 1,  1,  2, 2,  1, 4]
-          - [16, 16, 32, 1,  1,  2, 4,  1, 4]
-          - [16, 16, 32, 1,  1,  2, 6,  1, 4]
-          - [16, 16, 32, 1,  1,  2, 8,  1, 4]
-          - [16, 16, 32, 1,  1,  4, 2,  1, 4]
-          - [16, 16, 32, 1,  1,  4, 4,  1, 4]
-          - [16, 16, 32, 1,  1,  4, 6,  1, 4]
-          - [16, 16, 32, 1,  1,  4, 8,  1, 4]
-          - [16, 16, 32, 1,  1,  7, 2,  1, 4]
-          - [16, 16, 32, 1,  1,  7, 4,  1, 4]
-          - [16, 16, 32, 1,  1,  7, 6,  1, 4]
-          - [16, 16, 32, 1,  1,  7, 8,  1, 4]
-          - [16, 16, 32, 1,  1,  8, 2,  1, 4]
-          - [16, 16, 32, 1,  1,  8, 4,  1, 4]
-          - [16, 16, 32, 1,  1,  8, 6,  1, 4]
-          - [16, 16, 32, 1,  1,  8, 8,  1, 4]
-        - DepthU: [32, 64, 128]
+          - [16, 16, 32, 1,  1,  1, 2,  1, 4]   # 16x128
+          - [16, 16, 32, 1,  1,  1, 4,  1, 4]   # 16x256
+          - [16, 16, 32, 1,  1,  1, 6,  1, 4]   # 16x384
+          - [16, 16, 32, 1,  1,  1, 8,  1, 4]   # 16x512
+          - [16, 16, 32, 1,  1,  2, 2,  1, 4]   # 32x128
+          - [16, 16, 32, 1,  1,  2, 4,  1, 4]   # 32x256
+          - [16, 16, 32, 1,  1,  2, 6,  1, 4]   # 32x384
+          - [16, 16, 32, 1,  1,  2, 8,  1, 4]   # 32x512
+          - [16, 16, 32, 1,  1,  4, 2,  1, 4]   # 64x128
+          - [16, 16, 32, 1,  1,  4, 4,  1, 4]   # 64x256
+          - [16, 16, 32, 1,  1,  4, 6,  1, 4]   # 64x384
+          - [16, 16, 32, 1,  1,  4, 8,  1, 4]   # 64x512
+          - [16, 16, 32, 1,  1,  7, 2,  1, 4]   # 112x128
+          - [16, 16, 32, 1,  1,  7, 4,  1, 4]   # 112x256
+          - [16, 16, 32, 1,  1,  7, 6,  1, 4]   # 112x384
+          - [16, 16, 32, 1,  1,  7, 8,  1, 4]   # 112x512
+          - [16, 16, 32, 1,  1,  8, 2,  1, 4]   # 128x128
+          - [16, 16, 32, 1,  1,  8, 4,  1, 4]   # 128x256
+          - [16, 16, 32, 1,  1,  8, 6,  1, 4]   # 128x384
+          - [16, 16, 32, 1,  1,  8, 8,  1, 4]   # 128x512
+        # TPSN -> GSUMB
+        # TPSDP -> DP+(RAP0 / RAP1)
+        - Groups:
+          -
+            - PrefetchAcrossPersistent: [0]
+              TileProcessingStrategy: [None]
+
+            - PrefetchAcrossPersistent: [1]
+              ReuseAcrossPersistent: [0, 1]
+              TileProcessingStrategy: [DataParallel]
+
+        - PrefetchGlobalRead: [2]
         - TDMInst: [3]
+        - WorkAssignment: [StaticGrid]
+        - GlobalSplitU: [-1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+
+        # Generaal...
+        - DepthU: [32, 64, 128]
         - TDMPlusLdsBuf: [-1]
         - HalfPLR: [0]
         - TDMIterateMode: [-1]
@@ -98,11 +122,8 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [2]
         - ClusterLocalRead: [0]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]

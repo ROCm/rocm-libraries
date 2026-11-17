@@ -21,12 +21,13 @@ GlobalParameters:
   NumWarmups: 50
   EnqueuesPerSync: 1200   # fastest size runs ~4.5 us; keeps every size >= 4 ms per sync
   SleepPercent: 50
-  # PrintWinnersOnly: True
+  PrintWinnersOnly: True
   Architecture: gfx1250
   # KeepBuildTmp: True
   PrintLevel: 2
   SkipSlowSolutionRatio: 0.0
   RotatingBufferSize: 384
+  CSVExportWinner: True
 
 
 BenchmarkProblems:
@@ -52,7 +53,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-      ForkParameters:
+      ForkParameters: &fork9
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         # MIWaveGroup [4,1]: MT0 = 64*WT0 (128/256/384/512), MT1 = 16*WT1 (16..128)
@@ -89,6 +90,22 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  8, 6,  4, 1]
           - [16, 16, 32, 1,  1,  8, 7,  4, 1]
           - [16, 16, 32, 1,  1,  8, 8,  4, 1]
+
+        # TPSN -> GSUMB
+        # TPSDP -> DP+(RAP0 / RAP1)
+        - Groups:
+          -
+            - PrefetchAcrossPersistent: [0]
+              TileProcessingStrategy: [None]
+
+            - PrefetchAcrossPersistent: [1]
+              TileProcessingStrategy: [DataParallel]
+
+        - WorkAssignment: [StaticGrid]
+        - GlobalSplitU: [-1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+
+        # Generaal...
         - DepthU: [32, 64, 128]
         - TDMInst: [3]
         - TDMPlusLdsBuf: [-1]
@@ -113,8 +130,6 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - ClusterLocalRead: [0]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
@@ -149,6 +164,141 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
         - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [1019408, 32, 1, 128]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [755776, 48, 1, 48]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [636224, 48, 1, 64]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [467568, 112, 1, 64]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [286128, 64, 1, 112]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [259280, 16, 1, 32]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [142816, 80, 1, 64]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [125488, 128, 1, 48]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
+
+    # - # BenchmarkProblemSizeGroup
+    #   InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters: *fork9
+    #   BenchmarkForkParameters:
+    #   JoinParameters:
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #       - Exact: [98000, 96, 1, 64]
+    #     - ActivationArgs:
+    #       - [Enum: none]
+    #     - BiasTypeArgs: [s]
 
 LibraryLogic:
    ScheduleName: "gfx1250"
