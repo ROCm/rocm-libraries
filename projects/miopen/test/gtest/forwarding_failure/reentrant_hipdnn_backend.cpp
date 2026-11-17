@@ -10,6 +10,10 @@
 // re-enters miopenDestroy. If MIOpen still held a lock there, that call would
 // never return. script/test_forwarding_failure_modes.py checks that it does.
 //
+// With REENTRANT_HIPDNN_BACKEND_FAIL_SET_STREAM set, setting a stream fails, so
+// the hipDNN handle MIOpen just created for a handle with a stream is destroyed
+// again. That destroy re-enters miopenDestroy too.
+//
 // The backend header is not included: it declares these functions as imports on
 // Windows, and this library defines them.
 
@@ -17,6 +21,7 @@
 #include <miopen/miopen.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 #ifdef _WIN32
@@ -72,7 +77,9 @@ REENTRANT_BACKEND_EXPORT int hipdnnDestroy(hipdnnHandle* handle)
 
 REENTRANT_BACKEND_EXPORT int hipdnnSetStream(hipdnnHandle* handle, void* /*stream*/)
 {
-    return handle == nullptr ? Failure : Success;
+    static const bool failSetStream =
+        std::getenv("REENTRANT_HIPDNN_BACKEND_FAIL_SET_STREAM") != nullptr;
+    return handle == nullptr || failSetStream ? Failure : Success;
 }
 
 REENTRANT_BACKEND_EXPORT int hipdnnGetStream(hipdnnHandle* handle, void** stream)

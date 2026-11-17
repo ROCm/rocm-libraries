@@ -18,13 +18,21 @@
 //                      gives the handle a hipDNN handle for miopenDestroy to
 //                      destroy. Needs a GPU, so stops after printing a failed
 //                      miopenCreate.
-//  batchnorm           batchnorm forward training, forward inference with
+//  destroy_after_forward_on_stream
+//                      destroy_after_forward on a handle made by
+//                      miopenCreateWithStream on a new HIP stream, so the forwarded
+//                      call also sets that stream on the hipDNN handle. Prints the
+//                      hipStreamCreate result as stream_create first, and stops
+//                      after it if it failed.
+//  batchnorm          batchnorm forward training, forward inference with
 //                      estimates, and backward; prints bn_train, bn_infer and
 //                      bn_backward statuses
 //  repeat N            runs the previous step N more times
 
 #include <miopen/hipdnn_forwarding.h>
 #include <miopen/miopen.h>
+
+#include <hip/hip_runtime_api.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -93,6 +101,32 @@ miopenStatus_t ConvForward(const ConvProblem& p, miopenHandle_t handle = nullptr
                                     nullptr,
                                     nullptr,
                                     0);
+}
+
+void DestroyAfterForward(const ConvProblem& p, bool onStream)
+{
+    hipStream_t stream = nullptr;
+    if(onStream)
+    {
+        const hipError_t streamCreated = hipStreamCreate(&stream);
+        std::printf("stream_create=%d\n", static_cast<int>(streamCreated));
+        if(streamCreated != hipSuccess)
+            return;
+    }
+    miopenHandle_t handle = nullptr;
+    const miopenStatus_t created =
+        onStream ? miopenCreateWithStream(&handle, stream) : miopenCreate(&handle);
+    std::printf("create=%d\n", static_cast<int>(created));
+    if(created == miopenStatusSuccess)
+    {
+        // Data pointers are never read: the forwarded call fails before it runs
+        // anything, after it has tried to give the handle its hipDNN state.
+        std::printf("forward_with_handle=%d\n", static_cast<int>(ConvForward(p, handle)));
+        std::fflush(stdout);
+        std::printf("destroy=%d\n", static_cast<int>(miopenDestroy(handle)));
+    }
+    if(stream != nullptr)
+        static_cast<void>(hipStreamDestroy(stream));
 }
 
 // x's descriptor serves every activation tensor, a 1x1x1x1 one every per-channel
@@ -195,20 +229,11 @@ int main(int argc, char** argv)
             lastConvStatus = ConvForward(problem);
             std::printf("conv_forward=%d\n", static_cast<int>(lastConvStatus));
         }
-        else if(step == "destroy_after_forward")
+        else if(step == "destroy_after_forward" || step == "destroy_after_forward_on_stream")
         {
             if(!ensureProblem())
                 return false;
-            miopenHandle_t handle        = nullptr;
-            const miopenStatus_t created = miopenCreate(&handle);
-            std::printf("create=%d\n", static_cast<int>(created));
-            if(created != miopenStatusSuccess)
-                return true;
-            // Data pointers are never read: the forwarded call fails building its
-            // graph, after it has given the handle its hipDNN state.
-            std::printf("forward_with_handle=%d\n", static_cast<int>(ConvForward(problem, handle)));
-            std::fflush(stdout);
-            std::printf("destroy=%d\n", static_cast<int>(miopenDestroy(handle)));
+            DestroyAfterForward(problem, step == "destroy_after_forward_on_stream");
         }
         else if(step == "batchnorm")
         {

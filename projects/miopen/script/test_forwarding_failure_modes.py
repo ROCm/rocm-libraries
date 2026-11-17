@@ -18,10 +18,12 @@ the loader's search path. MIOpen handles the fake the same way as a missing back
 ctest sets MIOPEN_FAILURE_PROBE (the probe) and MIOPEN_FAKE_HIPDNN_BACKEND (the fake's
 directory). Without them every case is skipped.
 
-One case uses a second backend instead, from MIOPEN_REENTRANT_HIPDNN_BACKEND: hipDNN
-accepts it, and its hipdnnDestroy calls miopenDestroy. It checks that miopenDestroy does
-not hang when destroying its hipDNN handle re-enters it. That case needs a GPU, because
-the backend creates an MIOpen handle, and is skipped without one.
+Two cases use a second backend instead, from MIOPEN_REENTRANT_HIPDNN_BACKEND: hipDNN
+accepts it, and its hipdnnDestroy calls miopenDestroy. One checks that miopenDestroy does
+not hang when destroying its hipDNN handle re-enters it. The other makes the backend
+fail to set a stream, and checks that the forwarded call that destroys the hipDNN handle
+it just created does not hang either. Both need a GPU, because the backend creates an
+MIOpen handle, and are skipped without one.
 
 Uses unittest rather than pytest, like the other wrapper script tests, because nothing
 installs pytest on a machine that builds MIOpen.
@@ -312,6 +314,41 @@ class ForwardingFailureModesTest(unittest.TestCase):
         # Two hipDNN handles are destroyed: the one hipDNN's availability check makes,
         # and the one the forwarded call gave the probe's handle. Fewer means the
         # forwarded call never got that far, and miopenDestroy had nothing to re-enter.
+        self.assertEqual(
+            run.lines_starting(DESTROYED_MARKER),
+            [f"{DESTROYED_MARKER}{SUCCESS}"] * 2,
+            run.stderr,
+        )
+
+    def test_a_failed_stream_set_returns_when_the_backend_calls_back_into_miopen(self):
+        if self.reentrant_backend is None:
+            self.skipTest(f"set {REENTRANT_BACKEND_ENV}")
+        run = self.run_probe(
+            ["destroy_after_forward_on_stream"],
+            {**FORWARDING_ON, "REENTRANT_HIPDNN_BACKEND_FAIL_SET_STREAM": "1"},
+            backend=self.reentrant_backend,
+            timeout=60,
+        )
+        if run.statuses("create") != [SUCCESS]:
+            self.skipTest(
+                f"no stream or miopenCreateWithStream failed, so no GPU\n{run.stderr}"
+            )
+        self.assertEqual(
+            run.statuses("forward_with_handle"), [INTERNAL_ERROR], run.stderr
+        )
+        self.assertTrue(
+            any(
+                line.endswith(
+                    "could not set the MIOpen handle's stream on the hipDNN handle"
+                )
+                for line in run.lines_starting(FORWARDED_FAILURE)
+            ),
+            run.stderr,
+        )
+        self.assertEqual(run.statuses("destroy"), [SUCCESS], run.stderr)
+        # Two hipDNN handles are destroyed: the availability check's, and the one the
+        # forwarded call created and could not set the stream on. The probe's handle
+        # never kept one, so miopenDestroy destroys none.
         self.assertEqual(
             run.lines_starting(DESTROYED_MARKER),
             [f"{DESTROYED_MARKER}{SUCCESS}"] * 2,
