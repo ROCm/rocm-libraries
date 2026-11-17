@@ -924,10 +924,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                 # (reached here only with ForceRedoBenchmarkProblems) would otherwise be
                 # copied to 2_BenchmarkData as this run's results.
                 if not writeResultsFile:
-                    staleResults = [resultsFileName]
-                    if enableTileSelection:
-                        staleResults.append(resultsFileBase + "_Granularity.csv")
-                    for staleFile in staleResults:
+                    for staleFile in (resultsFileName, resultsFileBase + "_Granularity.csv"):
                         if os.path.isfile(staleFile):
                             os.remove(staleFile)
                 returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths,
