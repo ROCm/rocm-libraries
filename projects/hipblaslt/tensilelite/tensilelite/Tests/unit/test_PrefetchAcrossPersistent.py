@@ -279,8 +279,8 @@ class _SetupNewTilePapTdmWriter:
     def calculateLoopNumIter(self, kernel, tpa, tpb, loop_idx):
         return self._module("calculateLoopNumIter")
 
-    def openA2AShardLoop(self, kernel, tpa, tpb):
-        return self._module("openA2AShardLoop")
+    def a2aSetupSegments(self, kernel, tpa, tpb):
+        return self._module("a2aSetupSegments")
 
     def localReadInitPointers(self, kernel, tpa, tpb):
         return self._module("localReadInitPointers_%s" % tpb["tensorChar"])
