@@ -79,3 +79,18 @@ def test_study_checker_rejects_local_paths_and_provenance_drift(
     ] = "https://example.com/llvm-project"
     with pytest.raises(study.StudyError, match="repository disagrees"):
         _check_changed(wrong_repository, tmp_path)
+
+
+def test_study_checker_rejects_stale_boundary_count(tmp_path: Path) -> None:
+    churn = tmp_path / "churn.md"
+    churn.write_text(
+        (_CAPABILITIES_DIR / "churn_report.md")
+        .read_text()
+        .replace("changes at seven boundaries", "changes at six boundaries")
+    )
+    with pytest.raises(study.StudyError, match="changed-boundary count is stale"):
+        study.check(
+            _CAPABILITIES_DIR / "historical_observations.json",
+            _CAPABILITIES_DIR / "historical_study.md",
+            churn,
+        )
