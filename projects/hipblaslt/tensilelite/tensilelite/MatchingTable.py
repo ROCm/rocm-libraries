@@ -19,10 +19,25 @@ the logic files (``0`` marks an unmeasured size), and msgpack encodes the two
 differently, so each row remembers which it was. Values that cannot be
 stored exactly (a key element that is not a plain int, a speed that is
 neither, an int speed beyond float64's exact range) make ``fromRows`` return
-None and the caller keeps the legacy list.
+None and the caller keeps the legacy list. So does an interpreter without
+NumPy: a build environment that imports the source tree without installing
+``requirements.txt`` then loses the memory saving but still builds.
 """
 
-import numpy as np
+_numpyModule = None
+
+
+def _numpy():
+    """The numpy module, or None when it is not installed."""
+    global _numpyModule
+    if _numpyModule is None:
+        try:
+            import numpy
+
+            _numpyModule = numpy
+        except ImportError:
+            _numpyModule = False
+    return _numpyModule or None
 
 
 class MatchingTable:
@@ -48,50 +63,66 @@ class MatchingTable:
 
     # ----------------------------------------------------------------- build
     @classmethod
-    def fromRows(cls, rows):
-        """A MatchingTable holding ``rows`` (legacy row dicts), or None if not representable exactly.
+    def fromColumns(cls, keys, solutions, speeds):
+        """A MatchingTable for parallel lists of key lists, solutions and speeds, or None.
 
-        The result is sorted by key, like the legacy table after construction.
-        An empty table has no key width to store, so it stays a legacy list.
+        ``speeds`` is None for a table without a speed column. None is
+        returned when a value cannot be stored exactly or NumPy is missing;
+        the caller then keeps the legacy row dicts. The result is sorted by
+        key, like the legacy table after construction. An empty table has no
+        key width to store, so it stays a legacy list.
         """
-        if not rows:
+        np = _numpy()
+        if np is None or not keys:
             return None
-        hasSpeed = "speed" in rows[0]
-        keyLen = len(rows[0]["key"])
+        keyLen = len(keys[0])
         if keyLen == 0:
             return None
-        for row in rows:
-            if ("speed" in row) != hasSpeed or len(row["key"]) != keyLen:
+        for key in keys:
+            if len(key) != keyLen:
                 return None
-            for v in row["key"]:
+            for v in key:
                 if type(v) is not int:
                     return None
         try:
-            keys = np.array([row["key"] for row in rows], dtype=np.int64)
+            keyArray = np.array(keys, dtype=np.int64)
         except (OverflowError, ValueError, TypeError):
             return None
-        speeds = speedIsInt = None
-        if hasSpeed:
-            values = [row["speed"] for row in rows]
-            isInt = [type(v) is int for v in values]
-            if not all(isInt[i] or type(v) is float for i, v in enumerate(values)):
+        speedArray = speedIsInt = None
+        if speeds is not None:
+            isInt = [type(v) is int for v in speeds]
+            if not all(isInt[i] or type(v) is float for i, v in enumerate(speeds)):
                 return None
             try:
-                speeds = np.array(values, dtype=np.float64)
+                speedArray = np.array(speeds, dtype=np.float64)
             except (OverflowError, ValueError, TypeError):
                 return None
             if any(isInt):
                 speedIsInt = np.array(isInt, dtype=bool)
                 # An int must survive the trip through float64 unchanged.
-                intValues = [v for v, i in zip(values, isInt) if i]
+                intValues = [v for v, i in zip(speeds, isInt) if i]
                 if any(
-                    int(f) != v for v, f in zip(intValues, speeds[speedIsInt].tolist())
+                    int(f) != v
+                    for v, f in zip(intValues, speedArray[speedIsInt].tolist())
                 ):
                     return None
-        solutions = [row["index"].solution for row in rows]
-        table = cls(keys, solutions, speeds, speedIsInt)
+        table = cls(keyArray, list(solutions), speedArray, speedIsInt)
         table.sort()
         return table
+
+    @classmethod
+    def fromRows(cls, rows):
+        """A MatchingTable holding ``rows`` (legacy row dicts), or None if not representable exactly."""
+        if not rows:
+            return None
+        hasSpeed = "speed" in rows[0]
+        if any(("speed" in row) != hasSpeed for row in rows):
+            return None
+        return cls.fromColumns(
+            [row["key"] for row in rows],
+            [row["index"].solution for row in rows],
+            [row["speed"] for row in rows] if hasSpeed else None,
+        )
 
     # ------------------------------------------------------------ sequence
     def __len__(self):
@@ -138,6 +169,7 @@ class MatchingTable:
     def __iadd__(self, other):
         if not isinstance(other, MatchingTable):
             return NotImplemented
+        np = _numpy()
         if len(other) == 0:
             return self
         if len(self) == 0:
@@ -173,6 +205,7 @@ class MatchingTable:
         n = len(self)
         if n < 2:
             return
+        np = _numpy()
         order = np.lexsort(
             tuple(self.keys[:, j] for j in reversed(range(self.keys.shape[1])))
         )
