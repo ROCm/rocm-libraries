@@ -162,10 +162,12 @@ if(TENSILELITE_CLIENT_FORCE_RPATH AND UNIX AND NOT APPLE)
     find_program(TENSILELITE_PATCHELF patchelf)
     if(TENSILELITE_PATCHELF)
         foreach(_client IN ITEMS tensilelite-client cpu-gemm-driver)
-            add_custom_command(TARGET ${_client} POST_BUILD
-                COMMAND sh -c "r=$(\"$0\" --print-rpath \"$1\") || exit 1; [ -z \"$r\" ] || exec \"$0\" --force-rpath --set-rpath \"$r\" \"$1\""
-                        "${TENSILELITE_PATCHELF}" "$<TARGET_FILE:${_client}>"
-                VERBATIM)
+            if(TARGET ${_client})
+                add_custom_command(TARGET ${_client} POST_BUILD
+                    COMMAND sh -c "r=$(\"$0\" --print-rpath \"$1\") || exit 1; [ -z \"$r\" ] || exec \"$0\" --force-rpath --set-rpath \"$r\" \"$1\""
+                            "${TENSILELITE_PATCHELF}" "$<TARGET_FILE:${_client}>"
+                    VERBATIM)
+            endif()
         endforeach()
     else()
         message(WARNING
