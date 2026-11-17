@@ -122,21 +122,21 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 1,084 (90 + 63 + 312 + 116 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 1,084 (90 + 63 + 312 + 116 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 8 companions, its manifest's `companions`: 3 standalone `dbias_reduce` objects, 3 tail-zero objects and 2 V-head tail-zero objects, which the comparison below does not count) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask sdpa_head_pad` | 719 (90 + 63 + 192 + 116 + 256 + 1 + 1) |
 | `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,155 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 1,329 + 962 + 325) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 457 (90 + 63 + 278 + 24 + 1 + 1) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 465 (90 + 63 + 286 + 24 + 1 + 1) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 958 (90 + 63 + 278 + 24 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 8 companions, its manifest's `companions`: 3 standalone `dbias_reduce` objects, 3 tail-zero objects and 2 V-head tail-zero objects, which the comparison below does not count) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 966 (90 + 63 + 286 + 24 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 8 companions, its manifest's `companions`: 3 standalone `dbias_reduce` objects, 3 tail-zero objects and 2 V-head tail-zero objects, which the comparison below does not count) |
 
 `sdpa_bwd_dbias_reduce` and `sdpa_bwd_dsink_reduce` ship no content (both reduce kernels ride
 inside the dQ and merged objects), so no `OPS` list names them; their generators only build the
 standalone reduce pins that the S1 gates compare against.
 
-`sdpa_bwd_tailzero` ships no content of its own either: its six objects (gfx950 and gfx11-generic, each f16, bf16, fp32) and its two
-V-head objects (role `tailzero_hv`, one per arch; the f16 and bf16 entries name the same bytes) are
+`sdpa_bwd_tailzero` ships no content of its own either: its objects (gfx950, gfx11-generic, gfx942 and gfx90a, each f16, bf16, fp32) and its two
+V-head objects (role `tailzero_hv`, one per arch; the f16 and bf16 entries name the same bytes; gfx942 and gfx90a list the same eight companions as gfx11-generic) are
 companions built by the dQ generator and listed by the merged one (§3, *Companions*).
 
-The f32-bias, 16-bit direct-bias dQ and split K/V head rows (79 on gfx950, 72 on gfx11-generic) are ordinary rows of these ops: each is a sweep pin or ships under the
+The f32-bias, 16-bit direct-bias dQ and split K/V head rows (79 on gfx950, 72 on gfx11-generic, gfx942 and gfx90a) are ordinary rows of these ops: each is a sweep pin or ships under the
 nondeterminism policy below. The rows with separate V heads (`u2`) are their own packs, `<arch>.u2.kdp.json` (dK-only and dV-only dK/dV) and
 `<arch>.dq_u2.kdp.json` (V-head dQ), and the rows that store dB through a reduce are `<arch>.reduce.kdp.json` of dQ and merged, written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
 
@@ -172,25 +172,25 @@ matches the pin byte for byte on every row but the rows of the nondeterministic 
 (known-bad rebuilds, append-only): those ship a stored pin (for a combined row the combined object of the shipped content,
 read through `--stored-dir`, the content root, below), and their `manifest.json` entry and the `Pinned objects`
 table of `<arch>.SOURCE.md` say so. A row outside both lists that does not build, whose build is not its pin, or
-whose build spills (R-MIR) or was not scanned, stops the run. The R-MIR policy on gfx950: a freshly built object is always
+whose build spills (R-MIR) or was not scanned, stops the run. The R-MIR policy on gfx950, gfx942 and gfx90a: a freshly built object is always
 scanned and `not scanned` fails; `tools/rmir_known.csv` exempts no merged spec; a stored pin is recorded `not scanned` and ships only
-when its row of `tests/data/sdpa_bwd_reference.csv` records the pin's own scan in `rmir_scan` (`clean`: a sweep scan whose dump build
+when its row of the arch's reference CSV (`tests/data/sdpa_bwd_reference.csv`, `sdpa_bwd_gfx942_reference.csv`, `sdpa_bwd_gfx90a_reference.csv`) records the pin's own scan in `rmir_scan` (`clean`: a sweep scan whose dump build
 is the pinned object, with no finding; `exception`: a row of `sdpa_bwd_pinned_exceptions.csv`), else the run stops; a nondeterministic pin that
 is its own red rebuild stops the run; a pinned exception is covered by a device screen of the pin, cited in its `evidence`. The S1 tool
-(`--from-content`, and the sweep mode that writes the column) takes a gfx950 pin only with that record. The detector reads gfx950 MIR, so gfx11 is out of scope: a gfx11
+(`--from-content`, and the sweep mode that writes the column) takes a pin of those arches only with that record (on gfx942 and gfx90a the pin driver `tools/sdpa_bwd_pin_build.py` writes it beside each object). The detector reads gfx950, gfx942 and gfx90a MIR, so gfx11 is out of scope: a gfx11
 object has no R-MIR scan and is held to its pin byte for byte. The backward generators refuse an unrecorded ROCm
 version, so `ROCM_PATH` must be set. Every other `OPS` entry takes no reference dir.
 
 **The pins come from the tree.** A pin is a row of the arch's reference CSV (`tests/data/sdpa_bwd_reference.csv` for gfx950,
-`tests/data/sdpa_bwd_gfx11_reference.csv` for gfx11-generic): Spec hash, Spec key, the sha256 of the pinned object and its resource row.
+`tests/data/sdpa_bwd_gfx11_reference.csv` for gfx11-generic, `sdpa_bwd_gfx942_reference.csv`, `sdpa_bwd_gfx90a_reference.csv`): Spec hash, Spec key, the sha256 of the pinned object and its resource row.
 The shipped content holds the object of every pin but two kinds, because a shipped pin row *is* its pin: the main kernel of a combined
-object (a dB-storing bias row; the shipped object also carries the dBias reduce) and gfx950's standalone reduce kernels. `tools/sdpa_bwd_s1.py
+object (a dB-storing bias row; the shipped object also carries the dBias reduce) and gfx950's standalone reduce kernels (on gfx942 and gfx90a only the combined fp32 dQ rows). `tools/sdpa_bwd_s1.py
 --from-content "$CONTENT" --arch $ARCH --reference-dir <new dir>` copies each pin's object out of the content by sha256 and verifies it. For
 the two exceptions, `tests/data/sdpa_bwd_pin_functions.csv` records the sha256 of the pin's function bytes, which the per-kernel gate and
 `tools/sdpa_bwd_compare.py` read in place of the object. The tool fails on any other pin without an object. The same S1 tool also has a
 sweep mode (`--sweep-repo`, `--selection`) for authoring a new catalogue. That step needs an AMD-internal sweep repository that this
 repository does not include and is not publicly reproducible; it writes the `_instances.py` tables, the reference CSVs and the digest file this tree holds.
-Regenerating the shipped pins is the public path above and needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
+Regenerating the shipped pins is the public path above and needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the eight companions of its manifest (three standalone dBias reduce objects and five tail-zero objects).
 
 `tools/sdpa_bwd_tables_from_sweep.py` installs a pruned catalogue: a pin whose object another pin of the same arch and op also pins, with a Spec equal apart from `floor` and a served head-dim range that contains its own, is not installed (equal ranges keep the smaller hash). The tables and the reference CSV hold the pins that remain, and the tool prints the dropped rows. The tool installs no nondeterministic list.
 
@@ -200,7 +200,7 @@ Regenerating the shipped pins is the public path above and needs none of it. A g
 `tests/data/sdpa_bwd_pin_functions.csv` together; none is edited by hand. The reference `sha256` of a tree-built combined row is the combined object's, and `sdpa_bwd_s1.py --from-content` names such a pin by its function digest rather than copying the object.
 A row that builds differently across the sample is a nondeterministic row: list it by the policy above before it ships.
 
-**Nondeterministic builds.** LLVM's IR optimisation is nondeterministic for some kernels, and the 16-bit dQ and dK/dV modules are compiled for a second fast-math target, so the same bug shows as a different object or as `dual_object`. One list, `tests/data/sdpa_bwd_nondeterministic.csv` (both arches; columns in `generators/_sdpa_bwd_nondet.py`), and one policy, the "Nondeterministic builds" section of the `generators/_sdpa_bwd_cdna_build.py` docstring:
+**Nondeterministic builds.** LLVM's IR optimisation is nondeterministic for some kernels, and the 16-bit dQ and dK/dV modules are compiled for a second fast-math target, so the same bug shows as a different object or as `dual_object`. One list, `tests/data/sdpa_bwd_nondeterministic.csv` (every arch; columns in `generators/_sdpa_bwd_nondet.py`), and one policy, the "Nondeterministic builds" section of the `generators/_sdpa_bwd_cdna_build.py` docstring:
 
 - every listed row ships its stored pin; a recorded variant is a build-gate tolerance and is never shipped (no variant needs device validation);
 - a listed standalone row ships the sweep's pin; it is built once, for the manifest, never retried, and a `dual_object` build is no error, but a rebuild that exists must be the pin or a recorded variant (whole object, or main function), else the run stops;
@@ -321,10 +321,10 @@ A catalogue change (a new or repinned row) has no shipped object to copy: the ma
 
 ```bash
 STORED=$(mktemp -d)   # keep it until the regenerated content is committed
-for ARCH in gfx950 gfx11-generic; do
+for ARCH in gfx950 gfx11-generic gfx90a gfx942; do
   case $ARCH in
     gfx950)        OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged" ;;
-    gfx11-generic) OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq" ;;
+    gfx11-generic|gfx90a|gfx942) OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq" ;;
   esac
   REFERENCE_DIR=$(mktemp -d)/$ARCH   # a fresh path: the S1 tool refuses an existing directory, and §2 already built $REF_ROOT/$ARCH
   $PY tools/sdpa_bwd_s1.py --from-content "$CONTENT" --arch $ARCH --reference-dir "$REFERENCE_DIR"   # before the content moves
@@ -347,8 +347,8 @@ generator builds nothing and lists the dQ manifest's entries (it stops if they o
 **generate `sdpa_bwd_dq` before `sdpa_bwd_merged`** into the same content root (the `OPS` order above does); the
 `spec` of an entry is `<role>,<dtype>` (`tailzero,f16`, with `;arch=gfx11-generic` on gfx11), and
 `gen_descriptors.py` keys companions by `(dtype, role)`. Each tail-zero object is kept once, in the dQ arch folder (gfx11
-dQ holds `dbias_reduce` and `tailzero` companions, gfx950 dQ holds `tailzero`); the merged manifest's `tailzero.file`
-points to `../../sdpa_bwd_dq/gfx950/<file>` and the packer deduplicates by resolved path. A gfx950 row that names a
+dQ holds `dbias_reduce` and `tailzero` companions, gfx950 dQ holds `tailzero`; gfx942 and gfx90a dQ hold `dbias_reduce` and `tailzero`, the 16-bit tail-zero objects built from the gfx11 kernel and the fp32 one from the gfx950 kernel); the merged manifest's `tailzero.file`
+points to `../../sdpa_bwd_dq/gfx950/<file>` and the packer deduplicates by resolved path. A gfx950 row, and a gfx942/gfx90a `combined` fp32 row, that names a
 `reduce_symbol` has no reduce companion: its `dbias_reduce` entry names the row's own object and that symbol. The
 launch-name sets of the rows follow: dQ `{dq, tailzero}`, dB-storing dQ `{dq, dbias_reduce, tailzero}` (the `reduce`
 pack), merged `{merged, tailzero}`, dB-storing merged `{merged, dbias_reduce, tailzero}` (its `reduce` pack);
@@ -357,7 +357,7 @@ pack), merged `{merged, tailzero}`, dB-storing merged `{merged, dbias_reduce, ta
 A V-head tail-zero object (`tailzero_hv,<dtype>`, built by the same call) launches after a V-head dQ row (`u2=dq`) instead of the standard one.
 
 A tail-zero object has no pin. Its provenance is the generator: each object is built twice in fresh processes and the two
-builds must be byte-identical, the kernarg layout must be `PARAMS`, and on gfx950 the R-MIR scan must be clean; the gfx950
+builds must be byte-identical, the kernarg layout must be `PARAMS`, and on every arch but gfx11-generic the R-MIR scan must be clean; the
 resource row is recorded in the companion entry. The pin steps above (reference rows, pin
 exceptions) apply to every other object and are skipped for tail-zero rows. To build the tail-zero objects alone, for inspection:
 
