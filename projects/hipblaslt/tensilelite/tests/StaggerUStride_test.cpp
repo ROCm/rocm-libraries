@@ -89,6 +89,18 @@ TEST(StaggerUStrideTest, TTLayoutKeepsTunedStagger)
     EXPECT_EQ(staggerFor(makeProblem(512, 528, 256, true, 256, true)), kTuned);
 }
 
+// Leading dimensions above 2^24 are not representable in float, where elementBytes() lives.
+TEST(StaggerUStrideTest, LargeStridesUseExactByteArithmetic)
+{
+    constexpr size_t k = size_t{1} << 24;
+    // Packed k + 1 floats = 2^26 + 4 B is not aliased (float math rounds it to 2^26 and would
+    // fire); padding by 16 does not change that.
+    EXPECT_EQ(staggerFor(makeProblem(k + 1, k + 16, k + 16)), kTuned);
+    // Packed 2^24 floats = 2^26 B is aliased; the padded k + 1 is not (float math rounds the
+    // padded stride back to 2^26 and would keep the stagger).
+    EXPECT_EQ(staggerFor(makeProblem(k, k + 1, k + 1)), kNoStagger);
+}
+
 TEST(StaggerUStrideTest, RuleLimitedToGfx1151AndStaggeredSolutions)
 {
     auto padded = makeProblem(512, 528, 528);
