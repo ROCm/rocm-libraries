@@ -32,7 +32,12 @@ from .candidate import (
     make_dense_candidate,
 )
 from .common import AttentionRequest, normalize_band
-from .dense_rules import dense_kv_segments, dense_wave_segments
+from .dense_rules import (
+    dense_kv_segments,
+    dense_paged_fields,
+    dense_paged_tile_fits,
+    dense_wave_segments,
+)
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -52,7 +57,12 @@ _FEATURES = frozenset(
     {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
 )
 # Served by the grid body only (the persistent body refuses ALiBi).
-_GRID_FEATURES = _FEATURES | {"causal_bottom_right", "alibi", "alibi_external_slopes"}
+_GRID_FEATURES = _FEATURES | {
+    "causal_bottom_right",
+    "layout_paged",
+    "alibi",
+    "alibi_external_slopes",
+}
 
 
 @dataclass(frozen=True)
@@ -211,8 +221,14 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     shared_bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
     shared_ctas = -(-sq // shared_bm) * int(req.nhead_q) * int(req.batch)
     num_cus = int(req.num_cus) or _DEFAULT_NUM_PERSISTENT
-    window_tile = bool(window) and (
-        shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+    window_geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE]
+    # A paged request whose pages do not fit the window tile keeps the shared one.
+    window_tile = (
+        bool(window)
+        and shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+        and dense_paged_tile_fits(
+            req, int(window_geometry["block_m"]), int(window_geometry["block_n"])
+        )
     )
     geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
@@ -295,6 +311,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         right_bound=right_bound,
         kv_segments=kv_segments,
         use_alibi=bool(req.use_alibi),
+        **dense_paged_fields(req),
         kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )
 

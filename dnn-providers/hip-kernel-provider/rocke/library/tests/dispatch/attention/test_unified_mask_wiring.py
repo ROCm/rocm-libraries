@@ -13,7 +13,6 @@ bottom-right causal one. Covers every unified candidate: ``unified_2d``, ``unifi
 
 from __future__ import annotations
 
-import re
 import unittest
 from dataclasses import replace
 from unittest import mock
@@ -31,7 +30,6 @@ from dispatch.attention.common import (
     attention_band,
     normalize_band,
 )
-from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
 NO_MASK = AttentionMaskType.NO_MASK
 TOP_LEFT = AttentionMaskType.TOP_LEFT_CAUSAL
@@ -365,40 +363,37 @@ class TestBandInputRules(unittest.TestCase):
         from dispatch.attention import attention_candidates
         from rocke.dispatch.core import opt_in_probe
 
+        # The window takes the 128-row tile, and the spec is never built, so the
+        # expected text is spelled out per length instead of read from the refusal.
         for kw in (
             dict(sliding_window=128),
             dict(sliding_window=128, right_bound=0),
             dict(sliding_window=128, right_bound=64),
         ):
-            req = _req(
-                mask_type=NO_MASK, seqlen_q=1000, seqlen_k=1050, dtype="bf16", **kw
-            )
-            for c in attention_candidates():
-                if c.algorithm.startswith("attention_dense") and "gfx950" in c.name:
-                    with self.subTest(kw=kw, candidate=c.name):
-                        ok, why = c.admits(opt_in_probe(req, c))
-                        self.assertFalse(ok)
-                        # The tile depends on the shape and the window, and the
-                        # spec is never built, so read it out of the refusal and
-                        # check it is a registered tile that leaves a partial block.
-                        tile = re.search(
-                            r"seqlen_q 1000 is not a multiple of block_m (\d+); "
-                            r"seqlen_kv 1050 is not a multiple of block_n (\d+)",
-                            why,
-                        )
-                        self.assertIsNotNone(tile, why)
-                        block_m, block_n = int(tile.group(1)), int(tile.group(2))
-                        self.assertIn(
-                            (block_m, block_n),
-                            {
-                                (g["block_m"], g["block_n"])
-                                for g in DENSE_TILE_GEOMETRIES.values()
-                            },
-                        )
-                        self.assertNotEqual(1000 % block_m, 0)
-                        self.assertNotEqual(1050 % block_n, 0)
-                        self.assertIn("sliding_window", why)
-                        self.assertNotIn("ragged", why)
+            for sq, sk, reason in (
+                (
+                    1000,
+                    1050,
+                    "seqlen_q 1000 is not a multiple of block_m 128; "
+                    "seqlen_kv 1050 is not a multiple of block_n 64",
+                ),
+                (1024, 1050, "seqlen_kv 1050 is not a multiple of block_n 64"),
+                (1000, 1024, "seqlen_q 1000 is not a multiple of block_m 128"),
+            ):
+                req = _req(
+                    mask_type=NO_MASK, seqlen_q=sq, seqlen_k=sk, dtype="bf16", **kw
+                )
+                for c in attention_candidates():
+                    if c.algorithm.startswith("attention_dense") and "gfx950" in c.name:
+                        with self.subTest(kw=kw, lengths=(sq, sk), candidate=c.name):
+                            ok, why = c.admits(opt_in_probe(req, c))
+                            self.assertFalse(ok)
+                            self.assertIn(
+                                f"sliding_window needs whole tiles: {reason} "
+                                "(the partial-tile",
+                                why,
+                            )
+                            self.assertNotIn("ragged", why)
 
 
 class TestBandNormalization(unittest.TestCase):

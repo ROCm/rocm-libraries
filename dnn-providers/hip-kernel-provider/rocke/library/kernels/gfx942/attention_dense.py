@@ -219,6 +219,15 @@ from kernels.common.attention_dense_spec import (
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
 from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._attention_dense_paged import (
+    declare_paged_params,
+    paged_cache_bytes,
+    paged_kv_row,
+    paged_launch_args,
+    paged_seq_setup,
+    paged_wave_row_base,
+    validate_paged_launch,
+)
 from kernels.common.attention_dense_kv_split import (
     SEGMENT_PARAMS,
     allocate_segment_workspace,
@@ -548,7 +557,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
         if self.use_cfvst is None:
-            return default_use_cfvst(self.head_size, self.dtype)
+            return default_use_cfvst(self.head_size, self.dtype, self.paged)
         return bool(self.use_cfvst)
 
     def resolved_v_row_pad(self) -> int:
@@ -557,7 +566,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         Read by both the builder's ``V_lds`` alloc and the :func:`_lds_bytes` budget, so
         the two cannot drift."""
         if self.v_row_pad is None:
-            return _v_row_pad(self.head_size, self.dtype, self.block_n)
+            return _v_row_pad(self.head_size, self.dtype, self.block_n, self.paged)
         return int(self.v_row_pad)
 
     def resolved_use_v_swizzle(self) -> bool:
@@ -568,7 +577,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         if not self.resolved_use_cfvst():
             return False
         if self.use_v_swizzle is None:
-            return _use_v_swizzle(self.head_size, self.dtype)
+            return _use_v_swizzle(self.head_size, self.dtype, self.paged)
         return bool(self.use_v_swizzle)
 
     def resolved_use_exp2_fast(self) -> bool:
@@ -603,9 +612,11 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         block, the window and the runtime trip count, and the epilogue zeroes the rows
         that see no key from the runtime ``seqlen_kv``, so a window needs no
         window-specific per-shape guard ahead of the cache lookup.
-        ``ragged``/``varlen``/``paged`` never reach the builder
-        (:func:`supports_attention_dense` rejects them) but stay in the predicate,
-        identical to the gfx950 twin, so a later admit lands already excluded.
+        ``paged`` takes the baked path, as on the gfx950 twin: the K/V buffer bound
+        is the whole page cache, baked from ``num_kv_blocks``. ``ragged``/``varlen``
+        never reach the builder (:func:`supports_attention_dense` rejects them) but
+        stay in the predicate, identical to the gfx950 twin, so a later admit lands
+        already excluded.
 
         Every other knob that forks the body -- :func:`default_use_exp2_fast`
         included -- is a function of compile-time config only, never of the problem
@@ -755,14 +766,15 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if spec.lds_row_pad != _DEFAULT_LDS_ROW_PAD:
         parts.append(f"krowpad{spec.lds_row_pad}")
     vp = spec.resolved_v_row_pad()
-    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n):
+    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n, spec.paged):
         parts.append(f"vrowpad{vp}")
     cfvst = spec.resolved_use_cfvst()
-    if cfvst != default_use_cfvst(spec.head_size, spec.dtype):
+    if cfvst != default_use_cfvst(spec.head_size, spec.dtype, spec.paged):
         parts.append("cfvst1" if cfvst else "cfvst0")
     swz = spec.resolved_use_v_swizzle()
     if swz != (
-        spec.resolved_use_cfvst() and default_use_cfvst(spec.head_size, spec.dtype)
+        spec.resolved_use_cfvst()
+        and default_use_cfvst(spec.head_size, spec.dtype, spec.paged)
     ):
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
@@ -871,7 +883,7 @@ def default_use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     return True
 
 
-def default_use_cfvst(head_size: int, dtype: str) -> bool:
+def default_use_cfvst(head_size: int, dtype: str, paged: bool = False) -> bool:
     """Whether to feed V through the P1 conflict-free perm_b32 store-path transpose.
 
     D128 only (both dtypes). Measured on gfx942:
@@ -883,9 +895,12 @@ def default_use_cfvst(head_size: int, dtype: str) -> bool:
         LLVM 23), and replaces the naive path's 128 element-wise ds_read_u16 per tile
         with 32 ds_read_b64, as on fp16.
     Gate on rows-per-DMA == 1 (D128) so the LDS budget and the body agree.
+    Never for paged K/V: the cfvst V loads are per thread across the whole tile, so
+    they would need their own block-table lookups; paged V takes the async DMA path,
+    with the same per-wave page lookup as K.
     """
     del dtype  # both 2-byte dtypes take the same transposed-V path
-    return _rows_per_instr(head_size) == 1
+    return _rows_per_instr(head_size) == 1 and not paged
 
 
 def _pack_p_bf16(b: IRBuilder, elems):
@@ -958,13 +973,13 @@ def _v_swizzle_width(block_n: int) -> int:
     return max(64, 1 << (block_n - 1).bit_length())
 
 
-def _use_v_swizzle(head_size: int, dtype: str) -> bool:
-    """Policy for the V^T bank-conflict swizzle: rides the :func:`default_use_cfvst`
-    gate, since only the transposed-V (D128) store has a V_lds to swizzle."""
-    return default_use_cfvst(head_size, dtype)
+def _use_v_swizzle(head_size: int, dtype: str, paged: bool) -> bool:
+    """Policy for the V^T bank-conflict swizzle: rides the :func:`default_use_cfvst` gate,
+    since only the transposed-V (D128) store has a V_lds to swizzle."""
+    return default_use_cfvst(head_size, dtype, paged)
 
 
-def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
+def _v_row_pad(head_size: int, dtype: str, block_n: int, paged: bool) -> int:
     """V^T row (token-axis) pad, in elements, on the cfvst path (D128); 8 (no
     swizzle, original layout) everywhere else. On the cfvst path the row is widened to
     :func:`_v_swizzle_width` so the XOR swizzle (``col' = key ^ ((dim & (V_LDROW//4-1))
@@ -977,7 +992,7 @@ def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
     separate, independently-sweepable decision (:meth:`resolved_use_v_swizzle`), so the
     pad value and the swizzle no longer silently toggle each other.
     """
-    if not default_use_cfvst(head_size, dtype):
+    if not default_use_cfvst(head_size, dtype, paged):
         return 8
     return _v_swizzle_width(block_n) - block_n
 
@@ -1277,7 +1292,14 @@ def supports_attention_dense(
     # packed async-DMA layout the naive path relies on. Turning cfvst OFF is always
     # legal (it is the naive path), so only the ON direction is gated. See
     # default_use_cfvst.
-    if spec.resolved_use_cfvst() and not default_use_cfvst(spec.head_size, spec.dtype):
+    if spec.resolved_use_cfvst() and not default_use_cfvst(
+        spec.head_size, spec.dtype, spec.paged
+    ):
+        if spec.paged:
+            return False, (
+                "use_cfvst=True is rejected with paged K/V: the conflict-free-V "
+                "loader has no block-table lookup -- see default_use_cfvst"
+            )
         return False, (
             f"use_cfvst=True is rejected at D{spec.head_size}/{spec.dtype}: "
             f"the conflict-free-V store is measured-negative there (D64 is VGPR-bound "
@@ -1579,6 +1601,9 @@ def _build_attention_dense_single_buffer(
             readonly=True,
             align=4,
         )
+    block_tables = kv_lens = bt_stride = None
+    if spec.paged:
+        block_tables, kv_lens, bt_stride = declare_paged_params(b)
 
     # The baked branch emits each stride constant in place, at its use: the IR
     # builder is side-effecting, so sharing one const node would renumber every SSA
@@ -1729,6 +1754,10 @@ def _build_attention_dense_single_buffer(
         kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
         k_rsrc = b.buffer_rsrc(k, kv_bytes)
         v_rsrc = b.buffer_rsrc(v, kv_bytes)
+    elif spec.paged:
+        # One num_records node per rsrc, as in the baked branch below.
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(paged_cache_bytes(spec)))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(paged_cache_bytes(spec)))
     else:
         k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
@@ -1898,13 +1927,20 @@ def _build_attention_dense_single_buffer(
             ),
             b.mul(hq, b.const_i32(D)),
         )
-        k_base = b.add(
-            b.mul(
-                b.mul(bt, seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)),
-                _stride_k(),
-            ),
-            b.mul(hkv, b.const_i32(D)),
-        )
+        if spec.paged:
+            # The block table places the sequence's keys; no batch term.
+            k_base = b.mul(hkv, b.const_i32(D))
+            _pg_seq_base, _pg_n_pages = paged_seq_setup(
+                b, bt, kv_lens, bt_stride, spec.block_size
+            )
+        else:
+            k_base = b.add(
+                b.mul(
+                    b.mul(bt, seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)),
+                    _stride_k(),
+                ),
+                b.mul(hkv, b.const_i32(D)),
+            )
 
         # Q packs (QK B-operand), loaded unscaled. qk_scale = softmax_scale *
         # log2(e) is applied to the fp32 MFMA scores in do_qk instead: rounding
@@ -1926,6 +1962,17 @@ def _build_attention_dense_single_buffer(
                 if kbuf is not None
                 else None
             )
+            if spec.paged:
+                # A wave's rows of the tile sit in one page (spec paged
+                # validation): one block-table lookup per wave.
+                _wphys_base = paged_wave_row_base(
+                    b,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
+                    spec.block_size,
+                )
             if ROWS_PER_INSTR == 1:
                 for r in range(ROWS_PER_WAVE):
                     row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
@@ -1935,7 +1982,11 @@ def _build_attention_dense_single_buffer(
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(tile_key0, row)
                     gcol = b.mul(lane, b.const_i32(2))
-                    voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), gcol)
+                    if spec.paged:
+                        kv_row = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
+                    else:
+                        kv_row = gkey
+                    voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
                     b.async_buffer_load_lds_addr(
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
@@ -1970,6 +2021,8 @@ def _build_attention_dense_single_buffer(
                         )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
+                    if spec.paged:
+                        gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
@@ -2860,8 +2913,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     num_query_heads, num_kv_heads), then on the persistent grid a magic/shift pair
     per work-decode divisor. Then a ``sink_ptr`` ([Hq], q dtype) when
     ``spec.use_sinks``, an f32 ``alibi_slopes_ptr`` ([Hq], null for the
-    built-in slopes) when ``spec.use_alibi``, and an f32 ``lse_ptr`` when ``spec.emit_lse``,
-    in that order.
+    built-in slopes) when ``spec.use_alibi``, ``block_tables``/``kv_lens`` (i32
+    pointers) and ``block_table_stride`` (i32) when ``spec.paged``, and an f32
+    ``lse_ptr`` when ``spec.emit_lse``, in that order.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -2891,6 +2945,12 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         sig = sig.ptr("sink_ptr", spec.dtype)
     if spec.use_alibi:
         sig = sig.ptr("alibi_slopes_ptr", "f32")
+    if spec.paged:
+        sig = (
+            sig.ptr("block_tables", "i32")
+            .ptr("kv_lens", "i32")
+            .scalar("block_table_stride", "i32")
+        )
     if _as_gfx942_spec(spec).emit_lse:
         sig = sig.ptr("lse_ptr", "f32")
     if _as_gfx942_spec(spec).kv_segments > 1:
@@ -2929,6 +2989,9 @@ def run_attention_dense_torch(
     sinks=None,
     lse=None,
     alibi_slopes=None,
+    block_tables=None,
+    kv_lens=None,
+    validate_paged: bool = True,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
@@ -2937,6 +3000,11 @@ def run_attention_dense_torch(
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
     ``spec.use_sinks``. ``alibi_slopes`` is the optional fp32 per-query-head ALiBi
     slope ``[Hq]`` (``spec.use_alibi`` only); ``None`` selects hipDNN's built-in slopes.
+    ``spec.use_sinks``. With ``spec.paged``, ``k``/``v`` are the page caches
+    ``[num_kv_blocks, block_size, Hkv, D]`` and ``block_tables`` ([B, max_pages] i32)
+    / ``kv_lens`` ([B] i32) are required; ``validate_paged=False`` skips the host check
+    of their contents (a device->host sync), see
+    :func:`kernels.common._attention_dense_paged.validate_paged_launch`.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
     torch-free at import time. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
@@ -2969,6 +3037,7 @@ def run_attention_dense_torch(
             "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
             "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
         )
+    validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
     if not spec.use_sinks and sinks is not None:
         raise ValueError("sinks provided but spec.use_sinks is False")
     if spec.use_sinks:
@@ -2985,7 +3054,9 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
     check_alibi_slopes(spec, alibi_slopes)
-    validate_dense_lse(spec, q, k, v, out, lse, sinks=sinks)
+    validate_dense_lse(
+        spec, q, k, v, out, lse, block_tables=block_tables, kv_lens=kv_lens, sinks=sinks
+    )
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -3014,6 +3085,8 @@ def run_attention_dense_torch(
         vals["sink_ptr"] = sinks
     if spec.use_alibi:
         vals["alibi_slopes_ptr"] = alibi_slopes if alibi_slopes is not None else 0
+    if spec.paged:
+        vals.update(paged_launch_args(block_tables, kv_lens))
     if spec.emit_lse:
         vals["lse_ptr"] = lse
     if spec.kv_segments > 1:
