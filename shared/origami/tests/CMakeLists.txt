@@ -26,6 +26,13 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_nn.cpp"
 )
 
+if(ORIGAMI_ENABLE_NN)
+    # The library hides its internal symbols, so the decoder under test is compiled in directly.
+    target_sources(
+        origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/nn/twrec/b64_decode.cpp"
+    )
+endif()
+
 set(_origami_tw_weights_dir
     "${CMAKE_CURRENT_SOURCE_DIR}/../data/nn/tilewright/gfx950"
 )

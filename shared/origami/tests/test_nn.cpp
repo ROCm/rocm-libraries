@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,7 @@
 #include "origami/nn/features/gemm_tilewright.hpp"
 #include "origami/nn/filter.hpp"
 #include "origami/nn/nn.hpp"
+#include "origami/nn/twrec/b64_decode.hpp"
 
 namespace {
 
@@ -499,6 +501,87 @@ TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
   REQUIRE_FALSE(routed_results.empty());
   REQUIRE_FALSE(forced_results.empty());
   REQUIRE(std::isfinite(forced_results.front().latency));
+}
+
+namespace {
+
+std::vector<std::uint8_t> bytes_of(const std::string& s) {
+  return std::vector<std::uint8_t>(s.begin(), s.end());
+}
+
+// Decodes `in`; returns whether it was accepted. `out` is checked on success only.
+bool decode(const std::string& in, std::vector<std::uint8_t>* out) {
+  return origami::nn::twrec::detail::b64_decode(in, out);
+}
+
+}  // namespace
+
+TEST_CASE("NN: b64_decode accepts well-formed input", "[nn][b64]") {
+  std::vector<std::uint8_t> out;
+  REQUIRE(decode("", &out));
+  REQUIRE(out.empty());
+
+  REQUIRE(decode("TQ==", &out));
+  REQUIRE(out == bytes_of("M"));
+  REQUIRE(decode("TWE=", &out));
+  REQUIRE(out == bytes_of("Ma"));
+  REQUIRE(decode("TWFu", &out));
+  REQUIRE(out == bytes_of("Man"));
+  REQUIRE(decode("TWFuTWFu", &out));
+  REQUIRE(out == bytes_of("ManMan"));
+
+  // Whitespace is skipped and does not count toward the length.
+  REQUIRE(decode("TWFu\nTWE=\r\n", &out));
+  REQUIRE(out == bytes_of("ManMa"));
+  REQUIRE(decode(" T W F u ", &out));
+  REQUIRE(out == bytes_of("Man"));
+}
+
+TEST_CASE("NN: b64_decode rejects malformed padding", "[nn][b64]") {
+  std::vector<std::uint8_t> out;
+
+  // Padding that is not at the end.
+  REQUIRE_FALSE(decode("AB=C", &out));
+  REQUIRE_FALSE(decode("A=BC", &out));
+  REQUIRE_FALSE(decode("TQ==TWFu", &out));
+  REQUIRE_FALSE(decode("TWE=TWFu", &out));
+
+  // More padding than a group can hold.
+  REQUIRE_FALSE(decode("A===", &out));
+  REQUIRE_FALSE(decode("====", &out));
+  REQUIRE_FALSE(decode("TQ===", &out));
+
+  // Padding with the wrong number of data characters in front of it.
+  REQUIRE_FALSE(decode("T=", &out));
+  REQUIRE_FALSE(decode("TWE==", &out));
+  REQUIRE_FALSE(decode("TWFu=", &out));
+  REQUIRE_FALSE(decode("=", &out));
+
+  // A rejected input leaves no partial output behind.
+  REQUIRE(out.empty());
+}
+
+TEST_CASE("NN: b64_decode rejects lengths that are not a multiple of 4", "[nn][b64]") {
+  std::vector<std::uint8_t> out;
+  REQUIRE_FALSE(decode("T", &out));
+  REQUIRE_FALSE(decode("TQ", &out));
+  REQUIRE_FALSE(decode("TWE", &out));
+  REQUIRE_FALSE(decode("TWFuT", &out));
+  REQUIRE_FALSE(decode("TWFuTQ", &out));
+  REQUIRE_FALSE(decode("TWFuTWE", &out));
+  REQUIRE(out.empty());
+}
+
+TEST_CASE("NN: b64_decode rejects characters outside the alphabet and stray bits", "[nn][b64]") {
+  std::vector<std::uint8_t> out;
+  REQUIRE_FALSE(decode("TW-u", &out));
+  REQUIRE_FALSE(decode("TW_u", &out));
+  REQUIRE_FALSE(decode(std::string("TW\0u", 4), &out));  // an embedded NUL, not a terminator
+
+  // "TR==" would decode to the same byte as "TQ==" but sets bits the encoder never writes.
+  REQUIRE_FALSE(decode("TR==", &out));
+  REQUIRE_FALSE(decode("TWF=", &out));
+  REQUIRE(out.empty());
 }
 
 #else

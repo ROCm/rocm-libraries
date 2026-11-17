@@ -200,16 +200,10 @@ std::vector<std::uint32_t> apply_smart_k_filter(const std::vector<config_t>& con
                                                 bool use_sig_filter,
                                                 bool have_sk,
                                                 const CellModel& cm) {
-  auto sig_in_set = [&](const std::array<int, 8>& s) -> bool {
-    for (const auto& w : cm.smart_k_signatures)
-      if (w == s) return true;
-    return false;
-  };
-
   std::vector<std::uint32_t> out;
   out.reserve(feasible.size());
   for (const std::size_t idx : feasible) {
-    if (use_sig_filter && have_sk && !sig_in_set(sig_of(configs[idx]))) continue;
+    if (use_sig_filter && have_sk && cm.smart_k_set.count(sig_of(configs[idx])) == 0) continue;
     out.push_back(static_cast<std::uint32_t>(idx));
   }
   return out;
@@ -233,7 +227,7 @@ std::vector<rank_entry_t> rank_configs(const LoadedModel& model,
   const std::size_t x_dim = model.x_dim;
 
   const bool have_sk =
-      options.use_smart_k_whitelist && !cm.smart_k_signatures.empty();
+      options.use_smart_k_whitelist && !cm.smart_k_set.empty();
 
   const filter::filter_result_t filtered =
       filter::filter_configs(problem, hardware, configs);

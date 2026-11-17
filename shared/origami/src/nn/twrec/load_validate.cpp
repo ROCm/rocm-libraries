@@ -96,10 +96,14 @@ bool finalize_loaded_model(LoadedModel* model) {
 
   model->cell_index.clear();
   for (std::size_t i = 0; i < model->cells.size(); ++i) {
-    const CellModel& cm = model->cells[i];
+    CellModel& cm = model->cells[i];
     if (!validate_cell_hyperparams(cm)) return false;
     if (!validate_cell_weights(cm, model->q_dim, model->i_dim, model->x_dim)) return false;
     if (cm.smart_k_signatures.size() > kMaxSmartK) return false;
+    // Ranking tests every feasible config against this list, so index it once here.
+    cm.smart_k_set.clear();
+    cm.smart_k_set.reserve(cm.smart_k_signatures.size());
+    cm.smart_k_set.insert(cm.smart_k_signatures.begin(), cm.smart_k_signatures.end());
     auto [it, inserted] = model->cell_index.emplace(cm.label, i);
     if (!inserted) return false;
   }
