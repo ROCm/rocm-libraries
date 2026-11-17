@@ -20,6 +20,8 @@ typedef enum
     PATH_LOAD = 0,
     PATH_SPLIT,
     PATH_GUARD,
+    PATH_SPLIT_UNMASKED,
+    PATH_GUARD_UNMASKED,
 } path_t;
 
 typedef struct
@@ -55,6 +57,16 @@ static const case_t CASES[] = {
     {"vec3", 48, 32, 64, 32, 3, "f16", PATH_LOAD, false, false, false},
     /* rejected: 32-bit elements */
     {"f32", 64, 64, 64, 32, 8, "f32", PATH_LOAD, false, false, false},
+    /* rejected: guard on a full-participation tile */
+    {"guard_full", 64, 64, 64, 32, 8, "f16", PATH_GUARD, true, false, false},
+    /* rejected: guard at width 1 */
+    {"guard_vec1", 16, 32, 128, 32, 1, "f16", PATH_GUARD, true, false, false},
+    /* rejected: store_lds of an unmasked partial tile */
+    {"partial8_unmasked", 64, 32, 128, 32, 8, "f16", PATH_SPLIT_UNMASKED, true, false, false},
+    /* rejected: guard with unmasked reads */
+    {"guard_unmasked", 64, 32, 128, 32, 8, "f16", PATH_GUARD_UNMASKED, true, false, false},
+    /* unmasked reads of a full-participation tile (masked is moot there) */
+    {"full8_unmasked", 64, 64, 64, 32, 8, "f16", PATH_SPLIT_UNMASKED, true, false, false},
 };
 static const int NUM_CASES = sizeof(CASES) / sizeof(CASES[0]);
 
@@ -184,17 +196,10 @@ static int build(rocke_ir_builder_t* b, const case_t* c)
         rocke_regt_staged_t* staged = (rocke_regt_staged_t*)malloc(sizeof(rocke_regt_staged_t));
         if(staged == NULL)
             return 1;
-        rocke_reg_transpose_tile_loader_load_global(b,
-                                                    &ldr,
-                                                    tid,
-                                                    descriptor,
-                                                    &env,
-                                                    rsrc,
-                                                    /*masked=*/true,
-                                                    run_fn,
-                                                    &env,
-                                                    /*guard=*/c->path == PATH_GUARD,
-                                                    staged);
+        const bool masked = c->path != PATH_SPLIT_UNMASKED && c->path != PATH_GUARD_UNMASKED;
+        const bool guard = c->path == PATH_GUARD || c->path == PATH_GUARD_UNMASKED;
+        rocke_reg_transpose_tile_loader_load_global(
+            b, &ldr, tid, descriptor, &env, rsrc, masked, run_fn, &env, guard, staged);
         rocke_reg_transpose_tile_loader_store_lds(b, &ldr, tile, staged);
         free(staged);
     }

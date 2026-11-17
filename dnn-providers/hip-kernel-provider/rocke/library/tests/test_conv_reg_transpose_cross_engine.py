@@ -216,6 +216,43 @@ def _stem(**kw):
     return ConvProblem(**base)
 
 
+def _xrun_stem(**kw):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    # The patch-stem problem of the x_run validity tests (stride == filter).
+    base = dict(N=2, Hi=64, Wi=64, C=3, K=64, Y=16, X=16, sH=16, sW=16)
+    base.update(kw)
+    return ConvProblem(**base)
+
+
+def _xrun_base():
+    """x_run on the sync X loader (no register transpose): valid for the stem
+    problem on its own, so a combination refusal can only be the x_run gate."""
+    return dict(
+        x_run=True,
+        problem=_xrun_stem(),
+        reg_transpose=False,
+        tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+    )
+
+
+def _xrun_depthwise():
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(N=2, Hi=64, Wi=64, C=8, K=8, Y=3, X=3, pH=1, pW=1, groups=8)
+
+
+def _xrun_stem3d():
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(
+        N=2, Di=8, Hi=64, Wi=64, C=3, K=64, Z=3, Y=3, X=3,
+        sD=1, sH=1, sW=1, pD=1, pH=1, pW=1, dD=1,
+    )  # fmt: skip
+
+
 class TestXRunCrossEngine(_CrossEngine):
     def test_identical_ir(self):
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
@@ -242,7 +279,39 @@ class TestXRunCrossEngine(_CrossEngine):
                 # Problem conditions.
                 dict(x_run=True, problem=_stem(pW=1)),
                 dict(x_run=True, problem=_stem(C=6, groups=2)),
+                # Combination gate: each base is refused for x_run alone (it
+                # is valid, or fails a later gate, without it).
+                dict(_xrun_base(), lds_k_outer=True, tile_k=32, warp_tile_k=32),
+                dict(
+                    _xrun_base(),
+                    lds_k_outer=True,
+                    async_dma=True,
+                    tile_k=32,
+                    warp_tile_k=32,
+                ),
+                dict(_xrun_base(), problem=_xrun_stem3d()),
             )
+        )
+        # The wave64 combinations.
+        self.assert_rejected_alike(
+            (
+                dict(
+                    _xrun_base(),
+                    problem=_xrun_depthwise(),
+                    group_merge=2,
+                    wave_size=64,
+                    tile_k=32,
+                    warp_tile_k=32,
+                ),
+                dict(
+                    _xrun_base(),
+                    streamk="dp_sk",
+                    wave_size=64,
+                    tile_k=32,
+                    warp_tile_k=32,
+                ),
+            ),
+            arch="gfx950",
         )
 
 

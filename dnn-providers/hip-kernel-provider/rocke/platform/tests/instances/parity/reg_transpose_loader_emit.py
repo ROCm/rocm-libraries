@@ -6,9 +6,11 @@ Each case builds the smallest kernel that drives one path of the loader: the
 whole-tile ``load`` at every width (8, 4, 2 and the scalar 1), bf16, a
 descriptor with a validity predicate, the split ``load_global`` /
 ``store_lds`` pair, partial participation (a tile with fewer micro-tiles than
-threads) with and without the guarded reads, a run descriptor and a column
-swizzle. Two cases must be rejected by both engines: a width outside
-``REGT_VECS`` and a 32-bit element type.
+threads) with and without the guarded reads (and with unmasked reads of a full
+tile), a run descriptor and a column swizzle. Six cases must be rejected by both
+engines: a width outside ``REGT_VECS``, a 32-bit element type, the guard where
+it cannot apply (a full tile, a width of 1, unmasked reads) and the
+``store_lds`` of an unmasked partial tile.
 
 Config index = case * len(ARCHES) + arch_index. Every builder call is its own
 statement in the order the C emitter issues it: each call consumes an SSA id,
@@ -23,7 +25,9 @@ from _emit_common import run_emit
 ARCHES = ("gfx1201", "gfx950")
 
 # (name, tile_rows, tile_cols, block_size, wave_size, vec, dtype, path,
-#  valid, run, swizzle). path: "load", "split" or "guard" (split, guard=True).
+#  valid, run, swizzle). path: "load", "split", "guard" (split, guard=True),
+#  "split_unmasked" (split, masked=False) or "guard_unmasked" (split,
+#  masked=False, guard=True).
 CASES = (
     ("full8", 64, 64, 64, 32, 8, "f16", "load", False, False, False),
     ("full4_bf16", 64, 32, 64, 32, 4, "bf16", "load", False, False, False),
@@ -42,6 +46,28 @@ CASES = (
     ("vec3", 48, 32, 64, 32, 3, "f16", "load", False, False, False),
     # rejected: 32-bit elements
     ("f32", 64, 64, 64, 32, 8, "f32", "load", False, False, False),
+    # rejected: guard on a full-participation tile
+    ("guard_full", 64, 64, 64, 32, 8, "f16", "guard", True, False, False),
+    # rejected: guard at width 1
+    ("guard_vec1", 16, 32, 128, 32, 1, "f16", "guard", True, False, False),
+    # rejected: store_lds of an unmasked partial tile
+    (
+        "partial8_unmasked",
+        64,
+        32,
+        128,
+        32,
+        8,
+        "f16",
+        "split_unmasked",
+        True,
+        False,
+        False,
+    ),
+    # rejected: guard with unmasked reads
+    ("guard_unmasked", 64, 32, 128, 32, 8, "f16", "guard_unmasked", True, False, False),
+    # unmasked reads of a full-participation tile (masked is moot there)
+    ("full8_unmasked", 64, 64, 64, 32, 8, "f16", "split_unmasked", True, False, False),
 )
 
 _DTYPES = {"f16": F16, "bf16": BF16, "f32": F32}
@@ -119,7 +145,8 @@ def build(b: IRBuilder, case) -> None:
             tid=tid,
             descriptor=descriptor,
             rsrc=rsrc,
-            guard=path == "guard",
+            masked=not path.endswith("_unmasked"),
+            guard=path.startswith("guard"),
             **run_kw,
         )
         ldr.store_lds(b, smem_dst=tile, staged=staged)
