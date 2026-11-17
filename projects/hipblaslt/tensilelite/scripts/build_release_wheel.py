@@ -13,6 +13,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from check_release_wheel_contents import validate
 from stage_release_source import stage_source
@@ -94,7 +95,16 @@ def build_wheel(
         raise RuntimeError("Invalid canonical wheel: " + "; ".join(problems))
     destination.mkdir(parents=True, exist_ok=True)
     published = destination / wheel.name
-    shutil.copy2(wheel, published)
+    # A failed repair must not leave a partial wheel accepted by the cache.
+    with tempfile.NamedTemporaryFile(
+        dir=destination, prefix=f".{wheel.name}.", suffix=".tmp", delete=False
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        shutil.copy2(wheel, temporary_path)
+        os.replace(temporary_path, published)
+    finally:
+        temporary_path.unlink(missing_ok=True)
     # This directory is owned by the canonical wheel target. A commit/version
     # change must not leave an older wheel available for accidental selection.
     for old in destination.glob("tensilelite-*.whl"):
