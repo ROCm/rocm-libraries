@@ -1665,7 +1665,11 @@ the trainer, and the runtime compute the same number.
    rather than measuring it. The convention holds the rule-1 property that matters: every engine of a
    graph has the same numerator, so their `tflops` order is their `time` order. Refusing a count
    instead would cost every variable-length, paged, ragged and routed graph its `tflops` label and its
-   work features.
+   work features. Collection runs exactly that problem: `hipdnn_bench` writes each such operand's
+   declared contents (`InputDomain.hpp`, `declaredContents`): full valid lengths, cumulative lengths
+   of full sequences, ragged offsets of the dense layout, a page of its own for every table entry,
+   a mask keeping every block, and every routed row spread over the groups. Without that, a timing
+   buffer's zeros would run lengths of 0 and time a near-empty problem against the declared work.
 5. **One formula per node type**, over the operand roles of
    [Section 6.7](#67-per-node-operand-features):
 

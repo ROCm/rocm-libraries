@@ -427,6 +427,32 @@ TEST(TestNumericalValidation, GarbageInASmallElementIsNotHiddenByTheTensorsLarge
     EXPECT_NE(verdicts[2].reason.find("outside a tolerance of"), std::string::npos);
 }
 
+// A declared length or offset is written exactly, or the image is refused: a truncated or
+// narrowed one would time a different problem than the graph declares.
+TEST(TestNumericalValidation, DeclaredContentsAreWrittenExactlyOrNotAtAll)
+{
+    using hipdnn_bench::detail::declaredImage;
+    using hipdnn_frontend::DataType;
+    const auto narrow = declaredImage(DataType::INT32, 2 * sizeof(int32_t), {7, 4096});
+    ASSERT_EQ(narrow.size(), 2 * sizeof(int32_t));
+    std::array<int32_t, 2> lengths{};
+    std::memcpy(lengths.data(), narrow.data(), narrow.size());
+    EXPECT_EQ(lengths, (std::array<int32_t, 2>{7, 4096}));
+
+    const auto wide = declaredImage(DataType::INT64, sizeof(int64_t), {int64_t{1} << 40});
+    int64_t offset = 0;
+    std::memcpy(&offset, wide.data(), sizeof(offset));
+    EXPECT_EQ(offset, int64_t{1} << 40);
+    EXPECT_EQ(declaredImage(DataType::BOOLEAN, 3, {1, 1, 1}), (std::vector<uint8_t>{1, 1, 1}));
+
+    // A buffer holding another number of elements, a value the type cannot hold, a type that
+    // is not an integer.
+    EXPECT_TRUE(declaredImage(DataType::INT32, 3 * sizeof(int32_t), {7, 7}).empty());
+    EXPECT_TRUE(declaredImage(DataType::INT32, sizeof(int32_t), {int64_t{1} << 40}).empty());
+    EXPECT_TRUE(declaredImage(DataType::BOOLEAN, 1, {2}).empty());
+    EXPECT_TRUE(declaredImage(DataType::FLOAT, sizeof(float), {1}).empty());
+}
+
 TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
 {
     using hipdnn_frontend::DataType;

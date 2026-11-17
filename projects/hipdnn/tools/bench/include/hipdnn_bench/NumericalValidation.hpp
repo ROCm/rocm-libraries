@@ -373,6 +373,62 @@ inline std::vector<uint8_t> inputFillImage(hipdnn_frontend::DataType dataType,
     return image;
 }
 
+/// @brief A @p bytes long host image of @p values (hipdnn_bench::declaredContents) for an
+///        integer or boolean input; empty when the type is neither, the buffer does not hold
+///        exactly that many elements, or a value does not fit the type.
+inline std::vector<uint8_t> declaredImage(hipdnn_frontend::DataType dataType,
+                                          size_t bytes,
+                                          const std::vector<int64_t>& values)
+{
+    using hipdnn_frontend::DataType;
+    const auto width = static_cast<size_t>(elementBits(dataType) / 8);
+    if(width == 0 || bytes != values.size() * width)
+    {
+        return {};
+    }
+    std::vector<uint8_t> image(bytes, 0);
+    for(size_t index = 0; index < values.size(); ++index)
+    {
+        const auto value = values[index];
+        auto* element = image.data() + (index * width);
+        switch(dataType)
+        {
+        case DataType::INT64:
+            std::memcpy(element, &value, sizeof(value));
+            break;
+        case DataType::INT32:
+        {
+            if(value < std::numeric_limits<int32_t>::min()
+               || value > std::numeric_limits<int32_t>::max())
+            {
+                return {};
+            }
+            const auto narrow = static_cast<int32_t>(value);
+            std::memcpy(element, &narrow, sizeof(narrow));
+            break;
+        }
+        case DataType::INT8:
+        case DataType::UINT8:
+        case DataType::BOOLEAN:
+        {
+            const int64_t low = dataType == DataType::INT8 ? std::numeric_limits<int8_t>::min() : 0;
+            const int64_t high = dataType == DataType::INT8    ? std::numeric_limits<int8_t>::max()
+                                 : dataType == DataType::UINT8 ? std::numeric_limits<uint8_t>::max()
+                                                               : 1;
+            if(value < low || value > high)
+            {
+                return {};
+            }
+            *element = static_cast<uint8_t>(value);
+            break;
+        }
+        default:
+            return {};
+        }
+    }
+    return image;
+}
+
 /// @brief The fill seed for one problem: a hash of the serialized graph.
 ///
 /// Every candidate of a problem must read identical inputs for the cross-check to be valid;
