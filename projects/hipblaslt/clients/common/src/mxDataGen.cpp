@@ -410,12 +410,31 @@ std::vector<float> generateData(T                           dgen,
 
     // The K-major reference covers the generator's stride * cols buffer, whose scales the
     // generator counts per whole run of sizes[0] elements; past the last whole run there are none.
-    if(integerExact && isMatrixA == isTranspose && strides[1] * sizes[1] % sizes[0] != 0)
+    // sizes[0] is the divisor below. A zero row count is SIGFPE, and the generator would have
+    // rejected a non-positive size with invalid_argument before writing. Check that first.
+    if(integerExact && isMatrixA == isTranspose)
+    {
+        if(sizes[0] == 0 || sizes[1] == 0)
+            throw std::invalid_argument(
+                "Invalid dimensions: dimension sizes must be greater than 0.");
+        if(strides[1] * sizes[1] % sizes[0] != 0)
+            throw std::runtime_error(
+                "integer_exact MX data requires the stride times the columns to be a multiple of "
+                "the rows, got stride "
+                + std::to_string(strides[1]) + ", " + std::to_string(sizes[1]) + " columns and "
+                + std::to_string(sizes[0]) + " rows");
+    }
+
+    // Non-K-major integer_exact (non-transposed A, transposed B) realigns through
+    // getAlignedFloat. A partial trailing K block makes that helper form a data index one
+    // past the packed buffer (rows=64, cols=33, block 32 indexes 2112 of 2112 elements).
+    // Refuse before generating or writing. The helper repair is a separate change; rand_int
+    // on the base branch has the same indexing and stays out of scope here.
+    if(integerExact && isMatrixA != isTranspose && elementsPerMXBlock > 0
+       && static_cast<size_t>(sizes[1]) % static_cast<size_t>(elementsPerMXBlock) != 0)
         throw std::runtime_error(
-            "integer_exact MX data requires the stride times the columns to be a multiple of "
-            "the rows, got stride "
-            + std::to_string(strides[1]) + ", " + std::to_string(sizes[1]) + " columns and "
-            + std::to_string(sizes[0]) + " rows");
+            "integer_exact MX data with K along the columns requires K to be a multiple of "
+            + std::to_string(elementsPerMXBlock) + ", got " + std::to_string(sizes[1]));
 
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
