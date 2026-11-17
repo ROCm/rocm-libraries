@@ -3457,23 +3457,33 @@ class KernelWriterAssembly(KernelWriter):
       tmpSgprNumWorkGroups = None
       # General Batched GEMM Routed to Strided Batched GEMM path
       ArgType3_Routed_To_ArgType0 = Label(label="ArgType3_Routed_To_ArgType0", comment="")
+      # Short waves keep only the expected path inline: grouped problems run
+      # ArgType 1/2, the others ArgType 0/3. The other path is out of line so
+      # the instruction prefetcher does not fetch it.
+      groupedInline = self.shortWave(kernel) and kernel["ProblemType"]["GroupedGemm"]
+      coldMultiGemm = self.shortWave(kernel) and not groupedInline
       module.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=3))
-      module.add(SCBranchSCC1(labelName=ArgType3_Routed_To_ArgType0.getLabelName()))      
+      module.add(SCBranchSCC1(labelName=ArgType3_Routed_To_ArgType0.getLabelName()))
       module.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=0))
       self.sgprPool.checkIn(sgprArgType)
       sgprArgType = None # Cannot be used after this point
-      module.add(SCBranchSCC0(labelName=labelMultiGemm.getLabelName()))
-      module.add(ArgType3_Routed_To_ArgType0)
-      module.add(deepcopy(moduleWg))
-      module.add(self.clusterPadEarlyExit(kernel))
+      if groupedInline:
+        module.add(SCBranchSCC1(labelName=ArgType3_Routed_To_ArgType0.getLabelName()))
+        stridedModule = Module("ArgType0")
+      else:
+        module.add(SCBranchSCC0(labelName=labelMultiGemm.getLabelName()))
+        module.add(ArgType3_Routed_To_ArgType0)
+        stridedModule = module
+      stridedModule.add(deepcopy(moduleWg))
+      stridedModule.add(self.clusterPadEarlyExit(kernel))
       if not isPersistent(kernel):
         if clusterEnabled(kernel["ClusterDim"]):
-          module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
-        module.add(self.remapWgSerial(kernel, earlyStop=False))
-
-      # Grouped GEMM (ArgType 1/2) is out of line for short waves.
-      coldMultiGemm = self.shortWave(kernel)
-      if coldMultiGemm:
+          stridedModule.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
+        stridedModule.add(self.remapWgSerial(kernel, earlyStop=False))
+      if groupedInline:
+        self.coldBlock(ArgType3_Routed_To_ArgType0, labelMultiGemmEnd, stridedModule)
+        module.add(labelMultiGemm)
+      elif coldMultiGemm:
         hotModule = module
         module = Module("MultiGemm")
       else:
