@@ -113,8 +113,52 @@ def _running_max_slots(kernel):
     return slots
 
 
+def _clamped_reference_of(value):
+    """The raw max ``m`` if ``value`` is ``select(fcmp ogt m -inf, m, 0)``."""
+    op = value.op
+    if op is None or op.name != "arith.select" or not _is_const(op.operands[2], 0.0):
+        return None
+    cond = op.operands[0].op
+    if (
+        cond is None
+        or cond.name != "arith.fcmp"
+        or cond.attrs.get("pred") != "ogt"
+        or cond.operands[0] is not op.operands[1]
+        or not _is_const(cond.operands[1], -math.inf)
+    ):
+        return None
+    return op.operands[1]
+
+
+def _unwrap_rebuilt_max(carried, yielded):
+    """The raw max behind a carry rebuilt as ``select(fcmp oeq l 0, -inf, ref)``,
+    where ``l`` is a running sum the loop also yields and ``ref`` the clamped
+    exponent reference of the raw max; otherwise ``carried`` itself. The
+    transposed 32x32 path rebuilds the carry this way so the raw max does not
+    stay live through the body: -inf exactly while the row has seen no key."""
+    op = carried.op
+    if (
+        op is None
+        or op.name != "arith.select"
+        or not _is_const(op.operands[1], -math.inf)
+    ):
+        return carried
+    cond = op.operands[0].op
+    if (
+        cond is None
+        or cond.name != "arith.fcmp"
+        or cond.attrs.get("pred") != "oeq"
+        or not _is_const(cond.operands[1], 0.0)
+        or not any(cond.operands[0] is v for v in yielded)
+    ):
+        return carried
+    raw = _clamped_reference_of(op.operands[2])
+    return carried if raw is None else raw
+
+
 def _check_running_max(kernel, *, exponent_reference):
-    """Each running max is carried as ``fmax(carried max, ...)``; with
+    """Each running max is carried as ``fmax(carried max, ...)``, directly or
+    rebuilt from the running sum (:func:`_unwrap_rebuilt_max`); with
     ``exponent_reference``, that raw max also feeds the clamped exponent
     reference ``select(fcmp ogt max -inf, max, 0)``, which an ``fsub`` reads."""
     slots = _running_max_slots(kernel)
@@ -122,6 +166,8 @@ def _check_running_max(kernel, *, exponent_reference):
     users = _users(kernel) if exponent_reference else None
     for loop, slot, carried, maxima in slots:
         where = f"loop {loop.results[0].name} slot {slot}"
+        yield_op = next(op for op in loop.regions[0].ops if op.name == "scf.yield")
+        carried = _unwrap_rebuilt_max(carried, yield_op.operands)
         producer = carried.op.name if carried.op is not None else "a loop argument"
         assert carried.op is not None and carried.op.name == "arith.fmax", (
             f"{where} carries {producer} {carried.name}, not the raw fmax: a "

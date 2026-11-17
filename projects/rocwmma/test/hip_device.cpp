@@ -24,6 +24,9 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
+#include <cctype>
+#include <utility>
 #include <vector>
 
 #include "hip_device.hpp"
@@ -47,73 +50,24 @@ namespace rocwmma
 
         std::string deviceName(mProps.gcnArchName);
 
-        if(deviceName.find("gfx908") != std::string::npos)
+        // Arch names are matched case-insensitively against the enumerator names
+        std::transform(deviceName.begin(),
+                       deviceName.end(),
+                       deviceName.begin(),
+                       [](unsigned char c) { return std::toupper(c); });
+
+#define ROCWMMA_TEST_ARCH_NAME(ARCH, UNUSED) {#ARCH, hipGcnArch_t::ARCH},
+        static constexpr std::pair<const char*, hipGcnArch_t> archNames[]
+            = {ROCWMMA_FOR_EACH_TEST_ARCH(ROCWMMA_TEST_ARCH_NAME, )};
+#undef ROCWMMA_TEST_ARCH_NAME
+
+        for(auto const& [archName, gcnArch] : archNames)
         {
-            mGcnArch = hipGcnArch_t::GFX908;
-        }
-        else if(deviceName.find("gfx90a") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX90A;
-        }
-        else if(deviceName.find("gfx942") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX942;
-        }
-        else if(deviceName.find("gfx950") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX950;
-        }
-        else if(deviceName.find("gfx1100") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1100;
-        }
-        else if(deviceName.find("gfx1101") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1101;
-        }
-        else if(deviceName.find("gfx1102") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1102;
-        }
-        else if(deviceName.find("gfx1103") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1103;
-        }
-        else if(deviceName.find("gfx1150") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1150;
-        }
-        else if(deviceName.find("gfx1151") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1151;
-        }
-        else if(deviceName.find("gfx1152") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1152;
-        }
-        else if(deviceName.find("gfx1153") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1153;
-        }
-        else if(deviceName.find("gfx1170") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1170;
-        }
-        else if(deviceName.find("gfx1171") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1171;
-        }
-        else if(deviceName.find("gfx1200") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1200;
-        }
-        else if(deviceName.find("gfx1201") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1201;
-        }
-        else if(deviceName.find("gfx1250") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX1250;
+            if(deviceName.find(archName) != std::string::npos)
+            {
+                mGcnArch = gcnArch;
+                break;
+            }
         }
 
         switch(mProps.warpSize)

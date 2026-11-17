@@ -1071,6 +1071,80 @@ _CONFIGS = {
         num_seqs=2,
         use_qblock_reverse=True,
     ),
+    # cfg68: bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
+    # tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
+    # descriptor. Every other bf16/fp16 case takes the per-page copy offsets.
+    68: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        num_warps=4,
+        waves_per_eu=2,
+        tile_size=32,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_half_local_pv=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_mask_limit=True,
+    ),
+    # cfg69/70: page copies at the 16-page prefetch bound (page ids carried)
+    # and past it (page ids read in place).
+    69: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        tile_size=256,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+    ),
+    70: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        tile_size=288,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
+    # prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
+    # of tokens and the bf16 loaders must keep the paged-KV descriptor.
+    71: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=4,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=32,
+    ),
 }
 
 # --- idx64-67: emit_lse (trailing lse_ptr + FP32 LSE store), one per epilogue
@@ -1084,6 +1158,11 @@ _CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
 _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+# --- idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
+# idx71 is cfg71 above (bf16 D192 one warp); these three sit after it.
+_CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
+_CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
+_CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

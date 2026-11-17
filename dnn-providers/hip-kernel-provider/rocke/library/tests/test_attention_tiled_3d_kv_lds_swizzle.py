@@ -13,9 +13,9 @@ import pytest
 from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
-    build_unified_attention_3d_tiled,
-    build_unified_attention_reduce_tiled,
 )
+
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
 def _spec(**kw) -> UnifiedAttention3DTiledSpec:
@@ -77,8 +77,6 @@ def test_kernel_name_token():
     ],
 )
 def test_native_builder_matches_python(head_size, tile, kv_layout):
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = _spec(
         head_size=head_size,
@@ -91,18 +89,7 @@ def test_native_builder_matches_python(head_size, tile, kv_layout):
         kv_cache_policy="stream",
         kv_layout=kv_layout,
     )
-    reduce = UnifiedAttentionReduceTiledSpec(
-        head_size=head_size,
-        num_query_heads=32,
-        num_kv_heads=4,
-        dtype="bf16",
-        num_segments=8,
-    )
-    expected = _lower_kernel_to_llvm_python(
-        build_unified_attention_3d_tiled(spec, arch="gfx950"), arch="gfx950"
-    ) + _lower_kernel_to_llvm_python(
-        build_unified_attention_reduce_tiled(reduce, arch="gfx950"), arch="gfx950"
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx950")
     actual = engine.gfx950_attention_tiled_3d_lower_llvm(asdict(spec), "gfx950")
     assert actual == expected
 
@@ -148,17 +135,9 @@ def test_gfx942_spec_contract(wide):
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
-    from kernels.gfx942.attention_tiled_3d import (
-        build_unified_attention_3d_tiled as build_gfx942,
-    )
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = _gfx942_spec(num_seqs=3, **kw)
-    # The gfx942 binding lowers the segment kernel only.
-    expected = _lower_kernel_to_llvm_python(
-        build_gfx942(spec, arch="gfx942"), arch="gfx942"
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx942")
     assert engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942") == (
         expected
     )

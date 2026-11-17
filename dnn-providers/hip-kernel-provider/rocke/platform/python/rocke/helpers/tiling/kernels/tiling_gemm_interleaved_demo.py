@@ -340,9 +340,9 @@ def build_interleaved_gemm(
     # The driver is configured with the WARP tile -- it owns the per-wave m/n/k atom grid + the op.
     mma = TileMma(
         (warp_m, warp_n, tile_k),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target=arch,
         tiling=Tiling(atom_shape=(_ATOM, _ATOM, _ATOM)),
     )

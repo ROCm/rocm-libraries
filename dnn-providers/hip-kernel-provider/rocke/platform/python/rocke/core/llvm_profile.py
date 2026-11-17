@@ -323,15 +323,28 @@ def _datalayout_for_flavor(flavor: str) -> str:
     return _emission_profile(flavor).datalayout
 
 
-def _flavor_for_llvm(major: int) -> str:
-    """Map a compiler major to a qualified lane, failing beyond the frontier."""
-    latest_major, latest_flavor = _LLVM_FLAVOR_LADDER[-1]
+def measured_flavor_for_llvm(major: int) -> str | None:
+    """The qualified lane of a compiler of LLVM major ``major``, else ``None``.
+
+    ``None`` means the compiler is newer than the latest lane, so nothing about
+    it was measured. A major older than the first lane's takes the oldest lane,
+    as the lowering does.
+    """
+    latest_major, _ = _LLVM_FLAVOR_LADDER[-1]
     if major > latest_major:
-        raise ValueError(
-            f"LLVM compiler major {major} is newer than the latest qualified "
-            f"lane {latest_flavor}"
-        )
+        return None
     for minimum, flavor in reversed(_LLVM_FLAVOR_LADDER):
         if major >= minimum:
             return flavor
     return LLVM_FLAVORS[0]
+
+
+def _flavor_for_llvm(major: int) -> str:
+    """Map a compiler major to a qualified lane, failing beyond the frontier."""
+    flavor = measured_flavor_for_llvm(major)
+    if flavor is None:
+        raise ValueError(
+            f"LLVM compiler major {major} is newer than the latest qualified "
+            f"lane {LLVM_FLAVORS[-1]}"
+        )
+    return flavor

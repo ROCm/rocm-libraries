@@ -18,10 +18,10 @@ from kernels.common.attention_unified import UnifiedAttentionProblem
 from kernels.gfx942 import attention_tiled_3d as gfx942_3d
 from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
-    UnifiedAttentionReduceTiledSpec,
     build_unified_attention_3d_tiled,
-    build_unified_attention_reduce_tiled,
 )
+
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
 def _problem(**kw) -> UnifiedAttentionProblem:
@@ -82,8 +82,6 @@ def test_fp8_kv_rejects_streaming():
 def test_native_builder_matches_python(kv_layout):
     from dataclasses import asdict
 
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = UnifiedAttention3DTiledSpec(
         head_size=128,
@@ -100,18 +98,7 @@ def test_native_builder_matches_python(kv_layout):
         use_decode_grid=True,
         kv_cache_policy="stream",
     )
-    reduce = UnifiedAttentionReduceTiledSpec(
-        head_size=128,
-        num_query_heads=32,
-        num_kv_heads=8,
-        dtype="bf16",
-        num_segments=8,
-    )
-    expected = _lower_kernel_to_llvm_python(
-        build_unified_attention_3d_tiled(spec, arch="gfx950"), arch="gfx950"
-    ) + _lower_kernel_to_llvm_python(
-        build_unified_attention_reduce_tiled(reduce, arch="gfx950"), arch="gfx950"
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx950")
     actual = engine.gfx950_attention_tiled_3d_lower_llvm(asdict(spec), "gfx950")
     assert actual == expected
 
@@ -210,26 +197,9 @@ def test_gfx942_wide_loader_takes_all_or_stream(policy):
 def test_gfx942_native_builder_matches_python(kw):
     from dataclasses import asdict
 
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = _gfx942_spec(num_query_heads=32, num_segments=8, num_seqs=3, **kw)
-    # The binding lowers the segment kernel, then the reduce it derives from the
-    # segment spec (waves_per_eu included).
-    reduce = gfx942_3d.UnifiedAttentionReduceTiledSpec(
-        head_size=spec.head_size,
-        num_query_heads=spec.num_query_heads,
-        num_kv_heads=spec.num_kv_heads,
-        dtype=spec.dtype,
-        num_segments=spec.num_segments,
-        waves_per_eu=spec.waves_per_eu,
-    )
-    expected = _lower_kernel_to_llvm_python(
-        gfx942_3d.build_unified_attention_3d_tiled(spec, arch="gfx942"), arch="gfx942"
-    ) + _lower_kernel_to_llvm_python(
-        gfx942_3d.build_unified_attention_reduce_tiled(reduce, arch="gfx942"),
-        arch="gfx942",
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx942")
     actual = engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942")
     assert actual == expected
 

@@ -1385,3 +1385,40 @@ TYPED_TEST(DataGeneratorNormalFromFloatDistributionTest, TestForEachDataType)
 {
     this->testForDataType();
 }
+
+// NormalFromFloat must give the same bytes for the same seed. It used to share one
+// std::normal_distribution across the OpenMP threads; libstdc++ caches a spare sample inside it,
+// so threads raced on that cache and the output changed from run to run.
+template <typename DataType>
+class DataGeneratorNormalFromFloatDeterminismTest : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(DataGeneratorNormalFromFloatDeterminismTest, DataGeneratorTypes);
+
+TYPED_TEST(DataGeneratorNormalFromFloatDeterminismTest, SameSeedGivesSameBytes)
+{
+    if(omp_get_max_threads() < 2)
+        GTEST_SKIP() << "needs more than one OpenMP thread";
+
+    DataGeneratorOptions opts;
+    opts.initMode     = DataInitMode(NormalFromFloat{0.f, 1.f});
+    opts.forceDenorm  = false;
+    opts.blockScaling = isScaled<TypeParam>() ? 32 : 1;
+
+    const vector<index_t> size{512, 512};
+    const vector<index_t> stride{1, 512};
+
+    DataGenerator<TypeParam> first;
+    first.generate(size, stride, opts);
+    const auto data  = first.getDataBytes();
+    const auto scale = first.getScaleBytes();
+
+    for(int run = 0; run < 5; run++)
+    {
+        DataGenerator<TypeParam> again;
+        again.generate(size, stride, opts);
+        ASSERT_EQ(data, again.getDataBytes()) << "run " << run;
+        ASSERT_EQ(scale, again.getScaleBytes()) << "run " << run;
+    }
+}
