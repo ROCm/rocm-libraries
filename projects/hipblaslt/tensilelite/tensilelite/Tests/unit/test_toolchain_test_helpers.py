@@ -12,7 +12,7 @@ import rocisa
 import toolchain_test_helpers as helpers
 from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Types import IsaInfo, IsaVersion
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 
 @pytest.mark.parametrize("arch", ["gfx1200", (12, 0, 0)])

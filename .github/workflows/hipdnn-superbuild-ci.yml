@@ -225,10 +225,20 @@ jobs:
       # DVC-stored rocKE descriptors (the KDPs). Each pointer names the `ingestor`
       # remote, so a bare pull resolves it. Configure sets REQUIRE_DVC_DESCRIPTORS=ON,
       # so a missing file fails it instead of silently dropping the bundle.
+      #
+      # The gfx950_conv_fwd_aot_seed KDPs under test_descriptors/integration/rocKE are
+      # DVC-tracked too (same `ingestor` remote), and the configure-time check at
+      # CMakeLists.txt:409 needs them staged -- without this pull, only the .dvc
+      # pointers are present and configure fails under REQUIRE_DVC_DESCRIPTORS=ON.
       - name: Fetch rocKE descriptors
         run: |
           set -euo pipefail
           dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+          dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/test_descriptors/integration/rocKE
+          # A pull can exit 0 having fetched nothing; count what it should produce.
+          seed_count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/test_descriptors/integration/rocKE -name '*.kdp.json' -path '*artifacts*' | wc -l)
+          test "$seed_count" -gt 0 || { echo "dvc pull produced no gfx950_conv_fwd_aot_seed KDPs" >&2; exit 1; }
+          echo "Fetched $seed_count seed rocKE KDP(s)"
 
       # The gfx950 dgrad AOT instance lists are DVC-tracked too (same `ingestor`
       # remote), and hipdnn_ingestor_generator_pytest reads them straight from
@@ -517,10 +527,13 @@ jobs:
         run: |
           set -euo pipefail
           LOGNAME=github-runner dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/test_descriptors/integration/rocKE
           # A pull can exit 0 having fetched nothing; count what it should produce.
           count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors -name '*.kdp.json' -path '*artifacts*' | wc -l)
           test "$count" -gt 0 || { echo "dvc pull produced no rocKE KDPs" >&2; exit 1; }
-          echo "Fetched $count rocKE KDP(s)"
+          seed_count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/test_descriptors/integration/rocKE -name '*.kdp.json' -path '*artifacts*' | wc -l)
+          test "$seed_count" -gt 0 || { echo "dvc pull produced no gfx950_conv_fwd_aot_seed KDPs" >&2; exit 1; }
+          echo "Fetched $count rocKE KDP(s) and $seed_count seed rocKE KDP(s)"
 
       # Same reasoning as the Windows lane: the gfx950 dgrad AOT instance lists
       # are DVC-tracked (same `ingestor` remote), and hipdnn_ingestor_generator_pytest

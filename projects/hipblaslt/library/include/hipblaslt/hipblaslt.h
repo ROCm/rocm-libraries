@@ -50,9 +50,10 @@
 #include <hipblas/hipblas.h>
 #endif
 
+#ifdef __cplusplus
 #include <memory>
-#include <regex>
 #include <vector>
+#endif
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_complex.h>
@@ -67,11 +68,18 @@
 /* Opaque structures holding information */
 // clang-format off
 
+#ifdef __cplusplus
 #define HIPBLASLT_DATATYPE_INVALID static_cast<hipDataType>(255)
 // TODO: Replace static_cast<hipblasComputeType_t>(0) with the appropriate value since 0 represents f16_r
 #define HIPBLASLT_COMPUTE_TYPE_INVALID static_cast<hipblasComputeType_t>(0)
 #define HIPBLASLT_OPERATION_INVALID static_cast<hipblasOperation_t>(0)
 #define ROCBLASLT_COMPUTE_TYPE_INVALID static_cast<rocblaslt_compute_type>(255)
+#else
+#define HIPBLASLT_DATATYPE_INVALID ((hipDataType)255)
+#define HIPBLASLT_COMPUTE_TYPE_INVALID ((hipblasComputeType_t)0)
+#define HIPBLASLT_OPERATION_INVALID ((hipblasOperation_t)0)
+#define ROCBLASLT_COMPUTE_TYPE_INVALID ((rocblaslt_compute_type)255)
+#endif
 
 #define HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT \
     static_assert(false, "HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT is deprecated and not supported. Please set HIPBLASLT_MATMUL_DESC_A_SCALE_MODE as HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F instead.")
@@ -133,7 +141,7 @@ typedef enum {
  *  Values ``0``-``11`` are reserved for the chainable family's attributes.
  */
 typedef enum {
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. On gfx942 and gfx950 every other queue must be on an even xGMI SDMA engine in 2..14. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS = 13, /**<Required. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT = 14, /**<Required. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. Data type: ``int64_t``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
@@ -252,14 +260,13 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
-   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW`` for A
-   * and B; see ``hipblasLtOrder_t`` for the limits. The ``hipblaslt_ext`` ``Gemm`` and
+   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
    * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
-   * ``HIPBLASLT_ORDER_ROW``. Swizzled orders apply to A and B only: those APIs,
-   * ``hipblasLtMatmul``, and ``hipblasLtMatmulAlgoGetHeuristic`` return
-   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
-   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
-   * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
+   * Swizzled orders apply to A and B only: the same APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED``
+   * when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
+   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
    *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
@@ -492,21 +499,13 @@ typedef enum {
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    *
-   * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
-   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. For the supported combinations, the library
-   * rewrites internal copies of the layouts and transpose operations into an equivalent
-   * column-major problem. This rewrite does not copy or reorder matrix data and does not launch
-   * a separate transpose kernel. The heuristic and matmul use the same rewritten problem.
-   *
-   * Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major C or D, and for a row-major
-   * A or B combined with an operation other than ``HIPBLAS_OP_N`` or
-   * ``HIPBLAS_OP_T``, a block or vector scale mode, or an ``HIP_R_4I`` matrix. With a fused
-   * all-to-all epilogue, a row-major D returns ``HIPBLAS_STATUS_INVALID_VALUE`` instead, because
-   * the epilogue's own check runs first.
-   *
-   * Argument errors such as a null handle, descriptor, layout, or data pointer keep their usual
-   * status, and so does ``HIPBLASLT_OPERATION_INVALID``. The ``hipblaslt_ext`` APIs return
-   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
+   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
+   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
+   * matrix as its column-major transpose. The column-major result is ``(A * B)^T``, which is
+   * ``A * B`` in row-major order, so the output needs no transpose. Anything applied per row of D,
+   * such as a bias or an alpha vector, then applies per column of ``A * B``, and the scale for A
+   * becomes the scale for the second operand.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
@@ -701,9 +700,15 @@ typedef struct _hipblasLtMatmulAlgo_t{
  */
 typedef struct _hipblasLtMatmulHeuristicResult_t{
   hipblasLtMatmulAlgo_t algo;                      /**<Algo struct*/
+#ifdef __cplusplus
   size_t workspaceSize = 0;                        /**<Actual size of workspace memory required.*/
   hipblasStatus_t state = HIPBLAS_STATUS_SUCCESS;  /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
   float wavesCount = 1.0;                          /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#else
+  size_t workspaceSize;                            /**<Actual size of workspace memory required.*/
+  hipblasStatus_t state;                           /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
+  float wavesCount;                                /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#endif
   int reserved[4];                                 /**<Reserved.*/
 } hipblasLtMatmulHeuristicResult_t;
 #endif
