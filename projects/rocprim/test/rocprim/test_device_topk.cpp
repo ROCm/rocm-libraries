@@ -41,6 +41,8 @@
 #include <rocprim/types.hpp>
 
 // std library
+#include <algorithm>
+#include <random>
 #include <unordered_set>
 #include <vector>
 
@@ -952,4 +954,117 @@ TEST(RocprimDeviceTopkTests, TopkLargeSizesUnstable)
                           use_indirect_iterator,
                           size_in_type,
                           size_out_type>(debug_synchronous);
+}
+
+// The k = size / 2 - 1 smallest keys, where bin 0 of the first pass holds exactly 0..k, so the
+// result is exactly {0..k-1}. The last block of each histogram pass must see every block's
+// histogram: a short count changes the pivot and used to write keys past the k-th output.
+// A guard after the output checks that nothing is written past k.
+template<bool with_values>
+void topk_last_block_histogram_test()
+{
+    using key_type   = unsigned int;
+    using value_type = unsigned int;
+
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    constexpr size_t   guard_size  = 4096;
+    constexpr key_type guard_value = 0xFFFFFFFF;
+    constexpr int      calls       = 10;
+
+    for(size_t size : {size_t{1} << 20, size_t{1} << 22})
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        const size_t k = size / 2 - 1;
+
+        std::mt19937          rng(seeds[0]);
+        std::vector<key_type> input(size);
+        for(size_t i = 0; i < size; ++i)
+        {
+            input[i] = i <= k ? static_cast<key_type>(i) : 0x80000000u | (rng() & 0x7FFFFFFFu);
+        }
+        std::shuffle(input.begin(), input.end(), rng);
+
+        common::device_ptr<key_type>   d_keys_input(input);
+        common::device_ptr<value_type> d_values_input(input);
+        common::device_ptr<key_type>   d_keys_output(k + guard_size);
+        common::device_ptr<value_type> d_values_output(k + guard_size);
+
+        auto run = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        {
+            if constexpr(with_values)
+            {
+                return rocprim::topk_pairs(d_temp_storage,
+                                           temp_storage_size_bytes,
+                                           d_keys_input.get(),
+                                           d_keys_output.get(),
+                                           d_values_input.get(),
+                                           d_values_output.get(),
+                                           size,
+                                           k);
+            }
+            else
+            {
+                return rocprim::topk(d_temp_storage,
+                                     temp_storage_size_bytes,
+                                     d_keys_input.get(),
+                                     d_keys_output.get(),
+                                     size,
+                                     k);
+            }
+        };
+
+        size_t temp_storage_size_bytes;
+        HIP_CHECK(run(nullptr, temp_storage_size_bytes));
+        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+
+        for(int call = 0; call < calls; ++call)
+        {
+            SCOPED_TRACE(testing::Message() << "with call = " << call);
+
+            HIP_CHECK(hipMemset(d_keys_output.get(), 0xFF, (k + guard_size) * sizeof(key_type)));
+            HIP_CHECK(
+                hipMemset(d_values_output.get(), 0xFF, (k + guard_size) * sizeof(value_type)));
+
+            HIP_CHECK(run(d_temp_storage.get(), temp_storage_size_bytes));
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            const auto keys_output   = d_keys_output.load();
+            const auto values_output = d_values_output.load();
+
+            for(size_t i = k; i < k + guard_size; ++i)
+            {
+                ASSERT_EQ(keys_output[i], guard_value) << "key written past k at " << i;
+                ASSERT_EQ(values_output[i], guard_value) << "value written past k at " << i;
+            }
+
+            if constexpr(with_values)
+            {
+                for(size_t i = 0; i < k; ++i)
+                {
+                    ASSERT_EQ(values_output[i], keys_output[i]) << "at index " << i;
+                }
+            }
+
+            std::vector<key_type> sorted_output(keys_output.begin(), keys_output.begin() + k);
+            std::sort(sorted_output.begin(), sorted_output.end());
+            for(size_t i = 0; i < k; ++i)
+            {
+                ASSERT_EQ(sorted_output[i], static_cast<key_type>(i)) << "at index " << i;
+            }
+        }
+    }
+}
+
+TEST(RocprimDeviceTopkTests, TopkLastBlockHistogram)
+{
+    topk_last_block_histogram_test<false>();
+}
+
+TEST(RocprimDeviceTopkTests, TopkPairsLastBlockHistogram)
+{
+    topk_last_block_histogram_test<true>();
 }

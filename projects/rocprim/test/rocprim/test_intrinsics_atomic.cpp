@@ -177,3 +177,78 @@ TEST(RocprimAtomicTests, Flat128Bits)
         });
 }
 #endif
+// Waves 1 to 3 of every block add to a single word with relaxed atomics, and the last block to
+// finish checks the word with a plain load. Without device-scope release and acquire fences the
+// last block can see a short count.
+__global__ __launch_bounds__(256)
+void test_fence_last_block(unsigned int* words, unsigned int* counters, unsigned int* results)
+{
+    constexpr unsigned int stride = 32;
+
+    unsigned int* word    = words + blockIdx.y * stride;
+    unsigned int* counter = counters + blockIdx.y * stride;
+
+    __shared__
+    bool is_last_block;
+
+    if(threadIdx.x >= 64)
+    {
+        rocprim::detail::atomic_add(word, 1u);
+    }
+    rocprim::detail::atomic_fence_release_device();
+    __syncthreads();
+
+    if(threadIdx.x == 0)
+    {
+        rocprim::detail::atomic_fence_release_device();
+        const unsigned int finished = rocprim::detail::atomic_add(counter, 1u);
+        rocprim::detail::atomic_fence_acquire_device();
+        is_last_block = finished == gridDim.x - 1;
+    }
+    __syncthreads();
+
+    if(is_last_block)
+    {
+        rocprim::detail::atomic_fence_acquire_device();
+        if(threadIdx.x == 128)
+        {
+            results[blockIdx.y] = *word;
+        }
+    }
+}
+
+TEST(RocprimAtomicTests, DeviceFenceLastBlock)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    static constexpr unsigned int block_size = 256;
+    static constexpr unsigned int grid_size  = 208;
+    static constexpr unsigned int stride     = 32;
+    // Independent problems per launch (blockIdx.y), each with its own word and counter.
+    static constexpr unsigned int problems = 1000;
+    static constexpr unsigned int launches = 80;
+
+    for(unsigned int launch = 0; launch < launches; ++launch)
+    {
+        SCOPED_TRACE(testing::Message() << "with launch = " << launch);
+
+        common::device_ptr<unsigned int> d_words(std::vector<unsigned int>(problems * stride, 0));
+        common::device_ptr<unsigned int> d_counters(
+            std::vector<unsigned int>(problems * stride, 0));
+        common::device_ptr<unsigned int> d_results(problems);
+
+        test_fence_last_block<<<dim3(grid_size, problems), block_size>>>(d_words.get(),
+                                                                         d_counters.get(),
+                                                                         d_results.get());
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        const auto results = d_results.load();
+        for(unsigned int i = 0; i < problems; ++i)
+        {
+            ASSERT_EQ(results[i], (block_size - 64) * grid_size) << "with problem = " << i;
+        }
+    }
+}

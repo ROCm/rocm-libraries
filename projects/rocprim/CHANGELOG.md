@@ -21,6 +21,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 
 * Incorrect miscategorization of RDNA4 and CDNA5 GPUs.
+* Missing device-scope memory fences in `device_topk` (with `Stable = false`), which could let the last block read an incomplete global histogram, return a wrong result, and write past the K-th output element. Output writes are now also bounded by K.
 
 ### Upcoming changes
 

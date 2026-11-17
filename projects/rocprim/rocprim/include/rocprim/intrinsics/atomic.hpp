@@ -361,6 +361,30 @@ namespace detail
     }
 #endif
 
+    /// \brief Device-scope release fence.
+    ///
+    /// Makes the executing thread's preceding global writes and atomics visible at device scope
+    /// before its following writes and atomics. The compiler emits the target's sequence
+    /// (wait for outstanding vector memory, and an L2 writeback where needed).
+    ///
+    /// This is an internal function not meant for users.
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_release_device()
+    {
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+    }
+
+    /// \brief Device-scope acquire fence.
+    ///
+    /// Makes device-scope writes released by other threads visible to the executing thread's
+    /// following loads. The compiler emits the target's sequence (wait for outstanding
+    /// vector memory, and a cache invalidate).
+    ///
+    /// This is an internal function not meant for users.
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_acquire_device()
+    {
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+    }
+
     /// \brief Wait for all vector memory operations to complete
     ///
     /// This ensures that previous visible writes to vector memory have completed before the function
