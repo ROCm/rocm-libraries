@@ -1311,40 +1311,40 @@ rocblas_status special_trsm_template(rocblas_handle    handle,
                         int32_t           solution_index = 0;
                         uint32_t          flags          = 0;
 
-                        rocblas_gemm_ex_template<BATCHED>(handle,
-                                                          transA,
-                                                          rocblas_operation_none,
-                                                          BLOCK,
-                                                          width,
-                                                          r * BLOCK,
-                                                          &alpha_negative_one<T>,
-                                                          A,
-                                                          compute_type,
-                                                          offsetA + offset_Ain,
-                                                          lda,
-                                                          stride_A,
-                                                          B,
-                                                          compute_type,
-                                                          offsetB + offset_Bin,
-                                                          ldb,
-                                                          stride_B,
-                                                          alpha,
-                                                          B,
-                                                          compute_type,
-                                                          j * BLOCK + w * B_chunk_size * ldb
-                                                              + offset_Bin,
-                                                          ldb,
-                                                          stride_B,
-                                                          (void*)w_x_temp,
-                                                          compute_type,
-                                                          0,
-                                                          BLOCK,
-                                                          stride_X,
-                                                          batch_count,
-                                                          compute_type,
-                                                          algo,
-                                                          solution_index,
-                                                          0);
+                        RETURN_IF_ROCBLAS_ERROR((rocblas_gemm_ex_template<BATCHED>(
+                            handle,
+                            transA,
+                            rocblas_operation_none,
+                            BLOCK,
+                            width,
+                            r * BLOCK,
+                            &alpha_negative_one<T>,
+                            A,
+                            compute_type,
+                            offsetA + offset_Ain,
+                            lda,
+                            stride_A,
+                            B,
+                            compute_type,
+                            offsetB + offset_Bin,
+                            ldb,
+                            stride_B,
+                            alpha,
+                            B,
+                            compute_type,
+                            j * BLOCK + w * B_chunk_size * ldb + offset_Bin,
+                            ldb,
+                            stride_B,
+                            (void*)w_x_temp,
+                            compute_type,
+                            0,
+                            BLOCK,
+                            stride_X,
+                            batch_count,
+                            compute_type,
+                            algo,
+                            solution_index,
+                            0)));
                     }
                 }
 
@@ -1438,40 +1438,40 @@ rocblas_status special_trsm_template(rocblas_handle    handle,
                         int32_t           solution_index = 0;
                         uint32_t          flags          = 0;
 
-                        rocblas_gemm_ex_template<BATCHED>(handle,
-                                                          rocblas_operation_none,
-                                                          transA,
-                                                          width,
-                                                          BLOCK,
-                                                          r * BLOCK,
-                                                          &alpha_negative_one<T>,
-                                                          B,
-                                                          compute_type,
-                                                          offsetB + offset_Bin,
-                                                          ldb,
-                                                          stride_B,
-                                                          A,
-                                                          compute_type,
-                                                          offsetA + offset_Ain,
-                                                          lda,
-                                                          stride_A,
-                                                          alpha,
-                                                          B,
-                                                          compute_type,
-                                                          j * BLOCK * size_t(ldb) + w * B_chunk_size
-                                                              + offset_Bin,
-                                                          ldb,
-                                                          stride_B,
-                                                          (void*)w_x_temp,
-                                                          compute_type,
-                                                          0,
-                                                          width,
-                                                          stride_X,
-                                                          batch_count,
-                                                          compute_type,
-                                                          algo,
-                                                          solution_index,
-                                                          0);
+                        RETURN_IF_ROCBLAS_ERROR((rocblas_gemm_ex_template<BATCHED>(
+                            handle,
+                            rocblas_operation_none,
+                            transA,
+                            width,
+                            BLOCK,
+                            r * BLOCK,
+                            &alpha_negative_one<T>,
+                            B,
+                            compute_type,
+                            offsetB + offset_Bin,
+                            ldb,
+                            stride_B,
+                            A,
+                            compute_type,
+                            offsetA + offset_Ain,
+                            lda,
+                            stride_A,
+                            alpha,
+                            B,
+                            compute_type,
+                            j * BLOCK * size_t(ldb) + w * B_chunk_size + offset_Bin,
+                            ldb,
+                            stride_B,
+                            (void*)w_x_temp,
+                            compute_type,
+                            0,
+                            width,
+                            stride_X,
+                            batch_count,
+                            compute_type,
+                            algo,
+                            solution_index,
+                            0)));
                     }
                 }
 
@@ -3240,11 +3240,12 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
                 __syncthreads();
 
                 if(tx < i)
-                    valB -= (CONJ ? conj(
-                                 A_shared_or_global[i * size_t(lda_norm) + tx * size_t(lda_trans)])
-                                  : A_shared_or_global[i * size_t(lda_norm)
-                                                       + tx * size_t(lda_trans)])
-                            * sB[ty];
+                    valB
+                        -= (CONJ
+                                ? conj(A_shared_or_global[i * size_t(lda_norm)
+                                                          + tx * size_t(lda_trans)])
+                                : A_shared_or_global[i * size_t(lda_norm) + tx * size_t(lda_trans)])
+                           * sB[ty];
             }
 
             if(!UNIT && tx == 0)
