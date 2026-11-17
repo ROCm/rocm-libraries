@@ -245,41 +245,30 @@ namespace TensileLite
             // Reset the error code from the failed hipModuleLoad.
             (void)m_moduleApi.getLastError();
             std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
-            for(auto module : m_modules)
-            {
-                HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
-                    std::cerr << "hipModuleUnload failed: " << std::endl
-                              << " error: " << hipGetErrorString(error_t) << std::endl;
-                });
-            }
 
-            // Extra rotation copies are not recreated by recovery.
-            if(!m_extraModuleCopies.empty())
-            {
-                std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
-                          << m_extraModuleCopies.size()
-                          << " rotation copy set(s); I-cache rotation is now disabled "
-                          << "until loadCodeObjectFileExtraCopies() is called again." << std::endl;
-            }
-            for(auto const& copyModules : m_extraModuleCopies)
-            {
-                for(auto module : copyModules)
-                {
-                    HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
-                        std::cerr << "hipModuleUnload failed: " << std::endl
-                                  << " error: " << hipGetErrorString(error_t) << std::endl;
-                    });
-                }
-            }
-
+            // Taken under the lock every module and cache writer holds, so a
+            // concurrent load is neither lost nor unloaded here. Once the
+            // caches are reset, a new lookup cannot reach these modules, so
+            // they are unloaded after the lock is released. A launch that
+            // read a kernel handle before the reset may still use it after
+            // the unload.
+            std::vector<hipModule_t>              modules;
+            std::vector<std::vector<hipModule_t>> extraModuleCopies;
+            // In-memory images of those modules, released after the unloads.
+            std::vector<ModuleImage> images;
             {
                 std::lock_guard<std::mutex> guard(m_access);
-                for(auto module : m_modules)
-                    m_moduleImages.erase(module);
-                for(auto const& copyModules : m_extraModuleCopies)
+                modules.swap(m_modules);
+                extraModuleCopies.swap(m_extraModuleCopies);
+                auto detachImage = [&](hipModule_t module) {
+                    if(auto node = m_moduleImages.extract(module))
+                        images.push_back(std::move(node.mapped()));
+                };
+                for(auto module : modules)
+                    detachImage(module);
+                for(auto const& copyModules : extraModuleCopies)
                     for(auto module : copyModules)
-                        m_moduleImages.erase(module);
-                m_modules.clear();
+                        detachImage(module);
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.forEachValue([](std::atomic<bool>& loaded) {
                     loaded.store(false, std::memory_order_release);
@@ -288,9 +277,35 @@ namespace TensileLite
                 m_kernels.forEachValue([](std::atomic<hipFunction_t>& kernel) {
                     kernel.store(nullptr, std::memory_order_release);
                 });
-                m_extraModuleCopies.clear();
                 m_extraKernels.clear();
                 m_currentRotationCopy.store(0);
+            }
+
+            for(auto module : modules)
+            {
+                HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
+                    std::cerr << "hipModuleUnload failed: " << std::endl
+                              << " error: " << hipGetErrorString(error_t) << std::endl;
+                });
+            }
+
+            // Extra rotation copies are not recreated by recovery.
+            if(!extraModuleCopies.empty())
+            {
+                std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
+                          << extraModuleCopies.size()
+                          << " rotation copy set(s); I-cache rotation is now disabled "
+                          << "until loadCodeObjectFileExtraCopies() is called again." << std::endl;
+            }
+            for(auto const& copyModules : extraModuleCopies)
+            {
+                for(auto module : copyModules)
+                {
+                    HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
+                        std::cerr << "hipModuleUnload failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    });
+                }
             }
 
             hipError_t lazyLoadingError = initializeLazyLoading(lazyArch, lazyDir);
