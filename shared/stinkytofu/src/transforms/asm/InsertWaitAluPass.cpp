@@ -43,6 +43,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
+#include "stinkytofu/ir/asm/OperandHalves.hpp"
 #include "stinkytofu/ir/asm/RegHalfKeyer.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
@@ -250,24 +251,6 @@ inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
     return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
 }
 
-// Walk `regs`, skipping non-VGPR ones, and invoke fn(vgprIdx, half) for each
-// VGPR. halfFn maps an operand's position (VGPR-only) to its True16 half
-// selector, so fn may act at half-word (LOW/HIGH) granularity. Callers pass a
-// single operand list (getSrcRegs or getDestRegs) — never both, since src and
-// dst use different half selectors. Shared by producer stamping and consumer
-// probing.
-template <typename HalfFn, typename Fn>
-inline void forEachVGPR(const std::vector<StinkyRegister>& regs, HalfFn&& halfFn, Fn&& fn) {
-    size_t opIdx = 0;
-    for (const auto& reg : regs) {
-        if (reg.dataType != StinkyRegister::Type::Register) continue;
-        if (reg.reg.type != RegType::V) continue;
-        HighBitSel half = halfFn(opIdx);
-        ++opIdx;
-        for (uint16_t off = 0; off < reg.reg.num; ++off) fn(reg.reg.idx + off, half);
-    }
-}
-
 inline int wmmaDstVgprs(const StinkyInstruction& inst) {
     for (const auto& r : inst.getDestRegs())
         if (r.dataType == StinkyRegister::Type::Register && r.reg.type == RegType::V)
@@ -290,23 +273,6 @@ inline bool writesExec(const StinkyInstruction& inst) {
 
 inline bool isWaitAluInst(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_wait_alu;
-}
-
-// ---------------------------------------------------------------------------
-// True16 half-selectors
-// ---------------------------------------------------------------------------
-
-// True16 half-selector for dest operand index `destIdx` (only operand 0 and 1
-// can have a True16 dst-half). Falls through to NONE without modifier.
-inline HighBitSel destHalfSel(const True16Modifiers* mod, size_t destIdx) {
-    if (!mod) return HighBitSel::NONE;
-    if (destIdx == 0) return mod->getDst0();
-    if (destIdx == 1) return mod->getDst1();
-    return HighBitSel::NONE;
-}
-
-inline HighBitSel srcHalfSel(const True16Modifiers* mod, size_t srcIdx) {
-    return mod ? mod->getSrc(srcIdx) : HighBitSel::NONE;
 }
 
 // ---------------------------------------------------------------------------
@@ -534,8 +500,6 @@ class WaitcntBrackets {
     void onProducer(WaitEventType ev, const StinkyInstruction& inst, const VGPRHalfKeyer& keyer) {
         CounterType ct = counterFromEvent(ev);
 
-        const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
-
         if (ct == CT_VA_VDST) {
             VaPipe pipe = vaPipeOfEvent(ev);
             unsigned inc = hasMatrixScalePair(inst) ? 2u : 1u;
@@ -563,12 +527,10 @@ class WaitcntBrackets {
                                      << " ord=" << ord << "]\n");
             };
             if (ctx->opts.enableESM2TrackValuVsrc)
-                forEachVGPR(
-                    inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                    [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
-            forEachVGPR(
-                inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
+                forEachVgprHalf(inst, OperandSide::Src,
+                                [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
+            forEachVgprHalf(inst, OperandSide::Dst,
+                            [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
             return;
         }
 
@@ -606,15 +568,12 @@ class WaitcntBrackets {
                                  << "]\n");
         };
         // VM_VSRC tracks in-flight VMEM reads, which are always full DWORD.
-        forEachVGPR(
-            inst.getSrcRegs(), [](size_t) { return HighBitSel::NONE; },
-            [&](unsigned idx, HighBitSel half) { stampVM(idx, half); });
+        forEachVgprHalf(inst, OperandSide::Src,
+                        [&](unsigned idx, HighBitSel) { stampVM(idx, HighBitSel::NONE); });
     }
 
     // Probe each VGPR operand for hazards and accumulate the wait.
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
-        const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
-
         // TEMP HACK: drop the src RAW va_vdst for valu->global_load and valu->global_prefetch
         // (prefetch lacks IF_GLOBALLoad, so classify it separately). Safe: the DAG already
         // spaces the vaddr producer >=32 cycles (CDNA5 isVmemAddrHazardConsumer covers it).
@@ -622,24 +581,20 @@ class WaitcntBrackets {
                                        (isGLOBALLoad(inst) || isGlobalPrefetch(inst));
 
         if (!suppressSrcVaVdst) {
-            forEachVGPR(
-                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) {
-                    keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
-                        determineWait(CT_VA_VDST, k, wait, "src(RAW)");
-                    });
+            forEachVgprHalf(inst, OperandSide::Src, [&](unsigned idx, HighBitSel half) {
+                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
+                    determineWait(CT_VA_VDST, k, wait, "src(RAW)");
                 });
+            });
         }
 
-        forEachVGPR(
-            inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
-            [&](unsigned idx, HighBitSel half) {
-                keyer.forEachConsumerKey(
-                    idx, half, [&](RegKey k) { determineWait(CT_VA_VDST, k, wait, "dst(WAW)"); });
-                // WAR on VM_VSRC: writer-vs-in-flight-VMEM-read uses full DWORD.
-                RegKey full{RegType::V, idx, RegHalf::NONE};
-                determineWait(CT_VM_VSRC, full, wait, "dst(WAR)");
-            });
+        forEachVgprHalf(inst, OperandSide::Dst, [&](unsigned idx, HighBitSel half) {
+            keyer.forEachConsumerKey(
+                idx, half, [&](RegKey k) { determineWait(CT_VA_VDST, k, wait, "dst(WAW)"); });
+            // WAR on VM_VSRC: writer-vs-in-flight-VMEM-read uses full DWORD.
+            RegKey full{RegType::V, idx, RegHalf::NONE};
+            determineWait(CT_VM_VSRC, full, wait, "dst(WAR)");
+        });
     }
 
     // Same-class reads after this one satisfy its wait; clears a satisfied class's liveness.
