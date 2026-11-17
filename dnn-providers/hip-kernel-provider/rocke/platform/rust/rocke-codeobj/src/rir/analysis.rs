@@ -110,6 +110,33 @@ fn collect_allocs(region: &Region, out: &mut Vec<(ValueId, bool)>) {
     });
 }
 
+/// The allocations LDS DMA loads write: the one each load's LDS address is
+/// based on (`smem_addr_of`, carried through `smem_ptr_add` from its one
+/// based-on operand, as `target::gfx9::lds_dma::Facts::provenance`).
+fn dma_targets(kernel: &Kernel) -> FxHashSet<ValueId> {
+    let mut based: FxHashMap<ValueId, ValueId> = FxHashMap::default();
+    let mut out = FxHashSet::default();
+    preorder(&kernel.body, |op| match op.kind {
+        OpKind::SmemAddrOf => {
+            based.insert(op.results[0], op.operands[0]);
+        }
+        OpKind::SmemPtrAdd => {
+            let from: Vec<ValueId> = op.operands.iter().filter_map(|v| based.get(v).copied()).collect();
+            if let [alloc] = from[..] {
+                based.insert(op.results[0], alloc);
+            }
+        }
+        OpKind::BufferLoadLds | OpKind::GlobalLoadLds => {
+            let at = if op.kind == OpKind::BufferLoadLds { 1 } else { 2 };
+            if let Some(&alloc) = op.operands.get(at).and_then(|v| based.get(v)) {
+                out.insert(alloc);
+            }
+        }
+        _ => {}
+    });
+    out
+}
+
 /// Byte offset per allocation and the 16-byte-rounded pool size. Must run on
 /// the unoptimized kernel so preorder numbering matches the Python lowering.
 pub fn lds_layout(kernel: &Kernel) -> (FxHashMap<ValueId, u32>, u32) {
@@ -145,6 +172,10 @@ pub fn lds_layout(kernel: &Kernel) -> (FxHashMap<ValueId, u32>, u32) {
     if live.is_empty() {
         return (offsets, 0);
     }
+    // Lever `ldsdmakib`: an allocation LDS DMA loads write starts on a KiB boundary and takes whole KiB, so the
+    // KiB-granular LDS tags (`target::gfx9::lds_dma::tag`) of two such allocations, or of one and its neighbour,
+    // never overlap, and a read waits only for the DMA into its own allocation.
+    let whole_kib = if super::kernel_lever("ldsdmakib") { dma_targets(kernel) } else { FxHashSet::default() };
     const EXCL_LAST_SEQ: usize = 1 << 30;
     let mut slots: Vec<(usize, usize, usize)> = Vec::new();
     let no_reuse = super::debug_flag("noldsreuse");
@@ -153,8 +184,10 @@ pub fn lds_layout(kernel: &Kernel) -> (FxHashMap<ValueId, u32>, u32) {
         let Type::Smem(elem, shape) = kernel.ty(value) else {
             continue;
         };
-        let seg = elem.bytes() as usize * shape.iter().map(|&d| d as usize).product::<usize>();
-        let align = 4usize;
+        let bytes = elem.bytes() as usize * shape.iter().map(|&d| d as usize).product::<usize>();
+        let kib = whole_kib.contains(&value);
+        let seg = if kib { bytes.div_ceil(1024) * 1024 } else { bytes };
+        let align = if kib { 1024 } else { 4usize };
         let (first, last) = intervals.get(&value).copied().unwrap_or((0, 0));
         let mut best: Option<(usize, usize)> = None;
         if !exclusive {

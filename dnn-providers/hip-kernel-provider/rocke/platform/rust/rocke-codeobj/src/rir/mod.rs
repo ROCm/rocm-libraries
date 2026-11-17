@@ -154,6 +154,15 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 ///   build is disassembled into a device function (`dsv41_mono/direct_fn.py`), never launched.
 /// - `litshare`: one register per literal and block before scheduling
 ///   (`target::gfx9::lits`; the debug flag `litshare` too).
+/// - `ldsdmakib`: the LDS allocations that LDS DMA loads write start on a KiB
+///   boundary and take whole KiB (`rir::analysis::lds_layout`), so the
+///   waitcnt pass's KiB-granular LDS tags of two allocations never overlap
+///   and a read waits only for the DMA loads into its own allocation, also
+///   when allocations are not KiB multiples (a ring of 16.25 KiB slots).
+/// - `gldssaddr`: a `global_load_lds` from a wave-uniform base and a lane
+///   offset takes the saddr form (SGPR base plus the VGPR offset, which the
+///   hardware zero-extends) instead of a 64-bit VALU add per load
+///   (`rir::isel`); the kernel asserts that those offsets are non-negative.
 ///
 /// A kernel's own `dlevers` string attribute (the same syntax) decides each
 /// lever it names for that kernel, over `ROCKE_DIRECT_LEVERS` ([`kernel_lever`]).
@@ -217,7 +226,8 @@ pub(crate) fn with_kernel_levers<T>(levers: Option<std::sync::Arc<LeverDelta>>, 
 pub const LEVERS: &[&str] = &[
     "acqfence", "addrfold", "bitop3", "bufoffany", "devfn", "dmafree", "dmamanual", "dmamanualring",
     "dmamanualringw", "dppcombine", "dppcombinef", "dppcombinei", "dppmirror", "ds128", "dsb96",
-    "dsfold", "dshoist", "dsrebase", "fmac", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
+    "dsfold", "dshoist", "dsrebase", "fmac", "fp6pass", "gldssaddr", "i16vec", "ldsalias", "ldsdmakib", "ldsduos", "ldsgroup",
+    "ldspairs",
     "ldspairsfar", "ldsquads", "licm", "litreuse", "litshare", "loadfirst", "loadorder", "loopalign", "m0cse",
     "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar",
     "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",

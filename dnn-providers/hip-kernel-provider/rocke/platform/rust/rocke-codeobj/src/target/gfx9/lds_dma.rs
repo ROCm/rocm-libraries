@@ -160,6 +160,9 @@ pub enum Source {
     Buffer { rsrc: VRef, voffset: Opnd, soffset: Opnd },
     /// Global memory: the lane's 64-bit address (a VGPR pair).
     Global { addr: VRef },
+    /// Global memory in saddr form: the wave's base (an SGPR pair) plus the
+    /// lane's offset (a VGPR, zero-extended by the hardware).
+    GlobalSaddr { voffset: Opnd, saddr: VRef },
 }
 
 /// One LDS DMA load, its operands selected.
@@ -196,6 +199,10 @@ pub fn select(f: &mut MFunc, block: usize, dma: Dma) -> Result<(), CompileError>
             let op = if dma.dwords == 1 { Gfx9Op::GLoadLdsB32 } else { Gfx9Op::GLoadLdsB128 };
             (op, [Opnd::R(*addr)].into())
         }
+        (Source::GlobalSaddr { voffset, saddr }, 1 | 4) => {
+            let op = if dma.dwords == 1 { Gfx9Op::GLoadLdsB32 } else { Gfx9Op::GLoadLdsB128 };
+            (op, [*voffset, Opnd::R(*saddr)].into())
+        }
         (_, n) => return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("an LDS DMA load of {n} dwords per lane"))),
     };
     if dma.aux & !(1 | 2 | 16) != 0 {
@@ -218,7 +225,7 @@ pub fn select(f: &mut MFunc, block: usize, dma: Dma) -> Result<(), CompileError>
     let insts = &mut f.blocks[block].insts;
     insts.push(MInst::new(Opc::SMovB32, [Opnd::P(Phys::M0, 1)], [m0_source]));
     let cpol = (dma.aux & 1) | (dma.aux >> 1 & 1) << 1 | (dma.aux >> 4 & 1) << 2;
-    if !(0..4096).contains(&dma.offset) || (dma.offset != 0 && matches!(dma.source, Source::Global { .. })) {
+    if !(0..4096).contains(&dma.offset) || (dma.offset != 0 && !matches!(dma.source, Source::Buffer { .. })) {
         return Err(offset_error(dma.offset));
     }
     let insts = &mut f.blocks[block].insts;
@@ -397,6 +404,51 @@ mod tests {
         assert_eq!(wait_before(&l, "ds_read_b32"), None, "{l}");
         let l = listing(&dma_kernel("    tile.sync_lds_only (  )\n", false, 0));
         assert_eq!(wait_before(&l, "ds_read_b32"), Some((1, 15)), "{l}");
+    }
+
+    #[test]
+    fn gldssaddr_takes_the_saddr_form_without_the_64_bit_add() {
+        // A global_load_lds from the kernel argument %X (SGPRs) at the lane's offset: a VGPR pair address built
+        // by a 64-bit VALU add (saddr off), or with lever `gldssaddr` the offset VGPR and %X's SGPR pair.
+        let text = dma_kernel("", false, 0).replace(
+            "tile.async_buffer_load_lds_addr ( %rsrc, %a1, %voff, %c0 ) { aux = i:0, dwords = i:4 }",
+            "tile.global_load_lds ( %X, %voff, %a1 ) { aux = i:0, size_bytes = i:16 }",
+        );
+        assert!(text.contains("tile.global_load_lds"), "{text}");
+        let saddr = |l: &str| words(l, "global_load_lds_dwordx4")[1] >> 16 & 0x7f;
+        let plain = listing(&text);
+        assert!(plain.contains("v_addc_co_u32"), "{plain}");
+        assert_eq!(saddr(&plain), 0x7f, "{plain}");
+        let on = rir::with_levers(&["gldssaddr"], || listing(&text));
+        assert!(!on.contains("v_addc_co_u32"), "{on}");
+        assert!(saddr(&on) < 0x66, "{on}");
+        // The LDS destination and the wait before the read of %A do not move.
+        assert_eq!(wait_before(&on, "ds_read_b32"), wait_before(&plain, "ds_read_b32"));
+    }
+
+    #[test]
+    fn ldsdmakib_keeps_apart_the_dma_waits_of_allocations_that_share_a_kib() {
+        // %A and %B of 1040 bytes: 4-byte aligned they share the KiB at 1024, so a read of %A also waits for the
+        // DMA into %B issued after it (vmcnt(0)). Lever `ldsdmakib`: each starts on a KiB boundary and takes whole
+        // KiB, and the read waits for the DMA into %A only (vmcnt(1)).
+        let text = dma_kernel("", false, 0)
+            .replace("%A_smem : smem<f32, [1024]>", "%A_smem : smem<f32, [260]>")
+            .replace("%B_smem : smem<f32, [1024]>", "%B_smem : smem<f32, [260]>");
+        let kib = |text: &str| rir::with_levers(&["ldsdmakib"], || listing(text));
+        assert_eq!(wait_before(&listing(&text), "ds_read_b32"), Some((0, 15)));
+        assert_eq!(wait_before(&kib(&text), "ds_read_b32"), Some((1, 15)));
+        let k = rir::parse::parse(&text).unwrap_or_else(|e| panic!("{e}"));
+        let named = |name: &str| (0..k.values.len() as u32).map(ValueId).find(|&v| k.name_of(v) == name).expect(name);
+        let (plain, plain_size) = rir::analysis::lds_layout(&k);
+        let (whole, whole_size) = rir::with_levers(&["ldsdmakib"], || rir::analysis::lds_layout(&k));
+        assert_eq!((plain[&named("%A_smem")], plain[&named("%B_smem")], plain_size), (0, 1040, 2080));
+        assert_eq!((whole[&named("%A_smem")], whole[&named("%B_smem")], whole_size), (0, 2048, 4096));
+        // Allocations of whole KiB keep their offsets: the same code object.
+        let kib_sized = dma_kernel("", false, 0);
+        let objects = |levers: &[&str]| {
+            rir::with_levers(levers, || rir::compile_any_target(&kib_sized, Target::Gfx950)).unwrap_or_else(|e| panic!("{e}")).hsaco
+        };
+        assert_eq!(objects(&["ldsdmakib"]), objects(&[]));
     }
 
     #[test]

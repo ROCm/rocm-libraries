@@ -4858,6 +4858,17 @@ impl<'a> Isel<'a> {
         let (lo, hi) = self.d(op.operands[0])?;
         let off = self.w(op.operands[1])?;
         let uniform = self.uni(op.operands[0]) && self.uni(op.operands[1]);
+        // Lever `gldssaddr`: a wave-uniform base in SGPRs and a lane offset take the saddr form (base + the offset
+        // zero-extended), without the 64-bit VALU add per load. The lever asserts the offsets are non-negative.
+        if super::op_lever(op, "gldssaddr") && !uniform && !self.is_v(lo) && !self.is_v(hi) && !matches!(off, Opnd::Imm(_)) {
+            let saddr = self.pair_s(lo, hi);
+            let voffset = self.to_v(off);
+            let lds = self.w(op.operands[2])?;
+            let dwords = (op.int_attr("size_bytes").unwrap_or(0) / 4) as u8;
+            let (aux, tag) = (op.int_attr("aux").unwrap_or(0), self.dma_tag(op.operands[2]));
+            let dma = Dma { source: Source::GlobalSaddr { voffset, saddr }, lds, dwords, aux, tag, offset: 0 };
+            return crate::target::gfx9::lds_dma::select(&mut self.f, self.cur, dma);
+        }
         let sign = match off {
             Opnd::Imm(c) => Opnd::Imm(if (c as i32) < 0 { u32::MAX } else { 0 }),
             _ if uniform => self.s_bin(Opc::SAshrI32, off, Opnd::Imm(31)),
