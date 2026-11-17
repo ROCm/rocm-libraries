@@ -1165,7 +1165,17 @@ Expected<AllocationResult> runGreedyPlacement(const AllocationContext& context, 
     // Folding asks placement for one run of registers where two shorter runs
     // would have done. If that is what refused the colouring, the preference
     // gives way. A soft rule may not decide whether a kernel colours.
-    return Greedy(context, followHints, policy, /*mayFoldPairs=*/false).run();
+    Expected<AllocationResult> unfolded =
+        Greedy(context, followHints, policy, /*mayFoldPairs=*/false).run();
+    if (unfolded.hasValue()) return unfolded;
+
+    // Both refused, so folding was not the reason. Say where the folded attempt
+    // stopped too: it is a different colouring, and without this line a reader
+    // cannot tell a fold that never happened from one that did and also failed.
+    std::string folded = result.getError();
+    const std::string prefix = "@" + context.function.getName() + ": ";
+    if (folded.starts_with(prefix)) folded.erase(0, prefix.size());
+    return Expected<AllocationResult>::Error(unfolded.getError() + "\n    with folding: " + folded);
 }
 
 const PlacementPolicy& weightPolicy() {
