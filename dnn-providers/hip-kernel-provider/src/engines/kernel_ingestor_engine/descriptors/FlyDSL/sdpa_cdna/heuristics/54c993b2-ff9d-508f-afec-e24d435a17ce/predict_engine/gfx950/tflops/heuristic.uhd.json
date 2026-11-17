@@ -17,10 +17,20 @@
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
     "$graph.logical_bytes",
-    "$graph.nodes[0].attn_scale_value",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_scale_value",
+        1.0
+      ]
+    },
     "$graph.nodes[0].diagonal_alignment",
     "$graph.nodes[0].flops",
-    "$graph.nodes[0].generate_stats",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_stats",
+        false
+      ]
+    },
     "$graph.nodes[0].k.data_type",
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
@@ -91,7 +101,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:07105ec7b8104e63",
+  "features_hash": "sha256:35b617efd17cf279",
   "trained_against": {
     "ued": {
       "id": "54c993b2-ff9d-508f-afec-e24d435a17ce",
@@ -107,7 +117,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/1d7376d4a87acfcca44a3e4b2ad94b20831e02a45df8064db869f73ab7612dcd",
+    "selector_revision": "generic-untuned-v1/916d51f66650784c4dd98805423af6d1bd493cb212b98be8590c8f06c9693d80",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -118,6 +128,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "d656f59919507820f3501ad919bb9d30242a455e9121be519ff77aba94c1427e"
+    "hash": "99e4ea338037abc6a969a8800d4167dbd997fac1faa98ff431fd7becfca62c4a"
   }
 }
