@@ -25,6 +25,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -56,6 +57,8 @@ constexpr const char* kAlignRule = "ScalarTupleAlignment";
 constexpr const char* kVectorAlignRule = "VectorTupleAlignment";
 constexpr const char* kWmmaRule = "WmmaAccumulatorReuse";
 constexpr const char* kPinRule = "ProducerPinMatrix";
+constexpr const char* kShapeRule = "ProducerShapeMatrix";
+constexpr const char* kPinAccumulatorRule = "ProducerPinAccumulator";
 
 /// Looked up by name rather than by index, so adding a rule does not renumber
 /// every other test.
@@ -151,6 +154,27 @@ TEST_F(Gfx1250AllocationRulesTest, DeclaresEveryRuleWithTheRightKind) {
     ASSERT_NE(pin, nullptr) << rules.toString();
     EXPECT_FALSE(pin->description.empty());
     EXPECT_EQ(pin->kind(), RuleKind::Pin);
+
+    // An equality between values, which is what an offset relation is.
+    const AllocationRule* shape = findRule(rules, kShapeRule);
+    ASSERT_NE(shape, nullptr) << rules.toString();
+    EXPECT_FALSE(shape->description.empty());
+    EXPECT_EQ(shape->kind(), RuleKind::Offset);
+
+    const AllocationRule* pinAccumulator = findRule(rules, kPinAccumulatorRule);
+    ASSERT_NE(pinAccumulator, nullptr) << rules.toString();
+    EXPECT_FALSE(pinAccumulator->description.empty());
+    EXPECT_EQ(pinAccumulator->kind(), RuleKind::Pin);
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheShapeAndAccumulatorPinRulesShipOff) {
+    // Both are alternatives to ProducerPinMatrix, chosen per kernel with rules=
+    // and noRule=. Shipping either Active would change every kernel's colouring.
+    const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
+    for (const char* name : {kShapeRule, kPinAccumulatorRule}) {
+        ASSERT_NE(findRule(rules, name), nullptr) << name;
+        EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Off) << name;
+    }
 }
 
 TEST_F(Gfx1250AllocationRulesTest, EveryRuleIsActive) {
@@ -918,4 +942,199 @@ TEST_F(Gfx1250AllocationRulesTest, CompactionKeepsAPinnedMatrixDestinationAtTheP
     ASSERT_TRUE(with.hasValue()) << with.getError();
     EXPECT_TRUE(verifyAllocation(*func, *with, on.context()).ok());
     EXPECT_EQ(with->assignmentOf(dest->valueId()).idx, 100u) << with->toString();
+}
+
+// ---------------------------------------------------------------------------
+// ProducerShapeMatrix and ProducerPinAccumulator
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The shipped table with \p activate on and ProducerPinMatrix and the
+/// accumulator pairing off, so nothing but the rules named holds a matrix
+/// operand in place.
+AllocationRules gfx1250RulesWith(std::vector<std::string> activate) {
+    AllocationRules rules = gfx1250Rules(/*xnack=*/true);
+    RuleOverrides forced;
+    forced.activate = std::move(activate);
+    forced.disable = {kPinRule, kWmmaRule};
+    rules.force(forced);
+    return rules;
+}
+
+/// Does any affinity set name both \p a and \p b?
+bool tiedTogether(const AllocationConstraints& constraints, SSAValueID a, SSAValueID b) {
+    for (const AffinitySet& set : constraints.affinitySets()) {
+        const auto has = [&](SSAValueID id) {
+            return std::find(set.members.begin(), set.members.end(), id) != set.members.end();
+        };
+        if (has(a) && has(b)) return true;
+    }
+    return false;
+}
+
+/// buildCompetedChain's shape, written the way TensileLite writes it: every
+/// link accumulates in place on v[100:107]. The competitors are the same, so
+/// without a rule holding it the chain still comes apart.
+void buildCompetedInPlaceChain(BasicBlock* entry, std::vector<StinkyInstruction*>& chain) {
+    defineTuple(entry, /*base=*/100);
+    defineTuple(entry, /*base=*/360);
+    chain.push_back(createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/100));
+    createWmmaBf16(entry, /*dst=*/200, /*a=*/300, /*b=*/320, /*c=*/360);
+    useTuple(entry, /*base=*/200, /*sink=*/700);
+    useTuple(entry, /*base=*/320, /*sink=*/740);
+    chain.push_back(createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/100));
+    chain.push_back(createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/100));
+    useTuple(entry, /*base=*/100, /*sink=*/720);
+}
+
+}  // namespace
+
+TEST_F(Gfx1250AllocationRulesTest, TheShapeRuleKeepsAnInPlaceChainTogetherAnywhere) {
+    // The producer keeps the chain on v[100:107]. The shape rule keeps it on one
+    // range too, but compaction is free to choose which, so it lands below.
+    BasicBlock* entry = block("entry");
+    std::vector<StinkyInstruction*> chain;
+    buildCompetedInPlaceChain(entry, chain);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> head = ssaSourceUnits(*chain.front(), 2);
+    ASSERT_EQ(head.size(), 8u);
+    ASSERT_NE(head[0], nullptr);
+    CompactingGreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {}, gfx1250RulesWith({}));
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    // If the chain ever lands on one register by itself, this test has stopped
+    // measuring the rule.
+    ASSERT_GT(basesUsedBy(*without, head[0], chain), 1u) << without->toString();
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {}, gfx1250RulesWith({kShapeRule}));
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, on.context()).ok());
+    EXPECT_EQ(basesUsedBy(*coloured, head[0], chain), 1u) << coloured->toString();
+    EXPECT_NE(coloured->assignmentOf(head[0]->valueId()).idx, 100u) << coloured->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheShapeRuleTiesEachRoundOfARotatingTile) {
+    // A is loaded into v[300:307] twice, once per round. The two loads define
+    // different values; the producer kept them on one tuple, and so does the rule.
+    BasicBlock* entry = block("entry");
+    defineTuple(entry, /*base=*/100);
+    defineTuple(entry, /*base=*/320);
+    loadQuad(entry, /*base=*/300, /*addr=*/50);
+    loadQuad(entry, /*base=*/304, /*addr=*/50);
+    StinkyInstruction* first = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/100);
+    loadQuad(entry, /*base=*/300, /*addr=*/51);
+    loadQuad(entry, /*base=*/304, /*addr=*/51);
+    StinkyInstruction* second = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/100);
+    useTuple(entry, /*base=*/100, /*sink=*/720);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> roundOne = ssaSourceUnits(*first, 0);
+    const std::vector<StinkySSAValue*> roundTwo = ssaSourceUnits(*second, 0);
+    ASSERT_EQ(roundOne.size(), 8u);
+    ASSERT_EQ(roundTwo.size(), 8u);
+    ASSERT_NE(roundOne[0]->valueId(), roundTwo[0]->valueId());
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {}, gfx1250RulesWith({}));
+    EXPECT_FALSE(tiedTogether(off.constraints(), roundOne[0]->valueId(), roundTwo[0]->valueId()));
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {}, gfx1250RulesWith({kShapeRule}));
+    for (size_t unit = 0; unit < 8; ++unit) {
+        EXPECT_TRUE(
+            tiedTogether(on.constraints(), roundOne[unit]->valueId(), roundTwo[unit]->valueId()))
+            << "unit " << unit;
+    }
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, on.context()).ok());
+    EXPECT_EQ(coloured->assignmentOf(roundOne[0]->valueId()),
+              coloured->assignmentOf(roundTwo[0]->valueId()))
+        << coloured->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TupleShapesThatOverlapInTheProducerStayApart) {
+    // The tail-loop case: one WMMA reads B at v[858:865], a later one at
+    // v[860:867]. The value on v860 is unit 2 of the first tuple and unit 0 of
+    // the second. Tying by register would join them and so chain both tuples
+    // into one ten-wide block; tying by tuple keeps each tile its own.
+    BasicBlock* entry = block("entry");
+    defineTuple(entry, /*base=*/100);
+    defineTuple(entry, /*base=*/858);
+    StinkyInstruction* first = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/858, /*c=*/100);
+    defineTuple(entry, /*base=*/860);
+    StinkyInstruction* second = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/860, /*c=*/100);
+    useTuple(entry, /*base=*/100, /*sink=*/720);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> lower = ssaSourceUnits(*first, 1);
+    const std::vector<StinkySSAValue*> upper = ssaSourceUnits(*second, 1);
+    ASSERT_EQ(lower.size(), 8u);
+    ASSERT_EQ(upper.size(), 8u);
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {}, gfx1250RulesWith({kShapeRule}));
+    for (size_t unit = 0; unit < 8; ++unit) {
+        for (size_t other = 0; other < 8; ++other) {
+            EXPECT_FALSE(
+                tiedTogether(on.constraints(), lower[unit]->valueId(), upper[other]->valueId()))
+                << "unit " << unit << " of v[858:865] and unit " << other << " of v[860:867]";
+        }
+    }
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, on.context()).ok());
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheAccumulatorPinHoldsDAndCButNotAOrB) {
+    // ProducerPinMatrix pins every slotted operand. The accumulator pin pins the
+    // dst and src2 fields only, so A and B are left for the shape rule to move.
+    BasicBlock* entry = block("entry");
+    defineTuple(entry, /*base=*/100);
+    defineTuple(entry, /*base=*/300);
+    defineTuple(entry, /*base=*/320);
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/100);
+    useTuple(entry, /*base=*/100, /*sink=*/720);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    const std::vector<StinkySSAValue*> a = ssaSourceUnits(*wmma, 0);
+    const std::vector<StinkySSAValue*> b = ssaSourceUnits(*wmma, 1);
+    const std::vector<StinkySSAValue*> c = ssaSourceUnits(*wmma, 2);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_EQ(a.size(), 8u);
+    ASSERT_EQ(b.size(), 8u);
+    ASSERT_EQ(c.size(), 8u);
+
+    AllocationSetup accumulators(*func, RegClassSet::only(RegType::V), {},
+                                 gfx1250RulesWith({kPinAccumulatorRule, kShapeRule}));
+    const AllocationConstraints& pinned = accumulators.constraints();
+    EXPECT_TRUE(pinned.isPinned(dest->valueId())) << pinned.toString();
+    EXPECT_TRUE(pinned.isPinned(c[0]->valueId())) << pinned.toString();
+    EXPECT_FALSE(pinned.isPinned(a[0]->valueId())) << pinned.toString();
+    EXPECT_FALSE(pinned.isPinned(b[0]->valueId())) << pinned.toString();
+
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(accumulators.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, accumulators.context()).ok());
+    EXPECT_EQ(coloured->assignmentOf(dest->valueId()).idx, 100u) << coloured->toString();
+    EXPECT_NE(coloured->assignmentOf(a[0]->valueId()).idx, 300u) << coloured->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheAuditIsSilentOnTheProducerShape) {
+    // Both rules only ask for what the producer already did, so its own
+    // colouring satisfies them by construction.
+    BasicBlock* entry = block("entry");
+    std::vector<StinkyInstruction*> chain;
+    buildCompetedInPlaceChain(entry, chain);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const AllocationRules rules = gfx1250RulesWith({kShapeRule, kPinAccumulatorRule});
+    const std::vector<std::string> findings = auditRules(*func, createLegacyColoring(*func), rules);
+    EXPECT_TRUE(findings.empty()) << findings.front();
 }

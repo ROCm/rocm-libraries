@@ -23,13 +23,22 @@
 // What gfx1250 requires of a register allocation. See
 // docs/developer/register-allocation.md §14.
 
+#include <algorithm>
 #include <array>
+#include <map>
+#include <span>
+#include <tuple>
 #include <vector>
 
+#include "stinkytofu/core/BasicBlock.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
+#include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 
@@ -139,6 +148,80 @@ void pinMatrixProducerRegisters(const StinkyInstruction& inst, const OperandValu
                             });
 }
 
+/// Pin only the accumulator of a matrix instruction, D in dst and C in src2, to
+/// the register the producer assigned it; A and B stay free.
+///
+/// The accumulators are most of a GEMM's VGPRs and the epilogue reads every one
+/// of them, so leaving them where the producer laid them out keeps that code as
+/// written. Meant to run with ProducerShapeMatrix, which keeps each A and B tile
+/// together: on its own this leaves those tiles to fall apart into one block per
+/// load, which is what refuses a crowded kernel.
+void pinMatrixAccumulatorRegisters(const StinkyInstruction& inst, const OperandValues& values,
+                                   std::vector<SSAValueID>& pinned) {
+    if (!isMatrixInstruction(inst)) return;
+    forEachVgprOperandField(inst,
+                            [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+                                if (!reg.isRegister() || reg.reg.type != RegType::V) return;
+                                // The dst and src2 slots, the same fields
+                                // pairMatrixAccumulator relates.
+                                if (slot != 2 && slot != 3) return;
+                                for (const SSAValueID id : values(operand, isDest)) {
+                                    if (id != kInvalidSSAValueID) pinned.push_back(id);
+                                }
+                            });
+}
+
+/// Tie every value the producer put at the same unit of the same matrix operand
+/// tuple, so an accumulator chain or a rotating A or B tile becomes one block --
+/// the producer's shape -- while the allocator still chooses where it goes.
+///
+/// The lift gives every WMMA destination and every load its own value. In a
+/// kernel that fills the register file those fall apart into hundreds of short
+/// blocks, and no placement order fits them back together. ProducerPinMatrix
+/// avoids that by fixing each one at its producer register; this keeps the
+/// grouping and gives up only the position.
+///
+/// Keyed on the whole tuple, base and width, rather than on the register: a
+/// tail loop that reads B two registers lower than the main loop would otherwise
+/// chain every tile the two overlap into one block. Slotless scale fields are
+/// left to the unbankableOperands policy, as in ProducerPinMatrix.
+///
+/// Always satisfiable: the members of a set all sat on one register in the
+/// producer's colouring, which is legal, so no two are live at once.
+void tieMatrixProducerShapes(const Function& function, std::vector<TupleRun>& /*tupleRuns*/,
+                             std::vector<AffinitySet>& affinitySets) {
+    const SSAArena& arena = function.ssaArena();
+    const RegClassSet& lifted = arena.liftedClasses();
+    std::map<std::tuple<uint32_t, size_t, size_t>, std::vector<SSAValueID>> byTupleUnit;
+    for (const BasicBlock& block : function) {
+        for (const IRBase& ir : block) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr || !inst->hasAttachedSSA() || !isMatrixInstruction(*inst)) continue;
+            const OperandGroups groups = operandGroupsOf(*inst, lifted);
+            forEachVgprOperandField(
+                *inst, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+                    if (!reg.isRegister() || reg.reg.type != RegType::V || slot < 0) return;
+                    const std::span<const SSAValueID> ids = groups.at(operand, isDest);
+                    if (ids.empty() || ids.front() == kInvalidSSAValueID) return;
+                    const StinkySSAValue* first = arena.get(ids.front());
+                    if (first == nullptr || !first->hasPhysicalBinding()) return;
+                    if (first->physical().type != RegType::V) return;
+                    const uint32_t base = first->physical().idx;
+                    for (size_t unit = 0; unit < ids.size(); ++unit) {
+                        if (ids[unit] == kInvalidSSAValueID) continue;
+                        byTupleUnit[{base, ids.size(), unit}].push_back(ids[unit]);
+                    }
+                });
+        }
+    }
+    for (auto& [key, ids] : byTupleUnit) {
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        if (ids.size() < 2) continue;
+        affinitySets.push_back(AffinitySet{std::move(ids)});
+    }
+}
+
 // A literal triple, not getArchTriple(GfxArchID::Gfx1250): this TU is compiled
 // into a Gfx1250v0-only build where that enumerator does not exist, and keying
 // on {12,5,0} is what gives v0 the same rules as v1.
@@ -216,8 +299,30 @@ AllocationRules buildGfx1250Rules(const AsmCapsConfig& caps) {
     producerPin.status = RuleStatus::Active;
     producerPin.pinToProducer = pinMatrixProducerRegisters;
 
-    return AllocationRules(
-        {smemSelfOverlap, scalarAlignment, vectorAlignment, wmmaAccumulator, producerPin});
+    /// Keep each group of matrix operand values the producer laid out on one
+    /// register tuple -- an accumulator chain, a rotating A or B tile -- on one
+    /// tuple still, without fixing which. The alternative to ProducerPinMatrix
+    /// that leaves banks to the allocator; opt in with
+    /// rules=ProducerShapeMatrix,noRule=ProducerPinMatrix.
+    AllocationRule producerShape;
+    producerShape.name = "ProducerShapeMatrix";
+    producerShape.description =
+        "matrix operand values the producer put on one register tuple share one tuple";
+    producerShape.status = RuleStatus::Off;
+    producerShape.addRelations = tieMatrixProducerShapes;
+
+    /// The middle ground: accumulators stay where the producer put them and
+    /// ProducerShapeMatrix keeps A and B together while they move. Opt in with
+    /// rules=ProducerPinAccumulator+ProducerShapeMatrix,noRule=ProducerPinMatrix.
+    AllocationRule producerPinAccumulator;
+    producerPinAccumulator.name = "ProducerPinAccumulator";
+    producerPinAccumulator.description =
+        "accumulator operands of a matrix instruction keep the registers the producer assigned";
+    producerPinAccumulator.status = RuleStatus::Off;
+    producerPinAccumulator.pinToProducer = pinMatrixAccumulatorRegisters;
+
+    return AllocationRules({smemSelfOverlap, scalarAlignment, vectorAlignment, wmmaAccumulator,
+                            producerPin, producerShape, producerPinAccumulator});
 }
 
 struct Gfx1250RulesRegistrar {
