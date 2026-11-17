@@ -45,6 +45,7 @@ from rocke.core.ir import (
     PtrType,
     Type,
     VectorType,
+    _operand_types_error,
 )
 from rocke.core.verify import verify
 from rocke.tests.engines import (
@@ -249,9 +250,7 @@ def test_lowerings_refuse_a_bitwise_op_or_shift_of_a_non_integer(op_name, engine
 
 # Every same-type binary op (_SAME_TYPE_BINARY_OPS), the IRBuilder method that
 # builds it, and two operand types that differ: scalars for an ``arith`` op,
-# vectors (of another element or lane count) for a ``vector`` op. ``umax`` and
-# ``umin`` have no entry point here: their builders take only two operands of
-# one unsigned type and refuse anything else with that rule's own text.
+# vectors (of another element or lane count) for a ``vector`` op.
 _MIXED_TYPE_OPERANDS = {
     "arith.add": ("add", I32, I64),
     "arith.sub": ("sub", I64, I32),
@@ -271,8 +270,8 @@ _MIXED_TYPE_OPERANDS = {
     "arith.lshr": ("lshr", I64, I32),
     "arith.smax": ("smax", I32, I64),
     "arith.smin": ("smin", I64, I32),
-    "arith.umax": (None, U8, I32),
-    "arith.umin": (None, U8, I32),
+    "arith.umax": ("umax", U8, I32),
+    "arith.umin": ("umin", U8, I32),
     "vector.add": ("vector_add", VectorType(I32, 2), VectorType(I32, 4)),
     "vector.sub": ("vector_sub", VectorType(I32, 2), VectorType(I16, 2)),
     "vector.mul": ("vector_mul", VectorType(F32, 2), VectorType(F16, 2)),
@@ -284,9 +283,6 @@ _MIXED_TYPE_OPERANDS = {
     "vector.smin": ("vector_smin", VectorType(I16, 2), VectorType(I32, 2)),
     "vector.max": ("vector_max", VectorType(F32, 2), VectorType(F32, 4)),
 }
-_BUILT_MIXED_TYPE_OPS = sorted(
-    op_name for op_name, (builder, _, _) in _MIXED_TYPE_OPERANDS.items() if builder
-)
 
 
 def _operand_types_message(op_name):
@@ -309,7 +305,7 @@ def test_the_mixed_type_cases_cover_every_same_type_binary_op():
     assert set(_MIXED_TYPE_OPERANDS) == _SAME_TYPE_BINARY_OPS
 
 
-@pytest.mark.parametrize("op_name", _BUILT_MIXED_TYPE_OPS)
+@pytest.mark.parametrize("op_name", sorted(_MIXED_TYPE_OPERANDS))
 def test_builder_refuses_operands_of_different_types(op_name):
     """The lowerings emit both operands at the first one's type (``lshr i64``,
     ``add i32`` ...), so IRBuilder refuses a second operand of another type,
@@ -378,8 +374,12 @@ def test_lowerings_refuse_operands_of_different_types(op_name, engine):
             lambda b, scalar: b.vector_cmp("lt", scalar, scalar),
             "vector.cmp failed - first operand type='i32', expected a vector type",
         ),
+        (
+            lambda b, scalar: b.vector_fma(scalar, scalar, scalar),
+            "vector.fma failed - first operand type='i32', expected a vector type",
+        ),
     ],
-    ids=["vector_and", "vector_cmp"],
+    ids=["vector_and", "vector_cmp", "vector_fma"],
 )
 def test_vector_builders_refuse_a_scalar_first_operand(build, message):
     """A lane-wise op takes vectors: its builder refuses a scalar first
@@ -390,6 +390,36 @@ def test_vector_builders_refuse_a_scalar_first_operand(build, message):
         build(b, scalar)
     assert str(refusal.value) == message
     assert b.kernel.body.ops == []
+
+
+@pytest.mark.parametrize(
+    ("other_type", "ordinal"),
+    [(VectorType(F16, 2), "second"), (VectorType(F32, 4), "third")],
+    ids=["second", "third"],
+)
+def test_vector_fma_refuses_operands_of_more_than_one_type(other_type, ordinal):
+    """The lane-wise FMA takes three vectors of one type: its builder refuses
+    the first operand that differs, by its ordinal, with the operand rule's
+    ``TypeError`` and text, and adds no op."""
+    b = IRBuilder("vector_fma_mixed")
+    first = b.param("first", VectorType(F32, 2))
+    other = b.param("other", other_type)
+    operands = (first, other, first) if ordinal == "second" else (first, first, other)
+    with pytest.raises(TypeError) as refusal:
+        b.vector_fma(*operands)
+    assert str(refusal.value) == (
+        f"vector.fma failed - {ordinal} operand type='{other_type.name}', "
+        "expected the first operand's type 'vec<f32x2>'"
+    )
+    assert b.kernel.body.ops == []
+
+
+def test_the_operand_rule_refuses_more_operands_than_it_names():
+    """The operand rule names operands by ordinal, so it refuses more operands
+    than it names, before it reads any type. The ctest checks the C++ twin."""
+    assert _operand_types_error("vector.fma", [F32] * 4) == (
+        "vector.fma operand rule failed - operands=4, expected at most 3"
+    )
 
 
 @pytest.mark.parametrize("engine", ENGINES)

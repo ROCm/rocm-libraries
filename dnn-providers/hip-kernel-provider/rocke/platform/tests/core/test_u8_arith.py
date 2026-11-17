@@ -195,8 +195,8 @@ _UNSIGNED_CASES = {
     "umax_of_i32": (
         lambda b, x, y: b.umax(b.const_i32(1), b.const_i32(1)),
         (
-            ValueError,
-            "umax expects two operands of one unsigned integer type, got i32 and i32",
+            TypeError,
+            "arith.umax failed - operand type='i32', expected an unsigned integer scalar",
         ),
     ),
     "uitofp_f32_of_i32": (

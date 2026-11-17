@@ -683,13 +683,9 @@ rocke_value_t* rocke_i_binop(rocke_ir_builder_t* b,
     {
         rocke_i_refuse_non_integer(op_name, a->type);
     }
-    char operand_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_operand_types_error(op_name, a->type, bb->type, operand_error, sizeof operand_error))
-    {
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", operand_error);
-    }
     operands[0] = a;
     operands[1] = bb;
+    rocke_i_refuse_operand_types(b, op_name, operands, 2);
     return rocke_i_op1(b, opcode, operands, 2, a->type, NULL, result_name_hint);
 }
 

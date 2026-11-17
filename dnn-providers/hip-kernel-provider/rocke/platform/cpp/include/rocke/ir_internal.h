@@ -118,10 +118,11 @@ rocke_op_t* rocke_i_op0(rocke_ir_builder_t* b,
 
 /* Build one same-type binary op (rocke_i_is_same_type_binary_op) `(a, b) ->
  * a->type`, the dominant arith pattern (Python IRBuilder._binary_op). Validates
- * a/b non-NULL on a live builder, then throws ckc::TypeError for a bitwise op
+ * a/b non-NULL on a live builder, then refuses as ROCKE_ERR_TYPE a bitwise op
  * or shift whose operands are not integers or i1
- * (rocke_i_integer_element_error) and for operands of different types
- * (rocke_i_operand_types_error), checked in that order. */
+ * (rocke_i_integer_element_error) and operands of different types
+ * (rocke_i_refuse_operand_types), checked in that order. rocke_b_add_nuw,
+ * which carries a wrap attr, applies the same rules and the wrap rule itself. */
 rocke_value_t* rocke_i_binop(rocke_ir_builder_t* b,
                              rocke_opcode_t opcode,
                              rocke_value_t* a,
@@ -657,17 +658,34 @@ bool rocke_i_untyped_value_message(const rocke_type_t* type,
                                    char* buf,
                                    size_t cap);
 
-/* Mirrors ir._operand_types_error: the error for an `op_name` op whose second
- * operand, of type `rhs_type`, does not have its first operand's type,
- * `lhs_type`, or NULL when they agree; an operand with no type is refused
- * first (rocke_i_untyped_value_message). The binary ops and the compares lower
- * both operands at the first one's type, so the callers refuse it as
- * ROCKE_ERR_TYPE. A returned error is written to `buf`. */
+/* Mirrors ir._operand_types_error: the error for an `op_name` op whose
+ * `num_operands` (at most 3) operands, of `operand_types`, do not all have the
+ * first one's type, naming the first that differs, or NULL when they agree; an
+ * operand with no type is refused first (rocke_i_untyped_value_message). The
+ * binary ops, the compares and the lane-wise FMA lower every operand at the
+ * first one's type, so the callers refuse it as ROCKE_ERR_TYPE. A returned
+ * error is written to `buf`. */
 const char* rocke_i_operand_types_error(const char* op_name,
-                                        const rocke_type_t* lhs_type,
-                                        const rocke_type_t* rhs_type,
+                                        const rocke_type_t* const* operand_types,
+                                        int num_operands,
                                         char* buf,
                                         size_t cap);
+
+/* Mirrors ir._refuse_operand_types: refuse on `b` (ROCKE_ERR_TYPE, through
+ * rocke_i_set_err, which throws) the `num_operands` (at most 3) `operands` of
+ * an `op_name` op when rocke_i_operand_types_error refuses their types. */
+void rocke_i_refuse_operand_types(rocke_ir_builder_t* b,
+                                  const char* op_name,
+                                  const rocke_value_t* const* operands,
+                                  int num_operands);
+
+/* Mirrors ir._vector_operand_error: the error for a lane-wise `op_name` op
+ * whose first operand, of `operand_type`, is not a vector, or NULL. The
+ * builders refuse it as ROCKE_ERR_TYPE. A returned error is written to `buf`. */
+const char* rocke_i_vector_operand_error(const char* op_name,
+                                         const rocke_type_t* operand_type,
+                                         char* buf,
+                                         size_t cap);
 
 /* Mirrors ir._SAME_TYPE_BINARY_OPS: whether `opcode` is a binary op whose two
  * operands and result have one type. */
@@ -678,6 +696,17 @@ bool rocke_i_is_same_type_binary_op(rocke_opcode_t opcode);
  * The verifier reports it and every lowering refuses it as ROCKE_ERR_TYPE
  * before it lowers an op, for IR that did not come through the builders. */
 const char* rocke_i_operand_types_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Mirrors ir._COMPARE_OPS: whether `opcode` is arith.cmp, arith.fcmp or
+ * vector.cmp. */
+bool rocke_i_is_compare_op(rocke_opcode_t opcode);
+
+/* Mirrors ir._binary_arity_error: the error for a built op that
+ * rocke_i_is_same_type_binary_op or rocke_i_is_compare_op admits without
+ * exactly two operands and one result, or NULL. The verifier reports it, and
+ * every lowering (ROCKE_ERR_VALUE) and the constant folder check it before
+ * they read the second operand. A returned error is written to `buf`. */
+const char* rocke_i_binary_arity_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Mirrors ir._int_cmp_error, which returns the exception whose status this
  * returns: ROCKE_OK, or the refusal's status with its text written into `buf`.

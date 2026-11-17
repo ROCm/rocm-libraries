@@ -137,18 +137,80 @@ def test_c_api_builders_match_the_python_builder():
 
 
 @pytest.mark.parametrize(
-    "method,lhs,rhs",
-    [("add_nuw", F32, F32), ("cmp_ult", I32, I64), ("add_nuw", I1, I1)],
+    "method,lhs,rhs,error_type,message",
+    [
+        (
+            "add_nuw",
+            F32,
+            F32,
+            ValueError,
+            "arith.add: wrap 'nuw' needs i32 or i64 operands, got f32",
+        ),
+        (
+            "cmp_ult",
+            I32,
+            I64,
+            TypeError,
+            (
+                "arith.cmp failed - second operand type='i64', expected the first "
+                "operand's type 'i32'"
+            ),
+        ),
+        (
+            "add_nuw",
+            I32,
+            I64,
+            TypeError,
+            (
+                "arith.add failed - second operand type='i64', expected the first "
+                "operand's type 'i32'"
+            ),
+        ),
+        (
+            "add_nuw",
+            I1,
+            I1,
+            ValueError,
+            "arith.add: wrap 'nuw' needs i32 or i64 operands, got i1",
+        ),
+        (
+            "cmp_ult",
+            F32,
+            F32,
+            ValueError,
+            "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32",
+        ),
+        (
+            "add_nuw",
+            I8,
+            I32,
+            ValueError,
+            "arith.add: wrap 'nuw' needs i32 or i64 operands, got i8",
+        ),
+        (
+            "cmp_ult",
+            I8,
+            I32,
+            ValueError,
+            "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8",
+        ),
+    ],
 )
-def test_builders_refuse_operands_other_than_i32_or_i64(method, lhs, rhs):
+def test_builders_refuse_operands_other_than_i32_or_i64(
+    method, lhs, rhs, error_type, message
+):
+    """The unsigned forms take i32 or i64 operands (the ``nuw`` and ``ult``
+    rules, a ``ValueError``, checked first) of one type (the operand rule, a
+    ``TypeError``): the builders refuse anything else with the IR rules'
+    types and texts, in one order for both forms, which the C++ builders
+    share (the ctest)."""
     b = IRBuilder("refused")
     a = b.param("a", lhs)
     c = b.param("b", rhs)
-    with pytest.raises(
-        ValueError,
-        match=rf"^{method} expects two i32 or two i64 operands, got {lhs.name} / {rhs.name}$",
-    ):
+    with pytest.raises(error_type) as refusal:
         getattr(b, method)(a, c)
+    assert type(refusal.value) is error_type
+    assert str(refusal.value) == message
 
 
 # --------------------------------------------------------------------------
@@ -495,6 +557,83 @@ def test_compare_builders_refuse_what_the_ir_rule_refuses(
     assert type(error.value) is error_type
     assert str(error.value) == message
     assert len(b.kernel.body.ops) == ops_before
+
+
+# One-operand forms of a same-type binary op and of each compare, with the
+# result type each takes, as hand-written IR can hold them.
+_ONE_OPERAND_OPS = [
+    ("arith.add", I32, I32, {}),
+    ("arith.cmp", I32, I1, {"pred": "lt"}),
+    ("arith.fcmp", F32, I1, {"pred": "olt"}),
+    ("vector.cmp", VectorType(I32, 2), VectorType(I1, 2), {"pred": "lt"}),
+]
+
+
+def _one_operand_kernel(op_name, operand_type, result_type, attrs):
+    b = IRBuilder("one_operand")
+    value = b.param("value", operand_type)
+    b._op(op_name, [value], [result_type], attrs=attrs)
+    b.ret()
+    return b.kernel
+
+
+def _arity_message(op_name):
+    return f"{op_name} failed - operands / results=1 / 1, expected 2 / 1"
+
+
+@pytest.mark.parametrize(
+    "op_name,operand_type,result_type,attrs",
+    _ONE_OPERAND_OPS,
+    ids=[case[0] for case in _ONE_OPERAND_OPS],
+)
+def test_verifier_refuses_a_binary_op_or_compare_without_two_operands(
+    op_name, operand_type, result_type, attrs
+):
+    """The verifier reports the arity rule's text, and nothing else, for a
+    binary op or compare with one operand. The ctest checks the C++ verifier
+    with the same cases."""
+    kernel = _one_operand_kernel(op_name, operand_type, result_type, attrs)
+    assert _errors(kernel) == [_arity_message(op_name)]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "op_name,operand_type,result_type,attrs",
+    _ONE_OPERAND_OPS,
+    ids=[case[0] for case in _ONE_OPERAND_OPS],
+)
+def test_both_lowerings_refuse_a_binary_op_or_compare_without_two_operands(
+    op_name, operand_type, result_type, attrs, engine
+):
+    """Each engine's LLVM and HIP lowerings check the operand count before
+    they read the second operand, and refuse a one-operand binary op or
+    compare with the arity rule's ``ValueError`` and text, instead of failing
+    on, or reading past, the missing operand."""
+    kernel = _one_operand_kernel(op_name, operand_type, result_type, attrs)
+    for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
+        assert_rejects(
+            kernel,
+            "gfx942",
+            engine=engine,
+            error_type=ValueError,
+            message=_arity_message(op_name),
+        )
+
+
+def test_a_binary_op_without_two_operands_is_not_folded():
+    """A one-operand add of a constant breaks the arity rule, so the folder
+    leaves it for the verifier and the lowerings to refuse instead of reading
+    the missing operand. The ctest checks the C++ folder with the same case."""
+    b = IRBuilder("fold_one_operand")
+    out = b.param("out", PtrType(I32, "global"))
+    value = b._op("arith.add", [b.const_i32(1)], [I32]).result
+    b.store(value, out)
+    b.ret()
+    optimize_kernel(b.kernel)
+    (store,) = [
+        op for op in b.kernel.body.ops if op.name == "memref.global_store_typed"
+    ]
+    assert store.operands[2].op.name == "arith.add"
 
 
 @pytest.mark.parametrize(
