@@ -1517,6 +1517,35 @@ def _mma_dst_dtype(op_id: str) -> str:
     return _arch._op_id_dst_dtype().get(op_id, "fp32")
 
 
+def _mma_result_vector(dtype: str, frag_len: int) -> VectorType:
+    """The ``tile.mma`` result type of ``frag_len`` ``dtype`` elements.
+
+    Raises ValueError, prefixed "MMA destination dtype: ", for a dtype the IR
+    cannot represent.
+    """
+    try:
+        element = dtype_to_ir_type(dtype)
+    except ValueError as exc:
+        raise ValueError(f"MMA destination dtype: {exc}") from exc
+    return VectorType(element, frag_len)
+
+
+def mma_result_type(op_id: str) -> VectorType:
+    """The result type the arch catalog gives the MMA atom ``op_id``.
+
+    Its length is the destination fragment length and its element the
+    destination dtype, FP32 when the catalog's dtype table
+    (``_op_id_dst_dtype``) has no entry for ``op_id``. It is the type
+    :meth:`IRBuilder.mma` gives the result of a bare ``op_id``, and the
+    accumulator and result type a fixed-signature MFMA instruction takes
+    (:func:`rocke.core.mfma.validate_mfma`). Raises ValueError for an op_id
+    with no fragment length or a dtype the IR cannot represent. The C++
+    engine's twin is ``rocke_i_mma_result_type`` (``ir_internal.h``).
+    """
+    frag_len = _mma_dst_frag_len(op_id)
+    return _mma_result_vector(_mma_dst_dtype(op_id), frag_len)
+
+
 @dataclass(frozen=True)
 class VectorType(Type):
     elem: Type
@@ -5363,16 +5392,9 @@ class IRBuilder:
             dst_dtype = op.dst.dtype
             if not isinstance(dst_dtype, str):
                 raise ValueError("MMA destination dtype must name an IR scalar type")
-            try:
-                dst_elem = dtype_to_ir_type(dst_dtype)
-            except ValueError as exc:
-                raise ValueError(f"MMA destination dtype: {exc}") from exc
+            result_type = _mma_result_vector(dst_dtype, dst_frag_len)
         else:
-            dst_frag_len = _mma_dst_frag_len(op_id)
-            try:
-                dst_elem = dtype_to_ir_type(_mma_dst_dtype(op_id))
-            except ValueError as exc:
-                raise ValueError(f"MMA destination dtype: {exc}") from exc
+            result_type = mma_result_type(op_id)
 
         hint = (
             "mxacc"
@@ -5382,7 +5404,7 @@ class IRBuilder:
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(dst_elem, dst_frag_len)],
+            [result_type],
             attrs={"op_id": op_id, **(attrs or {})},
             result_name_hint=hint,
         ).result
