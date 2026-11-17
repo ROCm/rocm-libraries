@@ -423,7 +423,7 @@ endfunction()
 # tier-only entry does not match; elsewhere it selects `-LE ex_gpu`, which only the bare entry
 # matches. The bare entry also keeps the name other tooling selects by.
 function(miopen_add_wrapper_check NAME)
-  cmake_parse_arguments(CHECK "" "" "COMMAND;ENVIRONMENT;ENVIRONMENT_MODIFICATION" ${ARGN})
+  cmake_parse_arguments(CHECK "" "FAIL_REGULAR_EXPRESSION" "COMMAND;ENVIRONMENT;ENVIRONMENT_MODIFICATION" ${ARGN})
   foreach(CHECK_GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
     set(CHECK_ENTRY_NAME ${NAME})
     set(CHECK_LABELS ${MIOPEN_FORWARDING_PARITY_TIER_LABELS})
@@ -439,6 +439,10 @@ function(miopen_add_wrapper_check NAME)
     if(CHECK_ENVIRONMENT_MODIFICATION)
       set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES
         ENVIRONMENT_MODIFICATION "${CHECK_ENVIRONMENT_MODIFICATION}")
+    endif()
+    if(CHECK_FAIL_REGULAR_EXPRESSION)
+      set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES
+        FAIL_REGULAR_EXPRESSION "${CHECK_FAIL_REGULAR_EXPRESSION}")
     endif()
   endforeach()
 endfunction()
@@ -549,6 +553,20 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
       "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
+
+  # Tests of the dispatch macro's re-entry check. They need forwarding on from the first
+  # call and skip otherwise. gtest exits 0 when every test skips, so a skip fails the entry:
+  # a stray MIOPEN_DISABLE_HIPDNN_FOR would otherwise leave an entry that checks nothing.
+  if(MIOPEN_TEST_DISCRETE)
+    set(MIOPEN_WRAPPER_ROUTING_TEST test_wrapper_routing)
+  else()
+    set(MIOPEN_WRAPPER_ROUTING_TEST miopen_gtest)
+  endif()
+  miopen_add_wrapper_check(wrapper_reentry_macro
+    COMMAND $<TARGET_FILE:${MIOPEN_WRAPPER_ROUTING_TEST}> --gtest_filter=CPU_WrapperRoutingReentryMacro_NONE.*
+    ENVIRONMENT "MIOPEN_HIPDNN_FORWARDING=1"
+    ENVIRONMENT_MODIFICATION "MIOPEN_DISABLE_HIPDNN_FOR=unset:"
+    FAIL_REGULAR_EXPRESSION "\\[  SKIPPED \\]")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )

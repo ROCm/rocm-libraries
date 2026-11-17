@@ -222,3 +222,35 @@ as a missing backend.
 The fake is built as a CMake `MODULE` library, not `SHARED`. On Windows a `SHARED` library's DLL
 is written next to `MIOpen.dll`, where hipDNN looks for its backend, so every other test would
 load the fake. A `MODULE` library goes to its own directory on every platform.
+
+## Re-entry from a hipDNN plugin
+
+A hipDNN MIOpen plugin built against the public `libMIOpen.so` calls the wrapper from inside
+hipDNN, and the wrapper would forward that call to hipDNN again, without end. Instead it fails the
+call with `miopenStatusInternalError` (`ScopedHipdnnCall` and `RejectReentrantCall` in
+`src/private/hipdnn_graph.cpp`, checked in `MIOPEN_WRAPPER_FORWARD`). These tests cover it:
+
+- `CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard, the
+  failure it records and the trace line. They run with the other routing tests and need nothing
+  special.
+- `CPU_WrapperRoutingReentryMacro_NONE.*` run the dispatch macro itself, through a stub named
+  like an entry point. The route is read from `MIOPEN_HIPDNN_FORWARDING` once per process, so the
+  tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it, and
+  fails when a test skips, because gtest exits 0 for a skip and a stray
+  `MIOPEN_DISABLE_HIPDNN_FOR` would otherwise leave an entry that checks nothing. It needs no
+  GPU. Only the build tree registers it, not the packaged test list.
+- `miopen-provider-plugin-reentry-guard` (registered by `dnn-providers/miopen-provider` in a
+  superbuild that has both) runs `script/check_plugin_reentry.py`. It runs one forwarded
+  convolution through a stand-in plugin, the provider's own sources built against the public
+  library, with `HIPDNN_PLUGIN_DIR` pointing at it so it is the only engine. It passes when
+  MIOpen's message is printed; the shim test it runs is expected to fail. Without the guard the
+  process recurses until `hipblasLtCreate` fails and exits without a message.
+
+  The entry needs a built test binary, a GPU the shim test supports and a usable hipDNN, and it
+  is **skipped** (exit 77, `SKIP_RETURN_CODE`) when the machine lacks any of them. A run without
+  the message is repeated with hipDNN's default plugins: if that control run does not pass, the
+  machine cannot run the test and the entry skips; only a machine that passes the control and
+  still shows no message fails.
+
+`script/check_public_abi.py check-plugin` checks a plugin binary without running it; the provider
+registers it for the real plugin (must pass) and for the stand-in (must fail).

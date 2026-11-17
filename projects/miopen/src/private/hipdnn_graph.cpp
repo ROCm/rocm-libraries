@@ -206,6 +206,19 @@ LastForwardedError& LastError()
     return last;
 }
 
+struct ReentryState
+{
+    int depth = 0;
+    // The entry point most recently rejected in the outermost scope; null means none.
+    const char* rejected = nullptr;
+};
+
+ReentryState& Reentry()
+{
+    static thread_local ReentryState state;
+    return state;
+}
+
 // Pointers into the set stay valid as it grows, because its elements are never
 // moved.
 struct InternedStrings
@@ -242,7 +255,12 @@ AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t
                 RecordFailure(miopenStatusUnsupportedOp,
                               "could not build a hipDNN graph for this problem")};
 
+    const ScopedHipdnnCall scope;
     const fe::Error error = graph->build(hipdnnHandle);
+    // Checked before the status and before caching: a graph built during a re-entry is not
+    // worth reusing.
+    if(scope.ReentryDetected())
+        return {nullptr, RecordReentryFailure()};
     if(!error.is_good())
         return {nullptr, RecordHipdnnFailure(error)};
 
@@ -271,9 +289,14 @@ miopenStatus_t RunGraph(HandleState& state,
         workspace = state.workspace;
     }
 
+    const ScopedHipdnnCall scope;
     const fe::Error error = graph->execute(*state.hipdnnHandle, variantPack, workspace);
     // Recorded even when execute failed, because it may have queued work first.
     const bool recorded = hipEventRecord(state.lastWork, state.stream) == hipSuccess;
+    // Checked after the event record, which must still happen, and before hipDNN's status:
+    // a plugin that ignored the error makes hipDNN report success for an output nobody wrote.
+    if(scope.ReentryDetected())
+        return RecordReentryFailure();
     if(!error.is_good())
         return RecordHipdnnFailure(error);
     if(!recorded)
@@ -343,6 +366,60 @@ bool LastForwardedFailure(miopenStatus_t* status) noexcept
         return false;
     *status = last.status;
     return true;
+}
+
+ScopedHipdnnCall::ScopedHipdnnCall() noexcept
+{
+    ReentryState& state = Reentry();
+    if(state.depth == 0)
+        state.rejected = nullptr;
+    ++state.depth;
+}
+
+ScopedHipdnnCall::~ScopedHipdnnCall() { --Reentry().depth; }
+
+bool ScopedHipdnnCall::ReentryDetected() const noexcept { return Reentry().rejected != nullptr; }
+
+bool InHipdnnCall() noexcept { return Reentry().depth > 0; }
+
+miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept
+{
+    Reentry().rejected = entryPoint != nullptr ? entryPoint : "<null>";
+    try
+    {
+        if(RouteTraceEnabled())
+            ReportRouteDecision(entryPoint,
+                                ForwardingMode::Enabled,
+                                {Route::Rejected, RouteReason::ReentrantFromHipdnn},
+                                std::cerr);
+    }
+    catch(...)
+    {
+        // A lost trace line must not turn the rejection into an exception.
+    }
+    return miopenStatusInternalError;
+}
+
+miopenStatus_t RecordReentryFailure() noexcept
+{
+    try
+    {
+        const char* entryPoint = Reentry().rejected;
+        return RecordFailure(
+            miopenStatusInternalError,
+            std::string("a hipDNN plugin called the public MIOpen entry point ") +
+                (entryPoint != nullptr ? entryPoint : "<unknown>") +
+                " while hipDNN was running a forwarded call. The plugin was built against "
+                "libMIOpen.so, not libMIOpen_private.so, so it would call back into hipDNN "
+                "forever. Rebuild or reinstall the plugin (libmiopen_plugin.so) from the "
+                "same build as libMIOpen.");
+    }
+    catch(...)
+    {
+        // Building the reason ran out of memory, so record the status alone.
+        LastError() = LastForwardedError{true, miopenStatusInternalError};
+        return miopenStatusInternalError;
+    }
 }
 
 miopenStatus_t RunCachedGraph(miopenHandle_t handle,

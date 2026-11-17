@@ -739,6 +739,7 @@ class FakeLibrary:
         needed=(),
         naming=abi.ELF_NAMING,
         file_version="",
+        required=(),
     ):
         self.path = Path(path)
         self._symbols = set(symbols)
@@ -746,9 +747,13 @@ class FakeLibrary:
         self._needed = tuple(needed)
         self.naming = naming
         self._file_version = file_version
+        self._required = set(required)
 
     def defined_dynamic_functions(self):
         return set(self._symbols)
+
+    def required_functions(self):
+        return set(self._required)
 
     def soname(self):
         return self._soname
@@ -1101,6 +1106,7 @@ def pe_image(
     named_resource_entry=False,
     version_signature=0xFEEF04BD,
     text_vsize=None,
+    import_functions=None,
 ):
     """Return a DLL image.
 
@@ -1168,11 +1174,26 @@ def pe_image(
         )
         directories[0] = (start, end - start)
 
-    # Each imported DLL gets an empty, terminated table of imported functions.
+    def thunk_table(dll, absolute=False):
+        """The terminated table of what `import_functions` says `dll` provides: a
+        string is imported by name, an integer by ordinal."""
+        entry_size = 8 if pe32_plus else 4
+        entries = []
+        for function in (import_functions or {}).get(dll, ()):
+            if isinstance(function, int):
+                entries.append(1 << (entry_size * 8 - 1) | function)
+            else:
+                rva = put(b"\0\0" + function.encode() + b"\0")
+                entries.append(rva + image_base if absolute else rva)
+        body = b"".join(entry.to_bytes(entry_size, "little") for entry in entries)
+        return put(body + b"\0" * entry_size)
+
+    # Each imported DLL gets a terminated table of imported functions, empty unless
+    # `import_functions` names some.
     if imports:
         descriptors = []
         for name in imports:
-            thunks = put(b"\0" * 8)
+            thunks = thunk_table(name)
             descriptors.append(struct.pack("<IIIII", thunks, 0, 0, cstr(name), thunks))
         table = put(b"".join(descriptors) + b"\0" * 20)
         directories[1] = (table, 20 * (len(imports) + 1))
@@ -1181,14 +1202,22 @@ def pe_image(
         assert not (old_delay_layout and pe32_plus)
         descriptors = []
         for name in delay_imports:
-            thunks = put(b"\0" * 8)
+            thunks = thunk_table(name, absolute=old_delay_layout)
             if old_delay_layout:
                 attributes, name_field = 0, cstr(name) + image_base
             else:
                 attributes, name_field = 1, cstr(name)
             descriptors.append(
                 struct.pack(
-                    "<IIIIIIII", attributes, name_field, 0, thunks, thunks, 0, 0, 0
+                    "<IIIIIIII",
+                    attributes,
+                    name_field,
+                    0,
+                    thunks,
+                    thunks + image_base if old_delay_layout else thunks,
+                    0,
+                    0,
+                    0,
                 )
             )
         table = put(b"".join(descriptors) + b"\0" * 32)
@@ -1994,3 +2023,353 @@ def test_an_array_parameter_is_rejected_rather_than_compared_by_name():
     source = consumer(declaration(FWD, "miopenHandle_t, size_t lens[2]"))
     with pytest.raises(abi.AbiError, match="array parameter"):
         abi.parse_range_prototypes(source, "consumer.cpp")
+
+
+# --------------------------------------------------------------------------
+# check-plugin
+#
+# A plugin built against the public library re-enters the wrapper. These tests check that
+# the gate tells it apart from one built against libMIOpen_private.
+# --------------------------------------------------------------------------
+
+RANGE_FUNCTIONS = tuple(sorted(abi.RANGE_ENTRY_POINTS))
+
+
+def plugin_elf(
+    needed=("libMIOpen_private.so.1", "libc.so.6"),
+    required=("miopenCreate_impl", "miopenConvolutionForward_impl", *RANGE_FUNCTIONS),
+):
+    return FakeLibrary(
+        "libmiopen_plugin.so", (), "", needed, abi.ELF_NAMING, required=required
+    )
+
+
+def plugin_dll(
+    needed=("MIOpen_private.dll", "KERNEL32.dll"),
+    required=("miopenCreate_impl", *RANGE_FUNCTIONS),
+):
+    return FakeLibrary(
+        "miopen_plugin.dll", (), "", needed, abi.PE_NAMING, required=required
+    )
+
+
+def run_check_plugin(monkeypatch, plugin, private):
+    libs = {"libmiopen_plugin.so": plugin, "libMIOpen_private.so": private}
+    monkeypatch.setattr(abi, "open_library", lambda path, what: libs[path])
+    return abi.main(
+        ["check-plugin", "libmiopen_plugin.so", "--private-lib", "libMIOpen_private.so"]
+    )
+
+
+def test_check_plugin_passes_a_plugin_built_against_the_private_library(
+    monkeypatch, capsys
+):
+    assert run_check_plugin(monkeypatch, plugin_elf(), private_elf()) == 0
+    out = capsys.readouterr().out
+    assert "plugin check: PASS" in out
+    assert "matches the private library" in out
+
+
+def test_a_plugin_built_against_the_public_library_fails_every_condition(
+    monkeypatch, capsys
+):
+    """The prebuilt-SDK plugin: public name in DT_NEEDED, public names undefined."""
+    plugin = plugin_elf(
+        needed=("libMIOpen.so.1", "libc.so.6"),
+        required=("miopenCreate", "miopenConvolutionForward", *RANGE_FUNCTIONS),
+    )
+    assert run_check_plugin(monkeypatch, plugin, private_elf()) == 1
+    out = capsys.readouterr().out
+    assert "FAIL: plugin DT_NEEDED on libMIOpen_private is (absent)" in out
+    assert "FAIL: plugin has DT_NEEDED on libMIOpen.so.1" in out
+    assert "  miopenConvolutionForward\n" in out
+    assert "  miopenCreate\n" in out
+    assert "Rebuild or reinstall the plugin" in out
+    assert "plugin check: FAIL" in out
+
+
+def test_the_private_library_name_does_not_count_as_the_public_one(capsys):
+    """libMIOpen_private starts with libMIOpen; only the exact public name is wrong."""
+    assert abi.check_plugin_no_public_dep(plugin_elf()) is True
+    assert abi.check_plugin_no_public_dep(plugin_elf(needed=("libMIOpen.so",))) is False
+    assert (
+        abi.check_plugin_no_public_dep(plugin_elf(needed=("libMIOpen.so.1.0",)))
+        is False
+    )
+    assert (
+        abi.check_plugin_no_public_dep(
+            plugin_elf(needed=("libMIOpenCKGroupedConv.so",))
+        )
+        is True
+    )
+
+
+def test_a_plugin_linking_both_libraries_still_fails(monkeypatch, capsys):
+    plugin = plugin_elf(needed=("libMIOpen_private.so.1", "libMIOpen.so.1"))
+    assert run_check_plugin(monkeypatch, plugin, private_elf()) == 1
+    out = capsys.readouterr().out
+    assert "PASS: plugin DT_NEEDED on libMIOpen_private.so.1 matches" in out
+    assert "FAIL: plugin has DT_NEEDED on libMIOpen.so.1" in out
+
+
+def test_a_plugin_at_another_private_major_fails(capsys):
+    plugin = plugin_elf(needed=("libMIOpen_private.so.2",))
+    assert abi.check_plugin_private_dep(plugin, private_elf()) is False
+    assert "libMIOpen_private.so.2" in capsys.readouterr().out
+
+
+def test_a_private_library_without_a_major_cannot_match(capsys):
+    """An unversioned SONAME would make '' == '' pass for a plugin with no import."""
+    plugin = plugin_elf(needed=("libc.so.6",))
+    assert abi.check_plugin_private_dep(plugin, private_elf(soname="")) is False
+
+
+def test_a_public_entry_point_the_plugin_needs_fails(capsys):
+    plugin = plugin_elf(required=("miopenCreate_impl", "miopenCreate"))
+    assert abi.check_plugin_symbols(plugin) is False
+    assert "  miopenCreate\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("function", RANGE_FUNCTIONS)
+def test_each_unrenamed_range_function_is_allowed(function, capsys):
+    plugin = plugin_elf(required=("miopenCreate_impl", function))
+    assert abi.check_plugin_symbols(plugin) is True
+
+
+def test_other_symbols_are_not_miopen_entry_points(capsys):
+    """libc, the HIP runtime and MIOpen's internal exports are not the API."""
+    plugin = plugin_elf(
+        required=("miopenCreate_impl", "malloc", "hipMalloc", "miopen_sqlite3_init")
+    )
+    assert abi.check_plugin_symbols(plugin) is True
+
+
+def test_a_plugin_that_references_no_miopen_at_all_is_an_error():
+    """The wrong file, not a pass."""
+    with pytest.raises(abi.AbiError, match="no undefined miopen\\* symbols"):
+        abi.check_plugin_symbols(plugin_elf(required=("malloc",)))
+
+
+def test_a_plugin_with_public_references_only_fails_instead_of_erroring(capsys):
+    """The prebuilt-SDK plugin has no _impl reference at all, and is the case to catch."""
+    plugin = plugin_elf(required=("miopenCreate", "miopenConvolutionForward"))
+    assert abi.check_plugin_symbols(plugin) is False
+    assert "  miopenCreate\n" in capsys.readouterr().out
+
+
+def test_check_plugin_that_cannot_run_exits_2(monkeypatch, capsys):
+    assert (
+        run_check_plugin(monkeypatch, plugin_elf(required=("malloc",)), private_elf())
+        == 2
+    )
+    assert "ERROR:" in capsys.readouterr().err
+
+
+def test_check_plugin_rejects_a_dll_with_an_elf_private_library(monkeypatch, capsys):
+    assert run_check_plugin(monkeypatch, plugin_dll(), private_elf()) == 2
+    assert "different formats" in capsys.readouterr().err
+
+
+def test_check_plugin_passes_a_consistent_dll_pair(monkeypatch, capsys):
+    libs = {"miopen_plugin.dll": plugin_dll(), "MIOpen_private.dll": private_dll()}
+    monkeypatch.setattr(abi, "open_library", lambda path, what: libs[path])
+    result = abi.main(
+        ["check-plugin", "miopen_plugin.dll", "--private-lib", "MIOpen_private.dll"]
+    )
+    assert result == 0, capsys.readouterr().out
+
+
+def test_a_dll_plugin_importing_the_public_dll_fails(capsys):
+    plugin = plugin_dll(needed=("miopen.DLL", "MIOpen_private.dll"))
+    assert abi.check_plugin_no_public_dep(plugin) is False
+    assert "import of miopen.DLL" in capsys.readouterr().out
+
+
+def test_a_dll_plugin_is_matched_to_the_private_dll_without_case(capsys):
+    plugin = plugin_dll(needed=("MIOPEN_PRIVATE.dll",))
+    assert abi.check_plugin_private_dep(plugin, private_dll()) is True
+    assert (
+        abi.check_plugin_private_dep(
+            plugin_dll(needed=("KERNEL32.dll",)), private_dll()
+        )
+        is False
+    )
+
+
+# The readers, on images built here.
+
+
+def elf_image(
+    needed=(), undefined=(), defined=(), undefined_bind=abi.STB_GLOBAL, soname=""
+):
+    """A minimal 64-bit ELF shared object: a .dynsym, its .dynstr and a .dynamic.
+
+    `undefined` symbols are NOTYPE, as a real object's references are; `defined` ones
+    are global functions.
+    """
+    dynstr = bytearray(b"\0")
+
+    def string(text):
+        offset = len(dynstr)
+        dynstr.extend(text.encode() + b"\0")
+        return offset
+
+    dynsym = bytearray(24)  # the mandatory null symbol
+    for name in undefined:
+        info = undefined_bind << 4  # NOTYPE
+        dynsym += struct.pack("<IBBHQQ", string(name), info, 0, 0, 0, 0)
+    for name in defined:
+        info = abi.STB_GLOBAL << 4 | abi.STT_FUNC
+        dynsym += struct.pack("<IBBHQQ", string(name), info, 0, 1, 0x1000, 8)
+    dynamic = b"".join(struct.pack("<QQ", abi.DT_NEEDED, string(lib)) for lib in needed)
+    if soname:
+        dynamic += struct.pack("<QQ", abi.DT_SONAME, string(soname))
+    dynamic += struct.pack("<QQ", abi.DT_NULL, 0)
+
+    shstrtab = b"\0.dynstr\0.dynsym\0.dynamic\0.shstrtab\0"
+    names = {
+        n: shstrtab.index(n.encode())
+        for n in (".dynstr", ".dynsym", ".dynamic", ".shstrtab")
+    }
+    body = [bytes(dynstr), bytes(dynsym), dynamic, shstrtab]
+    offsets, cursor = [], 64
+    for blob in body:
+        offsets.append(cursor)
+        cursor += len(blob)
+    shoff = cursor
+    # name, type, flags, addr, offset, size, link, info, addralign, entsize
+    sections = [
+        (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        (names[".dynstr"], 3, 0, 0, offsets[0], len(body[0]), 0, 0, 1, 0),
+        (names[".dynsym"], 11, 0, 0, offsets[1], len(body[1]), 1, 1, 8, 24),
+        (names[".dynamic"], 6, 0, 0, offsets[2], len(body[2]), 1, 0, 8, 16),
+        (names[".shstrtab"], 3, 0, 0, offsets[3], len(body[3]), 0, 0, 1, 0),
+    ]
+    header = (
+        b"\x7fELF\x02\x01\x01"
+        + b"\0" * 9
+        + struct.pack(
+            "<HHIQQQIHHHHHH", 3, 0x3E, 1, 0, 0, shoff, 0, 64, 0, 0, 64, len(sections), 4
+        )
+    )
+    return (
+        header
+        + b"".join(body)
+        + b"".join(struct.pack("<IIQQQQIIQQ", *section) for section in sections)
+    )
+
+
+def read_elf(tmp_path, image):
+    path = tmp_path / "libmiopen_plugin.so"
+    path.write_bytes(image)
+    return abi.open_library(str(path), "library")
+
+
+def test_elf_reader_lists_what_an_object_leaves_undefined(tmp_path):
+    lib = read_elf(
+        tmp_path,
+        elf_image(
+            needed=["libMIOpen_private.so.1"],
+            undefined=["miopenCreate_impl", "malloc"],
+            defined=["miopenOwn"],
+        ),
+    )
+    assert lib.required_functions() == {"miopenCreate_impl", "malloc"}
+    assert lib.defined_dynamic_functions() == {"miopenOwn"}
+    assert lib.needed() == ["libMIOpen_private.so.1"]
+
+
+def test_elf_reader_counts_a_weak_reference_and_strips_the_version(tmp_path):
+    image = elf_image(
+        undefined=["miopenCreate@@MIOPEN_1.0"], undefined_bind=abi.STB_WEAK
+    )
+    assert read_elf(tmp_path, image).required_functions() == {"miopenCreate"}
+
+
+def run_check_plugin_files(tmp_path, plugin_image):
+    plugin = tmp_path / "libmiopen_plugin.so"
+    plugin.write_bytes(plugin_image)
+    private = tmp_path / "libMIOpen_private.so.1.0"
+    private.write_bytes(
+        elf_image(defined=["miopenCreate_impl"], soname="libMIOpen_private.so.1")
+    )
+    return abi.main(["check-plugin", str(plugin), "--private-lib", str(private)])
+
+
+def test_check_plugin_passes_a_built_plugin_end_to_end(tmp_path, capsys):
+    image = elf_image(
+        needed=["libMIOpen_private.so.1", "libc.so.6"],
+        undefined=["miopenCreate_impl", *RANGE_FUNCTIONS, "malloc"],
+    )
+    assert run_check_plugin_files(tmp_path, image) == 0, capsys.readouterr().out
+
+
+def test_check_plugin_fails_a_public_plugin_end_to_end(tmp_path, capsys):
+    """What a prebuilt SDK plugin looks like to the loader: the public name, twice over."""
+    image = elf_image(
+        needed=["libMIOpen.so.1", "libc.so.6"],
+        undefined=["miopenCreate", "miopenConvolutionForward", "malloc"],
+    )
+    assert run_check_plugin_files(tmp_path, image) == 1
+    out = capsys.readouterr().out
+    assert "FAIL: plugin DT_NEEDED on libMIOpen_private is (absent)" in out
+    assert "FAIL: plugin has DT_NEEDED on libMIOpen.so.1" in out
+    assert "  miopenConvolutionForward\n" in out
+
+
+@pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])
+def test_pe_reader_lists_imported_function_names(tmp_path, pe32_plus):
+    image = pe_image(
+        "miopen_plugin.dll",
+        imports=["MIOpen_private.dll", "KERNEL32.dll"],
+        import_functions={
+            "MIOpen_private.dll": ["miopenCreate_impl", 7],
+            "KERNEL32.dll": ["LoadLibraryA"],
+        },
+        pe32_plus=pe32_plus,
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    assert lib.required_functions() == {"miopenCreate_impl", "LoadLibraryA"}
+
+
+@pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])
+def test_pe_reader_lists_delay_imported_function_names(tmp_path, pe32_plus):
+    image = pe_image(
+        "miopen_plugin.dll",
+        delay_imports=["MIOpen.dll"],
+        import_functions={"MIOpen.dll": ["miopenCreate"]},
+        pe32_plus=pe32_plus,
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    assert lib.required_functions() == {"miopenCreate"}
+
+
+def test_pe_reader_lists_names_in_the_old_delay_layout(tmp_path):
+    image = pe_image(
+        "miopen_plugin.dll",
+        delay_imports=["MIOpen.dll"],
+        import_functions={"MIOpen.dll": ["miopenCreate"]},
+        pe32_plus=False,
+        old_delay_layout=True,
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    assert lib.required_functions() == {"miopenCreate"}
+
+
+def test_a_pe_without_imports_requires_nothing(tmp_path):
+    assert (
+        read_dll(tmp_path, pe_image("miopen_plugin.dll")).required_functions() == set()
+    )
+
+
+def test_a_dll_plugin_with_public_function_imports_fails_the_symbol_check(
+    tmp_path, capsys
+):
+    image = pe_image(
+        "miopen_plugin.dll",
+        imports=["MIOpen_private.dll"],
+        import_functions={"MIOpen_private.dll": ["miopenCreate_impl", "miopenCreate"]},
+    )
+    lib = read_dll(tmp_path, image, "miopen_plugin.dll")
+    assert abi.check_plugin_symbols(lib) is False
+    assert "  miopenCreate\n" in capsys.readouterr().out

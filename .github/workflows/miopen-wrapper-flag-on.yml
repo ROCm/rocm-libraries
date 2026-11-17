@@ -18,6 +18,10 @@
 # The parity harness is only checked for registration here. Executing it needs a GPU,
 # which no runner here has, so the doubled runs happen wherever MIOpen's ctest suite
 # is run on hardware rather than being duplicated as a bespoke step.
+#
+# The provider plugin is not built here. Its binary check (check_public_abi.py check-plugin)
+# is registered by dnn-providers/miopen-provider in any build that has both the wrapper and
+# the provider, such as the miopen-with-provider preset.
 
 name: "MIOpen: hipDNN wrapper flag-on"
 

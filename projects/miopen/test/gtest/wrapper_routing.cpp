@@ -43,7 +43,9 @@ static void PrintTo(ForwardingMode mode, std::ostream* os)
 }
 static void PrintTo(Route route, std::ostream* os)
 {
-    *os << (route == Route::Hipdnn ? "Route::Hipdnn" : "Route::Miopen");
+    *os << (route == Route::Hipdnn     ? "Route::Hipdnn"
+            : route == Route::Rejected ? "Route::Rejected"
+                                       : "Route::Miopen");
 }
 static void PrintTo(RouteReason reason, std::ostream* os)
 {
@@ -54,6 +56,7 @@ static void PrintTo(RouteReason reason, std::ostream* os)
     case RouteReason::DisabledByEnv: *os << "RouteReason::DisabledByEnv"; return;
     case RouteReason::HipdnnUnavailable: *os << "RouteReason::HipdnnUnavailable"; return;
     case RouteReason::InForwardingSet: *os << "RouteReason::InForwardingSet"; return;
+    case RouteReason::ReentrantFromHipdnn: *os << "RouteReason::ReentrantFromHipdnn"; return;
     }
     *os << "RouteReason(" << static_cast<int>(reason) << ')';
 }
@@ -839,6 +842,241 @@ TEST(CPU_WrapperRoutingLastError_NONE, LastForwardedFailureIsPerThread)
     miopenStatus_t status = miopenStatusSuccess;
     EXPECT_TRUE(seenOnItsThread);
     EXPECT_FALSE(hipdnn::LastForwardedFailure(&status));
+}
+
+// ---------------------------------------------------------------------------
+// Re-entry: a hipDNN plugin built against the public libMIOpen.so calls a forwarded
+// entry point from inside hipDNN, which must fail instead of looping.
+// ---------------------------------------------------------------------------
+
+TEST(CPU_WrapperRoutingReentry_NONE, IsOnlyActiveInsideAScope)
+{
+    EXPECT_FALSE(hipdnn::InHipdnnCall());
+    {
+        const hipdnn::ScopedHipdnnCall scope;
+        EXPECT_TRUE(hipdnn::InHipdnnCall());
+    }
+    EXPECT_FALSE(hipdnn::InHipdnnCall());
+}
+
+// hipDNN reports failures as values, but the plugin under it is not obliged to.
+TEST(CPU_WrapperRoutingReentry_NONE, LeavesTheScopeWhenAnExceptionPassesThrough)
+{
+    try
+    {
+        const hipdnn::ScopedHipdnnCall scope;
+        throw std::runtime_error("from the plugin");
+    }
+    catch(const std::runtime_error&)
+    {
+    }
+    EXPECT_FALSE(hipdnn::InHipdnnCall());
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AnInnerScopeLeavesTheOuterOneActive)
+{
+    const hipdnn::ScopedHipdnnCall outer;
+    {
+        const hipdnn::ScopedHipdnnCall inner;
+        EXPECT_TRUE(hipdnn::InHipdnnCall());
+    }
+    EXPECT_TRUE(hipdnn::InHipdnnCall());
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, RejectingFailsTheCallAndMarksTheScope)
+{
+    const hipdnn::ScopedHipdnnCall scope;
+    ASSERT_FALSE(scope.ReentryDetected());
+
+    testing::internal::CaptureStderr();
+    const miopenStatus_t status = hipdnn::RejectReentrantCall("miopenConvolutionForward");
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    EXPECT_EQ(status, miopenStatusInternalError);
+    EXPECT_TRUE(scope.ReentryDetected());
+}
+
+// A later scope must not inherit the mark, or the next call of a well-behaved plugin would
+// fail.
+TEST(CPU_WrapperRoutingReentry_NONE, TheMarkDoesNotOutliveTheOutermostScope)
+{
+    testing::internal::CaptureStderr();
+    {
+        const hipdnn::ScopedHipdnnCall scope;
+        hipdnn::RejectReentrantCall("miopenConvolutionForward");
+        ASSERT_TRUE(scope.ReentryDetected());
+    }
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    const hipdnn::ScopedHipdnnCall next;
+    EXPECT_FALSE(next.ReentryDetected());
+}
+
+// The call that opened the scope reports the failure once, so the rejected call itself adds
+// no error line or failure record.
+TEST(CPU_WrapperRoutingReentry_NONE, RejectingRecordsNoFailureAndPrintsNoErrorLine)
+{
+    hipdnn::ClearForwardedFailure();
+    const hipdnn::ScopedHipdnnCall scope;
+
+    testing::internal::CaptureStderr();
+    hipdnn::RejectReentrantCall("miopenConvolutionForward");
+    const std::string logged = testing::internal::GetCapturedStderr();
+
+    miopenStatus_t status = miopenStatusSuccess;
+    EXPECT_FALSE(hipdnn::LastForwardedFailure(&status));
+    EXPECT_EQ(logged.find("[hipDNN-forwarded]"), std::string::npos) << logged;
+    if(miopen::wrapper::RouteTraceEnabled())
+    {
+        EXPECT_NE(logged.find("miopenConvolutionForward"), std::string::npos) << logged;
+        EXPECT_NE(logged.find("route=rejected reason=reentrant-from-hipdnn"), std::string::npos)
+            << logged;
+    }
+    else
+    {
+        EXPECT_TRUE(logged.empty()) << logged;
+    }
+}
+
+// Every failing call reports, not just the first.
+TEST(CPU_WrapperRoutingReentry_NONE, RecordedFailureNamesTheEntryPointAndTheRemedy)
+{
+    hipdnn::ClearForwardedFailure();
+    testing::internal::CaptureStderr();
+    {
+        const hipdnn::ScopedHipdnnCall scope;
+        hipdnn::RejectReentrantCall("miopenConvolutionBackwardData");
+    }
+    const miopenStatus_t status = hipdnn::RecordReentryFailure();
+    const std::string logged    = testing::internal::GetCapturedStderr();
+
+    miopenStatus_t recorded = miopenStatusSuccess;
+    EXPECT_EQ(status, miopenStatusInternalError);
+    EXPECT_TRUE(hipdnn::LastForwardedFailure(&recorded));
+    EXPECT_EQ(recorded, miopenStatusInternalError);
+    EXPECT_STREQ(hipdnn::PrefixedErrorString(miopenStatusInternalError, "native"),
+                 "[hipDNN-forwarded] native");
+    hipdnn::ClearForwardedFailure();
+
+    if(miopen::wrapper::ErrorLoggingEnabled())
+    {
+        EXPECT_NE(logged.find("miopenConvolutionBackwardData"), std::string::npos) << logged;
+        EXPECT_NE(logged.find("Rebuild or reinstall the plugin"), std::string::npos) << logged;
+        EXPECT_NE(logged.find("libMIOpen_private.so"), std::string::npos) << logged;
+    }
+}
+
+// Pins the documented limit: the mark is per thread, so a plugin that moves the call to a
+// thread of its own is not seen.
+TEST(CPU_WrapperRoutingReentry_NONE, AnotherThreadIsNotInsideTheCall)
+{
+    const hipdnn::ScopedHipdnnCall scope;
+    bool otherThreadInside = true;
+    std::thread([&otherThreadInside] { otherThreadInside = hipdnn::InHipdnnCall(); }).join();
+
+    EXPECT_TRUE(hipdnn::InHipdnnCall());
+    EXPECT_FALSE(otherThreadInside);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, ARejectionOnAnotherThreadDoesNotMarkThisScope)
+{
+    const hipdnn::ScopedHipdnnCall scope;
+    testing::internal::CaptureStderr();
+    std::thread([] {
+        const hipdnn::ScopedHipdnnCall other;
+        hipdnn::RejectReentrantCall("miopenConvolutionForward");
+    }).join();
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    EXPECT_FALSE(scope.ReentryDetected());
+}
+
+TEST(CPU_WrapperRoutingReport_NONE, TraceLineGivesARejectedCallItsOwnReason)
+{
+    std::ostringstream os;
+    miopen::wrapper::ReportRouteDecision("miopenConvolutionForward",
+                                         ForwardingMode::Enabled,
+                                         {Route::Rejected, RouteReason::ReentrantFromHipdnn},
+                                         os);
+    const std::string line = os.str();
+    EXPECT_NE(line.find("route=rejected"), std::string::npos) << line;
+    EXPECT_NE(line.find("reason=reentrant-from-hipdnn"), std::string::npos) << line;
+    EXPECT_EQ(line.find("forwarding-off"), std::string::npos) << line;
+    EXPECT_EQ(line.find("not-in-forwarding-set"), std::string::npos) << line;
+}
+
+// ---------------------------------------------------------------------------
+// The dispatch macro itself, through a stub named like an entry point. The route is read
+// from MIOPEN_HIPDNN_FORWARDING once per process, so these skip unless it enables
+// forwarding; the wrapper_reentry_macro ctest entry sets it.
+// ---------------------------------------------------------------------------
+
+namespace reentry_stub {
+
+int forwardedCalls = 0;
+
+miopenStatus_t MarkForwarded()
+{
+    ++forwardedCalls;
+    return miopenStatusSuccess;
+}
+
+// Named like the entry point because the macro compares its first argument to __func__.
+miopenStatus_t miopenConvolutionForward()
+{
+    MIOPEN_WRAPPER_FORWARD(miopenConvolutionForward, MarkForwarded());
+    return miopenStatusBadParm; // what the MIOpen route would return
+}
+
+} // namespace reentry_stub
+
+class CPU_WrapperRoutingReentryMacro_NONE : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        testing::internal::CaptureStderr();
+        const Route route = miopen::wrapper::Dispatch("miopenConvolutionForward");
+        static_cast<void>(testing::internal::GetCapturedStderr());
+        if(route != Route::Hipdnn)
+            GTEST_SKIP() << "miopenConvolutionForward is not on the hipDNN route; run with "
+                            "MIOPEN_HIPDNN_FORWARDING=1";
+        reentry_stub::forwardedCalls = 0;
+        hipdnn::ClearForwardedFailure();
+    }
+};
+
+TEST_F(CPU_WrapperRoutingReentryMacro_NONE, ForwardsOutsideHipdnn)
+{
+    EXPECT_EQ(reentry_stub::miopenConvolutionForward(), miopenStatusSuccess);
+    EXPECT_EQ(reentry_stub::forwardedCalls, 1);
+}
+
+// Before the check, this call forwarded and, with a plugin under hipDNN, looped.
+TEST_F(CPU_WrapperRoutingReentryMacro_NONE, FailsInsteadOfForwardingFromInsideHipdnn)
+{
+    const hipdnn::ScopedHipdnnCall scope;
+    testing::internal::CaptureStderr();
+    const miopenStatus_t first  = reentry_stub::miopenConvolutionForward();
+    const miopenStatus_t second = reentry_stub::miopenConvolutionForward();
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    EXPECT_EQ(first, miopenStatusInternalError);
+    EXPECT_EQ(second, miopenStatusInternalError);
+    EXPECT_EQ(reentry_stub::forwardedCalls, 0);
+    EXPECT_TRUE(scope.ReentryDetected());
+}
+
+TEST_F(CPU_WrapperRoutingReentryMacro_NONE, ForwardsAgainOnceHipdnnHasReturned)
+{
+    {
+        const hipdnn::ScopedHipdnnCall scope;
+        testing::internal::CaptureStderr();
+        reentry_stub::miopenConvolutionForward();
+        static_cast<void>(testing::internal::GetCapturedStderr());
+    }
+    EXPECT_EQ(reentry_stub::miopenConvolutionForward(), miopenStatusSuccess);
+    EXPECT_EQ(reentry_stub::forwardedCalls, 1);
 }
 
 } // namespace

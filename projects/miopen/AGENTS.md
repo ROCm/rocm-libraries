@@ -22,7 +22,7 @@ C API -> descriptors + Handle -> ProblemDescription + ExecutionContext
 - **Find versus immediate:** legacy algorithm-enum convolution execution needs an algorithm-mapped invoker, normally registered by Find. Immediate APIs select a solver ID and can prepare/cache its invoker lazily. Find 2.0 uses problem/solution objects; not every operation supports standalone discovery (see `src/problem.cpp`).
 - **Persistence:** FindDb stores selected solutions/timings/workspace; PerfDb stores tuning configurations; binary and invoker caches are separate. Keep the key formats distinct: FindDb uses `ProblemDescription::Serialize`, PerfDb uses `VisitAll`, invokers use `MakeNetworkConfig`. A user FindDb record replaces the system record; PerfDb merges per solver ID, preferring user values.
 - **Kernel backends:** `addkernels/` embeds `src/kernels/` sources; `src/hipoc/` compiles/loads HIP, assembly, and optional MLIR code. CK grouped convolution ships as per-architecture plugins built in `src/ck_impl/`; legacy/static CK sources (`src/legacy_composable_kernel/`, `src/kernels/static_composable_kernel/`) are embedded like other kernels. Driver and test executables link `MIOpen_with_plugins` so the plugins build with them; the plugins link the implementation target. GEMM work can be delegated to rocBLAS/hipBLASLt through `src/gemm_v2.cpp`.
-- **Optional hipDNN wrapper:** `MIOPEN_ENABLE_HIPDNN_WRAPPER` splits public `libMIOpen` from `libMIOpen_private`. `src/private/wrapper.cpp` routes selected APIs through hipDNN or native `_impl` functions. The forwarded entry points are listed in `src/private/routing.cpp`; they are convolution execution APIs, while Find and immediate APIs stay native. Routing settings are cached; set them before first use. Forwarded failures return errors, not silent native fallback.
+- **Optional hipDNN wrapper:** `MIOPEN_ENABLE_HIPDNN_WRAPPER` splits public `libMIOpen` from `libMIOpen_private`. `src/private/wrapper.cpp` routes selected APIs through hipDNN or native `_impl` functions. The forwarded entry points are listed in `src/private/routing.cpp`; they are convolution execution APIs, while Find and immediate APIs stay native. Routing settings are cached; set them before first use. Forwarded failures return errors, not silent native fallback. The hipDNN provider plugin must link `libMIOpen_private` and call `_impl` entry points. A plugin built against the public library re-enters the wrapper from inside hipDNN; the wrapper fails that call with `miopenStatusInternalError` and fails the outer call too (`ScopedHipdnnCall` in `src/private/hipdnn_graph.cpp`, checked per call in `MIOPEN_WRAPPER_FORWARD`) instead of forwarding it again. The guard is per thread, so it does not see a plugin that moves the call to its own thread. `check_public_abi.py check-plugin` rejects such a plugin binary at build time.
 
 ## Key Directories
 
@@ -165,16 +165,23 @@ python3 script/check_public_abi.py check-headers --require-provider
 # Wrapper-OFF (default) shared build only; wrapper-ON builds use wrapper_abi_check below.
 python3 script/check_public_abi.py check build/lib/libMIOpen.so \
   --baseline test/public_abi/public_symbols.baseline
-python3 -m pytest script/test_check_public_abi.py
+python3 -m pytest script/test_check_public_abi.py script/test_check_plugin_reentry.py
 # test_forwarding_parity_gpu_labels and test_check_wrapper_registration live in test/gtest/, hence
 # PYTHONPATH; the rest are in script/.
 (cd script && PYTHONPATH=../test/gtest python3 -m unittest \
   test_check_wrapper_abi test_miopen_wrapper_libs test_run_forwarding_parity \
   test_compare_forwarding_runs test_forwarding_parity_gpu_labels test_check_wrapper_registration)
 # Wrapper-ON builds, after building miopen-tests (the libraries, forwarding_failure_probe,
-# and the fake hipDNN backend); no GPU needed:
+# and the fake hipDNN backend); no GPU needed. wrapper_reentry_macro runs the miopen_gtest
+# (or, in a discrete build, test_wrapper_routing) re-entry tests with forwarding on:
 ctest --test-dir build --output-on-failure --no-tests=error \
-  -R '^(wrapper_abi_check|forwarding_failure_modes|test_forwarding_parity_scripts)$'
+  -R '^(wrapper_abi_check|forwarding_failure_modes|wrapper_reentry_macro|test_forwarding_parity_scripts)$'
+# Wrapper-ON superbuild with the provider (the miopen-with-provider preset). The first two need
+# no GPU; the third needs a GPU and the miopen_gtest binary, and skips without them:
+ctest --test-dir build --output-on-failure --no-tests=error \
+  -R '^miopen-provider-plugin-(abi-check|abi-check-rejects-public-plugin|reentry-guard)$'
+# A built plugin by hand (it must link libMIOpen_private and call only _impl entry points):
+python3 script/check_public_abi.py check-plugin <plugin.so> --private-lib <libMIOpen_private.so.1.0>
 # GPU/backend required (not registered when configure detects no GPU):
 ctest --test-dir build --output-on-failure --no-tests=error -L forwarding_parity
 ```

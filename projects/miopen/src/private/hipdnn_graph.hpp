@@ -70,6 +70,39 @@ bool LastForwardedFailure(miopenStatus_t* status) noexcept;
 // like any other forwarded one, instead of silently running MIOpen.
 miopenStatus_t ForwardingNotImplemented(const char* entryPoint);
 
+// Marks this thread as inside a hipDNN build or execute call, the only place a hipDNN
+// plugin runs. A plugin built against the public libMIOpen.so binds to this wrapper, so its
+// call to a forwarded entry point would be forwarded back into hipDNN, which calls the
+// plugin again, without end.
+//
+// Thread-local, so a plugin that hands the call to a thread of its own is not seen. hipDNN
+// builds and executes plans on the calling thread.
+class ScopedHipdnnCall
+{
+public:
+    ScopedHipdnnCall() noexcept;
+    ~ScopedHipdnnCall();
+    ScopedHipdnnCall(const ScopedHipdnnCall&)            = delete;
+    ScopedHipdnnCall& operator=(const ScopedHipdnnCall&) = delete;
+
+    // True if RejectReentrantCall ran on this thread since the outermost scope opened.
+    // Check it after hipDNN returns: the plugin may have swallowed the error it was given.
+    bool ReentryDetected() const noexcept;
+};
+
+// True while a ScopedHipdnnCall is open on this thread.
+bool InHipdnnCall() noexcept;
+
+// What a forwarded entry point does instead of forwarding while InHipdnnCall() is true.
+// Remembers the entry point for ReentryDetected, writes a route trace line if MIOPEN_LOG_LEVEL
+// asks for one, and returns miopenStatusInternalError. It records no failure and prints no
+// error line: the call that opened the scope reports once, through RecordReentryFailure.
+miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept;
+
+// Records that a hipDNN plugin re-entered the wrapper as a forwarded failure and returns
+// miopenStatusInternalError. Call it when ReentryDetected() is true, whatever hipDNN returned.
+miopenStatus_t RecordReentryFailure() noexcept;
+
 // One value per kind of graph the wrapper builds. Kept in one list so that the
 // values stay distinct as operations are added: it is the first element of
 // every PlanKey.
