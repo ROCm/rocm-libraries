@@ -235,6 +235,35 @@ def test_a_stated_int_knob_of_zero_is_refused(firsts):
     assert spec is None and "knob ck must be a positive integer" in reason
 
 
+def test_a_stated_string_knob_must_be_a_name(firsts):
+    """A string knob (``sched``) is a non-empty name other than the absent value:
+    an empty or non-string one would not round-trip."""
+    for identity in firsts.values():
+        stated = json.loads(identity.knobs) if identity.is_direct else {}
+        if "sched" in stated:
+            break
+    else:
+        pytest.skip("no first-of-kind direct identity states sched")
+    for bad in ("", 3):
+        broken = dataclasses.replace(
+            identity, knobs=json.dumps({**stated, "sched": bad}, sort_keys=True)
+        )
+        spec, reason = cf.conv_fwd_aot_spec_for_identity(broken)
+        assert spec is None and "knob sched must be a name" in reason, bad
+
+
+@pytest.mark.parametrize(
+    "key",
+    [("implicit_gemm", "mem", "bf16"), ("direct_fwd_wmma", "direct", "fp16")],
+)
+def test_a_wave_size_other_than_the_targets_is_refused(firsts, key):
+    """gfx1250 is wave32: an implicit-GEMM or direct instance spelling wave64 is not
+    packageable (the direct and implicit paths each check it)."""
+    other = dataclasses.replace(_spec(firsts[key]), wave_size=64)
+    ok, reason = cf.supports_gfx1250_conv_fwd_aot(other)
+    assert not ok and "wave_size must be 32 on gfx1250" in reason, key
+
+
 def test_bool_knobs_keep_an_explicit_false(registered):
     """The gfx1250 tiled grid states ``unroll_rows`` False on some instances and
     leaves it out on others: both round-trip to their own identity."""

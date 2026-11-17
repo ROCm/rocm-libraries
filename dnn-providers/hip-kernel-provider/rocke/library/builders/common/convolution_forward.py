@@ -1061,12 +1061,12 @@ class ConvFwdAotTarget:
 
     ``direct_algorithms`` maps each direct algorithm with a packaged launch to
     the ``direct_variant`` its instances carry, ``direct_knobs`` each variant's
-    knob keys to their fields. ``gfx950_direct_contract`` selects gfx950's direct
-    contract: square filters, one stride and one padding, required knobs, and
-    std and spatial instances on the exact-shape engine's direct rule
-    (:func:`_direct_serves`). Without it (gfx1250) the WMMA pipelines compile
-    per-axis geometry, every knob is optional (:data:`_GFX1250_ABSENT`), and
-    every direct instance serves what the dispatcher admits.
+    knob keys to their fields. The direct contract itself lives in each target's
+    spec class: gfx950's is square filters, one stride and one padding, required
+    knobs, and std and spatial instances on the exact-shape engine's direct rule
+    (:func:`_direct_serves`); on gfx1250 the WMMA pipelines compile per-axis
+    geometry, every knob is optional (:data:`_GFX1250_ABSENT`), and every direct
+    instance serves what the dispatcher admits.
     """
 
     arch: str
@@ -1076,7 +1076,6 @@ class ConvFwdAotTarget:
     pipelines: tuple[str, ...]
     direct_algorithms: dict
     direct_knobs: dict
-    gfx950_direct_contract: bool
 
     def algorithm_of_variant(self, variant: str) -> str:
         for algorithm, value in self.direct_algorithms.items():
@@ -1094,7 +1093,6 @@ TARGETS = {
         pipelines=_AOT_PIPELINES,
         direct_algorithms=AOT_DIRECT_ALGORITHMS,
         direct_knobs=AOT_DIRECT_KNOBS,
-        gfx950_direct_contract=True,
     ),
     "gfx1250": ConvFwdAotTarget(
         arch="gfx1250",
@@ -1105,7 +1103,6 @@ TARGETS = {
         pipelines=("mem", "wavelet"),
         direct_algorithms=GFX1250_DIRECT_ALGORITHMS,
         direct_knobs=GFX1250_DIRECT_KNOBS,
-        gfx950_direct_contract=False,
     ),
 }
 
@@ -1249,6 +1246,16 @@ class ConvFwdAotSpec:
     """
 
     TARGET: ClassVar[ConvFwdAotTarget]
+
+    def direct_contract_error(self) -> str:
+        """The target's direct-instance contract beyond the shared checks; "" when
+        accepted. Each target's spec class states its own rule set."""
+        raise NotImplementedError
+
+    def direct_serves(self, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
+        """Whether a direct instance computes ``problem``, which already passed the
+        problem checks. Each target's spec class states its own rule set."""
+        raise NotImplementedError
 
     dtype: str
     tile_m: int
@@ -1682,6 +1689,18 @@ class Gfx950ConvFwdAotSpec(ConvFwdAotSpec):
 
     TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx950"]
 
+    def direct_contract_error(self) -> str:
+        """gfx950's direct contract (:func:`_gfx950_direct_contract_error`)."""
+        return _gfx950_direct_contract_error(self)
+
+    def direct_serves(self, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
+        """std and spatial instances serve on the exact-shape engine's direct rule
+        (:func:`_direct_serves`); the others on :func:`_gfx950_direct_launch_serves`."""
+        if self.direct_variant in _DIRECT_VARIANTS:
+            caps = conv_fwd_aot_capabilities(self)
+            return _direct_serves(caps, self.runtime_spec(problem))
+        return _gfx950_direct_launch_serves(self, problem)
+
 
 @dataclass(frozen=True)
 class Gfx1250ConvFwdAotSpec(ConvFwdAotSpec):
@@ -1695,6 +1714,16 @@ class Gfx1250ConvFwdAotSpec(ConvFwdAotSpec):
     """
 
     TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx1250"]
+
+    def direct_contract_error(self) -> str:
+        """gfx1250's direct contract: every knob is optional
+        (:func:`_gfx1250_direct_knob_error`)."""
+        return _gfx1250_direct_knob_error(self)
+
+    def direct_serves(self, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
+        """Every direct instance serves what the dispatcher admits, within the launch
+        bounds (:func:`_gfx1250_direct_launch_serves`)."""
+        return _gfx1250_direct_launch_serves(self, problem)
 
     stages: int = 0
     tiles_k: int = 0
@@ -1944,6 +1973,39 @@ def _aot_direct_knob_error(spec: ConvFwdAotSpec) -> str:
     return ""
 
 
+def _gfx950_direct_contract_error(spec: ConvFwdAotSpec) -> str:
+    """gfx950's direct contract after the checks both targets share: one stride and
+    one padding, square filters, required knobs; "" when accepted."""
+    if spec.direct_variant not in _AOT_HALO_VARIANTS and (
+        spec.dilation_h != 1 or spec.dilation_w != 1
+    ):
+        return "the direct depthwise kernels have no dilation (dilation_h == dilation_w == 1)"
+    if spec.stride_h != spec.stride_w or spec.pad_h != spec.pad_w:
+        return "the direct depthwise kernels compile one stride and one padding"
+    if spec.filter_h != spec.filter_w:
+        return "the direct sweep builds square filters only"
+    if spec.direct_variant not in _DIRECT_VARIANTS:
+        return _aot_direct_knob_error(spec)
+    for name, default in _AOT_DIRECT_KNOB_DEFAULTS.items():
+        value = getattr(spec, name)
+        if value != default or type(value) is not type(default):
+            return (
+                f"the {spec.direct_variant} direct variant does not use {name}; it "
+                f"must be {default!r}, got {value!r}"
+            )
+    if (
+        type(spec.block_waves) is not int
+        or not 1 <= spec.block_waves <= _DIRECT_MAX_BLOCK_WAVES
+    ):
+        return f"block_waves must be an integer in [1, {_DIRECT_MAX_BLOCK_WAVES}]"
+    if spec.direct_variant == DIRECT_VARIANT_SPATIAL:
+        if type(spec.block_w) is not int or spec.block_w != 0:
+            return "the spatial direct variant derives block_w; it must be 0"
+    elif type(spec.block_w) is not int or not 0 < spec.block_w <= _INT32_MAX:
+        return "block_w must be a positive signed 32-bit integer"
+    return ""
+
+
 def _aot_direct_error(spec: ConvFwdAotSpec) -> str:
     """The direct instance contract, before rocKE's validators; "" when accepted.
 
@@ -1982,36 +2044,7 @@ def _aot_direct_error(spec: ConvFwdAotSpec) -> str:
         value = getattr(spec, name)
         if type(value) is not int or not 0 <= value <= _INT32_MAX:
             return f"{name} must be a nonnegative signed 32-bit integer"
-    if not target.gfx950_direct_contract:
-        return _gfx1250_direct_knob_error(spec)
-    if spec.direct_variant not in _AOT_HALO_VARIANTS and (
-        spec.dilation_h != 1 or spec.dilation_w != 1
-    ):
-        return "the direct depthwise kernels have no dilation (dilation_h == dilation_w == 1)"
-    if spec.stride_h != spec.stride_w or spec.pad_h != spec.pad_w:
-        return "the direct depthwise kernels compile one stride and one padding"
-    if spec.filter_h != spec.filter_w:
-        return "the direct sweep builds square filters only"
-    if spec.direct_variant not in _DIRECT_VARIANTS:
-        return _aot_direct_knob_error(spec)
-    for name, default in _AOT_DIRECT_KNOB_DEFAULTS.items():
-        value = getattr(spec, name)
-        if value != default or type(value) is not type(default):
-            return (
-                f"the {spec.direct_variant} direct variant does not use {name}; it "
-                f"must be {default!r}, got {value!r}"
-            )
-    if (
-        type(spec.block_waves) is not int
-        or not 1 <= spec.block_waves <= _DIRECT_MAX_BLOCK_WAVES
-    ):
-        return f"block_waves must be an integer in [1, {_DIRECT_MAX_BLOCK_WAVES}]"
-    if spec.direct_variant == DIRECT_VARIANT_SPATIAL:
-        if type(spec.block_w) is not int or spec.block_w != 0:
-            return "the spatial direct variant derives block_w; it must be 0"
-    elif type(spec.block_w) is not int or not 0 < spec.block_w <= _INT32_MAX:
-        return "block_w must be a positive signed 32-bit integer"
-    return ""
+    return spec.direct_contract_error()
 
 
 def _aot_sweep_error(spec: ConvFwdAotSpec) -> tuple[bool, str]:
@@ -2313,10 +2346,35 @@ def _aot_admits(spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec) -> tuple[bool,
     return (True, "ok") if ok else (False, why)
 
 
-def _aot_direct_serves(
+def _gfx1250_direct_launch_serves(
     spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
-    """Whether a direct instance other than std or spatial computes ``problem``,
+    """Whether a gfx1250 direct instance computes ``problem``, which already passed
+    the problem checks: the admission alone decides what the problem must have (the
+    WMMA pipelines bake per-axis geometry and some channel counts), then the launch
+    has to fit: grid y and z 65535, grid x a 32-bit dispatch (its WMMA kernels walk
+    output columns or tiles along x).
+    """
+    ok, why = _aot_admits(spec, problem)
+    if not ok:
+        return False, why
+    step = spec.launch_step(problem)
+    grid = step.grid
+    if (
+        grid[0] > _AOT_NONGROUPED_MAX_GRID_X
+        or grid[0] * step.block[0] > _AOT_MAX_DISPATCH_ITEMS
+    ):
+        return False, f"direct grid x = {grid[0]} does not fit one dispatch"
+    for axis, extent in zip("yz", grid[1:]):
+        if extent > _MAX_GRID_DIM:
+            return False, f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
+    return True, "ok"
+
+
+def _gfx950_direct_launch_serves(
+    spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """Whether a gfx950 direct instance other than std or spatial computes ``problem``,
     which already passed the problem checks.
 
     rocKE's dispatcher admission (:func:`_aot_admits`), after naming the first
@@ -2327,27 +2385,8 @@ def _aot_direct_serves(
     axis 65535, the flat grid of the non-grouped and grouped-halo kernels (and
     of a split-C instance's fold) a 32-bit dispatch.
 
-    On gfx1250 the admission alone decides what the problem must have (the WMMA
-    pipelines bake per-axis geometry and some channel counts), then the launch
-    has to fit: grid y and z 65535, grid x a 32-bit dispatch (its WMMA kernels
-    walk output columns or tiles along x).
     """
     variant = spec.direct_variant
-    if not spec.TARGET.gfx950_direct_contract:
-        ok, why = _aot_admits(spec, problem)
-        if not ok:
-            return False, why
-        step = spec.launch_step(problem)
-        grid = step.grid
-        if (
-            grid[0] > _AOT_NONGROUPED_MAX_GRID_X
-            or grid[0] * step.block[0] > _AOT_MAX_DISPATCH_ITEMS
-        ):
-            return False, f"direct grid x = {grid[0]} does not fit one dispatch"
-        for axis, extent in zip("yz", grid[1:]):
-            if extent > _MAX_GRID_DIM:
-                return False, f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
-        return True, "ok"
     if problem.sH != problem.sW or problem.pH != problem.pW:
         return False, "the direct kernels compile one stride and one padding"
     for label, baked, actual in (
@@ -2435,7 +2474,7 @@ def conv_fwd_aot_serves(
     (:func:`_direct_serves`) on the instance's compiled filter, stride and
     padding, which the native pack shares with the exact-shape engine. The
     other direct variants: rocKE's dispatcher admission plus the packaged
-    launch bounds (:func:`_aot_direct_serves`). Batch, image and group count
+    launch bounds (``spec.direct_serves``). Batch, image and group count
     are kernel arguments, and for non-grouped the channel counts too.
 
     A non-grouped or grouped-halo instance runs a batch rocKE splits in pieces
@@ -2465,13 +2504,7 @@ def conv_fwd_aot_serves(
     if problem.dtype != spec.dtype:
         return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
     if spec.is_direct:
-        if (
-            spec.TARGET.gfx950_direct_contract
-            and spec.direct_variant in _DIRECT_VARIANTS
-        ):
-            caps = conv_fwd_aot_capabilities(spec)
-            return _direct_serves(caps, spec.runtime_spec(problem))
-        return _aot_direct_serves(spec, problem)
+        return spec.direct_serves(problem)
     if problem.Y * problem.X * (problem.C // problem.groups) >= MUL24_REDUCTION_LIMIT:
         return False, "the reduction extent Y*X*C/groups must stay below 2**23"
     return _aot_admits(spec, problem)
@@ -2637,11 +2670,3 @@ def supports_gfx950_conv_fwd_aot_problem(
     if arch != _ARCH:
         return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
     return supports_conv_fwd_aot_problem(problem, arch=arch)
-
-
-# The names the gfx950 engine's tools and tests have used since before gfx1250
-# shared this module; each is the function above, for either target.
-gfx950_conv_fwd_aot_capabilities = conv_fwd_aot_capabilities
-gfx950_conv_fwd_aot_batch_chunks = conv_fwd_aot_batch_chunks
-gfx950_conv_fwd_aot_serves = conv_fwd_aot_serves
-gfx950_conv_fwd_aot_runtime_candidates = conv_fwd_aot_runtime_candidates

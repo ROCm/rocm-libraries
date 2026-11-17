@@ -130,7 +130,7 @@ only below 64 groups, and every grid axis at most 65535.
 
 The other variants serve what rocKE's grouped-convolution dispatcher admits for them
 (and `grouped_halo` only for more than one group),
-which is what its direct benchmark offers them (`_aot_direct_serves`;
+which is what its direct benchmark offers them (`_gfx950_direct_launch_serves`;
 `identity_supports_problem`, then `direct_spec_for_problem`, which rebuilds the kernel
 spec on the real problem and runs its validator):
 the graph has one stride and one padding, the compiled filter, stride, padding and
@@ -157,7 +157,7 @@ problem cannot state.
 
 Natively, `aotDirectInstance` in `ConvFwdAotNative.cpp` parses the variant and its
 knobs (`aotDirectVariantUses`), and `conv::directInstanceLaunch` in
-`ConvFwdAotGeometry.hpp` applies the variant's rule (`depthwiseTileLaunch`,
+`Gfx950ConvFwdGeometry.hpp` applies the variant's rule (`depthwiseTileLaunch`,
 `groupedDirectLaunch`, `nongroupedDirectLaunch` for both DirectNongroupedConvSpec
 variants). `TestGfx950ConvFwdGeometry.cpp`
 holds it to a table of (instance, problem) cases that
@@ -195,7 +195,7 @@ launch as keep both windows below the offset, and the launches are balanced: a b
 images.
 
 The packaged engine runs it the same way. `conv::nongroupedBatchChunks` in
-`ConvFwdAotGeometry.hpp` (`gfx950_conv_fwd_aot_batch_chunks` in the adapter) gives
+`Gfx950ConvFwdGeometry.hpp` (`conv_fwd_aot_batch_chunks` in the adapter) gives
 the images per launch. The graph matcher admits such a graph even when a whole tensor
 passes the i32 launch ABI; only a non-grouped or grouped-halo instance serves it, and
 only when it serves each chunk as a problem of its own. That is stricter than
@@ -216,7 +216,7 @@ pointwise graphs are served by grouped instances: an instance is built against a
 probe, so it is never rocKE's pointwise GEMM.
 
 An implicit-GEMM instance serves a graph when all of these hold (`aotInstanceLaunch` in
-`ConvFwdAotGeometry.hpp`, `gfx950_conv_fwd_aot_serves` in the adapter). Both apply
+`Gfx950ConvFwdGeometry.hpp`, `conv_fwd_aot_serves` in the adapter). Both apply
 the exact-shape engine's capability check (`implicitGemmServes`,
 `_implicit_gemm_serves`) to the widths the identity records, plus the async chunks:
 
@@ -297,7 +297,7 @@ applies to them alone, in this order: the knob filter (a forced `tile_k` or
 `HIPDNN_INGESTOR_SHORTLIST_LIMIT`. A forced knob therefore picks among the selected
 instances; a knob value that only narrower copies have selects nothing.
 
-The Python mirror is `gfx950_conv_fwd_aot_runtime_candidates` in
+The Python mirror is `conv_fwd_aot_runtime_candidates` in
 `rocke/library/builders/common/convolution_forward.py`. Three tests hold the three
 together:
 
@@ -653,8 +653,8 @@ Each row of the table states how many instances of each family are selected for 
 graph, in the seed and in the full catalog, with the full catalog's implicit-GEMM count
 per dtype, since each dtype has a list of its own.
 `tests/test_make_conv_aot_config.py` recomputes the counts with
-`gfx950_conv_fwd_aot_runtime_candidates` over the committed lists, checks that they never
-exceed what `gfx950_conv_fwd_aot_serves` counts, and checks that every seed instance is
+`conv_fwd_aot_runtime_candidates` over the committed lists, checks that they never
+exceed what `conv_fwd_aot_serves` counts, and checks that every seed instance is
 selected for some graph. The integration
 CMake compiles each engine's suite only where that engine ships: the seed's where the
 integration root packs it for gfx950, the product's where the product root offers it.
