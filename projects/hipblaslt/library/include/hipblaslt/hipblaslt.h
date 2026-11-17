@@ -418,6 +418,15 @@ typedef enum
 } hipblasLtInt4Encoding_t;
 
 /*! \ingroup types_module
+ *  \brief Defined to 1 when this header declares the w4a16 API: ``HIP_R_4I`` matrix A with the
+ *  ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC*_16{BF,F}[_ZP]_EXT`` scale modes, the
+ *  ``HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT`` attribute and ``hipblasLtInt4Encoding_t``.
+ *  Use it to guard code against older headers; whether the current device has w4a16 kernels is
+ *  answered at run time by ``hipblasLtMatmulAlgoGetHeuristic``.
+ */
+#define HIPBLASLT_HAS_W4A16 1
+
+/*! \ingroup types_module
  *  \brief Mode values for the ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT``
  *  attribute and the C++ ext ``GemmPreference::setStreamKTileSchedulingMode``.
  *
