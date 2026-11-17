@@ -296,14 +296,16 @@ class MxGemmSpec:
     counted in code order over the whole kernel, so a K loop body longer than
     the instruction cache finds its next code already fetched on every pass.
 
-    ``wmma_reuse`` (``local_prefetch`` 0, the 16x16 WMMA) orders each
-    K-step's WMMAs and flags every WMMA whose next WMMA takes the same
-    operand, so the hardware may keep that operand instead of reading it
-    again from VGPRs: ``"b"`` N-repeat outer, M-repeat inner, flagging B;
-    ``"a"`` M-repeat outer, N-repeat inner, flagging A; ``"ab"`` N-repeat
-    outer with the M-repeats in alternating direction, flagging B within an
-    N-repeat and A where the direction turns. ``"none"`` issues them M-repeat
-    outer, without flags.
+    ``wmma_reuse`` (the 16x16 WMMA; ``local_prefetch`` 0, or ``"b"`` with B
+    in halves) orders each K-step's WMMAs and flags every WMMA whose next
+    WMMA takes the same operand, so the hardware may keep that operand
+    instead of reading it again from VGPRs: ``"b"`` N-repeat outer, M-repeat
+    inner, flagging B; ``"a"`` M-repeat outer, N-repeat inner, flagging A;
+    ``"ab"`` N-repeat outer with the M-repeats in alternating direction,
+    flagging B within an N-repeat and A where the direction turns.
+    ``"none"`` issues them M-repeat outer, without flags. With read-ahead and
+    B in halves (``half_plr`` "b"), whose WMMAs already run N-repeat outer
+    within a half, ``"b"`` flags every WMMA but the last of each B fragment.
 
     ``scales`` is where the WMMAs' E8M0 scale words come from: ``"lds"``
     from shared memory, where the TDM stages them with the tile;
@@ -999,7 +1001,10 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
     if spec.wmma_reuse not in WMMA_REUSE:
         return f"wmma_reuse must be one of {WMMA_REUSE}"
     if spec.wmma_reuse != "none" and spec.local_prefetch != 0:
-        return f"wmma_reuse {spec.wmma_reuse!r} needs local_prefetch 0"
+        if spec.wmma_reuse != "b":
+            return f"wmma_reuse {spec.wmma_reuse!r} needs local_prefetch 0"
+        if not spec.half_b:
+            return "wmma_reuse 'b' with local_prefetch 1 needs half_plr 'b'"
     if spec.wmma_reuse != "none" and spec.mma != "16x16":
         return f"wmma_reuse {spec.wmma_reuse!r} is for the 16x16 WMMA"
     if spec.scales not in SCALES:
@@ -2325,6 +2330,7 @@ class TileCompute:
         spec = k.spec
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         half = rn_count // 2
+        reuse_b = spec.wmma_reuse == "b"
         buffer = k.buffer_base(parity)
         out = list(accumulators)
         mma = self._mma_fn(out)
@@ -2368,6 +2374,7 @@ class TileCompute:
                         b_halves[which][j],
                         a_scales[rm],
                         b_scales[rn],
+                        reuse_b=reuse_b and rm + 1 < rm_count,
                     )
                 if signal_here and issued == spec.signal_wmmas:
                     hooks.signal()
@@ -2379,6 +2386,7 @@ class TileCompute:
         k, reader = self.k, self.reader
         spec = k.spec
         rm_count, half = spec.wave_repeat_m, spec.wave_repeat_n // 2
+        reuse_b = spec.wmma_reuse == "b"
         buffer = k.buffer_base(parity)
         out = list(accumulators)
         mma = self._mma_fn(out)
@@ -2419,6 +2427,7 @@ class TileCompute:
                             b_halves[which][j],
                             a_scales[rm],
                             b_scales[rn],
+                            reuse_b=reuse_b and rm + 1 < rm_count,
                         )
                 if signal_here and issued == spec.signal_wmmas:
                     hooks.signal()

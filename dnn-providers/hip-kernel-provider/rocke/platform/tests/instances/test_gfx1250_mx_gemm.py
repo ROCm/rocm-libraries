@@ -318,8 +318,9 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertIn("_kcont", _spec6(k_reads="contiguous").kernel_name())
 
     def test_wmma_reuse_validates_and_names(self):
-        """Operand reuse runs with local_prefetch 0 and the 16x16 WMMA, and
-        tags the kernel name."""
+        """Operand reuse runs with local_prefetch 0 and the 16x16 WMMA (B
+        reuse also with read-ahead and B in halves), and tags the kernel
+        name."""
         direct = {"local_prefetch": 0, "half_plr": "none"}
         self.assertEqual(WMMA_REUSE, ("none", "a", "b", "ab"))
         tags = {"a": "_ra", "b": "_rb", "ab": "_rab"}
@@ -331,11 +332,23 @@ class MxGemmSpecTest(unittest.TestCase):
                 with self.subTest(spec.kernel_name()):
                     self.assertIsNone(validate(spec))
                     self.assertTrue(spec.kernel_name().endswith(tag))
+        for spec in (
+            _spec6(wmma_reuse="b"),
+            _spec6(wmma_reuse="b", half_b_order="late"),
+            _spec8(wmma_reuse="b", half_b_order="late"),
+        ):
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                self.assertIn("_rb", spec.kernel_name())
         plain = _spec6(**direct).kernel_name()
         self.assertFalse(any(tag in plain for tag in tags.values()))
         bad = {
             "value": (_spec6(wmma_reuse="c", **direct), "wmma_reuse must be one of"),
             "prefetch": (_spec6(wmma_reuse="ab"), "needs local_prefetch 0"),
+            "half-B": (
+                _spec6(wmma_reuse="b", half_plr="none"),
+                "with local_prefetch 1 needs half_plr 'b'",
+            ),
             "atom": (_spec(wmma_reuse="a", **direct), "is for the 16x16 WMMA"),
         }
         for label, (spec, reason) in bad.items():
@@ -1810,6 +1823,50 @@ class MxGemmIrTest(unittest.TestCase):
                                 step[i][1] == step[j][1], order[i][1] == order[j][1]
                             )
 
+    def test_half_b_reuse_flags_each_b_fragment_but_its_last(self):
+        """With read-ahead and B in halves, wmma_reuse "b" flags B on exactly
+        the WMMAs whose next WMMA takes the same B fragment (every M-repeat
+        of a B fragment but the last) and never A; without it no WMMA flags
+        an operand."""
+        call = re.compile(
+            _WMMA + r"[^(]*\(i32 \d+, <16 x i32> (%[\w.]+), i32 \d+, "
+            r"<16 x i32> (%[\w.]+),[^\n]*i1 (true|false), i1 (true|false)\)"
+        )
+        swait = {"k_reads": "contiguous", "scale_swap": "wait"}
+        for base in (
+            _spec6(tile_m=256, tile_n=128, tile_k=512, half_b_order="late", **swait),
+            _spec6(lds_buffers=3, half_b_order="late", **swait),
+            _spec6(half_b_order="ahead"),
+            _spec8(half_b_order="late"),
+            _spec6(
+                256,
+                512,
+                2048,
+                tile_m=64,
+                tile_n=128,
+                tile_k=512,
+                lds_buffers=3,
+                half_b_order="late",
+                cluster_dim=(4, 2, 1),
+                **swait,
+            ),
+        ):
+            rm = base.wave_repeat_m
+            for reuse in ("none", "b"):
+                spec = replace(base, wmma_reuse=reuse)
+                with self.subTest(spec.kernel_name()):
+                    self.assertIsNone(validate(spec))
+                    calls = call.findall(_llvm(spec))
+                    self.assertGreater(len(calls), 0)
+                    self.assertFalse(any(c[2] == "true" for c in calls))
+                    flags = [c[3] == "true" for c in calls]
+                    if reuse == "none":
+                        self.assertFalse(any(flags))
+                        continue
+                    shared = [x[1] == y[1] for x, y in zip(calls, calls[1:])] + [False]
+                    self.assertEqual(flags, shared)
+                    self.assertEqual(sum(flags) * rm, len(calls) * (rm - 1))
+
     def test_register_scales_load_ahead_and_select_halves(self):
         """Register scales: no TDM scale loads and no LDS scale reads. Tile 0's
         words load before the loop and each tile loads the next tile's, one
@@ -3156,6 +3213,57 @@ class MxGemmDeviceTest(unittest.TestCase):
                             "read_issue": "interleave",
                             "read_bases": "fixed",
                             "cluster_dim": (1, 2, 1),
+                        },
+                    ),
+                )
+            ]
+            # B reuse with B in halves: half-B late with two and three
+            # buffers and a K tail, half-B ahead, FP8, the 64x128x512 tile.
+            + [
+                make(*problem, wmma_reuse="b", **fields)
+                for make, problem, fields in (
+                    (
+                        _spec6,
+                        (512, 512, 2048 + 512),
+                        {
+                            "tile_m": 256,
+                            "tile_n": 128,
+                            "tile_k": 512,
+                            "half_b_order": "late",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                    (
+                        _spec6,
+                        (1000, 1000, 2048 + 256),
+                        {
+                            "half_b_order": "late",
+                            "lds_buffers": 3,
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (1, 1, 1),
+                        },
+                    ),
+                    (_spec6, (512, 512, 2048), {"cluster_dim": (2, 2, 1)}),
+                    (
+                        _spec8,
+                        (512, 512, 2048),
+                        {"half_b_order": "late", "cluster_dim": (2, 2, 1)},
+                    ),
+                    (
+                        _spec6,
+                        (256, 512, 2048),
+                        {
+                            "tile_m": 64,
+                            "tile_n": 128,
+                            "tile_k": 512,
+                            "half_b_order": "late",
+                            "lds_buffers": 3,
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (4, 2, 1),
                         },
                     ),
                 )
