@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -212,6 +213,8 @@ TEST_CASE("NN: rank_configs inference=nn_fallback uses analytical", "[nn]") {
   const auto results = origami::rank_configs(problem, hardware, configs, options);
   REQUIRE_FALSE(results.empty());
   REQUIRE(results.front().latency > 0.0);
+  // The analytical model reports a latency and leaves score NaN.
+  for (const auto& r : results) REQUIRE(std::isnan(r.score));
 }
 
 TEST_CASE("NN: gemm_tilewright feature dimensions", "[nn]") {
@@ -361,13 +364,23 @@ TEST_CASE("NN: rank_configs inference=nn ranks with loaded tilewright model", "[
 
   const auto results = origami::rank_configs(problem, hardware, configs, options);
   REQUIRE_FALSE(results.empty());
-  REQUIRE(std::isfinite(results.front().latency));
+  REQUIRE(std::isfinite(results.front().score));
 
-  bool any_scored = false;
+  // The model produces a score, not a time: latency is NaN on every NN entry.
+  for (const auto& r : results) REQUIRE(std::isnan(r.latency));
+
+  // Scored entries come first, best score first; an unscored entry has no score either.
+  bool seen_unscored = false;
+  double previous    = std::numeric_limits<double>::infinity();
   for (const auto& r : results) {
-    if (std::isfinite(r.latency)) any_scored = true;
+    if (std::isnan(r.score)) {
+      seen_unscored = true;
+      continue;
+    }
+    REQUIRE_FALSE(seen_unscored);
+    REQUIRE(r.score <= previous);
+    previous = r.score;
   }
-  REQUIRE(any_scored);
 }
 
 TEST_CASE("NN: filter_configs rejects LDS-infeasible kernels", "[nn]") {
@@ -500,7 +513,7 @@ TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
 
   REQUIRE_FALSE(routed_results.empty());
   REQUIRE_FALSE(forced_results.empty());
-  REQUIRE(std::isfinite(forced_results.front().latency));
+  REQUIRE(std::isfinite(forced_results.front().score));
 }
 
 namespace {

@@ -2056,3 +2056,18 @@ TEST_CASE("gfx1250 WGP count selects the 6-XCD part", "[hardware]") {
   REQUIRE(p8.mem1_perf_ratio * p8.compute_clock_ghz == Catch::Approx(41930.0));
   REQUIRE(p8.mem3_perf_ratio * p8.compute_clock_ghz == Catch::Approx(17130.0));
 }
+
+TEST_CASE("Origami: prediction_result_t score defaults to NaN", "[origami]") {
+  origami::prediction_result_t result{1.5, origami::config_t{}};
+  REQUIRE(result.latency == 1.5);
+  REQUIRE(std::isnan(result.score));
+
+  // The analytical model fills in latency only.
+  const auto hardware = make_hardware(950);
+  const auto problem  = make_problem(2048, 2048, 2048);
+  std::vector<origami::config_t> configs = {make_config(256, 256, 64), make_config(128, 128, 32)};
+  for (const auto& r : origami::rank_configs(problem, hardware, configs)) {
+    REQUIRE(std::isfinite(r.latency));
+    REQUIRE(std::isnan(r.score));
+  }
+}
