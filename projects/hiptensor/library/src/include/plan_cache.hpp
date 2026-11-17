@@ -30,6 +30,7 @@
 #include <functional>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <hiptensor/hiptensor_types.h>
@@ -66,18 +67,25 @@ namespace hiptensor
 
         UpdatablePriorityQueue() = default;
 
+        // The queue owns its elements, so a copy must own copies of them: sharing the pointers
+        // would let either queue free elements the other still uses.
         UpdatablePriorityQueue(const UpdatablePriorityQueue& other)
-            : mHeapData(other.mHeapData)
-            , mKeyToElement(other.mKeyToElement)
         {
+            mHeapData.reserve(other.mHeapData.size());
+            for(auto const* elem : other.mHeapData)
+            {
+                mHeapData.push_back(new Element(*elem));
+                mKeyToElement[elem->key] = mHeapData.back();
+            }
         }
 
         UpdatablePriorityQueue& operator=(const UpdatablePriorityQueue& other)
         {
             if(this != &other)
             {
-                mHeapData     = other.mHeapData;
-                mKeyToElement = other.mKeyToElement;
+                UpdatablePriorityQueue copy(other);
+                std::swap(mHeapData, copy.mHeapData);
+                std::swap(mKeyToElement, copy.mKeyToElement);
             }
             return (*this);
         }

@@ -114,9 +114,10 @@ namespace hiptensor
 
         assert(mMaxCachelines > 0);
 
-        //If the table size equal to the maximum size, then remove extra LRU(least-recently-used) record
-        if(mPlanCacheLines.size() == mMaxCachelines
-           && mPlanCacheLines.find(hashId) != mPlanCacheLines.end())
+        //If a new cache line would exceed the maximum size, then remove the LRU(least-recently-used) record.
+        //An existing cache line is updated in place and needs no room.
+        while(mPlanCacheLines.size() >= mMaxCachelines && !mPqUidUsedTimes.empty()
+              && mPlanCacheLines.find(hashId) == mPlanCacheLines.end())
         {
             std::pair<HashId, time_point> lru_item = mPqUidUsedTimes.top();
             mPqUidUsedTimes.pop();
