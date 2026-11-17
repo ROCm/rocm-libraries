@@ -11,7 +11,9 @@ contracts. No GPU verdict uses it: the relation compares two subject outputs.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import importlib.util
 import itertools
 import math
 import re
@@ -20,17 +22,21 @@ from collections.abc import Callable
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from functools import cache
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from rocke.core.llvm_profile import LLVM_FLAVORS
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
-from ._analytical import _FORMAT, decode_bits, encode_bits
+from ._analytical import _FORMAT, UniformCase, decode_bits, encode_bits
 from ._dense_subject import (
     DENSE_SUBJECTS,
     PERMUTATION_SUBJECT_CASES,
+    _validate_supported_case,
     _verify_resolved_spec,
+    compile_dense_subject,
     resolve_dense_subject,
     softmax_scale,
 )
@@ -72,7 +78,7 @@ from ._permutation_path import (
     unmasked_path_violations,
     verified_key_tiles,
 )
-from .test_contracts import _fake_tuning_spec
+from .test_contracts import _dotted_name, _fake_tuning_spec
 from .test_permutation_dense import _unresponsive
 
 _LOG2E = 1.4426950408889634
@@ -315,6 +321,23 @@ def test_case_scope_refuses_what_the_bound_does_not_cover() -> None:
         PermutationCase(1, 4, 4, 3, 2, 8, "fp16")
     with pytest.raises(ValueError, match="dtype must be one of"):
         PermutationCase(1, 4, 4, 2, 2, 8, "fp32")
+    # The shape checks are the shared base's, so both lanes' cases refuse a
+    # dimension that is not positive.
+    shape = {
+        "batch": 1,
+        "seqlen_q": 32,
+        "seqlen_k": 32,
+        "nhead_q": 2,
+        "nhead_k": 2,
+        "head_dim": 8,
+    }
+    for name in shape:
+        for value in (0, -1):
+            changed = {**shape, name: value, "dtype": "fp16"}
+            with pytest.raises(ValueError, match=f"{name} must be positive"):
+                PermutationCase(**changed)
+            with pytest.raises(ValueError, match=f"{name} must be positive"):
+                UniformCase(**changed, mask="causal")
     assert len({case.case_id for case in PERMUTATION_QUICK_CASES}) == len(
         PERMUTATION_QUICK_CASES
     )
@@ -1223,6 +1246,15 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
     assert counts == expected_chain_counts(spec.block_n, spec.head_size)
 
 
+def _value_atom_takes_a_loaded_vector(ir: str) -> str:
+    loaded = re.search(r"(%[-\w.]+) = load <4 x half>, ptr addrspace\(1\)", ir)
+    assert loaded, "no <4 x half> load from a global pointer in the lowered IR"
+    return _substitute_once(
+        r"(<4 x half> %vp\d+, <4 x half> )%vp\d+(, <16 x float> )",
+        rf"\g<1>{loaded.group(1)}\2",
+    )(ir)
+
+
 @pytest.mark.parametrize(
     "edit,match",
     [
@@ -1270,6 +1302,34 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
             ),
             "does not read Q from q_ptr",
         ),
+        (
+            # A value atom multiplies V by a Q vector: its second operand is a
+            # load, not a pack of cast probabilities.
+            _value_atom_takes_a_loaded_vector,
+            "not four cast probabilities",
+        ),
+        (
+            # Slot 0 of a pack is written twice. The later write wins, so the
+            # first probability never enters the atom.
+            _substitute_once(
+                r"(%vpk\.\d+)( = insertelement <4 x half> undef, half %cast\d+, "
+                r"i32 0\n)(\s+)(%vpk\.\d+ = insertelement <4 x half> )\1"
+                r"(, half (%cast\d+), i32 1\n)",
+                r"\1\2\3%rewritten = insertelement <4 x half> \1, half \6, i32 0\n"
+                r"\3\4%rewritten\5",
+            ),
+            "not four cast probabilities",
+        ),
+        (
+            # A pack restarts from undef at slot 1, so slot 0 is never written.
+            _substitute_once(
+                r"(insertelement <4 x half> undef, half %cast\d+, i32 0\n"
+                r"\s+%vpk\.\d+ = insertelement <4 x half> )%vpk\.\d+"
+                r"(, half %cast\d+, i32 1\n)",
+                r"\1undef\2",
+            ),
+            "not four cast probabilities",
+        ),
     ],
     ids=[
         "value-region-aliases-keys",
@@ -1277,6 +1337,9 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
         "probability-used-twice",
         "value-chain-skips-an-atom",
         "score-reads-keys-twice",
+        "pack-is-not-an-insert-chain",
+        "pack-slot-written-twice",
+        "pack-slot-never-written",
     ],
 )
 def test_operand_trace_rejects_each_misrouted_operand(edit, match: str) -> None:
@@ -1409,6 +1472,60 @@ def test_fp_mode_is_read_from_the_kernel_descriptor() -> None:
         kernel_descriptor_words(b"not a code object")
 
 
+def test_compiled_subject_must_be_the_resolved_kernel(monkeypatch) -> None:
+    """The artifact the lane checks carries the name of the kernel dispatch
+    resolved; any other artifact is refused before it is read."""
+    import rocke.helpers.compile as compile_module
+
+    arch, case = PERMUTATION_SUBJECT_CASES[0]
+    subject = resolve_dense_subject(arch, case)
+    resolved_name = subject.tuning_spec.kernel_spec.kernel_name()
+
+    def compile_as(kernel_name: str):
+        monkeypatch.setattr(
+            compile_module,
+            "compile_kernel",
+            lambda kernel, **options: SimpleNamespace(kernel_name=kernel_name),
+        )
+        return compile_dense_subject(arch, subject)
+
+    assert compile_as(resolved_name).kernel_name == resolved_name
+    with pytest.raises(AssertionError, match="compiled 'another_kernel', expected"):
+        compile_as("another_kernel")
+
+
+def _compile_calls(path: Path, function: str) -> list[str]:
+    """Source of every ``compile_kernel`` call in one module-level function."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    (definition,) = (
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function
+    )
+    return [
+        ast.unparse(node)
+        for node in ast.walk(definition)
+        if isinstance(node, ast.Call) and _dotted_name(node.func) == "compile_kernel"
+    ]
+
+
+@pytest.mark.parametrize("arch", sorted(DENSE_SUBJECTS))
+def test_subject_compile_call_is_the_launchers(arch: str) -> None:
+    """``compile_dense_subject`` repeats the compile call of the launcher whose
+    kernel it checks. If one of the two changed alone, the lane would check one
+    artifact and launch another, and nothing else would fail."""
+    adapter = _compile_calls(
+        Path(__file__).with_name("_dense_subject.py"), "compile_dense_subject"
+    )
+    runner = importlib.util.find_spec(DENSE_SUBJECTS[arch].runner_module)
+    launcher = _compile_calls(Path(runner.origin), "run_attention_dense_torch")
+    assert len(adapter) == 1 and len(launcher) == 1, (adapter, launcher)
+    assert (
+        adapter[0].replace("runner.build_attention_dense(", "build_attention_dense(")
+        == launcher[0]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Subject scope
 # ---------------------------------------------------------------------------
@@ -1436,6 +1553,22 @@ def test_subject_accepts_only_an_unmasked_spec_for_an_unmasked_case() -> None:
             _verify_resolved_spec(
                 "gfx942", case, _unmasked_tuning_spec(**{name: value})
             )
+
+
+class _BottomRightCase(PermutationCase):
+    """A case of some other lane, with a mask the adapter cannot dispatch."""
+
+    @property
+    def mask(self) -> str:
+        return "bottom_right"
+
+
+def test_subject_refuses_a_case_mask_it_cannot_dispatch() -> None:
+    case = _BottomRightCase(1, 256, 256, 8, 2, 64, "fp16")
+    case.require_scope()
+    for entry in (_validate_supported_case, resolve_dense_subject):
+        with pytest.raises(ValueError, match="case mask must be one of"):
+            entry("gfx942", case)
 
 
 @pytest.mark.parametrize(

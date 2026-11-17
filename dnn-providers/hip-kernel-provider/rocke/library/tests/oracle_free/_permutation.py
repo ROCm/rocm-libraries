@@ -20,7 +20,7 @@ from fractions import Fraction
 
 import numpy as np
 
-from ._analytical import _DTYPES, _FORMAT, decode_bits
+from ._analytical import _DTYPES, _FORMAT, DenseCaseShape, decode_bits
 
 # Token span of the cross-tile and partial-final-tile maps. A test-space
 # boundary: it moves data between streaming steps without assuming the
@@ -38,8 +38,6 @@ _SEED_Q = 0x51
 _SEED_K = 0x4B
 _SEED_V = 0x56
 
-# Smallest normal exponent of each subject dtype.
-_MIN_EXPONENT = {"fp16": -14, "bf16": -126}
 # One FP32 unit of faithful rounding: an operation returns one of the two FP32
 # neighbours of its exact result.
 _FP32_UNIT = 2.0**-23
@@ -81,32 +79,8 @@ class PairingMutation(str, Enum):
 
 
 @dataclass(frozen=True)
-class PermutationCase:
+class PermutationCase(DenseCaseShape):
     """Logical unmasked dense-attention shape for one key-permutation case."""
-
-    batch: int
-    seqlen_q: int
-    seqlen_k: int
-    nhead_q: int
-    nhead_k: int
-    head_dim: int
-    dtype: str
-
-    def __post_init__(self) -> None:
-        for name in (
-            "batch",
-            "seqlen_q",
-            "seqlen_k",
-            "nhead_q",
-            "nhead_k",
-            "head_dim",
-        ):
-            if int(getattr(self, name)) <= 0:
-                raise ValueError(f"{name} must be positive")
-        if self.nhead_q % self.nhead_k:
-            raise ValueError("nhead_q must be a multiple of nhead_k")
-        if self.dtype not in _DTYPES:
-            raise ValueError(f"dtype must be one of {sorted(_DTYPES)}")
 
     @property
     def mask(self) -> str:
@@ -119,22 +93,9 @@ class PermutationCase:
         return 0
 
     @property
-    def output_shape(self) -> tuple[int, int, int, int]:
-        """Return the runner's logical ``[B, Sq, Hq, D]`` output shape."""
-        return (self.batch, self.seqlen_q, self.nhead_q, self.head_dim)
-
-    @property
-    def key_shape(self) -> tuple[int, int, int, int]:
-        """Return the runner's logical ``[B, Sk, Hkv, D]`` K/V shape."""
-        return (self.batch, self.seqlen_k, self.nhead_k, self.head_dim)
-
-    @property
     def case_id(self) -> str:
         """Return a stable identifier for test ids and resolved-subject checks."""
-        return (
-            f"{self.dtype}-none-b{self.batch}-sq{self.seqlen_q}-"
-            f"sk{self.seqlen_k}-hq{self.nhead_q}-hk{self.nhead_k}-d{self.head_dim}"
-        )
+        return self._shape_id(self.mask)
 
     def require_scope(self) -> None:
         """Refuse a case the lane's maps or the bound's derivation do not cover.
@@ -442,8 +403,9 @@ def permutation_bound(
     if not 0.0 <= score_spread < math.inf:
         raise ValueError("score_spread must be non-negative and finite")
 
-    fraction_bits = _FORMAT[dtype][0]
-    min_exponent = _MIN_EXPONENT[dtype]
+    fraction_bits, _, bias = _FORMAT[dtype]
+    # Smallest normal exponent of the dtype.
+    min_exponent = 1 - bias
     unit = _FP32_UNIT
     cast = 2.0 ** -(fraction_bits + 1)
     subnormal_half = 2.0 ** (min_exponent - fraction_bits - 1)

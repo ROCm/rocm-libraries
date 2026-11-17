@@ -342,7 +342,9 @@ anything, and fails, never skips, when one is missing:
 
 - The resolved spec is the unmasked single-pass dense kernel (see below).
 - The kernel is compiled as the launcher compiles it, and the path checks above
-  run on the LLVM IR of that artifact, not on an earlier build.
+  run on the LLVM IR of that artifact, not on an earlier build. The adapter
+  repeats the launcher's compile call; a CPU contract fails when the two calls
+  differ.
 - The number of key tiles a query row visits is taken from that IR: one KV loop
   over `seqlen_kv / block_n` whole tiles, with no mask and no early exit. A
   count inferred from the requested shape alone is not used.
