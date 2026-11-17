@@ -3,8 +3,9 @@
 
 """Build the CDNA SDPA backward code objects from ``Spec`` strings (``_sdpa_bwd_spec``).
 
-The split ops (prep, dkdv, dq) also build ``gfx11-generic``: their generator modules pass that arch to
-``_sdpa_bwd_rdna_build``, which reuses this module's pool, parameter lists and helpers (``run_op``'s ``other_arches``).
+The split ops (prep, dkdv, dq) also build ``gfx11-generic`` (their generator modules pass that arch to
+``_sdpa_bwd_rdna_build``, which reuses this module's pool, parameter lists and helpers: ``run_op``'s ``other_arches``) and gfx942 and
+gfx90a (``_sdpa_bwd_split_build``: the fp32 rows are built here, the 16-bit rows by ``_sdpa_bwd_rdna_build``).
 
 Two entry points share one compile:
 
@@ -33,7 +34,7 @@ LLVM's optimisation of some kernels' IR is not deterministic: identical MLIR can
 process, so rebuilding identical sources can give a different object than the sweep's pin. The 16-bit dQ and dK/dV modules
 are also compiled for a second target (``gfx950`` with ``{fast, unsafe_math}``, from their ``_COMPILE_HINTS``), so the same bug
 surfaces as ``dual_object`` when the two embedded objects differ: the extractor refuses them and nothing chooses one (the runtime
-loads the first). One list and one policy cover both arches and both symptoms.
+loads the first). One list and one policy cover every arch of the backward ops (gfx950, gfx11-generic, gfx942, gfx90a) and both symptoms.
 
 The list is ``tests/data/sdpa_bwd_nondeterministic.csv`` (``_sdpa_bwd_nondet``, its schema and loader). A row is listed when
 sampling (N = 6 fresh-process builds of every tuned row, under the regeneration conditions: ``FLYDSL_GEN_JOBS=28``, gfx950 dQ at 8)
@@ -75,7 +76,7 @@ options (``_fp32_reduce_reference``). The four pinned ops (``sdpa_bwd_{prep,dkdv
 ships its build and does not build (``error``, or ``dual_object`` after the rebuilds), a red R-MIR verdict,
 an object that was not scanned, or a red per-kernel gate stops the run, and nothing is shipped.
 
-R-MIR policy (every build path of a gfx950 object: this module's ``--specs`` mode and the four shipped ops, the tail-zero
+R-MIR policy (every build path of a gfx950, gfx942 or gfx90a object: this module's ``--specs`` mode and the four shipped ops, the tail-zero
 generator, and the sweep's ``tools/manifest.py``):
 
 * A freshly built object is always scanned; ``not scanned`` fails like a red verdict. A stored pin (``ship: pin``, or a stored
@@ -84,11 +85,11 @@ generator, and the sweep's ``tools/manifest.py``):
   ``exception``), else the run stops. A nondeterministic pin whose own rebuild is red also stops the run. A pinned exception
   (``known-bad-fresh-build``) is covered by a device screen of the pin, recorded in its ``evidence``.
 * ``tools/rmir_known.csv`` exempts no merged spec.
-* The detector is gfx950-only. gfx11 objects have no R-MIR scan; they must be their S1 pin byte for byte (``REGEN.md``).
+* The detector reads gfx950, gfx942 and gfx90a objects. gfx11 objects have no R-MIR scan; they must be their S1 pin byte for byte (``REGEN.md``).
 
 The dQ and merged ops also list the tail-zero objects (one per dtype) under ``companions`` of their manifest (``write_companions``): the dQ
-build keeps them (``gen_sdpa_bwd_dq.py`` builds them), the merged build lists the dQ folder's (``dq_tailzero_companions``; dQ is generated
-first). They have no pin and no reference row: ``gen_sdpa_bwd_tailzero.py`` is their provenance, so the pin and reference requirements above
+build keeps them (``gen_sdpa_bwd_dq.py`` builds them; on gfx942 and gfx90a ``_sdpa_bwd_split_build`` does), the merged build lists the dQ
+folder's (``dq_tailzero_companions``; dQ is generated first). They have no pin and no reference row: ``gen_sdpa_bwd_tailzero.py`` is their provenance, so the pin and reference requirements above
 do not reach them.
 
 The kernels are the ones under ``kernels_src/kernels/attention_bwd_cdna/``. Each is
@@ -145,18 +146,26 @@ from ._sdpa_bwd_spec import (  # noqa: F401  (LADDER is part of this module's su
     FP32,
     KERNELS,
     LADDER,
+    LDS_LIMIT_BYTES,
     Spec,
     U2_SYMBOLS,
     dbias_reduce_spec,
+    family,
     rung_below,
     to_spec,
 )
 
-# The arches each op is built for here. One entry per op, by `sdpa_bwd_<kernel>`.
-_OP_ARCHES = {f"sdpa_bwd_{kernel}": ("gfx950",) for kernel in KERNELS}
-
 # The kernels of the split engine's slots: their rows carry `grid`.
 SPLIT_KERNELS = ("prep", "dkdv", "dq")
+
+# The arches each op is built for here: the CDNA-family rows of each (gfx942 and gfx90a: their fp32 rows, with the RDNA family
+# building the 16-bit ones, ``_sdpa_bwd_split_build``). One entry per op, by `sdpa_bwd_<kernel>`.
+_OP_ARCHES = {
+    f"sdpa_bwd_{kernel}": (
+        ("gfx950", "gfx942", "gfx90a") if kernel in SPLIT_KERNELS else ("gfx950",)
+    )
+    for kernel in KERNELS
+}
 
 # `_extract_hsaco.extract_bin_attr` words a dump with two different objects this way.
 _DUAL_OBJECT_MARK = "embedded objects are not identical"
@@ -542,10 +551,6 @@ _GRID_RULE = {
     "dsink_reduce": "heads",
 }
 
-# LDS one workgroup may allocate on gfx950. The compiler reports an object over it as
-# an error, yet still emits the object, which then fails to launch.
-_LDS_LIMIT_BYTES = 163840
-
 
 # The dV-only object (``u2=dv``) runs one workgroup column per V head.
 _GRID_RULE_DVONLY = "vheads_by_kvblocks_by_seqs"
@@ -564,15 +569,20 @@ def op_of(spec: Spec) -> str:
     return f"sdpa_bwd_{spec.kernel}"
 
 
-def reduce_symbol_of(spec: Spec) -> str:
+def reduce_symbol_of(spec: Spec, standalone: bool = False) -> str:
     """The dBias reduce kernel the object of @p spec carries beside its own: the dB-storing ``bias`` objects of the merged and dQ kernels.
 
     An fp32 bias dQ object always stores dB (``store_db`` is not an fp32 knob), so it always carries the fp32 reduce; the reduce is keyed by the
-    dtype of the bias (dB takes it), so a ``bias_f32`` object beside 16-bit Q carries the fp32 reduce too.
+    dtype of the bias (dB takes it), so a ``bias_f32`` object beside 16-bit Q carries the fp32 reduce too. With @p standalone a dQ object
+    is the plain dQ kernel alone, which is the pin of a combined row (the S1 catalogue holds the standalone dQ object;
+    ``sdpa_bwd_gate.pin_gate`` compares the shipped object against it): none. A merged object has no standalone form.
     """
     return (
         SDPA_BWD_REDUCE_SYMBOL[spec.bias_dtype]
-        if spec.kernel in ("merged", "dq") and spec.cls == "bias" and spec.store_db != 0
+        if not (standalone and spec.kernel == "dq")
+        and spec.kernel in ("merged", "dq")
+        and spec.cls == "bias"
+        and spec.store_db != 0
         else ""
     )
 
@@ -634,7 +644,7 @@ def floor_value(spec: Spec):
     if spec.floor == "g1":
         return None
     if spec.floor == "tail":
-        return rung_below(spec.tile, spec.dtype)
+        return rung_below(spec.tile, spec.dtype, spec.arch)
     return int(spec.floor)
 
 
@@ -808,8 +818,8 @@ FP32_DQ_REFUSED = frozenset(
 )
 
 
-def build(spec: Spec) -> Built:
-    """A fresh launcher for @p spec; nothing is compiled yet."""
+def build(spec: Spec, standalone: bool = False) -> Built:
+    """A fresh launcher for @p spec; nothing is compiled yet. With @p standalone a combined dQ row builds without its reduce kernel (see ``reduce_symbol_of``)."""
     if spec.key() in FP32_DQ_REFUSED:
         raise NotImplementedError(
             f"{spec.key()} is not built: SGPR spill to scratch after 5 repair rounds; served by the block_m=32 twin"
@@ -821,6 +831,7 @@ def build(spec: Spec) -> Built:
             spec.tile,
             bool(spec.padded),
             **({"sink": True} if spec.sink else {}),
+            **({"vec_tail": True} if spec.vec_tail else {}),
         )
         return Built(spec, _single_jit(launch), mod, None, None, _hints_of(mod, spec))
     if spec.kernel == "dbias_reduce":
@@ -867,7 +878,7 @@ def build(spec: Spec) -> Built:
         if fl is not None:
             kw["hdim_qk_floor"] = fl
         knobs = _pin_dkdv(
-            spec, lambda **o: tuning.bwd_dkdv_knobs("gfx950", **kw, **o), meta
+            spec, lambda **o: tuning.bwd_dkdv_knobs(spec.arch, **kw, **o), meta
         )
     else:
         mod, builder = _family(spec, "dq")
@@ -894,9 +905,9 @@ def build(spec: Spec) -> Built:
         if fl is not None:
             kw["hdim_qk_floor"] = fl
         knobs = _pin_dq(
-            spec, lambda **o: tuning.bwd_dq_knobs("gfx950", **kw, **o), meta
+            spec, lambda **o: tuning.bwd_dq_knobs(spec.arch, **kw, **o), meta
         )
-        extra = {"dbias_reduce": bool(reduce_symbol_of(spec))}
+        extra = {"dbias_reduce": bool(reduce_symbol_of(spec, standalone))}
     rt = ("dropout",) if spec.dform == "rt" else ()
     launch = builder(meta, knobs, runtime_axes=rt, **extra)
     return Built(spec, _single_jit(launch), mod, meta, knobs, _hints_of(mod, spec))
@@ -1095,10 +1106,12 @@ def _run_gate(
     reduce_symbol: str = "",
     reference_dir: Path | None = None,
     reference_csv: Path = _REFERENCE_CSV,
+    scan_only: bool = False,
 ) -> dict:
     """The gates of the object file @p obj, scanned with the dump of the compile that produced it (none: @p obj is a stored pin, R-MIR is not scanned).
 
     With a @p reduce_symbol and a @p reference_dir, the pins are the objects there, checked against the rows of @p reference_csv.
+    With @p scan_only the result is the R-MIR scan alone (an object of a generic arch, ``sdpa_bwd_gate.py --scan-only``).
     """
     command = [
         sys.executable,
@@ -1108,6 +1121,8 @@ def _run_gate(
         "--spec",
         spec.key(),
     ]
+    if scan_only:
+        command += ["--scan-only"]
     command += ["--greedy-dump", str(greedy)] if greedy is not None else ["--pin"]
     if reduce_symbol:
         command += ["--reduce-symbol", reduce_symbol]
@@ -1139,6 +1154,7 @@ def _gate_reference(
     """
     if spec.dtype != FP32:
         return reference_dir, reference_csv
+    reference_dir = reference_dir.resolve()  # the overlay symlinks into it
     if fp32_reduce_dir is None:
         raise GeneratorError(f"{spec.key()}: no fp32 reduce reference was built")
     reduce_spec = dbias_reduce_spec(FP32)
@@ -1178,11 +1194,12 @@ def _gate(
     reference_dir: Path | None,
     reference_csv: Path,
     fp32_reduce_dir: Path | None,
+    standalone: bool = False,
 ) -> dict:
     """The gates of @p blob, scanned with the dump of the compile that produced it."""
     obj = greedy.with_name("obj.hsaco")
     obj.write_bytes(blob)
-    reduce_symbol = reduce_symbol_of(spec)
+    reduce_symbol = reduce_symbol_of(spec, standalone)
     if reduce_symbol and reference_dir is not None:
         reference_dir, reference_csv = _gate_reference(
             spec, reference_dir, reference_csv, fp32_reduce_dir, greedy.parent
@@ -1228,19 +1245,20 @@ def _compile_all(compile_one, tasks, arch: str, label) -> list:
     return results
 
 
-# A compile task: (spec key, spec hash, reference dir, reference CSV, fp32 reduce reference dir, hints kernel). The empty string is none.
-# A non-empty hints kernel names the module of the spec's dtype whose compile hints replace the spec's own: the one object of
-# ``_fp32_reduce_reference``, a standalone fp32 reduce built under the dQ module's options.
-_Task = tuple[str, str, str, str, str, str]
+# A compile task: (spec key, spec hash, reference dir, reference CSV, fp32 reduce reference dir, hints kernel, standalone). The empty
+# string is none. A non-empty hints kernel names the module of the spec's dtype whose compile hints replace the spec's own: the one
+# object of ``_fp32_reduce_reference``, a standalone fp32 reduce built under the dQ module's options. A non-empty ``standalone`` builds a
+# combined row as its standalone dQ object, the pin of the row (``reduce_symbol_of``).
+_Task = tuple[str, str, str, str, str, str, str]
 
 
 def _compile_one(task: _Task) -> Outcome:
     """Compile and gate one spec. Never raises for a build failure."""
-    spec_s, _, reference, reference_csv, fp32_reduce, hints_kernel = task
+    spec_s, _, reference, reference_csv, fp32_reduce, hints_kernel, standalone = task
     geometry = None
     try:
         spec = Spec.parse(spec_s)
-        built = build(spec)
+        built = build(spec, bool(standalone))
         if hints_kernel:
             built.hints = _hints_of(_family(spec, hints_kernel)[0], spec)
         geometry = geometry_of(built) or None
@@ -1269,6 +1287,7 @@ def _compile_one(task: _Task) -> Outcome:
                 Path(reference) if reference else None,
                 Path(reference_csv) if reference_csv else _REFERENCE_CSV,
                 Path(fp32_reduce) if fp32_reduce else None,
+                bool(standalone),
             )
         finally:
             shutil.rmtree(dump_dir, ignore_errors=True)
@@ -1295,7 +1314,7 @@ def _fp32_reduce_reference(arch: str, out: Path) -> Path:
     reduce_spec = dbias_reduce_spec(FP32)
     (outcome,) = _compile_all(
         _compile_one,
-        [(reduce_spec.key(), reduce_spec.hash(), "", "", "", "dq")],
+        [(reduce_spec.key(), reduce_spec.hash(), "", "", "", "dq", "")],
         arch,
         lambda task: f"{task[1]} (fp32 reduce under the dQ options)",
     )
@@ -1349,7 +1368,7 @@ def compile_specs(
 
         def tasks(specs: list[Spec]) -> list[_Task]:
             return [
-                (spec.key(), spec.hash(), reference, csv_path, fp32_reduce, "")
+                (spec.key(), spec.hash(), reference, csv_path, fp32_reduce, "", "")
                 for spec in specs
             ]
 
@@ -1416,10 +1435,10 @@ def _verify_kernel(
 ) -> int:
     """Check one kernel's arch, LDS, kernarg layout and block size against the declared ones; returns its threads per workgroup."""
     verify_arch(described, arch, where)
-    if described["group_segment_fixed_size"] > _LDS_LIMIT_BYTES:
+    if described["group_segment_fixed_size"] > LDS_LIMIT_BYTES[arch]:
         raise GeneratorError(
             f"{where}: needs {described['group_segment_fixed_size']} bytes of LDS; "
-            f"{arch} allows {_LDS_LIMIT_BYTES} per workgroup"
+            f"{arch} allows {LDS_LIMIT_BYTES[arch]} per workgroup"
         )
     expected, _ = _signature(_PARAMS[params_key])
     if described["signature"] != expected:
@@ -1706,7 +1725,8 @@ def read_nondeterministic(
     nondet.check(
         (row for row in rows.values() if wanted is None or row.hash in wanted),
         reference,
-        lambda spec: arch == "gfx950" and bool(reduce_symbol_of(spec)),
+        lambda spec: family(arch, spec.dtype) == "cdna"
+        and bool(reduce_symbol_of(spec)),
     )
     return rows
 
@@ -2079,60 +2099,42 @@ def dq_tailzero_companions(arch: str, op_dir: Path) -> list[dict]:
     ]
 
 
-def generate(
-    op: str,
-    arch: str,
-    out_root: Path,
-    only: set[str] | None = None,
-    reference_dir: Path | None = None,
-    reference_csv: Path = _REFERENCE_CSV,
-    exceptions_csv: Path = _EXCEPTIONS_CSV,
-    nondeterministic_csv: Path = nondet.NONDETERMINISTIC_CSV,
-    build_tailzero: CompanionBuilder | None = None,
-    stored_dir: Path | None = None,
-) -> int:
-    """Build every row of @p op (or the rows whose Spec hash is in @p only) for @p arch.
-
-    @p build_tailzero, when given, supplies the op's tail-zero companions (``(arch, op_dir) -> manifest entries``, objects written into
-    ``op_dir`` if it builds them); they have no pin and no reference row, so they are no row of this run. A failure ships nothing.
-
-    Writes ``<out_root>/<op>/<arch>/``; returns the number of ``error`` rows. The
-    directory must not hold files already. The manifest records the toolchain, ROCm version
-    included (``ROCM_PATH`` or ``ROCM_VERSION`` must name it).
-
-    An op in ``_SHIPPED_OPS`` ships the objects it builds (a row with two objects is rebuilt, ``compile_specs``), except the rows of
-    ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (@p exceptions_csv) and of the nondeterministic list (@p nondeterministic_csv): a
-    standalone row ships the sweep's pin and a combined row the combined object stored in the shipped content under @p stored_dir
-    (``<stored_dir>/<op>/<arch>/manifest.json``; required when a listed combined row is built, and never the directory being written). A
-    listed row's rebuild must still be its pin or a recorded variant (module docstring, "Nondeterministic builds"); the run raises ``GeneratorError``,
-    with nothing left in the op directory, when a row has to stop the run (``_stop_reasons``). It needs @p reference_dir (the sweep's
-    pins, ``<hash>.hsaco``, checked against the rows of @p reference_csv, ``tests/data/sdpa_bwd_reference.csv``): the
-    pins of the standalone pinned rows are shipped from it and the combined rows are gated against it. No other op takes one.
-    """
-    refusal = _refuse({op}, arch)
-    if refusal:
-        raise GeneratorError(refusal)
-    shipped = op in _SHIPPED_OPS
-    if shipped != (reference_dir is not None):
-        raise GeneratorError(
-            f"{op} ships the sweep's pins for its exception rows and needs --reference-dir"
-            if shipped
-            else f"{op} takes no reference directory"
-        )
-    if env.rocm_version() == "unknown":
-        raise GeneratorError(
-            "the ROCm version is unknown: set ROCM_PATH to the ROCm install the build compiles against"
-        )
-    instances = instances_for(op, arch)
+def rows_of(
+    op: str, arch: str, only: set[str] | None = None
+) -> tuple[list, list[Spec]]:
+    """(instances, specs) of the CDNA-family rows of @p op on @p arch (all of gfx950's, the fp32 rows of gfx942 and gfx90a), in table order."""
+    instances = [i for i in instances_for(op, arch) if family(arch, i.dtype) == "cdna"]
     if only is not None:
-        unknown = only - {to_spec(i).hash() for i in instances}
+        unknown = only - {to_spec(i, arch).hash() for i in instances}
         if unknown:
             raise GeneratorError(f"{op} has no row with hash {sorted(unknown)}")
-        instances = [i for i in instances if to_spec(i).hash() in only]
-    op_dir = out_root / op / arch
-    if not _empty_dir(op_dir):
-        raise GeneratorError(f"{op_dir} is not empty")
-    specs = [to_spec(instance) for instance in instances]
+        instances = [i for i in instances if to_spec(i, arch).hash() in only]
+    return instances, [to_spec(instance, arch) for instance in instances]
+
+
+def build_rows(
+    op: str,
+    arch: str,
+    instances: list,
+    specs: list[Spec],
+    op_dir: Path,
+    reference_dir: Path | None,
+    reference_csv: Path,
+    exceptions_csv: Path = _EXCEPTIONS_CSV,
+    rebuild_unstable: bool | None = None,
+    nondeterministic_csv: Path = nondet.NONDETERMINISTIC_CSV,
+    stored_dir: Path | None = None,
+) -> tuple[list[dict], list[str], list[Outcome]]:
+    """Build the CDNA-family rows @p specs (spelled by @p instances) of @p op on @p arch into @p op_dir (created when missing).
+
+    @p rebuild_unstable (default: for a shipped op) lets a row whose build is unstable be rebuilt in a fresh process (``compile_specs``);
+    ``_sdpa_bwd_split_build`` passes True for the CDNA-family rows of gfx942 and gfx90a, as the shipped ops do.
+
+    Returns (manifest records in row order, the reasons a row stops the run, the outcomes). The pins of the exception rows and of the rows
+    of the nondeterministic list @p nondeterministic_csv, the combined rows' gate references and the stored combined objects (@p stored_dir,
+    ``generate``) come from @p reference_dir and @p reference_csv.
+    """
+    shipped = op in _SHIPPED_OPS
     pins: list[Pin | None] = [None] * len(specs)
     if reference_dir is not None:
         reference = read_reference(reference_csv)
@@ -2144,14 +2146,12 @@ def generate(
             )
             for spec in specs
         ]
-    env.assert_flydsl_version()
-    env.prepare(arch)
     outcomes = compile_specs(
         specs,
         arch,
         reference_dir,
         reference_csv,
-        rebuild_unstable=shipped,
+        rebuild_unstable=shipped if rebuild_unstable is None else rebuild_unstable,
         shipped_pins=frozenset(
             spec.hash()
             for spec, pin in zip(specs, pins)
@@ -2160,7 +2160,6 @@ def generate(
             and (not reduce_symbol_of(spec) or pin.reason in _PIN_REASONS)
         ),
     )
-
     op_dir.mkdir(parents=True, exist_ok=True)
     records = []
     for instance, spec, outcome, pin in zip(instances, specs, outcomes, pins):
@@ -2184,15 +2183,83 @@ def generate(
                 geometry=outcome.geometry,
             )
             records.append(_record(instance, spec, failed, op_dir, arch))
-    if shipped:
-        reasons = _stop_reasons(records, pins)
-        if reasons:
-            for written in op_dir.iterdir():
-                written.unlink()
-            raise GeneratorError(
-                f"{len(reasons)} row(s) stop the run, nothing is shipped:\n  "
-                + "\n  ".join(reasons)
-            )
+    return records, (_stop_reasons(records, pins) if shipped else []), outcomes
+
+
+def generate(
+    op: str,
+    arch: str,
+    out_root: Path,
+    only: set[str] | None = None,
+    reference_dir: Path | None = None,
+    reference_csv: Path | None = None,
+    exceptions_csv: Path = _EXCEPTIONS_CSV,
+    nondeterministic_csv: Path = nondet.NONDETERMINISTIC_CSV,
+    build_tailzero: CompanionBuilder | None = None,
+    stored_dir: Path | None = None,
+) -> int:
+    """Build every row of @p op (or the rows whose Spec hash is in @p only) for @p arch (gfx950; the other arches of the backward ops
+    have rows of both families and are built by ``_sdpa_bwd_split_build`` or ``_sdpa_bwd_rdna_build``).
+
+    @p build_tailzero, when given, supplies the op's tail-zero companions (``(arch, op_dir) -> manifest entries``, objects written into
+    ``op_dir`` if it builds them); they have no pin and no reference row, so they are no row of this run. A failure ships nothing.
+
+    Writes ``<out_root>/<op>/<arch>/``; returns the number of ``error`` rows. The
+    directory must not hold files already. The manifest records the toolchain, ROCm version
+    included (``ROCM_PATH`` or ``ROCM_VERSION`` must name it).
+
+    An op in ``_SHIPPED_OPS`` ships the objects it builds (a row with two objects is rebuilt, ``compile_specs``), except the rows of
+    ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (@p exceptions_csv) and of the nondeterministic list (@p nondeterministic_csv): a
+    standalone row ships the sweep's pin and a combined row the combined object stored in the shipped content under @p stored_dir
+    (``<stored_dir>/<op>/<arch>/manifest.json``; required when a listed combined row is built, and never the directory being written). A
+    listed row's rebuild must still be its pin or a recorded variant (module docstring, "Nondeterministic builds"); the run raises ``GeneratorError``,
+    with nothing left in the op directory, when a row has to stop the run (``_stop_reasons``). It needs @p reference_dir (the sweep's
+    pins, ``<hash>.hsaco``, checked against the rows of @p reference_csv, the arch's reference CSV): the
+    pins of the standalone pinned rows are shipped from it and the combined rows are gated against it. No other op takes one.
+    """
+    refusal = _refuse({op}, arch)
+    if refusal:
+        raise GeneratorError(refusal)
+    if arch != "gfx950":
+        raise GeneratorError(
+            f"{op} on {arch} has rows of both families: build it with _sdpa_bwd_split_build, which writes one manifest"
+        )
+    shipped = op in _SHIPPED_OPS
+    if shipped != (reference_dir is not None):
+        raise GeneratorError(
+            f"{op} ships the sweep's pins for its exception rows and needs --reference-dir"
+            if shipped
+            else f"{op} takes no reference directory"
+        )
+    if env.rocm_version() == "unknown":
+        raise GeneratorError(
+            "the ROCm version is unknown: set ROCM_PATH to the ROCm install the build compiles against"
+        )
+    instances, specs = rows_of(op, arch, only)
+    op_dir = out_root / op / arch
+    if not _empty_dir(op_dir):
+        raise GeneratorError(f"{op_dir} is not empty")
+    env.assert_flydsl_version()
+    env.prepare(arch)
+    records, reasons, outcomes = build_rows(
+        op,
+        arch,
+        instances,
+        specs,
+        op_dir,
+        reference_dir,
+        reference_csv or _REFERENCE_CSV,
+        exceptions_csv,
+        nondeterministic_csv=nondeterministic_csv,
+        stored_dir=stored_dir,
+    )
+    if reasons:
+        for written in op_dir.iterdir():
+            written.unlink()
+        raise GeneratorError(
+            f"{len(reasons)} row(s) stop the run, nothing is shipped:\n  "
+            + "\n  ".join(reasons)
+        )
     companions = []
     if build_tailzero is not None:
         try:
@@ -2233,7 +2300,8 @@ def run_op(
 ) -> int:
     """The command line of one backward op's generator (``gen_<op>.py``).
 
-    @p other_arches maps an arch this module does not build to ``generate(op, out_root, only, reference_dir)`` of the module that does.
+    @p other_arches maps an arch this module does not build alone to ``generate(op, arch, out_root, only, reference_dir, stored_dir)`` of
+    the module that builds it.
     @p build_tailzero is the op's tail-zero companion supplier for the arches this module builds (``generate``).
     """
     other_arches = other_arches or {}
@@ -2264,7 +2332,7 @@ def run_op(
             type=Path,
             default=None,
             help="the shipped content root as it was before this regeneration (<op>/<arch>/manifest.json and objects), kept aside: "
-            "a listed combined row ships its object from it (required for the dq and merged ops of gfx950)",
+            "a listed combined row ships its object from it (required for the dq and merged ops of gfx950 and the dq op of gfx942 and gfx90a)",
         )
     args = parser.parse_args(argv)
     refusal = None if args.arch in other_arches else _refuse({op}, args.arch)
@@ -2273,9 +2341,17 @@ def run_op(
         return 1
     only = set(args.only.split(",")) if args.only else None
     reference_dir = getattr(args, "reference_dir", None)
+    stored_dir = getattr(args, "stored_dir", None)
     try:
         if args.arch in other_arches:
-            errors = other_arches[args.arch](op, args.out_dir, only, reference_dir)
+            errors = other_arches[args.arch](
+                op,
+                args.arch,
+                args.out_dir,
+                only,
+                reference_dir,
+                stored_dir=stored_dir,
+            )
         else:
             errors = generate(
                 op,
@@ -2284,7 +2360,7 @@ def run_op(
                 only,
                 reference_dir,
                 build_tailzero=build_tailzero,
-                stored_dir=getattr(args, "stored_dir", None),
+                stored_dir=stored_dir,
             )
     except (GeneratorError, env.FlydslEnvError) as exc:
         print(f"error: {exc}", file=sys.stderr)
