@@ -11,6 +11,10 @@ from geko.config_generator.fork_params import optimization_param as opt_param
 from geko.config_generator.fork_params import post_processor as base_pp
 from geko.config_generator.fork_params.hw_profiles.gfx1250 import optimization_param as g1250_opt
 from geko.config_generator.fork_params.hw_profiles.gfx1250 import post_processor as g1250_pp
+from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
+    select_cluster_dims,
+    tile_grid,
+)
 from geko.config_generator.mi_designer import MFMAParameters
 from geko.config_generator.shared_utils import ForkParameter, SizeContext
 from geko.schemas import GemmConfig, GemmType
@@ -342,6 +346,107 @@ def test_couple_cluster_dim_expands_mi_groups_per_shape(monkeypatch: pytest.Monk
     assert "ClusterDim" not in new_fork
     assert len(coupled) >= 1
     assert all("ClusterDim" in entry for entry in coupled)
+
+
+# The published gfx1250 MXFP4/NVFP4 MAF kernel: 512x128 unswapped, 256x256 with
+# SourceSwap=True.
+_MI_32X16 = [32, 16, 128, 1, 1, 8, 4, 2, 2]
+_MI_SQUARE = [16, 16, 128, 1, 1, 8, 8, 2, 2]
+_SIZE_4096X3072 = (4096, 3072, 1, 65536)
+
+
+def _mx_f4_cfg(streamk: bool = False) -> dict:
+    return _cfg(arch="gfx1250_96cu", dt="F4", streamk=streamk, mx=True)
+
+
+def _profile_cluster_shapes() -> list:
+    """The ClusterDim shapes the gfx1250 GA profile offers before coupling."""
+    params, _ = g1250_opt.GFX1250GAParams(_mx_f4_cfg()).generate_for_size(_SIZE_4096X3072)
+    return [list(s) for s in params["ClusterDim"].values]
+
+
+def _ss(values, active: bool = True) -> ForkParameter:
+    return ForkParameter(name="SourceSwap", values=values, active=active)
+
+
+def _coupled_shapes(mi: list, source_swap=None, entry_source_swap=None) -> list:
+    """ClusterDim shapes the GA post-processor couples to one MI entry at 4096x3072."""
+    fork = {"ClusterDim": ForkParameter(name="ClusterDim", values=_profile_cluster_shapes())}
+    if source_swap is not None:
+        fork["SourceSwap"] = source_swap
+    entry = _mi_entry(mi)
+    if entry_source_swap is not None:
+        entry["SourceSwap"] = entry_source_swap
+    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
+    _, coupled = _ga_pp().couple_cluster_dim(fork, [entry], ctx)
+    return [e["ClusterDim"].values[0] for e in coupled]
+
+
+def _selected(macro_tile: tuple) -> list:
+    grid = tile_grid(4096, 3072, macro_tile)
+    return [list(s) for s in select_cluster_dims(_profile_cluster_shapes(), grid, macro_tile)]
+
+
+def test_source_swapped_macro_tile_matches_tensile_effective_mi() -> None:
+    swapped = g1250_pp._source_swapped_macro_tile
+    assert base_pp.mi_macro_tile(_mi_entry(_MI_32X16)) == (512, 128)
+    assert swapped(_MI_32X16, (512, 128)) == (256, 256)
+    assert swapped([16, 32, 128, 1, 1, 4, 8, 2, 2], (128, 512)) == (256, 256)
+    assert swapped(_MI_SQUARE, (256, 256)) == (256, 256)
+
+
+def test_source_swap_values_defaults_and_precedence() -> None:
+    values = g1250_pp._source_swap_values
+    entry = _mi_entry(_MI_32X16)
+    assert values({}, entry) == [False]
+    assert values({"SourceSwap": _ss([True], active=False)}, entry) == [False]
+    assert values({"SourceSwap": _ss([False, True])}, entry) == [False, True]
+    own = {**entry, "SourceSwap": _ss([True])}
+    assert values({"SourceSwap": _ss([False, True])}, own) == [True]
+    assert values({"SourceSwap": _ss([])}, entry) == [False]
+    assert values({"SourceSwap": _ss(True)}, entry) == [True]
+
+
+def test_couple_cluster_dim_adds_the_source_swap_tile_shapes() -> None:
+    unswapped = _selected((512, 128))
+    swapped = _selected((256, 256))
+    # Among equal-size shapes the least-traffic one differs: [2, 8] at 512x128, [4, 4] at 256x256.
+    assert [2, 8] in unswapped and [4, 4] not in unswapped
+    assert [4, 4] in swapped and [2, 8] not in swapped
+
+    shapes = _coupled_shapes(_MI_32X16, _ss([False, True]))
+    assert [4, 4] in shapes and [2, 8] in shapes
+    assert sorted(map(tuple, shapes)) == sorted({tuple(s) for s in unswapped + swapped})
+    assert shapes == sorted(shapes, key=lambda s: (s[0] * s[1], s[0]))
+
+    assert _coupled_shapes(_MI_32X16, _ss([True])) == swapped
+    # An MI group's own SourceSwap wins over the flat parameter.
+    assert _coupled_shapes(_MI_32X16, _ss([False]), _ss([True])) == swapped
+
+
+def test_couple_cluster_dim_unchanged_without_source_swap_true() -> None:
+    unswapped = _selected((512, 128))
+    assert _coupled_shapes(_MI_32X16) == unswapped
+    assert _coupled_shapes(_MI_32X16, _ss([False])) == unswapped
+    assert _coupled_shapes(_MI_32X16, _ss([False, True], active=False)) == unswapped
+
+
+def test_couple_cluster_dim_square_mi_ignores_source_swap() -> None:
+    expected = _selected((256, 256))
+    assert _coupled_shapes(_MI_SQUARE, _ss([False, True])) == expected
+    assert _coupled_shapes(_MI_SQUARE) == expected
+
+
+@pytest.mark.parametrize("streamk", [False, True])
+def test_ga_postprocessor_offers_the_source_swap_tile_cluster(streamk: bool) -> None:
+    """The profile's flat SourceSwap lets the 32x16 MI draw its swapped tile's shapes."""
+    cfg = _mx_f4_cfg(streamk)
+    params, _ = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_SIZE_4096X3072)
+    assert True in params["SourceSwap"].values
+    pp = g1250_pp.GFX1250GAPostProcessor(cfg)
+    _, coupled = pp.apply(params, [_mi_entry(_MI_32X16)], _SIZE_4096X3072)
+    shapes = [e["ClusterDim"].values[0] for e in coupled]
+    assert [4, 4] in shapes and [2, 8] in shapes
 
 
 # ---------------------------------------------------------------------------
