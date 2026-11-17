@@ -5763,6 +5763,19 @@ namespace rocblaslt
                                  "online-off max-candidates=" + std::to_string(config.topK)
                                      + "; online tuning needs at least 2");
 
+#ifdef _WIN32
+        // HIP's Windows (PAL) backend doesn't time event pairs correctly: later launches
+        // overwrite a record's timestamp, so a pair can't time a launch. Online is off
+        // on Windows for now.
+        if(config.enabled)
+        {
+            log_tuning_lifecycle(__func__,
+                                 "online-off platform=windows; HIP event timing does not "
+                                 "measure launches there");
+            config.enabled = false;
+        }
+#endif
+
         return config;
     }
 } // namespace rocblaslt

@@ -348,6 +348,21 @@ namespace
         return hipGetDeviceCount(&count) == hipSuccess ? count : 0;
     }
 
+    // HIP's Windows (PAL) backend doesn't time event pairs correctly: later launches
+    // overwrite a record's timestamp. Online is off on Windows for now, and these
+    // cases need real samples, so they skip there.
+    constexpr const char* kNoTimedDevice = "no HIP device whose event pairs time launches";
+
+    int timedDeviceCount()
+    {
+#ifdef _WIN32
+        constexpr bool pairsTimeLaunches = false;
+#else
+        constexpr bool pairsTimeLaunches = true;
+#endif
+        return pairsTimeLaunches ? deviceCount() : 0;
+    }
+
     // A stream and a scrap buffer to bracket between a measurement's two events:
     // back-to-back records can read exactly 0.0 ms, which the sign test rejects.
     class Device
@@ -542,7 +557,7 @@ namespace
         ASSERT_EQ(visit(key, owner, ranked), 0)
             << "a launch that was not offered advanced the rotation";
 
-        if(deviceCount() < 1)
+        if(timedDeviceCount() < 1)
             return;
 
         const Device device(0);
@@ -616,7 +631,7 @@ namespace
         EXPECT_FALSE(resolved(key)) << "the queries spent the budget";
         EXPECT_EQ(visit(key, dispatched, ranked), 0) << "a query was credited";
 
-        if(deviceCount() < 1)
+        if(timedDeviceCount() < 1)
             return;
 
         const Device device(0);
@@ -643,8 +658,8 @@ namespace
     // and recorded like any other. complete says whether every candidate was timed.
     TEST_F(OnlineTuner, TheRowIsClaimedOnceByTheFirstCallServedTheWinner)
     {
-        if(deviceCount() < 1)
-            GTEST_SKIP() << "no HIP device";
+        if(timedDeviceCount() < 1)
+            GTEST_SKIP() << kNoTimedDevice;
 
         const Device device(0);
 
@@ -720,8 +735,8 @@ namespace
     // pair.
     TEST_F(OnlineTuner, AnUnrecordedPairIsNeverASample)
     {
-        if(deviceCount() < 1)
-            GTEST_SKIP() << "no HIP device";
+        if(timedDeviceCount() < 1)
+            GTEST_SKIP() << kNoTimedDevice;
 
         const Device device(0);
         const int    id = device.id();
@@ -792,8 +807,8 @@ namespace
     // early, and reading in-flight pairs leaves no HIP error.
     TEST_F(OnlineTuner, LiveEventPairsAreCappedReclaimedAndReportedOnce)
     {
-        if(deviceCount() < 1)
-            GTEST_SKIP() << "no HIP device";
+        if(timedDeviceCount() < 1)
+            GTEST_SKIP() << kNoTimedDevice;
         if(!HeldStream::supported(0))
             GTEST_SKIP() << "the device cannot hold a stream on a host value";
 
@@ -872,8 +887,8 @@ namespace
     // about to be recorded.
     TEST_F(OnlineTuner, APairNotYetRecordedIsNeitherReclaimedNorRetired)
     {
-        if(deviceCount() < 1)
-            GTEST_SKIP() << "no HIP device";
+        if(timedDeviceCount() < 1)
+            GTEST_SKIP() << kNoTimedDevice;
 
         const Device device(0);
         const int    id  = device.id();
@@ -963,8 +978,8 @@ namespace
     // back: rejected pairs of shapes not seen again must not hold the cap.
     TEST_F(OnlineTuner, AtTheCapRejectedPairsOfShapesNotSeenAgainAreRetired)
     {
-        if(deviceCount() < 1)
-            GTEST_SKIP() << "no HIP device";
+        if(timedDeviceCount() < 1)
+            GTEST_SKIP() << kNoTimedDevice;
 
         const Device device(0);
         const int    id  = device.id();
@@ -1011,8 +1026,8 @@ namespace
     // sample.
     TEST_F(OnlineTuner, ReadingAPairBackLeavesACaptureOfItsStreamValid)
     {
-        if(deviceCount() < 1)
-            GTEST_SKIP() << "no HIP device";
+        if(timedDeviceCount() < 1)
+            GTEST_SKIP() << kNoTimedDevice;
 
         const std::vector<int> ranked{311, 312, 313};
 
@@ -1076,8 +1091,8 @@ namespace
     // a clean thread, a pair that cannot be made leaves no error behind.
     TEST_F(OnlineTuner, TheCallersHipErrorStateIsLeftAsItWas)
     {
-        if(deviceCount() < 1)
-            GTEST_SKIP() << "no HIP device";
+        if(timedDeviceCount() < 1)
+            GTEST_SKIP() << kNoTimedDevice;
 
         const Device device(0);
 
@@ -1126,7 +1141,7 @@ namespace
     // with hipErrorInvalidResourceHandle, which the launch would then carry.
     TEST_F(OnlineTuner_multi_gpu, APooledEventPairIsNotHandedToAnotherDevice)
     {
-        if(deviceCount() < 2)
+        if(timedDeviceCount() < 2)
             GTEST_SKIP() << "needs two HIP devices";
 
         const Device zero(0);

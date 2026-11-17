@@ -3217,6 +3217,10 @@ namespace
             TuningTune_pre_checkin::SetUp();
             if(IsSkipped())
                 return;
+#ifdef _WIN32
+            // Online is off on Windows for now; see onlineTunerConfig().
+            GTEST_SKIP() << "online mode is off on Windows: HIP event pairs do not time launches";
+#endif
 
             for(const char* name : {"HIPBLASLT_TUNING_MODE",
                                     "HIPBLASLT_TUNING_CACHE_PATH",

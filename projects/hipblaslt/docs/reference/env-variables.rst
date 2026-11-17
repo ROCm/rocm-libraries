@@ -121,6 +121,10 @@ A call is not timed while its thread holds a HIP error it has not read, or when 
 stream of a device other than the thread's current device. It still runs, but a key explored only by
 such calls can end with no row.
 
+``online`` mode is not supported on Windows for now: the HIP runtime's Windows backend doesn't time
+event pairs correctly, so ``online`` can't measure launches. On Windows, ``online`` leaves tuning
+off and says so at startup.
+
 ``online`` mode measures real launches. Settings that serialize or skip launches, such as
 ``AMD_SERIALIZE_KERNEL``, ``HIP_LAUNCH_BLOCKING``, a profiler, or a ``TENSILE_DB`` setting that skips
 launches, distort its timings, so do not use ``online`` mode under them.
