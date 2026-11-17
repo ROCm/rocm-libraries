@@ -177,6 +177,23 @@ class ConvDgradAotTarget:
         )
 
 
+#: The implicit-GEMM pipelines of the wave64 MFMA engines (gfx950, gfx942);
+#: ``basic`` is an alias the sweep skips.
+_MFMA_PIPELINES = ("mem", "compv3", "compv4")
+#: The direct and helper algorithms of the wave64 MFMA engines (gfx950, gfx942).
+_MFMA_DIRECT_ALGORITHMS = (
+    "direct_depthwise_dgrad",
+    "direct_depthwise_dgrad_win",
+    "direct_grouped_dgrad_mfma",
+    "direct_dgrad_mfma_rtc",
+    "direct_grouped_dgrad_fused",
+    "direct_grouped_dgrad_4c",
+    "direct_dgrad_transpose_rtc",
+    "direct_dgrad_reorganize_rtc",
+    "direct_dgrad_transpose",
+    "direct_dgrad_reorganize",
+)
+
 #: The packaged dgrad engines, by architecture.
 TARGETS = {
     "gfx950": ConvDgradAotTarget(
@@ -184,20 +201,8 @@ TARGETS = {
         engine="hipkernel:Gfx950ConvDgradAot",
         wave_size=64,
         llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx950"],
-        # ``basic`` is an alias the sweep skips.
-        pipelines=("mem", "compv3", "compv4"),
-        direct_algorithms=(
-            "direct_depthwise_dgrad",
-            "direct_depthwise_dgrad_win",
-            "direct_grouped_dgrad_mfma",
-            "direct_dgrad_mfma_rtc",
-            "direct_grouped_dgrad_fused",
-            "direct_grouped_dgrad_4c",
-            "direct_dgrad_transpose_rtc",
-            "direct_dgrad_reorganize_rtc",
-            "direct_dgrad_transpose",
-            "direct_dgrad_reorganize",
-        ),
+        pipelines=_MFMA_PIPELINES,
+        direct_algorithms=_MFMA_DIRECT_ALGORITHMS,
     ),
     "gfx942": ConvDgradAotTarget(
         arch="gfx942",
@@ -206,19 +211,8 @@ TARGETS = {
         llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx942"],
         # gfx950's pipelines and direct algorithms; its instances leave every
         # gfx950-only instruction (16x16x32 MFMA, ds_read_tr) off.
-        pipelines=("mem", "compv3", "compv4"),
-        direct_algorithms=(
-            "direct_depthwise_dgrad",
-            "direct_depthwise_dgrad_win",
-            "direct_grouped_dgrad_mfma",
-            "direct_dgrad_mfma_rtc",
-            "direct_grouped_dgrad_fused",
-            "direct_grouped_dgrad_4c",
-            "direct_dgrad_transpose_rtc",
-            "direct_dgrad_reorganize_rtc",
-            "direct_dgrad_transpose",
-            "direct_dgrad_reorganize",
-        ),
+        pipelines=_MFMA_PIPELINES,
+        direct_algorithms=_MFMA_DIRECT_ALGORITHMS,
     ),
     "gfx1250": ConvDgradAotTarget(
         arch="gfx1250",
@@ -2022,16 +2016,16 @@ def _flavor_rank(flavor: str) -> int:
 def _require_packaged_flavor(target: ConvDgradAotTarget) -> None:
     """Refuse to package under an LLVM older than the catalog's.
 
-    The catalog's instances are the kernels the rocKE sweep measured, lowered for
-    the target's flavor (gfx950 and gfx942 ``llvm22``, gfx1250 ``llvm24``) and compiled by a
+    The catalog's instances are the kernels the rocKE sweep measured, lowered for the
+    target's flavor (gfx950 and gfx942 ``llvm22``, gfx1250 ``llvm24``) and compiled by a
     COMGR of that LLVM or newer. A pack step that resolves an older COMGR -- the ROCm
     the build found, rather than the one the sweep ran -- lowers for its flavor and
     gets that LLVM's code generation: the same configuration, but compiled to more
     registers and slower code, shipped without a word. Point
     ``HIPKERNELPROVIDER_ROCKE_COMGR_LIB`` at a COMGR of that LLVM or newer (and
     ``HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR`` at the flavor to lower exactly as the
-    sweep did; that pin is build-wide, so a build packing both engines pins the
-    newer, ``llvm24``).
+    sweep did; that pin is build-wide, so a build packing gfx1250 with another
+    engine pins ``llvm24``).
     """
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 

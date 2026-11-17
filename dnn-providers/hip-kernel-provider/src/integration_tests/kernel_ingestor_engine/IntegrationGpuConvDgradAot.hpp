@@ -53,12 +53,12 @@
 #include "ScopedPluginLogCapture.hpp"
 
 /// @file IntegrationGpuConvDgradAot.hpp
-/// The GPU suites of the dgrad AOT-instance engines (hipkernel:Gfx950ConvDgradAot,
-/// hipkernel:Gfx1250ConvDgradAot), shared: a backward-data graph, the shipped catalog read
-/// from the product tree main() loads, the CPU reference, and ConvDgradAotHarness, whose
-/// members are the suites' test bodies. Each engine's file supplies its Traits -- the
-/// engine, its architecture, its direct_variant families and its graphs, each with how many
-/// catalog instances of every family serve it as conv_dgrad_aot_plan in
+/// The GPU suites of the dgrad AOT-instance engines (one per Target: gfx950, gfx942,
+/// gfx1250), shared: a backward-data graph, the shipped catalog read from the product tree
+/// main() loads, the CPU reference, and ConvDgradAotHarness, whose members are the suites'
+/// test bodies. Each engine's file supplies its Traits -- the engine, its architecture, its
+/// direct_variant families and its graphs, each with how many catalog instances of every
+/// family serve it as conv_dgrad_aot_plan in
 /// rocke/library/builders/common/convolution_backward_data.py counts them -- and
 /// instantiates the suites.
 ///
@@ -523,7 +523,7 @@ enum class PinOutcome
 ///
 /// Goes through the plugin's exported
 /// hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimitForTesting symbol
-/// (setProviderDgradBatchChunkByteLimit; both dgrad engines share the limit), not the
+/// (setProviderDgradBatchChunkByteLimit; every dgrad engine shares the limit), not the
 /// header's inline batchChunkByteLimitForTesting() directly: this TU and the loaded
 /// provider .so are separate binaries, each with its own copy of that function-local
 /// static, so setting this TU's copy would leave the provider's own limit at I32_MAX and
@@ -548,12 +548,44 @@ public:
     ScopedBatchChunkLimit& operator=(const ScopedBatchChunkLimit&) = delete;
 };
 
+/// The direct_variant lists of the wave64 MFMA engines (gfx950, gfx942), whose Traits
+/// derive from it: they package the same direct pipelines.
+struct MfmaDgradVariants
+{
+    /// Every direct_variant a selectable kernel carries, "none" being implicit GEMM; the
+    /// order of a DgradGraph's counts.
+    static const Names& variants()
+    {
+        static const Names s_variants{"none",
+                                      "depthwise_dgrad",
+                                      "depthwise_dgrad_win",
+                                      "grouped_dgrad_fused",
+                                      "grouped_dgrad_4c",
+                                      "grouped_dgrad_mfma",
+                                      "dgrad_mfma_rtc"};
+        return s_variants;
+    }
+    /// The single-kernel direct pipelines, which the fallback score ranks first.
+    static const Names& singleKernelVariants()
+    {
+        static const Names s_variants{
+            "depthwise_dgrad", "depthwise_dgrad_win", "grouped_dgrad_fused", "grouped_dgrad_4c"};
+        return s_variants;
+    }
+    /// The MFMA pipelines, which launch weight transforms before their compute pass.
+    static const Names& mfmaVariants()
+    {
+        static const Names s_variants{"grouped_dgrad_mfma", "dgrad_mfma_rtc"};
+        return s_variants;
+    }
+};
+
 /// The harness of one engine's suites. @p Traits supplies:
 ///   ENGINE_NAME, DESCRIPTOR_PREFIX (the bundle slug), ARCH, GRAPH_NAME, CACHE_TAG,
 ///   SELECTABLE_INSTANCES and HELPER_INSTANCES per dtype, variants() (every direct_variant
 ///   a selectable kernel carries, "none" first), singleKernelVariants() and mfmaVariants()
 ///   (the fallback score's tiers: single-kernel direct pipelines above the MFMA ones above
-///   implicit GEMM), and graphs().
+///   implicit GEMM; MfmaDgradVariants' for the wave64 MFMA engines), and graphs().
 template <typename Traits>
 class ConvDgradAotHarness
     : public test_utilities::IntegrationGraphVerificationHarness<float, DgradVariant>

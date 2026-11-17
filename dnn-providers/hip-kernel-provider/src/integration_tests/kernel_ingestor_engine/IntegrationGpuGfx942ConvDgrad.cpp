@@ -29,7 +29,7 @@ using namespace conv_dgrad_aot_test;
 namespace
 {
 
-struct Gfx942Traits
+struct Gfx942Traits : MfmaDgradVariants
 {
     static constexpr const char* ENGINE_NAME = "hipkernel:Gfx942ConvDgradAot";
     static constexpr const char* DESCRIPTOR_PREFIX = "gfx942_conv_dgrad_aot";
@@ -40,32 +40,7 @@ struct Gfx942Traits
     static constexpr size_t SELECTABLE_INSTANCES = 173;
     static constexpr size_t HELPER_INSTANCES = 8;
 
-    /// Every direct_variant a selectable kernel carries, "none" being implicit GEMM; the
-    /// order of a DgradGraph's counts.
-    static const Names& variants()
-    {
-        static const Names s_variants{"none",
-                                      "depthwise_dgrad",
-                                      "depthwise_dgrad_win",
-                                      "grouped_dgrad_fused",
-                                      "grouped_dgrad_4c",
-                                      "grouped_dgrad_mfma",
-                                      "dgrad_mfma_rtc"};
-        return s_variants;
-    }
-    /// The single-kernel direct pipelines, which the fallback score ranks first.
-    static const Names& singleKernelVariants()
-    {
-        static const Names s_variants{
-            "depthwise_dgrad", "depthwise_dgrad_win", "grouped_dgrad_fused", "grouped_dgrad_4c"};
-        return s_variants;
-    }
-    /// The MFMA pipelines, which launch weight transforms before their compute pass.
-    static const Names& mfmaVariants()
-    {
-        static const Names s_variants{"grouped_dgrad_mfma", "dgrad_mfma_rtc"};
-        return s_variants;
-    }
+    // variants(), singleKernelVariants() and mfmaVariants(): MfmaDgradVariants'.
 
     // N is 2 wherever the kernel's grid allows it, so a write past the last dX row of an image
     // lands in the next one and fails. Odd spatial sizes leave partial tiles. Together the
