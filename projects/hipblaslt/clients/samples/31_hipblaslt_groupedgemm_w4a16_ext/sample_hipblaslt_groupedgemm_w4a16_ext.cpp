@@ -91,9 +91,10 @@ static int runCase(hipblasLtHandle_t           handle,
                    bool                        totalBound = false)
 {
     // totalBound: the host problem is n = {R, 1, ..., 1} with R the total rows,
-    // which sizes the grid for any split of R rows; each group's buffers still
-    // hold maxN >= R columns.
+    // which sizes the grid for any split of R rows; each group's buffers then
+    // hold only its own n_g columns.
     const int     G       = int(nDev.size());
+    auto cols = [&](int g) { return totalBound ? std::max<int64_t>(1, nDev[g]) : maxN; };
     const int64_t kGroups = k / groupSize;
     const size_t  scaleB  = size_t(m) * kGroups * 2;
     const size_t  zpOff   = (scaleB + zpAlignment - 1) / zpAlignment * zpAlignment;
@@ -105,8 +106,9 @@ static int runCase(hipblasLtHandle_t           handle,
     std::uniform_real_distribution<float> sd(0.02f, 0.08f), bd(-1.0f, 1.0f);
 
     std::vector<Group> grp(G);
-    for(auto& g : grp)
+    for(int gi = 0; gi < G; gi++)
     {
+        auto& g = grp[gi];
         g.aRaw.resize(size_t(m) * k);
         for(auto& v : g.aRaw)
             v = uint8_t(nib(rng));
@@ -123,14 +125,14 @@ static int runCase(hipblasLtHandle_t           handle,
                 zp[e / 2] = (e & 1) ? uint8_t((zp[e / 2] & 0x0F) | (z << 4))
                                     : uint8_t((zp[e / 2] & 0xF0) | z);
             }
-        g.b.resize(size_t(maxN) * k);
+        g.b.resize(size_t(cols(gi)) * k);
         for(auto& v : g.b)
             v = f32_to_bf16(bd(rng));
 
         std::vector<uint8_t> packed(size_t(m) * k / 2);
         for(size_t i = 0; i < packed.size(); i++)
             packed[i] = uint8_t(g.aRaw[2 * i] | (g.aRaw[2 * i + 1] << 4));
-        std::vector<uint16_t> dInit(size_t(m) * maxN, sentinel);
+        std::vector<uint16_t> dInit(size_t(m) * cols(gi), sentinel);
 
         CHECK_HIP(hipMalloc(&g.dA, packed.size()));
         CHECK_HIP(hipMalloc(&g.dScale, g.scaleZp.size()));
@@ -245,7 +247,7 @@ static int runCase(hipblasLtHandle_t           handle,
     bool   untouched = true;
     for(int g = 0; g < G; g++)
     {
-        std::vector<uint16_t> got(size_t(m) * maxN);
+        std::vector<uint16_t> got(size_t(m) * cols(g));
         CHECK_HIP(hipMemcpy(got.data(), grp[g].dD, got.size() * 2, hipMemcpyDeviceToHost));
         const auto*    s  = reinterpret_cast<const uint16_t*>(grp[g].scaleZp.data());
         const uint8_t* zp = grp[g].scaleZp.data() + zpOff;
@@ -260,7 +262,7 @@ static int runCase(hipblasLtHandle_t           handle,
                                 * bf16_to_f32(s[size_t(r) * kGroups + q]);
                 deq[size_t(r) * k + c] = bf16_to_f32(f32_to_bf16(v));
             }
-        for(int64_t j = 0; j < maxN; j++)
+        for(int64_t j = 0; j < cols(g); j++)
             for(int64_t i = 0; i < m; i++)
             {
                 const uint16_t out = got[size_t(j) * m + i];
@@ -338,6 +340,21 @@ int main(int argc, char** argv)
             R += v;
         fails += runCase(handle, 1024, 2048, R, n, 0, true);
         fails += runCase(handle, 2048, 512, R, n, 0, true);
+    }
+    {
+        // vLLM-like prefill on the device path: all 256 experts as groups, about
+        // a fifth of them empty, ~3.3k routed rows, host bound {R, 1, ..., 1}. Timed.
+        std::mt19937                         r(11);
+        std::geometric_distribution<int>     c(1.0 / 16);
+        std::uniform_int_distribution<int>   e(0, 4);
+        std::vector<int32_t>                 n(256);
+        for(auto& v : n)
+            v = e(r) == 0 ? 0 : std::min(c(r) + 1, 160);
+        int32_t R = 0;
+        for(int32_t v : n)
+            R += v;
+        fails += runCase(handle, 1024, 2048, R, n, iters > 0 ? 20 : 0, true);
+        fails += runCase(handle, 2048, 512, R, n, iters > 0 ? 20 : 0, true);
     }
     // Uneven groups below the host bound, including empty ones.
     fails += runCase(handle, 1024, 2048, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);

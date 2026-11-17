@@ -3440,64 +3440,60 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMulI32(dst=sgpr(tmpSgprAddrM), src0=sgpr(sgprNumsOfGemm), src1=4)) # offset wgTable
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
 
-        # prefetch 1 arg load
-        module.addComment1("Grouped Gemm:: prefetch 1 arg load")
+        # Batched linear search: load the sizes of SEARCH_BATCH gemms, wait once,
+        # then scan them. Scalar loads may return out of order, so only a full
+        # wait is safe; batching divides the serialized load latencies a
+        # workgroup pays before it finds its gemm by the batch size. Loads past
+        # the last gemm repeat the last one. The last gemm takes every
+        # workgroup left over (they exit once its tiles are known).
+        SEARCH_BATCH = 4
+        gsuComponent = Component.GSU.find(self)
+        module.addComment1("Grouped Gemm:: batched search, %u gemms per wait" % SEARCH_BATCH)
         module.add(SMovB32(dst=sgpr(tmpSgprLoopCounter), src=1))
         module.add(SMovB32(dst=sgpr(tmpSgprAccumTiles), src=0))
-        module.add(self.argLoader.loadKernArg(tmpSgprM, tmpSgprArgAddress0, sgpr(tmpSgprAddrM), dword=4))
-        #module.add(SCmpKEQU32(src=sgpr(sgprNumsOfGemm), simm16=1, comment="if gemm_count is 1?"))
-        module.add(self.getSCMPKInstruction("EQU32", sgprNumsOfGemm, 1, comment="if gemm_count is 1?"))
-        label_noLoadLoop = Label("wgTable_noLoadLoop", "")
-        module.add(SCBranchSCC1(labelName=label_noLoadLoop.getLabelName()))
-
-        # Start to search
-        module.addComment1("Grouped Gemm:: accumulate numTiles for each gemm")
-        module.addComment0("Grouped Gemm:: loop start")
-        label_Loop_gemm_count = Label(self.rapLabel("Loop_GemmCount"), "")
-        module.add(label_Loop_gemm_count)
-        module.add(SWaitCnt(kmcnt=0))
-        # calculate numTiles
-        regStateRes = ContinuousRegister(idx=tmpSgpr0, size=2)
-        module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG0), dReg=sgpr(tmpSgprM), divisor=kernel["MacroTile0"], tmpSgprRes=regStateRes))
-        module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG1), dReg=sgpr(tmpSgprN), divisor=kernel["MacroTile1"], tmpSgprRes=regStateRes))
-        # accumulate tiles of each gemm
-        module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
-        module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprB)))
-        if kernel["GlobalSplitU"] != 0 and not self.gsuIsOne(kernel):
-          module.add(SAndB32(dst=sgpr(tmpSgprNumWG1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
-          module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
-        module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
-        # check wgIndex >= AccumTiles?
-        module.add(SCmpLtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgprAccumTiles)))
         label_FOUND = Label("FOUND", "")
-        module.add(SCBranchSCC1(labelName=label_FOUND.getLabelName()))
-
-        gsuComponent = Component.GSU.find(self)
-        module.add(gsuComponent.defineAndResources(self, kernel, tmpSgpr0, tmpSgprM, tmpSgprN, tmpSgprNumWG0, tmpSgprAccumTiles))
-
-        module.add(SAddU32(dst=sgpr(tmpSgprAddrM), src0=sgpr(tmpSgprAddrM), src1=sgpr(tmpSgprArgOffsett)))
-        module.add(self.argLoader.loadKernArg(tmpSgprM, tmpSgprArgAddress0, sgpr(tmpSgprAddrM), dword=4))
-        module.add(SAddU32(dst=sgpr(tmpSgprLoopCounter), src0=sgpr(tmpSgprLoopCounter), src1=1))
-        # loop gemm count
-        module.add(SCmpLtU32(src0=sgpr(tmpSgprLoopCounter), src1=sgpr(sgprNumsOfGemm)))
-        module.add(SCBranchSCC1(labelName=label_Loop_gemm_count.getLabelName()))
-
-        # noLoadLoop
-        module.addComment1("Grouped Gemm:: noLoadLoop")
-        module.add(label_noLoadLoop)
-        module.add(SWaitCnt(kmcnt=0))
-        # calculate numTiles
-        regStateRes = ContinuousRegister(idx=tmpSgpr0, size=2)
-        module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG0), dReg=sgpr(tmpSgprM), divisor=kernel["MacroTile0"], tmpSgprRes=regStateRes))
-        module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG1), dReg=sgpr(tmpSgprN), divisor=kernel["MacroTile1"], tmpSgprRes=regStateRes))
-        # accumulate tiles of each gemm
-        tmpSgprGSU = tmpSgpr.idx
-        module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
-        module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprB)))
-        if kernel["GlobalSplitU"] != 0 and not self.gsuIsOne(kernel):
-          module.add(SAndB32(dst=sgpr(tmpSgprGSU), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
-          module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprGSU)))
-        module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
+        with self.allocTmpSgpr(4 * SEARCH_BATCH + 1, 4, tag="groupedSearchBatch") as batchSgpr:
+          regs = [batchSgpr.idx + 4 * j for j in range(SEARCH_BATCH)]
+          tmpAddr = batchSgpr.idx + 4 * SEARCH_BATCH
+          label_Loop_gemm_count = Label(self.rapLabel("Loop_GemmCount"), "")
+          foundLabels = [Label(self.labels.getNameInc("GemmFound%u" % j), "") for j in range(SEARCH_BATCH)]
+          module.add(label_Loop_gemm_count)
+          module.add(SMovB32(dst=sgpr(tmpAddr), src=sgpr(tmpSgprAddrM)))
+          module.add(self.argLoader.loadKernArg(regs[0], tmpSgprArgAddress0, sgpr(tmpAddr), dword=4))
+          for j in range(1, SEARCH_BATCH):
+            module.add(SAddU32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprLoopCounter), src1=j, comment="1-based index of gemm %u of the batch" % j))
+            module.add(SCmpLeU32(src0=sgpr(tmpSgpr0), src1=sgpr(sgprNumsOfGemm), comment="past the last gemm?"))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr0 + 1), src0=sgpr(tmpSgprArgOffsett), src1=0, comment="else repeat the last"))
+            module.add(SAddU32(dst=sgpr(tmpAddr), src0=sgpr(tmpAddr), src1=sgpr(tmpSgpr0 + 1)))
+            module.add(self.argLoader.loadKernArg(regs[j], tmpSgprArgAddress0, sgpr(tmpAddr), dword=4))
+          module.add(SWaitCnt(kmcnt=0))
+          regStateRes = ContinuousRegister(idx=tmpSgpr0, size=2)
+          for j in range(SEARCH_BATCH):
+            module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG0), dReg=sgpr(regs[j]), divisor=kernel["MacroTile0"], tmpSgprRes=regStateRes))
+            module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG1), dReg=sgpr(regs[j] + 1), divisor=kernel["MacroTile1"], tmpSgprRes=regStateRes))
+            module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
+            module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(regs[j] + 2)))
+            if kernel["GlobalSplitU"] != 0 and not self.gsuIsOne(kernel):
+              module.add(SAndB32(dst=sgpr(tmpSgprNumWG1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+              module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
+            module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
+            module.add(SCmpLtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgprAccumTiles), comment="workgroup in this gemm?"))
+            module.add(SCBranchSCC1(labelName=foundLabels[j].getLabelName()))
+            module.add(SAddU32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprLoopCounter), src1=j))
+            module.add(SCmpEQU32(src0=sgpr(tmpSgpr0), src1=sgpr(sgprNumsOfGemm), comment="last gemm?"))
+            module.add(SCBranchSCC1(labelName=foundLabels[j].getLabelName()))
+            module.add(gsuComponent.defineAndResources(self, kernel, tmpSgpr0, tmpSgprM, tmpSgprN, tmpSgprNumWG0, tmpSgprAccumTiles))
+          module.add(SAddU32(dst=sgpr(tmpSgprLoopCounter), src0=sgpr(tmpSgprLoopCounter), src1=SEARCH_BATCH))
+          module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprArgOffsett), src1=SEARCH_BATCH))
+          module.add(SAddU32(dst=sgpr(tmpSgprAddrM), src0=sgpr(tmpSgprAddrM), src1=sgpr(tmpSgpr0)))
+          module.add(SBranch(labelName=label_Loop_gemm_count.getLabelName()))
+          for j in range(SEARCH_BATCH):
+            module.add(foundLabels[j])
+            for d in range(4):
+              module.add(SMovB32(dst=sgpr(tmpSgprM + d), src=sgpr(regs[j] + d), comment="sizes of the found gemm"))
+            if j:
+              module.add(SAddU32(dst=sgpr(tmpSgprLoopCounter), src0=sgpr(tmpSgprLoopCounter), src1=j))
+            module.add(SBranch(labelName=label_FOUND.getLabelName()))
 
         # gemmIndex found
         tmpSgprWgLeft = tmpSgpr.idx
