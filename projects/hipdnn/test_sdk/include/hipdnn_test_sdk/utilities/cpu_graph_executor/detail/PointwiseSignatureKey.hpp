@@ -174,10 +174,6 @@ struct PointwiseSignatureKey
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
-        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::NEG,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -311,12 +307,11 @@ struct PointwiseSignatureKey
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
-        // CMP_GT with FP64, FP8 and inputs of different floating-point types
-        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>(map);
+        addComparisonPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE>(map);
+
+        // CMP_GT with FP8 and inputs of different floating-point types
         addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT,
                              hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
                              hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
@@ -380,6 +375,10 @@ struct PointwiseSignatureKey
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
 
         // Logical operations are BOOLEAN in / BOOLEAN out and compute type doesn't affect them

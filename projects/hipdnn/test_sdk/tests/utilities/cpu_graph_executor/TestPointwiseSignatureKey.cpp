@@ -727,3 +727,101 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForLogicalOperations)
         PointwiseMode::LOGICAL_NOT, DataType::FLOAT, DataType::FLOAT, DataType::BOOLEAN};
     EXPECT_EQ(planBuilders.count(floatNotKey), 0u);
 }
+
+TEST(TestPointwiseSignatureKey, PlanBuildersCoverAddedDataTypes)
+{
+    const auto builders = PointwiseSignatureKey::getPlanBuilders();
+    const auto isRegistered
+        = [&builders](const PointwiseSignatureKey& key) { return builders.count(key) == 1; };
+
+    // FP64 supports every non-logical mode, including all comparisons and GEN_INDEX
+    EXPECT_TRUE(
+        isRegistered({PointwiseMode::ABS, DataType::DOUBLE, DataType::DOUBLE, DataType::DOUBLE}));
+    EXPECT_TRUE(isRegistered({PointwiseMode::ADD,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE}));
+    EXPECT_TRUE(isRegistered({PointwiseMode::CMP_EQ,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE,
+                              DataType::BOOLEAN,
+                              DataType::DOUBLE}));
+    EXPECT_TRUE(isRegistered({PointwiseMode::CMP_LE,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE,
+                              DataType::BOOLEAN,
+                              DataType::DOUBLE}));
+    EXPECT_TRUE(isRegistered(
+        {PointwiseMode::GEN_INDEX, DataType::DOUBLE, DataType::DOUBLE, DataType::INT32}));
+    EXPECT_TRUE(isRegistered({PointwiseMode::BINARY_SELECT,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE,
+                              DataType::DOUBLE,
+                              DataType::BOOLEAN}));
+
+    // INT32 computes in FP32 and supports only some modes
+    EXPECT_TRUE(
+        isRegistered({PointwiseMode::NEG, DataType::INT32, DataType::FLOAT, DataType::INT32}));
+    EXPECT_TRUE(isRegistered({PointwiseMode::MAX_OP,
+                              DataType::INT32,
+                              DataType::FLOAT,
+                              DataType::INT32,
+                              DataType::INT32}));
+    EXPECT_FALSE(
+        isRegistered({PointwiseMode::ABS, DataType::INT32, DataType::FLOAT, DataType::INT32}));
+    EXPECT_FALSE(isRegistered(
+        {PointwiseMode::SIGMOID_FWD, DataType::INT32, DataType::FLOAT, DataType::INT32}));
+
+    // BOOLEAN supports only BINARY_SELECT among the non-logical modes
+    EXPECT_TRUE(isRegistered({PointwiseMode::BINARY_SELECT,
+                              DataType::BOOLEAN,
+                              DataType::FLOAT,
+                              DataType::BOOLEAN,
+                              DataType::BOOLEAN,
+                              DataType::BOOLEAN}));
+    EXPECT_FALSE(isRegistered(
+        {PointwiseMode::RELU_FWD, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN}));
+
+    // FP8 computes in FP32, with an FP8 or FP32 output, and compares with CMP_GT only
+    for(const auto fp8 : {DataType::FP8_E4M3, DataType::FP8_E5M2})
+    {
+        EXPECT_TRUE(isRegistered({PointwiseMode::ABS, fp8, DataType::FLOAT, fp8}));
+        EXPECT_TRUE(isRegistered({PointwiseMode::ABS, fp8, DataType::FLOAT, DataType::FLOAT}));
+        EXPECT_TRUE(isRegistered({PointwiseMode::ADD, fp8, DataType::FLOAT, fp8, fp8}));
+        EXPECT_TRUE(
+            isRegistered({PointwiseMode::CMP_GT, fp8, DataType::FLOAT, DataType::BOOLEAN, fp8}));
+        EXPECT_FALSE(
+            isRegistered({PointwiseMode::CMP_EQ, fp8, DataType::FLOAT, DataType::BOOLEAN, fp8}));
+        EXPECT_TRUE(isRegistered(
+            {PointwiseMode::BINARY_SELECT, fp8, DataType::FLOAT, fp8, fp8, DataType::BOOLEAN}));
+    }
+
+    // CMP_GT with inputs of different floating-point types, and only CMP_GT
+    EXPECT_TRUE(isRegistered({PointwiseMode::CMP_GT,
+                              DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::BOOLEAN,
+                              DataType::HALF}));
+    EXPECT_TRUE(isRegistered({PointwiseMode::CMP_GT,
+                              DataType::BFLOAT16,
+                              DataType::FLOAT,
+                              DataType::BOOLEAN,
+                              DataType::HALF}));
+    EXPECT_TRUE(isRegistered({PointwiseMode::CMP_GT,
+                              DataType::FLOAT,
+                              DataType::DOUBLE,
+                              DataType::BOOLEAN,
+                              DataType::DOUBLE}));
+    EXPECT_FALSE(isRegistered({PointwiseMode::CMP_GT,
+                               DataType::HALF,
+                               DataType::DOUBLE,
+                               DataType::BOOLEAN,
+                               DataType::DOUBLE}));
+    EXPECT_FALSE(isRegistered({PointwiseMode::CMP_EQ,
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::BOOLEAN,
+                               DataType::HALF}));
+}

@@ -49,7 +49,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
-| Pointwise Unary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32 |
+| Pointwise Unary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32; INT32 supports a subset of modes, see below |
 | Pointwise Binary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `CMP_*` outputs BOOLEAN and also accepts INT32 inputs; `LOGICAL_AND`/`LOGICAL_OR` are BOOLEAN only |
 | Pointwise Ternary | FP16, BFP16, FP32, FP64, INT32, BOOLEAN, FP8 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
@@ -138,16 +138,21 @@ Input operands may be scalars: a baked compile-time constant, a runtime scalar w
 pure runtime scalar read from the variant pack. A scalar is treated as a one-element tensor that
 broadcasts to the output shape.
 
-Beyond FP16, BFP16 and FP32, the reference registers FP64, INT32, BOOLEAN and the FP8 formats
-`FP8_E4M3` and `FP8_E5M2`:
+Each (input, compute, output) tuple is registered explicitly, and a node with any other tuple is
+declined. FP16 and BFP16 nodes compute in FP32 (binary FP16 and BFP16 nodes also register same-type
+compute). Beyond FP16, BFP16 and FP32, the reference registers FP64, INT32, BOOLEAN and the FP8
+formats `FP8_E4M3` and `FP8_E5M2`:
 
-- FP64 supports every implemented mode and computes in FP64.
+- FP64 computes in FP64 and supports every mode except the BOOLEAN-only logical modes, including all
+  `CMP_*` modes and `GEN_INDEX`.
 - INT32 computes in FP32, so integer values above 2^24 lose exactness in arithmetic; comparisons of
-  integer inputs are exact. It supports the arithmetic, comparison and selection modes that are
-  meaningful for integers; the transcendental modes are declined.
+  integer inputs are exact. It supports `RELU_FWD`, `NEG`, `ADD`, `SUB`, `MUL`, `MAX`, `MIN`, the
+  `CMP_*` modes and `BINARY_SELECT`; every other mode is declined.
 - BOOLEAN supports `BINARY_SELECT` and the logical modes.
-- FP8 inputs compute in FP32 and produce an output in the input's FP8 format or FP32.
-- `CMP_GT` also accepts inputs of different floating-point types (FP16, BFP16, FP32 and FP64).
+- FP8 inputs compute in FP32 and produce an output in the input's FP8 format or FP32. They support
+  the unary and binary modes, `CMP_GT` and `BINARY_SELECT`; the other `CMP_*` modes are declined.
+- `CMP_GT` also accepts inputs of different floating-point types: FP32 with FP16, FP32 with BFP16,
+  FP16 with BFP16, and FP32 with FP64, each in both orders.
 
 ## Operation Restrictions
 

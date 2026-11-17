@@ -2079,6 +2079,41 @@ TEST_F(TestPointwisePlan, GenIndexProducesCoordinateAlongAxis)
     }
 }
 
+TEST_F(TestPointwisePlan, GenIndexAcceptsDoubleInput)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 3, 2, 2},
+                                   {1, 3, 2, 2},
+                                   DataType::DOUBLE,
+                                   DataType::DOUBLE,
+                                   DataType::INT32,
+                                   hipdnn_frontend::PointwiseMode::GEN_INDEX,
+                                   1,
+                                   TensorLayout::NCHW,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   int64_t{1});
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* output
+        = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    for(int64_t channel = 0; channel < 3; ++channel)
+    {
+        EXPECT_EQ(output->getHostValue(0, channel, 1, 1), static_cast<int32_t>(channel));
+    }
+}
+
 TEST(TestPointwisePlanBuilder, IsApplicableTernary)
 {
     auto [graph, tensorBundle, variantPack]
@@ -3299,6 +3334,8 @@ TEST(TestPointwisePlanDataTypes, DoubleOperations)
               (std::vector<double>{-3.5, 0.0, -1.5, 2.0}));
     EXPECT_EQ((runBinary<D, D, D, DataType::BOOLEAN>(PointwiseMode::CMP_GT, a, b)),
               (std::vector<double>{0.0, 0.0, 0.0, 1.0}));
+    EXPECT_EQ((runBinary<D, D, D, DataType::BOOLEAN>(PointwiseMode::CMP_LE, a, b)),
+              (std::vector<double>{1.0, 1.0, 1.0, 0.0}));
     EXPECT_EQ((runSelect<D, D>(a, b)), (std::vector<double>{-2.5, -0.5, 1.5, 2.0}));
 }
 
@@ -3311,7 +3348,6 @@ TEST(TestPointwisePlanDataTypes, Int32Operations)
     const std::vector<double> b = {2, -1, 7, 4};
 
     EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::RELU_FWD, a)), (std::vector<double>{0, 0, 3, 8}));
-    EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::ABS, a)), (std::vector<double>{5, 1, 3, 8}));
     EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::NEG, a)), (std::vector<double>{5, 1, -3, -8}));
     EXPECT_EQ((runBinary<I, I, F, I>(PointwiseMode::SUB, a, b)),
               (std::vector<double>{-7, 0, -4, 4}));
@@ -3394,6 +3430,7 @@ TEST(TestPointwisePlanDataTypes, DeclinesOperationsThatAreNotMeaningfulForTheTyp
     for(const auto& [dataType, mode] :
         {std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::SIGMOID_FWD},
          std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::TANH_FWD},
+         std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::ABS},
          std::pair{DataType::BOOLEAN, hipdnn_frontend::PointwiseMode::RELU_FWD}})
     {
         auto [graph, tensorBundle, variantPack] = buildPointwiseUnaryGraph(
