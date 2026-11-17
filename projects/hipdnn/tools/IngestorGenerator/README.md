@@ -1019,6 +1019,11 @@ python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
 The same test checks that the shipped UED binds exactly the configured ids and, with the
 heuristics pulled from DVC, that each is installed.
 
+The dgrad AOT engines commit no config, so `tests/test_trained_rankers.py` does not cover
+their rankers: `_TRAINED_CATALOG_SHA256` in `tests/test_make_conv_dgrad_aot_config.py`
+records each one's fingerprint instead, over every shard of its bundle
+(`python3 tools/catalog_fingerprint.py <bundle>/artifacts/*.kdp.json`).
+
 ### The engine manifest and `reduction:`
 
 A rocKE registry-backed engine's `configs/<slug>.engine.yaml`, expanded by
