@@ -39,7 +39,7 @@ namespace
         *out << test.name;
     }
 
-    // Regression: https://github.com/ROCm/rocm-libraries/pull/15266#discussion_r4554390239
+    // Regression: https://github.com/ROCm/rocm-libraries/issues/15764
     // 1024 products of (-128)*(-128) reach 2^24 exactly. At that magnitude,
     // float accumulation loses each trailing 1*1 term, whereas integer
     // accumulation preserves both terms before the epilogue conversion.
