@@ -1473,7 +1473,7 @@ namespace
                   st_ok);
         rocsparse_dnmat_descr huge_dense = nullptr;
         ASSERT_EQ(rocsparse_create_dnmat_descr(
-                      &huge_dense, k_max, 1, 1, g_dummy, f32, rocsparse_order_column),
+                      &huge_dense, k_max, 1, k_max, g_dummy, f32, rocsparse_order_column),
                   st_ok);
         size_t huge_buffer = 7;
         EXPECT_EQ(rocsparse_dense_to_sparse(handle,
