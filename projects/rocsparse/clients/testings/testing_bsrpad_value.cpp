@@ -300,8 +300,8 @@ void testing_bsrpad_value_extra(const Arguments& arg)
     };
 
     const pad_case cases[] = {
-        // One block: i * block_dim + i = 2147488280.
-        {46340, 1, 1, 46341},
+        // One block: i * block_dim = 2147534622 exceeds INT32_MAX; i * block_dim + i = 2147580963.
+        {46341, 1, 1, 46342},
         // 513 blocks: block_index * block_dim * block_dim + i * block_dim + i = 2151677951.
         {std::numeric_limits<int32_t>::max(), 1 << 20, 513, 2048},
     };
