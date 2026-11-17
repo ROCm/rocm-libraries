@@ -348,17 +348,6 @@ def run(
             if cu_count is not None:
                 env["CU"] = str(cu_count)
 
-            # The prebuilt client must bind the libtensilelite-host it was built
-            # with (YAML library parser). An installed hipblaslt on
-            # LD_LIBRARY_PATH ships a msgpack-only host, which makes the client
-            # abort with "Failed to load solution library". Scope the override
-            # to this Tensile subprocess only.
-            client_lib_dir = str((client_build_dir / "tensilelite").resolve())
-            existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
-            env["LD_LIBRARY_PATH"] = (
-                f"{client_lib_dir}:{existing_ld}" if existing_ld else client_lib_dir
-            )
-
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 tensile_cmd = [
                     hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
@@ -372,12 +361,14 @@ def run(
                 # Tensile sizes its pool from this process's CPU affinity.
                 # GEKO_CPU_SLICES is a comma-separated list of taskset ranges,
                 # one per visible device, so concurrent jobs do not each inherit
-                # the full mask.
+                # the full mask. taskset is Linux-only.
                 cpu_slices = [
-                    s for s in os.environ.get("GEKO_CPU_SLICES", "").split(",") if s
+                    s.strip()
+                    for s in os.environ.get("GEKO_CPU_SLICES", "").split(",")
+                    if s.strip()
                 ]
-                if cpu_slices:
-                    cpu_slice = cpu_slices[int(self.device) % len(cpu_slices)]
+                if cpu_slices and os.name != "nt":
+                    cpu_slice = cpu_slices[self.device % len(cpu_slices)]
                     tensile_cmd = ["taskset", "-c", cpu_slice, *tensile_cmd]
                 proc = subprocess.Popen(
                     tensile_cmd,

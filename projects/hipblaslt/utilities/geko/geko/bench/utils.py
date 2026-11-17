@@ -28,16 +28,10 @@ _SCALE_DEFAULTS = {"scaleA": 0, "scaleB": 0}
 
 
 def ensure_scale_columns(df):
-    """Add scaleA/scaleB columns defaulting to 0 (no scaling) if missing. Mutates df in place.
-
-    A mixed workload has the columns on only some rows. Those blanks are the
-    same as a missing column: no scaling.
-    """
+    """Add scaleA/scaleB columns defaulting to 0 (no scaling) if missing. Mutates df in place."""
     for col, default in _SCALE_DEFAULTS.items():
         if col not in df.columns:
             df[col] = default
-        else:
-            df[col] = df[col].fillna(default)
     return df
 
 # Quote parenthesized complex values like (1,0) so embedded commas do not
