@@ -2588,6 +2588,22 @@ and omit `rocm[devel]`.
   generic runner owns pytest execution and JUnit. There is one wheel and no
   compatibility phase (Q133).
 
+## Native build implementation clarification (2026-11-17, #15579 review)
+
+Q094, Q121 and Q134 remain the accepted contracts. Invoke's `--rocm-path`
+selects native build inputs; it does not persist a runtime root. `install`
+shares one resolved environment among native helpers, reports its original
+source, and warns if exported `ROCM_PATH` names another directory. Editable
+TensileLite installation and binding keep the caller environment. Binding saves
+only the client path, and source distributions retain `+g<sha>[.dirty]`.
+
+Runtime selection remains independent: #11023/#11024/#11032 choose an SDK in
+the active interpreter before a conventional prefix. Complete SDK native-build
+integration is still follow-up work. The earlier proposal's editable identity,
+binding-environment and standalone-override requirements are superseded; see
+[InvokeInstallPythonRocmSupport.md](InvokeInstallPythonRocmSupport.md) for the
+implemented contract and remaining work.
+
 ## Deferred decisions
 
 1. ~~Exact TensileLite source-build identity beyond the distribution version.~~
