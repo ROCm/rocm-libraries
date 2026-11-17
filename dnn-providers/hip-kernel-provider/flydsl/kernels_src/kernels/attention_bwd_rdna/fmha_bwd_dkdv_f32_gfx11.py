@@ -52,7 +52,6 @@ from flydsl._mlir import ir
 from flydsl.compiler.kernel_function import CompilationContext
 from flydsl.expr import const_expr, gpu, range_constexpr, rocdl
 from flydsl.expr.typing import T
-from flydsl.runtime.device import get_rocm_arch
 
 KERNEL_NAME = "fmha_bwd_dkdv_f32_gfx11_kernel"
 _LOG2E = host_math.log2(host_math.e)
@@ -106,7 +105,7 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
     CAUSAL = meta.cls == "causal"
     BIAS = meta.cls == "bias"
     DROPOUT = bool(meta.dropout)
-    PHILOX = Philox.for_arch(get_rocm_arch())
+    PHILOX = Philox.for_arch(knobs.arch)
     if DROPOUT and PHILOX.width != 32:
         raise ValueError(
             "the gfx11 dropout map is Philox 4x32 (the gfx950 map); the width table must fall back to 32 for this arch"
