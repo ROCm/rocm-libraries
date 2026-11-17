@@ -524,6 +524,17 @@ def validateCustomPostKernels(kernelConfig):
         raise ValueError("Parallel reduction, post kernels and PersistentLoopArgsVersion=3 require TileProcessingStrategy=StreamK")
     if ("parallel" in reductions) != ("streamKReduce" in kinds):
         raise ValueError("CustomKernel.reductions includes parallel if and only if a streamKReduce post kernel is declared")
+    # SKSplitFactor tells the modes apart and gives the reducer the split
+    # count; the partials live in the workspace.
+    splitArgs = {"SKSplitFactor", "AddressWorkspace"}
+    def hasSplitArgs(args):
+        return isinstance(args, list) and splitArgs <= {
+            arg.get("semantic") for arg in args if isinstance(arg, dict)}
+    if "parallel" in reductions:
+        if not hasSplitArgs(descriptor.get("args")):
+            raise ValueError("Parallel reduction requires main kernel args SKSplitFactor and AddressWorkspace")
+        if not all(hasSplitArgs(post.get("args", [])) for post in postKernels if post["kind"] == "streamKReduce"):
+            raise ValueError("Parallel reduction requires streamKReduce args SKSplitFactor and AddressWorkspace")
     # The tile count already includes the batch, and a dynamic work queue never
     # runs parallel reduction.
     if postKernels and descriptor.get("grid") != ["StreamKNoBatch", "One", "One"]:

@@ -1927,6 +1927,8 @@ _POST_KERNEL_CONFIG = """\
     CustomKernel:
       args:
         - {type: address, semantic: AddressD}
+        - {type: address, semantic: AddressWorkspace}
+        - {type: uint32, semantic: SKSplitFactor}
       macrotile: [256, 256, 64]
       threads: [256, 1, 1]
       grid: [StreamKNoBatch, One, One]
@@ -2038,6 +2040,14 @@ def _dropPostKernels(config):
     (lambda config: config.update(WorkAssignment="DynamicWorkQueue"), "StaticGrid or Hybrid"),
     (_setDescriptor("grid", ["StreamKNoBatch", "TilesBands", "One"]), "must not use TilesBands"),
     (lambda config: config.update(ProblemType={"GroupedGemm": True}), "do not support GroupedGemm"),
+    (_setDescriptor("args", [{"type": "address", "semantic": "AddressWorkspace"}]),
+     "requires main kernel args SKSplitFactor and AddressWorkspace"),
+    (_setDescriptor("args", [{"type": "uint32", "semantic": "SKSplitFactor"}]),
+     "requires main kernel args SKSplitFactor and AddressWorkspace"),
+    (_setPost("args", [{"type": "address", "semantic": "AddressWorkspace"}]),
+     "requires streamKReduce args SKSplitFactor and AddressWorkspace"),
+    (_setPost("args", [{"type": "uint32", "semantic": "SKSplitFactor"}]),
+     "requires streamKReduce args SKSplitFactor and AddressWorkspace"),
 ])
 def test_post_kernel_validation_errors(mutate, match):
     config = _post_kernel_config()

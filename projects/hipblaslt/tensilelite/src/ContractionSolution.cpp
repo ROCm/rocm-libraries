@@ -5193,6 +5193,27 @@ namespace TensileLite
            != kinds[static_cast<size_t>(CustomPostKernelKind::StreamKReduce)])
             throw std::runtime_error(
                 "Parallel reduction requires a streamKReduce post kernel and vice versa");
+        // SKSplitFactor tells the modes apart and gives the reducer the split
+        // count; the partials live in the workspace.
+        auto hasSplitArgs = [](std::vector<CustomArgDefinition> const& args) {
+            auto has = [&](CustomArgSemantic semantic) {
+                return std::any_of(args.begin(), args.end(), [&](auto const& arg) {
+                    return arg.semantic == semantic;
+                });
+            };
+            return has(CustomArgSemantic::SKSplitFactor)
+                   && has(CustomArgSemantic::AddressWorkspace);
+        };
+        if(modes[static_cast<size_t>(CustomReductionMode::Parallel)])
+        {
+            if(!hasSplitArgs(customKernel.args))
+                throw std::runtime_error("Parallel reduction requires main kernel args "
+                                         "SKSplitFactor and AddressWorkspace");
+            for(auto const& post : customKernel.postKernels)
+                if(post.kind == CustomPostKernelKind::StreamKReduce && !hasSplitArgs(post.args))
+                    throw std::runtime_error("Parallel reduction requires streamKReduce args "
+                                             "SKSplitFactor and AddressWorkspace");
+        }
         // The partials start at the workspace base, where amax and bias-gradient
         // scratch would also go.
         if(!customKernel.postKernels.empty()
