@@ -38,6 +38,7 @@
 #include <exception>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -2583,6 +2584,49 @@ TEST(TestIngestorUhdKernelHeuristic, TheOutOfRangeReportCountsOnlyFullyScoredCan
     EXPECT_FALSE(recorder.hasLogContaining("the model contributed nothing"));
     EXPECT_EQ(scored[0].kernelId, testId(0x01));
     EXPECT_EQ(scored[1].kernelId, testId(0x02));
+}
+
+/// The adapter name a descriptor reaches the adapter factory as: makeUhdAdapter dispatches on this
+/// string, so an adapter mapped to another's name is built as that adapter.
+TEST(TestUhdKernelHeuristic, EveryAdapterReachesTheFactoryUnderItsOwnName)
+{
+    const std::vector<std::pair<UhdAdapter, std::string>> names = {
+        {UhdAdapter::STATIC_ORDER, "static_order"},
+        {UhdAdapter::NATIVE, "native"},
+        {UhdAdapter::TREE_DATA, "tree_data"},
+        {UhdAdapter::TABLE, "table"},
+        {UhdAdapter::CUSTOM_LIBRARY, "custom_library"},
+        {UhdAdapter::LINEAR_DATA, "linear_data"},
+        {UhdAdapter::MLP_DATA, "mlp_data"},
+    };
+    for(const auto& [adapter, name] : names)
+    {
+        HeuristicDescriptor descriptor;
+        descriptor.adapter = adapter;
+        EXPECT_EQ(UhdKernelHeuristic::configFrom(descriptor).adapterType, name) << name;
+    }
+}
+
+/// Selector revisions and model hashes record these codes, so each adapter needs its own and a
+/// shipped model's must not move.
+TEST(TestUhdKernelHeuristic, EveryAdapterHasItsOwnFixedSelectorCode)
+{
+    const std::vector<std::pair<UhdAdapter, int>> codes = {
+        {UhdAdapter::STATIC_ORDER, 0},
+        {UhdAdapter::NATIVE, 1},
+        {UhdAdapter::TREE_DATA, 2},
+        {UhdAdapter::TABLE, 3},
+        {UhdAdapter::CUSTOM_LIBRARY, 4},
+        {UhdAdapter::LINEAR_DATA, 5},
+        {UhdAdapter::MLP_DATA, 6},
+    };
+    std::set<int> distinct;
+    for(const auto& [adapter, code] : codes)
+    {
+        EXPECT_EQ(detail::selectorCode(adapter), code);
+        distinct.insert(detail::selectorCode(adapter));
+    }
+    EXPECT_EQ(distinct.size(), codes.size());
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

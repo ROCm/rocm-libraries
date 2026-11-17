@@ -16,6 +16,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <regex>
 #include <set>
@@ -35,6 +36,7 @@
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
@@ -2556,22 +2558,33 @@ TEST(TestDescriptorLoader, MissingDefaultModelPreservesDeclaredOrderSelection)
 namespace
 {
 
-/// Turns the set's UHD into a tree_data one naming @p artifact and writes the tree; the
-/// artifact itself is left to the caller.
+/// Turns the set's UHD into a data-artifact one (tree_data unless @p adapter says otherwise)
+/// naming @p artifact and writes the tree; the artifact itself is left to the caller.
 std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
                                              const std::string& engineName,
-                                             const std::string& artifact)
+                                             const std::string& artifact,
+                                             const std::string& adapter = "tree_data")
 {
     auto documents = makeSetDocuments('1', engineName);
     auto& heuristic = documentOfType(documents, ".uhd.json");
-    heuristic["adapter"] = "tree_data";
+    heuristic["adapter"] = adapter;
     heuristic.erase("native");
     heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
     heuristic["features_hash"]
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
     heuristic["trained_against"] = provenanceOf(documents);
     heuristic["objective"] = "max";
-    heuristic["tree_data"] = {{"artifact", artifact}};
+    if(adapter == "linear_data")
+    {
+        // A within-catalog ranker: a log slowdown, lower is better, estimating no metric.
+        heuristic["objective"] = "min";
+    }
+    else if(adapter == "mlp_data")
+    {
+        // An engine estimate: the log of a registered metric.
+        heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log"}};
+    }
+    heuristic[adapter] = {{"artifact", artifact}};
     writeDocuments(root, documents);
     return root;
 }
@@ -2605,6 +2618,34 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
     // absolute.
     EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
               "model.bin");
+}
+
+/// Each data-artifact adapter a descriptor can name loads as its own UhdAdapter: a spelling the
+/// loader does not map would drop the engine's model.
+TEST(TestDescriptorLoader, ReadsEachDataArtifactAdapterAsItsOwn)
+{
+    const ScopedSymbols symbols;
+    const std::vector<std::pair<std::string, UhdAdapter>> adapters = {
+        {"tree_data", UhdAdapter::TREE_DATA},
+        {"linear_data", UhdAdapter::LINEAR_DATA},
+        {"mlp_data", UhdAdapter::MLP_DATA},
+    };
+    for(const auto& [name, expected] : adapters)
+    {
+        SCOPED_TRACE(name);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("adapter_" + name));
+        writeModelHeuristicSet(dir.path(), "test:adapter_" + name, "model.bin", name);
+        writeArtifact(dir.path() / "model.bin");
+
+        const auto sets = validatedSetsFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        ASSERT_TRUE(sets.front().heuristic.has_value());
+        EXPECT_EQ(sets.front().heuristic->adapter, expected);
+        EXPECT_EQ(
+            std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
+            "model.bin");
+    }
 }
 
 /// The packer copies a shared model UHD and its artifact into every arch shard. Each copy
@@ -3882,21 +3923,89 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseNameIsNotScoped)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
-/// Optional per RFC 0020 §4.2 and mapped to no hipDNN enum, so what is under test is that
-/// a conforming UED carrying them still loads -- the field used to be an unknown key.
-TEST(TestDescriptorLoader, AcceptsAnEngineDeclaringNumericalNotes)
+/// Every cuDNN numerical-note name is authorable and maps to its transport value.
+TEST(TestDescriptorLoader, MapsEveryNumericalNoteName)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("numerical_notes"));
-    auto documents = makeSetDocuments('1', "test:numerical");
-    documentOfType(documents, ".ued.json")["numerical_notes"]
-        = nlohmann::json::array({"tensor_core", "reduced_precision_reduction"});
+    const std::vector<std::pair<const char*, int32_t>> names
+        = {{"tensor_core", HIPDNN_NUMERICAL_NOTE_TENSOR_CORE},
+           {"down_convert_inputs", HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS},
+           {"reduced_precision_reduction", HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION},
+           {"fft", HIPDNN_NUMERICAL_NOTE_FFT},
+           {"nondeterministic", HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC},
+           {"winograd", HIPDNN_NUMERICAL_NOTE_WINOGRAD},
+           {"winograd_tile_4x4", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4},
+           {"winograd_tile_6x6", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6},
+           {"winograd_tile_13x13", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13},
+           {"strict_nan_prop", HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP}};
+
+    for(const auto& [name, value] : names)
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("numerical_notes"));
+        auto documents = makeSetDocuments('1', "test:numerical");
+        documentOfType(documents, ".ued.json")["numerical_notes"] = nlohmann::json::array({name});
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u) << name;
+        ASSERT_TRUE(sets.front().engine.numericalNotes.has_value()) << name;
+        EXPECT_EQ(*sets.front().engine.numericalNotes, (std::vector<int32_t>{value})) << name;
+    }
+}
+
+/// An absent key is "no claim" and an authored empty list is an explicit claim of no
+/// notes; the two must stay distinguishable.
+TEST(TestDescriptorLoader, DistinguishesAnAbsentNumericalNotesKeyFromAnEmptyList)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory absentDir(uniqueDirectory("notes_absent"));
+    writeDocuments(absentDir.path(), makeSetDocuments('1', "test:absent"));
+    const auto absent = loadFrom(absentDir.path());
+    ASSERT_EQ(absent.size(), 1u);
+    EXPECT_FALSE(absent.front().engine.numericalNotes.has_value());
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory emptyDir(uniqueDirectory("notes_empty"));
+    auto documents = makeSetDocuments('1', "test:empty");
+    documentOfType(documents, ".ued.json")["numerical_notes"] = nlohmann::json::array();
+    writeDocuments(emptyDir.path(), documents);
+    const auto empty = loadFrom(emptyDir.path());
+    ASSERT_EQ(empty.size(), 1u);
+    ASSERT_TRUE(empty.front().engine.numericalNotes.has_value());
+    EXPECT_TRUE(empty.front().engine.numericalNotes->empty());
+}
+
+/// One engine carries both note lists; each lands in its own field.
+TEST(TestDescriptorLoader, ParsesBehaviorAndNumericalNotesOnTheSameEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("both_note_lists"));
+    auto documents = makeSetDocuments('1', "test:both_notes");
+    auto& ued = documentOfType(documents, ".ued.json");
+    ued["behavior_notes"] = nlohmann::json::array({"runtime_compilation"});
+    ued["numerical_notes"] = nlohmann::json::array({"nondeterministic"});
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.numericalNotes,
-              (std::vector<std::string>{"tensor_core", "reduced_precision_reduction"}));
+    EXPECT_EQ(sets.front().engine.behaviorNotes,
+              (std::vector<int32_t>{HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION}));
+    ASSERT_TRUE(sets.front().engine.numericalNotes.has_value());
+    EXPECT_EQ(*sets.front().engine.numericalNotes,
+              (std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC}));
+}
+
+/// Any name outside the closed vocabulary is rejected, including a known name in the
+/// wrong case.
+TEST(TestDescriptorLoader, DropsAnEngineDeclaringAnUnknownNumericalNote)
+{
+    for(const char* name : {"ftz", "NONDETERMINISTIC", "tensor-core"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unknown_note"));
+        auto documents = makeSetDocuments('1', "test:unknown");
+        documentOfType(documents, ".ued.json")["numerical_notes"] = nlohmann::json::array({name});
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty()) << name;
+    }
 }
 
 /// A note repeated is reported twice downstream, so it is an authoring mistake rather
@@ -3906,7 +4015,7 @@ TEST(TestDescriptorLoader, DropsAnEngineRepeatingANumericalNote)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("repeated_note"));
     auto documents = makeSetDocuments('1', "test:repeated");
     documentOfType(documents, ".ued.json")["numerical_notes"]
-        = nlohmann::json::array({"tensor_core", "tensor_core"});
+        = nlohmann::json::array({"nondeterministic", "nondeterministic"});
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
@@ -6607,6 +6716,30 @@ TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
     EXPECT_TRUE(set.heuristicsByMetric.empty());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
+}
+
+TEST(TestDescriptorLoader, ParsesASlottedUedToOneDescriptorWhateverItsStorageHeld)
+{
+    // Per-arch shards ship byte-identical copies of one slotted UED, and the loader keeps
+    // them only while their parsed descriptors compare equal. A compared member the slotted
+    // branch leaves unassigned would carry whatever its storage held, so each parse lands in
+    // storage pre-filled with a different pattern (the parser's result is constructed in
+    // place where the compiler elides the copy).
+    auto documents = makeSlottedDocuments('1', "test:slotted_storage");
+    const auto& ued = documentOfType(documents, ".ued.json");
+    const auto parseOver = [&ued](unsigned char fill, unsigned char* storage) {
+        std::fill_n(storage, sizeof(EngineDescriptor), fill);
+        return new(storage) EngineDescriptor(detail::parseEngineDescriptor(ued, "slotted ued"));
+    };
+    alignas(EngineDescriptor) std::array<unsigned char, sizeof(EngineDescriptor)> first{};
+    alignas(EngineDescriptor) std::array<unsigned char, sizeof(EngineDescriptor)> second{};
+    auto* lhs = parseOver(0xAA, first.data());
+    auto* rhs = parseOver(0x55, second.data());
+
+    const bool equal = *lhs == *rhs;
+    lhs->~EngineDescriptor();
+    rhs->~EngineDescriptor();
+    EXPECT_TRUE(equal);
 }
 
 TEST(TestDescriptorLoader, UnslottedFilesLoadWithEmptySlotState)

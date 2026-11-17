@@ -1511,59 +1511,6 @@ int ConvDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         } while(false);
     }
 
-    if(!immediate_solution)
-    {
-        miopenStatus_t rc = miopenStatusSuccess;
-        if(is_wrw && rc == miopenStatusSuccess)
-        {
-            wrw_auxiliary.resume(wall_enabled);
-            wrw_auxiliary_gwss.resume(wall_enabled);
-            rc = miopenConvolutionBackwardWeightsGetWorkSpaceSize(GetHandle(),
-                                                                  outputTensor,
-                                                                  inputTensor,
-                                                                  convDesc,
-                                                                  weightTensor,
-                                                                  &ws_sizeof_find_wrw);
-            wrw_auxiliary_gwss.pause(wall_enabled);
-            wrw_auxiliary.pause(wall_enabled);
-            AdjustWorkspacesizeVariableFromEnv(ws_sizeof_find_wrw);
-        }
-        if(is_bwd && rc == miopenStatusSuccess)
-        {
-            bwd_auxiliary.resume(wall_enabled);
-            bwd_auxiliary_gwss.resume(wall_enabled);
-            rc = miopenConvolutionBackwardDataGetWorkSpaceSize(GetHandle(),
-                                                               outputTensor,
-                                                               weightTensor,
-                                                               convDesc,
-                                                               inputTensor,
-                                                               &ws_sizeof_find_bwd);
-            bwd_auxiliary_gwss.pause(wall_enabled);
-            bwd_auxiliary.pause(wall_enabled);
-            AdjustWorkspacesizeVariableFromEnv(ws_sizeof_find_bwd);
-        }
-        if(is_fwd && rc == miopenStatusSuccess)
-        {
-            fwd_auxiliary.resume(wall_enabled);
-            fwd_auxiliary_gwss.resume(wall_enabled);
-            rc = miopenConvolutionForwardGetWorkSpaceSize(
-                GetHandle(),
-                (is_transform ? weightTensor_vect4 : weightTensor),
-                (is_transform ? inputTensor_vect4 : inputTensor),
-                convDesc,
-                outputTensor,
-                &ws_sizeof_find_fwd);
-            fwd_auxiliary_gwss.pause(wall_enabled);
-            fwd_auxiliary.pause(wall_enabled);
-            AdjustWorkspacesizeVariableFromEnv(ws_sizeof_find_fwd);
-        }
-        if(rc != miopenStatusSuccess)
-        {
-            std::cout << "Error getting workspace size, status = " << rc << std::endl;
-            return rc;
-        }
-    }
-
     if(is_fwd || is_wrw)
         in.AllocOnHost(inputTensor);
     if(is_fwd || is_bwd)
@@ -1766,6 +1713,62 @@ int ConvDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         std::cout << "Error copying data to GPU, status = " << status << std::endl;
         return miopenStatusNotInitialized;
     }
+
+    // Queried after the tensors are on the device, as an application such as PyTorch does, so a
+    // workspace size that depends on free device memory accounts for them.
+    if(!immediate_solution)
+    {
+        miopenStatus_t rc = miopenStatusSuccess;
+        if(is_wrw && rc == miopenStatusSuccess)
+        {
+            wrw_auxiliary.resume(wall_enabled);
+            wrw_auxiliary_gwss.resume(wall_enabled);
+            rc = miopenConvolutionBackwardWeightsGetWorkSpaceSize(GetHandle(),
+                                                                  outputTensor,
+                                                                  inputTensor,
+                                                                  convDesc,
+                                                                  weightTensor,
+                                                                  &ws_sizeof_find_wrw);
+            wrw_auxiliary_gwss.pause(wall_enabled);
+            wrw_auxiliary.pause(wall_enabled);
+            AdjustWorkspacesizeVariableFromEnv(ws_sizeof_find_wrw);
+        }
+        if(is_bwd && rc == miopenStatusSuccess)
+        {
+            bwd_auxiliary.resume(wall_enabled);
+            bwd_auxiliary_gwss.resume(wall_enabled);
+            rc = miopenConvolutionBackwardDataGetWorkSpaceSize(GetHandle(),
+                                                               outputTensor,
+                                                               weightTensor,
+                                                               convDesc,
+                                                               inputTensor,
+                                                               &ws_sizeof_find_bwd);
+            bwd_auxiliary_gwss.pause(wall_enabled);
+            bwd_auxiliary.pause(wall_enabled);
+            AdjustWorkspacesizeVariableFromEnv(ws_sizeof_find_bwd);
+        }
+        if(is_fwd && rc == miopenStatusSuccess)
+        {
+            fwd_auxiliary.resume(wall_enabled);
+            fwd_auxiliary_gwss.resume(wall_enabled);
+            rc = miopenConvolutionForwardGetWorkSpaceSize(
+                GetHandle(),
+                (is_transform ? weightTensor_vect4 : weightTensor),
+                (is_transform ? inputTensor_vect4 : inputTensor),
+                convDesc,
+                outputTensor,
+                &ws_sizeof_find_fwd);
+            fwd_auxiliary_gwss.pause(wall_enabled);
+            fwd_auxiliary.pause(wall_enabled);
+            AdjustWorkspacesizeVariableFromEnv(ws_sizeof_find_fwd);
+        }
+        if(rc != miopenStatusSuccess)
+        {
+            std::cout << "Error getting workspace size, status = " << rc << std::endl;
+            return rc;
+        }
+    }
+
     return miopenStatusSuccess;
 }
 
