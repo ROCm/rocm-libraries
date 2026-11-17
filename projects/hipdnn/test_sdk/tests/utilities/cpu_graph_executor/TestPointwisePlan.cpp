@@ -1066,7 +1066,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryExp)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -1102,7 +1103,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinaryDiv)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -1176,7 +1178,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionGenIndex)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, int32_t>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, int32_t>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
