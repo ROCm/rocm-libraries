@@ -516,8 +516,9 @@ inline std::vector<RegimeAxis> parseLabelAxes(const nlohmann::json& axes,
         {
             if(label.find(':') != std::string::npos)
             {
-                load.errors.push_back(block + " axis '" + axis.name + "': label '" + label
-                                      + "' contains ':'");
+                auto error = block;
+                error.append(" axis '").append(axis.name).append("': label '").append(label);
+                load.errors.push_back(error.append("' contains ':'"));
             }
         }
 
@@ -529,8 +530,10 @@ inline std::vector<RegimeAxis> parseLabelAxes(const nlohmann::json& axes,
                 const auto name = queryReference(variable);
                 if(!name.empty() && metadata.find(name) == nullptr)
                 {
-                    load.errors.push_back(block + " axis '" + axis.name
-                                          + "' references undeclared parameter '" + name + "'");
+                    auto error = block;
+                    error.append(" axis '").append(axis.name);
+                    error.append("' references undeclared parameter '").append(name);
+                    load.errors.push_back(error.append("'"));
                 }
             }
         }

@@ -3,18 +3,22 @@
 
 #include <algorithm>
 #include <gtest/gtest.h>
+#include <memory>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
-#include <hipdnn_plugin_sdk/heuristics/OptionalFeatures.hpp>
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
+#include <hipdnn_tools/OptionalFeatures.hpp>
 
 namespace
 {
-using hipdnn_plugin_sdk::heuristics::findOptionalFeature;
-using hipdnn_plugin_sdk::heuristics::OptionalFeatureKind;
-using hipdnn_plugin_sdk::heuristics::unguardedOptionalReferences;
+using hipdnn_tools::findOptionalFeature;
+using hipdnn_tools::OptionalFeatureKind;
+using hipdnn_tools::unguardedOptionalReferences;
 
 constexpr const char* SCALE = "$graph.nodes[0].attn_scale_value";
 constexpr const char* MASK_DIM = "$graph.nodes[0].attn_mask.dims[2]";
@@ -129,5 +133,139 @@ TEST(TestOptionalFeatures, AnOperandRequiredByEveryTypeTheNodeCanBeIsNotOptional
                          "$graph.nodes[1].q.dims[0]",
                          "$graph.nodes[1].scale.rank"}),
               std::vector<std::string>{"$graph.nodes[1].scale.rank"});
+}
+
+// Attention graphs as TestEngineFeatures builds them, for the cross-check below: Q [2, 8, 3,
+// 16], K and V [2, 2, 7, *], O [2, 8, 3, 32], and four [2, 1, 1, 1] operands for uids 5-8.
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+struct Device
+{
+    int multiProcessorCount = 64;
+    int warpSize = 32;
+    size_t totalGlobalMem = 1024;
+    int memoryBusWidth = 256;
+    int memoryClockRate = 1000;
+    size_t sharedMemPerBlock = 65536;
+};
+
+void addTensor(GraphT& graph, int64_t uid, std::vector<int64_t> dims, std::vector<int64_t> strides)
+{
+    auto tensor = std::make_unique<TensorAttributesT>();
+    tensor->uid = uid;
+    tensor->dims = std::move(dims);
+    tensor->strides = std::move(strides);
+    tensor->data_type = DataType::HALF;
+    graph.tensors.push_back(std::move(tensor));
+}
+
+SdpaAttributesT attention()
+{
+    SdpaAttributesT sdpa;
+    sdpa.q_tensor_uid = 1;
+    sdpa.k_tensor_uid = 2;
+    sdpa.v_tensor_uid = 3;
+    sdpa.o_tensor_uid = 4;
+    return sdpa;
+}
+
+GraphT attentionGraph(SdpaAttributesT sdpa)
+{
+    GraphT graph;
+    addTensor(graph, 1, {2, 8, 3, 16}, {384, 48, 16, 1});
+    addTensor(graph, 2, {2, 2, 7, 16}, {224, 112, 16, 1});
+    addTensor(graph, 3, {2, 2, 7, 32}, {448, 224, 32, 1});
+    addTensor(graph, 4, {2, 8, 3, 32}, {768, 96, 32, 1});
+    for(int64_t uid = 5; uid <= 8; ++uid)
+    {
+        addTensor(graph, uid, {2, 1, 1, 1}, {1, 1, 1, 1});
+    }
+    auto node = std::make_unique<NodeT>();
+    node->compute_data_type = DataType::FLOAT;
+    node->attributes.Set(sdpa);
+    graph.nodes.push_back(std::move(node));
+    return graph;
+}
+
+/// Every feature hipDNN publishes for @p graph at selection time.
+nlohmann::json features(const GraphT& graph)
+{
+    flatbuffers::FlatBufferBuilder graphBuffer;
+    graphBuffer.Finish(Graph::Pack(graphBuffer, &graph));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+        graphBuffer.GetBufferPointer(), graphBuffer.GetSize());
+    flatbuffers::FlatBufferBuilder configBuffer;
+    configBuffer.Finish(CreateEngineConfig(configBuffer, 1));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        configBuffer.GetBufferPointer(), configBuffer.GetSize());
+    return hipdnn_plugin_sdk::heuristics::engineFeatures(wrapper, config, Device{}).toJson();
+}
+
+// RFC 0019 section 6.2: a model must read every feature a valid graph may leave unbound
+// through value_or_default or behind present, and this list is them. So each feature one valid
+// form of attention publishes and another omits must be listed, whichever way round. Tensor
+// ranks are equal across these forms: how many dims a tensor publishes is shape, which training
+// sees as a column absent in some rows.
+TEST(TestOptionalFeatures, EveryFeatureAValidFormOmitsIsAnOptionalFeature)
+{
+    auto dropout = attention();
+    dropout.dropout_probability = 0.1F;
+    dropout.seed_tensor_uid = 5;
+    dropout.offset_tensor_uid = 6;
+    auto stated = attention();
+    stated.attn_scale_value = 0.125F;
+    stated.left_bound = 4;
+    stated.right_bound = 0;
+    stated.generate_stats = true;
+    stated.stats_tensor_uid = 5;
+    auto masked = attention();
+    masked.attn_mask_tensor_uid = 5;
+    masked.sink_token_tensor_uid = 6;
+    masked.scale_tensor_uid = 7;
+    auto paged = attention();
+    paged.seq_len_q_tensor_uid = 5;
+    paged.seq_len_kv_tensor_uid = 6;
+    paged.page_table_k_tensor_uid = 7;
+    paged.page_table_v_tensor_uid = 8;
+    paged.padding_mask = true;
+    auto ragged = attentionGraph(attention());
+    ragged.tensors[0]->ragged_offset_tensor_uid = 5;
+
+    const auto minimal = features(attentionGraph(attention()));
+    for(const auto& [name, form] :
+        {std::pair<std::string, nlohmann::json>{"dropout", features(attentionGraph(dropout))},
+         std::pair<std::string, nlohmann::json>{"stated", features(attentionGraph(stated))},
+         std::pair<std::string, nlohmann::json>{"masked", features(attentionGraph(masked))},
+         std::pair<std::string, nlohmann::json>{"paged variable-length",
+                                                features(attentionGraph(paged))}})
+    {
+        SCOPED_TRACE(name);
+        std::set<std::string> differing;
+        for(const auto& [one, other] : {std::pair{&minimal, &form}, std::pair{&form, &minimal}})
+        {
+            for(const auto& item : one->items())
+            {
+                if(!other->contains(item.key()))
+                {
+                    differing.insert(item.key());
+                }
+            }
+        }
+        EXPECT_FALSE(differing.empty());
+        for(const auto& feature : differing)
+        {
+            EXPECT_NE(findOptionalFeature(feature), nullptr)
+                << feature << " is absent from a valid graph but not an optional feature";
+        }
+    }
+    const auto raggedForm = features(ragged);
+    for(const auto& item : minimal.items())
+    {
+        if(!raggedForm.contains(item.key()))
+        {
+            EXPECT_NE(findOptionalFeature(item.key()), nullptr)
+                << item.key() << " is absent from a ragged graph but not an optional feature";
+        }
+    }
 }
 } // namespace

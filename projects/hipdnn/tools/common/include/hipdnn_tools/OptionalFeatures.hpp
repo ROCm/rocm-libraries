@@ -18,9 +18,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
+#include <hipdnn_tools/node_operand_table_generated.h>
 
-namespace hipdnn_plugin_sdk::heuristics
+/// @file OptionalFeatures.hpp
+/// @brief Which published features a valid graph may leave unbound, and which references of a
+///        UHD signature read one unguarded. Tools-internal (hipdnn_tools_common): the descriptor
+///        validator and hipdnn_uhd_features use it; nothing at selection time does.
+namespace hipdnn_tools
 {
 
 /// Why a published feature can be absent on a valid graph.
@@ -86,10 +90,9 @@ inline bool metricIsDerivedFromWork(std::string_view metric)
 namespace detail
 {
 
-inline OptionalFeatureKind
-    optionalKindOf(hipdnn_flatbuffers_sdk::data_objects::node_operands::OperandKind kind)
+inline OptionalFeatureKind optionalKindOf(node_operands::OperandKind kind)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::node_operands::OperandKind;
+    using node_operands::OperandKind;
     switch(kind)
     {
     case OperandKind::TENSOR:
@@ -128,7 +131,7 @@ inline std::optional<std::pair<std::string, std::string>> nodeOperandOf(std::str
 /// (`type`, `flops`, `data_dependent`) constrains nothing.
 inline std::set<std::string_view> candidateNodeTypes(const std::set<std::string>& names)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::node_operands::OPERANDS;
+    using node_operands::OPERANDS;
     std::set<std::string_view> types;
     for(const auto& operand : OPERANDS)
     {
@@ -400,9 +403,9 @@ inline void collectUnguardedReads(const nlohmann::json& node,
 /// operand visitor) and the work features.
 inline const std::vector<OptionalFeature>& optionalFeatures()
 {
-    static const std::vector<OptionalFeature> features = [] {
+    static const std::vector<OptionalFeature> s_features = [] {
         std::vector<OptionalFeature> result;
-        for(const auto& operand : hipdnn_flatbuffers_sdk::data_objects::node_operands::OPERANDS)
+        for(const auto& operand : node_operands::OPERANDS)
         {
             if(!operand.optional)
             {
@@ -426,7 +429,7 @@ inline const std::vector<OptionalFeature>& optionalFeatures()
         }
         return result;
     }();
-    return features;
+    return s_features;
 }
 
 /// The optional feature family published @p name (with or without `$`) belongs to, or
@@ -520,4 +523,4 @@ inline nlohmann::json optionalFeaturesJson()
     return features;
 }
 
-} // namespace hipdnn_plugin_sdk::heuristics
+} // namespace hipdnn_tools

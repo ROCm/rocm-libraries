@@ -14,7 +14,6 @@
 
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
-#include <hipdnn_plugin_sdk/heuristics/OptionalFeatures.hpp>
 
 namespace
 {

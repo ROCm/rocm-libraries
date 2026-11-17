@@ -3,8 +3,8 @@
 
 #include <array>
 #include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
-#include <hipdnn_plugin_sdk/heuristics/OptionalFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
+#include <hipdnn_tools/OptionalFeatures.hpp>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -155,8 +155,7 @@ nlohmann::json lint(const nlohmann::json& request)
     // Compiling refuses a signature the runtime would refuse, before it is linted.
     static_cast<void>(FeatureExtractor(signature, {}));
     auto unguarded = nlohmann::json::array();
-    for(const auto& found :
-        hipdnn_plugin_sdk::heuristics::unguardedOptionalReferences(signature, metric))
+    for(const auto& found : hipdnn_tools::unguardedOptionalReferences(signature, metric))
     {
         unguarded.push_back({{"reference", found.reference},
                              {"pattern", found.feature->pattern},
@@ -179,8 +178,7 @@ int main(int argc, char** argv)
         }
         if(mode == "--optional-features")
         {
-            std::cout << nlohmann::json{{"optional_features",
-                                         hipdnn_plugin_sdk::heuristics::optionalFeaturesJson()}}
+            std::cout << nlohmann::json{{"optional_features", hipdnn_tools::optionalFeaturesJson()}}
                              .dump()
                       << '\n';
             return 0;
