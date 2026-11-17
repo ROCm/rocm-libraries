@@ -277,27 +277,28 @@ To format the code per commit, install githooks:
 Storing large file using Git Large File Storage
 =========================================================
 
-`Data Versioning System (DVS) <https://dvc.org/>`_ replaces large files, such as audio samples, videos, datasets, and
-graphics with text pointers inside Git, while storing the file contents on a remote server. MIOpen uses DVC to
-store large files, such as kernel database files (``*.kdb``), which are normally > 0.5 GB.
+`Git LFS <https://git-lfs.com/>`_ replaces large files with small text pointers inside Git, while storing the file
+contents on a remote server. MIOpen uses Git LFS to store large files, such as the kernel database files
+(``*.kdb.bz2``), which are normally > 0.5 GB.
 
-To install DVC, use the `instructions provided for your platform here <https://dvc.org/doc/install>`_.
-
-You can `pull <https://dvc.org/doc/command-reference/pull>`_ all large files or a single large file using:
-
-.. code:: shell
-
-   dvc pull
-
-or
+To install Git LFS, use the `instructions provided for your platform here <https://git-lfs.com/>`_. Then enable it
+once for your user account:
 
 .. code:: shell
 
-   dvc pull "filename"
+   git lfs install
 
+With Git LFS enabled, ``git clone`` and ``git checkout`` download the large files together with the rest of the
+checkout. If you cloned without Git LFS, or want to fetch the large files again, use:
 
-If you are familiar with using Git LFS, a key difference with DVC is that you must manually run ``dvc pull`` after you
-switch branches or merge changes in Git to ensure any large binaries are kept in sync with your checkout.
+.. code:: shell
+
+   git lfs pull --include "projects/miopen/src/kernels/*.kdb.bz2"
+
+Without ``--include``, ``git lfs pull`` fetches every Git LFS file in the repository.
+
+If the kernel database files are still text pointers when you configure MIOpen, CMake prints a warning and skips the
+kernel database packages.
 
 Installing the dependencies manually
 ===============================================================
