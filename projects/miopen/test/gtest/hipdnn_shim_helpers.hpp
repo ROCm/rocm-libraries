@@ -103,6 +103,16 @@ using OwnedProblem = Owned<miopenProblem_t, miopenDestroyProblem>;
 using OwnedActivationDescriptor =
     Owned<miopenActivationDescriptor_t, miopenDestroyActivationDescriptor>;
 
+// A handle of its own on `stream`, so it reuses no invoker or plan that another
+// handle cached. Sharing the stream keeps it ordered with the shared handle's work.
+struct OwnedHandleOnStream : Owned<miopenHandle_t, miopenDestroy>
+{
+    explicit OwnedHandleOnStream(miopenAcceleratorQueue_t stream)
+    {
+        EXPECT_EQ(miopenCreateWithStream(&handle, stream), miopenStatusSuccess);
+    }
+};
+
 // Declare it after the vector it refers to, so it is destroyed first. Nulls are skipped
 // because the vector can hold slots the find call did not fill.
 struct OwnedSolutions
@@ -548,6 +558,15 @@ inline void ExpectForwardedDecline(const CallResult& result, const char* reason 
     // MIOPEN_LOG_LEVEL can turn the reason off.
     if(reason != nullptr && miopen::wrapper::ErrorLoggingEnabled())
         EXPECT_NE(result.logged.find(reason), std::string::npos) << result.logged;
+}
+
+// A decline on the forwarded path, with its status and its logged reason.
+inline void ExpectDeclinedBecause(const CallResult& result,
+                                  const char* reason,
+                                  miopenStatus_t expected = miopenStatusUnsupportedOp)
+{
+    EXPECT_EQ(result.status, expected) << reason;
+    ExpectForwardedDecline(result, reason);
 }
 
 // For a case MIOpen serves and the forwarded path may decline. Natively, some conv problems fail

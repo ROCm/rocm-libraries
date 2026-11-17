@@ -1497,9 +1497,7 @@ void ForgetTuning(const BN2DTestCase& test_case)
     for(const char* value : {"NONE", "DB_CLEAN"})
     {
         const ScopedFindEnforce find_enforce(value);
-        hs::Owned<miopenHandle_t, miopenDestroy> owned_handle;
-        ASSERT_EQ(miopenCreateWithStream(&owned_handle.handle, get_handle().GetStream()),
-                  miopenStatusSuccess);
+        const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
         auto&& handle = miopen::deref(owned_handle.handle);
 
         TrainData train;
@@ -1732,9 +1730,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
         SCOPED_TRACE(name);
         const ScopedFindEnforce find_enforce(step.value);
 
-        hs::Owned<miopenHandle_t, miopenDestroy> owned_handle;
-        ASSERT_EQ(miopenCreateWithStream(&owned_handle.handle, get_handle().GetStream()),
-                  miopenStatusSuccess);
+        const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
         auto&& handle = miopen::deref(owned_handle.handle);
 
         {
@@ -1774,9 +1770,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
         ForgetTuning(SearchCase());
         const ScopedFindEnforce find_enforce(value);
 
-        hs::Owned<miopenHandle_t, miopenDestroy> owned_handle;
-        ASSERT_EQ(miopenCreateWithStream(&owned_handle.handle, get_handle().GetStream()),
-                  miopenStatusSuccess);
+        const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
         auto&& handle = miopen::deref(owned_handle.handle);
         const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
 
@@ -2372,8 +2366,7 @@ TEST(GPU_HipdnnShimBNDeclined_FP32, UnsupportedProblemsAreDeclinedWithReason)
         // With a check missing the call is served, so its work must finish
         // before the buffers are freed.
         handle.Finish();
-        EXPECT_EQ(result.status, miopenStatusUnsupportedOp) << reason;
-        hs::ExpectForwardedDecline(result, reason);
+        hs::ExpectDeclinedBecause(result, reason);
     };
 
     {
