@@ -25,6 +25,7 @@
 #include <cctype>
 #include <new>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 
@@ -944,8 +945,9 @@ namespace hipblaslt_jit
         }
     };
 
-    JitLibrary::JitLibrary(fs::path root)
+    JitLibrary::JitLibrary(fs::path root, DeviceKey deviceKey)
         : m_root(root.lexically_normal())
+        , m_deviceKey(std::move(deviceKey))
     {
         if(!m_root.has_filename() && m_root.has_parent_path())
             m_root = m_root.parent_path();
@@ -977,6 +979,13 @@ namespace hipblaslt_jit
     fs::path JitLibrary::directory(const CacheKey& key) const
     {
         return buildDirectory() / key.directoryName();
+    }
+
+    void JitLibrary::disable(const std::string& reason)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if(m_disabled.empty())
+            m_disabled = reason;
     }
 
     Status JitLibrary::checkRoot()
@@ -1020,12 +1029,15 @@ namespace hipblaslt_jit
             opened->path     = buildDirectory().parent_path() / revision / name;
             opened->identity = key;
             std::error_code error;
-            if(!create && !fs::is_directory(opened->path, error))
+            if(!create)
             {
-                m_directories.erase(slotName);
-                return nullptr;
+                if(!fs::is_directory(opened->path, error))
+                {
+                    m_directories.erase(slotName);
+                    return nullptr;
+                }
             }
-            if(create)
+            else
             {
                 for(const auto& path : {opened->path, opened->staging()})
                     if(auto status = files::privateDirectory(path); !status.ok())
@@ -1116,6 +1128,51 @@ namespace hipblaslt_jit
             return status;
         out = std::move(compiled);
         return {};
+    }
+
+    void JitLibrary::discover(int device)
+    {
+        CacheKey key;
+        if(!m_deviceKey || !checkRoot().ok() || !m_deviceKey(device, key).ok())
+            return;
+        const auto revisionNow = buildDirectory().filename().string();
+        const auto schema      = buildDirectory().parent_path();
+        auto       revisions   = std::vector<std::string>{revisionNow};
+        const auto older       = olderRevisionNames(schema, revisionNow);
+        revisions.insert(revisions.end(), older.begin(), older.end());
+        for(const auto& revision : revisions)
+        {
+            const bool      current = revision == revisionNow;
+            std::error_code error;
+            const auto      root = schema / revision;
+            if(!fs::is_directory(root, error))
+                continue;
+            for(fs::directory_iterator next(root, error), end; !error && next != end;
+                next.increment(error))
+            {
+                if(!next->is_directory())
+                    continue;
+                const auto           name = next->path().filename().string();
+                std::vector<uint8_t> bytes;
+                if(!files::readFile(next->path() / "cache-key.msgpack", fileLimit, bytes).ok())
+                    continue;
+                msgpack_io::CacheKeyDocument stored;
+                if(!msgpack_io::readCacheKey(bytes, stored).ok())
+                    continue;
+                auto candidate = key;
+                if(stored.hasBackendId)
+                    candidate.backendId = stored.backendId;
+                if(stored.hasBackendVersion)
+                    candidate.backendVersion = static_cast<uint32_t>(stored.backendVersion);
+                if(candidate.directoryName() != name || !directoryAgrees(stored, candidate))
+                    continue;
+                Status why;
+                // An older revision is not written: no staging directory and no
+                // cache-key.msgpack is created for it.
+                if(auto* directory = open(revision, name, candidate, current, why))
+                    addOnce(m_routes[device], directory);
+            }
+        }
     }
 
     Status JitLibrary::lookup(const CacheKey&                           key,
@@ -1590,6 +1647,8 @@ namespace hipblaslt_jit
                     if(!m_disabled.empty())
                         return failed(Stage::Lookup,
                                       "JIT solution library disabled: " + m_disabled);
+                    if(reload)
+                        discover(device);
                     const auto revisionNow = buildDirectory().filename().string();
                     const auto schema      = buildDirectory().parent_path();
                     auto       attached    = m_routes[device];
@@ -1747,10 +1806,12 @@ namespace hipblaslt_jit
         struct ActiveQuery
         {
             bool                     engaged = false;
+            bool                        allowGeneration = false;
             DeviceTarget             target;
             BackendInfo              backend;
             size_t                   workspace = 0;
             std::vector<std::string> exclude;
+            JitLibrary::GenerateMissing generate;
             Status                   failure;
         };
 
@@ -1759,12 +1820,72 @@ namespace hipblaslt_jit
             thread_local ActiveQuery query;
             return query;
         }
+
+        // The layout a generator sees: type, sizes and strides of every tensor
+        // the problem describes (A, B, C, D and any E, bias, scale or metadata
+        // tensor), plus the C/D aliasing and batch mode. A published entry is
+        // still named by the type and sizes alone, because a solution's
+        // predicates decide which strides it serves. A generator may support one
+        // layout and reject another, so each layout is attempted once.
+        std::string layoutKey(const TensileLite::ContractionProblemGemm& problem)
+        {
+            const auto join = [](const std::vector<size_t>& values) {
+                std::string text;
+                for(auto value : values)
+                    text += (text.empty() ? "" : "x") + std::to_string(value);
+                return text;
+            };
+            std::string layout;
+            for(size_t index = 0; index < problem.tensors().size(); ++index)
+            {
+                const auto& tensor = problem.tensors()[index];
+                if(tensor.empty())
+                    continue;
+                layout += "|t" + std::to_string(index) + ':'
+                          + std::to_string(static_cast<int>(tensor.dataType())) + ':'
+                          + join(tensor.sizes()) + ':' + join(tensor.strides());
+            }
+            layout += problem.cEqualsD() ? "|cd1" : "|cd0";
+            layout += "|bm" + std::to_string(static_cast<int>(problem.batchMode()));
+            return layout;
+        }
+
+        // Empty when the problem cannot be named. That problem is not generated
+        // and does not suppress a later one.
+        std::string generationAttemptKey(const ActiveQuery&                         query,
+                                         const CacheKey&                            key,
+                                         const TensileLite::ContractionProblemGemm& problem,
+                                         int                                        numSolutions)
+        {
+            try
+            {
+                std::ostringstream attempt;
+                attempt << query.target.device << '|' << key.directoryName() << '|'
+                        << key.codeObjectVersion << '|' << query.workspace << '|' << numSolutions
+                        << '|' << problemTypeKey(problem);
+                for(auto size : problemSizes(problem))
+                    attempt << 'x' << size;
+                attempt << layoutKey(problem);
+                attempt << "|uso" << problem.getParams().uniformSummationOrder() << "|ar"
+                        << static_cast<int>(problem.alphaRestriction()) << "|br"
+                        << static_cast<int>(problem.betaRestriction()) << "|act"
+                        << static_cast<int>(problem.getParams().activationEnum());
+                for(const auto& name : query.exclude)
+                    attempt << "|x" << name;
+                return attempt.str();
+            }
+            catch(const std::exception&)
+            {
+                return {};
+            }
+        }
     }
 
     TensileLite::SolutionVector<TensileLite::ContractionSolution>
         JitLibrary::solutionsFor(const TensileLite::ContractionProblemGemm& problem,
                                  const TensileLite::Hardware&               hardware,
-                                 int                                        numSolutions)
+                                 int                                        numSolutions,
+                                 bool                                       generate)
     {
         using Solution = TensileLite::ContractionSolution;
         TensileLite::SolutionVector<Solution> result;
@@ -1773,7 +1894,8 @@ namespace hipblaslt_jit
             return result;
         auto problemCopy = problem;
         problemCopy.setWorkspaceSize(query.workspace);
-        const auto key = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
+        const auto key        = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
+        const auto attemptKey = generationAttemptKey(query, key, problemCopy, numSolutions);
         std::vector<int32_t> indices;
         query.failure = lookup(key,
                                query.target.device,
@@ -1782,6 +1904,75 @@ namespace hipblaslt_jit
                                static_cast<size_t>(numSolutions),
                                query.exclude,
                                indices);
+        const bool miss = indices.size() < static_cast<size_t>(numSolutions);
+        std::shared_ptr<GenerationAttempt> attempt;
+        bool                               owner = false;
+        if(generate && query.allowGeneration && miss && !attemptKey.empty() && query.generate
+           && query.failure.ok())
+        {
+            std::lock_guard<std::mutex> guard(m_attemptMutex);
+            auto [it, inserted] = m_attempts.try_emplace(attemptKey);
+            if(inserted)
+            {
+                it->second        = std::make_shared<GenerationAttempt>();
+                it->second->owner = std::this_thread::get_id();
+                attempt           = it->second;
+                owner             = true;
+            }
+            else if(it->second && it->second->owner != std::this_thread::get_id())
+            {
+                attempt = it->second;
+            }
+        }
+        if(owner)
+        {
+            struct Finish
+            {
+                GenerationAttempt& attempt;
+                ~Finish()
+                {
+                    {
+                        std::lock_guard<std::mutex> guard(attempt.mutex);
+                        attempt.done = true;
+                    }
+                    attempt.ready.notify_all();
+                }
+            } finish{*attempt};
+
+            auto exclude = query.exclude;
+            for(auto index : indices)
+            {
+                Status why;
+                if(auto solution = solutionByIndex(query.target.device, hardware, index, why))
+                    if(!excludedKernel(exclude, solution->kernelName))
+                        exclude.push_back(solution->kernelName);
+            }
+            std::vector<int32_t> extra;
+            query.generate(
+                static_cast<size_t>(numSolutions) - indices.size(), exclude, extra, query.failure);
+            for(auto index : extra)
+                if(std::find(indices.begin(), indices.end(), index) == indices.end())
+                    indices.push_back(index);
+            if(!indices.empty())
+                query.failure = {};
+        }
+        else if(attempt)
+        {
+            {
+                std::unique_lock<std::mutex> lock(attempt->mutex);
+                attempt->ready.wait(lock, [&] { return attempt->done; });
+            }
+            indices.clear();
+            query.failure = lookup(key,
+                                   query.target.device,
+                                   problemCopy,
+                                   hardware,
+                                   static_cast<size_t>(numSolutions),
+                                   query.exclude,
+                                   indices);
+        }
+        if(indices.size() > static_cast<size_t>(numSolutions))
+            indices.resize(static_cast<size_t>(numSolutions));
         for(auto index : indices)
         {
             Status why;
@@ -1798,18 +1989,22 @@ namespace hipblaslt_jit
         return result;
     }
 
-    void JitLibrary::beginQuery(const DeviceTarget&      target,
+    void JitLibrary::beginQuery(bool                     allowGeneration,
+                                const DeviceTarget&      target,
                                 const BackendInfo&       backend,
                                 size_t                   workspace,
-                                std::vector<std::string> excludeKernels)
+                                std::vector<std::string> excludeKernels,
+                                GenerateMissing          generate)
     {
-        auto& query     = activeQuery();
-        query           = {};
-        query.engaged   = true;
-        query.target    = target;
-        query.backend   = backend;
-        query.workspace = workspace;
-        query.exclude   = std::move(excludeKernels);
+        auto& query           = activeQuery();
+        query                 = {};
+        query.engaged         = true;
+        query.allowGeneration = allowGeneration;
+        query.target          = target;
+        query.backend         = backend;
+        query.workspace       = workspace;
+        query.exclude         = std::move(excludeKernels);
+        query.generate        = std::move(generate);
     }
 
     void JitLibrary::endQuery()
@@ -1854,7 +2049,8 @@ namespace hipblaslt_jit
                                      TensileLite::Hardware const&               hardware,
                                      TensileLite::SolutionLibrarySearchType) const
     {
-        auto found = const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, INT32_MAX);
+        auto found
+            = const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, INT32_MAX, false);
         TensileLite::SolutionSet<TensileLite::ContractionSolution> result;
         result.insert(found.begin(), found.end());
         return result;
@@ -1883,7 +2079,7 @@ namespace hipblaslt_jit
                                      TensileLite::Hardware const&               hardware,
                                      int                                        numSolutions) const
     {
-        return const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, numSolutions);
+        return const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, numSolutions, true);
     }
 
     TensileLite::SolutionVector<TensileLite::ContractionSolution> JitLibrary::findTopSolutionsGroupedGemm(
