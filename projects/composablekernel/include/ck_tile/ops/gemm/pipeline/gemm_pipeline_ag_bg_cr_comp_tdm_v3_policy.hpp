@@ -59,6 +59,9 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// previous row's WMMAs instead of being waited on right before its own. The last read of a
     /// stage then comes one row earlier, and so does the arrive.
     static constexpr bool kStreamARowPrefetch = false;
+    /// With kStreamARowPrefetch: how many A rows ahead of the WMMAs the LDS reads run (1: the
+    /// next row). Deeper hides more LDS latency per row, at 16 VGPRs (fp8, 16x16x128) per row.
+    static constexpr index_t kStreamARowPrefetchDepth = 1;
 
     /// MX, split barrier only: stage the A/B scales in LDS. The issuers of each LDS stage also
     /// async-load (128-bit, VGPR-addressed, no TDM descriptor) the scales of the K tile after the

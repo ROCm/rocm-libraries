@@ -67,6 +67,13 @@
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/gemm/kernel/mx_gemm_kernel.hpp"
 
+#if defined(CK_TILE_EXP_CLK)
+namespace ck_tile {
+__device__ unsigned long long ck_tile_exp_clk[kExpClkSlots];
+__device__ unsigned long long ck_tile_exp_fill[kExpFillSlots];
+} // namespace ck_tile
+#endif
+
 namespace {
 
 using ADataType      = ck_tile::fp8_t;
@@ -108,6 +115,10 @@ struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 #endif
 #if defined(CK_EX55_A_ROW_PREFETCH)
     [[maybe_unused]] static constexpr bool kStreamARowPrefetch = CK_EX55_A_ROW_PREFETCH != 0;
+#endif
+#if defined(CK_EX55_A_ROW_PREFETCH_DEPTH)
+    [[maybe_unused]] static constexpr ck_tile::index_t kStreamARowPrefetchDepth =
+        CK_EX55_A_ROW_PREFETCH_DEPTH;
 #endif
 };
 #else
@@ -757,6 +768,74 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
     }
     BENCH_HIP_CHECK(hipEventDestroy(start));
     BENCH_HIP_CHECK(hipEventDestroy(stop));
+#if defined(CK_TILE_EXP_CLK)
+    {
+        // the last launch's stamps: median over waves of cycles per KPerBlock K step and of clock
+        std::vector<unsigned long long> st(ck_tile::kExpClkSlots);
+        BENCH_HIP_CHECK(hipMemcpyFromSymbol(st.data(),
+                                            HIP_SYMBOL(ck_tile::ck_tile_exp_clk),
+                                            st.size() * sizeof(unsigned long long)));
+        std::vector<double> cyc, mhz;
+        const double steps = static_cast<double>(p.K) / 256.0;
+        for(size_t w = 0; w + 3 < st.size(); w += 4)
+        {
+            if(st[w + 1] == 0 || st[w + 3] <= st[w + 1])
+                continue;
+            const double dc = static_cast<double>(st[w + 2] - st[w]);
+            const double dt = static_cast<double>(st[w + 3] - st[w + 1]) / 100.0e6;
+            cyc.push_back(dc / steps);
+            mhz.push_back(dc / dt / 1.0e6);
+        }
+        auto med = [](std::vector<double> v) {
+            if(v.empty())
+                return 0.0;
+            std::sort(v.begin(), v.end());
+            return v[v.size() / 2];
+        };
+        std::printf("{\"type\":\"clk\",\"bench\":\"%s\",\"waves\":%zu,\"cyc_per_kstep\":%.0f,"
+                    "\"mhz\":%.0f}\n",
+                    bench_name.c_str(),
+                    cyc.size(),
+                    med(cyc),
+                    med(mhz));
+        // TDM fills of the issuer waves (steady state: skip the first and last 2 fills of a wave)
+        std::vector<unsigned long long> fs(ck_tile::kExpFillSlots);
+        BENCH_HIP_CHECK(hipMemcpyFromSymbol(fs.data(),
+                                            HIP_SYMBOL(ck_tile::ck_tile_exp_fill),
+                                            fs.size() * sizeof(unsigned long long)));
+        // per operand: with alternating issuers waves 0 and 2 issue A, waves 1 and 3 issue B
+        std::vector<double> lat[2], lead[2], stall[2];
+        const size_t per_wave = static_cast<size_t>(ck_tile::kExpFillTiles) * 3;
+        for(size_t w = 0; w + per_wave <= fs.size(); w += per_wave)
+        {
+            const size_t op = (w / per_wave) % 2; // wave id parity (16 slots per workgroup)
+            size_t nf       = 0;
+            while(nf < static_cast<size_t>(ck_tile::kExpFillTiles) && fs[w + nf * 3] != 0 &&
+                  fs[w + nf * 3 + 2] != 0)
+                ++nf;
+            for(size_t t = 2; t + 2 < nf; ++t)
+            {
+                const double is = static_cast<double>(fs[w + t * 3]);
+                const double ws = static_cast<double>(fs[w + t * 3 + 1]);
+                const double wd = static_cast<double>(fs[w + t * 3 + 2]);
+                if(wd < is || ws < is)
+                    continue;
+                lat[op].push_back(wd - is);
+                lead[op].push_back(ws - is);
+                stall[op].push_back(wd - ws);
+            }
+        }
+        for(int op = 0; op < 2; ++op)
+            std::printf("{\"type\":\"fill\",\"bench\":\"%s\",\"op\":\"%s\",\"fills\":%zu,"
+                        "\"lat\":%.0f,\"lead\":%.0f,\"stall\":%.0f}\n",
+                        bench_name.c_str(),
+                        op == 0 ? "A" : "B",
+                        lat[op].size(),
+                        med(lat[op]),
+                        med(lead[op]),
+                        med(stall[op]));
+    }
+#endif
 
     std::vector<double> sorted = samples;
     std::sort(sorted.begin(), sorted.end());

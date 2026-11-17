@@ -12,6 +12,46 @@
 
 namespace ck_tile {
 
+#if defined(CK_TILE_EXP_CLK)
+// EXPERIMENT (-DCK_TILE_EXP_CLK): per-wave shader-cycle and realtime stamps around the
+// split-barrier K loop, (cycles0, realtime0, cycles1, realtime1) at ((workgroup * 16 + wave) * 4).
+// The example defines the array (kExpClkSlots u64) and reads it back after timing.
+inline constexpr index_t kExpClkSlots = 4096 * 16 * 4;
+extern __device__ unsigned long long ck_tile_exp_clk[kExpClkSlots];
+CK_TILE_DEVICE void exp_clk_stamp(index_t half)
+{
+    unsigned long long c, r;
+    asm volatile("s_get_shader_cycles_u64 %0" : "=s"(c));
+    asm volatile("s_sendmsg_rtn_b64 %0, sendmsg(MSG_RTN_GET_REALTIME)\n\ts_wait_kmcnt 0x0"
+                 : "=s"(r));
+    const index_t wg =
+        static_cast<index_t>(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+    const index_t slot = (wg * 16 + get_warp_id()) * 4 + 2 * half;
+    if(get_lane_id() == 0 && slot + 1 < kExpClkSlots)
+    {
+        ck_tile_exp_clk[slot]     = c;
+        ck_tile_exp_clk[slot + 1] = r;
+    }
+}
+// Per TDM fill on its issuer waves: (issue, wait start, wait done) shader cycles at
+// (((workgroup * 16 + wave) * kExpFillTiles + fill) * 3 + kind).
+inline constexpr index_t kExpFillTiles = 272;
+inline constexpr index_t kExpFillSlots = 256 * 16 * kExpFillTiles * 3;
+extern __device__ unsigned long long ck_tile_exp_fill[kExpFillSlots];
+CK_TILE_DEVICE void exp_fill_stamp(index_t kind, index_t fill)
+{
+    unsigned long long c;
+    asm volatile("s_get_shader_cycles_u64 %0" : "=s"(c));
+    const index_t wg =
+        static_cast<index_t>(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+    const index_t slot = ((wg * 16 + get_warp_id()) * kExpFillTiles + fill) * 3 + kind;
+    if(get_lane_id() == 0 && fill < kExpFillTiles && slot < kExpFillSlots)
+    {
+        ck_tile_exp_fill[slot] = c;
+    }
+}
+#endif
+
 /**
  * @brief TDM (tensor data mover) compute pipeline, version 3.
  *
@@ -975,10 +1015,21 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             {
                 // Issue the TDM fill of LDS stage f from the issuer's DRAM window, then point the
                 // window at the tile this issuer fills next (two K tiles on).
+#if defined(CK_TILE_EXP_CLK)
+                index_t exp_fill_idx = 0; // this wave's fills issued / published so far
+                index_t exp_pub_idx  = 0;
+#endif
                 auto fill_stage = [&](auto f) {
                     constexpr index_t s = decltype(f)::value;
-                    auto& a_window      = std::get<s>(std::tie(a_copy_dram_window, a_dram_window1));
-                    auto& b_window      = std::get<s>(std::tie(b_copy_dram_window, b_dram_window1));
+#if defined(CK_TILE_EXP_CLK)
+                    if(s == 0 ? (is_a_issuer0 || is_b_issuer0) : (is_a_issuer1 || is_b_issuer1))
+                    {
+                        exp_fill_stamp(0, exp_fill_idx);
+                        ++exp_fill_idx;
+                    }
+#endif
+                    auto& a_window = std::get<s>(std::tie(a_copy_dram_window, a_dram_window1));
+                    auto& b_window = std::get<s>(std::tie(b_copy_dram_window, b_dram_window1));
                     if(s == 0 ? is_a_issuer0 : is_a_issuer1)
                     {
                         // the scale words first: small, they land well before the data fill
@@ -1028,13 +1079,30 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     }
                     if constexpr(Policy::kTensorWaitAllWaves)
                     {
+#if defined(CK_TILE_EXP_CLK)
+                        // the issuers' own wait, stamped; the arrive's wait is then a no-op
+                        if(is_stage_issuer(f))
+                        {
+                            exp_fill_stamp(1, exp_pub_idx);
+                            s_wait_tensorcnt<0>();
+                            exp_fill_stamp(2, exp_pub_idx);
+                            ++exp_pub_idx;
+                        }
+#endif
                         workgroup_barrier_arrive<0>();
                     }
                     else
                     {
                         if(is_stage_issuer(f))
                         {
+#if defined(CK_TILE_EXP_CLK)
+                            exp_fill_stamp(1, exp_pub_idx);
                             s_wait_tensorcnt<0>();
+                            exp_fill_stamp(2, exp_pub_idx);
+                            ++exp_pub_idx;
+#else
+                            s_wait_tensorcnt<0>();
+#endif
                         }
                         workgroup_barrier_arrive();
                     }
@@ -1049,6 +1117,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 {
                     move_tile_window(b_dram_window1, b_dram_tile_window_step);
                 }
+#if defined(CK_TILE_EXP_CLK)
+                exp_clk_stamp(0);
+#endif
                 fill_stage(I0{});
                 scales.prologue();
 
@@ -1166,45 +1237,53 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             }
                             if constexpr(Policy::kStreamARowPrefetch)
                             {
-                                // Row r + 1's A reads are issued before row r's WMMAs; the
-                                // arrive follows the last read (row R - 1's, issued in step
-                                // R - 2).
+                                // Row r + P's A reads are issued before row r's WMMAs (P =
+                                // kStreamARowPrefetchDepth, capped at the row count); the arrive
+                                // follows the last read (row R - 1's, issued in step R - 1 - P, or
+                                // in the preload when P covers every row).
                                 constexpr index_t R = BlockGemm::MIterPerWarp;
-                                auto load_a_row     = [&](auto r) {
-                                    auto t = make_static_distributed_tensor<ADataType>(
-                                        MakeARowDistribution());
+                                constexpr index_t P = Policy::kStreamARowPrefetchDepth < R
+                                                          ? Policy::kStreamARowPrefetchDepth
+                                                          : R;
+                                static_assert(P >= 1, "kStreamARowPrefetchDepth must be >= 1");
+                                auto rows = generate_tuple(
+                                    [&](auto) {
+                                        return make_static_distributed_tensor<ADataType>(
+                                            MakeARowDistribution());
+                                    },
+                                    number<R>{});
+                                auto load_a_row = [&](auto r) {
                                     auto w = a_row_windows[s];
                                     move_tile_window(w, {r.value * a_row_m, i.value * kSubTileK});
-                                    load_tile(t, w);
-                                    return t;
+                                    load_tile(rows(r), w);
                                 };
-                                auto a_cur = load_a_row(number<0>{});
-                                if constexpr(is_last_sub_tile && R == 1)
-                                {
+                                // early refill: pin what crosses the refill branch (B and the rows
+                                // not multiplied yet), then arrive
+                                auto arrive_pinned = [&](auto first_live) {
+                                    if constexpr(kRefillAfterArrive)
+                                    {
+                                        static_for<decltype(first_live)::value, R, 1>{}(
+                                            [&](auto q) { PinAsDwords(rows(q)); });
+                                        PinAsDwords(b_block_tile);
+                                    }
                                     arrive();
+                                };
+                                static_for<0, P, 1>{}([&](auto r) { load_a_row(r); });
+                                if constexpr(is_last_sub_tile && P >= R)
+                                {
+                                    arrive_pinned(number<0>{});
                                 }
                                 static_for<0, R, 1>{}([&](auto r) {
-                                    decltype(a_cur) a_nxt;
-                                    if constexpr(r.value + 1 < R)
+                                    if constexpr(r.value + P < R)
                                     {
-                                        a_nxt = load_a_row(number<r.value + 1>{});
-                                        if constexpr(is_last_sub_tile && r.value + 2 == R)
+                                        load_a_row(number<r.value + P>{});
+                                        if constexpr(is_last_sub_tile && r.value + P == R - 1)
                                         {
-                                            if constexpr(kRefillAfterArrive)
-                                            {
-                                                PinAsDwords(a_cur);
-                                                PinAsDwords(a_nxt);
-                                                PinAsDwords(b_block_tile);
-                                            }
-                                            arrive();
+                                            arrive_pinned(r);
                                         }
                                     }
                                     BlockGemmRows<r.value, 0, 1, i.value>(
-                                        c_block_tile, a_cur, b_block_tile, stage_scales);
-                                    if constexpr(r.value + 1 < R)
-                                    {
-                                        a_cur = a_nxt;
-                                    }
+                                        c_block_tile, rows[r], b_block_tile, stage_scales);
                                 });
                             }
                             else
@@ -1388,6 +1467,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     __builtin_amdgcn_s_wait_asynccnt(0);
                 }
                 s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+#if defined(CK_TILE_EXP_CLK)
+                exp_clk_stamp(1);
+#endif
                 return c_block_tile;
             }
             else
