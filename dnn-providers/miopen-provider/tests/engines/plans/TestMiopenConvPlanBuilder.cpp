@@ -34,6 +34,13 @@ using namespace hipdnn_test_sdk::utilities;
 using test_conv_common::CONV_2D_W_DIMS;
 using test_conv_common::CONV_2D_X_DIMS;
 using test_conv_common::CONV_2D_Y_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_DATA_TYPE;
+using test_conv_common::MIXED_LAYOUT_2D_DX_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_DX_STRIDES;
+using test_conv_common::MIXED_LAYOUT_2D_DY_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_DY_STRIDES;
+using test_conv_common::MIXED_LAYOUT_2D_W_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_W_STRIDES;
 using test_conv_common::packedStrides;
 
 class TestMiopenConvPlanBuilder : public ::testing::Test
@@ -255,28 +262,26 @@ static ConvGraphSpec uniformPackedSpec(bool channelsLastLayout,
 // dy and dx channels-first, w channels-last (the F15 2D bf16 shape).
 static ConvGraphSpec mixedLayoutSpec()
 {
-    return {{{2, 32, 14, 14}, {6272, 196, 14, 1}},
-            {{32, 16, 3, 3}, {144, 1, 48, 16}},
-            {{2, 16, 16, 16}, {4096, 256, 16, 1}},
-            ConvDataType::BFLOAT16};
+    return {{MIXED_LAYOUT_2D_DY_DIMS, MIXED_LAYOUT_2D_DY_STRIDES},
+            {MIXED_LAYOUT_2D_W_DIMS, MIXED_LAYOUT_2D_W_STRIDES},
+            {MIXED_LAYOUT_2D_DX_DIMS, MIXED_LAYOUT_2D_DX_STRIDES},
+            MIXED_LAYOUT_2D_DATA_TYPE};
 }
 
 // All channels-last, dx with padded rows.
 static ConvGraphSpec channelsLastNonPackedSpec()
 {
-    return {{CONV_2D_Y_DIMS, {144, 1, 24, 4}},
-            {CONV_2D_W_DIMS, {36, 1, 12, 4}},
-            {CONV_2D_X_DIMS, {320, 1, 40, 4}},
-            ConvDataType::FLOAT};
+    ConvGraphSpec spec = uniformPackedSpec(/*channelsLastLayout=*/true);
+    spec.dx.strides = {320, 1, 40, 4};
+    return spec;
 }
 
 // All channels-first, dx with padded rows.
 static ConvGraphSpec channelsFirstNonPackedSpec()
 {
-    return {{CONV_2D_Y_DIMS, {144, 36, 6, 1}},
-            {CONV_2D_W_DIMS, {36, 9, 3, 1}},
-            {CONV_2D_X_DIMS, {512, 128, 16, 1}},
-            ConvDataType::FLOAT};
+    ConvGraphSpec spec = uniformPackedSpec(/*channelsLastLayout=*/false);
+    spec.dx.strides = {512, 128, 16, 1};
+    return spec;
 }
 
 // A single-channel 46341 x 46341 image as dy and dx (2,147,488,281 elements) with a 1x1 filter.

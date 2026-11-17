@@ -236,6 +236,18 @@ inline const std::vector<int64_t> CONV_2D_X_DIMS = {2, 4, 8, 8};
 inline const std::vector<int64_t> CONV_2D_W_DIMS = {4, 4, 3, 3};
 inline const std::vector<int64_t> CONV_2D_Y_DIMS = {2, 4, 6, 6};
 
+// The 2D bf16 convolution of the mixed-layout bundle that MIOpen fails on, in backward-data roles
+// (forward poses the same problem with x the shape of dx and y the shape of dy): dy and dx are
+// channels-first and w is channels-last, with the exact strides of the bundle.
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DY_DIMS = {2, 32, 14, 14};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DY_STRIDES = {6272, 196, 14, 1};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_W_DIMS = {32, 16, 3, 3};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_W_STRIDES = {144, 1, 48, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DX_DIMS = {2, 16, 16, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DX_STRIDES = {4096, 256, 16, 1};
+inline constexpr hipdnn_flatbuffers_sdk::data_objects::DataType MIXED_LAYOUT_2D_DATA_TYPE
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
+
 // The reason the fused applicability check gives for the graph of cbaGraphWithFloatBiasOnHalfGraph.
 inline constexpr const char* FLOAT_BIAS_ON_HALF_GRAPH_REASON
     = "Bias tensor data type FLOAT must equal the convolution input data type HALF";

@@ -40,6 +40,13 @@ using miopen_plugin::conv_applicability::validateConvBwdDataIoTensors;
 using miopen_plugin::conv_applicability::validateConvBwdDataSize;
 using miopen_plugin::conv_applicability::validateConvFwdIoTensors;
 using miopen_plugin::conv_applicability::validateConvWrwIoTensors;
+using test_conv_common::MIXED_LAYOUT_2D_DATA_TYPE;
+using test_conv_common::MIXED_LAYOUT_2D_DX_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_DX_STRIDES;
+using test_conv_common::MIXED_LAYOUT_2D_DY_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_DY_STRIDES;
+using test_conv_common::MIXED_LAYOUT_2D_W_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_W_STRIDES;
 using test_conv_common::packedStrides;
 
 namespace
@@ -137,6 +144,9 @@ std::vector<RankShapes> rankShapes()
 const std::vector<int64_t>& convXDims = test_conv_common::CONV_2D_X_DIMS;
 const std::vector<int64_t>& convWDims = test_conv_common::CONV_2D_W_DIMS;
 const std::vector<int64_t>& convYDims = test_conv_common::CONV_2D_Y_DIMS;
+
+// The three shapes in the roles of uniformCase.
+const RankShapes CONV_SHAPES = {convXDims, convWDims, convYDims};
 
 // ---------------------------------------------------------------------------------------------
 // Forward, backward data and backward weights
@@ -938,14 +948,12 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsUniformPackedAtEveryRank)
 
 TEST(TestMiopenConvApplicabilityChecks, AcceptsEverySupportedDataType)
 {
-    const RankShapes shapes = {convXDims, convWDims, convYDims};
-
     for(const auto dataType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
         for(const bool channelsLastLayout : {false, true})
         {
             SCOPED_TRACE(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
-            expectAccepted(uniformCase(shapes, channelsLastLayout, dataType));
+            expectAccepted(uniformCase(CONV_SHAPES, channelsLastLayout, dataType));
         }
     }
 }
@@ -957,19 +965,19 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsDegenerateUniformShapes)
     // 1D channels-last with a single channel on dy (the 1D NLC bundle pattern): a single output
     // channel gives dy strides in which the extent-1 channel dimension ties with its neighbour.
     expectAccepted({"1d single output channel",
-                    withStrides({2, 1, 16}, {16, 1, 1}),
-                    withStrides({1, 16, 3}, {48, 1, 16}),
-                    withStrides({2, 16, 16}, {256, 1, 16})});
+                    channelsLast({2, 1, 16}),
+                    channelsLast({1, 16, 3}),
+                    channelsLast({2, 16, 16})});
     expectAccepted({"1d single output channel and batch",
-                    withStrides({1, 1, 16}, {16, 1, 1}),
-                    withStrides({1, 16, 3}, {48, 1, 16}),
-                    withStrides({1, 16, 16}, {256, 1, 16})});
+                    channelsLast({1, 1, 16}),
+                    channelsLast({1, 16, 3}),
+                    channelsLast({1, 16, 16})});
 
     // One input channel with an Rx1 filter: all three tensors carry extent-1 dimensions whose
     // strides tie.
     expectAccepted({"single input channel with Rx1 filter",
                     channelsLast({2, 16, 16, 1}),
-                    withStrides({16, 1, 3, 1}, {3, 1, 1, 1}),
+                    channelsLast({16, 1, 3, 1}),
                     channelsLast({2, 1, 16, 1})});
 
     // A global convolution makes dy's spatial extent 1: its canonical channels-first strides are
@@ -1073,7 +1081,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNot
 {
     for(const bool channelsLastLayout : {false, true})
     {
-        const ConvCase base = uniformCase({convXDims, convWDims, convYDims}, channelsLastLayout);
+        const ConvCase base = uniformCase(CONV_SHAPES, channelsLastLayout);
 
         for(size_t zeroIndex = 1; zeroIndex < convXDims.size(); ++zeroIndex)
         {
@@ -1190,9 +1198,11 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesMixedLayoutBundleShapes)
          withStrides({32, 16, 16}, {256, 1, 16}, DataType::HALF),
          withStrides({2, 16, 16}, {256, 1, 16}, DataType::HALF)},
         {"2d bf16, dy cf, w cl, dx cf",
-         withStrides({2, 32, 14, 14}, {6272, 196, 14, 1}, DataType::BFLOAT16),
-         withStrides({32, 16, 3, 3}, {144, 1, 48, 16}, DataType::BFLOAT16),
-         withStrides({2, 16, 16, 16}, {4096, 256, 16, 1}, DataType::BFLOAT16)},
+         withStrides(
+             MIXED_LAYOUT_2D_DY_DIMS, MIXED_LAYOUT_2D_DY_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE),
+         withStrides(MIXED_LAYOUT_2D_W_DIMS, MIXED_LAYOUT_2D_W_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE),
+         withStrides(
+             MIXED_LAYOUT_2D_DX_DIMS, MIXED_LAYOUT_2D_DX_STRIDES, MIXED_LAYOUT_2D_DATA_TYPE)},
         {"2d half, dy cf, w cl, dx cl",
          withStrides({2, 32, 8, 8}, {2048, 64, 8, 1}, DataType::HALF),
          withStrides({32, 16, 2, 2}, {64, 1, 32, 16}, DataType::HALF),
@@ -1412,8 +1422,7 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesNonPackedChannelsLast)
 // broadcast tensors and does not say that MIOpen computes such a convolution correctly.
 TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTensor)
 {
-    const ConvCase base
-        = uniformCase({convXDims, convWDims, convYDims}, /*channelsLastLayout=*/false);
+    const ConvCase base = uniformCase(CONV_SHAPES, /*channelsLastLayout=*/false);
 
     for(const Role role : ROLES)
     {
@@ -1435,15 +1444,15 @@ TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTen
 
 TEST(TestMiopenConvApplicabilityChecks, DeclinesMalformedTensors)
 {
-    auto nullDyDims = uniformCase({convXDims, convWDims, convYDims}, false);
+    auto nullDyDims = uniformCase(CONV_SHAPES, false);
     nullDyDims.dy.nullDims = true;
     expectDeclined(nullDyDims, "null dims");
 
-    auto nullDxDims = uniformCase({convXDims, convWDims, convYDims}, false);
+    auto nullDxDims = uniformCase(CONV_SHAPES, false);
     nullDxDims.dx.nullDims = true;
     expectDeclined(nullDxDims, "null dims");
 
-    auto nullStrides = uniformCase({convXDims, convWDims, convYDims}, false);
+    auto nullStrides = uniformCase(CONV_SHAPES, false);
     nullStrides.w.nullStrides = true;
     expectDeclined(nullStrides, "null dims or strides");
 
@@ -1622,7 +1631,7 @@ TEST(TestMiopenConvApplicabilityChecks, SizeLimitIsNotPartOfTheIoTensorRules)
 // Every operation, every tensor in turn, under the tensor's name in the operation.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesDimsWhoseElementCountOverflows)
 {
-    const ConvCase packed = uniformCase({convXDims, convWDims, convYDims}, false);
+    const ConvCase packed = uniformCase(CONV_SHAPES, false);
 
     for(const auto& dims : ioOverflowingDims())
     {
@@ -1650,7 +1659,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesDimsWhoseElementCountOverflows)
 // Every operation, every tensor in turn, under the tensor's name in the operation.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesStridesWhoseArithmeticOverflows)
 {
-    const ConvCase packed = uniformCase({convXDims, convWDims, convYDims}, false);
+    const ConvCase packed = uniformCase(CONV_SHAPES, false);
 
     for(const auto& overflowing : overflowingStrides())
     {
@@ -1713,7 +1722,7 @@ TEST(TestMiopenConvApplicabilityChecks, StridesOnTheRepresentableLimitAreJudgedB
     constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
     constexpr int64_t MIN_VALUE = std::numeric_limits<int64_t>::min();
 
-    const ConvCase base = uniformCase({convXDims, convWDims, convYDims}, false);
+    const ConvCase base = uniformCase(CONV_SHAPES, false);
     const TensorSpec spanReachesMax = withStrides({2, 1, 1}, {MAX_VALUE - 1, 1, 1});
     const TensorSpec termIsMin = withStrides({2, 1, 1}, {MIN_VALUE, 1, 1});
     ASSERT_FALSE(isTensorPacked(spanReachesMax.dims, spanReachesMax.strides));
@@ -1752,7 +1761,7 @@ TEST(TestMiopenConvApplicabilityChecks, DimsWhoseElementCountIsJustBelowTheLimit
 TEST(TestMiopenConvApplicabilityChecks, DeclinesNegativeDims)
 {
     const TensorSpec negative = withUnitStrides({4, -2, 3, 3});
-    const ConvCase packed = uniformCase({convXDims, convWDims, convYDims}, false);
+    const ConvCase packed = uniformCase(CONV_SHAPES, false);
 
     for(const Role role : ROLES)
     {
