@@ -936,9 +936,10 @@ rocke_status_t rocke_h_lower_op(rocke_h_lowerer_t* lw, const rocke_op_t* op)
     const char* tf32_error = rocke_tf32_op_error(op);
     if(tf32_error)
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
-    char integer_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_integer_element_op_error(op, integer_error, sizeof integer_error))
-        return rocke_h_fail(lw, ROCKE_ERR_TYPE, "%s", integer_error);
+    char operand_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_integer_element_op_error(op, operand_error, sizeof operand_error)
+       || rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
+        return rocke_h_fail(lw, ROCKE_ERR_TYPE, "%s", operand_error);
     fn = rocke_h_dispatch(op->opcode);
     if(!fn)
     {

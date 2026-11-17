@@ -302,7 +302,7 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
     const rocke_value_t* r = h_res(op);
     char cmp_buf[ROCKE_ERR_MSG_CAP];
     const rocke_status_t cmp_status
-        = rocke_i_cmp_error(&op->attrs, a->type, cmp_buf, sizeof cmp_buf);
+        = rocke_i_cmp_error(&op->attrs, a->type, b->type, cmp_buf, sizeof cmp_buf);
     if(cmp_status != ROCKE_OK)
     {
         return rocke_h_fail(lw, cmp_status, "%s", cmp_buf);
@@ -754,7 +754,7 @@ static rocke_status_t rocke_h_op_arith_fcmp(rocke_h_lowerer_t* lw, const rocke_o
     const rocke_value_t* b = op->operands[1];
     char fcmp_buf[ROCKE_ERR_MSG_CAP];
     const rocke_status_t fcmp_status
-        = rocke_i_fcmp_error(&op->attrs, a->type, fcmp_buf, sizeof fcmp_buf);
+        = rocke_i_fcmp_error(&op->attrs, a->type, b->type, fcmp_buf, sizeof fcmp_buf);
     if(fcmp_status != ROCKE_OK)
     {
         return rocke_h_fail(lw, fcmp_status, "%s", fcmp_buf);

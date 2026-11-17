@@ -211,20 +211,20 @@ rocke_value_t* rocke_b_mod(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
 
 rocke_value_t* rocke_b_land(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
-    if(rocke_i_live(b) && a)
-        rocke_i_refuse_non_integer("arith.and", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_AND, a, c, "and");
 }
 
 rocke_value_t* rocke_b_lor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
-    if(rocke_i_live(b) && a)
-        rocke_i_refuse_non_integer("arith.or", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_OR, a, c, "or");
 }
 
+/* IRBuilder.lnot: arith.not lowers to an xor with all ones, so a value that is
+ * not an integer or i1 is refused as a TypeError. */
 rocke_value_t* rocke_b_lnot(rocke_ir_builder_t* b, rocke_value_t* a)
 {
+    if(rocke_i_live(b) && a)
+        rocke_i_refuse_non_integer("arith.not", a->type);
     return rocke_i_unop(b, ROCKE_OP_ARITH_NOT, a, "not");
 }
 
@@ -283,41 +283,16 @@ rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value
 
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
-    if(rocke_i_live(b) && a)
-        rocke_i_refuse_non_integer("arith.xor", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_XOR, a, c, "xor");
 }
 
 rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
-    if(rocke_i_live(b) && a)
-        rocke_i_refuse_non_integer("arith.shl", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_SHL, a, c, "shl");
 }
 
-/* IRBuilder.lshr: LLVM's lshr takes two integers of one width, so a value
- * that is not an integer or i1, or a shift amount of another type, is refused
- * as a TypeError with the Python engine's text. */
 rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
-    if(!rocke_i_live(b))
-        return NULL;
-    if(a && c)
-    {
-        rocke_i_refuse_non_integer("arith.lshr", a->type);
-        if(!rocke_type_eq(a->type, c->type))
-        {
-            char expected[ROCKE_ERR_MSG_CAP];
-            char message[ROCKE_ERR_MSG_CAP];
-            snprintf(expected, sizeof expected, "the shifted value's type '%s'", a->type->name);
-            throw ckc::TypeError(rocke_i_type_name_message("arith.lshr",
-                                                           "shift amount type",
-                                                           c->type->name,
-                                                           expected,
-                                                           message,
-                                                           sizeof message));
-        }
-    }
     return rocke_i_binop(b, ROCKE_OP_ARITH_LSHR, a, c, "lshr");
 }
 
@@ -506,7 +481,8 @@ static rocke_value_t* cmp_impl(
     rocke_attr_set_str(b, &at, "pred", pred);
     /* Python IRBuilder._int_cmp: refuse what ir._int_cmp_error refuses. */
     char cmp_buf[ROCKE_ERR_MSG_CAP];
-    const rocke_status_t cmp_status = rocke_i_cmp_error(&at, a->type, cmp_buf, sizeof cmp_buf);
+    const rocke_status_t cmp_status
+        = rocke_i_cmp_error(&at, a->type, c->type, cmp_buf, sizeof cmp_buf);
     if(cmp_status != ROCKE_OK)
         return (rocke_value_t*)rocke_i_set_err(b, cmp_status, "%s", cmp_buf);
     return rocke_i_op1(b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &at, hint);
@@ -566,7 +542,8 @@ rocke_value_t*
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp NULL operand");
     /* Python IRBuilder.fcmp: refuse what ir._fcmp_error refuses. */
     char fcmp_buf[ROCKE_ERR_MSG_CAP];
-    const rocke_status_t fcmp_status = rocke_i_fcmp_error(&at, a->type, fcmp_buf, sizeof fcmp_buf);
+    const rocke_status_t fcmp_status
+        = rocke_i_fcmp_error(&at, a->type, c->type, fcmp_buf, sizeof fcmp_buf);
     if(fcmp_status != ROCKE_OK)
         return (rocke_value_t*)rocke_i_set_err(b, fcmp_status, "%s", fcmp_buf);
     operands[0] = a;

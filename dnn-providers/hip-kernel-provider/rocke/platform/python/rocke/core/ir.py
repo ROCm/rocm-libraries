@@ -548,35 +548,127 @@ def _int_cmp_pred_error(attrs: Mapping[str, Any], operand_type: str) -> str | No
     return _unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type)
 
 
+def _operand_types_error(op_name: str, lhs_type: Type, rhs_type: Type) -> str | None:
+    """The error for an ``op_name`` op whose second operand, of ``rhs_type``,
+    does not have its first operand's type, ``lhs_type``, or None when they
+    agree.
+
+    The binary ops and the compares take two operands of one type: their
+    lowerings emit both operands at the first one's type (LLVM ``icmp i32``,
+    ``lshr i64`` and so on), so an i32 and an i64 would lower to IR the
+    compiler rejects. The builders refuse it as a ``TypeError``, and the
+    verifier reports it and every lowering refuses it for IR that did not come
+    through them: the same-type binary ops through
+    :func:`_operand_types_op_error`, the compares through their rules
+    (:func:`_int_cmp_error`, :func:`_vector_cmp_error`, :func:`_fcmp_error`).
+    An operand with no type is refused first, with
+    :func:`_untyped_value_message`'s text. The C++ engine's
+    ``rocke_i_operand_types_error`` writes the same texts.
+    """
+    for index, operand_type in enumerate((lhs_type, rhs_type)):
+        error = _untyped_value_message(
+            operand_type, f"{op_name} operand", index, "an IR type"
+        )
+        if error is not None:
+            return error
+    if lhs_type == rhs_type:
+        return None
+    return _type_name_message(
+        op_name,
+        "second operand type",
+        rhs_type.name,
+        f"the first operand's type {lhs_type.name!r}",
+    )
+
+
 def _int_cmp_error(
-    attrs: Mapping[str, Any], operand_type: Type
+    attrs: Mapping[str, Any], lhs_type: Type, rhs_type: Type
 ) -> ValueError | TypeError | None:
     """The refusal, for its caller to raise, of an ``arith.cmp`` op with
-    ``attrs`` on operands of ``operand_type``, or None when it is valid.
+    ``attrs`` on operands of ``lhs_type`` and ``rhs_type``, or None when it is
+    valid.
 
     Its ``pred`` follows :func:`_int_cmp_pred_error` (a ``ValueError``); then
-    its operands must be integers or i1 (:data:`_INTEGER_ELEMENT_TYPES`; a
-    ``TypeError``). The builders, the verifier and both lowerings use it, and
-    the C++ engine (``rocke_i_cmp_error``) returns the matching status and
-    text.
+    its operands have one type (:func:`_operand_types_error`; a
+    ``TypeError``), an integer or i1 (:data:`_INTEGER_ELEMENT_TYPES`; a
+    ``TypeError``). The builders, the verifier, both lowerings and the constant
+    folder use it, and the C++ engine (``rocke_i_cmp_error``) returns the
+    matching status and text.
     """
-    error = _int_cmp_pred_error(attrs, operand_type.name)
+    error = _int_cmp_pred_error(attrs, lhs_type.name)
     if error:
         return ValueError(error)
-    if operand_type.name not in _INTEGER_ELEMENT_TYPES:
+    error = _operand_types_error("arith.cmp", lhs_type, rhs_type)
+    if error:
+        return TypeError(error)
+    if lhs_type.name not in _INTEGER_ELEMENT_TYPES:
         return TypeError(
             _type_name_message(
                 "arith.cmp",
                 "operand type",
-                operand_type.name,
+                lhs_type.name,
                 "an integer or i1 type (compare floats with fcmp)",
             )
         )
     return None
 
 
+# The binary ops whose two operands and result have one type. IRBuilder builds
+# them so; for IR that did not come through it, the verifier reports operands
+# of different types and every lowering refuses them
+# (:func:`_operand_types_op_error`). The C++ engine's twin is
+# ``rocke_i_is_same_type_binary_op``.
+_SAME_TYPE_BINARY_OPS = frozenset(
+    {
+        "arith.add",
+        "arith.sub",
+        "arith.mul",
+        "arith.div",
+        "arith.mod",
+        "arith.fadd",
+        "arith.fsub",
+        "arith.fmul",
+        "arith.fdiv",
+        "arith.fmax",
+        "arith.fmin",
+        "arith.and",
+        "arith.or",
+        "arith.smax",
+        "arith.smin",
+        "arith.umax",
+        "arith.umin",
+        "arith.xor",
+        "arith.shl",
+        "arith.lshr",
+        "vector.add",
+        "vector.sub",
+        "vector.mul",
+        "vector.and",
+        "vector.or",
+        "vector.shl",
+        "vector.lshr",
+        "vector.smax",
+        "vector.smin",
+        "vector.max",
+    }
+)
+
+
+def _operand_types_op_error(op: Op) -> str | None:
+    """:func:`_operand_types_error` for a built op that is one of
+    :data:`_SAME_TYPE_BINARY_OPS` with two operands, or None. The verifier
+    reports it and every lowering refuses it as a ``TypeError`` before it
+    lowers an op, for IR that did not come through IRBuilder (C++ engine:
+    ``rocke_i_operand_types_op_error``)."""
+    if op.name not in _SAME_TYPE_BINARY_OPS or len(op.operands) != 2:
+        return None
+    lhs, rhs = op.operands
+    return _operand_types_error(op.name, lhs.type, rhs.type)
+
+
 # The bitwise ops and shifts. LLVM defines ``and`` / ``or`` / ``xor`` / ``shl`` /
-# ``lshr`` on integers only, so their element type must be an integer or ``i1``
+# ``lshr`` on integers only, and ``arith.not`` lowers to an ``xor`` with all
+# ones, so their element type must be an integer or ``i1``
 # (_integer_element_error). The C++ engine's twin is
 # ``rocke_i_is_integer_element_op``.
 _INTEGER_ELEMENT_OPS = frozenset(
@@ -584,6 +676,7 @@ _INTEGER_ELEMENT_OPS = frozenset(
         "arith.and",
         "arith.or",
         "arith.xor",
+        "arith.not",
         "arith.shl",
         "arith.lshr",
         "vector.and",
@@ -602,7 +695,7 @@ def _integer_element_error(op_name: str, operand_type: Type) -> str | None:
     A float operand would lower to IR the compiler rejects. IRBuilder refuses
     it when the op is built (:func:`_refuse_non_integer`); for IR that did not
     come through IRBuilder, the verifier reports it and every lowering refuses
-    it (:func:`_refuse_non_integer_op`). The C++ engine's
+    it (:func:`_integer_element_op_error`). The C++ engine's
     ``rocke_i_integer_element_error`` reports the same text.
     """
     element = element_type(operand_type)
@@ -621,29 +714,33 @@ def _refuse_non_integer(op_name: str, operand_type: Type) -> None:
         raise TypeError(error)
 
 
-def _refuse_non_integer_op(op: Op) -> None:
-    """:func:`_refuse_non_integer` for a built op that is one of
-    :data:`_INTEGER_ELEMENT_OPS`, on its first operand. IRBuilder refuses such
-    an op when it is built; every lowering calls this before it lowers an op,
-    for IR that did not come through it (C++ engine:
-    ``rocke_i_integer_element_op_error``)."""
-    if op.name in _INTEGER_ELEMENT_OPS and op.operands:
-        _refuse_non_integer(op.name, op.operands[0].type)
+def _integer_element_op_error(op: Op) -> str | None:
+    """:func:`_integer_element_error` for a built op that is one of
+    :data:`_INTEGER_ELEMENT_OPS`, on its first operand, or None. IRBuilder
+    refuses such an op when it is built; the verifier reports this and every
+    lowering refuses it as a ``TypeError`` before it lowers an op, for IR that
+    did not come through it (C++ engine: ``rocke_i_integer_element_op_error``,
+    same text)."""
+    if op.name not in _INTEGER_ELEMENT_OPS or not op.operands:
+        return None
+    return _integer_element_error(op.name, op.operands[0].type)
 
 
 def _vector_cmp_error(
-    attrs: Mapping[str, Any], operand_type: Type
+    attrs: Mapping[str, Any], lhs_type: Type, rhs_type: Type
 ) -> ValueError | TypeError | None:
     """The refusal, for its caller to raise, of a ``vector.cmp`` op with
-    ``attrs`` on operands of ``operand_type``, or None when it is valid.
+    ``attrs`` on operands of ``lhs_type`` and ``rhs_type``, or None when it is
+    valid.
 
     Its ``pred`` is absent (``lt``) or one of the ``vector.cmp`` predicates (a
-    ``ValueError``); then its lanes must be integers or i1, as it lowers to
-    ``icmp`` (:func:`_integer_element_error`; a ``TypeError``). The builder,
-    the verifier and both lowerings use it, and the C++ engine
-    (``rocke_i_vector_cmp_error``) returns the matching status and text. A
-    TF32 vector meets the TF32 rule first in the verifier and the lowerings,
-    which check it before any op rule.
+    ``ValueError``); then its operands have one type
+    (:func:`_operand_types_error`; a ``TypeError``), whose lanes are integers
+    or i1, as it lowers to ``icmp`` (:func:`_integer_element_error`; a
+    ``TypeError``). The builder, the verifier and both lowerings use it, and
+    the C++ engine (``rocke_i_vector_cmp_error``) returns the matching status
+    and text. A TF32 vector meets the TF32 rule first in the verifier and the
+    lowerings, which check it before any op rule.
     """
     error = _string_attr_error(
         attrs,
@@ -654,18 +751,22 @@ def _vector_cmp_error(
     )
     if error:
         return ValueError(error)
-    error = _integer_element_error("vector.cmp", operand_type)
+    error = _operand_types_error("vector.cmp", lhs_type, rhs_type) or (
+        _integer_element_error("vector.cmp", lhs_type)
+    )
     return TypeError(error) if error else None
 
 
 def _fcmp_error(
-    attrs: Mapping[str, Any], operand_type: Type
+    attrs: Mapping[str, Any], lhs_type: Type, rhs_type: Type
 ) -> ValueError | TypeError | None:
     """The refusal, for its caller to raise, of an ``arith.fcmp`` op with
-    ``attrs`` on operands of ``operand_type``, or None when it is valid.
+    ``attrs`` on operands of ``lhs_type`` and ``rhs_type``, or None when it is
+    valid.
 
     Its ``pred`` is one of the ``arith.fcmp`` predicates and is required (a
-    ``ValueError``); then its operands must be one of
+    ``ValueError``); then its operands have one type
+    (:func:`_operand_types_error`; a ``TypeError``), one of
     :data:`_FCMP_OPERAND_TYPES` (a ``TypeError``). The builder, the verifier
     and both lowerings use it, and the C++ engine (``rocke_i_fcmp_error``)
     returns the matching status and text.
@@ -680,12 +781,15 @@ def _fcmp_error(
     )
     if error:
         return ValueError(error)
-    if operand_type.name not in _FCMP_OPERAND_TYPES:
+    error = _operand_types_error("arith.fcmp", lhs_type, rhs_type)
+    if error:
+        return TypeError(error)
+    if lhs_type.name not in _FCMP_OPERAND_TYPES:
         return TypeError(
             _type_name_message(
                 "arith.fcmp",
                 "operand type",
-                operand_type.name,
+                lhs_type.name,
                 f"{', '.join(_FCMP_OPERAND_TYPES[:-1])} or {_FCMP_OPERAND_TYPES[-1]} "
                 "(compare integers with cmp)",
             )
@@ -2035,9 +2139,9 @@ def _untyped_value_message(
     the if/else rule (:func:`_if_else_error`) check each value with it before
     they read its type's name, and both report it as a ``TypeError`` (a missing
     type is the wrong kind of object), as the if/else builder refuses a result
-    type. The C++ engine (``untyped_value_message`` in
-    ``cpp/core/ir/ir_flow.cpp``) writes the same text, spelling its missing
-    type ``None``, with ``ROCKE_ERR_TYPE``.
+    type; the operand rule (:func:`_operand_types_error`) checks each operand
+    with it too. The C++ engine (``rocke_i_untyped_value_message``) writes the
+    same text, spelling its missing type ``None``, with ``ROCKE_ERR_TYPE``.
     """
     if isinstance(value_type, Type):
         return None
@@ -3069,6 +3173,36 @@ class IRBuilder:
 
     # ----- generic op builder -----
 
+    def _binary_op(
+        self,
+        op_name: str,
+        lhs: Value,
+        rhs: Value,
+        result_name_hint: str,
+        attrs: dict[str, Any] | None = None,
+    ) -> Value:
+        """The result, of their type, of one ``op_name`` (one of
+        :data:`_SAME_TYPE_BINARY_OPS`) of ``lhs`` and ``rhs``.
+
+        Raises ``TypeError`` for a bitwise op or shift
+        (:data:`_INTEGER_ELEMENT_OPS`) whose operands are not integers or
+        ``i1`` (:func:`_integer_element_error`), and for operands of different
+        types (:func:`_operand_types_error`), checked in that order. The C++
+        engine's ``rocke_i_binop`` is its twin.
+        """
+        if op_name in _INTEGER_ELEMENT_OPS:
+            _refuse_non_integer(op_name, lhs.type)
+        error = _operand_types_error(op_name, lhs.type, rhs.type)
+        if error:
+            raise TypeError(error)
+        return self._op(
+            op_name,
+            [lhs, rhs],
+            [lhs.type],
+            attrs=attrs,
+            result_name_hint=result_name_hint,
+        ).result
+
     def _op(
         self,
         name: str,
@@ -3134,7 +3268,7 @@ class IRBuilder:
         return op.result
 
     def add(self, a: Value, b: Value) -> Value:
-        return self._op("arith.add", [a, b], [a.type], result_name_hint="add").result
+        return self._binary_op("arith.add", a, b, "add")
 
     def add_nuw(self, a: Value, b: Value) -> Value:
         """Integer ``a + b`` that the caller knows does not wrap as unsigned.
@@ -3145,33 +3279,31 @@ class IRBuilder:
         poison. Operands are two i32 or two i64 values.
         """
         _check_unsigned_int_operands("add_nuw", a, b)
-        return self._op(
-            "arith.add", [a, b], [a.type], attrs={"wrap": "nuw"}, result_name_hint="add"
-        ).result
+        return self._binary_op("arith.add", a, b, "add", attrs={"wrap": "nuw"})
 
     def sub(self, a: Value, b: Value) -> Value:
-        return self._op("arith.sub", [a, b], [a.type], result_name_hint="sub").result
+        return self._binary_op("arith.sub", a, b, "sub")
 
     def mul(self, a: Value, b: Value) -> Value:
-        return self._op("arith.mul", [a, b], [a.type], result_name_hint="mul").result
+        return self._binary_op("arith.mul", a, b, "mul")
 
     def div(self, a: Value, b: Value) -> Value:
-        return self._op("arith.div", [a, b], [a.type], result_name_hint="div").result
+        return self._binary_op("arith.div", a, b, "div")
 
     def mod(self, a: Value, b: Value) -> Value:
-        return self._op("arith.mod", [a, b], [a.type], result_name_hint="mod").result
+        return self._binary_op("arith.mod", a, b, "mod")
 
     def fadd(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fadd", [a, b], [a.type], result_name_hint="fadd").result
+        return self._binary_op("arith.fadd", a, b, "fadd")
 
     def fsub(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fsub", [a, b], [a.type], result_name_hint="fsub").result
+        return self._binary_op("arith.fsub", a, b, "fsub")
 
     def fmul(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fmul", [a, b], [a.type], result_name_hint="fmul").result
+        return self._binary_op("arith.fmul", a, b, "fmul")
 
     def fdiv(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fdiv", [a, b], [a.type], result_name_hint="fdiv").result
+        return self._binary_op("arith.fdiv", a, b, "fdiv")
 
     def fneg(self, a: Value) -> Value:
         return self._op("arith.fneg", [a], [a.type], result_name_hint="fneg").result
@@ -3294,9 +3426,10 @@ class IRBuilder:
 
     def _int_cmp(self, pred: str, a: Value, b: Value) -> Value:
         """An ``arith.cmp`` of ``a`` and ``b`` by ``pred``; refuses what
-        ``_int_cmp_error`` refuses (a float operand, say: TypeError)."""
+        ``_int_cmp_error`` refuses (operands of different types, or a float
+        operand, say: TypeError)."""
         attrs = {"pred": pred}
-        refusal = _int_cmp_error(attrs, a.type)
+        refusal = _int_cmp_error(attrs, a.type, b.type)
         if refusal:
             raise refusal
         return self._op(
@@ -3507,10 +3640,10 @@ class IRBuilder:
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
         """An ``arith.fcmp`` of ``a`` and ``b`` by ``pred``; refuses what
-        ``_fcmp_error`` refuses (an unknown pred: ValueError; an integer
-        operand: TypeError)."""
+        ``_fcmp_error`` refuses (an unknown pred: ValueError; operands of
+        different types, or an integer operand: TypeError)."""
         attrs = {"pred": pred}
-        refusal = _fcmp_error(attrs, a.type)
+        refusal = _fcmp_error(attrs, a.type, b.type)
         if refusal:
             raise refusal
         return self._op(
@@ -3518,10 +3651,10 @@ class IRBuilder:
         ).result
 
     def fmax(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fmax", [a, b], [a.type], result_name_hint="fmax").result
+        return self._binary_op("arith.fmax", a, b, "fmax")
 
     def fmin(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fmin", [a, b], [a.type], result_name_hint="fmin").result
+        return self._binary_op("arith.fmin", a, b, "fmin")
 
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
@@ -3595,30 +3728,33 @@ class IRBuilder:
 
     def land(self, a: Value, b: Value) -> Value:
         """Bit-and (used for i1 conjunction and i32 masks). Raises
-        ``TypeError`` unless ``a`` is an integer or ``i1``."""
-        _refuse_non_integer("arith.and", a.type)
-        return self._op("arith.and", [a, b], [a.type], result_name_hint="and").result
+        ``TypeError`` unless ``a`` and ``b`` are integers or ``i1`` of one
+        type."""
+        return self._binary_op("arith.and", a, b, "and")
 
     def lor(self, a: Value, b: Value) -> Value:
-        """Bit-or. Raises ``TypeError`` unless ``a`` is an integer or ``i1``."""
-        _refuse_non_integer("arith.or", a.type)
-        return self._op("arith.or", [a, b], [a.type], result_name_hint="or").result
+        """Bit-or. Raises ``TypeError`` unless ``a`` and ``b`` are integers or
+        ``i1`` of one type."""
+        return self._binary_op("arith.or", a, b, "or")
 
     def lnot(self, a: Value) -> Value:
-        """Bitwise-NOT. For an i1 input this is the logical negation."""
+        """Bitwise-NOT. For an i1 input this is the logical negation. Raises
+        ``TypeError`` unless ``a`` is an integer or ``i1``: it lowers to an
+        ``xor`` with all ones."""
+        _refuse_non_integer("arith.not", a.type)
         return self._op("arith.not", [a], [a.type], result_name_hint="not").result
 
     def smax(self, a: Value, b: Value) -> Value:
         """Signed maximum; an unsigned operand is refused (use :meth:`umax`)."""
         _refuse_unsigned("smax", a.type, "umax")
         _refuse_unsigned("smax", b.type, "umax")
-        return self._op("arith.smax", [a, b], [a.type], result_name_hint="smax").result
+        return self._binary_op("arith.smax", a, b, "smax")
 
     def smin(self, a: Value, b: Value) -> Value:
         """Signed minimum; an unsigned operand is refused (use :meth:`umin`)."""
         _refuse_unsigned("smin", a.type, "umin")
         _refuse_unsigned("smin", b.type, "umin")
-        return self._op("arith.smin", [a, b], [a.type], result_name_hint="smin").result
+        return self._binary_op("arith.smin", a, b, "smin")
 
     def _require_unsigned_pair(self, op_name: str, a: Value, b: Value) -> None:
         scalar = not isinstance(a.type, VectorType)
@@ -4084,40 +4220,26 @@ class IRBuilder:
         return self.fmin(hi, self.fmax(lo, v))
 
     def xor(self, a: Value, b_v: Value) -> Value:
-        """Bitwise XOR. Same type for both operands. Raises ``TypeError``
-        unless ``a`` is an integer or ``i1``."""
-        _refuse_non_integer("arith.xor", a.type)
-        return self._op("arith.xor", [a, b_v], [a.type], result_name_hint="xor").result
+        """Bitwise XOR. Raises ``TypeError`` unless ``a`` and ``b_v`` are
+        integers or ``i1`` of one type."""
+        return self._binary_op("arith.xor", a, b_v, "xor")
 
     def shl(self, a: Value, b_v: Value) -> Value:
         """Logical left shift ``a << b_v``. Lowers to LLVM ``shl``.
         AMDGPU folds constant shifts into ``v_lshlrev_b32`` with the
-        immediate baked in. Raises ``TypeError`` unless ``a`` is an integer or
-        ``i1``.
+        immediate baked in. Raises ``TypeError`` unless ``a`` and ``b_v`` are
+        integers or ``i1`` of one type.
         """
-        _refuse_non_integer("arith.shl", a.type)
-        return self._op("arith.shl", [a, b_v], [a.type], result_name_hint="shl").result
+        return self._binary_op("arith.shl", a, b_v, "shl")
 
     def lshr(self, a: Value, b_v: Value) -> Value:
         """Logical right shift ``a >> b_v`` (zero-fill). Lowers to
         LLVM ``lshr``; AMDGPU folds to ``v_lshrrev_b{32,64}``.
 
-        Raises ``TypeError`` unless ``a`` is an integer or ``i1`` and ``b_v``
-        has the same type: LLVM's ``lshr`` takes two integers of one width.
+        Raises ``TypeError`` unless ``a`` and ``b_v`` are integers or ``i1``
+        of one type: LLVM's ``lshr`` takes two integers of one width.
         """
-        _refuse_non_integer("arith.lshr", a.type)
-        if b_v.type != a.type:
-            raise TypeError(
-                _type_name_message(
-                    "arith.lshr",
-                    "shift amount type",
-                    b_v.type.name,
-                    f"the shifted value's type {a.type.name!r}",
-                )
-            )
-        return self._op(
-            "arith.lshr", [a, b_v], [a.type], result_name_hint="lshr"
-        ).result
+        return self._binary_op("arith.lshr", a, b_v, "lshr")
 
     def umul_hi_i32(self, a: Value, b_v: Value) -> Value:
         """Unsigned high 32 bits of an i32 * i32 product.
@@ -4680,16 +4802,28 @@ class IRBuilder:
         ).result
 
     def vector_binary(self, op_name: str, a: Value, b: Value) -> Value:
-        """Lane-wise ``vector.<op_name>`` of two matching vectors. The signed ops
+        """Lane-wise ``vector.<op_name>`` of two vectors of one type. A first
+        operand that is not a vector is a ``TypeError``. The signed ops
         (``smax``, ``smin``) refuse an unsigned element type, and the bitwise
         ops and shifts (:data:`_INTEGER_ELEMENT_OPS`) one that is not an integer
-        or ``i1`` (``TypeError``)."""
-        if not isinstance(a.type, VectorType) or a.type != b.type:
-            raise ValueError("vector_binary expects matching vector operands")
+        or ``i1`` (``TypeError``); then a second operand of another type is a
+        ``TypeError`` (:func:`_operand_types_error`)."""
+        if not isinstance(a.type, VectorType):
+            raise TypeError(
+                _type_name_message(
+                    f"vector.{op_name}",
+                    "first operand type",
+                    a.type.name,
+                    "a vector type",
+                )
+            )
         if op_name in ("smax", "smin"):
             _refuse_unsigned(f"vector_{op_name}", a.type)
         if f"vector.{op_name}" in _INTEGER_ELEMENT_OPS:
             _refuse_non_integer(f"vector.{op_name}", a.type)
+        error = _operand_types_error(f"vector.{op_name}", a.type, b.type)
+        if error:
+            raise TypeError(error)
         return self._op(
             f"vector.{op_name}", [a, b], [a.type], result_name_hint=f"v{op_name}"
         ).result
@@ -4782,13 +4916,18 @@ class IRBuilder:
         ).result
 
     def vector_cmp(self, pred: str, a: Value, b: Value) -> Value:
-        """A lane-by-lane compare of ``a`` and ``b`` by ``pred``; refuses what
-        ``_vector_cmp_error`` refuses (an unknown pred: ValueError; lanes that
-        are not integers or i1: TypeError)."""
-        if not isinstance(a.type, VectorType) or a.type != b.type:
-            raise ValueError("vector_cmp expects matching vector operands")
+        """A lane-by-lane compare of ``a`` and ``b`` by ``pred``. A first
+        operand that is not a vector is a ``TypeError``; then it refuses what
+        ``_vector_cmp_error`` refuses (an unknown pred: ValueError; operands of
+        different types, or lanes that are not integers or i1: TypeError)."""
+        if not isinstance(a.type, VectorType):
+            raise TypeError(
+                _type_name_message(
+                    "vector.cmp", "first operand type", a.type.name, "a vector type"
+                )
+            )
         attrs = {"pred": pred}
-        refusal = _vector_cmp_error(attrs, a.type)
+        refusal = _vector_cmp_error(attrs, a.type, b.type)
         if refusal:
             raise refusal
         return self._op(

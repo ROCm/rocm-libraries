@@ -14,10 +14,12 @@ values as numpy, on negative and positive values alike.
 
 LLVM's ``lshr`` takes two integers of one width, so IRBuilder refuses a shift
 of a float and a shift amount of another type when the op is built, and the
-verifier reports both for IR written past the builder. The element rule is the
-one every bitwise op and shift shares (``and``, ``or``, ``xor``, ``shl``,
-``lshr``, scalar and vector), so it is pinned here for all of them. The C++
-engine's builders and verifier, with the same texts, are checked by
+verifier reports both and every lowering refuses both for IR written past the
+builder. The element rule is the one every bitwise op and shift shares
+(``and``, ``or``, ``xor``, ``not``, ``shl``, ``lshr``, scalar and vector), and
+the operand rule the one every same-type binary op shares (the arithmetic ones
+too), so each is pinned here for every op it governs. The C++ engine's builders,
+verifier and lowerings, with the same texts, are checked by
 test_unsigned_int_ops.cpp.
 """
 
@@ -30,12 +32,15 @@ from typing import NamedTuple
 import numpy as np
 import pytest
 from rocke.core.ir import (
+    _SAME_TYPE_BINARY_OPS,
+    F16,
     F32,
     I1,
     I8,
     I16,
     I32,
     I64,
+    U8,
     IRBuilder,
     PtrType,
     Type,
@@ -135,11 +140,13 @@ def test_hip_shifts_through_the_unsigned_type_of_the_width(engine):
 
 
 # Every op whose element type must be an integer or i1: its dotted name and the
-# IRBuilder method that builds it from two operands.
+# IRBuilder method that builds it (``lnot`` from one operand, the others from
+# two).
 _INTEGER_ELEMENT_BUILDERS = {
     "arith.and": "land",
     "arith.or": "lor",
     "arith.xor": "xor",
+    "arith.not": "lnot",
     "arith.shl": "shl",
     "arith.lshr": "lshr",
     "vector.and": "vector_and",
@@ -147,6 +154,7 @@ _INTEGER_ELEMENT_BUILDERS = {
     "vector.shl": "vector_shl",
     "vector.lshr": "vector_lshr",
 }
+_UNARY_OPS = frozenset({"arith.not"})
 
 
 def _operand_type(op_name, element):
@@ -155,15 +163,25 @@ def _operand_type(op_name, element):
     return element if op_name.startswith("arith.") else VectorType(element, 2)
 
 
-def _kernel_past_the_builder(op_name, value_type, amount_type):
-    """One ``op_name`` (a bitwise op or shift) of a ``value_type`` parameter
-    and an ``amount_type`` parameter, written past IRBuilder (which refuses a
-    non-integer operand, and a mismatched lshr shift amount), as hand-assembled
-    or deserialized IR can reach the verifier and the lowerings."""
+def _build_integer_element_op(b, op_name, value):
+    """``op_name`` built by its IRBuilder method on ``value`` (as both operands
+    of a binary op)."""
+    operands = [value] if op_name in _UNARY_OPS else [value, value]
+    return getattr(b, _INTEGER_ELEMENT_BUILDERS[op_name])(*operands)
+
+
+def _kernel_past_the_builder(op_name, *operand_types):
+    """One ``op_name`` of one parameter per type in ``operand_types``, of the
+    first one's type, written past IRBuilder (which refuses a non-integer
+    operand of a bitwise op or shift, and operands of different types), as
+    hand-assembled or deserialized IR can reach the verifier and the
+    lowerings."""
     b = IRBuilder(op_name.replace(".", "_") + "_past_the_builder")
-    value = b.param("value", value_type)
-    amount = b.param("amount", amount_type)
-    b._op(op_name, [value, amount], [value_type])
+    operands = [
+        b.param(f"operand{index}", operand_type)
+        for index, operand_type in enumerate(operand_types)
+    ]
+    b._op(op_name, operands, [operand_types[0]])
     b.ret()
     return b.kernel
 
@@ -171,46 +189,35 @@ def _kernel_past_the_builder(op_name, value_type, amount_type):
 def _f32_kernel(op_name):
     """One ``op_name`` of f32 values: an f32 scalar, or two f32 lanes."""
     f32_type = _operand_type(op_name, F32)
-    return _kernel_past_the_builder(op_name, f32_type, f32_type)
+    arity = 1 if op_name in _UNARY_OPS else 2
+    return _kernel_past_the_builder(op_name, *[f32_type] * arity)
+
+
+def _integer_element_message(op_name):
+    return f"{op_name} failed - element type='f32', expected an integer or i1 type"
 
 
 @pytest.mark.parametrize("op_name", sorted(_INTEGER_ELEMENT_BUILDERS))
 def test_builder_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
-    """LLVM's bitwise ops and shifts have no float form: IRBuilder refuses an
-    f32 operand, scalar or lane by lane, with a ``TypeError`` naming the op and
-    the element type, instead of building IR the compiler rejects."""
+    """LLVM's bitwise ops and shifts have no float form (``not`` lowers to an
+    ``xor``): IRBuilder refuses an f32 operand, scalar or lane by lane, with a
+    ``TypeError`` naming the op and the element type, instead of building IR
+    the compiler rejects."""
     b = IRBuilder("integer_op_f32")
     value = b.param("value", _operand_type(op_name, F32))
-    build = getattr(b, _INTEGER_ELEMENT_BUILDERS[op_name])
     with pytest.raises(TypeError) as refusal:
-        build(value, value)
-    assert str(refusal.value) == (
-        f"{op_name} failed - element type='f32', expected an integer or i1 type"
-    )
-
-
-def test_builder_refuses_a_shift_amount_of_another_width():
-    """``lshr`` shifts two integers of one width: IRBuilder refuses an i64
-    shifted by an i32 with a ``TypeError`` naming both types."""
-    b = IRBuilder("lshr_mixed_widths")
-    value = b.param("value", I64)
-    amount = b.param("amount", I32)
-    with pytest.raises(TypeError) as refusal:
-        b.lshr(value, amount)
-    assert str(refusal.value) == (
-        "arith.lshr failed - shift amount type='i32', expected the shifted "
-        "value's type 'i64'"
-    )
+        _build_integer_element_op(b, op_name, value)
+    assert str(refusal.value) == _integer_element_message(op_name)
 
 
 @pytest.mark.parametrize("op_name", sorted(_INTEGER_ELEMENT_BUILDERS))
 def test_builder_accepts_an_i1_bitwise_op_or_shift(op_name):
     """``i1`` is an LLVM integer, so a bitwise op or shift of it, scalar or
-    lane by lane, is built (and verifies): ``land`` / ``lor`` of i1 are the
-    predicate conjunction and disjunction."""
+    lane by lane, is built (and verifies): ``land`` / ``lor`` / ``lnot`` of i1
+    are the predicate conjunction, disjunction and negation."""
     b = IRBuilder("integer_op_i1")
     flag = b.param("flag", _operand_type(op_name, I1))
-    getattr(b, _INTEGER_ELEMENT_BUILDERS[op_name])(flag, flag)
+    _build_integer_element_op(b, op_name, flag)
     b.ret()
     assert verify(b.kernel) == []
 
@@ -220,9 +227,7 @@ def test_verifier_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
     """IR written past the builder still meets the rule: the verifier reports
     an f32 bitwise op or shift with the builder's text."""
     messages = [diagnostic.message for diagnostic in verify(_f32_kernel(op_name))]
-    assert messages == [
-        f"{op_name} failed - element type='f32', expected an integer or i1 type"
-    ]
+    assert messages == [_integer_element_message(op_name)]
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -238,28 +243,153 @@ def test_lowerings_refuse_a_bitwise_op_or_shift_of_a_non_integer(op_name, engine
             "gfx942",
             engine=engine,
             error_type=TypeError,
-            message=f"{op_name} failed - element type='f32', expected an integer or i1 type",
+            message=_integer_element_message(op_name),
+        )
+
+
+# Every same-type binary op (_SAME_TYPE_BINARY_OPS), the IRBuilder method that
+# builds it, and two operand types that differ: scalars for an ``arith`` op,
+# vectors (of another element or lane count) for a ``vector`` op. ``umax`` and
+# ``umin`` have no entry point here: their builders take only two operands of
+# one unsigned type and refuse anything else with that rule's own text.
+_MIXED_TYPE_OPERANDS = {
+    "arith.add": ("add", I32, I64),
+    "arith.sub": ("sub", I64, I32),
+    "arith.mul": ("mul", I64, I32),
+    "arith.div": ("div", I32, I16),
+    "arith.mod": ("mod", I32, I64),
+    "arith.fadd": ("fadd", F32, F16),
+    "arith.fsub": ("fsub", F16, F32),
+    "arith.fmul": ("fmul", F32, F16),
+    "arith.fdiv": ("fdiv", F32, F16),
+    "arith.fmax": ("fmax", F16, F32),
+    "arith.fmin": ("fmin", F32, F16),
+    "arith.and": ("land", I32, I16),
+    "arith.or": ("lor", I1, I32),
+    "arith.xor": ("xor", I32, I64),
+    "arith.shl": ("shl", I32, I64),
+    "arith.lshr": ("lshr", I64, I32),
+    "arith.smax": ("smax", I32, I64),
+    "arith.smin": ("smin", I64, I32),
+    "arith.umax": (None, U8, I32),
+    "arith.umin": (None, U8, I32),
+    "vector.add": ("vector_add", VectorType(I32, 2), VectorType(I32, 4)),
+    "vector.sub": ("vector_sub", VectorType(I32, 2), VectorType(I16, 2)),
+    "vector.mul": ("vector_mul", VectorType(F32, 2), VectorType(F16, 2)),
+    "vector.and": ("vector_and", VectorType(I32, 2), VectorType(I32, 4)),
+    "vector.or": ("vector_or", VectorType(I32, 2), VectorType(I16, 2)),
+    "vector.shl": ("vector_shl", VectorType(I32, 2), VectorType(I16, 2)),
+    "vector.lshr": ("vector_lshr", VectorType(I32, 2), VectorType(I16, 2)),
+    "vector.smax": ("vector_smax", VectorType(I32, 2), VectorType(I32, 4)),
+    "vector.smin": ("vector_smin", VectorType(I16, 2), VectorType(I32, 2)),
+    "vector.max": ("vector_max", VectorType(F32, 2), VectorType(F32, 4)),
+}
+_BUILT_MIXED_TYPE_OPS = sorted(
+    op_name for op_name, (builder, _, _) in _MIXED_TYPE_OPERANDS.items() if builder
+)
+
+
+def _operand_types_message(op_name):
+    _, lhs_type, rhs_type = _MIXED_TYPE_OPERANDS[op_name]
+    return (
+        f"{op_name} failed - second operand type='{rhs_type.name}', expected the "
+        f"first operand's type '{lhs_type.name}'"
+    )
+
+
+def _mixed_type_kernel(op_name):
+    """One ``op_name`` of its two differing operand types, written past
+    IRBuilder."""
+    _, lhs_type, rhs_type = _MIXED_TYPE_OPERANDS[op_name]
+    return _kernel_past_the_builder(op_name, lhs_type, rhs_type)
+
+
+def test_the_mixed_type_cases_cover_every_same_type_binary_op():
+    """The cases below cover the whole operand rule: one per op it governs."""
+    assert set(_MIXED_TYPE_OPERANDS) == _SAME_TYPE_BINARY_OPS
+
+
+@pytest.mark.parametrize("op_name", _BUILT_MIXED_TYPE_OPS)
+def test_builder_refuses_operands_of_different_types(op_name):
+    """The lowerings emit both operands at the first one's type (``lshr i64``,
+    ``add i32`` ...), so IRBuilder refuses a second operand of another type,
+    scalar or lane by lane, with a ``TypeError`` naming both types, and adds no
+    op."""
+    builder, lhs_type, rhs_type = _MIXED_TYPE_OPERANDS[op_name]
+    b = IRBuilder("mixed_operand_types")
+    lhs = b.param("lhs", lhs_type)
+    rhs = b.param("rhs", rhs_type)
+    with pytest.raises(TypeError) as refusal:
+        getattr(b, builder)(lhs, rhs)
+    assert str(refusal.value) == _operand_types_message(op_name)
+    assert b.kernel.body.ops == []
+
+
+@pytest.mark.parametrize("untyped_index", [0, 1])
+def test_builder_refuses_an_operand_with_no_type(untyped_index):
+    """A value built by hand can lack a type: the operand rule refuses it as a
+    ``TypeError`` naming the operand, before it reads any type's name."""
+    b = IRBuilder("untyped_operand")
+    operands = [b.param("typed", I32), b.param("untyped", None)]
+    if untyped_index == 0:
+        operands.reverse()
+    with pytest.raises(TypeError) as refusal:
+        b.add(*operands)
+    assert str(refusal.value) == (
+        f"arith.add operand {untyped_index} failed - type=None, expected an IR type"
+    )
+
+
+@pytest.mark.parametrize("op_name", sorted(_MIXED_TYPE_OPERANDS))
+def test_verifier_refuses_operands_of_different_types(op_name):
+    """The verifier reports a binary op whose second operand's type differs
+    from the first's, scalar or lane by lane, with the builder's text."""
+    messages = [
+        diagnostic.message for diagnostic in verify(_mixed_type_kernel(op_name))
+    ]
+    assert messages == [_operand_types_message(op_name)]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("op_name", sorted(_MIXED_TYPE_OPERANDS))
+def test_lowerings_refuse_operands_of_different_types(op_name, engine):
+    """IR written past the builder reaches the lowerings without the verifier:
+    each engine's LLVM and HIP lowerings refuse a binary op whose operands
+    differ in type with the builder's ``TypeError`` and text, instead of
+    emitting both at the first one's type."""
+    for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
+        assert_rejects(
+            _mixed_type_kernel(op_name),
+            "gfx942",
+            engine=engine,
+            error_type=TypeError,
+            message=_operand_types_message(op_name),
         )
 
 
 @pytest.mark.parametrize(
-    ("op_name", "value_type", "amount_type"),
+    ("build", "message"),
     [
-        ("arith.lshr", I64, I32),
-        ("vector.lshr", VectorType(I32, 2), VectorType(I16, 2)),
-        ("vector.shl", VectorType(I32, 2), VectorType(I16, 2)),
-        ("vector.and", VectorType(I32, 2), VectorType(I16, 2)),
-        ("vector.or", VectorType(I32, 2), VectorType(I16, 2)),
+        (
+            lambda b, scalar: b.vector_and(scalar, scalar),
+            "vector.and failed - first operand type='i32', expected a vector type",
+        ),
+        (
+            lambda b, scalar: b.vector_cmp("lt", scalar, scalar),
+            "vector.cmp failed - first operand type='i32', expected a vector type",
+        ),
     ],
+    ids=["vector_and", "vector_cmp"],
 )
-def test_verifier_refuses_operands_of_different_types(op_name, value_type, amount_type):
-    """The verifier reports a bitwise op or shift whose second operand's type
-    differs from the first's, scalar or lane by lane."""
-    kernel = _kernel_past_the_builder(op_name, value_type, amount_type)
-    messages = [diagnostic.message for diagnostic in verify(kernel)]
-    assert messages == [
-        f"{op_name}: operand types differ ({value_type.name} vs {amount_type.name})"
-    ]
+def test_vector_builders_refuse_a_scalar_first_operand(build, message):
+    """A lane-wise op takes vectors: its builder refuses a scalar first
+    operand by its type, a ``TypeError``, and adds no op."""
+    b = IRBuilder("vector_op_of_a_scalar")
+    scalar = b.param("scalar", I32)
+    with pytest.raises(TypeError) as refusal:
+        build(b, scalar)
+    assert str(refusal.value) == message
+    assert b.kernel.body.ops == []
 
 
 def _compile_via_hipcc(kernel, arch):
