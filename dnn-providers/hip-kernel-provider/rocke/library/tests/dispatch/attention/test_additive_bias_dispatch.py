@@ -229,6 +229,28 @@ class TestTuningCandidates(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "gfx950-only"):
             make_explicit_attention_2d_spec(problem, config, arch="gfx942")
 
+    def test_declared_feature_and_spec_build_share_one_rule(self):
+        from dispatch.attention.axes import _CODEPATH_KNOBS
+        from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
+        from dispatch.attention.tuning_specs import additive_bias_geometry_ok
+
+        problem = replace(attention_problem(_req()), use_additive_bias=True)
+        wide32 = tuple(_CODEPATH_KNOBS[("gfx950", "wide32")].items())
+        config = ExplicitAttention2DConfig(
+            num_warps=2, block_m_per_warp=32, tile_policy="2x", knobs=wide32
+        )
+        # Refused by the shared rule before the kernel's own validator runs.
+        with self.assertRaisesRegex(ValueError, "non-transposed 32x32 path"):
+            make_explicit_attention_2d_spec(problem, config, arch="gfx950")
+        for variant in GFX950_TUNING_VARIANTS:
+            knobs = _CODEPATH_KNOBS.get((variant.arch, variant.codepath), {})
+            declared = (
+                "attn_bias"
+                in _candidate(variant.candidate_name).capability.supports_features
+            )
+            with self.subTest(candidate=variant.candidate_name):
+                self.assertEqual(declared, additive_bias_geometry_ok("gfx950", knobs))
+
     def test_declared_bias_support_matches_the_kernel(self):
         # _variant_features (gfx950_unified.py) declares "every gfx950
         # geometry except wide32 takes a bias" as a fact about the kernel,

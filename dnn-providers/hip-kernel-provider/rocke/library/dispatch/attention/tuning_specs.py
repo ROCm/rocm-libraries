@@ -134,13 +134,32 @@ def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
     return fields
 
 
-def _bias_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
+def additive_bias_geometry_ok(arch: str, knobs: Mapping[str, object]) -> bool:
+    """Whether a tiled geometry, named by its fixed codepath ``knobs``, has an
+    additive-bias site. The one rule behind both the candidate's declared
+    ``attn_bias`` feature and the spec build: gfx950 only, and not the
+    non-transposed 32x32 path (``use_mfma_32x32`` without
+    ``use_transposed_qk_32x32``)."""
+    if arch != "gfx950":
+        return False
+    return not (
+        knobs.get("use_mfma_32x32") and not knobs.get("use_transposed_qk_32x32")
+    )
+
+
+def _bias_fields(
+    problem: UnifiedAttentionProblem, arch: str, knobs: Mapping[str, object]
+) -> dict:
     """Additive-bias spec field; only the gfx950 tiled specs declare it, and
     bias-off passes nothing so those specs are unchanged."""
     if not problem.use_additive_bias:
         return {}
     if arch != "gfx950":
         raise ValueError(f"additive bias is gfx950-only, got {arch}")
+    if not additive_bias_geometry_ok(arch, knobs):
+        raise ValueError(
+            "additive bias is not emitted on the non-transposed 32x32 path"
+        )
     return {"use_additive_bias": True}
 
 
@@ -240,7 +259,7 @@ def make_explicit_attention_2d_spec(
     spec = spec_type(
         **_semantic_fields(problem, config.builder_kind),
         **_mask_fields(problem, arch),
-        **_bias_fields(problem, arch),
+        **_bias_fields(problem, arch, knobs),
         num_warps=int(config.num_warps),
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
@@ -340,7 +359,7 @@ def make_explicit_attention_3d_specs(
     segment = spec_type(
         **semantic,
         **_mask_fields(problem, arch),
-        **_bias_fields(problem, arch),
+        **_bias_fields(problem, arch, knobs),
         num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
         tile_size_override=(None if tile == int(problem.block_size) else int(tile)),

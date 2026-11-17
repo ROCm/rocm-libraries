@@ -29,8 +29,9 @@ from .common import (
     _request_errors,
     _selector_matches,
 )
+from .axes import _CODEPATH_KNOBS
 from .candidate import make_tuning_candidate
-from .tuning_specs import NUM_SEGMENTS
+from .tuning_specs import NUM_SEGMENTS, additive_bias_geometry_ok
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -97,9 +98,12 @@ D256_GFX950_ALGORITHM = "d256_gfx950"
 
 
 def _variant_features(variant: AttentionGeometryVariant) -> frozenset:
-    """Additive bias is emitted on the 16x16, transposed 32x32 and split-KV
-    score paths; the non-transposed 32x32 (wide32) spec rejects it."""
-    return frozenset() if variant.codepath == "wide32" else frozenset({"attn_bias"})
+    """Additive bias is declared exactly where the spec build accepts it
+    (``additive_bias_geometry_ok``, the same rule ``_bias_fields`` enforces)."""
+    knobs = _CODEPATH_KNOBS.get((variant.arch, variant.codepath), {})
+    if additive_bias_geometry_ok(variant.arch, knobs):
+        return frozenset({"attn_bias"})
+    return frozenset()
 
 
 def _make_gfx950_d256_candidate() -> KernelCandidate:
