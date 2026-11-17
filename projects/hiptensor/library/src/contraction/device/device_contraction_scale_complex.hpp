@@ -308,10 +308,9 @@ namespace ck
 
                     Argument(Argument&& other)
                         : mScaleArgs(
-                              {std::move(other.mScaleArgs[0]), std::move(other.mScaleArgs[1])})
+                            {std::move(other.mScaleArgs[0]), std::move(other.mScaleArgs[1])})
                         , mBilinearArgs({std::move(other.mBilinearArgs[0]),
                                          std::move(other.mBilinearArgs[1])})
-                        , mAllocFailed(other.mAllocFailed)
                     {
                     }
 
@@ -323,7 +322,6 @@ namespace ck
                             mScaleArgs[1]    = std::move(other.mScaleArgs[1]);
                             mBilinearArgs[0] = std::move(other.mBilinearArgs[0]);
                             mBilinearArgs[1] = std::move(other.mBilinearArgs[1]);
-                            mAllocFailed     = other.mAllocFailed;
                         }
                         return *this;
                     }
@@ -362,25 +360,20 @@ namespace ck
                         mE_grid       = p_e_grid;
                         auto blockDim = dim3(1024);
 
-                        auto decompGrid = [this, blockDim](auto&       out_r,
-                                                           auto&       out_i,
-                                                           auto const* input_grid,
-                                                           uint32_t    elementCount) {
+                        auto decompGrid = [blockDim](auto&       out_r,
+                                                     auto&       out_i,
+                                                     auto const* input_grid,
+                                                     uint32_t    elementCount) {
                             using DecompT = typename std::decay_t<decltype(out_r)>::element_type;
                             static_assert(std::is_same_v<
                                               DecompT,
                                               typename std::decay_t<decltype(out_i)>::element_type>,
                                           "r and i buffers must be same type");
 
-                            if(input_grid != nullptr)
+                            if(input_grid != nullptr && elementCount > 0)
                             {
                                 out_r = std::move(allocDevice<DecompT>(elementCount));
                                 out_i = std::move(allocDevice<DecompT>(elementCount));
-                                if(!out_r || !out_i)
-                                {
-                                    mAllocFailed = true;
-                                    return;
-                                }
 
                                 auto gridDim = dim3(ceilDiv(elementCount, blockDim.x));
                                 hiptensor::unpack<<<gridDim, blockDim, 0>>>(
@@ -502,7 +495,6 @@ namespace ck
                     ScaleCDEElementwiseOperation element_op;
                     void*                        mE_grid;
                     index_t                      elementsE;
-                    bool                         mAllocFailed = false;
                 };
 
                 // Invoker
@@ -568,10 +560,6 @@ namespace ck
 
                 static bool IsSupportedArgument(const Argument& arg)
                 {
-                    if(arg.mAllocFailed)
-                    {
-                        return false;
-                    }
                     return ScaleDecompOp::IsSupportedArgument(*(arg.mScaleArgs[0].get()))
                            && ScaleDecompOp::IsSupportedArgument(*(arg.mScaleArgs[1].get()))
                            && BilinearDecompOp::IsSupportedArgument(*(arg.mBilinearArgs[0].get()))

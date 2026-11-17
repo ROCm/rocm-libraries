@@ -44,6 +44,7 @@ namespace hiptensor
         auto hipStatus = hipGetDevice(&currentDeviceId);
         if(hipStatus != hipSuccess)
         {
+            clearHipError();
             auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
             snprintf(msg,
                      sizeof(msg),

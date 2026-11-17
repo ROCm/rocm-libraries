@@ -70,17 +70,26 @@ public:
     {
         mValid = hipEventCreate(&mStart) == hipSuccess && hipEventCreate(&mStop) == hipSuccess
                  && hipEventRecord(mStart) == hipSuccess;
+        if(!mValid)
+        {
+            hiptensor::clearHipError();
+        }
     }
 
     ~SelectionTimer()
     {
+        bool destroyed = true;
         if(mStart != nullptr)
         {
-            (void)hipEventDestroy(mStart);
+            destroyed = hipEventDestroy(mStart) == hipSuccess;
         }
         if(mStop != nullptr)
         {
-            (void)hipEventDestroy(mStop);
+            destroyed = hipEventDestroy(mStop) == hipSuccess && destroyed;
+        }
+        if(!destroyed)
+        {
+            hiptensor::clearHipError();
         }
     }
 
@@ -95,6 +104,7 @@ public:
         {
             return elapsed;
         }
+        hiptensor::clearHipError();
         return -1.0f;
     }
 
@@ -524,6 +534,14 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
         snprintf(msg,
                  sizeof(msg),
                  "Selected kernel is unable to solve the problem (%s)",
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorContraction", msg);
+    }
+    else if(errorCode == HIPTENSOR_STATUS_ALLOC_FAILED)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Out of device memory for kernel scratch buffers (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContraction", msg);
     }

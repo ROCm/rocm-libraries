@@ -321,6 +321,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                                    hipMemcpyDeviceToDevice);
         if(hipStatus != hipSuccess)
         {
+            hiptensor::clearHipError();
             auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
             snprintf(msg,
                      sizeof(msg),

@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <new>
+
 #include "data_types.hpp"
 #include "util.hpp"
 #include <hiptensor/hiptensor.h>
@@ -123,18 +125,23 @@ namespace hiptensor
         void operator()(void* ptr)
         {
             // A deleter cannot report errors; a failed free must not terminate the process.
-            (void)hipFree(ptr);
+            if(hipFree(ptr) != hipSuccess)
+            {
+                clearHipError();
+            }
         }
     };
 
-    // Returns an empty pointer if the allocation fails.
+    // Throws std::bad_alloc if the allocation fails; ContractionSolution reports it as
+    // HIPTENSOR_STATUS_ALLOC_FAILED.
     template <typename T>
     auto allocDevice(int64_t numElements)
     {
         T* data = nullptr;
         if(hipMalloc(&data, numElements * sizeof(T)) != hipSuccess)
         {
-            data = nullptr;
+            clearHipError();
+            throw std::bad_alloc();
         }
         return std::unique_ptr<T, DeviceDeleter>(data, DeviceDeleter());
     }

@@ -129,12 +129,9 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorCreate", msg);
 
-    *handle = nullptr;
-
-    auto newHandle = std::unique_ptr<hiptensorHandle>(new(std::nothrow) hiptensorHandle);
-    if(newHandle == nullptr)
+    if(handle == nullptr)
     {
-        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        auto errorCode = HIPTENSOR_STATUS_INVALID_VALUE;
         snprintf(msg,
                  sizeof(msg),
                  "Initialization Error : handle = nullptr (%s)",
@@ -143,7 +140,25 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         return errorCode;
     }
 
+    *handle = nullptr;
+
+    auto newHandle = std::unique_ptr<hiptensorHandle>(new(std::nothrow) hiptensorHandle);
+    if(newHandle == nullptr)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization Error : cannot allocate handle (%s)",
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+
     auto hip_status = hipInit(0);
+    if(hip_status != hipSuccess)
+    {
+        hiptensor::clearHipError();
+    }
 
     if(hip_status == hipErrorInvalidDevice)
     {
@@ -185,6 +200,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
 
     if(hip_status != hipSuccess)
     {
+        hiptensor::clearHipError();
         auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
         snprintf(msg,
                  sizeof(msg),

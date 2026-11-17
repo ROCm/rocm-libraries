@@ -43,6 +43,10 @@ namespace
 {
     constexpr char const* kNoDeviceChildEnv = "HIPTENSOR_DEVICE_INIT_TEST_NO_DEVICE_CHILD";
 
+    // gtest prints the expression text of a failed assertion, and ctest skips this binary if its
+    // output contains the status name, which would hide the failure.
+    constexpr hiptensorStatus_t kDeviceMismatch = HIPTENSOR_STATUS_ARCH_MISMATCH;
+
     int visibleDeviceCount()
     {
         int count = 0;
@@ -133,12 +137,17 @@ TEST(DeviceInitTest, CreateOnCurrentDevice)
     if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
     {
         EXPECT_EQ(handle, nullptr);
-        GTEST_SKIP() << "Cannot proceed: unsupported host device detected";
+        GTEST_SKIP() << "hipTensor does not support the current device";
     }
     ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
     EXPECT_EQ(createContractionPlan(handle), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(hiptensorDestroy(handle), HIPTENSOR_STATUS_SUCCESS);
+}
+
+TEST(DeviceInitTest, CreateWithNullHandleReturnsInvalidValue)
+{
+    EXPECT_EQ(hiptensorCreate(nullptr), HIPTENSOR_STATUS_INVALID_VALUE);
 }
 
 TEST(DeviceInitTest, HandleIsBoundToCreationDevice)
@@ -172,7 +181,7 @@ TEST(DeviceInitTest, HandleIsBoundToCreationDevice)
     // ARCH_MISMATCH for handle1 on device 0 can only come from the device check.
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
     EXPECT_EQ(createContractionPlan(handle0), HIPTENSOR_STATUS_SUCCESS);
-    EXPECT_EQ(createContractionPlan(handle1), HIPTENSOR_STATUS_ARCH_MISMATCH);
+    EXPECT_EQ(createContractionPlan(handle1), kDeviceMismatch);
 
     ASSERT_EQ(hipSetDevice(1), hipSuccess);
     EXPECT_EQ(createContractionPlan(handle1), HIPTENSOR_STATUS_SUCCESS);
@@ -237,7 +246,7 @@ TEST(DeviceInitTest, ThreadsSelectTheirOwnDevice)
     }
     if(supported == 0)
     {
-        GTEST_SKIP() << "Cannot proceed: unsupported host device detected";
+        GTEST_SKIP() << "hipTensor does not support the current device";
     }
 }
 
@@ -280,5 +289,8 @@ TEST(DeviceInitTest, LoadWithoutDeviceDoesNotTerminate)
 int main(int argc, char** argv)
 {
     testing::InitGoogleTest(&argc, argv);
+    // ctest skips this binary if its output mentions an unsupported device. Keep the library's
+    // error log off so the ARCH_MISMATCH these tests expect cannot match.
+    hiptensorLoggerForceDisable();
     return RUN_ALL_TESTS();
 }

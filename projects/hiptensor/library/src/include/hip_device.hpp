@@ -32,6 +32,14 @@
 
 namespace hiptensor
 {
+    // HIP keeps the error of a failed call until hipGetLastError() reads it, and CK checks
+    // hipGetLastError() after every kernel launch and throws on any error. Call this after
+    // handling a failed HIP call so a later, unrelated launch does not report it again.
+    inline void clearHipError()
+    {
+        (void)hipGetLastError();
+    }
+
     class HipDevice
     {
     public:
