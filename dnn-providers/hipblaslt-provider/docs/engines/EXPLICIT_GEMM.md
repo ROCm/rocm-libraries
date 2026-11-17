@@ -118,6 +118,10 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   - *NCHW 1x1 fp16 wrw:* MIOpen accumulates per image into the fp16 dw. That trades precision for speed and is offered here only as the RPR sibling.
   - *1x1 stride-2 fwd/bwd:* about 1.5x on gfx942 fp32 (indicative: not measured with the staged channels-last plan).
   - *Tiny shapes:* our extra launches cost time.
+  - *16-bit channels-last wrw over the cap on gfx11:* column blocks keep it off the fp32-output path. Measured on gfx1101 (autotuned, iters 20, MIOpen in search mode on the same node):
+    - DeepLabV3 c512 k512 3x3 d4 (16 x 128²): rocBLAS 8.3 s -> 51.9 ms and hipBLASLt 399 -> 89 ms, against MIOpen's 51.1;
+    - c2048 k256 d24 / d36: rocBLAS 13.1 s -> 173-181 ms and hipBLASLt 315-319 -> 196-212 ms, against MIOpen's 114-125. Single-tap blocks there pay an im2col per tap and a 256-wide GEMM per block; CONV_WRW serves these layers at 68-90 ms.
+    - On MI325X the image-sliced candidates keep the BLAS engines at their earlier times.
   - *Some long 1-D and small-channel 16-bit wrw against `GemmWrwUniversal`:* HiFi-GAN 1x16 NCHW fp16 and EfficientNetV2 c24 NHWC fp16 run about 4x slower on MI325X. The cause is not diagnosed.
 - **OOTB ranking.** hipDNN's candidate enumeration is alphabetical, so the BLAS engines rank ahead of every `hipkernel:CONV_*` engine without autotune. That is a naming accident, not a measured choice. Measured without autotune on a set of gfx950 ConvTranspose graphs, this ranking runs at 0.36-0.40x of MIOpen. It is a heuristics issue, not an engine one.
 
@@ -216,6 +220,8 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
 3. **Templated summing col2im on 16-bit columns.** This would keep 16-bit-output GEMMs for overlapping taps. On RDNA3, the libraries' 16-bit-output GEMMs run 4-5x faster than fp32-output ones on a vocoder upsampler.
 4. **Further RPR forms** (rocBLAS 16-bit k-chunks, hipBLASLt fp16 split-K) are measurement-led.
 5. **Calibrate the 1 GiB repack cap** against measured workloads.
+6. **Single-tap column blocks** (c2048-class 16-bit channels-last wrw, 1.4-1.6x behind MIOpen on gfx1101): batch a block's taps into one strided-batched GEMM, or read a single tap's columns as a shifted view of x where its window needs no padding instead of copying them.
+7. **gfx11 fp32-output GEMMs elsewhere:** 16-bit backward data with overlapping taps writes fp32 columns (hipBLASLt 4-6 TFLOP/s on gfx1101; rocBLAS declined there). A summing col2im over 16-bit columns (item 3) would move it to the 16-bit-output kernels.
 
 ## Tests
 `tests/engines/conv/`:
