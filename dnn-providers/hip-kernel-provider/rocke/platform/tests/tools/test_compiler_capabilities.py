@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -90,6 +91,88 @@ def test_report_is_comgr_only_and_covers_complete_corpora(tmp_path: Path) -> Non
         assert {entry["outcome"] for entry in result["value"]["observations"]} == {
             "accepted"
         }
+
+
+def test_flavor_consumer_inventory_is_mechanically_closed() -> None:
+    platform = _SOURCE_TOOLS.parent
+    roots = {
+        "python": platform / "python" / "rocke" / "core",
+        "cpp": platform / "cpp" / "core",
+    }
+    if not all(root.is_dir() for root in roots.values()):
+        pytest.skip("source Python/C++ flavor consumers are not installed test assets")
+    tokens = {
+        "python": (
+            "_emission_profile",
+            "_supports_llvm23_target_ops",
+            "_flavor_at_least",
+            "_is_modern_flavor",
+            "_datalayout_for_flavor",
+            "_flavor_for_llvm",
+            "minimum_llvm_flavor",
+            "required_llvm_flavor",
+        ),
+        "cpp": (
+            "rocke_ll_emission_profile",
+            "rocke_ll_profile_has",
+            "rocke_ll_flavor_at_least",
+            "rocke_ll_datalayout_for_flavor",
+            "rocke_ll_flavor_for_llvm_major",
+            "minimum_llvm_flavor",
+            "required_llvm_flavor",
+        ),
+    }
+    observed = {}
+    for language, root in roots.items():
+        for path in root.rglob("*"):
+            if path.suffix not in {".py", ".cpp", ".h"}:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for token in tokens[language]:
+                count = len(
+                    re.findall(
+                        rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])",
+                        source,
+                    )
+                )
+                if count:
+                    observed[(str(path.relative_to(platform)), token)] = count
+    expected = {
+        ("cpp/core/ir/ir_tile.cpp", "minimum_llvm_flavor"): 1,
+        ("cpp/core/isa/backend.cpp", "rocke_ll_datalayout_for_flavor"): 1,
+        ("cpp/core/llvm_profile.cpp", "rocke_ll_datalayout_for_flavor"): 1,
+        ("cpp/core/llvm_profile.cpp", "rocke_ll_emission_profile"): 4,
+        ("cpp/core/llvm_profile.cpp", "rocke_ll_flavor_at_least"): 1,
+        ("cpp/core/llvm_profile.cpp", "rocke_ll_flavor_for_llvm_major"): 1,
+        ("cpp/core/llvm_profile.cpp", "rocke_ll_profile_has"): 1,
+        ("cpp/core/lower_llvm/control.cpp", "rocke_ll_profile_has"): 1,
+        ("cpp/core/lower_llvm/core.cpp", "rocke_ll_datalayout_for_flavor"): 1,
+        ("cpp/core/lower_llvm/core.cpp", "rocke_ll_flavor_for_llvm_major"): 1,
+        ("cpp/core/lower_llvm/core.cpp", "rocke_ll_profile_has"): 1,
+        ("cpp/core/lower_llvm/crosslane.cpp", "minimum_llvm_flavor"): 2,
+        ("cpp/core/lower_llvm/crosslane.cpp", "required_llvm_flavor"): 1,
+        ("cpp/core/lower_llvm/crosslane.cpp", "rocke_ll_flavor_at_least"): 1,
+        ("cpp/core/lower_llvm/data.cpp", "rocke_ll_emission_profile"): 1,
+        ("cpp/core/lower_llvm/mma.cpp", "rocke_ll_profile_has"): 1,
+        ("python/rocke/core/ir.py", "minimum_llvm_flavor"): 1,
+        ("python/rocke/core/isa/backend.py", "_datalayout_for_flavor"): 3,
+        ("python/rocke/core/isa/backend.py", "_supports_llvm23_target_ops"): 2,
+        ("python/rocke/core/llvm_profile.py", "_datalayout_for_flavor"): 2,
+        ("python/rocke/core/llvm_profile.py", "_emission_profile"): 3,
+        ("python/rocke/core/llvm_profile.py", "_flavor_at_least"): 1,
+        ("python/rocke/core/llvm_profile.py", "_flavor_for_llvm"): 1,
+        ("python/rocke/core/llvm_profile.py", "_is_modern_flavor"): 1,
+        ("python/rocke/core/llvm_profile.py", "_supports_llvm23_target_ops"): 1,
+        ("python/rocke/core/lower_llvm.py", "_datalayout_for_flavor"): 1,
+        ("python/rocke/core/lower_llvm.py", "_emission_profile"): 4,
+        ("python/rocke/core/lower_llvm.py", "_flavor_at_least"): 2,
+        ("python/rocke/core/lower_llvm.py", "_flavor_for_llvm"): 2,
+        ("python/rocke/core/lower_llvm.py", "_is_modern_flavor"): 3,
+        ("python/rocke/core/lower_llvm.py", "_supports_llvm23_target_ops"): 2,
+        ("python/rocke/core/lower_llvm.py", "minimum_llvm_flavor"): 2,
+        ("python/rocke/core/lower_llvm.py", "required_llvm_flavor"): 1,
+    }
+    assert observed == expected
 
 
 def test_current_profile_layouts_remain_in_probe_owned_archaeology() -> None:

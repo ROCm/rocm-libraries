@@ -28,6 +28,7 @@ _FATAL_PROCESS_MARKERS = (
     "Segmentation fault",
     "UNREACHABLE executed",
     "Assertion failed",
+    "Unknown command line argument",
 )
 
 

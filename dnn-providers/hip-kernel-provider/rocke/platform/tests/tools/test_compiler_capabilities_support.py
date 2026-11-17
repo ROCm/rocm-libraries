@@ -124,6 +124,17 @@ def test_worker_normal_rejection_is_distinct_from_process_crash(
     assert crashed.outcome == "crash"
     assert "LLVM ERROR" in crashed.diagnostic
 
+    monkeypatch.setattr(
+        support.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            ["python"], 1, b"", b"Unknown command line argument '-bad-option'"
+        ),
+    )
+    option_crash = support._probe_one(request, comgr_lib=None, timeout=10)
+    assert option_crash.outcome == "crash"
+    assert "Unknown command line argument" in option_crash.diagnostic
+
 
 def test_worker_timeout_is_bounded_and_classified(
     monkeypatch: pytest.MonkeyPatch,

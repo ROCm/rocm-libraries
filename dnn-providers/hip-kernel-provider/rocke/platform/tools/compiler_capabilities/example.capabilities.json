@@ -609,7 +609,7 @@
   "probe": {
     "effective_processor": "gfx950",
     "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
-    "implementation_sha256": "831f11e38fc6808afbc52ff11025cc2a4be710e6c7158070825bc28c09c9c11d",
+    "implementation_sha256": "cc957d60eceb6c927c650c92e1715a9a05bfa95848644ae4f0082ef968f92df6",
     "name": "rocke-comgr-capabilities",
     "processor": "gfx950",
     "schema_sha256": "21c99cbac8781c3a2fffcb30792c29e8c7aa9dd627068c4a7f5c95909ef8cb99",

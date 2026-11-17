@@ -9,6 +9,7 @@
 - [Fast execution](#fast-execution)
 - [Run the probe](#run-the-probe)
 - [Report semantics](#report-semantics)
+- [Historical validation](#historical-validation)
 - [Relationship to LLVM flavors](#relationship-to-llvm-flavors)
 - [Scope](#scope)
 
@@ -161,6 +162,29 @@ behavior observations.
 resolver must choose among accepted forms, preserve unknown states, and qualify
 the selected complete kernels through byte identity, generated-code/resource
 checks, and numeric testing.
+
+## Historical validation
+
+The probe is replayed across 43 selected weekly public compiler snapshots,
+three public release baselines, and five processor contexts.
+[`replay_historical.py`](replay_historical.py) uses HTTP range requests to
+extract only COMGR and its required shared libraries from SDK wheels, downloads
+only the smaller COMGR package for release baselines, reuses duplicate artifacts,
+and checkpoints each completed row. The sanitized
+machine evidence lives in
+[`historical_observations.json`](historical_observations.json), with analysis in
+[`historical_study.md`](historical_study.md) and
+[`churn_report.md`](churn_report.md).
+
+Run the dependency-free checker after any probe, schema, input, or study change:
+
+```bash
+python tools/compiler_capabilities/check_historical_study.py
+```
+
+The checker proves public artifact provenance, exact candidate closure and
+ordering, report digests, processor coverage, duplicate-artifact repeatability,
+absence of machine-local paths, and every published structural/churn boundary.
 
 ## Relationship to LLVM flavors
 

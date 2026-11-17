@@ -1,0 +1,334 @@
+{
+  "format": "rocke-comgr-historical-inputs/v1",
+  "public_sources": [
+    "https://github.com/ROCm/TheRock/blob/main/docs/packaging/legacy_per_family_releases.md",
+    "https://github.com/ROCm/TheRock/blob/main/docs/packaging/legacy_multi_arch_releases.md",
+    "https://github.com/ROCm/TheRock/blob/main/RELEASES.md"
+  ],
+  "releases": [
+    {
+      "artifact": "comgr_3.0.0.70000-38~24.04_amd64.deb",
+      "artifact_url": "https://repo.radeon.com/rocm/apt/7.0/pool/main/c/comgr/comgr_3.0.0.70000-38~24.04_amd64.deb",
+      "id": "7.0.0",
+      "index_url": "https://repo.radeon.com/rocm/apt/7.0/pool/main/c/comgr/",
+      "kind": "deb"
+    },
+    {
+      "artifact": "comgr_3.0.0.70100-20~24.04_amd64.deb",
+      "artifact_url": "https://repo.radeon.com/rocm/apt/7.1/pool/main/c/comgr/comgr_3.0.0.70100-20~24.04_amd64.deb",
+      "id": "7.1.0",
+      "index_url": "https://repo.radeon.com/rocm/apt/7.1/pool/main/c/comgr/",
+      "kind": "deb"
+    },
+    {
+      "artifact": "comgr_3.0.0.70200-43~24.04_amd64.deb",
+      "artifact_url": "https://repo.radeon.com/rocm/apt/7.2/pool/main/c/comgr/comgr_3.0.0.70200-43~24.04_amd64.deb",
+      "id": "7.2.0",
+      "index_url": "https://repo.radeon.com/rocm/apt/7.2/pool/main/c/comgr/",
+      "kind": "deb"
+    }
+  ],
+  "weekly": [
+    {
+      "artifact": "7.12.0a20260214",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260214-py3-none-linux_x86_64.whl",
+      "id": "W06",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.12.0a20260218",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260218-py3-none-linux_x86_64.whl",
+      "id": "W07",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.12.0a20260218",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260218-py3-none-linux_x86_64.whl",
+      "id": "W08",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.12.0a20260228",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260228-py3-none-linux_x86_64.whl",
+      "id": "W09",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.12.0a20260304",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260304-py3-none-linux_x86_64.whl",
+      "id": "W10",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260312",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260312-py3-none-linux_x86_64.whl",
+      "id": "W11",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260319",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260319-py3-none-linux_x86_64.whl",
+      "id": "W12",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260326",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260326-py3-none-linux_x86_64.whl",
+      "id": "W13",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260402",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260402-py3-none-linux_x86_64.whl",
+      "id": "W14",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260409",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260409-py3-none-linux_x86_64.whl",
+      "id": "W15",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260416",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260416-py3-none-linux_x86_64.whl",
+      "id": "W16",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260423",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260423-py3-none-linux_x86_64.whl",
+      "id": "W17",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260430",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260430-py3-none-linux_x86_64.whl",
+      "id": "W18",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260507",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260507-py3-none-linux_x86_64.whl",
+      "id": "W19",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.13.0a20260514",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260514-py3-none-linux_x86_64.whl",
+      "id": "W20",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.14.0a20260521",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260521-py3-none-linux_x86_64.whl",
+      "id": "W21",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.14.0a20260528",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260528-py3-none-linux_x86_64.whl",
+      "id": "W22",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.14.0a20260604",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260604-py3-none-linux_x86_64.whl",
+      "id": "W23",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.14.0a20260610",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260610-py3-none-linux_x86_64.whl",
+      "id": "W24",
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.14.0a20260619",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.14.0a20260619-py3-none-linux_x86_64.whl",
+      "id": "W25",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.15.0a20260626",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260626-py3-none-linux_x86_64.whl",
+      "id": "W26",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.15.0a20260628",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260628-py3-none-linux_x86_64.whl",
+      "id": "W26-1",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.15.0a20260702",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260702-py3-none-linux_x86_64.whl",
+      "id": "W27",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.15.0a20260709",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260709-py3-none-linux_x86_64.whl",
+      "id": "W28",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.15.0a20260715",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260715-py3-none-linux_x86_64.whl",
+      "id": "W29a",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.15.0a20260716",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260716-py3-none-linux_x86_64.whl",
+      "id": "W29b",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "7.15.0a20260723",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260723-py3-none-linux_x86_64.whl",
+      "id": "W30",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.0.0a20260730",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.0.0a20260730-py3-none-linux_x86_64.whl",
+      "id": "W31",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.1.0a20260805",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260805-py3-none-linux_x86_64.whl",
+      "id": "W32",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.1.0a20260813",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260813-py3-none-linux_x86_64.whl",
+      "id": "W33",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.1.0a20260819",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260819-py3-none-linux_x86_64.whl",
+      "id": "W34",
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.1.0a20260829",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260829-py3-none-linux_x86_64.whl",
+      "id": "W35",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.1.0a20260902",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260902-py3-none-linux_x86_64.whl",
+      "id": "W36",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.1.0a20260909",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260909-py3-none-linux_x86_64.whl",
+      "id": "W37",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.2.0a20260915",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20260915-py3-none-linux_x86_64.whl",
+      "id": "W38",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.2.0a20260922",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20260922-py3-none-linux_x86_64.whl",
+      "id": "W39",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.2.0a20261001",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261001-py3-none-linux_x86_64.whl",
+      "id": "W40",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.2.0a20261008",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261008-py3-none-linux_x86_64.whl",
+      "id": "W41",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.2.0a20261014",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261014-py3-none-linux_x86_64.whl",
+      "id": "W42",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.2.0a20261022",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261022-py3-none-linux_x86_64.whl",
+      "id": "W43",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.3.0a20261029",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261029-py3-none-linux_x86_64.whl",
+      "id": "W44",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.3.0a20261105",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261105-py3-none-linux_x86_64.whl",
+      "id": "W45",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    },
+    {
+      "artifact": "10.3.0a20261112",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261112-py3-none-linux_x86_64.whl",
+      "id": "W46",
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "kind": "wheel"
+    }
+  ]
+}

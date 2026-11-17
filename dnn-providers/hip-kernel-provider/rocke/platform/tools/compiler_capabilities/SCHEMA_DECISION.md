@@ -102,6 +102,11 @@ them without changing report semantics.
 The embedded LLVM version explains which compiler lineage was observed. It does
 not predict a capability and never substitutes for one.
 
+The schema and probe are replayed against 43 weekly public snapshots, three
+public release baselines, and five processor contexts. Historical evidence is
+invalidated and regenerated when the probe or schema digest changes; the checker
+pins exact candidate closure and published transition claims.
+
 ## Evolution
 
 The schema is checkout-local. Its history is ordinary source history; there is

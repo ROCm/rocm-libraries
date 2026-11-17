@@ -177,6 +177,13 @@ a compiler fact:
 
 These need a migration or compatibility adapter, not a compiler probe.
 
+`test_flavor_consumer_inventory_is_mechanically_closed` scans both source
+engines and pins every current use of emission-profile lookup, broad capability,
+ranked/exact flavor admission, data-layout selection, major-to-flavor mapping,
+and `minimum_llvm_flavor`/`required_llvm_flavor`. A new consumer fails until it
+is classified here and in the migration backlog rather than silently extending
+the flavor model.
+
 ## COMGR probe corpus
 
 Every candidate is a complete LLVM module compiled in an isolated process
