@@ -29,8 +29,9 @@
  * The split engine serves a sink graph. A graph with a dSink runs the prep sink twin and the
  * dsink_reduce kernel (the prep stage's kernel carries a `dsink_reduce` source); a graph with a
  * sink and no dSink runs the plain prep rows, because the sink is already in the sink-inclusive
- * LSE the caller supplies. The merged engine declines every sink graph, and the split engine a
- * FLOAT sink and an fp32 graph with a sink.
+ * LSE the caller supplies. The merged engine reads that same LSE, so it serves a sink graph
+ * without a dSink (a FLOAT one too, since no kernel reads it) and declines one with a dSink; the
+ * split engine declines a FLOAT sink with a dSink and an fp32 graph with a dSink.
  *
  * The reference is CpuFpReferenceSdpa: its forward pass, with the sink, gives the O and the
  * sink-inclusive LSE the device is handed, and its backward pass (SdpaBwdOptions::setSink) gives
@@ -446,7 +447,19 @@ void execute(std::string_view engine, const SinkCase& c, const Staged<T>& staged
     const auto sinkElements = static_cast<size_t>((s.heads + 7) / 8 * 8);
     std::unique_ptr<DeviceBuffer> sink;
     std::unique_ptr<DeviceBuffer> dsink;
-    if(c.withSink)
+    if(c.withSink && c.sinkType == DataType::FLOAT)
+    {
+        // A FLOAT sink: no kernel reads it without a dSink, but the buffer is the graph's.
+        std::vector<float> sinkHost(sinkElements, 0.0F);
+        for(size_t h = 0; h < staged.sink.size(); ++h)
+        {
+            sinkHost[h] = static_cast<float>(staged.sink[h]);
+        }
+        sink = std::make_unique<DeviceBuffer>(sinkElements * sizeof(float));
+        sink->upload(sinkHost);
+        buffers.push_back({uid::SINK, sink->get()});
+    }
+    else if(c.withSink)
     {
         std::vector<T> sinkHost(sinkElements, T(0.0F));
         for(size_t h = 0; h < staged.sink.size(); ++h)
@@ -668,20 +681,75 @@ TEST_F(TestGpuFlydslSdpaBwdSinkFp16, SplitServesASinkOnlyGraphWithThePlainPrepRo
     expectServedAs(SPLIT_ENGINE, c);
 }
 
+/// A sink without dSink on the merged engine: dense and padded, non-causal and causal. dQ, dK
+/// and dV depend on the sink only through the sink-inclusive Stats, which the harness hands the
+/// device; the merged plan is built by the engine's id, so the merged engine served the graph.
+void expectMergedServesASinkOnlyGraph(DataType dtype, bool gqa)
+{
+    for(const bool padded : {false, true})
+    {
+        for(const bool causal : {false, true})
+        {
+            SCOPED_TRACE(std::string(gqa ? "gqa" : "mha") + (padded ? " padded" : " dense")
+                         + (causal ? " causal" : " non-causal"));
+            auto c = sinkCase(dtype, gqa, padded, causal);
+            c.withDsink = false;
+            expectServedAs(MERGED_ENGINE, c);
+            if(::testing::Test::HasFatalFailure())
+            {
+                return;
+            }
+        }
+    }
+}
+
+// A FLOAT sink without a dSink: no kernel reads it, the sink-inclusive Stats carry it.
+TEST_F(TestGpuFlydslSdpaBwdSinkBfp16, MergedServesAFloatSinkWithoutDsink)
+{
+    auto c = sinkCase(DataType::BFLOAT16, true, true, true);
+    c.withDsink = false;
+    c.sinkType = DataType::FLOAT;
+    expectServedAs(MERGED_ENGINE, c);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSinkBfp16, SplitServesAFloatSinkWithoutDsink)
+{
+    auto c = sinkCase(DataType::BFLOAT16, false, false, true);
+    c.withDsink = false;
+    c.sinkType = DataType::FLOAT;
+    expectServedAs(SPLIT_ENGINE, c);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSinkBfp16, MergedServesASinkOnlyGraphOfMhaThroughTheCallersStats)
+{
+    expectMergedServesASinkOnlyGraph(DataType::BFLOAT16, false);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSinkBfp16, MergedServesASinkOnlyGraphOfGqaThroughTheCallersStats)
+{
+    expectMergedServesASinkOnlyGraph(DataType::BFLOAT16, true);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSinkFp16, MergedServesASinkOnlyGraphOfMhaThroughTheCallersStats)
+{
+    expectMergedServesASinkOnlyGraph(DataType::HALF, false);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSinkFp16, MergedServesASinkOnlyGraphOfGqaThroughTheCallersStats)
+{
+    expectMergedServesASinkOnlyGraph(DataType::HALF, true);
+}
+
 // ---------------------------------------------------------------------------
 // Declined
 // ---------------------------------------------------------------------------
 
-TEST_F(TestGpuFlydslSdpaBwdSink, SplitDeclinesAFloatSink)
+TEST_F(TestGpuFlydslSdpaBwdSink, SplitDeclinesAFloatSinkWithADsink)
 {
-    for(const bool withDsink : {true, false})
-    {
-        SCOPED_TRACE(withDsink ? "sink and dSink" : "sink only");
-        auto c = sinkCase(DataType::BFLOAT16, false, false, false);
-        c.sinkType = DataType::FLOAT;
-        c.withDsink = withDsink;
-        expectDeclined(SPLIT_ENGINE, specOfSink(c));
-    }
+    auto c = sinkCase(DataType::BFLOAT16, false, false, false);
+    c.sinkType = DataType::FLOAT;
+    c.withDsink = true;
+    expectDeclined(SPLIT_ENGINE, specOfSink(c));
 }
 
 TEST_F(TestGpuFlydslSdpaBwdSink, SplitDeclinesAnFp32GraphWithASink)
@@ -691,15 +759,11 @@ TEST_F(TestGpuFlydslSdpaBwdSink, SplitDeclinesAnFp32GraphWithASink)
     expectDeclined(SPLIT_ENGINE, specOfSink(c));
 }
 
-TEST_F(TestGpuFlydslSdpaBwdSink, MergedDeclinesASinkGraph)
+TEST_F(TestGpuFlydslSdpaBwdSink, MergedDeclinesADsinkGraph)
 {
-    for(const bool withDsink : {true, false})
-    {
-        SCOPED_TRACE(withDsink ? "sink and dSink" : "sink only");
-        auto c = sinkCase(DataType::BFLOAT16, false, false, false);
-        c.withDsink = withDsink;
-        expectDeclined(MERGED_ENGINE, specOfSink(c));
-    }
+    auto c = sinkCase(DataType::BFLOAT16, false, false, false);
+    c.withDsink = true;
+    expectDeclined(MERGED_ENGINE, specOfSink(c));
 }
 
 // ---------------------------------------------------------------------------

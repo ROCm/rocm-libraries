@@ -653,11 +653,12 @@ TEST(TestFlydslSdpaBwdMergedGraph, DeclinesAForwardGraphWithoutAnalysingIt)
     EXPECT_FALSE(graphMatch(spec).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedGraph, SK0DeclinesASinkGraph)
+TEST(TestFlydslSdpaBwdMergedGraph, SK0ServesASinkWithoutDsinkAndDeclinesADsink)
 {
-    EXPECT_FALSE(graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
-                     addSink(g, DataType::HALF);
-                 })).has_value());
+    // The merged kernels read the caller's sink-inclusive LSE: a sink alone changes nothing.
+    EXPECT_TRUE(graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
+                    addSink(g, DataType::HALF);
+                })).has_value());
     EXPECT_FALSE(graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
                      addSink(g, DataType::HALF);
                      addDsink(g, DataType::HALF);

@@ -132,8 +132,10 @@ struct MatchOptions
     /// and the graph has no bias, is not FLOAT and is not ragged. Off, a V whose heads differ
     /// from K's declines [shape] (SH-1).
     bool acceptValueHeads = false;
-    /// Accept sink_token and dsink_token tensors. Off, they decline [sink] (SK-0).
-    bool acceptSink = false;
+    /// Accept a dsink_token tensor, which the engine computes with its prep sink twin. Off, a
+    /// dSink declines [sink] (SK-0). A sink_token alone needs no kernel and every engine
+    /// accepts it: the kernels read the caller's LSE, which already holds the sink.
+    bool acceptDsink = false;
 };
 
 /// What the split engine opts into: every option.
@@ -142,7 +144,7 @@ inline constexpr MatchOptions SPLIT_MATCH_OPTIONS = [] {
     options.acceptFloat = true;
     options.acceptF32Bias = true;
     options.acceptValueHeads = true;
-    options.acceptSink = true;
+    options.acceptDsink = true;
     return options;
 }();
 
@@ -237,7 +239,7 @@ struct SdpaBwdProblem
     int64_t seedUid = NO_UID;
     int64_t offsetUid = NO_UID;
     /// The sink input and its gradient, NO_UID when absent; dsinkUid is set only on an engine
-    /// that opted into acceptSink.
+    /// that opted into acceptDsink.
     int64_t sinkUid = NO_UID;
     int64_t dsinkUid = NO_UID;
 };
@@ -1757,16 +1759,21 @@ private:
 
     /// RN-1: rng_dump_tensor_uid set declines [rng_dump] on every engine; the kernels
     /// regenerate the Philox mask and write no dump.
-    /// SK-0: sink or dSink on an engine that does not opt in (MatchOptions::acceptSink) declines
-    /// [sink]. SK-1: the sink dtype is Q's 16-bit dtype; a FLOAT sink beside a 16-bit Q, and any
-    /// sink on an fp32 graph, decline [sink]. SK-2: a sink and a dSink are device tensors of
+    /// SK-0: dSink on an engine that does not opt in (MatchOptions::acceptDsink) declines [sink];
+    /// a sink without dSink is accepted by every engine, because the kernels read the caller's
+    /// LSE, which already holds the sink (the merged kernel's Delta is recomputed from O and dO,
+    /// and its LSE is the input's), and dQ, dK and dV depend on the sink only through that LSE.
+    /// SK-1: a sink without dSink is FLOAT or Q's dtype (any other declines [sink]), on an fp32
+    /// graph too. With a dSink the sink dtype is Q's 16-bit dtype: a FLOAT sink beside a 16-bit
+    /// Q, and any sink on an fp32 graph, decline [sink]. SK-2: a sink and a dSink are device tensors of
     /// the shape, stride and alignment checkSinkTensor names. SK-3: dSink has the sink's dims
     /// and dtype. SK-4: dSink without sink declines [sink]. SK-5: dSink with a V head dim in
     /// (192, 224] declines [sink]; the prep sink twin has no row there. A sink without dSink
-    /// needs no kernel: it is already in the caller's stats.
+    /// needs no kernel: it is already in the caller's stats; the sink tensor still passes SK-1
+    /// (the sink-only form) and SK-2.
     /// DE-1: is_deterministic_algorithm is accepted and ignored; every output has one writer.
-    /// MT-1: max_total_seq_len_q and max_total_seq_len_kv are accepted and ignored; they size
-    /// a workspace this engine does not use.
+    /// MT-1: max_total_seq_len_q and max_total_seq_len_kv are accepted and ignored; they give
+    /// the packed buffers' token span, which this engine does not need.
     Verdict checkSinkAndExtras()
     {
         const auto& a = _attributes;
@@ -1782,10 +1789,9 @@ private:
         {
             return std::nullopt;
         }
-        if(!_options.acceptSink)
+        if(dsinkUid.has_value() && !_options.acceptDsink)
         {
-            return Decline{"sink",
-                           "sink_token or dsink_token is set; this engine has no sink term"};
+            return Decline{"sink", "dsink_token is set; this engine has no sink term"};
         }
         if(!sinkUid.has_value())
         {
@@ -1797,20 +1803,33 @@ private:
             return verdict;
         }
         const auto sinkType = sink.tensor->data_type();
-        if(_problem.dtype == data_objects::DataType::FLOAT)
+        if(!dsinkUid.has_value())
         {
-            return Decline{"sink",
-                           describe(sink)
-                               + " on an fp32 graph: the fp32 split family has no sink twin"};
+            // No kernel reads the sink: FLOAT, or Q's 16-bit dtype, as the frontend allows.
+            if(sinkType != data_objects::DataType::FLOAT && sinkType != _problem.dtype)
+            {
+                return Decline{"sink",
+                               describe(sink) + " dtype " + typeName(sinkType)
+                                   + " is neither FLOAT nor the I/O dtype "
+                                   + typeName(_problem.dtype)};
+            }
         }
-        if(sinkType != _problem.dtype)
+        else
         {
-            return Decline{"sink",
-                           describe(sink) + " dtype " + typeName(sinkType)
-                               + ": the kernels read the I/O dtype " + typeName(_problem.dtype)};
-        }
-        if(dsinkUid.has_value())
-        {
+            if(_problem.dtype == data_objects::DataType::FLOAT)
+            {
+                return Decline{"sink",
+                               describe(sink)
+                                   + " with a dSink on an fp32 graph: the fp32 split family has "
+                                     "no sink twin"};
+            }
+            if(sinkType != _problem.dtype)
+            {
+                return Decline{"sink",
+                               describe(sink) + " dtype " + typeName(sinkType)
+                                   + ": the kernels read the I/O dtype "
+                                   + typeName(_problem.dtype)};
+            }
             Operand dsink{"dSink", *dsinkUid};
             if(auto verdict = checkSinkTensor(dsink))
             {
