@@ -716,7 +716,11 @@ namespace
             }
         }
         s.emplace_back("all_rows_empty", make(4, {0, 0, 0}));
-        s.emplace_back("first_row_long", make(3 * B + 7, {3 * B + 7, 4, 5, 0, 6}));
+        // Each block adds its part of a row to y atomically, in any order, so
+        // every partial sum of a row must be an integer a bf16 y holds exactly
+        // (at most 256). A first row of 2 * B + 7 stays below that on wave64;
+        // 3 * B + 7 does not.
+        s.emplace_back("first_row_long", make(2 * B + 7, {2 * B + 7, 4, 5, 0, 6}));
         s.emplace_back("first_row_one_block", make(B, {B, 4, 5, 0, 6}));
         s.emplace_back("first_row_one_block_plus_one", make(B + 1, {B + 1, 4, 5, 0, 6}));
         s.emplace_back("last_row_long", make(3 * B + 7, {4, 5, 0, 3 * B + 7}));
@@ -1228,6 +1232,10 @@ TEST_F(CsrmvNnzsplit, density_selected_granularities)
         const int64_t        n    = 4 * B;
         std::vector<int64_t> base = uniform_lens(needed, dn.lo, dn.span);
         const std::string    tag  = dn.name;
+        // The row spans three blocks but stays below the skew guard (64 times
+        // the mean row length, at least 64 * dn.lo). 3 * B + 5 crosses it at
+        // 4 nnz per thread on wave64.
+        const int64_t long_row = 2 * B + 5;
 
         std::vector<Named> shapes;
         shapes.emplace_back(tag + "_uniform", make(n, base));
@@ -1243,17 +1251,17 @@ TEST_F(CsrmvNnzsplit, density_selected_granularities)
         }
         {
             auto lens = base;
-            lens.insert(lens.begin(), 3 * B + 5);
+            lens.insert(lens.begin(), long_row);
             shapes.emplace_back(tag + "_first_row_spans_blocks", make(n, lens));
         }
         {
             auto lens = base;
-            lens.push_back(3 * B + 5);
+            lens.push_back(long_row);
             shapes.emplace_back(tag + "_last_row_spans_blocks", make(n, lens));
         }
         {
             auto lens = base;
-            lens.insert(lens.begin() + static_cast<std::ptrdiff_t>(lens.size() / 2), 3 * B + 5);
+            lens.insert(lens.begin() + static_cast<std::ptrdiff_t>(lens.size() / 2), long_row);
             shapes.emplace_back(tag + "_middle_row_spans_blocks", make(n, lens));
         }
         {
