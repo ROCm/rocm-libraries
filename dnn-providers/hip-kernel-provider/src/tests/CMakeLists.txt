@@ -968,3 +968,31 @@ if(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST AND HIPDNN_ENABLE_KERNEL_INGESTOR
     set_tests_properties(hkp_conv_rdna_generic_compile PROPERTIES
         LABELS "conv_generic_compile" TIMEOUT 3600)
 endif()
+
+# The conv code-size gate (conv/tools/code_gate): the compile census (TestConvCompileCensus under
+# the dry HIPRTC hook) records the compile of every catalog config the census graphs admit, on
+# every catalog architecture, and each distinct one is compiled with the ROCm clang. It fails
+# when a device function the inliner leaves out of its entry point reaches the 128 KiB
+# short-branch range or builds a long branch in s[30:31], its return address: such a kernel
+# returns into its own body and never ends. Host-only and long, so opt-in and labeled out of the
+# tiered suites.
+if(HIPKERNELPROVIDER_CONV_CODE_GATE_TEST AND HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND HIPKERNELPROVIDER_ENABLE_CONV)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(DEFINED ROCM_PATH)
+        set(_hkp_gate_rocm "${ROCM_PATH}")
+    else()
+        set(_hkp_gate_rocm "/opt/rocm")
+    endif()
+    cmake_host_system_information(RESULT _hkp_gate_jobs QUERY NUMBER_OF_LOGICAL_CORES)
+    enable_testing()
+    add_test(
+        NAME hkp_conv_code_size_gate
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../conv/tools/code_gate/run_gate.py
+            --tests $<TARGET_FILE:hip_kernel_provider_tests>
+            --rocm ${_hkp_gate_rocm} -j ${_hkp_gate_jobs})
+    set_tests_properties(hkp_conv_code_size_gate PROPERTIES
+        LABELS "conv_code_gate" TIMEOUT 14400)
+endif()

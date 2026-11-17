@@ -1,8 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// LD_PRELOAD hook around HIPRTC for the RDNA generic-target tooling (check_generic.py, the
-// generic-vs-chip timing pilot). Not part of the provider; test tooling only.
+// LD_PRELOAD hook around HIPRTC for the conv compile tooling (check_generic.py, the
+// generic-vs-chip timing pilot, and the code-size gate's census, ../code_gate). Not part of the
+// provider; test tooling only.
 //
 //   HKP_RTC_LOG=<file>          append one JSON line per hiprtcCompileProgram:
 //                               {"name": <program name>, "options": [<options as passed>],
@@ -18,6 +19,12 @@
 //                               for ocml, ockl, oclc_unsafe_math_off, oclc_finite_only_off,
 //                               oclc_wavefrontsize64_off, oclc_isa_version_11-generic (or 12-)
 //                               and oclc_abi_version_600.
+//   HKP_RTC_DRY=1               record without compiling: hiprtcCompileProgram logs (each
+//                               distinct program and option list once) and succeeds with an
+//                               empty code object, and hipModuleLoadData, hipModuleGetFunction
+//                               and hipModuleUnload accept it. Plans then build on any host, for
+//                               any --offload-arch, with nothing compiled or loaded; nothing may
+//                               launch. Set HIPDNN_DISABLE_CACHE=1 so no empty object is cached.
 //
 // Build: cc -shared -fPIC -O2 -o librtc_hook.so rtc_hook.c -ldl -lpthread
 
@@ -145,6 +152,56 @@ static void writeJsonString(FILE* f, const char* s)
 
 static const char ARCH_PREFIX[] = "--offload-arch=";
 
+static int dryRun(void)
+{
+    const char* dry = getenv("HKP_RTC_DRY");
+    return dry != NULL && dry[0] == '1';
+}
+
+// Distinct (name, options) hashes already logged in a dry run.
+#define SEEN_SLOTS (1u << 22)
+static unsigned long long* g_seen = NULL;
+
+static unsigned long long hashString(unsigned long long h, const char* s)
+{
+    for(; *s != '\0'; ++s)
+    {
+        h = (h ^ (unsigned char)*s) * 1099511628211ULL;
+    }
+    return (h ^ 0xffu) * 1099511628211ULL;
+}
+
+// 1 when (name, options) is new (and now remembered); the caller holds g_lock.
+static int firstSighting(const char* name, int numOptions, const char* const* options)
+{
+    if(g_seen == NULL)
+    {
+        g_seen = (unsigned long long*)calloc(SEEN_SLOTS, sizeof(unsigned long long));
+        if(g_seen == NULL)
+        {
+            return 1;
+        }
+    }
+    unsigned long long h = hashString(14695981039346656037ULL, name);
+    for(int i = 0; i < numOptions; ++i)
+    {
+        h = hashString(h, options[i]);
+    }
+    h |= 1; // 0 marks an empty slot
+    for(unsigned long long i = h % SEEN_SLOTS;; i = (i + 1) % SEEN_SLOTS)
+    {
+        if(g_seen[i] == h)
+        {
+            return 0;
+        }
+        if(g_seen[i] == 0)
+        {
+            g_seen[i] = h;
+            return 1;
+        }
+    }
+}
+
 hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char* const* options)
 {
     static CompileFn real = NULL;
@@ -192,7 +249,8 @@ hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char
             used[usedCount++] = tok;
         }
     }
-    const hiprtcResult result = real(prog, usedCount, used);
+    const int dry = dryRun();
+    const hiprtcResult result = dry ? 0 : real(prog, usedCount, used);
 
     const char* logPath = getenv("HKP_RTC_LOG");
     if(logPath != NULL && logPath[0] != '\0')
@@ -200,7 +258,7 @@ hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char
         char name[NAME_LEN];
         nameOf(prog, name);
         pthread_mutex_lock(&g_lock);
-        FILE* f = fopen(logPath, "a");
+        FILE* f = !dry || firstSighting(name, numOptions, options) ? fopen(logPath, "a") : NULL;
         if(f != NULL)
         {
             fputs("{\"name\": ", f);
@@ -225,4 +283,89 @@ hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char
     free(extra);
     free((void*)used);
     return result;
+}
+
+// The dry run's stand-ins: an empty code object, and a module and function that are never
+// launched.
+typedef hiprtcResult (*CodeSizeFn)(hiprtcProgram, size_t*);
+typedef hiprtcResult (*CodeFn)(hiprtcProgram, char*);
+typedef int (*ModuleLoadFn)(void**, const void*);
+typedef int (*ModuleFunctionFn)(void**, void*, const char*);
+typedef int (*ModuleUnloadFn)(void*);
+
+static char g_dryModule;
+static char g_dryFunction;
+
+hiprtcResult hiprtcGetCodeSize(hiprtcProgram prog, size_t* size)
+{
+    static CodeSizeFn real = NULL;
+    if(dryRun())
+    {
+        *size = 8;
+        return 0;
+    }
+    if(real == NULL)
+    {
+        real = (CodeSizeFn)nextSymbol("hiprtcGetCodeSize");
+    }
+    return real(prog, size);
+}
+
+hiprtcResult hiprtcGetCode(hiprtcProgram prog, char* code)
+{
+    static CodeFn real = NULL;
+    if(dryRun())
+    {
+        memset(code, 0, 8);
+        return 0;
+    }
+    if(real == NULL)
+    {
+        real = (CodeFn)nextSymbol("hiprtcGetCode");
+    }
+    return real(prog, code);
+}
+
+int hipModuleLoadData(void** module, const void* image)
+{
+    static ModuleLoadFn real = NULL;
+    if(dryRun())
+    {
+        *module = &g_dryModule;
+        return 0;
+    }
+    if(real == NULL)
+    {
+        real = (ModuleLoadFn)nextSymbol("hipModuleLoadData");
+    }
+    return real(module, image);
+}
+
+int hipModuleGetFunction(void** function, void* module, const char* name)
+{
+    static ModuleFunctionFn real = NULL;
+    if(module == &g_dryModule)
+    {
+        *function = &g_dryFunction;
+        return 0;
+    }
+    if(real == NULL)
+    {
+        real = (ModuleFunctionFn)nextSymbol("hipModuleGetFunction");
+    }
+    return real(function, module, name);
+}
+
+int hipModuleUnload(void* module)
+{
+    static ModuleUnloadFn real = NULL;
+    if(module == &g_dryModule)
+    {
+        return 0;
+    }
+    if(real == NULL)
+    {
+        real = (ModuleUnloadFn)nextSymbol("hipModuleUnload");
+    }
+    return real(module);
 }

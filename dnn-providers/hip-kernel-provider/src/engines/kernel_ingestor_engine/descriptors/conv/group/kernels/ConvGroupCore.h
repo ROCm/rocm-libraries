@@ -486,6 +486,16 @@ struct K4RowsLcm
     static constexpr int value = A / gcd(A, B) * B;
 };
 
+// A 3-D filter's taps make the row-streaming body too large for the inliner. Called as a function
+// past the short-branch range (128 KiB), the body gets long branches built in s[30:31], its return
+// address, and the return jumps back into the body: the kernel never ends. With a 3-D filter
+// (CONV_GROUP_FT past 1) the body is always inlined into the entry point, where long branches take
+// free registers; 2-D bodies inline on their own.
+#if defined(CONV_GROUP_FT) && CONV_GROUP_FT > 1
+#define K4_ROWS_INLINE __forceinline__
+#else
+#define K4_ROWS_INLINE
+#endif
 template <class T,
           class Atom,
           int FT,
@@ -497,7 +507,7 @@ template <class T,
           int CB,
           int DEPTH,
           int NBI = 0>
-__device__ void k4ConvMmaRows(const K4Args& a CONV_EPI_FN_PARAM)
+__device__ K4_ROWS_INLINE void k4ConvMmaRows(const K4Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = CB * WAVE;
