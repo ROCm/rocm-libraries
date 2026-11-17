@@ -193,6 +193,17 @@ const rocke_type_t*
  * IR type. */
 const rocke_type_t* rocke_require_ir_type(const char* dtype);
 
+/* The result type the arch catalog gives the MMA atom `op_id` (Python
+ * core/ir.py mma_result_type), as its element and count: `*count` is the
+ * dst fragment length and `*element` the IR type of the dst dtype, fp32 when
+ * the catalog's dtype table (rocke_arch_mma_op_id_dst_dtype) has no entry for
+ * `op_id`. The builder gives a bare op_id's tile.mma result this type, and a
+ * fixed-signature MFMA instruction takes it as its accumulator and result.
+ * Throws ckc::ValueError for an op_id with no fragment length, and as
+ * rocke_require_ir_type does for a dtype the IR cannot represent; on a throw
+ * neither output is written. */
+void rocke_i_mma_result_type(const char* op_id, const rocke_type_t** element, int* count);
+
 /* The number of bits a value of type `t` occupies (Python core/ir.py::type_bits):
  * a scalar's format width, a vector's element width times its count, a
  * pointer's address-space width. Throws ckc::TypeError for an LDS allocation

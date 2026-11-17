@@ -1,8 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /* Fixed MFMA lowering ABI checks, mirroring core/mfma.py::validate_mfma.
- * Inspect actual SSA values rather than re-resolving mutable catalog metadata.
- * Returned errors use the caller's buffer; no ownership is transferred. */
+ * Inspect actual SSA values against each instruction's signature: A and B
+ * from the fixed table below, the accumulator and result from the type the
+ * arch catalog gives the op_id. Returned errors use the caller's buffer; no
+ * ownership is transferred. */
 #ifndef ROCKE_MFMA_INTERNAL_H
 #define ROCKE_MFMA_INTERNAL_H
 
@@ -206,16 +208,15 @@ static inline const char* rocke_mfma_source_type(const char* op_id)
     return NULL;
 }
 
-/* The accumulator and result type of MFMA `op_id` (Python validate_mfma's
- * rule): vec<f64x1> for the f64 4x4x4 atom, vec<f64x4> for the other f64 one,
- * vec<f32x16> for a 32x32 atom and vec<f32x4> for any other. */
+/* The name of the accumulator and result type MFMA `op_id` takes: the result
+ * type the arch catalog gives it (rocke_i_mma_result_type). Every op_id these
+ * checks pass (a fixed-signature or XF32 atom) has one, so it does not throw. */
 static inline void rocke_mfma_accumulator_type(const char* op_id, char* type, size_t capacity)
 {
-    const int f64 = strncmp(op_id, "mfma_f64_", 9) == 0;
-    const int count = strcmp(op_id, "mfma_f64_4x4x4_f64") == 0    ? 1
-                      : strncmp(op_id, "mfma_f32_32x32", 14) == 0 ? 16
-                                                                  : 4;
-    snprintf(type, capacity, "vec<%sx%d>", f64 ? "f64" : "f32", count);
+    const rocke_type_t* element = NULL;
+    int count = 0;
+    rocke_i_mma_result_type(op_id, &element, &count);
+    snprintf(type, capacity, "vec<%sx%d>", element->name, count);
 }
 
 /* Python validate_mfma for a fixed-signature MFMA `op_id`: NULL when `op` fits

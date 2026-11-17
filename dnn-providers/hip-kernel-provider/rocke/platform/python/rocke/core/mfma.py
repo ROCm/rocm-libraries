@@ -4,12 +4,28 @@
 
 from __future__ import annotations
 
-from .ir import BF8E5M2, BF16, F16, F32, F64, FP8E4M3, I8, I32, U8, Op, Type, VectorType
+from .ir import (
+    BF8E5M2,
+    BF16,
+    F16,
+    F32,
+    F64,
+    FP8E4M3,
+    I8,
+    I32,
+    U8,
+    Op,
+    Type,
+    VectorType,
+    mma_result_type,
+)
 from .tf32 import TF32_MMA, mma_instruction_id, tf32_mma_error
 
-# These are the implemented instructions' fixed emission signatures, independent
-# of the authoring catalog's logical src2/dst metadata. Packed instructions use
-# a bitcast and therefore accept any supported numeric carrier of equal width.
+# These are the implemented instructions' fixed A and B types, independent of
+# the authoring catalog's logical src0/src1 metadata. Packed instructions use a
+# bitcast and therefore accept any supported numeric carrier of equal width.
+# The accumulator and result type each instruction takes is the arch catalog's
+# (mma_result_type).
 _SOURCES = {
     "mfma_f32_16x16x4_f32": F32,
     "mfma_f32_32x32x2_f32": F32,
@@ -87,8 +103,10 @@ def validate_mfma(op: Op) -> None:
     """Reject actual values that cannot use the selected fixed instruction ABI.
 
     Keep src2 and dst independent in generic MMA authoring. Each implemented
-    MFMA emitter imposes its own physical signature before emitting any text.
-    XF32 retains its existing logical TF32 diagnostics.
+    MFMA instruction takes its fixed A and B types (``_SOURCES``) and the
+    accumulator and result type the arch catalog gives its op_id
+    (:func:`~rocke.core.ir.mma_result_type`); emitters check them before
+    emitting any text. XF32 retains its existing logical TF32 diagnostics.
     """
     op_id = mma_instruction_id(op)
     if op_id in TF32_MMA:
@@ -155,10 +173,7 @@ def validate_mfma(op: Op) -> None:
         if not valid:
             required = VectorType(I8, 8) if byte_source else source
             raise ValueError(f"MFMA requires src0 and src1 to be {required.name}")
-    count = 16 if op_id.startswith("mfma_f32_32x32") else 4
-    if op_id == "mfma_f64_4x4x4_f64":
-        count = 1
-    expected = VectorType(F64 if op_id.startswith("mfma_f64_") else F32, count)
+    expected = mma_result_type(op_id)
     if not _fixed_type_matches(
         op.operands[2].type, expected
     ) or not _fixed_type_matches(op.result.type, expected):
