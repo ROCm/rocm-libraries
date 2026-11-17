@@ -1414,14 +1414,16 @@ namespace
         EXPECT_EQ(nnz, 717);
     }
     // rocsparse_dense_to_sparse sizes its buffer from the sparse descriptor and
-    // writes with the dense matrix dimensions. A dense matrix one row and one
-    // column larger must be rejected before those writes.
-    void expect_dense_to_sparse_dim_mismatch(rocsparse_handle handle, rocsparse_format format)
+    // writes with the dense matrix dimensions. Each call differs in only one
+    // dimension, so a check of rows alone or columns alone still fails a case.
+    void expect_dense_to_sparse_dim_mismatch(rocsparse_handle handle,
+                                             rocsparse_format format,
+                                             bool             row_mismatch)
     {
         const int64_t sparse_rows = 2;
         const int64_t sparse_cols = 3;
-        const int64_t dense_rows  = sparse_rows + 1;
-        const int64_t dense_cols  = sparse_cols + 1;
+        const int64_t dense_rows  = sparse_rows + (row_mismatch ? 1 : 0);
+        const int64_t dense_cols  = sparse_cols + (row_mismatch ? 0 : 1);
         const int32_t sentinel_i  = 0x5a5a5a5a;
         const float   sentinel_v  = 42.0f;
         const size_t  sentinel_b  = 0xA5A5A5A5u;
@@ -1570,29 +1572,34 @@ namespace
 
     TEST_F(ConvDescr, DenseToSparseDimMismatchCsr)
     {
-        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csr);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csr, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csr, false);
     }
 
     TEST_F(ConvDescr, DenseToSparseDimMismatchCsc)
     {
-        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csc);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csc, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csc, false);
     }
 
     TEST_F(ConvDescr, DenseToSparseDimMismatchCoo)
     {
-        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo, false);
     }
 
     // dense_to_sparse has no ELL conversion. This still guards the dimension
     // check, which runs before the not_implemented return.
     TEST_F(ConvDescr, DenseToSparseDimMismatchEll)
     {
-        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell, false);
     }
 
     TEST_F(ConvDescr, DenseToSparseDimMismatchBell)
     {
-        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, false);
     }
 
 } // namespace
