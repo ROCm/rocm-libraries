@@ -495,20 +495,24 @@ enum class ConvDirection
 };
 
 /// The calibrated allowances of the model, per direction and output type; tolerances.md has the
-/// calibration. lambda: intermediates and products, in units of eps * sigma. summationOrder: c,
-/// in units of sqrt(K) * u32. Every lambda is fitted to MIOpen (the smallest that leaves a
+/// calibration. lambda: intermediates and products, in units of eps * sigma, plus
+/// lambdaPerQuarticRootK * K^(1/4) where the need grows with the reduction length. summationOrder:
+/// c, in units of sqrt(K) * u32. Every lambda is fitted to MIOpen (the smallest that leaves a
 /// headroom of 1.5 on the calibration data; c is the base 4 of forward): backward float to the
 /// Winograd solvers at the shortest reductions, backward data half to Winograd, backward weights
-/// half and bfloat16 to the split-K kernels that add partial results in the output type.
+/// half and bfloat16 to the split-K kernels that add partial results in the output type. Those
+/// kernels split longer reductions into more parts, so their error grows with K: about as K^(1/4)
+/// on the calibration data, up to K = 2.8 million.
 ///
-///   (lambda, c)   float                half      bfloat16
-///   forward       (0, 4)               (12, 1)   (0, 1)
-///   dgrad         (13, 4)              (12, 1)   (6, 1)
-///   wrw           (13, 4)              (36, 1)   (21, 1)
+///   (lambda, c)   float                half                   bfloat16
+///   forward       (0, 4)               (12, 1)                (0, 1)
+///   dgrad         (13, 4)              (12, 1)                (6, 1)
+///   wrw           (15, 4)              (22 + 1.5 K^1/4, 1)    (13 + 0.5 K^1/4, 1)
 struct ConvToleranceAllowances
 {
     double intermediateLambda = 0.0;
     double summationOrder = 1.0;
+    double lambdaPerQuarticRootK = 0.0;
 };
 
 template <ConvDirection Direction, typename OutputType>
@@ -519,19 +523,25 @@ constexpr ConvToleranceAllowances convToleranceAllowances()
                   "the convolution output tolerance models half, bfloat16 and float outputs only");
     if constexpr(std::is_same_v<OutputType, float>)
     {
-        return {Direction == ConvDirection::FPROP ? 0.0 : 13.0, DEFAULT_FLOAT_SUMMATION_ORDER};
+        if constexpr(Direction == ConvDirection::FPROP)
+        {
+            return {0.0, DEFAULT_FLOAT_SUMMATION_ORDER, 0.0};
+        }
+        return {Direction == ConvDirection::WRW ? 15.0 : 13.0, DEFAULT_FLOAT_SUMMATION_ORDER, 0.0};
     }
     else if constexpr(std::is_same_v<OutputType, half>)
     {
-        return {Direction == ConvDirection::WRW ? 36.0 : 12.0, 1.0};
+        return Direction == ConvDirection::WRW ? ConvToleranceAllowances{22.0, 1.0, 1.5}
+                                               : ConvToleranceAllowances{12.0, 1.0, 0.0};
     }
     else if constexpr(Direction == ConvDirection::FPROP)
     {
-        return {0.0, 1.0};
+        return {0.0, 1.0, 0.0};
     }
     else
     {
-        return {Direction == ConvDirection::WRW ? 21.0 : 6.0, 1.0};
+        return Direction == ConvDirection::WRW ? ConvToleranceAllowances{13.0, 1.0, 0.5}
+                                               : ConvToleranceAllowances{6.0, 1.0, 0.0};
     }
 }
 
@@ -620,7 +630,9 @@ AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
     {
         tolerance.rtol += summationError;
     }
-    tolerance.atol = (summationError + ALLOWANCES.intermediateLambda * eps) * sigma
+    const double lambda = ALLOWANCES.intermediateLambda
+                          + ALLOWANCES.lambdaPerQuarticRootK * std::sqrt(std::sqrt(k));
+    tolerance.atol = (summationError + lambda * eps) * sigma
                      + ROUNDING_POINT_MARGIN * roundingPointError + minNormal;
     hipdnn_test_sdk::utilities::validateToleranceRange<OutputType>(tolerance.atol);
     return tolerance;
@@ -687,7 +699,7 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
  *
  * The model of calculateConvFpropOutputTolerance() with dy and w in place of x and w, K from
  * convDgradAccumulationLength(), and its own calibrated constants: lambda 12 for half, 6 for
- * bfloat16 and 32 for float; c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for
+ * bfloat16 and 13 for float; c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for
  * float. The float lambda covers the shortest reductions, where a few products differ by several
  * float steps of a typical output.
  *
@@ -716,10 +728,10 @@ AbsRelTolerance calculateConvDgradOutputTolerance(const ConvDgradErrorScale& sca
  * bfloat16 or float, with float accumulation, graded against a float-accumulating reference.
  *
  * The model of calculateConvFpropOutputTolerance() with x and dy in place of x and w, K from
- * convWrwAccumulationLength(), and its own calibrated constants: lambda 36 for half, 24 for
- * bfloat16 and 32 for float; c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for
- * float. The half and bfloat16 lambdas cover reductions whose partial results are kept in the
- * output type.
+ * convWrwAccumulationLength(), and its own calibrated constants: lambda 22 + 1.5 * K^(1/4) for
+ * half, 13 + 0.5 * K^(1/4) for bfloat16 and 15 for float; c 1 for half and bfloat16 and
+ * DEFAULT_FLOAT_SUMMATION_ORDER for float. The half and bfloat16 lambdas cover split-K reductions
+ * whose partial results are added in the output type, more of them the longer the reduction.
  *
  * @tparam OutputType half, bfloat16 or float.
  * @param scale The problem statistics; see ConvWrwErrorScale.
