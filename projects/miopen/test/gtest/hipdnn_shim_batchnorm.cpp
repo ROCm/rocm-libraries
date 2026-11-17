@@ -1971,6 +1971,39 @@ TEST(GPU_HipdnnShimBNAlphaBeta_FP32, StatusMatchesMiopen)
         const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
         hs::ExpectStatusParity("alpha_beta_bwd_param_diff", result, miopenStatusBadParm, reason);
     }
+    // beta is checked on its own: a check that read only alpha passes every case above.
+    {
+        SCOPED_TRACE("train beta");
+        TrainData d;
+        SetUpTrain(d);
+        d.beta            = 1.0f;
+        const auto result = hs::CaptureCall([&] { return TrainV1(handle, d); });
+        hs::ExpectStatusParity("beta_train", result, miopenStatusUnknownError, reason);
+    }
+    {
+        SCOPED_TRACE("infer beta");
+        InferData d;
+        SetUpInfer(d);
+        d.beta            = 1.0f;
+        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
+        hs::ExpectStatusParity("beta_infer", result, miopenStatusBadParm, reason);
+    }
+    {
+        SCOPED_TRACE("bwd beta");
+        BwdData d;
+        SetUpBwd(d);
+        d.betaDataDiff    = 1.0f;
+        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
+        hs::ExpectStatusParity("beta_bwd", result, miopenStatusBadParm, reason);
+    }
+    {
+        SCOPED_TRACE("bwd param diff beta");
+        BwdData d;
+        SetUpBwd(d);
+        d.betaParamDiff   = 1.0f;
+        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
+        hs::ExpectStatusParity("beta_bwd_param_diff", result, miopenStatusBadParm, reason);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2169,14 +2202,87 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
 }
 
 // The hipDNN path repeats MIOpen's parameter checks, so it must reject these
-// with BadParm as MIOpen does: statistics of another rank than x, on forward
-// and on backward, and a training x that is not packed.
+// with BadParm as MIOpen does: a null x, statistics of another rank than x,
+// y of another type than x (or dx than dy), a training x that is not packed,
+// an x of fewer than 3 dimensions, and one value per statistic.
 TEST(GPU_HipdnnShimBNBadParm_FP32, StatusMatchesMiopen)
 {
     auto&& handle = get_handle();
     const std::vector<std::size_t> nchw{2, 4, 8, 8};
+    const std::vector<std::size_t> rank2{2, 4};
+    const std::vector<std::size_t> one_value{1, 4, 1, 1};
     const miopen::TensorDescriptor rank3_stats(miopenFloat, std::vector<std::size_t>{1, 4, 1});
-    const char* rank_reason = "as many dimensions as x";
+    const char* rank_reason      = "as many dimensions as x";
+    const char* null_reason      = "must not be null";
+    const char* type_reason      = "must have the same data type";
+    const char* min_rank_reason  = "at least 3 dimensions";
+    const char* one_value_reason = "more than one value per statistic";
+
+    {
+        SCOPED_TRACE("null x train");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.x.dev.reset();
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity("bad_parm_null_x_train", result, miopenStatusBadParm, null_reason);
+    }
+    {
+        SCOPED_TRACE("null x bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.x.dev.reset();
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity("bad_parm_null_x_bwd", result, miopenStatusBadParm, null_reason);
+    }
+    {
+        SCOPED_TRACE("x and y types differ train");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.y               = RawTensor(handle, miopenHalf, nchw);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_type_mismatch_train", result, miopenStatusBadParm, type_reason);
+    }
+    {
+        SCOPED_TRACE("x and y types differ infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.y               = RawTensor(handle, miopenHalf, nchw);
+        const auto result = hs::CaptureCall([&] { return p.Infer(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_type_mismatch_infer", result, miopenStatusBadParm, type_reason);
+    }
+    {
+        SCOPED_TRACE("dx and dy types differ bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.dx              = RawTensor(handle, miopenHalf, nchw);
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_type_mismatch_bwd", result, miopenStatusBadParm, type_reason);
+    }
+    {
+        SCOPED_TRACE("rank 2 train");
+        RawProblem p(handle, rank2, miopenFloat, miopenFloat, miopenFloat);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_rank2_train", result, miopenStatusBadParm, min_rank_reason);
+    }
+    {
+        SCOPED_TRACE("rank 2 bwd");
+        RawProblem p(handle, rank2, miopenFloat, miopenFloat, miopenFloat);
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity("bad_parm_rank2_bwd", result, miopenStatusBadParm, min_rank_reason);
+    }
+    {
+        SCOPED_TRACE("one value per statistic train");
+        RawProblem p(handle, one_value, miopenFloat, miopenFloat, miopenFloat);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_one_value_train", result, miopenStatusBadParm, one_value_reason);
+    }
+    {
+        SCOPED_TRACE("one value per statistic bwd");
+        RawProblem p(handle, one_value, miopenFloat, miopenFloat, miopenFloat);
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_one_value_bwd", result, miopenStatusBadParm, one_value_reason);
+    }
 
     {
         SCOPED_TRACE("rank mismatch train");
