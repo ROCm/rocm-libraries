@@ -15,4 +15,6 @@ Tests:
     diag: U
     incx: 1
     matrix_size: *multiples_of_32_sizes
+    iters: 100
+    cold_iters: 20
 ...
