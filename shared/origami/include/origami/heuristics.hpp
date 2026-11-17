@@ -77,6 +77,9 @@ struct heuristic_defaults_t {
   // Model tuning constants (relocated from gemm.cpp)
   static constexpr double TARGET_WG_SLOTS_PER_CU       = 2.0;
   static constexpr double K_ITER_LOOP_OVERHEAD         = 500.0;
+  /// gfx115x (RDNA3.5): slope of the loop-skeleton time (WMMA, loads, stores and LDS
+  /// removed) over K-iterations, fit on 14 shipped gfx1150/gfx1151 kernels.
+  static constexpr double GFX115X_K_ITER_LOOP_OVERHEAD = 120.0;
   static constexpr double BATCHED_FILL_ITER_TARGET     = 4.0;
   static constexpr double BATCHED_FILL_PENALTY         = 4.0;
   static constexpr double TAIL_WASTE_PENALTY           = 4.0;
@@ -232,6 +235,17 @@ struct heuristic_defaults_t {
   /// applied as its ratio, max(1, S_fit / occ) / max(1, S_dev / occ).
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION     = 2.5326976116052373;
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION_DEV = 2.0;
+
+  /// Per-K-iteration loop bookkeeping (branch / counter / barrier) for an architecture.
+  static constexpr double k_iter_loop_overhead(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1150:
+      case hardware_t::architecture_t::gfx1151:
+      case hardware_t::architecture_t::gfx1152:
+      case hardware_t::architecture_t::gfx1153: return GFX115X_K_ITER_LOOP_OVERHEAD;
+      default: return K_ITER_LOOP_OVERHEAD;
+    }
+  }
 };
 
 /**

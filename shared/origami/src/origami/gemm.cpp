@@ -2938,11 +2938,12 @@ double compute_tile_latency(const problem_t& problem,
   // measured fixed cost of a K-iteration, which grows with the workgroup's waves.
   const double pgr_loop_overlap =
       (pgr >= 3) ? (1.0 / static_cast<double>(pgr - 1)) : 1.0;
+  const double k_iter_loop_overhead = heuristic_defaults_t::k_iter_loop_overhead(hardware.arch);
   const double L_loop_overhead =
       hardware.is_cdna5()
           ? heuristic_defaults_t::GFX1250_KITER_FIXED_CLK *
                 static_cast<double>(k_iters)
-          : heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
+          : k_iter_loop_overhead * static_cast<double>(k_iters) * pgr_loop_overlap;
 
   // A multicast load completes only when every peer has issued it, so cluster peers advance in
   // lockstep through a cluster-barrier handshake at each in-loop tensor load, plus one before
@@ -3027,7 +3028,7 @@ double compute_tile_latency(const problem_t& problem,
       hardware.is_cdna5() ? 0.0 :
       (depth_waste_ratio * heuristic_defaults_t::TAIL_WASTE_PENALTY +
        m_edge_ratio * heuristic_defaults_t::M_EDGE_PENALTY + batched_fill_ratio) *
-      (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
+      (L_main_per_iter + k_iter_loop_overhead);
 
   // MainLoop subtotal.
   const double L_mainloop = L_main + L_ngll + L_nll + L_tail + L_pgr_stall + L_loop_overhead +
