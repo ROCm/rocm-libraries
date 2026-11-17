@@ -1,0 +1,68 @@
+# rocKE advisory static analysis: opt-in pre-push hooks for all rocke Python
+# (types, metrics, dead code).
+#
+# This is NOT the repository's pre-commit configuration (the .pre-commit-config.yaml
+# in the repository root). pre-commit reads this file only when it is named with
+# -c, so nothing here applies to anyone who has not opted in, and the root file
+# keeps working with the pre-commit versions it already supports.
+#
+# Enable once per clone, from the repository root:
+#   pre-commit install --hook-type pre-push -c dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
+# At push time only the three hooks below run; the repo's other hooks (black,
+# bandit, ...) do not. They are system hooks, so there is nothing to download.
+# Needs pre-commit 3.2.0 or newer: older versions call the stage `push` and reject
+# this file with "Expected one of ... but got: 'pre-push'" (fix: pip install -U
+# pre-commit). The legacy spelling `push` would work everywhere, but 3.2.0 and
+# newer warn about it for every hook on every run.
+#
+# NON-BLOCKING: the wrapper always exits 0, and `verbose` prints its report.
+# Missing tools are advisory, and so is a missing Python: pre-commit itself fails
+# a hook whose program is absent, before the wrapper could skip anything, so the
+# entry is a small bash snippet. It runs the first of `python`, `python3` that
+# works and is Python 3.10+, and skips (exit 0) when there is none. It exits 0
+# after the wrapper too, so a wrapper that cannot even start (a sparse checkout
+# without tools/static_analysis/) stays advisory as well. It needs bash on PATH, as
+# the pre-push script that pre-commit installs does. CI does not run these hooks.
+#
+# Settings: this directory (the wrapper and pyrightconfig.json).
+# Reading the reports: rocke/docs/static-analysis.md.
+repos:
+  - repo: local
+    hooks:
+      - id: rocke-pyright
+        name: rocKE advisory - pyright type check (non-blocking)
+        entry: &rocke_advisory_entry |-
+          bash -c '
+          for py in python python3; do
+            if "$py" -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>&1; then
+              "$py" dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/static_analysis_checks.py "$@"
+              exit 0
+            fi
+          done
+          echo "rocKE advisory ($1): no Python 3.10+ on PATH; skipped."
+          exit 0
+          ' --
+        args: [pyright]
+        language: system
+        files: &rocke_py '^dnn-providers/hip-kernel-provider/rocke/.*\.py$'
+        stages: [pre-push]
+        require_serial: true
+        verbose: true
+      - id: rocke-radon
+        name: rocKE advisory - radon metrics (non-blocking)
+        entry: *rocke_advisory_entry
+        args: [radon]
+        language: system
+        files: *rocke_py
+        stages: [pre-push]
+        require_serial: true
+        verbose: true
+      - id: rocke-vulture
+        name: rocKE advisory - vulture dead code (non-blocking)
+        entry: *rocke_advisory_entry
+        args: [vulture]
+        language: system
+        files: *rocke_py
+        stages: [pre-push]
+        require_serial: true
+        verbose: true

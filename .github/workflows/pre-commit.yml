@@ -95,8 +95,9 @@ jobs:
         env:
           CHANGED_FILES_FILE: ${{ steps.prep.outputs.changed_files_file }}
         run: |
-          # Runs only when the wrapper, its tests or its wiring change.
-          if grep -qE '^(dnn-providers/hip-kernel-provider/rocke/(tools/static_analysis/(static_analysis_checks\.py|pyrightconfig\.json|requirements\.txt)|library/tests/(test_static_analysis_checks\.py|pytest\.ini))|\.pre-commit-config\.yaml|\.github/workflows/pre-commit\.yml)$' "$CHANGED_FILES_FILE"; then
+          # Runs only when the wrapper, its tests or its wiring change (the wiring is
+          # the rocKE-local hook config next to the wrapper, not the root config).
+          if grep -qE '^(dnn-providers/hip-kernel-provider/rocke/(tools/static_analysis/(static_analysis_checks\.py|pyrightconfig\.json|requirements\.txt|pre-commit-config\.yaml)|library/tests/(test_static_analysis_checks\.py|pytest\.ini))|\.github/workflows/pre-commit\.yml)$' "$CHANGED_FILES_FILE"; then
             git sparse-checkout add dnn-providers/hip-kernel-provider/rocke
             # Own venv, so the pinned tools below do not replace the pre-commit
             # that the pre-commit action runs as the gate in the next step. The

@@ -9,11 +9,11 @@
 #   vulture  -- dead code (unused functions/variables, unreachable branches)
 #
 # ALWAYS exits 0: findings are reported, never enforced -- even if a tool is
-# missing or crashes. Wired as pre-push hooks (rocke-pyright / rocke-radon /
-# rocke-vulture) in the repo-root .pre-commit-config.yaml, using the active Python
-# environment without installing tools. pyright settings live next to this file, in
-# pyrightconfig.json; the radon and vulture settings are below. Pinned versions of
-# the tools: requirements.txt, also next to this file.
+# missing or crashes. Wired as opt-in pre-push hooks (rocke-pyright / rocke-radon /
+# rocke-vulture) in pre-commit-config.yaml next to this file (not the repo-root
+# config), using the active Python environment without installing tools. pyright
+# settings live in pyrightconfig.json, also next to this file; the radon and
+# vulture settings are below. Pinned versions of the tools: requirements.txt.
 #
 # Paths outside rocke are ignored; no paths = every tracked rocke .py file, as
 # listed by `git ls-files` (git, not this script, knows what is source and what
@@ -21,9 +21,11 @@
 #
 # What the reports mean and what to act on: rocke/docs/static-analysis.md.
 #
-# Usage (install optional tools separately; see the guide):
-#   pre-commit install --hook-type pre-push --install-hooks   # one-time; runs on push
-#   pre-commit run rocke-radon --hook-stage pre-push --files <paths>
+# Usage (install optional tools separately; see the guide; run from the repo root):
+#   pre-commit install --hook-type pre-push --allow-missing-config \
+#       -c dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
+#   pre-commit run rocke-radon --hook-stage pre-push --files <paths> \
+#       -c dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
 # Direct (the tool must be importable by this python). Use this form, not
 # `pre-commit run --all-files`, for all of rocke: pre-commit splits a long file
 # list into several runs, each printing its own report.

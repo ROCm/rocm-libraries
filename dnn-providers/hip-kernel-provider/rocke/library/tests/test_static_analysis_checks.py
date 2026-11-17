@@ -30,6 +30,12 @@ import pytest
 _ROCKE = Path(__file__).resolve().parents[2]  # tests -> library -> rocke
 _SCRIPT = _ROCKE / "tools" / "static_analysis" / "static_analysis_checks.py"
 _PYRIGHT_CONFIG = _SCRIPT.with_name("pyrightconfig.json")
+_HOOK_CONFIG = _SCRIPT.with_name("pre-commit-config.yaml")
+# Where a contributor names it with -c, relative to the repository root.
+_HOOK_CONFIG_REL = Path(
+    "dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml"
+)
+_ROOT_HOOK_CONFIG = _ROCKE.parents[2] / ".pre-commit-config.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -434,21 +440,27 @@ def test_pyright_non_json_failure_is_advisory(adv, monkeypatch, capsys):
     assert "error(s)" not in out
 
 
-def _hook_repo(tmp_path, tool):
-    """A scratch repository with the wrapper and the repo's own ``rocke-<tool>`` hook.
+def _load_yaml(path):
+    pytest.importorskip("yaml")
+    import yaml
 
-    The hook definition comes from the repository's ``.pre-commit-config.yaml``, so
-    these tests run what a contributor would run. Returns ``(repo, hook)``.
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _hook_repo(tmp_path, tool):
+    """A scratch repository with the wrapper and the rocKE-local hook config.
+
+    The config is the real ``tools/static_analysis/pre-commit-config.yaml``, copied
+    to the same place and used through ``-c`` as a contributor would use it; the
+    scratch repository has no root ``.pre-commit-config.yaml``. Returns
+    ``(repo, hook)`` for the ``rocke-<tool>`` hook.
     """
     pytest.importorskip("pre_commit")
     if shutil.which("bash") is None:
         pytest.skip("the hook entry is a bash snippet")
-    import yaml
-
-    config_path = _ROCKE.parents[2] / ".pre-commit-config.yaml"
-    if not config_path.is_file():
-        pytest.skip("repository hook config is not part of this layout")
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not _HOOK_CONFIG.is_file():
+        pytest.skip("the rocKE-local hook config is not part of this layout")
+    config = _load_yaml(_HOOK_CONFIG)
     hook = next(
         h
         for repo in config["repos"]
@@ -458,19 +470,18 @@ def _hook_repo(tmp_path, tool):
     )
     repo = tmp_path / "repo"
     repo.mkdir()
-    script = Path(
-        "dnn-providers/hip-kernel-provider/rocke/tools/static_analysis"
-        "/static_analysis_checks.py"
-    )
+    script = _HOOK_CONFIG_REL.with_name("static_analysis_checks.py")
     (repo / script).parent.mkdir(parents=True)
     shutil.copyfile(_SCRIPT, repo / script)
-    (repo / ".pre-commit-config.yaml").write_text(
-        yaml.safe_dump({"repos": [{"repo": "local", "hooks": [hook]}]}),
-        encoding="utf-8",
-    )
+    shutil.copyfile(_HOOK_CONFIG, repo / _HOOK_CONFIG_REL)
     _git(repo, "init", "-q")
     _git(repo, "add", ".")
     return repo, hook
+
+
+def _scratch_wrapper(repo):
+    """Where `_hook_repo` put the wrapper inside the scratch repository."""
+    return repo / _HOOK_CONFIG_REL.with_name("static_analysis_checks.py")
 
 
 def _run_hook(repo, hook, env):
@@ -486,6 +497,8 @@ def _run_hook(repo, hook, env):
             "--hook-stage",
             "pre-push",
             "--all-files",
+            "-c",
+            str(_HOOK_CONFIG_REL),
         ],
         cwd=repo,
         env=env,
@@ -494,6 +507,39 @@ def _run_hook(repo, hook, env):
         timeout=60,
     )
     return proc.returncode, proc.stdout + proc.stderr
+
+
+def test_local_hook_config_has_only_local_pre_push_hooks():
+    # pre-commit reads this file only when it is named with -c, so it may use the
+    # pre-push stage; it must stay free of downloads (no remote repository) and of
+    # anything that would run at another stage.
+    if not _HOOK_CONFIG.is_file():
+        pytest.skip("the rocKE-local hook config is not part of this layout")
+    config = _load_yaml(_HOOK_CONFIG)
+    assert [r["repo"] for r in config["repos"]] == ["local"]
+    hooks = {h["id"]: h for r in config["repos"] for h in r["hooks"]}
+    assert set(hooks) == {"rocke-pyright", "rocke-radon", "rocke-vulture"}
+    for hook in hooks.values():
+        assert hook["stages"] == ["pre-push"], hook["id"]
+        assert hook["language"] == "system", hook["id"]
+        assert not hook.get("additional_dependencies"), hook["id"]
+
+
+def test_root_hook_config_needs_no_newer_pre_commit_for_these_hooks():
+    # pre-commit older than 3.2.0 rejects the whole file when any hook uses the
+    # `pre-push` stage, and every contributor reads the root config on each commit.
+    # The advisory hooks therefore live in their own file (see above).
+    if not _ROOT_HOOK_CONFIG.is_file():
+        pytest.skip("the repository hook config is not part of this layout")
+    config = _load_yaml(_ROOT_HOOK_CONFIG)
+    stages = {*config.get("default_stages", [])}
+    ids = set()
+    for repo in config["repos"]:
+        for hook in repo["hooks"]:
+            ids.add(hook["id"])
+            stages.update(hook.get("stages", []))
+    assert "pre-push" not in stages
+    assert not {"rocke-pyright", "rocke-radon", "rocke-vulture"} & ids
 
 
 @pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
@@ -592,8 +638,8 @@ def test_hook_runs_a_usable_python_or_skips_but_never_fails(
 
 @pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
 def test_hook_whose_wrapper_is_missing_never_fails(adv, require_git, tmp_path, tool):
-    # A sparse checkout can hold a changed rocke file without tools/static_analysis/.
-    # Python then cannot open the wrapper and exits non-zero; the hook must not.
+    # A checkout can hold a changed rocke file but not the wrapper. Python then
+    # cannot open it and exits non-zero; the hook must not.
     if os.name == "nt":
         pytest.skip("builds a PATH of symlinks")
     repo, hook = _hook_repo(tmp_path, tool)
@@ -601,7 +647,7 @@ def test_hook_whose_wrapper_is_missing_never_fails(adv, require_git, tmp_path, t
     (rocke / "library").mkdir()
     (rocke / "library" / "kernel.py").write_text("x = 1\n", encoding="utf-8")
     _git(repo, "add", "-A")
-    _git(repo, "rm", "-r", "-q", "-f", "--", str(rocke / "tools" / "static_analysis"))
+    _git(repo, "rm", "-q", "-f", "--", str(_scratch_wrapper(repo)))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for needed in ("bash", "git"):
@@ -622,6 +668,85 @@ def test_hook_whose_wrapper_is_missing_never_fails(adv, require_git, tmp_path, t
     assert (
         "can't open file" in out
     ), out  # the hook really did run, on a missing wrapper
+
+
+_ROOT_ONLY_HOOK = """\
+repos:
+  - repo: local
+    hooks:
+      - id: root-only
+        name: a hook of the repository's own config
+        entry: sh -c 'echo ROOT-HOOK-RAN; exit 1'
+        language: system
+        always_run: true
+        pass_filenames: false
+"""
+
+
+def test_push_runs_only_the_local_config_hooks(adv, require_git, tmp_path):
+    # The hooks are installed as the guide says: -c names the rocKE-local config, so
+    # the repository's own hooks (here one that always fails) do not run at push,
+    # and --allow-missing-config lets a push through from a checkout that lacks the
+    # file (another branch, a sparse checkout) instead of failing on it.
+    if os.name == "nt":
+        pytest.skip("builds a PATH of symlinks")
+    repo, _ = _hook_repo(tmp_path, "pyright")
+    (repo / ".pre-commit-config.yaml").write_text(_ROOT_ONLY_HOOK, encoding="utf-8")
+    kernel = _scratch_wrapper(repo).parents[2] / "library" / "kernel.py"
+    kernel.parent.mkdir()
+    kernel.write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", str(remote))
+    _git(repo, "remote", "add", "origin", str(remote))
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for needed in ("bash", "git"):
+        (bin_dir / needed).symlink_to(shutil.which(needed))
+    empty_env = tmp_path / "empty-env"  # a Python with none of the analyzers
+    venv.EnvBuilder(with_pip=False).create(empty_env)
+    python3 = bin_dir / "python3"
+    python3.write_text(
+        f'#!/bin/sh\nexec "{empty_env / "bin" / "python"}" "$@"\n', encoding="utf-8"
+    )
+    python3.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": str(bin_dir),
+        "PRE_COMMIT_HOME": str(tmp_path / "cache"),
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+    }
+    for name in ("VIRTUAL_ENV", "SKIP"):
+        env.pop(name, None)
+
+    def run(*args):
+        proc = subprocess.run(
+            args, cwd=repo, env=env, capture_output=True, text=True, timeout=120
+        )
+        return proc.returncode, proc.stdout + proc.stderr
+
+    code, out = run(
+        sys.executable,
+        *("-m", "pre_commit", "install", "--hook-type", "pre-push"),
+        *("-c", str(_HOOK_CONFIG_REL), "--allow-missing-config"),
+    )
+    assert code == 0, out
+    code, out = run("git", "push", "origin", "HEAD:refs/heads/work")
+    assert code == 0, out
+    for name in ("pyright type check", "radon metrics", "vulture dead code"):
+        assert f"rocKE advisory - {name}" in out, out
+    assert "ROOT-HOOK-RAN" not in out, out
+
+    (repo / _HOOK_CONFIG_REL).unlink()  # a checkout without the config file
+    kernel.write_text("x = 2\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "second")
+    code, out = run("git", "push", "origin", "HEAD:refs/heads/work")
+    assert code == 0, out
+    assert "config file not found" in out, out
 
 
 @pytest.mark.parametrize(
