@@ -49,8 +49,7 @@ The following table lists all operations currently supported in hipDNN:
     - Virtual
     - Data type: FP32 or the input data type
 - Bias operand (the ADD operand that is not the convolution output)
-    - Dims: `[1, K, 1, ..]`, where K is the convolution output channel count and the rank equals the rank of the convolution output
-    - Channel stride: 1 when K > 1
+    - Dims, rank and channel stride: see Bias, output and tensor requirements below
     - Data type: the input data type
 #### Activation node
 - Compute data type: FP32

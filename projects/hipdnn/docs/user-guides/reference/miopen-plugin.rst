@@ -120,7 +120,8 @@ Bias node (optional)
     - Data type: ``FP32`` or the input data type
 - Bias operand (the ADD operand that is not the convolution output)
 
-    - Dims: ``[1, K, 1, ..]``, where K is the convolution output channel count and the rank equals the rank of the convolution output
+    - Rank: at most the convolution output rank; a lower-rank bias is right-aligned against the output, so its missing leading dimensions are 1
+    - Dims, once aligned: ``[1, K, 1, ..]``, where K is the convolution output channel count
     - Channel stride: 1 when K > 1
     - Data type: the input data type
 
