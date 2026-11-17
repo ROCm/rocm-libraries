@@ -1983,6 +1983,7 @@ __device__ I laed4_alt(I n,
             info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin, MAXIT);
             if(info != 0)
             {
+                dlam = orgati ? (di + tau) : (dip1 + tau);
                 return info;
             }
         }
@@ -2198,6 +2199,7 @@ __device__ I laed4_alt(I n,
                               MAXIT);
                 if(info != 0)
                 {
+                    dlam = orgati ? (di + tau) : (dip1 + tau);
                     return info;
                 }
             }
