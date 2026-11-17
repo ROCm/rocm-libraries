@@ -1,9 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import errno
+import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -105,6 +108,50 @@ def test_release_source_staging_preserves_an_sdist_revision(tmp_path):
     destination = tmp_path / "staged"
     runpy.run_path(str(_STAGER))["stage_source"](source, destination)
     assert (destination / "tensilelite/_build_info.py").read_text() == stamp
+
+
+def test_failed_missing_wheel_repair_recovers_on_retry(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(_SOURCE_ROOT / "scripts"))
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+    build_wheel = runpy.run_path(
+        str(_SOURCE_ROOT / "scripts/build_release_wheel.py")
+    )["build_wheel"]
+    metadata = tmp_path / "metadata.json"
+    metadata.write_text(
+        json.dumps(
+            {"source_revision": _SHA, "distribution_version": f"5.0.0+g{_SHA}"}
+        )
+    )
+    inputs = tmp_path / "inputs.txt"
+    inputs.write_text(str(_SOURCE_ROOT / "pyproject.toml") + "\n")
+    stage = tmp_path / "stage"
+    destination = tmp_path / "published"
+    args = (_SOURCE_ROOT, metadata, stage, destination, inputs)
+    wheel = build_wheel(*args)
+    assert zipfile.is_zipfile(wheel)
+    manifest = destination / ".published"
+    previous_manifest = manifest.read_bytes()
+    wheel.unlink()
+
+    original_copy = shutil.copy2
+
+    def fail_publication_copy(source, target, *args, **kwargs):
+        if Path(target).parent == destination:
+            # A failed disk write can leave a file at the opened destination.
+            Path(target).write_bytes(Path(source).read_bytes()[:256])
+            raise OSError(errno.ENOSPC, "disk full during wheel publication")
+        return original_copy(source, target, *args, **kwargs)
+
+    with monkeypatch.context() as failure:
+        failure.setattr(shutil, "copy2", fail_publication_copy)
+        with pytest.raises(OSError, match="disk full"):
+            build_wheel(*args)
+
+    assert manifest.read_bytes() == previous_manifest
+    repaired = build_wheel(*args)
+    assert repaired == wheel
+    assert zipfile.is_zipfile(repaired)
+    assert not list(destination.glob(".*.tmp"))
 
 
 def test_release_wheel_records_the_given_revision_and_validates(tmp_path):
