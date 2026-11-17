@@ -35,8 +35,9 @@ In case the Composable Kernel library isn't included in your ROCm installation, 
 in order to build and install the library.
 
 > [!TIP]
-> When building Composable Kernel, add `-DHIPTENSOR_BUILD_TESTS=ON` to the cmake configure command in order to only build the
-> targets required by hipTensor and speed-up the build time.
+> hipTensor only needs the Composable Kernel headers. When building Composable Kernel for hipTensor, add
+> `-DCK_HEADERS_ONLY=ON` to the cmake configure command to install the headers and CMake package without
+> compiling any Composable Kernel instance library.
 
 ## Build with CMake
 

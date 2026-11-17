@@ -306,8 +306,12 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         zgridsize = zlocalsize
                     * ((problem.batches() / config.batchElements + zlocalsize - 1) / zlocalsize);
 
-        stashMethod
-            = getStashMethod(problem, stashValuesBwd, ylocalsize, zlocalsize, config.batchElements);
+        stashMethod = getStashMethod(problem,
+                                     stashValuesBwd,
+                                     ylocalsize,
+                                     zlocalsize,
+                                     config.batchElements,
+                                     config.vectorsize);
 
         if(problem.isLayoutChannelLast() && problem.channels() % 2 == 0 && xlocalsize % 2 == 0)
         {

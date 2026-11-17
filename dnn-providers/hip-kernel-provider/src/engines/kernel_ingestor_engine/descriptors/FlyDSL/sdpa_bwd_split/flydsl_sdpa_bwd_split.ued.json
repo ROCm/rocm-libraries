@@ -15,7 +15,8 @@
         "head_dim",
         "padded",
         "hints",
-        "floor"
+        "floor",
+        "vec_tail"
       ]
     },
     {
