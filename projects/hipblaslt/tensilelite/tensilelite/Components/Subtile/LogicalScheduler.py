@@ -948,6 +948,70 @@ class EmittedModule:
         return self.source.kind if self.source else ""
 
 
+class EpilogueFreeList:
+    """VGPR free-list for the single-pass woven epilogue store allocator.
+
+    As the store drains pair-by-pair (ascending gap position), each relocated
+    terminal MFMA retires its operand VGPRs once its LAST reader has executed at
+    its gap -- ``release`` returns those registers to the pool. The DPP cacheline align then
+    ``acquire``s a 4-consecutive, 2-aligned quad for a coalesced store's blend or
+    pack destination, and ``give_back``s it after the store has read it so the next
+    pair can recycle it. Supply grows monotonically along the drain, so a forward
+    sweep can satisfy demand without any fresh allocation (zero VGPR cost).
+
+    This is a bookkeeping structure over VGPR *offsets*; it never allocates from
+    the real register pool. It is inert unless ``acquire`` is called -- the
+    plain-woven store (no cacheline align) only ever releases, so it changes no codegen.
+    """
+
+    __slots__ = ("_free", "_held")
+
+    def __init__(self):
+        self._free = set()   # offsets currently free (retired, not handed out)
+        self._held = set()   # offsets handed out via acquire, awaiting give_back
+
+    def release(self, offsets):
+        """Return retired operand VGPR offsets to the free pool."""
+        for off in offsets:
+            if off not in self._held:
+                self._free.add(off)
+
+    def _quad_base(self, free):
+        for b in sorted(free):
+            if b % 2 == 0 and all((b + j) in free for j in range(4)):
+                return b
+        return None
+
+    def can_acquire_quads(self, n):
+        """True if ``n`` disjoint 4-consecutive 2-aligned quads are free now."""
+        free = set(self._free)
+        for _ in range(n):
+            b = self._quad_base(free)
+            if b is None:
+                return False
+            free.difference_update(range(b, b + 4))
+        return True
+
+    def acquire_quad(self):
+        """Hand out one 4-consecutive 2-aligned free quad (its base), or None."""
+        b = self._quad_base(self._free)
+        if b is None:
+            return None
+        for j in range(4):
+            self._free.discard(b + j)
+            self._held.add(b + j)
+        return b
+
+    def give_back(self, base):
+        """Recycle an acquired quad after its store has read it."""
+        for j in range(4):
+            self._held.discard(base + j)
+            self._free.add(base + j)
+
+    def free_count(self):
+        return len(self._free)
+
+
 # ── Main scheduler class ───────────────────────────────────
 
 class LogicalScheduler:
@@ -5504,17 +5568,65 @@ class LogicalScheduler:
             writer.states.subtileWeaveLookahead = 0
             writer.states.subtileWeavePairCounter = 0
             writer.states.subtileWeaveEmitted = set()
+            writer.states.subtilePendingPhase2b = None
+            writer.states.subtileDeferredSrdDIncs = []
             writer.states.subtileWeaveCaptureInstances = [] if weaveGroups is not None else None
             writer.states.subtileWeaveCaptureCurrent = None
             # 4d-3a/3b: build the real beta0/NonEdge D store exactly once, then use
             # its captured reads and gaps to perform 4d-3b latency hiding.
             writer.states.subtileHoistedStoreInit = None
+            _packSlot0 = getattr(writer.states, "subtilePairPackSlot", 0)
             storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
             if weaveGroups is not None:
+                _mfmaLatency = int(writer.states.archCaps.get("MfmaToAccReadLatency", 0))
+                # In pack-lease mode a second emit pass below rebuilds the store; the
+                # terminal-MFMA move must happen on THAT store, not this one. So pass 1
+                # only computes the lease plans (applyMoves=False) and leaves the loop's
+                # terminal MFMAs intact. Stock (no lease env) moves them here as before.
+                _leaseMode = self._wovenCachelineAlignOn()
                 self._planCapturedTerminalMfmas(
                     fusedEmitted, writer.states.subtileWeaveCaptureInstances,
-                    storeModule,
-                    int(writer.states.archCaps.get("MfmaToAccReadLatency", 0)))
+                    storeModule, _mfmaLatency, applyMoves=not _leaseMode)
+                # Woven store cacheline align: a second emit pass draws each eligible woven pair's pack
+                # scratch quad from the free-list lease computed above (retired operand VGPRs)
+                # instead of the dedicated pack ring, then re-plans on the new module. With the
+                # cacheline align off there is no lease and only the single (pass-1) emit runs.
+                _packPlan = {}
+                for _d in getattr(self, "_wovenPackPlans", []) or []:
+                    _packPlan.update(_d)
+                if self._wovenCachelineAlignOn() and _packPlan:
+                    writer.states.subtileWovenPackPlan = _packPlan
+                    writer.states.subtileWeaveMfmaGroups = \
+                        copy.deepcopy(weaveGroups) if weaveGroups is not None else None
+                    writer.states.subtileWeaveLookahead = 0
+                    writer.states.subtileWeavePairCounter = 0
+                    writer.states.subtileWeaveEmitted = set()
+                    writer.states.subtilePendingPhase2b = None
+                    writer.states.subtileDeferredSrdDIncs = []
+                    writer.states.subtileWeaveCaptureInstances = [] if weaveGroups is not None else None
+                    writer.states.subtileWeaveCaptureCurrent = None
+                    writer.states.subtileHoistedStoreInit = None
+                    writer.states.subtilePairPackSlot = _packSlot0
+                    storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
+                    self._pinToPass1 = True
+                    self._activePackPlan = _packPlan
+                    try:
+                        self._planCapturedTerminalMfmas(
+                            fusedEmitted, writer.states.subtileWeaveCaptureInstances,
+                            storeModule,
+                            int(writer.states.archCaps.get("MfmaToAccReadLatency", 0)))
+                    finally:
+                        self._pinToPass1 = False
+                        self._activePackPlan = None
+                    writer.states.subtileWovenPackPlan = None
+                elif _leaseMode:
+                    # Lease mode but no pair qualified for a lease, so no second pass
+                    # ran. Pass 1 deferred the terminal-MFMA move (applyMoves=False);
+                    # perform it now on the pass-1 store so the weave is not lost --
+                    # the kernel is then identical to stock.
+                    self._planCapturedTerminalMfmas(
+                        fusedEmitted, writer.states.subtileWeaveCaptureInstances,
+                        storeModule, _mfmaLatency, applyMoves=True)
                 # Planner appends the gap MFMAs after Phase1 (mfma, mfma, step-1,
                 # mfma, mfma, step-2). Spread the convert VALU into those MFMA
                 # issue shadows (2 v_cvt_pk per gap), matching main-loop ds_read.
@@ -5752,8 +5864,17 @@ class LogicalScheduler:
         woven.setItems(others + [gap, phase2])
         return True
 
+    # Most terminal MFMAs the banded reorder puts in one store gap (develop's ALAP order
+    # gives 2; more than 3 piles the weave up at the front of the store).
+    WOVEN_CACHELINE_ALIGN_BAND_CAP = 3
+
+    def _wovenCachelineAlignOn(self):
+        """StoreCachelineAlign on the woven fused store: turns on the dead-register pack lease,
+        the banded terminal-MFMA order and the deferred (staggered) store it needs."""
+        return bool(self._kernel and self._kernel.get("StoreCachelineAlign", False))
+
     def _planCapturedTerminalMfmas(self, emitted_3d, captures, storeModule,
-                                   requiredCycles):
+                                   requiredCycles, applyMoves=True):
         """Move only producers with a safe generated gap in every runtime path.
 
         requiredCycles is MfmaToAccReadLatency: the separation a consumer must
@@ -5763,6 +5884,13 @@ class LogicalScheduler:
         issues in at least one cycle -- but it means a gap can qualify on
         instruction count while being tighter in cycles than the name suggests,
         never the reverse.
+
+        applyMoves: when False, compute the lease plans (_wovenPackPlans) as a side
+        effect but do NOT move any terminal MFMA out of the loop into the store gaps. The pack-lease two-pass uses this: pass 1
+        only needs the lease plan, and MUST NOT consume the loop's terminal MFMAs,
+        or pass 2 (which rebuilds the store) would find none left to weave and
+        silently drop them. Pass 2 then runs with applyMoves=True to perform the
+        real single move on the final (lease-applied) store.
         """
         mfmaEms, allInsts = self._plsinTerminalMfmas(emitted_3d)
         if not allInsts or not captures or requiredCycles <= 0:
@@ -5787,6 +5915,32 @@ class LogicalScheduler:
         flat = list(storeModule.flatitems())
         position = {id(item): idx for idx, item in enumerate(flat)}
         plans = []
+        # Woven store cacheline align: per capture, a {pairIdx: quadBase} lease letting
+        # the plain-woven store draw its pack scratch quad from retired operand VGPRs
+        # (the free-list) instead of the dedicated pack ring. Consumed by the caller's
+        # second emit pass + _pairPackQuad. Empty unless the env flag is set.
+        self._wovenPackPlans = []
+        # Lease two-pass: the pack leases are computed from pass 1's placement
+        # (applyMoves=False). Pass 2 re-emits the store with the leases applied (and, under
+        # STAGGER_CACHELINE_ALIGN, the cacheline align blends), which changes instruction counts; a free re-plan
+        # could put a reader in a LATER gap than the lease plan assumed and have it read an
+        # operand already leased as a pack quad. So pass 2 is pinned: a producer may only go
+        # to its pass-1 gap or an earlier one (earlier = operand retires sooner = lease still
+        # valid), and a producer pass 1 left in the loop stays there.
+        _pinned = bool(getattr(self, "_pinToPass1", False)) and applyMoves
+        # physical VGPR -> earliest pairIdx that was leased it as part of a pack quad
+        _leasedBy = {}
+        if _pinned:
+            for _pp, _base in (getattr(self, "_activePackPlan", None) or {}).items():
+                if isinstance(_base, int):
+                    for _r in range(_base, _base + 4):
+                        _leasedBy[_r] = min(_leasedBy.get(_r, _pp), _pp)
+        if not applyMoves:
+            self._pass1Placement = {}
+        import re as _rePin
+        def _pairOfGap(_g):
+            _m = _rePin.search(r"pair(\d+)", getattr(_g, "name", "") or "")
+            return int(_m.group(1)) if _m else -1
         for capture in captures:
             consumers = {}
             consumedRegs = {}
@@ -5817,29 +5971,223 @@ class LogicalScheduler:
                 plans.append({})
                 continue
 
-            def _lastQualifyingGap(gapList, readPos):
+            qualifying = [p for p in allInsts
+                          if consumers.get(id(p)) is not None
+                          and consumedRegs.get(id(p)) == writesByProducer.get(id(p))]
+            # Epilogue register allocator (single-pass placement). Each movable terminal
+            # MFMA has a liveness window [lower, readPos): `lower` is the position after
+            # its operands are written -- for the woven store the operands are produced in
+            # the main loop, before the store module, so lower == 0 -- and `readPos` is
+            # where the store reads its accumulator. Place it ALAP: the latest store gap
+            # strictly before readPos that still leaves >= requiredCycles instructions of
+            # MFMA->acc separation. This IS the production placement (it replaces the former
+            # _lastQualifyingGap solver with the same rule expressed as the allocator's
+            # forward pass), so the cacheline align free-list -- which recycles each operand as its
+            # MFMA retires at its gap -- is an incremental addition, not a second scheduler.
+            # candidates is built in store-pair order == ascending anchorPos, so the
+            # in-order scan's last qualifying gap is the ALAP (highest-anchor) one.
+            capturePlan = {}
+            # Placement policy is ALAP (last qualifying gap): maximises each
+            # MFMA->accRead separation.
+            # BANDED reorder (woven cacheline align): cluster each A-tile's terminal MFMAs into a
+            # contiguous gap-band, tiles ordered by Abase ascending (band 0 = earliest
+            # gaps). Goal: a tile retires when its band ends -> incremental A-tile
+            # retirement, so the cacheline align free-list grows earlier WITHOUT the ASAP collapse
+            # (each band still spans several gaps; all gaps stay occupied). A producer
+            # whose readPos forbids every gap in its band (its earliest-column reader
+            # needs an earlier gap than the band provides) falls back to the ALAP pick
+            # -- this fallback is exactly where the structural floor shows up: tiles in
+            # LATE bands cannot fully cluster because their early-readPos readers are
+            # anchored to the early gaps.
+            _band = bool(self._wovenCachelineAlignOn()) and not _pinned
+            # WEAVE_BAND_CAP=N: capacity-limited variant. Uncapped banding piles every
+            # late reader of a tile into the band's last gap; the convert-interleave
+            # can only isolate 3 MFMAs per gap (4 cvt_pk in two groups), so N=3 keeps
+            # every MFMA separated while still retiring tiles early.
+            _bandCap = self.WOVEN_CACHELINE_ALIGN_BAND_CAP if _band else 0
+            _bandOf = {}   # pairIdx -> band index; _tileBand: Abase -> band index
+            if _band:
+                def _aBaseP(_p):
+                    _ks = self._plsinRegisterKeys(getattr(_p, "a", None)) or ()
+                    return _ks[0][2] if _ks and _ks[0] is not None else -1
+                import re as _reb
+                def _pairOfB(_g):
+                    _m = _reb.search(r"pair(\d+)", getattr(_g, "name", "") or "")
+                    return int(_m.group(1)) if _m else -1
+                _tiles = sorted({_aBaseP(p) for p in qualifying})
+                _nb = max(1, len(_tiles))
+                _tileBand = {t: i for i, t in enumerate(_tiles)}
+                _candPairsSorted = sorted({_pairOfB(g) for _, g in candidates if _pairOfB(g) >= 0})
+                # split the sorted gap pairIdxs into _nb contiguous bands
+                _bandPairs = {}
+                for _i, _pi in enumerate(_candPairsSorted):
+                    _b = (_i * _nb) // max(1, len(_candPairsSorted))
+                    _bandPairs.setdefault(_b, []).append(_pi)
+            for producer in qualifying:
+                readPos = consumers[id(producer)]
                 chosen = None
-                for anchorPos, gap in gapList:
+                chosenBand = None   # banded pick (latest qualifying gap within the tile's band)
+                _pin = self._pass1Placement.get((len(plans), id(producer))) if _pinned else None
+                if _pinned and _pin is None:
+                    continue
+                if _pinned and _leasedBy:
+                    # Hard guarantee, independent of how well the passes line up: a producer
+                    # must run before any pair that was leased one of its operand registers.
+                    for _c in self._plsinOperands(producer, self._PLSIN_MFMA_SOURCES):
+                        for _kk in (self._plsinRegisterKeys(_c) or ()):
+                            if _kk is not None and _kk[1] is None and _kk[2] in _leasedBy:
+                                _pin = min(_pin, _leasedBy[_kk[2]] - 1)
+                for anchorPos, gap in candidates:
                     if anchorPos >= readPos:
                         continue
-                    # Instructions, not cycles: a conservative stand-in, since
-                    # each issues in at least one cycle, so N of them span at
-                    # least N cycles.
+                    if _pin is not None and _pairOfGap(gap) > _pin:
+                        continue
+                    # Instructions, not cycles: a conservative stand-in, since each issues
+                    # in at least one cycle, so N of them span at least N cycles.
                     instsBetween = sum(1 for item in flat[anchorPos + 1:readPos]
                                        if isinstance(item, Instruction))
                     if instsBetween >= requiredCycles:
                         chosen = gap
-                return chosen
-
-            qualifying = [p for p in allInsts
-                          if consumers.get(id(p)) is not None
-                          and consumedRegs.get(id(p)) == writesByProducer.get(id(p))]
-            capturePlan = {}
-            for producer in qualifying:
-                chosen = _lastQualifyingGap(candidates, consumers[id(producer)])
+                        if _band and not _bandCap:
+                            _b = _tileBand.get(_aBaseP(producer))
+                            if _b is not None and _pairOfB(gap) in set(_bandPairs.get(_b, ())):
+                                chosenBand = gap   # latest qualifying gap inside the band
+                if _band and chosenBand is not None:
+                    chosen = chosenBand
                 if chosen is not None:
                     capturePlan[id(producer)] = chosen
+            if _bandCap:
+                # Start from ALAP, then per tile (Abase ascending) find the first gap G at or
+                # after its band end by which all its readers fit under the cap, and move its later
+                # readers into the latest free slots <= G. Any earlier gap than the ALAP
+                # one qualifies (more MFMA->read separation). Producers sharing a readPos
+                # share an accumulator and move together.
+                _gapIdx = {id(g): i for i, (_, g) in enumerate(candidates)}
+                _gapObj = [g for _, g in candidates]
+                _placed = [p for p in qualifying if id(p) in capturePlan]
+                _load = {}
+                for _p in _placed:
+                    _gi = _gapIdx[id(capturePlan[id(_p)])]
+                    _load[_gi] = _load.get(_gi, 0) + 1
+                _groups = {}
+                for _p in _placed:
+                    _groups.setdefault(consumers[id(_p)], []).append(_p)
+                def _cur(_k):
+                    return _gapIdx[id(capturePlan[id(_groups[_k][0])])]
+                for _t in _tiles:
+                    _keys = sorted({consumers[id(_p)] for _p in _placed if _aBaseP(_p) == _t})
+                    # Aim for the tile's band end, not earlier: pulling further forward
+                    # than the band needs starves the late stores of MFMAs.
+                    _bandEnd = max((_gapIdx[id(g)] for _, g in candidates
+                                    if _pairOfB(g) in set(_bandPairs.get(_tileBand[_t], ()))),
+                                   default=0)
+                    for _G in range(_bandEnd, len(_gapObj)):
+                        _free = {g: _bandCap - _load.get(g, 0) for g in range(_G + 1)}
+                        _assign = {}
+                        for _k in sorted((k for k in _keys if _cur(k) > _G), reverse=True):
+                            _n = len(_groups[_k])
+                            _tgt = next((g for g in range(_G, -1, -1) if _free[g] >= _n), None)
+                            if _tgt is None:
+                                _assign = None
+                                break
+                            _free[_tgt] -= _n
+                            _assign[_k] = _tgt
+                        if _assign is None:
+                            continue
+                        for _k, _tgt in _assign.items():
+                            _n = len(_groups[_k])
+                            _load[_cur(_k)] -= _n
+                            _load[_tgt] = _load.get(_tgt, 0) + _n
+                            for _p in _groups[_k]:
+                                capturePlan[id(_p)] = _gapObj[_tgt]
+                        break
+            if not applyMoves:
+                for _p in qualifying:
+                    if id(_p) in capturePlan:
+                        # keyed per capture: every capture plans the same producers
+                        self._pass1Placement[(len(plans), id(_p))] = _pairOfGap(capturePlan[id(_p)])
+            if self._wovenCachelineAlignOn():
+                # Drive the active EpilogueFreeList forward through the drain: walk pairs in
+                # ascending gap position, and as each pair's relocated MFMAs execute, release
+                # an operand VGPR the instant its LAST reader has run (reader-count hits 0).
+                # free_before_pair[k] = pool size the moment pair k drains, i.e. what the cacheline align
+                # could acquire there. INERT: nothing acquires, so plain-woven assembly is
+                # unchanged. Validated against the direct retire<position schedule.
+                _sys = __import__("sys")
+                def _opoffs(_p):
+                    _o = set()
+                    for _c in self._plsinOperands(_p, self._PLSIN_MFMA_SOURCES):
+                        for _kk in (self._plsinRegisterKeys(_c) or ()):
+                            if _kk is not None and _kk[1] is None:  # resolved VGPR offset
+                                _o.add(_kk[2])
+                    return _o
+                _gapAnchor = {id(_g): _ap for _ap, _g in candidates}
+                _placed = [(_gapAnchor[id(capturePlan[id(_p)])], _p) for _p in qualifying
+                           if id(_p) in capturePlan and id(capturePlan[id(_p)]) in _gapAnchor]
+                _byPos = {}
+                _readerCount = {}
+                for _pos, _p in _placed:
+                    _byPos.setdefault(_pos, []).append(_p)
+                    for _off in _opoffs(_p):
+                        _readerCount[_off] = _readerCount.get(_off, 0) + 1
+                _fl = EpilogueFreeList()
+                _pairPos = sorted({_ap for _ap, _g in candidates})
+                _curve = []
+                _acq = []                                   # per-pair acquired quad base (or -1)
+                # STAGGERED store: pair k's pack quad is held live until pair k+1's deferred
+                # store, so pairs k and k+1 are CONCURRENTLY live. Defer give_back by one pair
+                # so two consecutive pairs never receive the same base (which would let
+                # Phase1(k+1)'s cvt clobber pending Phase2b(k)). Non-stagger keeps the original
+                # acquire-then-immediately-give-back (one live quad).
+                _stagger = bool(self._wovenCachelineAlignOn())
+                _prevHeld = None
+                for _P in _pairPos:
+                    _curve.append(_fl.free_count())        # pool as pair _P begins to drain
+                    # try to draw one 2-aligned quad from the pool available BEFORE this pair
+                    # drains (regs retired strictly earlier); scratch, so give it right back.
+                    _qb = _fl.acquire_quad()
+                    _acq.append(_qb if _qb is not None else -1)
+                    if _qb is not None:
+                        if _stagger:
+                            if _prevHeld is not None:
+                                _fl.give_back(_prevHeld)   # free pair (k-1) only now (held 1 pair)
+                            _prevHeld = _qb
+                        else:
+                            _fl.give_back(_qb)
+                    for _p in _byPos.get(_P, ()):          # this pair's MFMAs now execute
+                        for _off in _opoffs(_p):
+                            _readerCount[_off] -= 1
+                            if _readerCount[_off] == 0:    # last reader done -> retire
+                                _fl.release([_off])
+                if _stagger and _prevHeld is not None:
+                    _fl.give_back(_prevHeld)               # drain the last held quad
+                # cross-check against the direct schedule (retire position = max reader pos)
+                _retire = {}
+                for _pos, _p in _placed:
+                    for _off in _opoffs(_p):
+                        _retire[_off] = max(_retire.get(_off, -1), _pos)
+                _expect = [sum(1 for _r in _retire.values() if _r < _P) for _P in _pairPos]
+                _mono = all(_curve[_i] >= _curve[_i-1] for _i in range(1, len(_curve)))
+                _nAcq = sum(1 for _q in _acq if _q >= 0)
+                # Build the pack lease: pair position -> pairIdx (from the gap name), then
+                # {pairIdx: acquired quad base} for pairs that got one. Stash per capture.
+                import re as _re
+                _posToPair = {}
+                for _ap, _g in candidates:
+                    _m = _re.search(r"pair(\d+)", getattr(_g, "name", "") or "")
+                    if _m is not None:
+                        _posToPair[_ap] = int(_m.group(1))
+                _packPlan = {}
+                for _i, _P in enumerate(_pairPos):
+                    if _acq[_i] >= 0 and _P in _posToPair:
+                        _packPlan[_posToPair[_P]] = _acq[_i]
+                self._wovenPackPlans.append(_packPlan)
             plans.append(capturePlan)
+
+        if not applyMoves:
+            # Lease pass-1: plans/leases computed above; defer the actual move to
+            # pass 2 so the loop keeps its terminal MFMAs for the re-emitted store.
+            return 0
 
         moved = {id(inst) for inst in allInsts}
         moved -= self._plsinProducersWithClobberedSources(emitted_3d, allInsts)
@@ -6031,6 +6379,34 @@ class LogicalScheduler:
     _PLSIN_MFMA_SOURCES = ("a", "b", "mxsa", "mxsb")
     _PLSIN_UNIT_READS  = ("srcs", "src")
     _PLSIN_UNIT_WRITES = ("dst", "dsts")
+
+    def _epilogueDefUse(self, inst):
+        """General (writes, reads) register-key sets for ONE store-module instruction.
+
+        writes = the ``dst`` register (the single VALU/scalar write; memory stores have
+        none). reads = every other register operand, taken from ``getParams()`` rather
+        than ``srcs`` -- ``getParams`` is the only accessor that also exposes a memory
+        op's operands (a buffer_store's vdata/vaddr live nowhere in ``dst``/``srcs``, so
+        a srcs-only scan would wrongly free the store's data quad before the store). The
+        dst appears first in ``getParams`` when present, so reads = params minus dst.
+        Both are sets of ``_plsinRegisterKeys`` keys; immediates contribute nothing.
+        """
+        writes = set()
+        dst = getattr(inst, "dst", None)
+        dk = self._plsinRegisterKeys(dst) if dst is not None else None
+        if dk:
+            writes.update(dk)
+        reads = set()
+        try:
+            params = list(inst.getParams())
+        except Exception:
+            params = []
+        for p in params:
+            k = self._plsinRegisterKeys(p)
+            if k:
+                reads.update(k)
+        reads -= writes   # a reg that is only the dst is a write, not a read
+        return writes, reads
 
     def _plsinDrainReadyBars(self, flat, mfmaPos, units):
         """For each drain unit, the last MFMA index it must be placed after.
