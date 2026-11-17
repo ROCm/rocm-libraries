@@ -2725,6 +2725,7 @@ try
     ROCSPARSE_CHECKARG_SIZE(4, ell_block_dim);
     ROCSPARSE_CHECKARG(4, ell_block_dim, (ell_block_dim == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
+    ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols % ell_block_dim) != 0, rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(5,
                        ell_cols,
                        rocsparse::bell_ell_cols_too_wide(cols, ell_block_dim, ell_cols),
@@ -2809,6 +2810,7 @@ try
     ROCSPARSE_CHECKARG_SIZE(4, ell_block_dim);
     ROCSPARSE_CHECKARG(4, ell_block_dim, (ell_block_dim == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
+    ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols % ell_block_dim) != 0, rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(5,
                        ell_cols,
                        rocsparse::bell_ell_cols_too_wide(cols, ell_block_dim, ell_cols),

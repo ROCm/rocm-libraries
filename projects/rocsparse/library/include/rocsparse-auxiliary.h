@@ -1266,10 +1266,10 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *  @param[in]
  *  ell_block_dim block dimension of the sparse blocked ELL matrix.
  *  @param[in]
-*  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
-*                number of blocks stored per block row. Must be a multiple of \p ell_block_dim
-*                and must not exceed \p cols rounded up to a multiple of \p ell_block_dim.
-*                A wider value returns \ref rocsparse_status_invalid_size.
+ *  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
+ *                number of blocks stored per block row. Must be a multiple of \p ell_block_dim
+ *                and must not exceed \p cols rounded up to a multiple of \p ell_block_dim.
+ *                A wider value returns \ref rocsparse_status_invalid_size.
  *  @param[in]
  *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length
  *                \p mb*ell_cols/ell_block_dim,

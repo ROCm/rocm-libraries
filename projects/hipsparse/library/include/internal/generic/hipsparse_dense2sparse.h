@@ -53,7 +53,7 @@ extern "C" {
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p pBufferSizeInBytes
-*               pointer is invalid.
+*               pointer is invalid, or the rows or columns of \p matA and \p matB differ.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           handle,
@@ -94,7 +94,7 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
-*               pointer is invalid.
+*               pointer is invalid, or the rows or columns of \p matA and \p matB differ.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           handle,
@@ -197,7 +197,7 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
-*               pointer is invalid.
+*               pointer is invalid, or the rows or columns of \p matA and \p matB differ.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_convert(hipsparseHandle_t           handle,

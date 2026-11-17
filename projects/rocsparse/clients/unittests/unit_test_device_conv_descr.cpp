@@ -1351,6 +1351,7 @@ namespace
             expect_bell(4, 4, 0, 2, g_dummy, g_dummy, st_size);
             expect_bell(-1, 4, 2, 2, g_dummy, g_dummy, st_size);
             expect_bell(4, 4, 2, 2, nullptr, nullptr, st_ptr);
+            expect_bell(4, 4, 2, 3, g_dummy, g_dummy, st_size);
             // A partial last block column rounds ell_cols up to the next block.
             expect_bell(3, 3, 2, 4, g_dummy, g_dummy, st_ok);
             expect_bell(3, 3, 2, 6, g_dummy, g_dummy, st_size);
