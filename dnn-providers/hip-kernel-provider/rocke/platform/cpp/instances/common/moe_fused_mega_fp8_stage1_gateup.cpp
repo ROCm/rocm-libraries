@@ -7,6 +7,9 @@
  * rocke/instances/common/moe_fused_mega_fp8.py.
  *
  * Implements (Python -> C99 phase function):
+ *   _a_scale_row_offsets / _load_a_scales / _scale_products
+ *       -> moe_fp8_a_scale_row_offsets / moe_fp8_load_a_scales /
+ *          moe_fp8_scale_products (static)
  *   _emit_fp8_gateup_fused_kloop (legacy / DTLA / cluster paths)
  *       -> rocke_moe_fp8_emit_fp8_gateup_fused_kloop
  *   _silu_mul_f32
@@ -31,6 +34,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h> /* snprintf */
+
+#include <vector>
 
 #include "rocke/helper_helpers.asm.h" /* rocke_mfma_f8f6f4_agpr_cluster */
 #include "rocke/instance_moe_fused_mega_fp8_internal.h"
@@ -143,6 +148,61 @@ rocke_value_t* rocke_moe_fp8_store_hidden_f32_pass(rocke_moe_fp8_build_ctx_t* ct
 }
 
 /* ===================================================================== *
+ * STAGE 1a: per-output A scales (Python _a_scale_row_offsets,
+ * _load_a_scales, _scale_products)
+ * ===================================================================== */
+
+/* _a_scale_row_offsets: the AScale element offset of the row of each output
+ * the lane holds. A lane loads A from one row (m_in_atom) but holds
+ * atom->c_per_lane outputs in other rows (rocke_mfma_atom_lane_to_output, the
+ * mapping the hidden-tile store uses), so element i is (m_tile_base +
+ * row_in_atom(i)) * stride_a_scale, the offset of output i's scale row before
+ * the group index is added. */
+static std::vector<rocke_value_t*> moe_fp8_a_scale_row_offsets(rocke_ir_builder_t* b,
+                                                               const rocke_mfma_atom_t* atom,
+                                                               rocke_value_t* lane,
+                                                               rocke_value_t* m_tile_base,
+                                                               rocke_value_t* stride_a_scale)
+{
+    std::vector<rocke_value_t*> offsets;
+    offsets.reserve(static_cast<size_t>(atom->c_per_lane));
+    for(int i = 0; i < atom->c_per_lane; ++i)
+    {
+        rocke_value_t* row_in_atom = NULL;
+        rocke_value_t* col_in_atom = NULL;
+        rocke_mfma_atom_lane_to_output(b, atom, lane, i, &row_in_atom, &col_in_atom);
+        offsets.push_back(rocke_b_mul(b, rocke_b_add(b, m_tile_base, row_in_atom), stride_a_scale));
+    }
+    return offsets;
+}
+
+/* _load_a_scales: <row_offsets.size() x f32>, element i = AScale[row_offsets[i]
+ * + kg], the scale of output i's row for contraction group kg. */
+static rocke_value_t* moe_fp8_load_a_scales(rocke_ir_builder_t* b,
+                                            rocke_value_t* AScale,
+                                            const std::vector<rocke_value_t*>& row_offsets,
+                                            rocke_value_t* kg)
+{
+    std::vector<rocke_value_t*> scales;
+    scales.reserve(row_offsets.size());
+    for(rocke_value_t* row_offset : row_offsets)
+    {
+        scales.push_back(rocke_b_global_load_f32(b, AScale, rocke_b_add(b, row_offset, kg), 0));
+    }
+    return rocke_b_vec_pack(b, scales.data(), static_cast<int>(scales.size()), rocke_f32());
+}
+
+/* _scale_products: the per-output dequant factors of one contraction group,
+ * a_scales * splat(weight_scale), one packed vector multiply. */
+static rocke_value_t* moe_fp8_scale_products(rocke_ir_builder_t* b,
+                                             rocke_value_t* a_scales,
+                                             rocke_value_t* weight_scale)
+{
+    rocke_value_t* weight_scales = rocke_b_vector_splat(b, weight_scale, a_scales->type->count);
+    return rocke_b_vector_mul(b, a_scales, weight_scales);
+}
+
+/* ===================================================================== *
  * STAGE 1a: gate+up fp8 GEMM fused across ALL ni
  * ===================================================================== */
 
@@ -207,8 +267,10 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
     rocke_value_t* c_atom_k = rocke_b_const_i32(b, atom->k);
     int atoms_per_group = ROCKE_MOE_FP8_GROUP_K / atom->k; /* 4 (K=32) or 1 (K=128) */
 
-    rocke_value_t* m_row = rocke_b_add(b, m_tile_base, lane_decode->m_in_atom);
-    rocke_value_t* a_row_scale_base = rocke_b_mul(b, m_row, stride_a_scale);
+    /* One A scale row per output the lane holds (shared by every ni cell). */
+    const std::vector<rocke_value_t*> a_scale_row_offsets
+        = moe_fp8_a_scale_row_offsets(b, atom, lane_decode->lane, m_tile_base, stride_a_scale);
+    int ni, kk;
 
     /* Per-ni n_col / n_blk for the weight-scale index math. Python emits these
      * as TWO separate list comprehensions:
@@ -217,7 +279,6 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
      * i.e. ALL the adds first, THEN all the divs. Keep that op-emit order. */
     rocke_value_t* n_cols[ROCKE_MOE_FP8_MAX_NNI];
     rocke_value_t* n_blks[ROCKE_MOE_FP8_MAX_NNI];
-    int ni, kk;
     for(ni = 0; ni < nni; ++ni)
     {
         n_cols[ni] = rocke_b_add(b, n_tile_bases[ni], lane_decode->n_in_atom);
@@ -272,7 +333,7 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
         rocke_value_t* gate_outer[ROCKE_MOE_FP8_MAX_NNI];
         rocke_value_t* up_outer[ROCKE_MOE_FP8_MAX_NNI];
 
-        rocke_value_t* a_scale_v;
+        rocke_value_t* a_scales;
         rocke_value_t* kg_gate;
         rocke_value_t* kg_up;
         rocke_value_t* gate_ab[ROCKE_MOE_FP8_MAX_NNI];
@@ -293,10 +354,7 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
         }
 
         /* Per-group scales (hoisted alongside the operand prefetch). */
-        {
-            rocke_value_t* a_scale_off = rocke_b_add(b, a_row_scale_base, kg);
-            a_scale_v = rocke_b_global_load_f32(b, AScale, a_scale_off, 0);
-        }
+        a_scales = moe_fp8_load_a_scales(b, AScale, a_scale_row_offsets, kg);
         kg_gate = rocke_b_mul(b, kg, stride_gate_scale);
         kg_up = rocke_b_mul(b, kg, stride_up_scale);
         for(ni = 0; ni < nni; ++ni)
@@ -305,8 +363,8 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
                 = rocke_b_global_load_f32(b, WGateScale, rocke_b_add(b, kg_gate, n_blks[ni]), 0);
             rocke_value_t* usc
                 = rocke_b_global_load_f32(b, WUpScale, rocke_b_add(b, kg_up, n_blks[ni]), 0);
-            gate_ab[ni] = rocke_b_fmul(b, a_scale_v, gsc);
-            up_ab[ni] = rocke_b_fmul(b, a_scale_v, usc);
+            gate_ab[ni] = moe_fp8_scale_products(b, a_scales, gsc);
+            up_ab[ni] = moe_fp8_scale_products(b, a_scales, usc);
         }
 
         k_group_base = rocke_b_mul(b, kg, c_group_k);
@@ -587,10 +645,8 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
             rocke_value_t* new_up[ROCKE_MOE_FP8_MAX_NNI];
             for(ni = 0; ni < nni; ++ni)
             {
-                rocke_value_t* gvec = rocke_b_vector_splat(b, gate_ab[ni], atom->c_per_lane);
-                rocke_value_t* uvec = rocke_b_vector_splat(b, up_ab[ni], atom->c_per_lane);
-                new_gate[ni] = rocke_b_vector_fma(b, g_acc[ni], gvec, gate_outer[ni]);
-                new_up[ni] = rocke_b_vector_fma(b, u_acc[ni], uvec, up_outer[ni]);
+                new_gate[ni] = rocke_b_vector_fma(b, g_acc[ni], gate_ab[ni], gate_outer[ni]);
+                new_up[ni] = rocke_b_vector_fma(b, u_acc[ni], up_ab[ni], up_outer[ni]);
             }
             for(ni = 0; ni < nni; ++ni)
             {

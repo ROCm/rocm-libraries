@@ -468,7 +468,7 @@ def moe_fused_mega_fp8_signature(
         .ptr("WGate", "fp8e4m3")
         .ptr("WUp", "fp8e4m3")
         .ptr("WDown", "fp8e4m3")
-        .ptr("AScale", "f32")  # input_scale, per (token-block, H-block-of-128)
+        .ptr("AScale", "f32")  # input_scale, per (padded A row, H-block-of-128)
         .ptr("WGateScale", "f32")  # fc1_scale gate half, per (E, I-block, H-block)
         .ptr("WUpScale", "f32")  # fc1_scale up half
         .ptr("WDownScale", "f32")  # fc2_scale, per (E, H_out-block, I-block)
@@ -504,6 +504,48 @@ def moe_fused_mega_fp8_signature(
 # ---------------------------------------------------------------------------
 # STAGE 1a: gate+up fp8 GEMM with per-128-block dequant
 # ---------------------------------------------------------------------------
+
+
+def _a_scale_row_offsets(
+    b: IRBuilder,
+    *,
+    atom: MfmaAtom,
+    lane: Value,
+    m_tile_base: Value,
+    stride_a_scale: Value,
+) -> list[Value]:
+    """The ``AScale`` element offset of the row of each output a lane holds.
+
+    ``AScale`` holds one scale per A row and 128-wide contraction group, with
+    row stride ``stride_a_scale``. A lane of the MFMA loads A from one row
+    (``m_in_atom``) but holds ``atom.c_per_lane`` outputs that sit in other
+    rows (:meth:`MfmaAtom.lane_to_output`, the mapping the Pass A store uses),
+    so it needs the scale row of each output: element ``i`` of the result is
+    the offset of output ``i``'s row, before the group index is added.
+    """
+    offsets = []
+    for i in range(atom.c_per_lane):
+        row_in_atom, _ = atom.lane_to_output(b, lane, i)
+        offsets.append(b.mul(b.add(m_tile_base, row_in_atom), stride_a_scale))
+    return offsets
+
+
+def _load_a_scales(
+    b: IRBuilder, *, AScale: Value, row_offsets: list[Value], kg: Value
+) -> Value:
+    """The A scales of a lane's outputs for contraction group ``kg``, as a
+    ``<c_per_lane x f32>`` vector: element ``i`` is ``AScale[row_offsets[i] +
+    kg]``, the scale of output ``i``'s row (``_a_scale_row_offsets``)."""
+    return b.vec_pack(
+        [b.global_load_f32(AScale, b.add(offset, kg)) for offset in row_offsets], F32
+    )
+
+
+def _scale_products(b: IRBuilder, *, a_scales: Value, weight_scale: Value) -> Value:
+    """The per-output dequant factors of one contraction group: ``a_scales``
+    (one per output row, ``_load_a_scales``) times the lane's shared
+    ``weight_scale``, one packed vector multiply."""
+    return b.vector_mul(a_scales, b.vector_splat(weight_scale, a_scales.type.count))
 
 
 def _emit_fp8_gateup_fused_kloop(
@@ -558,8 +600,14 @@ def _emit_fp8_gateup_fused_kloop(
     atoms_per_group = GROUP_K // atom.k  # 4
     nni = len(n_tile_bases)
 
-    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
-    a_row_scale_base = b.mul(m_row, stride_a_scale)
+    # One A scale row per output the lane holds (shared by every ni cell).
+    a_scale_row_offsets = _a_scale_row_offsets(
+        b,
+        atom=atom,
+        lane=lane_decode.lane,
+        m_tile_base=m_tile_base,
+        stride_a_scale=stride_a_scale,
+    )
 
     # Per-ni n_col / n_blk for the weight-scale index math.
     n_cols = [b.add(nb, lane_decode.n_in_atom) for nb in n_tile_bases]
@@ -583,8 +631,9 @@ def _emit_fp8_gateup_fused_kloop(
         up_outer = list(outs[nni:])
 
         # Per-group scales (hoisted alongside the operand prefetch).
-        a_scale_off = b.add(a_row_scale_base, kg)
-        a_scale_v = b.global_load_f32(AScale, a_scale_off)
+        a_scales = _load_a_scales(
+            b, AScale=AScale, row_offsets=a_scale_row_offsets, kg=kg
+        )
         kg_gate = b.mul(kg, stride_gate_scale)
         kg_up = b.mul(kg, stride_up_scale)
         gate_ab = []
@@ -592,8 +641,8 @@ def _emit_fp8_gateup_fused_kloop(
         for ni in range(nni):
             gsc = b.global_load_f32(WGateScale, b.add(kg_gate, n_blks[ni]))
             usc = b.global_load_f32(WUpScale, b.add(kg_up, n_blks[ni]))
-            gate_ab.append(b.fmul(a_scale_v, gsc))
-            up_ab.append(b.fmul(a_scale_v, usc))
+            gate_ab.append(_scale_products(b, a_scales=a_scales, weight_scale=gsc))
+            up_ab.append(_scale_products(b, a_scales=a_scales, weight_scale=usc))
 
         k_group_base = b.mul(kg, c_group_k)
 
@@ -846,10 +895,8 @@ def _emit_fp8_gateup_fused_kloop(
         new_gate = []
         new_up = []
         for ni in range(nni):
-            gvec = b.vector_splat(gate_ab[ni], atom.c_per_lane)
-            uvec = b.vector_splat(up_ab[ni], atom.c_per_lane)
-            new_gate.append(b.vector_fma(g_acc[ni], gvec, gate_outer[ni]))
-            new_up.append(b.vector_fma(u_acc[ni], uvec, up_outer[ni]))
+            new_gate.append(b.vector_fma(g_acc[ni], gate_ab[ni], gate_outer[ni]))
+            new_up.append(b.vector_fma(u_acc[ni], up_ab[ni], up_outer[ni]))
         b.scf_yield(*(new_gate + new_up))
 
     res = outer.results
@@ -1848,9 +1895,10 @@ def build_moe_fused_mega_gemm_fp8(
         # MANDATORY because the down-GEMM fold applies a single per-lane scalar
         # (indexed by the A-input Hidden row ``m_in_atom``) to output slots that
         # span 4 DIFFERENT output rows; only a row-uniform block scale stays
-        # correct under that fold (the same constraint as the activation scale,
-        # BUILD_SPEC_FP8 OPEN RISK #1). The scale is broadcast to every row of
-        # ``scale_view`` so any ``m_in_atom`` read returns the block scale.
+        # correct under that fold. (Stage 1 does not share this constraint: it
+        # scales each output with the activation scale of its own row.) The
+        # scale is broadcast to every row of ``scale_view`` so any
+        # ``m_in_atom`` read returns the block scale.
         #
         # LEVER (fuse-quant): the per-block amax is reduced from registers as
         # part of Pass A instead of a separate full-block LDS re-read sweep.
