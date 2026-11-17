@@ -2,7 +2,7 @@
 # Copyright (c) 2025 FlyDSL Project Contributors
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 
-"""FlyDSL dBias reduction for the split backward (gfx11-generic / gfx12-generic): the broadcast-dim sum of the full-shape dB workspace.
+"""FlyDSL dBias reduction for the split backward (gfx11-generic, gfx12-generic, and the f32 dB reduce of the 16-bit rows of gfx942 / gfx90a): the broadcast-dim sum of the full-shape dB workspace.
 
 The dQ kernel writes `dB = dS` for the full (B, Hq, Sq, Sk) problem, one writer per element (the dQ kernel). When the bias is
 broadcast over batch and / or head and that dim is larger than 1, the user's dBias has fewer elements and the sum over the broadcast
