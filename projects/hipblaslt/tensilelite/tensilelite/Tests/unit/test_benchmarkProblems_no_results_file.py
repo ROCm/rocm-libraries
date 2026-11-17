@@ -446,19 +446,44 @@ class _DummyLock:
         return False
 
 
-def test_parallel_execution_no_results_file(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "setting, writeResultsFile",
+    [
+        ("no-results-file=True", False),
+        ("no-results-file = True", False),
+        ("no-results-file= True", False),
+        ("no-results-file=True # omit CSV", False),
+        (" no-results-file\t=\tyEs\t # omit CSV", False),
+        ("no-results-file=1", False),
+        ("no-results-file=False", True),
+        ("no-results-file = 0 # keep CSV", True),
+        ("no-results-file= no", True),
+    ],
+)
+def test_parallel_execution_results_file_policy(
+    tmp_path, monkeypatch, capsys, setting, writeResultsFile
+):
+    """Valid client INI formatting preserves the requested output policy during merging."""
     monkeypatch.setattr(ParallelExecution, "ClientExecutionLock", _DummyLock)
     monkeypatch.setitem(globalParameters, "ClientExecutionLockPath", str(tmp_path / "lock"))
     perGpuConfigs = []
 
     def popen(args, cwd):
-        perGpuConfigs.append(Path(args[2]).read_text())
+        text = Path(args[2]).read_text()
+        gpu = len(perGpuConfigs)
+        perGpuConfigs.append(text)
+        if writeResultsFile:
+            result = next(line.split("=", 1)[1] for line in text.splitlines()
+                          if line.startswith("results-file="))
+            Path(result).write_text(f"Problem,GFLOPS\n{gpu},1\n")
         return _Proc()
 
     monkeypatch.setattr(ParallelExecution.subprocess, "Popen", popen)
     cfg = tmp_path / "ClientParameters.ini"
+    results = tmp_path / "results.csv"
     cfg.write_text(
-        "device-idx=0\nno-results-file=True\n" + "".join(f"problem-size={i}\n" for i in range(4))
+        f"device-idx=0\nresults-file={results}\n{setting}\n"
+        + "".join(f"problem-size={i}\n" for i in range(4))
     )
 
     rc = ParallelExecution.runClientParallel(
@@ -470,9 +495,13 @@ def test_parallel_execution_no_results_file(tmp_path, monkeypatch, capsys):
     assert len(perGpuConfigs) == 2
     for text in perGpuConfigs:
         lines = text.splitlines()
-        assert "no-results-file=True" in lines
-        assert not any(line.startswith("results-file=") for line in lines)
-    assert sorted(os.listdir(tmp_path)) == ["ClientParameters.ini"]  # no CSV, per-GPU dir removed
+        assert setting in lines
+    assert results.exists() is writeResultsFile
+    if writeResultsFile:
+        assert results.read_text() == "Problem,GFLOPS\n0,1\n1,1\n"
+    assert sorted(os.listdir(tmp_path)) == (
+        ["ClientParameters.ini", "results.csv"] if writeResultsFile else ["ClientParameters.ini"]
+    )
     assert "No results-file found" not in capsys.readouterr().out
 
 
@@ -563,16 +592,24 @@ def test_end_to_end_without_library_logic(tensile_args, tmp_path, monkeypatch, _
     assert _run_tensile(tensile_args, monkeypatch, config, outputDir, *_NO_FORCE_REDO) == 1
 
 
-def test_end_to_end_force_redo_drops_stale_results(tensile_args, tmp_path, monkeypatch, _gpu_less):
+@pytest.mark.parametrize("useCache", [False, True], ids=["fresh", "cached"])
+def test_end_to_end_force_redo_drops_stale_results(
+    tensile_args, tmp_path, monkeypatch, _gpu_less, useCache
+):
     """A LibraryLogic run, then ForceRedoBenchmarkProblems without LibraryLogic into the
     same output directory: the first run's CSVs are not left as the second run's results."""
     outputDir = tmp_path / "out"
     _run_tensile(tensile_args, monkeypatch, _config(tmp_path, True), outputDir)
     assert list((outputDir / BENCHMARK_DATA_DIR).glob("*.csv"))
+    (sourceCsv,) = (outputDir / "1_BenchmarkProblems").rglob("00_Final.csv")
+    sourceCsv.with_name("00_Final_Granularity.csv").write_text("previous tile run\n")
+    (collectedCsv,) = (outputDir / BENCHMARK_DATA_DIR).glob("*.csv")
+    collectedCsv.with_suffix(".gsp").write_text("previous tile run\n")
 
     launches = _run_tensile(
         tensile_args, monkeypatch, _config(tmp_path, False), outputDir,
         "--global-parameters", "ForceRedoBenchmarkProblems=True",
+        *(("--use-cache",) if useCache else ()),
     )
 
     assert launches == 1

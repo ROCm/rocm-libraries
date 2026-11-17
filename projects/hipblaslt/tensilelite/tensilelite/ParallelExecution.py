@@ -311,7 +311,9 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
         noResultsFile = False
         with open(configPath, 'r') as f:
             for line in f:
-                key, _, value = line.strip().partition('=')
+                key, _, value = line.partition('#')[0].partition('=')
+                key = key.strip()
+                value = value.strip()
                 if key == 'results-file' and originalResultsPath is None:
                     originalResultsPath = value
                 elif key == 'no-results-file':
