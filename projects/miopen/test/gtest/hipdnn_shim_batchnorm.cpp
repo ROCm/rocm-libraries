@@ -1434,8 +1434,8 @@ const BN2DTestCase& SearchCase()
     return search_case;
 }
 
-// Training passes no running stats, since a search re-runs the kernel and would
-// apply the running-stat update more than once.
+// Training passes the saved statistics but no running stats, which these tests do
+// not check.
 hs::CallResult TrainUnderPolicy(miopen::Handle& handle,
                                 TrainData& d,
                                 miopenBatchNormMode_t mode    = miopenBNSpatial,
