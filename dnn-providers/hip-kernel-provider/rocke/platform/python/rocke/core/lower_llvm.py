@@ -2398,7 +2398,7 @@ class _Lowerer:
         align = int(op.attrs.get("align", 1))
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+            f"{self._operand(ptr)}, {_llvm_type(idx.type)} {self._operand(idx)}"
         )
         self._current().emit(
             f"  {op.result.name} = load {elem_ty}, ptr addrspace(1) {gep}, align {align}"
@@ -2423,7 +2423,7 @@ class _Lowerer:
         align = int(op.attrs.get("align", 1))
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+            f"{self._operand(ptr)}, {_llvm_type(idx.type)} {self._operand(idx)}"
         )
         self._current().emit(
             f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"

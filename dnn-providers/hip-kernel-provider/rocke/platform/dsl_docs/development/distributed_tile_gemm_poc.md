@@ -1,7 +1,8 @@
 # Distributed-tile GEMM PoC plan
 
-**Status:** Stage 0 runtime support implemented and CPU-tested; GPU peer execution
-and fused kernels remain unvalidated/unimplemented.
+**Status:** Stage 0 runtime support and Stage 1 peer-copy builders are implemented.
+CPU, compiler, and engine-parity checks passed; GPU peer execution remains
+unvalidated, and fused GEMM kernels are not implemented.
 
 ## Goal and agreed scope
 
@@ -234,6 +235,36 @@ each target before expanding the rank count.
 merely successful compilation or reported link access. Failures are classified
 as orchestration, mapping/runtime, compilation, or kernel correctness failures.
 
+#### Stage 1 implementation status
+
+`instances/common/peer_tile_copy.py` now provides the spec, host problem
+validation, grid/signature helpers, and masked builder, with a C ABI builder and
+binding counterpart. Source/destination placement is supplied at launch; the
+same builder exercises peer reads or peer writes. All real accesses are gated
+by source, destination, logical-rectangle, and partial-thread-chunk bounds.
+
+The generic typed scalar-memory lowerers now preserve the index type rather
+than hard-coding i32. This permits i64 peer-view offsets without introducing a
+new IR primitive or narrowing an address. Covered existing families retain
+byte-identical output compared with the Stage 0 Python source.
+
+Completed checks include CPU interpretation of actual IR, independent C++
+builder/binding comparisons, full family parity across supported LLVM flavors,
+canonical IR/verifier parity, and offline COMGR compilation for both dtypes and
+targets. None establishes actual GPU peer execution.
+
+Compiler validation also exposed duplicate build-ID accessor definitions. CMake
+now selects the stamped implementation, and a host C++ provenance test guards
+against linking the obsolete unstamped implementation.
+
+New-family LLVM/canonical-IR snapshots were added without changing existing
+entries. The repository-wide golden snapshot has pre-existing drift, confirmed
+against Stage 0 source; that integration issue is not re-blessed as part of this
+PoC. Dedicated peer-family snapshot tests pass independently.
+
+See the [peer-copy replay methodology](../../python/rocke/examples/common/peer_tile_copy/README.md)
+for contracts, CPU/compiler checks, and the still-pending hardware gate.
+
 ### Stage 2 — Fused direct-peer GEMM
 
 Build one spec-driven family with input-provider and output-placement choices:
@@ -362,12 +393,13 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 
 - [x] Agree on scope and perform initial read-only discovery.
 - [x] Audit peer/runtime and IR requirements and add CPU-tested runtime support (Stage 0).
-- [ ] Validate minimal mapped-peer tile reads/writes (Stage 1).
+- [x] Implement minimal paired peer-copy builders and CPU/compiler/parity tests (Stage 1).
+- [ ] Validate mapped-peer tile reads/writes on hardware (Stage 1 gate).
 - [ ] Add parity-tested fused direct-peer GEMM variants (Stage 2).
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
 - [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
 
-**Immediate next action:** implement the Stage 1 minimal paired peer-tile builders
-and their CPU/byte-identity tests, then separately authorize GPU execution. Use
+**Immediate next action:** review/commit the Stage 1 implementation, then
+separately authorize the two-GPU read/write validation on each target. Use
 explicit per-device modules and raw-buffer ownership; do not change the GEMM
 pipeline until directed peer reads/writes have passed on hardware.

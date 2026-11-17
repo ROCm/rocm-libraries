@@ -129,10 +129,11 @@ static void op_memref_global_load_typed(rocke_lower_t* L, const rocke_op_t* op)
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 1);
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
+                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
                    gep,
                    elem_ty,
                    rocke_ll_operand(L, ptr),
+                   rocke_ll_llvm_type(L, idx->type),
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(L,
                    "  %s = load %s, ptr addrspace(1) %s, align %lld",
@@ -170,10 +171,11 @@ static void op_memref_global_store_typed(rocke_lower_t* L, const rocke_op_t* op)
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 1);
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
+                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
                    gep,
                    elem_ty,
                    rocke_ll_operand(L, ptr),
+                   rocke_ll_llvm_type(L, idx->type),
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(L,
                    "  store %s %s, ptr addrspace(1) %s, align %lld",

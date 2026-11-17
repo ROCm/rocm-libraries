@@ -1393,6 +1393,25 @@ def cfgs_deep_fused_conv_pool():
     ]
 
 
+def cfgs_peer_tile_copy() -> list[tuple[dict[str, int | str], str]]:
+    """Mirror the standalone peer emitter's geometry/target ordering."""
+    geometries = [
+        (4, 64, 64, "bf16"),
+        (3, 17, 64, "f16"),
+        (7, 33, 128, "bf16"),
+        (9, 65, 256, "f16"),
+        (1, 1, 256, "bf16"),
+    ]
+    return [
+        (
+            {"tile_rows": rows, "tile_cols": cols, "block_size": block, "dtype": dtype},
+            arch,
+        )
+        for rows, cols, block, dtype in geometries
+        for arch in ("gfx950", "gfx942")
+    ]
+
+
 # (family, lower_fn_name, configs, arch). arch=None => use per-config arch
 # (configs are (dict, arch) tuples). Otherwise configs are plain dicts.
 FAMILIES = [
@@ -1414,6 +1433,7 @@ FAMILIES = [
     ("reduce", "reduce_lower_llvm", cfgs_reduce(), "gfx950"),
     ("pooling", "pooling_lower_llvm", cfgs_pooling(), "gfx950"),
     ("transpose", "transpose_lower_llvm", cfgs_transpose(), "gfx950"),
+    ("peer_tile_copy", "peer_tile_copy_lower_llvm", cfgs_peer_tile_copy(), None),
     ("permute_nd", "permute_nd_lower_llvm", cfgs_permute_nd(), "gfx950"),
     ("smoothquant", "smoothquant_lower_llvm", cfgs_smoothquant(), "gfx950"),
     ("topk_softmax", "topk_softmax_lower_llvm", cfgs_topk_softmax(), "gfx950"),

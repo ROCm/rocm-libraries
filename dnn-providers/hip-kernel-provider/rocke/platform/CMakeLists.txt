@@ -156,6 +156,9 @@ set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
 # pybind bindings under cpp/bindings are a separate target and are excluded.
 file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
 list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/cpp/bindings/")
+# The legacy TU duplicates the stamped rocke_build_id.cpp accessors. Linking it
+# first would silently report an unknown build-id even in a fresh build.
+list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/cpp/core/build_id[.]cpp$")
 
 add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
 target_include_directories(rocke_core PUBLIC
