@@ -253,15 +253,20 @@ inline void rpp_cpu_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* in
     for (Rpp32s k = 0; k < numBins; k++) out[k] = rpp_fft_cmul(scratch[k], plan.chirp[k]);
 }
 
-// In-place forward radix-2 DIT FFT over four transforms at once, held in split real and
-// imaginary arrays with element k of transform l at [k * 4 + l]. Four doubles are one 256-bit
-// vector, so a lane group is exactly one register and the shared twiddles broadcast across it:
-// every stage is vertical SIMD with no shuffles or cross-lane work. That is why this vectorizes
-// across transforms rather than within one, where butterfly partners sit at varying strides.
-// No FMA here: the audio kernels build with -mno-fma (add_fma_property in src/modules/
-// CMakeLists.txt), so these mirror the scalar expressions operation for operation, grouping
-// included, which keeps the two paths bit-identical.
-inline void rpp_simd_fft_radix2_forward(Rpp64f* re, Rpp64f* im, Rpp32s len,
+// Complex multiply matching the scalar form: cr = ar*br - ai*bi, ci = ar*bi + ai*br.
+inline void rpp_simd_fft_cmul(__m256d ar, __m256d ai, __m256d br, __m256d bi, __m256d& cr,
+                              __m256d& ci) {
+    cr = _mm256_sub_pd(_mm256_mul_pd(ar, br), _mm256_mul_pd(ai, bi));
+    ci = _mm256_add_pd(_mm256_mul_pd(ar, bi), _mm256_mul_pd(ai, br));
+}
+
+// Radix-4 form of the four-lane butterfly. Each pass fuses what were two consecutive radix-2
+// stages, so the intermediate results stay in registers instead of being written out and read
+// back. The arithmetic and its order are unchanged, only the memory traffic halves. Fusing
+// stage pairs also means the existing base-2 bit-reversal still applies - a textbook radix-4
+// would need base-4 digit reversal. When log2(len) is odd one radix-2 stage runs first, and its
+// twiddles are all tw[0] == 1 so it carries no multiply.
+inline void rpp_simd_fft_radix4_forward(Rpp64f* re, Rpp64f* im, Rpp32s len,
                                         const std::vector<Rpp32u>& bitRev,
                                         const std::vector<RppFftComplex>& tw) {
     for (Rpp32s i = 0; i < len; i++) {
@@ -275,41 +280,73 @@ inline void rpp_simd_fft_radix2_forward(Rpp64f* re, Rpp64f* im, Rpp32s len,
             _mm256_storeu_pd(im + j * 4, ai);
         }
     }
-    for (Rpp32s size = 2; size <= len; size <<= 1) {
-        const Rpp32s half = size >> 1;
-        const Rpp32s step = len / size;
-        for (Rpp32s i = 0; i < len; i += size) {
-            // The first butterfly of every block uses tw[0], which is exactly 1, so its twiddle
-            // multiply is skipped. That is the whole of the size == 2 stage, half of size == 4,
-            // and len - 1 of the (len/2) * log2(len) butterflies overall.
-            {
-                Rpp64f* reLo = re + i * 4;
-                Rpp64f* imLo = im + i * 4;
-                Rpp64f* reHi = re + (i + half) * 4;
-                Rpp64f* imHi = im + (i + half) * 4;
-                const __m256d tr = _mm256_loadu_pd(reHi), ti = _mm256_loadu_pd(imHi);
-                const __m256d ur = _mm256_loadu_pd(reLo), ui = _mm256_loadu_pd(imLo);
-                _mm256_storeu_pd(reHi, _mm256_sub_pd(ur, tr));
-                _mm256_storeu_pd(imHi, _mm256_sub_pd(ui, ti));
-                _mm256_storeu_pd(reLo, _mm256_add_pd(ur, tr));
-                _mm256_storeu_pd(imLo, _mm256_add_pd(ui, ti));
-            }
-            Rpp32s k = step;
-            for (Rpp32s j = i + 1; j < i + half; j++, k += step) {
-                const __m256d wr = _mm256_set1_pd(tw[k].real());
-                const __m256d wi = _mm256_set1_pd(tw[k].imag());
-                Rpp64f* reLo = re + j * 4;
-                Rpp64f* imLo = im + j * 4;
-                Rpp64f* reHi = re + (j + half) * 4;
-                Rpp64f* imHi = im + (j + half) * 4;
-                const __m256d xr = _mm256_loadu_pd(reHi), xi = _mm256_loadu_pd(imHi);
-                const __m256d tr = _mm256_sub_pd(_mm256_mul_pd(wr, xr), _mm256_mul_pd(wi, xi));
-                const __m256d ti = _mm256_add_pd(_mm256_mul_pd(wr, xi), _mm256_mul_pd(wi, xr));
-                const __m256d ur = _mm256_loadu_pd(reLo), ui = _mm256_loadu_pd(imLo);
-                _mm256_storeu_pd(reHi, _mm256_sub_pd(ur, tr));
-                _mm256_storeu_pd(imHi, _mm256_sub_pd(ui, ti));
-                _mm256_storeu_pd(reLo, _mm256_add_pd(ur, tr));
-                _mm256_storeu_pd(imLo, _mm256_add_pd(ui, ti));
+
+    Rpp32s stages = 0;
+    while ((1 << stages) < len) stages++;
+
+    Rpp32s H = 1;
+    if (stages & 1) {
+        for (Rpp32s i = 0; i < len; i += 2) {
+            Rpp64f* aRe = re + i * 4;
+            Rpp64f* aIm = im + i * 4;
+            Rpp64f* bRe = re + (i + 1) * 4;
+            Rpp64f* bIm = im + (i + 1) * 4;
+            const __m256d x0r = _mm256_loadu_pd(aRe), x0i = _mm256_loadu_pd(aIm);
+            const __m256d x1r = _mm256_loadu_pd(bRe), x1i = _mm256_loadu_pd(bIm);
+            _mm256_storeu_pd(aRe, _mm256_add_pd(x0r, x1r));
+            _mm256_storeu_pd(aIm, _mm256_add_pd(x0i, x1i));
+            _mm256_storeu_pd(bRe, _mm256_sub_pd(x0r, x1r));
+            _mm256_storeu_pd(bIm, _mm256_sub_pd(x0i, x1i));
+        }
+        H = 2;
+    }
+
+    for (; 4 * H <= len; H <<= 2) {
+        const Rpp32s stepA = len / (2 * H);
+        const Rpp32s stepB = len / (4 * H);
+        for (Rpp32s i = 0; i < len; i += 4 * H) {
+            for (Rpp32s t = 0; t < H; t++) {
+                const __m256d wAr = _mm256_set1_pd(tw[t * stepA].real());
+                const __m256d wAi = _mm256_set1_pd(tw[t * stepA].imag());
+                const __m256d wB0r = _mm256_set1_pd(tw[t * stepB].real());
+                const __m256d wB0i = _mm256_set1_pd(tw[t * stepB].imag());
+                const __m256d wB1r = _mm256_set1_pd(tw[(t + H) * stepB].real());
+                const __m256d wB1i = _mm256_set1_pd(tw[(t + H) * stepB].imag());
+
+                Rpp64f* p0r = re + (i + t) * 4;
+                Rpp64f* p0i = im + (i + t) * 4;
+                Rpp64f* p1r = re + (i + t + H) * 4;
+                Rpp64f* p1i = im + (i + t + H) * 4;
+                Rpp64f* p2r = re + (i + t + 2 * H) * 4;
+                Rpp64f* p2i = im + (i + t + 2 * H) * 4;
+                Rpp64f* p3r = re + (i + t + 3 * H) * 4;
+                Rpp64f* p3i = im + (i + t + 3 * H) * 4;
+
+                const __m256d x0r = _mm256_loadu_pd(p0r), x0i = _mm256_loadu_pd(p0i);
+                const __m256d x1r = _mm256_loadu_pd(p1r), x1i = _mm256_loadu_pd(p1i);
+                const __m256d x2r = _mm256_loadu_pd(p2r), x2i = _mm256_loadu_pd(p2i);
+                const __m256d x3r = _mm256_loadu_pd(p3r), x3i = _mm256_loadu_pd(p3i);
+
+                __m256d t1r, t1i, t3r, t3i;
+                rpp_simd_fft_cmul(wAr, wAi, x1r, x1i, t1r, t1i);
+                rpp_simd_fft_cmul(wAr, wAi, x3r, x3i, t3r, t3i);
+                const __m256d u0r = _mm256_add_pd(x0r, t1r), u0i = _mm256_add_pd(x0i, t1i);
+                const __m256d u1r = _mm256_sub_pd(x0r, t1r), u1i = _mm256_sub_pd(x0i, t1i);
+                const __m256d u2r = _mm256_add_pd(x2r, t3r), u2i = _mm256_add_pd(x2i, t3i);
+                const __m256d u3r = _mm256_sub_pd(x2r, t3r), u3i = _mm256_sub_pd(x2i, t3i);
+
+                __m256d v2r, v2i, v3r, v3i;
+                rpp_simd_fft_cmul(wB0r, wB0i, u2r, u2i, v2r, v2i);
+                rpp_simd_fft_cmul(wB1r, wB1i, u3r, u3i, v3r, v3i);
+
+                _mm256_storeu_pd(p0r, _mm256_add_pd(u0r, v2r));
+                _mm256_storeu_pd(p0i, _mm256_add_pd(u0i, v2i));
+                _mm256_storeu_pd(p2r, _mm256_sub_pd(u0r, v2r));
+                _mm256_storeu_pd(p2i, _mm256_sub_pd(u0i, v2i));
+                _mm256_storeu_pd(p1r, _mm256_add_pd(u1r, v3r));
+                _mm256_storeu_pd(p1i, _mm256_add_pd(u1i, v3i));
+                _mm256_storeu_pd(p3r, _mm256_sub_pd(u1r, v3r));
+                _mm256_storeu_pd(p3i, _mm256_sub_pd(u1i, v3i));
             }
         }
     }
@@ -388,7 +425,7 @@ inline void rpp_simd_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* c
             scratchIm[k * 4 + l] = (o < inLen) ? (Rpp64f)in[l][o] : 0.0;
         }
     }
-    rpp_simd_fft_radix2_forward(scratchRe, scratchIm, h, plan.bitRev, plan.twiddlesHalf);
+    rpp_simd_fft_radix4_forward(scratchRe, scratchIm, h, plan.bitRev, plan.twiddlesHalf);
 
     // Z[0] carries both purely real end bins: X[0] = Re+Im and X[n/2] = Re-Im.
     const __m256d zero = _mm256_setzero_pd();
