@@ -79,6 +79,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/SwInstructionPrefetchAbsDynamicPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/StinkyModifiersTest.cpp
+    unit/asm/VgprMsbTrackerTest.cpp
     unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     unit/ssa/AttachedSSATest.cpp

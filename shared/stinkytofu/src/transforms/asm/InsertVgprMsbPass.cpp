@@ -39,11 +39,6 @@
 
 namespace stinkytofu {
 namespace {
-enum VgprMsbState : int {
-    NOT_REQUIRED = -1,
-    LABEL_BEGIN = -2,
-};
-
 bool isMsbComputableClass(const StinkyInstruction& inst) {
     return !(inst.is(InstFlag::IF_SALU) || inst.is(InstFlag::IF_SMemLoad) ||
              inst.is(InstFlag::IF_SMemStore) || inst.is(InstFlag::IF_SMemAtomic) ||
@@ -98,23 +93,21 @@ void collectUnbankableOperands(const StinkyInstruction& inst, const std::string&
         });
 }
 
-bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
-                         GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
-    if (!hasVgpr || requiredSetVal == currentMsb) {
-        if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
-        return false;
-    }
+bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, VgprMsbTracker& tracker,
+                         AsmIRBuilder& irBuilder, GfxArchID archId, IRBase* insertBefore,
+                         VgprMsbMode msbMode) {
+    const VgprMsbStep step = tracker.step(requiredSetVal, hasVgpr);
+    if (!step.emit) return false;
 
-    if (currentMsb == VgprMsbState::LABEL_BEGIN) {
+    if (step.firstAfterLabel) {
         StinkyInstruction* nopInst =
             irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
         nopInst->addSrcReg(StinkyRegister(0));
     }
 
     int combinedSetVal = requiredSetVal;
-    if (msbMode == VgprMsbMode::Msb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
-        currentMsb != VgprMsbState::LABEL_BEGIN) {
-        combinedSetVal += (currentMsb << 8);
+    if (msbMode == VgprMsbMode::Msb16 && step.previousWord.has_value()) {
+        combinedSetVal += (*step.previousWord << 8);
     }
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
@@ -127,7 +120,6 @@ bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
                              ", src2: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 2)) +
                              ", dst: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
-    currentMsb = requiredSetVal;
     return true;
 }
 
@@ -176,7 +168,7 @@ class InsertVgprMsbPassImpl : public Pass {
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
-            int currentMsb = VgprMsbState::NOT_REQUIRED;
+            VgprMsbTracker tracker;
             IRBase* preferredInsertBefore = nullptr;
             auto findNextInstructionAnchor = [&](BasicBlock::iterator from) -> IRBase* {
                 for (auto scanIt = from; scanIt != bb.end(); ++scanIt) {
@@ -191,7 +183,7 @@ class InsertVgprMsbPassImpl : public Pass {
                 if (!inst) continue;
 
                 if (inst->getUnifiedOpcode() == GFX::LABEL) {
-                    currentMsb = VgprMsbState::LABEL_BEGIN;
+                    tracker.label();
                     preferredInsertBefore = nullptr;
                     continue;
                 }
@@ -204,7 +196,7 @@ class InsertVgprMsbPassImpl : public Pass {
                 // the single-function pipeline, which re-established MSB after the
                 // call because the call ended a basic block.
                 if (isCall(*inst)) {
-                    currentMsb = VgprMsbState::NOT_REQUIRED;
+                    tracker.reset();
                     // Never carry a deferred insertion anchor across call boundaries:
                     // call may clobber VGPR MSB state, so post-call rebuilds must stay post-call.
                     preferredInsertBefore = nullptr;
@@ -214,8 +206,8 @@ class InsertVgprMsbPassImpl : public Pass {
                 IRBase* insertBefore = preferredInsertBefore ? preferredInsertBefore : inst;
 
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb,
-                                                          irBuilder, archId, insertBefore, msbMode);
+                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, tracker, irBuilder,
+                                                          archId, insertBefore, msbMode);
                 collectUnbankableOperands(*inst, func.getName(), unbankable);
                 encodeVgprOperands(inst);
                 if (emittedVgprMsb || isMsbComputableClass(*inst)) preferredInsertBefore = nullptr;

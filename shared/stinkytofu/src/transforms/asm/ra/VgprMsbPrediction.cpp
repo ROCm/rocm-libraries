@@ -13,14 +13,6 @@
 #include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
 
 namespace stinkytofu {
-namespace {
-
-// InsertVgprMsbPass's two states besides a word. The count has to follow its
-// emitVgprMsbIfNeeded() step for step, or the prediction drifts from the asm.
-constexpr int kNotRequired = -1;
-constexpr int kLabelBegin = -2;
-
-}  // namespace
 
 std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(const Function& function,
                                                             const AllocationResult& colouring,
@@ -42,17 +34,17 @@ std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(const Function& func
         const auto owners = loopsOf.find(&bb);
         if (owners == loopsOf.end()) continue;
 
-        int current = kNotRequired;
+        VgprMsbTracker tracker;
         for (const IRBase& ir : bb) {
             const auto* inst = dyn_cast<StinkyInstruction>(&ir);
             if (inst == nullptr) continue;
             if (inst->getUnifiedOpcode() == GFX::LABEL) {
-                current = kLabelBegin;
+                tracker.label();
                 continue;
             }
             if (isPseudoInst(inst)) continue;
             if (isCall(*inst)) {
-                current = kNotRequired;
+                tracker.reset();
                 continue;
             }
 
@@ -73,11 +65,7 @@ std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(const Function& func
                 for (const size_t owner : owners->second) predicted[owner].switches.reset();
             }
 
-            if (!hasVgpr || required == current) {
-                if (current == kLabelBegin) current = kNotRequired;
-                continue;
-            }
-            current = required;
+            if (!tracker.step(required, hasVgpr).emit) continue;
             for (const size_t owner : owners->second) {
                 if (predicted[owner].switches.has_value()) ++*predicted[owner].switches;
             }
