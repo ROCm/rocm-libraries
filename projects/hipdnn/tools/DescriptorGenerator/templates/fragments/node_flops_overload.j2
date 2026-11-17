@@ -17,7 +17,10 @@
 // Work-data-dependent operands: {{ op.work_data_dependent_fields | join(', ') }}.
 // Their contents decide how much of the declared work runs. Count the problem the shapes
 // declare (padded lengths, every routed row) and never read an operand's contents; the
-// node's data_dependent feature tells a model the count is a bound.
+// node's data_dependent feature tells a model the count is a bound. Each such operand also
+// needs a rule in hipdnn_bench::declaredContents (tools/bench/include/hipdnn_bench/
+// InputDomain.hpp) that writes contents making a run the declared problem; without one the
+// bench times it on its generic fill.
 {% endif %}
 
 inline std::optional<double>
