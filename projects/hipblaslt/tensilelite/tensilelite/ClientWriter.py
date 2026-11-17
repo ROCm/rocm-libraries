@@ -742,6 +742,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-e', problemType.useE)
         param('use-gate-residual', problemType.useGateResidual)
         param('output-amaxD', problemType.outputAmaxD)
+        if problemType.outputPeerD: # only when on, so the config text of other problems is unchanged
+            param('output-peerD', problemType.outputPeerD)
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
@@ -882,6 +884,16 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("library-update-comment",   globalParameters["LibraryUpdateComment"])
 
         param("use-user-args",            globalParameters["UseUserArgs"])
+        if globalParameters["SplitDevices"] > 1:
+            param("split-devices",        globalParameters["SplitDevices"])
+            param("split-dim",            globalParameters["SplitDim"])
+            placement = ""
+            for tensor in "ABCD":
+                value = globalParameters["SplitPlacement" + tensor]
+                if value not in ("Replicated", "Shared"):
+                    printExit("SplitPlacement%s must be Replicated or Shared, got %r" % (tensor, value))
+                placement += value[0]
+            param("split-placement",      placement)
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
