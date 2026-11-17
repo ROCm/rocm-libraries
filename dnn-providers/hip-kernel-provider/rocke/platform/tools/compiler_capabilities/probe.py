@@ -82,7 +82,6 @@ _GENERIC_PROCESSORS = {
     "gfx1100": "gfx11-generic",
     "gfx1151": "gfx11-generic",
     "gfx1201": "gfx12-generic",
-    "gfx1250": "gfx12-generic",
 }
 
 
@@ -527,7 +526,7 @@ def load_or_probe(
     }
     _validate_report_completeness(report)
     outcomes = [result.outcome for result in results.values()]
-    if all(outcome != "error" for outcome in outcomes):
+    if all(outcome not in {"timeout", "error"} for outcome in outcomes):
         support._write_json(cache_path, report)
     return report, False
 
@@ -569,14 +568,65 @@ def _expected_observations(processor: str) -> dict[str, list[tuple[str, str]]]:
 def _validate_report_completeness(report: dict[str, object]) -> None:
     capabilities = report.get("capabilities")
     probe = report.get("probe")
-    if not isinstance(capabilities, dict) or not isinstance(probe, dict):
-        raise support.ProbeError("report must contain probe and capabilities objects")
+    compiler = report.get("compiler")
+    if (
+        not isinstance(capabilities, dict)
+        or not isinstance(probe, dict)
+        or not isinstance(compiler, dict)
+    ):
+        raise support.ProbeError(
+            "report must contain probe, compiler, and capabilities objects"
+        )
+    if probe.get("name") != "rocke-comgr-capabilities":
+        raise support.ProbeError("report probe.name must identify the COMGR probe")
+    if probe.get("target_triple") != _TARGET_TRIPLE:
+        raise support.ProbeError("report probe.target_triple is not AMDGPU")
+    for field in (
+        "implementation_sha256",
+        "schema_sha256",
+        "fingerprint",
+    ):
+        value = probe.get(field)
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise support.ProbeError(f"report probe.{field} must be a SHA-256 digest")
+    if compiler.get("route") != "comgr":
+        raise support.ProbeError("report compiler.route must be comgr")
+    library = compiler.get("library")
+    if not isinstance(library, str) or not library:
+        raise support.ProbeError("report compiler.library must be a non-empty string")
+    compiler_sha = compiler.get("sha256")
+    if (
+        not isinstance(compiler_sha, str)
+        or re.fullmatch(r"[0-9a-f]{64}", compiler_sha) is None
+    ):
+        raise support.ProbeError("report compiler.sha256 must be a SHA-256 digest")
+    if not isinstance(compiler.get("version_source"), str) or not compiler.get(
+        "version_source"
+    ):
+        raise support.ProbeError("report compiler.version_source must be non-empty")
+    llvm_version = compiler.get("llvm_version")
+    if llvm_version is not None and (
+        not isinstance(llvm_version, list)
+        or len(llvm_version) != 3
+        or not all(isinstance(part, int) and part >= 0 for part in llvm_version)
+    ):
+        raise support.ProbeError(
+            "report compiler.llvm_version must be three non-negative integers or null"
+        )
     processor = probe.get("processor")
     effective_processor = probe.get("effective_processor")
     if not isinstance(processor, str):
         raise support.ProbeError("report probe.processor must be a string")
     if not isinstance(effective_processor, str) or not effective_processor:
         raise support.ProbeError("report probe.effective_processor must be a string")
+    allowed_effective = {processor}
+    if generic := _GENERIC_PROCESSORS.get(processor):
+        allowed_effective.add(generic)
+    if effective_processor not in allowed_effective:
+        raise support.ProbeError(
+            "report probe.effective_processor is not the requested processor "
+            "or its explicit generic fallback"
+        )
     expected = _expected_observations(processor)
     if set(capabilities) != set(expected):
         raise support.ProbeError("report capability set differs from the COMGR corpus")

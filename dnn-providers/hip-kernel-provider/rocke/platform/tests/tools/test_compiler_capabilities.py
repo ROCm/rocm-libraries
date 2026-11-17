@@ -123,7 +123,7 @@ def test_generic_processor_names_are_explicit_not_digit_derived() -> None:
     assert P._GENERIC_PROCESSORS["gfx950"] == "gfx9-4-generic"
     assert P._GENERIC_PROCESSORS["gfx942"] == "gfx9-4-generic"
     assert P._GENERIC_PROCESSORS["gfx906"] == "gfx9-generic"
-    assert P._GENERIC_PROCESSORS["gfx1250"] == "gfx12-generic"
+    assert "gfx1250" not in P._GENERIC_PROCESSORS
     assert "gfx999" not in P._GENERIC_PROCESSORS
 
 
@@ -173,6 +173,32 @@ def test_rejection_and_crash_are_observations_not_inference(tmp_path: Path) -> N
     assert observations[0]["outcome"] == "rejected"
     assert observations[1]["outcome"] == "crash"
     assert "evidence" not in observations[0]
+
+
+def test_timeout_report_is_not_cached(tmp_path: Path) -> None:
+    calls = 0
+
+    def timed_out(
+        requests: list[support.ProbeRequest], **_: object
+    ) -> dict[str, support.ProbeResult]:
+        nonlocal calls
+        calls += 1
+        results = _accept_all(requests)
+        results[requests[0].key] = support.ProbeResult(
+            requests[0].key, "timeout", "synthetic timeout"
+        )
+        return results
+
+    for _ in range(2):
+        _, cache_hit = P.load_or_probe(
+            comgr_lib=None,
+            processor="gfx950",
+            cache_dir=tmp_path / "cache",
+            identify=_identity,
+            run=timed_out,
+        )
+        assert cache_hit is False
+    assert calls == 2
 
 
 def test_identity_result_pins_every_candidate_worker(tmp_path: Path) -> None:
@@ -273,6 +299,43 @@ def test_cache_fingerprint_covers_comgr_probe_schema_and_context(
     assert third_hit is False
     assert third["probe"]["fingerprint"] != first["probe"]["fingerprint"]
     assert calls == 2
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "message"),
+    [
+        ("probe", "implementation_sha256", "implementation_sha256"),
+        ("probe", "schema_sha256", "schema_sha256"),
+        ("probe", "fingerprint", "fingerprint"),
+        ("compiler", "sha256", "compiler.sha256"),
+    ],
+)
+def test_dependency_free_validator_rejects_malformed_provenance_digests(
+    tmp_path: Path, section: str, field: str, message: str
+) -> None:
+    report = _report(tmp_path)
+    report[section][field] = ""
+    with pytest.raises(support.ProbeError, match=message):
+        P._validate_report_completeness(report)
+
+
+def test_dependency_free_validator_rejects_bad_envelope_provenance(
+    tmp_path: Path,
+) -> None:
+    report = _report(tmp_path)
+    report["compiler"]["route"] = "clang"
+    with pytest.raises(support.ProbeError, match="compiler.route"):
+        P._validate_report_completeness(report)
+
+    report = _report(tmp_path / "library")
+    report["compiler"]["library"] = ""
+    with pytest.raises(support.ProbeError, match="compiler.library"):
+        P._validate_report_completeness(report)
+
+    report = _report(tmp_path / "effective")
+    report["probe"]["effective_processor"] = "gfx12-generic"
+    with pytest.raises(support.ProbeError, match="effective_processor"):
+        P._validate_report_completeness(report)
 
 
 def test_dependency_free_validator_rejects_missing_duplicate_and_bad_evidence(
