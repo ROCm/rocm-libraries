@@ -88,8 +88,12 @@ static int runCase(hipblasLtHandle_t           handle,
                    int64_t                     maxN,
                    const std::vector<int32_t>& nDev,
                    int                         iters,
-                   bool                        totalBound = false)
+                   bool                        totalBound = false,
+                   int                         roundTo    = 0)
 {
+    // roundTo > 0 (with totalBound): host n = {S, 0, ..., 0}, S = sum of the
+    // counts each rounded up to roundTo. Needs the counts on the host, but
+    // leaves no surplus workgroups for any tile width that divides roundTo.
     // totalBound: the host problem is n = {R, 1, ..., 1} with R the total rows,
     // which sizes the grid for any split of R rows; each group's buffers then
     // hold only its own n_g columns.
@@ -158,6 +162,14 @@ static int runCase(hipblasLtHandle_t           handle,
             return 1;
         std::fill(vn.begin(), vn.end(), 1);
         vn[0] = R;
+        if(roundTo > 0)
+        {
+            int64_t S = 0;
+            for(int32_t v : nDev)
+                S += (v + roundTo - 1) / roundTo * roundTo;
+            std::fill(vn.begin(), vn.end(), 0);
+            vn[0] = S;
+        }
     }
     float                                   alpha = 1.0f, beta = 0.0f;
     std::vector<hipblaslt_ext::GemmEpilogue> epi(G);
@@ -284,7 +296,7 @@ static int runCase(hipblasLtHandle_t           handle,
 
 
     std::cout << "grouped w4a16 m=" << m << " k=" << k << " G=" << G << " maxN=" << maxN
-              << (totalBound ? " host n={R,1,..}" : "")
+              << (totalBound ? (roundTo ? " host n={S,0,..}" : " host n={R,1,..}") : "")
               << " n={";
     for(int g = 0; g < G; g++)
         std::cout << nDev[g] << (g + 1 < G ? "," : "}");
@@ -327,6 +339,8 @@ int main(int argc, char** argv)
     // split of R rows (empty groups included) on the device.
     fails += runCase(handle, 1024, 2048, 16, {5, 0, 3, 1, 0, 4, 2, 1}, 0, true);
     fails += runCase(handle, 2048, 512, 16, {5, 0, 3, 1, 0, 4, 2, 1}, 0, true);
+    fails += runCase(handle, 1024, 2048, 32, {5, 0, 3, 1, 0, 4, 2, 1}, 0, true, 32);
+    fails += runCase(handle, 2048, 512, 32, {5, 0, 3, 1, 0, 4, 2, 1}, 0, true, 32);
     {
         // Prefill-like: 64 experts, uneven counts, the last group the largest.
         std::mt19937                       r(7);
@@ -355,6 +369,9 @@ int main(int argc, char** argv)
             R += v;
         fails += runCase(handle, 1024, 2048, R, n, iters > 0 ? 20 : 0, true);
         fails += runCase(handle, 2048, 512, R, n, iters > 0 ? 20 : 0, true);
+        // Same routing with the tight host bound (counts known on the host).
+        fails += runCase(handle, 1024, 2048, R, n, iters > 0 ? 20 : 0, true, 32);
+        fails += runCase(handle, 2048, 512, R, n, iters > 0 ? 20 : 0, true, 32);
     }
     // Uneven groups below the host bound, including empty ones.
     fails += runCase(handle, 1024, 2048, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);
