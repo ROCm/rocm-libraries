@@ -190,6 +190,7 @@ protected:
 
         if(!run.referenceReady)
         {
+            ASSERT_NO_FATAL_FAILURE(prepareReferenceInputs(run.gpuBundle, run.cpuBundle));
             ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, run.cpuBundle));
             run.referenceReady = true;
         }
@@ -381,6 +382,16 @@ protected:
         {
             bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
         }
+    }
+
+    /// Runs after the GPU graph and before the CPU reference's first run. A suite whose
+    /// reference reads an engine output as its input (SDPA's Philox dropout reads the engine's
+    /// RNG dump as its explicit mask, SEM-015) copies it from @p gpuBundle into @p cpuBundle
+    /// here. Does nothing by default.
+    virtual void prepareReferenceInputs(
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle)
+    {
     }
 
     /// Called with the workspace each GPU execute is about to receive, before the execute.

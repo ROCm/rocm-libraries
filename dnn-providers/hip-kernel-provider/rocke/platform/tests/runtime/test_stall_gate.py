@@ -4,14 +4,17 @@
 
 The fake-gate tests need no GPU: they pin the order of one sample (arm, start
 event, the call, stop event, release, wait) and what happens when the call
-raises or the watchdog had to release the gate. The last tests run on a GPU
-when there is one: a real wait on a real stream, released by the host and, for
-a call that blocks the host, by the watchdog.
+raises or the watchdog had to release the gate, and that no garbage
+collection runs inside a sample. The last tests run on a GPU when there is
+one: a real wait on a real stream, released by the host and, for a call that
+blocks the host, by the watchdog.
 """
 
 from __future__ import annotations
 
+import gc
 import os
+import weakref
 
 import pytest
 from rocke.runtime.stall_gate import StallTimeout, time_launches_staged
@@ -123,6 +126,51 @@ def test_a_watchdog_release_invalidates_the_measurement():
     assert rt.log[-3:] == ["device_sync", "destroy:start", "destroy:stop"]
 
 
+class _Cycle:
+    """An object that only the cyclic garbage collector can free."""
+
+    def __init__(self):
+        self.itself = self
+
+
+def test_no_automatic_collection_runs_inside_a_sample():
+    """A collection that frees device memory inside a sample would block the
+    host on the stalled stream; garbage from before the call waits until the
+    samples are over."""
+    rt = _FakeRuntime()
+    cycle = _Cycle()
+    freed = weakref.ref(cycle)
+    del cycle
+    assert freed() is not None
+    seen = []
+
+    def fn():
+        seen.append((freed() is not None, gc.isenabled()))
+
+    time_launches_staged(fn, warmup=1, iters=2, gate=_FakeGate(rt.log), runtime=rt)
+    assert seen == [(True, False)] * 3
+    assert gc.isenabled()
+
+
+@pytest.mark.parametrize("caller_enabled", [True, False])
+def test_the_callers_collector_setting_survives_a_raise(caller_enabled):
+    rt = _FakeRuntime()
+    if not caller_enabled:
+        gc.disable()
+    try:
+        with pytest.raises(RuntimeError, match="launch failed"):
+            time_launches_staged(
+                _fn(rt.log, raise_on=1),
+                warmup=0,
+                iters=1,
+                gate=_FakeGate(rt.log),
+                runtime=rt,
+            )
+        assert gc.isenabled() == caller_enabled
+    finally:
+        gc.enable()
+
+
 def _busy_launch():
     """A launch of a one-instruction kernel, or skip when none can be built."""
     import struct
@@ -174,3 +222,52 @@ def test_real_watchdog_unblocks_a_call_that_waits_on_the_stalled_stream():
             time_launches_staged(blocking, warmup=0, iters=1, gate=gate)
         # The gate stays usable after a timeout.
         assert len(time_launches_staged(run, warmup=0, iters=2, gate=gate)) == 2
+
+
+@_GPU
+def test_real_device_free_inside_the_call_is_a_stall_timeout():
+    from rocke.runtime.launcher import DeviceMem
+    from rocke.runtime.stall_gate import StallGate
+
+    _rt, run = _busy_launch()
+    buffers = [DeviceMem(256)]
+
+    def run_then_free():
+        run()
+        buffers.clear()
+
+    with StallGate(timeout_s=0.2) as gate, pytest.raises(StallTimeout):
+        time_launches_staged(run_then_free, warmup=0, iters=1, gate=gate)
+
+
+@_GPU
+def test_real_garbage_holding_device_memory_is_not_freed_inside_a_sample():
+    """The call allocates enough containers for an automatic young-generation
+    collection, which would free the cycle's buffer on the stalled stream."""
+    from rocke.runtime.launcher import DeviceMem
+    from rocke.runtime.stall_gate import StallGate
+
+    _rt, run = _busy_launch()
+    alive_inside = []
+    with StallGate(timeout_s=0.2) as gate:
+        # Start the collector's counts at zero, so the cycle below is still in
+        # the young generation when the sample runs.
+        gc.collect()
+        cycle = _Cycle()
+        cycle.buffer = DeviceMem(256)
+        freed = weakref.ref(cycle)
+        del cycle
+
+        def run_under_collection_pressure():
+            run()
+            # Each new cycle is one more container towards the threshold.
+            for _ in range(2 * gc.get_threshold()[0]):
+                _Cycle()
+            alive_inside.append(freed() is not None)
+
+        time_launches_staged(
+            run_under_collection_pressure, warmup=0, iters=1, gate=gate
+        )
+    assert alive_inside == [True]
+    gc.collect()
+    assert freed() is None

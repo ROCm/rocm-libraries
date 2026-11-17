@@ -7,7 +7,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - geko=true/false
   - miopen=true/false
   - tensilelite_coverage=true/false
-  - hipblaslt_library_uniqueness=true/false
+  - hipblaslt_logic_corpus=true/false
   - hipblaslt_rocjitsu_scripts=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
@@ -37,25 +37,37 @@ COMPONENTS = {
         "projects/miopen/**",
         # The hipDNN MIOpen provider carries a copy of MIOpen's rename list,
         # generated from miopen.h, and hand-written declarations of a few
-        # MIOpen entry points. MIOpen CI checks both against MIOpen. A PR
-        # touching only the provider is exactly the drift that gate exists to
-        # catch, so it has to trigger this component too.
-        "dnn-providers/miopen-provider/**",
+        # MIOpen entry points. MIOpen CI checks both against MIOpen, so a PR
+        # touching them has to trigger this component. List only the provider
+        # files those checks read (generate_wrapper_sources.py and
+        # check_public_abi.py in projects/miopen/script); add any new one.
+        "dnn-providers/miopen-provider/MiopenApi.hpp",
+        "dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp",
+        "dnn-providers/miopen-provider/.clang-format",
         ".github/workflows/component-ci-miopen.yml",
     ],
     "tensilelite_coverage": [
         "projects/hipblaslt/tensilelite/**",
         ".github/workflows/component-ci-tensilelite-coverage.yml",
     ],
-    "hipblaslt_library_uniqueness": [
+    # The logic corpus is tuning data outside tensilelite/, so a change to it
+    # alone triggers no TensileLite lane. This one validates the whole corpus
+    # and runs the unit tests that read it; the validator and the tests' corpus
+    # plumbing trigger it too.
+    "hipblaslt_logic_corpus": [
         "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
+        "projects/hipblaslt/scripts/run_tensile_logic_check.py",
+        "projects/hipblaslt/tensilelite/tensilelite/logic/**",
+        "projects/hipblaslt/tensilelite/tensilelite/CustomYamlLoader.py",
+        "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py",
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
         "test_solution_uid_uniqueness.py",
         "projects/hipblaslt/tensilelite/tox.ini",
-        ".github/workflows/component-ci-library-uniqueness.yml",
+        ".github/workflows/component-ci-logic-corpus.yml",
     ],
     "hipblaslt_rocjitsu_scripts": [
         "projects/hipblaslt/clients/scripts/rocjitsu/**",
+        ".github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh",
         ".github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml",
     ],
 }

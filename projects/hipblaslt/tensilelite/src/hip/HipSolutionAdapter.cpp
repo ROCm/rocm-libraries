@@ -176,6 +176,7 @@ namespace TensileLite
                 m_modules.clear();
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
+                m_helperKernelPath.clear();
                 m_kernels.clear();
                 m_extraModuleCopies.clear();
                 m_extraKernels.clear();
@@ -220,7 +221,10 @@ namespace TensileLite
                 //Isolate filename
                 size_t start = path.rfind('/');
                 start        = (start == std::string::npos) ? 0 : start + 1;
-                m_loadedCOFiles.insert(removeXnack(std::string(path.begin() + start, path.end())));
+                std::string fileName(path.begin() + start, path.end());
+                if(fileName.rfind("Kernels.so-000-", 0) == 0)
+                    m_helperKernelPath = path;
+                m_loadedCOFiles.insert(removeXnack(fileName));
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -638,6 +642,37 @@ namespace TensileLite
                 }
             }
 
+            // If helper rotation copies were not loaded, fall back to the
+            // original m_modules so multi-kernel launches still resolve.
+            if(copyIdx > 0)
+            {
+                auto origIt = m_kernels.find(name);
+                if(origIt != m_kernels.end())
+                {
+                    rv = origIt->second;
+                    return hipSuccess;
+                }
+
+                for(auto module : m_modules)
+                {
+                    err = hipModuleGetFunction(&rv, module, name.c_str());
+
+                    if(err == hipSuccess)
+                    {
+                        m_kernels[name] = rv;
+                        return err;
+                    }
+                    else if(err != hipErrorNotFound)
+                    {
+                        return err;
+                    }
+                    else
+                    {
+                        (void)m_moduleApi.getLastError(); // clear hipErrorNotFound
+                    }
+                }
+            }
+
             return err;
         }
 
@@ -687,6 +722,34 @@ namespace TensileLite
                 m_loadedModuleNames.push_back(
                     concatenate("File ", path, " (rotation copy ", i + 1, ")"));
             }
+            return hipSuccess;
+        }
+
+        hipError_t SolutionAdapter::loadHelperKernelExtraCopies(int extraCopies)
+        {
+            std::string path;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if(m_helperKernelPath.empty())
+                    return hipSuccess;
+                path = m_helperKernelPath;
+                if(extraCopies <= 0)
+                    extraCopies = (int)m_extraModuleCopies.size();
+                if(extraCopies <= 0)
+                    return hipSuccess;
+                // Each rotation slot should mirror every module in m_modules.
+                if(!m_extraModuleCopies.empty()
+                   && m_extraModuleCopies[0].size() >= m_modules.size())
+                    return hipSuccess;
+            }
+
+            hipError_t err = loadCodeObjectFileExtraCopies(path, extraCopies);
+            if(err != hipSuccess)
+                return err;
+
+            if(m_debug)
+                std::cout << "[icache-rotate] loaded " << extraCopies
+                          << " extra rotation copies of helper " << path << std::endl;
             return hipSuccess;
         }
 
@@ -866,13 +929,17 @@ namespace TensileLite
                     return hipErrorInvalidValue;
                 }
 
-                // The kernel receives its cluster id in z as a 16-bit value, so
-                // a larger grid z would silently wrap.
-                if(kernel.numWorkGroups.z > KernelInvocation::MaxClusterGridDimZ)
+                // Cluster ids in y and z are 16-bit; more clusters would wrap.
+                const size_t clustersY = kernel.numWorkGroups.y / kernel.clusterDim.y;
+                const size_t clustersZ = kernel.numWorkGroups.z;
+                if(clustersY > KernelInvocation::MaxClusterGridDimYZ
+                   || clustersZ > KernelInvocation::MaxClusterGridDimYZ)
                 {
-                    std::cerr << "hipDrvLaunchKernelEx: workgroup grid z exceeds the cluster "
-                              << "launch limit of " << KernelInvocation::MaxClusterGridDimZ
-                              << " (numWorkGroups " << kernel.numWorkGroups
+                    std::cerr << "hipDrvLaunchKernelEx: cluster count in y/z (" << clustersY
+                              << ", " << clustersZ << ") exceeds the cluster launch limit of "
+                              << KernelInvocation::MaxClusterGridDimYZ
+                              << " clusters (numWorkGroups " << kernel.numWorkGroups
+                              << ", clusterDim " << kernel.clusterDim
                               << ") for kernel: " << kernel.kernelName << std::endl;
                     return hipErrorInvalidValue;
                 }

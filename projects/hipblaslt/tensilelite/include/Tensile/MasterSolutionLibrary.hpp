@@ -161,7 +161,6 @@ namespace TensileLite
         mutable SolutionMap<MySolution>                         solutions;
         std::string                                             version;
         mutable std::mutex                                      solutionsGuard;
-        mutable std::atomic<bool>                               lastFindTopRetAll = false;
 
         // Indexed-format state. `blobCache` serves this file's own solutions;
         // `solutionSources` collects the caches of lazily loaded shards, keyed by
@@ -258,7 +257,17 @@ namespace TensileLite
 
             auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
             auto mLibrary
-                = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+                = dynamic_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+            // Nothing is recorded for a shard that did not load, so a later
+            // lookup tries it again.
+            if(mLibrary == nullptr || mLibrary->library == nullptr)
+            {
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Failed to load library for index " << index
+                              << " from file: " << path.string() << std::endl;
+                return;
+            }
 
             using std::begin;
             using std::end;
@@ -433,11 +442,7 @@ namespace TensileLite
             {
                 return std::shared_ptr<MySolution>();
             }
-            if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-            {
-                solution->requiredHostWorkspaceSizePerProblem
-                    = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
-            }
+            solution->ensureRequiredHostWorkspaceSize(problem, hardware);
             return solution;
         }
 
@@ -487,8 +492,7 @@ namespace TensileLite
                                                       nop,
                                                       solution->problemType.useGateResidual,
                                                       solution->problemType.gateResidualDataTypeWhiteList);
-                solution->requiredHostWorkspaceSizePerProblem
-                    = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
+                solution->ensureRequiredHostWorkspaceSize(problem, hardware);
             }
             return solution;
         }
@@ -637,24 +641,13 @@ namespace TensileLite
             {
                 SolutionVector<MySolution> rv{local};
                 if(numSolutions == 1)
-                {
-                    lastFindTopRetAll = false;
                     return rv;
-                }
-                auto rest         = library->findTopSolutions(problem, hardware, numSolutions - 1);
-                lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
+                auto rest = library->findTopSolutions(problem, hardware, numSolutions - 1);
                 rv.insert(rv.end(), rest.begin(), rest.end());
                 return rv;
             }
 #endif
-            auto result       = library->findTopSolutions(problem, hardware, numSolutions);
-            lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
-            return result;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            return library->findTopSolutions(problem, hardware, numSolutions);
         }
 
         virtual SolutionVector<MySolution>

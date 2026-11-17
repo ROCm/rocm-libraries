@@ -203,7 +203,7 @@ def test_role_and_explicit_default_target_preserve_other_maps(tmp_path):
     model = _model(tmp_path / "model", tree)
     _apply(build_plan(model, tree, role="predict_applicable_kernels", arch="default"))
     expected = copy.deepcopy(original)
-    expected["predict_applicable_kernels"] = {"default": NEW}
+    expected["predict_applicable_kernels"] = {"default": [NEW]}
     assert _read(tree / "engine.ued.json") == expected
 
 
