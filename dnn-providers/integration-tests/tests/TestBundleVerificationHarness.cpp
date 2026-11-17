@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -386,6 +387,34 @@ TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
                   0)
             << "uid " << uid;
     }
+}
+
+TEST(TestBundleVerificationHarness, PackedStridedHostSentinelFillMatchesTensorFill)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using hipdnn_data_sdk::types::half;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {2, 3};
+    const std::vector<int64_t> strides = {1, 2};
+    const auto attribute
+        = CreateTensorAttributesDirect(builder, 1, "output", DataType::HALF, &strides, &dims);
+    builder.Finish(attribute);
+
+    const auto* tensorAttributes
+        = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    const std::unordered_map<int64_t, const TensorAttributes*> attributes{{1, tensorAttributes}};
+    const auto outputs
+        = detail::allocateSentinelOutputs(attributes, {1}, TensorMap{}, {}, /*onDevice=*/false);
+
+    auto expected = hipdnn_data_sdk::utilities::createTensor<half>(dims, strides);
+    expected->fillWithSentinelValue();
+    ASSERT_TRUE(outputs.at(1)->isPacked());
+    ASSERT_EQ(outputs.at(1)->elementSpace(), expected->elementSpace());
+    EXPECT_EQ(std::memcmp(outputs.at(1)->rawHostData(),
+                          expected->rawHostData(),
+                          expected->elementSpace() * expected->elementSize()),
+              0);
 }
 } // namespace
 
