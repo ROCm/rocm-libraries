@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "eed77add-1009-4884-ba05-1831ea9a4774",
+  "name": "hip_conv_dgrad_fma_2d_rdna variant fields",
+  "fields": [
+    {
+      "name": "kernel_family",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "tile_n",
+      "type": "int"
+    }
+  ]
+}

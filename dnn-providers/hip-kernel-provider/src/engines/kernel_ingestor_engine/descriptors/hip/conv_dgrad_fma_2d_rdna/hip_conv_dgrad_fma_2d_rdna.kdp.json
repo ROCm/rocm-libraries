@@ -1,0 +1,476 @@
+{
+  "version": "1.0",
+  "id": "2a6484ab-b0f4-4743-9261-07b658e2651b",
+  "name": "hipkernel:hip_conv_dgrad_fma_2d_rdna",
+  "matchers": [
+    "286c2477-8780-4239-9d5c-b68e5975ad97"
+  ],
+  "engine": "f90a48bd-dac3-4d4e-b49d-1de0202b27f4",
+  "dispatch": "7e9e87e6-0367-4bfa-86c0-ad9cd7e434f9",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "f90a48bd-dac3-4d4e-b49d-1de0202b27f4",
+          "kmd_id": "eed77add-1009-4884-ba05-1831ea9a4774",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "kernel_family",
+            "dtype",
+            "layout",
+            "tile_n"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "c8c72135-e518-4ecc-a765-d2bac25eb4a5",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f32_nchw_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4070f7c4-7e55-4e3e-9627-ad07ac956e40",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f32_nchw_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 64
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2ce57fc3-2e6a-4254-84f4-10b57d22b8ad",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f32_nchw_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 128
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ae35bd7e-78ee-4fcf-abba-67fcbffac0cd",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f32_nhwc_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ffe4e216-084e-4f57-8aea-e1ecc372d209",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f32_nhwc_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 64
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "26925d9c-0add-4612-a81c-f678aead5a07",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f32_nhwc_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 0,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 128
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b1393f67-21fc-43d6-8ca2-fcdd9d08ed25",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f16_nchw_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7f2944a8-91a9-4c6d-b9bb-b53c2e1e70b0",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f16_nchw_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 64
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a8b67e7c-e1b3-4bb0-9e98-271a045a3db5",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f16_nchw_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 128
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6391c72b-3358-49b9-a246-93dde0cff05e",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f16_nhwc_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2e5183ce-9e4c-4563-b54d-97b148f5763b",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f16_nhwc_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 64
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0fd654bc-4bc9-456f-93d1-86c06af50c00",
+      "name": "hip_conv_dgrad_fma_2d_rdna.f16_nhwc_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 1,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 128
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3440c8a9-0ce1-4e1d-96cc-672b36541962",
+      "name": "hip_conv_dgrad_fma_2d_rdna.bf16_nchw_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "36d924d1-9e0b-45d9-8c95-1a4fd8668ef3",
+      "name": "hip_conv_dgrad_fma_2d_rdna.bf16_nchw_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 64
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "64b7b811-dad2-4701-bced-02503745083d",
+      "name": "hip_conv_dgrad_fma_2d_rdna.bf16_nchw_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 0,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "tile_n": 128
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a9f27d13-d8fa-49f3-ada4-7f42fd7f4057",
+      "name": "hip_conv_dgrad_fma_2d_rdna.bf16_nhwc_tile_n32",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 32
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a3f152a7-7e6c-4fa6-9a7a-92b2c378f094",
+      "name": "hip_conv_dgrad_fma_2d_rdna.bf16_nhwc_tile_n64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 64
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 64
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "18544455-79d4-433f-b368-4e12b53881cf",
+      "name": "hip_conv_dgrad_fma_2d_rdna.bf16_nhwc_tile_n128",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFmaIgemm.cpp",
+        "entry": "ConvDgradFmaIgemm",
+        "build": {
+          "defines": {
+            "CONV_DTYPE": 2,
+            "CONV_CHANNELS_LAST": 1,
+            "TILE_N": 128
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_igemm",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "tile_n": 128
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
+  ]
+}

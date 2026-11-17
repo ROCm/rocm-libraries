@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "286c2477-8780-4239-9d5c-b68e5975ad97",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.hip_conv_dgrad_fma_2d_rdna.kernel_match"
+}
