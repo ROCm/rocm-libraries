@@ -976,8 +976,8 @@ CK_TILE_DEVICE void run(Args a)
                         const F2 x = __builtin_elementwise_fma(
                             F2{logits[n][i], logits[n][i + 1]},
                             F2{scale2, scale2},
-                            F2{-(Generic && !FiniteBase && base == -INFINITY ? 0.f : base),
-                               -(Generic && !FiniteBase && base == -INFINITY ? 0.f : base)});
+                            F2{-(Generic && !FiniteBase && -base == INFINITY ? 0.f : base),
+                               -(Generic && !FiniteBase && -base == INFINITY ? 0.f : base)});
                         const float e0                    = __builtin_amdgcn_exp2f(x[0]);
                         const F2 e                        = {e0, __builtin_amdgcn_exp2f(x[1])};
                         p[qm][n / 2][(n % 2) * 8 + i]     = T(e[0]);
@@ -1019,9 +1019,9 @@ CK_TILE_DEVICE void run(Args a)
             float base = maxima[qm];
             const bool initialized =
                 (CooperativePrefetch ? decltype(first_iteration)::value : start == begin) ||
-                (Generic && !FiniteBase && base == -INFINITY);
+                (Generic && !FiniteBase && -base == INFINITY);
             if((CooperativePrefetch ? decltype(first_iteration)::value : start == begin) ||
-               (Generic && !FiniteBase && base == -INFINITY))
+               (Generic && !FiniteBase && -base == INFINITY))
             {
                 if constexpr(InitialScore && !EagerMax)
                 {
@@ -1341,14 +1341,14 @@ CK_TILE_DEVICE void run(Args a)
         // Merge the zero-valued virtual token after the attention loop. Each
         // lane holds half of the denominator until the epilogue reduction.
         const float sink = a.sink[head] * ck_tile::log2e_v<float>;
-        if(sink != -INFINITY)
+        if(-sink != INFINITY)
         {
 #pragma unroll
             for(int qm = 0; qm < QM; ++qm)
             {
                 const float base   = maxima[qm];
                 const float next   = __builtin_isnan(sink) ? sink : max(base, sink);
-                const float alpha  = next == INFINITY || base == -INFINITY
+                const float alpha  = next == INFINITY || -base == INFINITY
                                          ? 0.f
                                          : __builtin_amdgcn_exp2f(base - next);
                 const float weight = sink == INFINITY ? 1.f : __builtin_amdgcn_exp2f(sink - next);

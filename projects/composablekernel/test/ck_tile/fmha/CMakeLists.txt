@@ -119,7 +119,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
     add_gtest_executable(test_ck_tile_fmha_qr_tdm_lds_padding
         test_qr_tdm_lds_padding.cpp)
-    target_link_libraries(test_ck_tile_fmha_qr_tdm_lds_padding PRIVATE utility)
     # the qr_tdm pipeline folds log2(e) into scale_s and has no exp() fallback
     target_compile_definitions(test_ck_tile_fmha_qr_tdm_lds_padding
         PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
