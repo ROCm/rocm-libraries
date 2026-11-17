@@ -198,25 +198,27 @@ void expectGpuMatchesCpu(const flatbuffers::FlatBufferBuilder& graph,
                         actual.size() * sizeof(float),
                         hipMemcpyDeviceToHost),
               hipSuccess);
-    // Loosest per-op SDK tolerance across the graph's nodes, as reference validation uses
-    const float tolerance = defaultTolerance(wrapper, DataType::FLOAT);
+    // Loosest per-op SDK tolerance across the graph's nodes, as an absolute bound
+    const float tolerance = defaultTolerance(wrapper, DataType::FLOAT).atol;
     for(size_t i = 0; i < expected.size(); ++i)
     {
         EXPECT_NEAR(actual[i], expected[i], tolerance) << "output element " << i;
     }
 }
 
-// conv x [2, 3, 6, 6] * w [4, 3, 3, 3] -> [2, 4, 6, 6], then `first` and `second` with per-channel
-// operands, as in the CPU executor's ConvAddMulFusedGraph and ConvMaxMinFusedGraph.
-flatbuffers::FlatBufferBuilder convThenTwoPointwise(PointwiseMode first, PointwiseMode second)
+} // namespace
+
+// conv, then an add and a multiply with per-channel operands, as in the CPU executor's
+// ConvAddMulFusedGraph.
+TEST(TestGpuFusedOperationsGraphExecutor, ConvAddMulMatchesCpu)
 {
     constexpr int64_t X_UID = 1;
     constexpr int64_t W_UID = 2;
     constexpr int64_t CONV_UID = 3;
-    constexpr int64_t FIRST_OPERAND_UID = 4;
-    constexpr int64_t FIRST_OUTPUT_UID = 5;
-    constexpr int64_t SECOND_OPERAND_UID = 6;
-    constexpr int64_t SECOND_OUTPUT_UID = 7;
+    constexpr int64_t ADD_OPERAND_UID = 4;
+    constexpr int64_t ADDED_UID = 5;
+    constexpr int64_t MUL_OPERAND_UID = 6;
+    constexpr int64_t SCALED_UID = 7;
     const std::vector<int64_t> xDims = {2, 3, 6, 6};
     const std::vector<int64_t> wDims = {4, 3, 3, 3};
     const std::vector<int64_t> yDims = {2, 4, 6, 6};
@@ -235,32 +237,10 @@ flatbuffers::FlatBufferBuilder convThenTwoPointwise(PointwiseMode first, Pointwi
                                          {1, 1},
                                          {1, 1},
                                          DataType::FLOAT);
-    const auto firstApplied
-        = appendPointwise(conv, first, CONV_UID, FIRST_OUTPUT_UID, FIRST_OPERAND_UID, perChannel);
-    return appendPointwise(
-        firstApplied, second, FIRST_OUTPUT_UID, SECOND_OUTPUT_UID, SECOND_OPERAND_UID, perChannel);
-}
-
-} // namespace
-
-TEST(TestGpuFusedOperationsGraphExecutor, ConvAddMulMatchesCpu)
-{
-    expectGpuMatchesCpu(convThenTwoPointwise(PointwiseMode::ADD, PointwiseMode::MUL));
-}
-
-// The GPU reference has no MAX_OP or MIN_OP kernel yet (see TestPointwiseReferenceParity), so it
-// declines this graph; once it takes it, the executors are compared.
-TEST(TestGpuFusedOperationsGraphExecutor, ConvMaxMinMatchesCpu)
-{
-    const auto graph = convThenTwoPointwise(PointwiseMode::MAX_OP, PointwiseMode::MIN_OP);
-
-    GpuReferenceGraphExecutor gpuExecutor;
-    if(!gpuExecutor.isApplicable(graph.GetBufferPointer(), graph.GetSize()))
-    {
-        GTEST_SKIP() << "The GPU reference declines MAX_OP and MIN_OP (known pointwise gap)";
-    }
-
-    expectGpuMatchesCpu(graph);
+    const auto added = appendPointwise(
+        conv, PointwiseMode::ADD, CONV_UID, ADDED_UID, ADD_OPERAND_UID, perChannel);
+    expectGpuMatchesCpu(appendPointwise(
+        added, PointwiseMode::MUL, ADDED_UID, SCALED_UID, MUL_OPERAND_UID, perChannel));
 }
 
 // conv, then a bias add, then ReLU: the three-node graph the engines fuse.

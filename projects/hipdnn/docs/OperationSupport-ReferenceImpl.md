@@ -154,8 +154,9 @@ formats `FP8_E4M3` and `FP8_E5M2`:
   `CMP_*` modes and `BINARY_SELECT`; every other mode is declined. `ABS` and `NEG` are declined
   because their result overflows `int32` for `INT32_MIN`.
 - BOOLEAN supports `BINARY_SELECT` and the logical modes.
-- FP8 inputs compute in FP32 and produce an output in the input's FP8 format or FP32. They support
-  the unary and binary modes, `CMP_GT` and `BINARY_SELECT`; the other `CMP_*` modes are declined.
+- FP8 inputs compute in FP32. The unary and binary modes other than `GEN_INDEX`, `LOGICAL_*` and
+  `CMP_*` produce an output in the input's FP8 format or FP32. `CMP_GT` produces BOOLEAN and
+  `BINARY_SELECT` the input's FP8 format; `GEN_INDEX` and the other `CMP_*` modes are declined.
 - `CMP_GT` also accepts inputs of different floating-point types: FP32 with FP16, FP32 with BFP16,
   FP16 with BFP16, and FP32 with FP64, each in both orders. Other pairs, such as FP16 with FP64 or
   BFP16 with FP64, and the other `CMP_*` modes with mixed inputs, are declined.

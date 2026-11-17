@@ -241,6 +241,8 @@ Backward Weights nodes with such an operand.
 `TestPointwiseReferenceParity` (`tests/TestGpuPointwiseSignatureKey.cpp`) asks both executors about every mode
 and datatype tuple either registry can express, and fails when the two differ in a way `knownGaps()` does not list
 or when a listed difference no longer exists. Update these two documents together with `knownGaps()`.
+`TestGpuPointwiseExecutor` in the same file runs one mode of every datatype tuple the GPU registers on the device
+and compares the result with the CPU reference.
 
 ### Reduction Modes
 

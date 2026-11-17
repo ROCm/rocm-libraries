@@ -4,7 +4,8 @@
 // The CPU and GPU pointwise references list their modes and datatype tuples in unrelated places,
 // and the GPU key has no mode. TestPointwiseReferenceParity asks both executors about every
 // (mode, datatype tuple) either registry can express. Each difference has to be listed in
-// knownGaps(), and each listed gap has to still be a difference.
+// knownGaps(), and each listed gap has to still be a difference. TestGpuPointwiseExecutor runs one
+// mode of every tuple the GPU registers and compares it with the CPU reference.
 
 #include <gtest/gtest.h>
 
@@ -14,16 +15,27 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <type_traits>
+#include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
@@ -31,12 +43,20 @@
 #include "harness/reference-validation/ReferenceOpCoverage.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
+using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter;
 using hipdnn_integration_tests::ReferenceExecutorType;
 using hipdnn_integration_tests::bundle::referenceSupportedOps;
 using hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor;
 using hipdnn_integration_tests::gpu_graph_executor::detail::GpuPointwiseSignatureKey;
 using hipdnn_test_sdk::detail::PointwiseSignatureKey;
+using hipdnn_test_sdk::utilities::CpuFpReferenceValidation;
+using hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl;
+using hipdnn_test_sdk::utilities::datatypeToNativeVariant;
+using hipdnn_test_sdk::utilities::pointwise::getTolerance;
+
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
 
 namespace
 {
@@ -49,6 +69,11 @@ constexpr DataType K_INT32 = DataType::INT32;
 constexpr DataType K_FP8_E4M3 = DataType::FP8_E4M3;
 constexpr DataType K_FP8_E5M2 = DataType::FP8_E5M2;
 constexpr DataType K_NONE = DataType::UNSET;
+
+// datatypeToNativeVariant() holds more types than the GPU kernels take
+template <typename T>
+constexpr bool IS_GPU_TYPE
+    = std::is_same_v<T, float> || std::is_same_v<T, HalfType> || std::is_same_v<T, BFloat16Type>;
 
 // What the references dispatch on. An operand a mode does not use is UNSET; with the mode UNSET it
 // is a datatype signature.
@@ -116,6 +141,11 @@ std::string describe(const PointwiseTuple& tuple)
     return text.str();
 }
 
+constexpr int64_t IN0_UID = 1;
+constexpr int64_t OUT_UID = 2;
+constexpr int64_t IN1_UID = 3;
+constexpr int64_t IN2_UID = 4;
+
 // A single-node pointwise graph for `tuple`; `dims` is the first input and the output,
 // `operandDims` the other inputs. createPointwiseGraph() gives input and output one datatype, so it
 // cannot express a mixed tuple.
@@ -123,11 +153,6 @@ flatbuffers::FlatBufferBuilder buildGraph(const PointwiseTuple& tuple,
                                           const std::vector<int64_t>& dims,
                                           const std::vector<int64_t>& operandDims)
 {
-    constexpr int64_t IN0_UID = 1;
-    constexpr int64_t OUT_UID = 2;
-    constexpr int64_t IN1_UID = 3;
-    constexpr int64_t IN2_UID = 4;
-
     flatbuffers::FlatBufferBuilder builder;
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const auto operandStrides = hipdnn_data_sdk::utilities::generateStrides(operandDims);
@@ -227,6 +252,20 @@ std::set<PointwiseTuple> gpuCandidateTuples()
                                              key.outputDataType,
                                              key.computeDataType});
             }
+        }
+    }
+    return tuples;
+}
+
+// One mode of each arity stands in for all of them: NEG for unary tuples, SUB for binary ones.
+std::vector<PointwiseTuple> executedTuples()
+{
+    std::vector<PointwiseTuple> tuples;
+    for(const auto& tuple : gpuCandidateTuples())
+    {
+        if(tuple.mode == PointwiseMode::NEG || tuple.mode == PointwiseMode::SUB)
+        {
+            tuples.push_back(tuple);
         }
     }
     return tuples;
@@ -605,3 +644,82 @@ TEST(TestPointwiseReferenceParity, FiveDimensionCapDeclinesDeeperGraphsWhileTheC
             << describe(tuple) << " at 6-D";
     }
 }
+
+// The parity tests only ask isApplicable(); a plan that passes its datatypes to the kernel in the
+// wrong order is only seen when it runs. The CPU reference is the oracle because the CPU executor
+// declines the GPU-only tuples.
+class TestGpuPointwiseExecutor : public ::testing::TestWithParam<PointwiseTuple>
+{
+};
+
+TEST_P(TestGpuPointwiseExecutor, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto& tuple = GetParam();
+    const bool binary = tuple.in1 != K_NONE;
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto graph = buildGraph(tuple, dims, dims);
+    GpuReferenceGraphExecutor gpuExecutor;
+
+    // A unary tuple has no second input, so in0's type stands in for it.
+    std::visit(
+        [&](auto in0, auto in1, auto out) {
+            using In0 = decltype(in0);
+            using In1 = decltype(in1);
+            using Out = decltype(out);
+            if constexpr(IS_GPU_TYPE<In0> && IS_GPU_TYPE<In1> && IS_GPU_TYPE<Out>)
+            {
+                Tensor<In0> input0(dims, strides);
+                Tensor<In1> input1(dims, strides);
+                Tensor<Out> gpuOutput(dims, strides);
+                Tensor<Out> cpuOutput(dims, strides);
+                input0.fillTensorWithRandomValues(-1.0f, 1.0f, 42);
+                input1.fillTensorWithRandomValues(-1.0f, 1.0f, 43);
+
+                std::unordered_map<int64_t, void*> variantPack
+                    = {{IN0_UID, input0.rawDeviceData()}, {OUT_UID, gpuOutput.rawDeviceData()}};
+                if(binary)
+                {
+                    variantPack[IN1_UID] = input1.rawDeviceData();
+                    CpuReferencePointwiseImpl<Out, double>::pointwiseCompute(
+                        tuple.mode, cpuOutput, input0, input1);
+                }
+                else
+                {
+                    CpuReferencePointwiseImpl<Out, double>::pointwiseCompute(
+                        tuple.mode, cpuOutput, input0);
+                }
+                gpuExecutor.execute(graph.GetBufferPointer(), graph.GetSize(), variantPack);
+                gpuOutput.markDeviceModified();
+
+                const float tolerance = getTolerance<Out>();
+                const CpuFpReferenceValidation<Out> validation(tolerance, tolerance);
+                EXPECT_TRUE(validation.allClose(cpuOutput, gpuOutput));
+            }
+            else
+            {
+                ADD_FAILURE() << "A datatype of this tuple is not covered by IS_GPU_TYPE";
+            }
+        },
+        datatypeToNativeVariant(tuple.in0),
+        datatypeToNativeVariant(binary ? tuple.in1 : tuple.in0),
+        datatypeToNativeVariant(tuple.out));
+}
+
+// The name holds the mode and every datatype, so no two tuples share one.
+INSTANTIATE_TEST_SUITE_P(Registered,
+                         TestGpuPointwiseExecutor,
+                         ::testing::ValuesIn(executedTuples()),
+                         [](const ::testing::TestParamInfo<PointwiseTuple>& info) {
+                             const auto& tuple = info.param;
+                             std::string name = EnumNamePointwiseMode(tuple.mode);
+                             name += std::string("_") + EnumNameDataType(tuple.in0);
+                             if(tuple.in1 != K_NONE)
+                             {
+                                 name += std::string("_") + EnumNameDataType(tuple.in1);
+                             }
+                             return name + "_" + EnumNameDataType(tuple.out) + "_"
+                                    + EnumNameDataType(tuple.compute);
+                         });
