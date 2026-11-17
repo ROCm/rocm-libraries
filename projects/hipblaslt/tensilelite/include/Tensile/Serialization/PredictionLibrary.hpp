@@ -214,22 +214,9 @@ namespace TensileLite
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
 
 #if ORIGAMI_ENABLE_NN
-                    const std::string logicStem = logic_stem_from_path(ctx->filename);
-                    const std::string dataDir   = directory_from_path(ctx->filename);
-                    lib.nn_models = origami::nn::load_models_for_logic(logicStem, dataDir);
-                    if(const char* diag = std::getenv("ORIGAMI_NN_DIAG"))
-                    {
-                        if(diag[0] != '\0' && std::strcmp(diag, "0") != 0)
-                        {
-                            std::fprintf(stderr,
-                                         "[ORIGAMI_NN_DIAG] PredictionLibrary stem=%s dir=%s "
-                                         "tilewright_handle=%d\n",
-                                         logicStem.c_str(),
-                                         dataDir.c_str(),
-                                         lib.nn_models.tilewright);
-                            std::fflush(stderr);
-                        }
-                    }
+                    // Weights load on first use (see LazyNnModels), not here.
+                    lib.nn_models.logicStem  = logic_stem_from_path(ctx->filename);
+                    lib.nn_models.weightsDir = directory_from_path(ctx->filename);
 #endif
                 }
             }

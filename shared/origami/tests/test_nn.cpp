@@ -92,6 +92,70 @@ bool tilewright_weights_available() {
     }                                                                                     \
   } while (0)
 
+TEST_CASE("NN: nn_inference_requested follows the resolved mode", "[nn]") {
+  ScopedEnvVar mode("ORIGAMI_INFERENCE_MODE", "analytical");
+  REQUIRE_FALSE(origami::nn::nn_inference_requested());
+  REQUIRE_FALSE(origami::nn::nn_inference_requested(origami::inference_mode_t::analytical));
+  REQUIRE(origami::nn::nn_inference_requested(origami::inference_mode_t::nn));
+  REQUIRE(origami::nn::nn_inference_requested(origami::inference_mode_t::nn_fallback));
+
+  // The environment override applies to a call that asked for the default.
+  mode.set("nn_fallback");
+  REQUIRE(origami::nn::nn_inference_requested());
+  mode.set("nn");
+  REQUIRE(origami::nn::nn_inference_requested());
+}
+
+TEST_CASE("NN: a missing index lookup is cached", "[nn][tilewright]") {
+  SKIP_UNLESS_TW_WEIGHTS();
+
+  // A loadable manifest in a scratch directory that has no index yet.
+  ScratchManifest good(origami::nn::features::gemm_tilewright::feature_names_hash);
+  const std::filesystem::path manifest(good.path());
+  const std::string dir  = manifest.parent_path().string();
+  const std::string name = manifest.filename().string();
+
+  REQUIRE(origami::nn::load_models_for_logic("stem_a", dir).tilewright ==
+          origami::nn::invalid_handle);
+
+  // Now the index names the manifest for stem_a. The earlier miss is remembered for the
+  // process, so many libraries asking for the same stem do not each read the index. Weights
+  // are expected to exist before the first lookup.
+  {
+    std::ofstream out(std::filesystem::path(dir) / "origami_nn_index");
+    out << "stem_a tilewright " << name << "\n" << "stem_b tilewright " << name << "\n";
+  }
+  REQUIRE(origami::nn::load_models_for_logic("stem_a", dir).tilewright ==
+          origami::nn::invalid_handle);
+
+  // A stem that was never looked up reads the index and loads the same manifest, so the miss
+  // above came from the cache and not from an unloadable file.
+  const origami::nn::model_handle_t handle = origami::nn::load_models_for_logic("stem_b", dir).tilewright;
+  REQUIRE(handle >= 0);
+  origami::nn::unload_model(handle);
+}
+
+TEST_CASE("NN: a rejected manifest shared by two stems gives no model for either",
+          "[nn][tilewright]") {
+  SKIP_UNLESS_TW_WEIGHTS();
+
+  // The failed load is remembered, so the second stem does not parse the manifest again; the
+  // observable result is that both stems report no model.
+  ScratchManifest bad("0000000000000000");
+  const std::string manifest_name = std::filesystem::path(bad.path()).filename().string();
+  // The manifest and its sidecar live in the ScratchManifest directory; put the index there.
+  const std::string dir = std::filesystem::path(bad.path()).parent_path().string();
+  {
+    std::ofstream out(std::filesystem::path(dir) / "origami_nn_index");
+    out << "stem_x tilewright " << manifest_name << "\n"
+        << "stem_y tilewright " << manifest_name << "\n";
+  }
+  REQUIRE(origami::nn::load_models_for_logic("stem_x", dir).tilewright ==
+          origami::nn::invalid_handle);
+  REQUIRE(origami::nn::load_models_for_logic("stem_y", dir).tilewright ==
+          origami::nn::invalid_handle);
+}
+
 TEST_CASE("NN: rank_options_t defaults", "[nn]") {
   origami::rank_options_t options;
   REQUIRE(options.analytical_model == origami::model_t::gemm);

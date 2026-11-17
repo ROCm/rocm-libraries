@@ -157,3 +157,13 @@ rank_options_t resolve_rank_options(rank_options_t options) {
 }
 
 }  // namespace origami::nn::detail
+
+namespace origami::nn {
+
+bool nn_inference_requested(inference_mode_t requested) {
+  rank_options_t options;
+  options.inference = requested;
+  return detail::resolve_rank_options(options).inference != inference_mode_t::analytical;
+}
+
+}  // namespace origami::nn

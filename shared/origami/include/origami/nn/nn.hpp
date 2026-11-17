@@ -31,6 +31,7 @@
 #endif
 
 #include "origami/nn/types.hpp"
+#include "origami/types.hpp"
 #include "origami/origami_export.h"
 
 #include <string>
@@ -45,6 +46,11 @@ ORIGAMI_EXPORT model_handle_t load_model_by_index(const std::string& logic_stem,
 
 ORIGAMI_EXPORT library_models_t load_models_for_logic(const std::string& logic_stem,
                                                       const std::string& hint_dir = "");
+
+/// True when rank_configs would use ML for a call that requests `requested`, after the
+/// ORIGAMI_INFERENCE_MODE override is applied. Callers use it to defer loading weights until
+/// a call can actually use them; the default mode is analytical.
+ORIGAMI_EXPORT bool nn_inference_requested(inference_mode_t requested = inference_mode_t::analytical);
 
 ORIGAMI_EXPORT void unload_model(model_handle_t handle);
 
