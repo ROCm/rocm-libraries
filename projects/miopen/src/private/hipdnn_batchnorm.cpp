@@ -392,7 +392,8 @@ bool HasSolverDataTypes(const std::vector<TensorInfo>& tensors)
                        [](const TensorInfo& tensor) { return tensor.dataType == miopenFloat; });
 }
 
-// The activations MIOpen's spatial training and inference solvers accept.
+// The activations MIOpen's spatial training, inference and backward solvers
+// accept.
 bool IsSolverActivation(miopenActivationMode_t act)
 {
     return act == miopenActivationPASTHRU || act == miopenActivationRELU ||
@@ -400,11 +401,9 @@ bool IsSolverActivation(miopenActivationMode_t act)
 }
 
 // When no MIOpen solver applies, MIOpen fails with NotImplemented ("No solver
-// found"), so the forwarded call does too. Training has a spatial and a
-// per-activation solver, and only the spatial one limits the activation.
-// Inference has one solver for both modes, which limits it. Backward has a
-// spatial and a per-activation solver, and the per-activation one accepts
-// spatial problems with any activation, so backward never fails on one.
+// found"), so the forwarded call does too. Training and backward each have a
+// spatial and a per-activation solver, and only the spatial one limits the
+// activation. Inference has one solver for both modes, which limits it.
 miopenStatus_t CheckSolverExists(const BnProblem& problem)
 {
     if(!HasSolverDataTypes(problem.tensors))
@@ -413,11 +412,13 @@ miopenStatus_t CheckSolverExists(const BnProblem& problem)
     bool limitsActivation = false;
     switch(problem.kind)
     {
-    case GraphKind::BnFwdTraining: limitsActivation = problem.bnMode == miopenBNSpatial; break;
-    case GraphKind::BnFwdInference:
-    case GraphKind::BnFwdInferenceInvVar: limitsActivation = true; break;
+    case GraphKind::BnFwdTraining:
     case GraphKind::BnBackward:
     case GraphKind::BnBackwardActivation:
+        limitsActivation = problem.bnMode == miopenBNSpatial;
+        break;
+    case GraphKind::BnFwdInference:
+    case GraphKind::BnFwdInferenceInvVar: limitsActivation = true; break;
     case GraphKind::ConvFprop:
     case GraphKind::ConvDgrad:
     case GraphKind::ConvWgrad:

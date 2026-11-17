@@ -2298,6 +2298,34 @@ struct RawProblem
                                                 variance.dev.get());
     }
 
+    miopenStatus_t BwdActivation(miopen::Handle& handle)
+    {
+        return miopenBatchNormBackwardActivation(&handle,
+                                                 mode,
+                                                 &one,
+                                                 &zero,
+                                                 &one,
+                                                 &zero,
+                                                 &x.desc,
+                                                 x.dev.get(),
+                                                 &dy.desc,
+                                                 dy.dev.get(),
+                                                 &dx.desc,
+                                                 dx.dev.get(),
+                                                 &scale.desc,
+                                                 &bias.desc,
+                                                 &mean.desc,
+                                                 &variance.desc,
+                                                 scale.dev.get(),
+                                                 bias.dev.get(),
+                                                 dscale.dev.get(),
+                                                 dbias.dev.get(),
+                                                 1e-5,
+                                                 mean.dev.get(),
+                                                 variance.dev.get(),
+                                                 activ.handle);
+    }
+
     miopenBatchNormMode_t mode = miopenBNSpatial;
     RawTensor x, y, dy, dx, scale, bias, mean, variance, dscale, dbias;
     hs::OwnedActivationDescriptor activ;
@@ -2341,6 +2369,16 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
         const auto result = hs::CaptureCall([&] { return p.Train(handle); });
         hs::ExpectStatusParity(
             "no_solver_tanh_train", result, miopenStatusNotImplemented, no_solver);
+    }
+    // MIOpen's per-activation backward solver once took spatial problems too,
+    // so this ran its kernel, which wrote dscale per element past the
+    // per-channel buffer and returned success.
+    {
+        SCOPED_TRACE("tanh bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.SetActivation(miopenActivationTANH);
+        const auto result = hs::CaptureCall([&] { return p.BwdActivation(handle); });
+        hs::ExpectStatusParity("no_solver_tanh_bwd", result, miopenStatusNotImplemented, no_solver);
     }
     {
         SCOPED_TRACE("unknown mode train");
