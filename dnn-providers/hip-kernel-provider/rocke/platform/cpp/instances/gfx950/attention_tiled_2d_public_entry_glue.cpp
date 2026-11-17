@@ -459,9 +459,8 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
         }
         if(spec->use_transposed_mask_once)
         {
-            rocke_g950_fail(b,
-                            ROCKE_ERR_VALUE,
-                            "use_additive_bias does not support use_transposed_mask_once");
+            rocke_g950_fail(
+                b, ROCKE_ERR_VALUE, "use_additive_bias does not support use_transposed_mask_once");
         }
         if(spec->use_mfma_32x32 && !spec->use_transposed_qk_32x32)
         {
