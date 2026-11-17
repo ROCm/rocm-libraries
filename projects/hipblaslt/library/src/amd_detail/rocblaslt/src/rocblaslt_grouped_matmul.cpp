@@ -253,6 +253,14 @@ namespace
             log_error(__func__, "grouped GEMM does not support epilogues or scaling other than MX");
             return rocblaslt_status_invalid_value;
         }
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_a2a(*desc, fusedInfo))
+        {
+            log_error(__func__, "grouped GEMM does not support a fused all-to-all");
+            return rocblaslt_status_invalid_value;
+        }
+#endif
         if(mx && kIsUniform(desc, matA) && uniformK(desc, matA) % mxBlock(desc) != 0)
         {
             log_error(__func__, "MX grouped GEMM needs K to be a multiple of the scale block size");

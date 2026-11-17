@@ -13,10 +13,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include <cstdint>
 #include <memory>
-#include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace TensileLite
@@ -51,8 +48,7 @@ namespace TensileLite
         {
             // sdmaPeers: device ids to enable P2P to and open one SDMA queue each for,
             // indexed by rank; the entry equal to deviceId is a loopback queue.
-            // sdmaRotate: steps each remote peer queue takes along the even xGMI engines
-            // (sdmaRotateEngine) from KFD's recommendation; the loopback queue uses engine 0.
+            // sdmaRotate: the `rotate` of sdmaQueueEngine.
             DeviceContext(int                     deviceId,
                           bool                    useDefaultStream,
                           size_t                  commFlagsBytes = 0,
@@ -81,25 +77,6 @@ namespace TensileLite
         constexpr size_t kCommFlagsBytes = kCommChannels * FUSED_A2A_FLAG_BLOCK_BYTES;
 
         constexpr int kFusedA2ASdmaRotateDefault = -1;
-
-        // Remote peer queue engine: `engine` moved `steps` places around the ring
-        // 2, 4, ..., 14. `xgmiEngines` is the node's NumSdmaXgmiEngines.
-        inline uint32_t sdmaRotateEngine(uint32_t engine, int steps, uint32_t xgmiEngines)
-        {
-            if(engine < 2 || engine > 14 || engine % 2 != 0)
-                throw std::runtime_error(
-                    "[fused-a2a] a remote peer queue requires an even xGMI SDMA engine in "
-                    "2..14; got "
-                    + std::to_string(engine) + ".");
-            if(steps != 0 && xgmiEngines != 14)
-                throw std::runtime_error(
-                    "[fused-a2a] --fused-a2a-sdma-rotate=" + std::to_string(steps)
-                    + " requires 14 xGMI SDMA engines; the node has " + std::to_string(xgmiEngines)
-                    + ". Use --fused-a2a-sdma-rotate=0.");
-            if(steps == 0)
-                return engine;
-            return 2 + 2 * ((((int)engine - 2) / 2 + steps % 7 + 7) % 7);
-        }
 
         template <typename F>
         void forEachDevice(std::vector<std::shared_ptr<DeviceContext>> const& devices, F&& f)
