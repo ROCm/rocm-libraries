@@ -41,10 +41,12 @@
  *        prepare and launch, against hipDNN's CPU reference wgrad accumulated in double.
  *
  * Every config of the catalog shipped for this device's architecture that serves a case runs on
- * it, in fp32, fp16 and bf16 (a layout no config ships for on the architecture is skipped): grouped layers of 4 channels a group (odd batch), both layouts,
- * dense layers with ragged rows (widths no multiple of a lane's columns), width stride 2, 1x1
- * (2-D and 1-D), 5x5, true convolution, height stride / dilation / padding, several splits folded in order, and a
- * tensor past 2 GiB of small images (sampled).
+ * it, in fp32, fp16 and bf16 (a layout no config ships for on the architecture is skipped):
+ * grouped layers of 4 channels a group (odd batch), both layouts, dense layers with ragged rows
+ * (widths no multiple of a lane's columns), width stride 2, 1x1 (2-D and 1-D), 5x5, true
+ * convolution, height stride / dilation / padding, several splits folded in order, depthwise
+ * layers in both layouts (3x3 and 5x5 at width stride 1 and 2, 7x7, 3-D, an inf at a row's end),
+ * and a tensor past 2 GiB of small images (sampled).
  *
  * Tolerance: the sum is fp32 over the images and positions, so each element is off by at most a
  * few units of fp32 rounding of the sum of its terms' magnitudes, plus two units of the element
@@ -331,6 +333,24 @@ std::vector<DeviceCase> deviceCases()
     auto convolution3d = conv(2, 8, 8, 2, {4, 6, 8}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, false);
     convolution3d.mode = ConvMode::CONVOLUTION;
     cases.push_back({"ThreeDConvolutionMode", convolution3d});
+    // Depthwise (one channel a group, the cb = kb = 1 set), both layouts: every filter class of
+    // the set, widths no multiple of a lane's columns, and 3-D.
+    const auto depthwise = [&cases](const std::string& name,
+                                    const std::vector<int64_t>& input,
+                                    const std::vector<int64_t>& filter,
+                                    const std::vector<int64_t>& pad,
+                                    const std::vector<int64_t>& stride) {
+        cases.push_back(
+            {"Depthwise" + name + "Nchw", conv(2, 16, 16, 16, input, filter, pad, stride, false)});
+        cases.push_back(
+            {"Depthwise" + name + "Nhwc", conv(2, 16, 16, 16, input, filter, pad, stride, true)});
+    };
+    depthwise("ThreeByThree", {13, 11}, {3, 3}, {1, 1}, {1, 1});
+    depthwise("ThreeByThreeStride2", {15, 17}, {3, 3}, {1, 1}, {2, 2});
+    depthwise("FiveByFive", {12, 14}, {5, 5}, {2, 2}, {1, 1});
+    depthwise("FiveByFiveStride2", {13, 15}, {5, 5}, {2, 2}, {2, 2});
+    depthwise("SevenBySeven", {12, 13}, {7, 7}, {3, 3}, {1, 1});
+    depthwise("ThreeD", {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1});
     return cases;
 }
 
@@ -530,6 +550,34 @@ TEST_P(TestGpuConvGroupValuWrwInf, BFloat16)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGroupValuWrwInf,
+                         ::testing::Values(false, true),
+                         [](const auto& info) { return info.param ? "Nhwc" : "Nchw"; });
+
+/// The same inf at a row's end, depthwise (one channel a group): the cb = kb = 1 set.
+class TestGpuConvGroupValuWrwDepthwiseInf : public ::testing::TestWithParam<bool>
+{
+};
+
+TEST_P(TestGpuConvGroupValuWrwDepthwiseInf, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(conv(2, 8, 8, 8, {7, 13}, {3, 3}, {1, 1}, {1, 1}, GetParam()), true);
+}
+
+TEST_P(TestGpuConvGroupValuWrwDepthwiseInf, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(conv(2, 8, 8, 8, {7, 13}, {3, 3}, {1, 1}, {1, 1}, GetParam()), true);
+}
+
+TEST_P(TestGpuConvGroupValuWrwDepthwiseInf, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(conv(2, 8, 8, 8, {7, 13}, {3, 3}, {1, 1}, {1, 1}, GetParam()), true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupValuWrwDepthwiseInf,
                          ::testing::Values(false, true),
                          [](const auto& info) { return info.param ? "Nhwc" : "Nchw"; });
 
