@@ -545,15 +545,16 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   add_dependencies(miopen-check fake_hipdnn_backend)
 
   # A backend hipDNN accepts whose hipdnnDestroy calls miopenDestroy. MODULE, with its import
-  # library in its own directory, for the same reasons as the fake above.
+  # library in its own directory, for the same reasons as the fake above. It needs no install
+  # RPATH: its one library dependency is MIOpen (hipdnn_frontend_dynamic is header-only), and
+  # only the probe loads it, after MIOpen is already in the process. TheRock's RPATH pass
+  # skips MODULE targets, so THEROCK_INSTALL_RPATH_ORIGIN would not be read here anyway.
   add_library(reentrant_hipdnn_backend MODULE forwarding_failure/reentrant_hipdnn_backend.cpp)
   target_link_libraries(reentrant_hipdnn_backend PRIVATE MIOpen hipdnn_frontend_dynamic)
   set_target_properties(reentrant_hipdnn_backend PROPERTIES
     OUTPUT_NAME hipdnn_backend
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend"
-    THEROCK_INSTALL_RPATH_ORIGIN
-      "${CMAKE_INSTALL_BINDIR}/${MIOPEN_WRAPPER_TESTS_SUBDIR}/reentrant_hipdnn_backend")
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend")
   add_dependencies(miopen-tests reentrant_hipdnn_backend)
   add_dependencies(miopen-check reentrant_hipdnn_backend)
 
