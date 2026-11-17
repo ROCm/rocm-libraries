@@ -157,6 +157,14 @@ class ForwardingFailureModesTest(unittest.TestCase):
         self.assertEqual(len(run.lines_starting(UNAVAILABLE)), 1, run.stderr)
         self.assertEqual(len(run.lines_starting(FORWARDED_FAILURE)), 3, run.stderr)
 
+    def test_refused_backend_fails_every_forwarded_batchnorm_call(self):
+        run = self.run_probe(["batchnorm"], FORWARDING_ON)
+        self.assertTrue(run.loaded_fake_backend(), run.stderr)
+        for step in ("bn_train", "bn_infer", "bn_backward"):
+            self.assertEqual(run.statuses(step), [INTERNAL_ERROR], run.stderr)
+        self.assertEqual(len(run.lines_starting(UNAVAILABLE)), 1, run.stderr)
+        self.assertEqual(len(run.lines_starting(FORWARDED_FAILURE)), 3, run.stderr)
+
     def test_trace_names_the_unavailable_backend_as_the_reason(self):
         # Level 7 (Trace) includes everything level 6 prints.
         for level in ("6", "7"):

@@ -18,6 +18,9 @@
 //                      gives the handle a hipDNN handle for miopenDestroy to
 //                      destroy. Needs a GPU, so stops after printing a failed
 //                      miopenCreate.
+//  batchnorm           batchnorm forward training, forward inference with
+//                      estimates, and backward; prints bn_train, bn_infer and
+//                      bn_backward statuses
 //  repeat N            runs the previous step N more times
 
 #include <miopen/hipdnn_forwarding.h>
@@ -92,6 +95,82 @@ miopenStatus_t ConvForward(const ConvProblem& p, miopenHandle_t handle = nullptr
                                     0);
 }
 
+// x's descriptor serves every activation tensor, a 1x1x1x1 one every per-channel
+// one. As for ConvForward, neither route reads the data pointers: the MIOpen
+// route rejects the null handle, and the hipDNN route, with hipDNN unavailable,
+// fails first. Inference gets non-null estimates, as without them it runs
+// training instead.
+bool BatchNorm(const ConvProblem& p)
+{
+    miopenTensorDescriptor_t stats = nullptr;
+    if(!Check(miopenCreateTensorDescriptor(&stats), "create stats") ||
+       !Check(miopenSet4dTensorDescriptor(stats, miopenFloat, 1, 1, 1, 1), "set stats"))
+    {
+        if(stats != nullptr)
+            miopenDestroyTensorDescriptor(stats);
+        return false;
+    }
+    float alpha    = 1.0f;
+    float beta     = 0.0f;
+    float estimate = 0.0f;
+
+    const miopenStatus_t train = miopenBatchNormalizationForwardTraining(nullptr,
+                                                                         miopenBNSpatial,
+                                                                         &alpha,
+                                                                         &beta,
+                                                                         p.x,
+                                                                         nullptr,
+                                                                         p.x,
+                                                                         nullptr,
+                                                                         stats,
+                                                                         nullptr,
+                                                                         nullptr,
+                                                                         0.0,
+                                                                         nullptr,
+                                                                         nullptr,
+                                                                         1e-5,
+                                                                         nullptr,
+                                                                         nullptr);
+    std::printf("bn_train=%d\n", static_cast<int>(train));
+    const miopenStatus_t infer = miopenBatchNormalizationForwardInference(nullptr,
+                                                                          miopenBNSpatial,
+                                                                          &alpha,
+                                                                          &beta,
+                                                                          p.x,
+                                                                          nullptr,
+                                                                          p.x,
+                                                                          nullptr,
+                                                                          stats,
+                                                                          nullptr,
+                                                                          nullptr,
+                                                                          &estimate,
+                                                                          &estimate,
+                                                                          1e-5);
+    std::printf("bn_infer=%d\n", static_cast<int>(infer));
+    const miopenStatus_t backward = miopenBatchNormalizationBackward(nullptr,
+                                                                     miopenBNSpatial,
+                                                                     &alpha,
+                                                                     &beta,
+                                                                     &alpha,
+                                                                     &beta,
+                                                                     p.x,
+                                                                     nullptr,
+                                                                     p.x,
+                                                                     nullptr,
+                                                                     p.x,
+                                                                     nullptr,
+                                                                     stats,
+                                                                     nullptr,
+                                                                     nullptr,
+                                                                     nullptr,
+                                                                     1e-5,
+                                                                     nullptr,
+                                                                     nullptr);
+    std::printf("bn_backward=%d\n", static_cast<int>(backward));
+    miopenDestroyTensorDescriptor(stats);
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -130,6 +209,11 @@ int main(int argc, char** argv)
             std::printf("forward_with_handle=%d\n", static_cast<int>(ConvForward(problem, handle)));
             std::fflush(stdout);
             std::printf("destroy=%d\n", static_cast<int>(miopenDestroy(handle)));
+        }
+        else if(step == "batchnorm")
+        {
+            if(!ensureProblem() || !BatchNorm(problem))
+                return false;
         }
         else if(step == "error_string")
         {
