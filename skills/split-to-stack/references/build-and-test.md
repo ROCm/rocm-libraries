@@ -20,7 +20,7 @@ Write `stack.md`: each branch with its SHA and notes. Keep it current after ever
 
 Dependents are restacked, never re-cut. After every successful build, replay each one, bottom first, in `$WT` without moving any branch: `git -C "$WT" switch --detach <its original SHA>`, then `git -C "$WT" rebase --onto <new parent> <old parent>`. The first dependent's old parent is S and its new parent is `$BR(top)`; each next one uses the previous dependent's original and new SHA. Always start from the original SHAs recorded in `run.md`. Resolve conflicts by intent and record them in `stack.md`; a range that contains merges, or a genuinely ambiguous conflict, is `## Blocked`. Record each dependent's original and new SHA in `stack.md`.
 
-At the end of Phase 8 the orchestrator asks explicit permission, listing each dependent with both SHAs, then moves them in one `git update-ref --stdin` transaction that checks the original SHAs. A dependent checked out in a worktree is moved only if the user detaches it first.
+At the end of Phase 8 the orchestrator asks explicit permission, listing each dependent's branch, PR, owner and both SHAs, with approval per branch or **approve all listed**. Only when every required move is approved does it move them in one `git update-ref --stdin` transaction that checks the original SHAs; otherwise preserve the local result and stop before moving dependents. A dependent checked out in a worktree is moved only if the user detaches it first. This permission covers local moves only; pushing needs the approval in `publish-and-cleanup.md`.
 
 ## Phase 8: Verify
 
