@@ -51,24 +51,92 @@ _KNOBS = (
     ),
 )
 
-# Specs both validators refuse: (label, spec overrides, arch).
+# A 3-D and a depthwise problem for the ukd refusals.
+_P3D = ConvProblem(
+    N=2, Hi=8, Wi=8, C=64, K=128, Y=3, X=3, pH=1, pW=1, Di=8, Z=3, sD=1, pD=1, dD=1
+)
+_PDW = ConvProblem(N=2, Hi=14, Wi=14, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=32)
+
+# Specs both validators refuse: (label, spec overrides, arch, reason text).
+# Each case is refused by its own knob's check (the reason pins which), not by
+# an earlier gate.
 _REFUSED = (
-    ("ukd_pointwise", dict(uniform_k_decode=True, pointwise=True), _ARCH),
-    ("rtp2", dict(regt_prefetch=2), _ARCH),
-    ("rtp_gfx1100", dict(regt_prefetch=1), "gfx1100"),
-    # rtp pipeline: regt_prefetch is the 'mem' pipeline's K loop.
-    ("rtp_wavelet", dict(regt_prefetch=1, pipeline="wavelet"), _ARCH),
-    # rtp split_k_cluster: regt_prefetch does not combine with split_k_cluster.
-    ("rtp_split_k_cluster", dict(regt_prefetch=1, split_k_cluster=1), _ARCH),
-    ("lxs_k_pad", dict(lds_swizzle=True, lds_k_pad=0), _ARCH),
-    # lxs tile_k: lds_swizzle needs tile_k in 16/32/64/128 (got 24).
-    ("lxs_tile_k_bad", dict(lds_swizzle=True, tile_k=24), _ARCH),
-    ("gfr_wavelet", dict(group_fast_raster=True, pipeline="wavelet"), _ARCH),
-    # gfr chiplet_swizzle: WMMA gate rejects chiplet_swizzle before gfr_reason fires.
     (
-        "gfr_chiplet_swizzle",
-        dict(group_fast_raster=True, groups=2, chiplet_swizzle=True),
+        "ukd_pointwise",
+        dict(uniform_k_decode=True, pointwise=True),
         _ARCH,
+        "uniform_k_decode does not support the pointwise fast path",
+    ),
+    (
+        "ukd_3d",
+        dict(uniform_k_decode=True, problem=_P3D),
+        _ARCH,
+        "uniform_k_decode does not support 3-D convolution",
+    ),
+    (
+        "ukd_group_merge",
+        dict(
+            uniform_k_decode=True,
+            problem=_PDW,
+            group_merge=2,
+            vector_size_b=1,
+            tile_n=32,
+            warp_n=1,
+        ),
+        _ARCH,
+        "uniform_k_decode does not support group_merge",
+    ),
+    ("rtp2", dict(regt_prefetch=2), _ARCH, "regt_prefetch (fwd) must be 0 or 1"),
+    (
+        "rtp_gfx1100",
+        dict(regt_prefetch=1),
+        "gfx1100",
+        "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets",
+    ),
+    (
+        "rtp_wavelet",
+        dict(regt_prefetch=1, pipeline="wavelet"),
+        _ARCH,
+        "regt_prefetch is the 'mem' pipeline's K loop",
+    ),
+    (
+        "rtp_split_k_cluster",
+        dict(regt_prefetch=1, split_k_cluster=1),
+        _ARCH,
+        "regt_prefetch does not combine with split_k_cluster",
+    ),
+    (
+        "lxs_k_pad",
+        dict(lds_swizzle=True, lds_k_pad=0),
+        _ARCH,
+        "lds_swizzle sets the LDS layout itself",
+    ),
+    (
+        "lxs_tile_k_bad",
+        dict(lds_swizzle=True, tile_k=48),
+        _ARCH,
+        "lds_swizzle needs tile_k in 16/32/64/128 (got 48)",
+    ),
+    (
+        "gfr_wavelet",
+        dict(group_fast_raster=True, pipeline="wavelet"),
+        _ARCH,
+        "group_fast_raster does not support the wavelet pipeline",
+    ),
+    (
+        # chiplet_swizzle is an MFMA-only knob: on gfx1201 the WMMA gate
+        # refuses it first, so the case runs on a wave64 gfx950 spec.
+        "gfr_chiplet_swizzle",
+        dict(
+            group_fast_raster=True,
+            groups=2,
+            chiplet_swizzle=True,
+            wave_size=64,
+            tile_k=64,
+            warp_tile_k=32,
+        ),
+        "gfx950",
+        "group_fast_raster does not support chiplet_swizzle",
     ),
 )
 
@@ -147,6 +215,28 @@ class TestRdnaKnobSpecDict(unittest.TestCase):
             conv_implicit_gemm_spec_to_dict(spec)
 
 
+class TestRdnaKnobRefusals(unittest.TestCase):
+    """Python-only (runs in CI): each knob refusal fires with its own reason."""
+
+    def test_each_refusal_hits_its_own_check(self):
+        for label, kw, arch, why in _REFUSED:
+            with self.subTest(case=label):
+                ok, reason = is_valid_spec(_spec(**kw), arch)
+                self.assertFalse(ok)
+                self.assertIn(why, reason)
+
+    def test_the_admitted_twins_are_valid(self):
+        """The refused specs differ from valid ones only in the knob's trigger."""
+        for label, kw in (
+            ("ukd", dict(uniform_k_decode=True)),
+            ("lxs_tk64", dict(lds_swizzle=True, tile_k=64)),
+            ("gfr", dict(group_fast_raster=True, groups=2)),
+        ):
+            with self.subTest(case=label):
+                ok, reason = is_valid_spec(_spec(**kw), _ARCH)
+                self.assertTrue(ok, reason)
+
+
 @unittest.skipIf(
     importlib.util.find_spec("rocke_library_engine") is None,
     "rocke_library_engine extension not importable",
@@ -178,7 +268,7 @@ class TestRdnaKnobCrossEngine(unittest.TestCase):
     def test_refused_by_both(self):
         from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
-        for label, kw, arch in _REFUSED:
+        for label, kw, arch, _why in _REFUSED:
             spec = _spec(**kw)
             with self.subTest(case=label):
                 self.assertFalse(is_valid_spec(spec, arch)[0])
