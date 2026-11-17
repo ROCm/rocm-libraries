@@ -89,6 +89,30 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, 0.0));
 }
 
+// Narrower than one 8-pixel HIP block, so with the full ROI (x = 0) a horizontal flip mirrors each
+// row entirely within its partial last block.
+constexpr Size kNarrowWidthSize{1, 45, 6};
+
+std::vector<WithParams<FlipParams>> flip_configs() {
+    // Same-layout cases plus both directions of the fused output-layout conversion.
+    std::vector<WithParams<FlipParams>> configs = with_params<FlipParams>(
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {FlipParams{0, 0}, FlipParams{1, 0}, FlipParams{0, 1}, FlipParams{1, 1}});
+    // HIP only: HOST does not use the 8-pixel block, and its narrow horizontal flips are
+    // skip-listed separately.
+    for (const TestConfig& cfg :
+         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
+                      {Roi::Full}, {kNarrowWidthSize}))
+        if (cfg.backend == RPP_HIP_BACKEND) configs.push_back({cfg, FlipParams{1, 0}});
+    return configs;
+}
+
 }  // namespace
 
 // Full name:
@@ -101,16 +125,5 @@ TEST_P(FlipTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_flip<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, FlipTest,
-    ::testing::ValuesIn(with_params<FlipParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {FlipParams{0, 0}, FlipParams{1, 0}, FlipParams{0, 1}, FlipParams{1, 1}})),
-    op_config_name<FlipParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, FlipTest, ::testing::ValuesIn(flip_configs()),
+                         op_config_name<FlipParams>);
