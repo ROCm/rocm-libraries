@@ -27,7 +27,6 @@ from __future__ import print_function
 from os import path
 
 # Compatibility generator version written to logic and configuration files.
-# The installed distribution and native client append the selected ROCm identity.
 GENERATOR_VERSION = "5.0.0"
 __version__ = GENERATOR_VERSION
 

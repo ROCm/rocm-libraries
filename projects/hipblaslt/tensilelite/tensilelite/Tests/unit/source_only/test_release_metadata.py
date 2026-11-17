@@ -4,6 +4,7 @@
 """release_metadata.py: the version and commit CMake gives the native client."""
 
 import os
+import json
 from pathlib import Path
 import runpy
 import shutil
@@ -13,7 +14,6 @@ import sys
 import pytest
 
 from tensilelite import GENERATOR_VERSION
-
 
 pytestmark = pytest.mark.unit
 
@@ -34,8 +34,11 @@ def _copy_metadata(dest, version="5.0.0"):
 
 
 def _run(script, *args, **env):
-    base = {k: v for k, v in os.environ.items()
-            if k not in ("TENSILELITE_SOURCE_REVISION", "ROCM_PATH", "ROCM_VERSION")}
+    base = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("TENSILELITE_SOURCE_REVISION", "ROCM_PATH", "ROCM_VERSION")
+    }
     return subprocess.run(
         [sys.executable, str(script), *args],
         env={**base, **env},
@@ -68,6 +71,36 @@ def test_cli_reports_none_without_a_commit(tmp_path):
 
     assert _run(script, "version").stdout == "5.0.0\n"
     assert _run(script, "source-revision").stdout == "none\n"
+
+
+@pytest.mark.parametrize("revision", [None, _SHA, _SHA + ".dirty." + "a" * 12])
+def test_combined_metadata_matches_individual_queries(tmp_path, revision):
+    script = _copy_metadata(tmp_path / "src")
+    env = {"TENSILELITE_SOURCE_REVISION": revision} if revision else {}
+    result = _run(script, "metadata", **env)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "distribution_version": _run(script, "version", **env).stdout.strip(),
+        "source_revision": _run(script, "source-revision", **env).stdout.strip(),
+    }
+
+
+def test_combined_metadata_resolves_source_once(tmp_path, monkeypatch, capsys):
+    script = _copy_metadata(tmp_path / "src")
+    metadata = runpy.run_path(str(script))
+    calls = []
+
+    def resolve():
+        calls.append(True)
+        return _SHA
+
+    monkeypatch.setitem(metadata["main"].__globals__, "source_revision", resolve)
+    assert metadata["main"](["metadata"]) == 0
+    assert len(calls) == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "distribution_version": "5.0.0+g" + _SHA,
+        "source_revision": _SHA,
+    }
 
 
 def test_cli_ignores_the_rocm_environment(tmp_path):

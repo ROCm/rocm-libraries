@@ -17,6 +17,7 @@ CMake runs this file to give the native client the same values:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 import runpy
@@ -31,9 +32,7 @@ _source_revision = runpy.run_path(str(_SOURCE_ROOT / "tensilelite" / "_source_re
 def component_version() -> str:
     value = (_SOURCE_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     if not _COMPONENT_RELEASE_RE.fullmatch(value):
-        raise RuntimeError(
-            "TensileLite VERSION must contain an X.Y.Z release; " f"got {value!r}"
-        )
+        raise RuntimeError("TensileLite VERSION must contain an X.Y.Z release; " f"got {value!r}")
     return value
 
 
@@ -51,13 +50,22 @@ def distribution_version(revision: Optional[str]) -> str:
 
 
 def main(argv: list[str]) -> int:
-    commands = ("version", "source-revision")
+    commands = ("version", "source-revision", "metadata")
     if len(argv) != 1 or argv[0] not in commands:
         print(f"usage: {Path(sys.argv[0]).name} {{{'|'.join(commands)}}}", file=sys.stderr)
         return 2
     revision = source_revision()
     if argv[0] == "version":
         print(distribution_version(revision))
+    elif argv[0] == "metadata":
+        print(
+            json.dumps(
+                {
+                    "distribution_version": distribution_version(revision),
+                    "source_revision": revision or "none",
+                }
+            )
+        )
     else:
         print(revision or "none")
     return 0

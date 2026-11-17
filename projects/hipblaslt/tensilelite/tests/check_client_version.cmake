@@ -2,9 +2,22 @@
 # SPDX-License-Identifier: MIT
 
 # Runs one tensilelite-client identity query and compares its single line of
-# output exactly with the value CMake computed at configure time.
+# output exactly with the saved final build metadata.
 #   -DCLIENT=<path> -DQUERY=<--version|--source-revision|--build-rocm> -DEXPECTED=<value>
 
+if(METADATA)
+    file(READ "${METADATA}" _metadata)
+    if(QUERY STREQUAL "--version")
+        set(_key distribution_version)
+    elseif(QUERY STREQUAL "--source-revision")
+        set(_key source_revision)
+    elseif(QUERY STREQUAL "--build-rocm")
+        set(_key build_rocm)
+    else()
+        message(FATAL_ERROR "Unsupported identity query: ${QUERY}")
+    endif()
+    string(JSON EXPECTED GET "${_metadata}" "${_key}")
+endif()
 if(NOT CLIENT OR NOT QUERY OR NOT DEFINED EXPECTED OR EXPECTED STREQUAL "")
     message(FATAL_ERROR "CLIENT, QUERY and EXPECTED are required")
 endif()
