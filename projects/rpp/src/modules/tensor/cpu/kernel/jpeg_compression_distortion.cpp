@@ -305,7 +305,7 @@ inline void quantize_block_avx2(__m256* p, const float* quantTable, int qualityP
         // Round half up like roundf in quantize_block, and clamp to the baseline 8-bit range
         quantRow = _mm256_min_ps(
             _mm256_max_ps(_mm256_floor_ps(_mm256_add_ps(quantRow, avx_p1op2)), avx_p1), avx_p255);
-        p[i] = accurate_quant_round(p[i], quantRow);         // Quantize
+        p[i] = accurate_quant_round(p[i], quantRow);  // Quantize
     }
 }
 
