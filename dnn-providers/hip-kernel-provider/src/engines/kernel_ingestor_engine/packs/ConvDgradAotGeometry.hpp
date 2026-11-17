@@ -20,10 +20,11 @@
 
 /// @file ConvDgradAotGeometry.hpp
 /// The launch contract of the shape-generic backward-data (dgrad) AOT-instance engines,
-/// hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot (one per Target): the
-/// instances a catalog describes, the problem an engine matches, and the launch plan of
-/// one instance on one problem -- the served predicate, the kernels it launches with
-/// their grids and arguments, the workspace and the dX zero-fill. It ports
+/// hipkernel:Gfx950ConvDgradAot, hipkernel:Gfx942ConvDgradAot and
+/// hipkernel:Gfx1250ConvDgradAot (one per Target): the instances a catalog describes, the
+/// problem an engine matches, and the launch plan of one instance on one problem -- the
+/// served predicate, the kernels it launches with their grids and arguments, the workspace
+/// and the dX zero-fill. It ports
 /// conv_dgrad_aot_plan of the rocKE adapter
 /// rocke/library/builders/common/convolution_backward_data.py, which is rocKE's own offer
 /// (identity_supports_problem, direct_spec_for_problem) plus the launch bounds; the unit
@@ -858,7 +859,8 @@ struct DirectKnobs
     int64_t wavesPerEu = 0;
     int64_t xcdTiles = 0;
     int64_t stageRows = 0;
-    // gfx1250: the streaming depthwise channels per lane, and the WMMA pipelines' knobs.
+    // gfx942 and gfx1250: the streaming depthwise channels per lane; gfx1250: the WMMA
+    // pipelines' knobs.
     int64_t cpl = 0;
     int64_t ck = 0;
     int64_t prefetch = 0;
@@ -1136,7 +1138,7 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Targ
     // The knobs past the shared ones: a gfx950 kernel carries none of them, a gfx942 one
     // holds cpl and a gfx1250 one every one (0 where its variant does not use it).
     const auto extraBegin = GFX1250_DIRECT_KNOB_FIELDS.begin();
-    const auto extraEnd = extraBegin + targetExtraKnobFields(target);
+    const auto extraEnd = extraBegin + static_cast<std::ptrdiff_t>(targetExtraKnobFields(target));
     const auto* sched = metadata.stringField("sched");
     if(gfx1250 ? sched == nullptr
                : (sched != nullptr
