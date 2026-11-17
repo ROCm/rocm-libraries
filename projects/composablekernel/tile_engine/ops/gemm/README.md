@@ -784,7 +784,9 @@ variant-aware driver**, not a per-variant copy. `--variant` selects both the
 
 Grouped GEMM, batched GEMM, batched contraction, mx_gemm, stream-K and
 gemm_bquant have their own `<op>_full_benchmark.py` drivers (gemm_bquant's lives
-in `block_scale_gemm/gemm_bquant/`).
+in `block_scale_gemm/gemm_bquant/`). `gemm_multi_d` also has a dedicated
+`gemm_multi_d_full_benchmark.py`. `--variant grouped_gemm` is rejected; use
+`grouped_gemm_full_benchmark.py`.
 
 ### Native (legacy) Tile Engine builds
 
