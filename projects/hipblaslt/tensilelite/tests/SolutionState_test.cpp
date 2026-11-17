@@ -637,7 +637,8 @@ TEST(SolutionState, PackedFp8OperandsSplitIntoAAndB)
         StateOptions options;
         options.dataType     = c.name;
         options.destDataType = "Half";
-        auto const& type     = build(options)->problemType;
+        auto const  solution = build(options);
+        auto const& type     = solution->problemType;
         EXPECT_EQ(type.aType, c.a) << c.name;
         EXPECT_EQ(type.bType, c.b) << c.name;
         EXPECT_EQ(type.computeInputTypeA, c.packed) << c.name;
@@ -715,7 +716,8 @@ TEST(SolutionState, AssertAlphaValueOneIsTheOnlyAlphaValue)
     using namespace Predicates::Contraction;
     StateOptions options;
     options.extraIntegers = {{"AssertAlphaValue", 1}};
-    auto alpha            = onlyDirect<AlphaValue>(build(options)->problemPredicate);
+    auto solution         = build(options);
+    auto alpha            = onlyDirect<AlphaValue>(solution->problemPredicate);
     ASSERT_NE(alpha, nullptr);
     EXPECT_EQ(alpha->value, ScalarValue::One);
 
@@ -828,6 +830,41 @@ TEST(SolutionState, RejectsARepeatedSummationIndex)
     }
 }
 
+TEST(SolutionState, RejectsASummationIndexThatIsAlsoACIndex)
+{
+    // NumIndicesC is 3, so index 1 is a C index. It is also a summation index.
+    StateOptions options;
+    options.summation = {3, 1};
+    try
+    {
+        build(options);
+        FAIL() << "IndicesSummation [3, 1] was accepted";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("also a free index"), std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(SolutionState, RejectsASummationIndexThatIsAlsoABatchIndex)
+{
+    // Index 2 is the batch index in the default problem type, and a summation
+    // index. The free-index check does not see it.
+    StateOptions options;
+    options.summation = {3, 2};
+    try
+    {
+        build(options);
+        FAIL() << "IndicesSummation [3, 2] was accepted";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("also a batch index"), std::string::npos)
+            << error.what();
+    }
+}
+
 TEST(SolutionState, Gfx950DeviceNameSelectsTheChip)
 {
     StateOptions options;
@@ -857,9 +894,10 @@ TEST(SolutionState, Gfx950DeviceNameSelectsTheChip)
     EXPECT_TRUE(sawChip);
 
     // Python matches the id's text, so a zero-padded id names no chip.
-    options.deviceName = "Device 075a0";
-    auto const& padded = dynamic_cast<Predicates::IsSubclass<Hardware, AMDGPU> const&>(
-        *build(options)->hardwarePredicate);
+    options.deviceName         = "Device 075a0";
+    auto        paddedSolution = build(options);
+    auto const& padded         = dynamic_cast<Predicates::IsSubclass<Hardware, AMDGPU> const&>(
+        *paddedSolution->hardwarePredicate);
     EXPECT_NE(dynamic_cast<Predicates::GPU::ProcessorEqual const*>(padded.value.get()), nullptr);
 }
 
@@ -937,7 +975,8 @@ TEST(SolutionState, ShortTileListsLeaveTheRestZero)
     StateOptions options;
     options.threadTile        = {4, 2};
     options.matrixInstruction = {};
-    auto const& size          = build(options)->sizeMapping;
+    auto        solution      = build(options);
+    auto const& size          = solution->sizeMapping;
     EXPECT_EQ(size.threadTile, TensileLite::dim3(4, 2, 0));
     EXPECT_EQ(size.matrixInstruction, (std::array<int, 4>{0, 0, 0, 0}));
 }
