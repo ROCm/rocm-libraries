@@ -16,6 +16,7 @@ the `rocke` docs. They are reference material, not part of the runtime package.
 - `empirical-case-studies.md`
 - `kernel-launch-guide.md`
 - `bisect-perf-regression.md`
+- `search-optimize-rocke.md`
 
 ## Helper Scripts
 
