@@ -510,15 +510,15 @@ ResampleGraphConfig pooledOutput(int64_t outH, int64_t outW, bool withIndex = fa
 }
 }
 
-TEST(TestResampleValidator, OutputElementCountAtTheGlobalThreadIdLimit)
+TEST(TestResampleValidator, OutputElementCountAtTheLaunchThreadLimit)
 {
-    // The kernel's global thread id is built in 32 bits, so 2^32 outputs is the last count it
-    // reaches.
+    // One launch runs fewer than 2^32 threads in 256-thread blocks, so 2^32 - 256 outputs is the
+    // last count served; one more rounds up to 2^32 threads.
     for(const auto& [outW, fits] :
-        {std::pair{int64_t{65536}, true}, std::pair{int64_t{65537}, false}})
+        {std::pair{int64_t{4294967040}, true}, std::pair{int64_t{4294967041}, false}})
     {
         SCOPED_TRACE(outW);
-        auto builder = createResampleFwdGraph(pooledOutput(65536, outW));
+        auto builder = createResampleFwdGraph(pooledOutput(1, outW));
         if(fits)
         {
             EXPECT_NO_THROW(validateResampleGraph(builder));

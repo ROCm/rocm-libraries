@@ -117,15 +117,16 @@ void ResampleValidator::checkTensorShapesSupported(
                                 toStdVector(resampleAttr.stride()),
                                 toStdVector(resampleAttr.window()));
 
-    // The forward kernel forms its global thread id from 32-bit block and thread indices, so it
-    // reaches at most 2^32 output elements, and it narrows the flattened input spatial index to
-    // the INT32 index tensor.
-    constexpr int64_t MAX_OUTPUT_ELEMENTS = int64_t{1} << 32;
+    // The forward plan launches one thread per output element in 256-thread blocks, and HIP
+    // rejects a launch of 2^32 or more threads, so the rounded-up thread count must stay below
+    // 2^32: at most 2^32 - 256 outputs. The kernel also narrows the flattened input spatial index
+    // to the INT32 index tensor.
+    constexpr int64_t MAX_OUTPUT_ELEMENTS = (int64_t{1} << 32) - 256;
     if(!extentProductAtMost(yDims, 0, MAX_OUTPUT_ELEMENTS))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "ResampleFwd output exceeds the 2^32 elements one launch can index.");
+            "ResampleFwd output exceeds the 2^32 - 256 elements one launch can cover.");
     }
 
     if(resampleAttr.index_tensor_uid().has_value())
