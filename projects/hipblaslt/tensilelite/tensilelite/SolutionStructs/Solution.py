@@ -2345,7 +2345,7 @@ class Solution(collections.abc.Mapping):
     if isStreamK(state) and list(state.get("ClusterDim", [1, 1]))[:2] != [1, 1]:
       raise RuntimeError(
         f"Custom kernel '{ck.get('name', '?')}' is Stream-K and requires ClusterDim [1, 1].")
-    if "parallel" in ck.get("reductions", []) and (
+    if "parallel" in ck.get("streamKReductions", []) and (
         ck.get("workspaceType") not in ("StreamK", "StreamKWithReduction")
         or not ck.get("workspaceSizePerElemC")):
       raise RuntimeError(
