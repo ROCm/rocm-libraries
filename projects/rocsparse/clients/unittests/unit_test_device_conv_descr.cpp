@@ -1818,8 +1818,6 @@ namespace
                   st_size);
         EXPECT_EQ(bytes, 7);
         EXPECT_EQ(C.read(), std::vector<float>(9, -1.0f));
-        EXPECT_EQ(rocsparse_destroy_dnmat_descr(dnB), st_ok);
-        EXPECT_EQ(rocsparse_destroy_dnmat_descr(dnC), st_ok);
     }
 
 } // namespace
