@@ -202,8 +202,9 @@ class ABGRTile:
   def emitLDSBufferSwap(self, ti, writer, kernel):
     return _emitGRLDSBufferSwap(self.config.tag, self, ti, writer, kernel)
 
-  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False):
-    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter)
+  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False, tightenLimit=False):
+    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter,
+                            tightenLimit)
 
 
 class ABLRTile:
@@ -895,9 +896,9 @@ class TileInfo:
       return self.gr.emitLDSBufferSwap(self, writer, kernel)
     return Module()
 
-  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False):
+  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False, tightenLimit=False):
     if self.gr is not None:
-      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter)
+      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter, tightenLimit)
     return Module()
 
   def emitStoreD(self, writer, kernel):

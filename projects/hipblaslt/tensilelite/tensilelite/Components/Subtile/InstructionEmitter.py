@@ -426,7 +426,8 @@ class InstructionEmitter:
                 return []
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel, hold))
         else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold))
+            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold,
+                                            getattr(source, 'tightenLimit', False)))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 

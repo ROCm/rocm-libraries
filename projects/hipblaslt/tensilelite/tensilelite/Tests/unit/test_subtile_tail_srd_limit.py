@@ -110,3 +110,38 @@ def test_tlu1_unswizzled_scale_is_left_alone():
     insts = _instructions(_emit(unitStrideTcs={"MXSA"}, tPs=_SCALE_TPS, depthU=512,
                                 mxScaleFormat="NoSwizzle"))
     assert not any(i.startswith("s_sub_u32") for i in insts)
+
+
+def _advance(tightenLimit):
+    from rocisa.code import Module
+    from tensilelite.Components.Subtile.SubtileGREmit import emitSrdAdvance
+
+    module = Module()
+    emitSrdAdvance(module, "A", 128, writer=None, kernel=None, tightenLimit=tightenLimit)
+    return _instructions([line.strip() for line in str(module).splitlines() if line.strip()])
+
+
+def test_mainloop_advance_leaves_the_limit_alone():
+    """Srd+2 is a generous tile-boundary window there; every K-block in it is live."""
+    assert _advance(tightenLimit=False) == [
+        "s_add_u32 s[sgprSrdA], s[sgprSrdA], 128",
+        "s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], 0",
+    ]
+
+
+def test_tail_uid_advance_carries_the_tightened_limit_along():
+    """A multi-unroll tail advances the base after computeTailLoopSrdLimit has
+    already ended the window at K_rem, so the window has to shrink with it or the
+    next unroll reads live memory past the data instead of clamping to zero."""
+    insts = _advance(tightenLimit=True)
+    assert insts[2:] == [
+        "s_sub_u32 s[sgprSrdA+2], s[sgprSrdA+2], 128",
+        "s_cselect_b32 s[sgprSrdA+2], 0, s[sgprSrdA+2]",
+    ]
+
+
+def test_tail_preloop_marks_only_the_uid_advances():
+    from tensilelite.Components.Subtile.LogicalScheduler import GRIncOp
+
+    assert GRIncOp(tensor="A", unrollId=0).tightenLimit is False
+    assert GRIncOp(tensor="A", unrollId=1, tightenLimit=True).tightenLimit is True

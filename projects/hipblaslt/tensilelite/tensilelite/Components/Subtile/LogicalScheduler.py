@@ -846,6 +846,9 @@ class GRIncOp(BaseOp):
     # Set on the PGR=2 pre-loop advance between the two prefetch clusters, where
     # the SRD must stay put when the summation fits in one DepthU. See emitSrdAdvance.
     holdOnLastIter: bool = False
+    # Set on the tail loop's advance between uids, where Srd+2 has been tightened
+    # to K_rem and so has to shrink with the base. See emitSrdAdvance.
+    tightenLimit: bool = False
 
     def __post_init__(self):
         self.kind = 'gr_inc'
@@ -4096,7 +4099,8 @@ class LogicalScheduler:
         # K-steps below then read that same slice back.
         for gr in self._make_gr_all_tensors(0, all_tiles):
             if gr.unrollId > 0 and cfg.numUnroll.get(gr.tensor, 1) > 1:
-                preamble.append(GRIncOp(tensor=gr.tensor, unrollId=gr.unrollId))
+                preamble.append(GRIncOp(tensor=gr.tensor, unrollId=gr.unrollId,
+                                        tightenLimit=True))
             preamble.append(gr)
         # bf16-only: an OOB dwordx4 load can corrupt the trailing 16-bit
         # element at the K-boundary (buffer instructions enforce dword
