@@ -502,9 +502,6 @@ std::string CheckSupported(const BnProblem& problem)
     // result to match.
     if(perActivation && problem.act != miopenActivationPASTHRU)
         return "hipDNN per-activation batchnorm does not support an activation";
-    if(problem.act != miopenActivationPASTHRU && !ActivationAttributes(problem, false))
-        return std::string("hipDNN batchnorm does not support the ") +
-               ActivationModeName(problem.act) + " activation";
     // Before the packed test, so a truncated tensor is declined for the reason
     // that applies to it.
     if(const char* reason = CheckTensorLayouts(tensors))

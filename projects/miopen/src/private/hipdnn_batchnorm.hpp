@@ -39,7 +39,8 @@ namespace hipdnn {
 // - miopenStatusNotImplemented when no MIOpen solver applies: x, y, dy or dx
 //   not FLOAT, HALF or BFLOAT16, or scale, bias or statistics not FLOAT. Also
 //   an activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP on spatial
-//   training and on inference. Backward has a solver for every activation.
+//   training and backward, and on inference. A null activation descriptor
+//   means no activation, as it does in MIOpen.
 //
 // Like MIOpen, the wrapper writes the saved statistics on training only when
 // both pointers are given, and updates the running statistics only when all
@@ -62,9 +63,6 @@ namespace hipdnn {
 // thus tell that forwarding did not happen. miopenGetErrorString adds a
 // "[hipDNN-forwarded]" prefix. The reason goes to stderr unless MIOPEN_LOG_LEVEL
 // hides errors. The wrapper declines these problems:
-// - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP on spatial
-//   backward, the only call that both accepts and applies one. A null
-//   activation descriptor means no activation, as it does in MIOpen.
 // - Any activation other than PASTHRU in per-activation mode. MIOpen's
 //   per-activation kernels ignore it (a MIOpen bug,
 //   https://github.com/ROCm/rocm-libraries/issues/15445), so there is no
