@@ -623,6 +623,20 @@ class MxGemmSpecTest(unittest.TestCase):
             with self.subTest(label):
                 self.assertIn(reason, validate(spec) or "")
 
+    def test_inst_prefetch_validate_and_name(self):
+        """inst_prefetch is 0 (none) or a positive WMMA count and tags the
+        name with the count."""
+        self.assertEqual(_spec6().inst_prefetch, 0)
+        for every in (1, 16, 64):
+            spec = _spec6(inst_prefetch=every)
+            with self.subTest(every=every):
+                self.assertIsNone(validate(spec))
+                self.assertIn(f"_ipf{every}", spec.kernel_name())
+        self.assertNotIn("_ipf", _spec6().kernel_name())
+        self.assertIn(
+            "inst_prefetch must be 0", validate(_spec6(inst_prefetch=-1)) or ""
+        )
+
     def test_pair_map_covers_d_once_and_splits_the_halves(self):
         """With the pair map every D element of a tile has one lane, slot and
         N-repeat, a lane's group is adjacent columns, SIMD pair p (waves p
@@ -1648,6 +1662,33 @@ class MxGemmIrTest(unittest.TestCase):
                 self.assertEqual(
                     len(re.findall(_WMMA, llvm)), len(re.findall(_WMMA, _llvm(rows)))
                 )
+
+    def test_inst_prefetch_ir(self):
+        """An instruction prefetch before every inst_prefetch-th WMMA of the
+        kernel, counted over every tile and pass; none by default."""
+        prefetch = "s_prefetch_inst_pc_rel 0, null, 31"
+        for fields in (
+            {"tile_k": 256, "local_prefetch": 1, "half_b_order": "late"},
+            {
+                **_PANELS,
+                "half_plr": "none",
+                "read_issue": "interleave",
+                "k_reads": "contiguous",
+                "scale_swap": "wait",
+            },
+            _DIRECT,
+        ):
+            base = _spec6(512, 512, 2048, cluster_dim=(1, 1, 1), **fields)
+            self.assertNotIn(prefetch, _llvm(base))
+            for every in (16, 64):
+                spec = replace(base, inst_prefetch=every)
+                with self.subTest(kernel=spec.kernel_name()):
+                    llvm = _llvm(spec)
+                    wmmas = len(re.findall(_WMMA, llvm))
+                    self.assertEqual(llvm.count(prefetch), -(-wmmas // every))
+                    self.assertLess(
+                        llvm.index(prefetch), re.search(_WMMA, llvm).start()
+                    )
 
     def test_three_buffers_issue_wait_and_peel(self):
         """With three buffers the prologue loads three tiles and every tile
@@ -3091,6 +3132,46 @@ class MxGemmDeviceTest(unittest.TestCase):
                             "read_bases": "fixed",
                             "cluster_dim": (1, 2, 1),
                         },
+                    ),
+                )
+            ]
+            # Instruction prefetch: the panel walk, half-B late with three
+            # buffers and a K tail, FP8 half-B late.
+            + [
+                make(*problem, inst_prefetch=every, **fields)
+                for make, problem, every, fields in (
+                    (
+                        _spec6,
+                        (512, 512, 2048),
+                        16,
+                        {
+                            **_PANELS,
+                            "half_plr": "none",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "read_issue": "interleave",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                    (
+                        _spec6,
+                        (1024, 1024, 2048 + 256),
+                        8,
+                        {
+                            "tile_m": 256,
+                            "tile_n": 256,
+                            "local_prefetch": 1,
+                            "half_b_order": "late",
+                            "lds_buffers": 3,
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                        },
+                    ),
+                    (
+                        _spec8,
+                        (512, 512, 2048),
+                        32,
+                        {"half_b_order": "late", "cluster_dim": (2, 2, 1)},
                     ),
                 )
             ]

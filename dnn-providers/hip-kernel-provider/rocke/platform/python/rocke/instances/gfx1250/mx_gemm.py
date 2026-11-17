@@ -193,6 +193,10 @@ _CLUSTER_WAIT_ASM = "s_barrier_wait -3"
 _CLUSTER_SIGNAL_WAVE0_ASM = (
     "s_cmp_eq_u32 $0, 0\n" "s_cbranch_scc0 1\n" "s_barrier_signal -3"
 )
+# The next 32 instruction cache lines (128 B each, 4 KiB) from this PC, as
+# mxfp4_tdm_gemm's epilogue prefetch. Address translations drain first so the
+# prefetch is not caught in an XNACK replay.
+_INST_PREFETCH_ASM = "s_wait_xcnt 0\ns_prefetch_inst_pc_rel 0, null, 31"
 
 
 def _is_pow2(value: int) -> bool:
@@ -287,6 +291,11 @@ class MxGemmSpec:
     (``half_plr`` "b"), the two pairs read different A and B halves at the
     same time. D vectors are then one group wide.
 
+    ``inst_prefetch`` (0: none) issues an instruction prefetch of the next
+    4 KiB of code before every ``inst_prefetch``-th WMMA of the kernel's code,
+    counted in code order over the whole kernel, so a K loop body longer than
+    the instruction cache finds its next code already fetched on every pass.
+
     ``wmma_reuse`` (``local_prefetch`` 0, the 16x16 WMMA) orders each
     K-step's WMMAs and flags every WMMA whose next WMMA takes the same
     operand, so the hardware may keep that operand instead of reading it
@@ -341,6 +350,7 @@ class MxGemmSpec:
     walk: str = "tile"
     read_bases: str = "loop"
     wave_map: str = "rows"
+    inst_prefetch: int = 0
     block_k: int = field(default=32, init=False)
 
     @property
@@ -697,6 +707,7 @@ class MxGemmSpec:
                 "pwh": self.halves,
                 "rbf": self.fixed_bases,
                 "wmp": self.pairs,
+                f"ipf{self.inst_prefetch}": self.inst_prefetch > 0,
             },
         )
 
@@ -1035,6 +1046,8 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
     atom = spec.atom
     if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
         return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
+    if spec.inst_prefetch < 0:
+        return "inst_prefetch must be 0 (none) or a positive WMMA count"
     if spec.wave_map not in WAVE_MAPS:
         return f"wave_map must be one of {WAVE_MAPS}"
     if spec.pairs:
@@ -2175,6 +2188,8 @@ class TileCompute:
     def __init__(self, k: _Kernel, reader: LdsReader):
         self.k = k
         self.reader = reader
+        # WMMAs emitted so far, for ``inst_prefetch``.
+        self.wmmas = 0
 
     def _mma_fn(self, out):
         k = self.k
@@ -2204,6 +2219,10 @@ class TileCompute:
                 attrs["scale_sel_a"] = sel_a
             if sel_b:
                 attrs["scale_sel_b"] = sel_b
+            every = k.spec.inst_prefetch
+            if every and self.wmmas % every == 0:
+                k.b.inline_asm(_INST_PREFETCH_ASM, "")
+            self.wmmas += 1
             out[index] = k.b.mma(
                 atom, a_frag, b_frag, out[index], a_scale, b_scale, attrs=attrs or None
             )

@@ -887,6 +887,7 @@ _AXES = {
     "walk": ("walk", str, "tile"),
     "read_bases": ("read_bases", str, "loop"),
     "wave_map": ("wave_map", str, "rows"),
+    "inst_prefetch": ("inst_prefetch", int, "0"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),
