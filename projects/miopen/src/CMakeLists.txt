@@ -962,10 +962,17 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # MIOPEN_BUILDING_PRIVATE, so the MIOpen source tree stays untouched. The
     # option is restricted to CXX and the path is quoted, so neither a checkout
     # path containing a space nor the generated .S sources added under
-    # MIOPEN_INCBIN can be handed a C++ header.
+    # MIOPEN_INCBIN can be handed a C++ header. clang-cl takes /FI and ignores
+    # -include with only a warning, which would leave the _impl names unrenamed.
     target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOPEN_BUILDING_PRIVATE)
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        set(_miopen_force_include "/FI")
+    else()
+        set(_miopen_force_include "-include")
+    endif()
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:${_miopen_force_include} \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
+    unset(_miopen_force_include)
 
     # Public wrapper library. src/private/wrapper_passthrough.cpp (generated from
     # <miopen/miopen.h> by script/generate_wrapper_sources.py) and
@@ -1178,6 +1185,15 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         kernels/lgbm_model_meta.json
         kernels/lgbm_rank.bin
         kernels/lgbm_pcfg.bin)
+    if(MIOPEN_FDEEP_MODEL_FORMAT STREQUAL "keras2")
+        # frugally-deep 0.15.x: replace the Keras 3 models with their Keras 2 copies (same names).
+        file(GLOB KERAS2_MODEL_FILES CONFIGURE_DEPENDS kernels/keras2/*.model)
+        foreach(KERAS2_MODEL_FILE ${KERAS2_MODEL_FILES})
+            get_filename_component(KERAS2_MODEL_FILENAME "${KERAS2_MODEL_FILE}" NAME)
+            list(REMOVE_ITEM MODEL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/kernels/${KERAS2_MODEL_FILENAME}")
+        endforeach()
+        list(APPEND MODEL_FILES ${KERAS2_MODEL_FILES})
+    endif()
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()

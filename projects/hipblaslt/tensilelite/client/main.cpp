@@ -27,6 +27,7 @@
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -230,7 +231,10 @@ namespace TensileLite
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
-                ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
+                ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
+                ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
+                ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
+                ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. A shared A, B or C is the copy of the last device, whose slice is the largest; a shared D is the one of device-idx, and every device writes its slice into it.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -291,10 +295,11 @@ namespace TensileLite
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
                 ("world",                    po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: device count of each problem, one value per problem-size.")
-                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: extent that goes all-to-all, one value per problem-size: leading feature (M) count for GemmA2A.")
+                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: extent that goes all-to-all, one value per problem-size: leading feature (M) count for GemmA2A, reduction (K) count for A2AGemm (defaults to K).")
                 ("world-filter",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: run only the problems whose world is listed; empty runs all.")
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("fused-a2a-sdma-rotate",    po::value<int>(), "Fused A2A, gfx942 and gfx950: move each remote peer SDMA queue this many steps along the even xGMI engines 2,4,...,14 from its KFD recommendation; nonzero requires 14 xGMI SDMA engines. Ignored on other architectures, which spread the remote peer queues over the recommended engines. The loopback queue uses engine 0. Defaults to -1.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -427,6 +432,7 @@ namespace TensileLite
                 ("rotating-buffer-size",      po::value<int32_t>()->default_value(0), "Size of rotating buffer in the unit of MB.")
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
+                ("output-peerD",              po::value<bool>()->default_value(false), "Every device also stores D into the other device's D (needs --split-devices 2): both end up with the complete D.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
                 ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
                 ("metadata-layout",           po::value<int32_t>()->default_value(0), "Sparse Metadata Layout")
@@ -822,6 +828,10 @@ namespace TensileLite
                 throw std::runtime_error("[fused-a2a] --use-user-args is not supported.");
             if(!args["library-update-file"].as<std::string>().empty())
                 throw std::runtime_error("[fused-a2a] --library-update-file is not supported.");
+            if(args["fused-a2a"].as<FusedA2A>() == FusedA2A::A2AGemm
+               && args["batch-mode"].as<int>() != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] A2AGemm supports only --batch-mode=0 (strided).");
             if(args["rotating-buffer-size"].as<int32_t>() > 0
                && args["rotating-buffer-mode"].as<int32_t>() == 1)
                 throw std::runtime_error(
@@ -840,7 +850,29 @@ int main(int argc, const char* argv[])
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
+    auto const mainStart     = TimingClock::now();
+    auto const mainStartWall = std::chrono::system_clock::now();
+
+    // Declared first => destroyed last among main()'s locals. Stamps the wall clock once
+    // every local (dataInit, library, hip buffers, ...) has been destroyed so the Python
+    // side can separate "locals destruction" from "static destruction / process exit".
+    struct LocalsDestroyedStamp
+    {
+        ~LocalsDestroyedStamp()
+        {
+            if(g_timingInstrumentationEnabled)
+            {
+                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+                std::clog << "TIMING_TS:main_locals_destroyed:" << ns << "\n";
+                std::clog.flush();
+            }
+        }
+    } localsDestroyedStamp;
+
     auto args = parse_args(argc, argv);
+    auto const argsParsed = TimingClock::now();
 
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
@@ -854,17 +886,37 @@ int main(int argc, const char* argv[])
     std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
     srand(seed);
 
-    ClientProblemFactory problemFactory(args);
-
+    // Timing buffer is initialized before the problem factory so timers inside it work.
+    auto const preCalibration = TimingClock::now();
     initTimingBuffer();
     calibrateTimingOverhead();
+    auto const calibrated = TimingClock::now();
 
-    bool fusedA2A = args["fused-gemm-a2a"].as<bool>();
+    ClientProblemFactory problemFactory(args);
+    auto const factoryDone = TimingClock::now();
+    // These happen before the timing buffer exists; record them now.
+    if(g_timingInstrumentationEnabled)
+    {
+        g_timingBuffer.push_back(TimingRec{
+            "main_parse_args",
+            std::chrono::duration<double, std::milli>(argsParsed - mainStart).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_timing_calibration",
+            std::chrono::duration<double, std::milli>(calibrated - preCalibration).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_problem_factory",
+            std::chrono::duration<double, std::milli>(factoryDone - calibrated).count()});
+    }
+
+    const FusedA2A fusedMode = args["fused-a2a"].as<FusedA2A>();
+    bool           fusedA2A  = fusedMode != FusedA2A::Disabled;
     if(fusedA2A)
         checkFusedA2AArgs(args);
     auto const& worldFilter = args["world-filter"].as<std::vector<int>>();
     if(!fusedA2A && !worldFilter.empty())
-        throw std::runtime_error("--world-filter applies only with --fused-gemm-a2a");
+        throw std::runtime_error("--world-filter applies only with --fused-a2a");
+    if(!fusedA2A && args.count("fused-a2a-sdma-rotate"))
+        throw std::runtime_error("--fused-a2a-sdma-rotate applies only with --fused-a2a");
 
     auto problems        = problemFactory.problems();
     int  firstProblemIdx = args["problem-start-idx"].as<int>();
@@ -898,15 +950,74 @@ int main(int argc, const char* argv[])
                                                      deviceCount,
                                                      ". Narrow them with --world-filter."));
         }
+        // --split-devices N: every problem runs as N slices on N consecutive devices.
+        {
+            auto const placement = args["split-placement"].as<std::string>();
+            if(placement.size() != 4
+               || placement.find_first_not_of("RS") != std::string::npos)
+                throw std::runtime_error(
+                    "--split-placement needs 4 letters (A, B, C, D), each R or S, got '" + placement
+                    + "'");
+            if(args["output-peerD"].as<bool>()
+               && (args["split-devices"].as<int>() != 2 || placement[3] != 'R'))
+                throw std::runtime_error(
+                    "--output-peerD needs --split-devices 2 and a replicated D");
+        }
+        int splitM = args["split-devices"].as<int>();
+        if(splitM < 1)
+            throw std::runtime_error("--split-devices must be >= 1");
+        if(splitM > 1 && args["split-dim"].as<std::string>() != "M"
+           && args["split-dim"].as<std::string>() != "N")
+            throw std::runtime_error("--split-dim must be M or N");
+        if(splitM > 1 && fusedA2A)
+            throw std::runtime_error("--split-devices cannot be combined with --fused-a2a");
+        if(splitM > 1 && args["use-user-args"].as<bool>())
+            throw std::runtime_error("--split-devices does not support --use-user-args");
+        if(splitM > 1 && args["grouped-gemm"].as<bool>())
+            throw std::runtime_error("--split-devices does not support --grouped-gemm");
+        // With C = D each device's C is redirected to its own zeroed full-size D, so beta * C would
+        // read zeros: the combination is not supported.
+        if(splitM > 1 && args["c-equal-d"].as<bool>())
+            throw std::runtime_error("--split-devices does not support --c-equal-d");
+        // Each device's D is replaced by an exact-size full output, which has none of the
+        // padding (and no maxElements metadata) that the bounds check puts around D.
+        if(splitM > 1 && args["bounds-check"].as<BoundsCheckMode>() != BoundsCheckMode::Disable)
+            throw std::runtime_error("--split-devices does not support --bounds-check");
+        if(splitM > 1 && args["best-solution"].as<bool>())
+            throw std::runtime_error(
+                "--split-devices needs the all-solutions run (not --best-solution): a "
+                "library-selected solution is not checked against each slice");
+        if(splitM > 1)
+            world = splitM;
+
+        if(splitM > 1)
+        {
+            int deviceCount = 0;
+            HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
+            if(args["device-idx"].as<int>() + splitM > deviceCount)
+                throw std::runtime_error(concatenate("--split-devices=",
+                                                     splitM,
+                                                     " needs devices ",
+                                                     args["device-idx"].as<int>(),
+                                                     "..",
+                                                     args["device-idx"].as<int>() + splitM - 1,
+                                                     " but only ",
+                                                     deviceCount,
+                                                     " are visible"));
+        }
 
         std::vector<int> deviceIds(world);
         std::iota(deviceIds.begin(), deviceIds.end(), args["device-idx"].as<int>());
+        const int sdmaRotate = args.count("fused-a2a-sdma-rotate")
+                                   ? args["fused-a2a-sdma-rotate"].as<int>()
+                                   : kFusedA2ASdmaRotateDefault;
         for(int id : deviceIds)
             devices.push_back(
                 std::make_shared<DeviceContext>(id,
                                                 args["use-default-stream"].as<bool>(),
                                                 fusedA2A ? kCommFlagsBytes : 0,
-                                                fusedA2A ? deviceIds : std::vector<int>{}));
+                                                fusedA2A ? deviceIds : std::vector<int>{},
+                                                sdmaRotate));
     }
     std::shared_ptr<DeviceContext>              device0 = devices[0];
     std::vector<std::shared_ptr<DeviceContext>> active;
@@ -1009,8 +1120,12 @@ int main(int argc, const char* argv[])
         // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
         srand(seed);
         ScopedTimer timer("data_init_setup");
-        forEachDevice(devices, [&](DeviceContext& ctx) {
-            ctx.dataInit = std::make_shared<DataInitialization>(args, problemFactory);
+        forEachDeviceIndexed(devices, [&](DeviceContext& ctx, size_t d) {
+            // Each device sizes its buffers for its own slice of M (the full problem when the
+            // split is off).
+            ctx.dataInit
+                = std::make_shared<DataInitialization>(args, problemFactory.sliceFactory(d));
+            ctx.dataInit->setSlice(&problemFactory, d);
         });
     }
 
@@ -1021,13 +1136,15 @@ int main(int argc, const char* argv[])
     }
 
     MetaRunListener listeners;
-    std::shared_ptr<BenchmarkTimer> benchmarkTimer;
-    float                           flushTimeMs{};
+    std::shared_ptr<BenchmarkTimer>        benchmarkTimer;
+    std::shared_ptr<SynchronizerValidator> synchronizerValidator;
+    float                                  flushTimeMs{};
 
     {
         ScopedTimer timer("listener_setup");
         for(auto const& ctx : devices)
             listeners.addListener(ctx->dataInit);
+        solutionIterator->setSplit(&problemFactory);
         listeners.addListener(solutionIterator);
         listeners.addListener(std::make_shared<ProgressListener>(args));
 
@@ -1040,9 +1157,14 @@ int main(int argc, const char* argv[])
             // Before ReferenceValidator: postSolution runs listeners in
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
-            listeners.addListener(std::make_shared<SynchronizerValidator>(args));
-            listeners.addListener(std::make_shared<ReferenceValidator>(args));
+            synchronizerValidator = std::make_shared<SynchronizerValidator>(args);
+            auto referenceValidator = std::make_shared<ReferenceValidator>(args);
+            synchronizerValidator->setSplit(&problemFactory);
+            referenceValidator->setSplit(&problemFactory);
+            listeners.addListener(synchronizerValidator);
+            listeners.addListener(referenceValidator);
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
+            benchmarkTimer->setSplit(&problemFactory);
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -1082,6 +1204,153 @@ int main(int argc, const char* argv[])
 
     reporters->report(ResultKey::ProblemCount, problemFactory.problems().size());
 
+    // --split-devices: every device holds a full-size D and writes its slice at the slice's final
+    // offset with the full strides, into its own memory. Nothing is written to a peer; an
+    // all-gather would copy each slice region into the peers' D at the same offset.
+    std::vector<std::vector<std::shared_ptr<void>>> fullOutputs; // [device][rotating slot]
+    // Pointer-array batches: the kernels take one pointer per batch (batchA/B/C/D) instead of the
+    // scalar pointers, so every redirected D also needs its own pointer array on the device.
+    std::vector<std::vector<std::shared_ptr<void>>> fullBatchD; // [device][rotating slot]
+    auto attachFullOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
+        if(problemFactory.numSlices() < 2)
+            return;
+        auto const* full = dynamic_cast<ContractionProblemGemm const*>(problem);
+        if(full == nullptr)
+            throw std::runtime_error("--split-devices needs a plain GEMM problem");
+        const size_t bytes = static_cast<size_t>(full->d().totalAllocatedElements()
+                                                 * full->d().elementBytes());
+        // R = every device has its own copy, S = one copy that the other devices use.
+        auto const placement = args["split-placement"].as<std::string>();
+        auto const shared    = [&](size_t tensor) { return placement[tensor] == 'S'; };
+        // A shared D is the first device's. A shared A, B or C is the last device's: every device
+        // reads it with its own slice's size, and the last slice is the largest (it takes the
+        // remainder), so every other slice fits in the last device's buffers. The first device's
+        // would be too small for the last slice whenever the split is not even.
+        const size_t inputOwner  = devices.size() - 1;
+        const bool   sharedInput = shared(0) || shared(1) || shared(2);
+        // The other devices reach a shared tensor over peer access. An OutputPeerD kernel also
+        // writes the other device's D, so every device needs access to every other one.
+        if(placement.find('S') != std::string::npos || full->outputPeerD())
+            for(size_t d = 0; d < devices.size(); d++)
+                for(size_t other = 0; other < devices.size(); other++)
+                {
+                    const bool toSharedD     = shared(3) && other == 0;
+                    const bool toSharedInput = sharedInput && other == inputOwner;
+                    if(other == d || (!full->outputPeerD() && !toSharedD && !toSharedInput))
+                        continue;
+                    ScopedDevice device(devices[d]->deviceId);
+                    hipError_t   pe = hipDeviceEnablePeerAccess(devices[other]->deviceId, 0);
+                    if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
+                        HIP_CHECK_EXC(pe);
+                    static_cast<void>(hipGetLastError());
+                }
+        const bool pointerArray
+            = full->batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+              || !full->stridedBatched();
+        fullOutputs.resize(devices.size());
+        fullBatchD.resize(devices.size());
+        std::vector<size_t> sliceBytes(devices.size(), 0);
+        for(size_t d = 0; d < devices.size(); d++)
+        {
+            const int    id     = devices[d]->deviceId;
+            ScopedDevice device(id);
+            auto const   freeOnDevice = [id](void* q) {
+                int previous = 0;
+                static_cast<void>(hipGetDevice(&previous));
+                static_cast<void>(hipSetDevice(id));
+                static_cast<void>(hipFree(q));
+                static_cast<void>(hipSetDevice(previous));
+            };
+            auto&        slots = fullOutputs[d];
+            while(slots.size() < endSlot && !(d > 0 && shared(3)))
+            {
+                void* p = nullptr;
+                HIP_CHECK_EXC(hipMalloc(&p, bytes));
+                HIP_CHECK_EXC(hipMemset(p, 0, bytes));
+                slots.emplace_back(p, freeOnDevice);
+            }
+            // D keeps the full strides in every slice, so its batches sit at the same distance
+            // from the slice's start on every device.
+            std::vector<size_t> batchOffsets;
+            if(pointerArray)
+                batchOffsets = problemFactory.sliceBatchOffsets(
+                    problem, d, ContractionProblemGemm::TENSOR::D);
+            auto& batchArrays = fullBatchD[d];
+            while(pointerArray && batchArrays.size() < endSlot)
+            {
+                void* p = nullptr;
+                HIP_CHECK_EXC(
+                    hipMalloc(&p, std::max<size_t>(1, batchOffsets.size()) * sizeof(void*)));
+                batchArrays.emplace_back(p, freeOnDevice);
+            }
+            const size_t offsetBytes = static_cast<size_t>(
+                problemFactory.sliceOffsetInD(problem, d) * full->d().elementBytes());
+            sliceBytes[d] = offsetBytes;
+            for(size_t r = firstSlot; r < endSlot; r++)
+            {
+                auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
+                auto& dBase  = d > 0 && shared(3) ? fullOutputs[0][r] : slots[r];
+                void* dest   = static_cast<char*>(dBase.get()) + offsetBytes;
+                const bool inPlace = inputs.c == inputs.d;
+                if(inPlace)
+                    inputs.c = dest;
+                inputs.d = dest;
+                if(pointerArray)
+                {
+                    // One pointer per batch into the redirected D, kept on this device.
+                    std::vector<void*> batches;
+                    for(size_t offset : batchOffsets)
+                        batches.push_back(static_cast<char*>(dest) + offset);
+                    HIP_CHECK_EXC(hipMemcpy(batchArrays[r].get(),
+                                            batches.data(),
+                                            batches.size() * sizeof(void*),
+                                            hipMemcpyHostToDevice));
+                    inputs.batchD = static_cast<void* const*>(batchArrays[r].get());
+                    if(inPlace)
+                        inputs.batchC = static_cast<void const* const*>(batchArrays[r].get());
+                }
+                if(d != inputOwner && sharedInput)
+                {
+                    // A shared tensor is read through the owner's pointers, and through its batch
+                    // pointer array. This loop never changes the owner's A, B or C (its C is not
+                    // in place: --c-equal-d is refused with a split).
+                    auto const& owner = dynamic_cast<ContractionInputs const&>(
+                        *devices[inputOwner]->inputArr[r]);
+                    if(shared(0))
+                    {
+                        inputs.a      = owner.a;
+                        inputs.batchA = owner.batchA;
+                        inputs.scaleA = owner.scaleA;
+                        inputs.mxsa   = owner.mxsa;
+                    }
+                    if(shared(1))
+                    {
+                        inputs.b      = owner.b;
+                        inputs.batchB = owner.batchB;
+                        inputs.scaleB = owner.scaleB;
+                        inputs.mxsb   = owner.mxsb;
+                    }
+                    if(shared(2) && !inPlace)
+                    {
+                        inputs.c      = owner.c;
+                        inputs.batchC = owner.batchC;
+                    }
+                }
+            }
+        }
+        // OutputPeerD: device d also stores its slice into the other device's full D, at the
+        // same offset, so each ends up with the complete D.
+        if(full->outputPeerD())
+            for(size_t d = 0; d < devices.size(); d++)
+            {
+                const size_t peer = (d + 1) % devices.size();
+                for(size_t r = firstSlot; r < endSlot; r++)
+                {
+                    auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
+                    inputs.peerD = static_cast<char*>(fullOutputs[peer][r].get()) + sliceBytes[d];                }
+            }
+    };
+
     bool  useUserArgs = args["use-user-args"].as<bool>();
     void* dUA         = nullptr;
     void* dUAHost     = nullptr;
@@ -1107,12 +1376,22 @@ int main(int argc, const char* argv[])
             size_t rotationLaunchIdx = 0;
             for(int problemIdx : problemIdxs)
             {
+                // Declared first => destroyed last: problem_total covers the whole body,
+                // problem_teardown covers destruction of the body's locals (see mark() below).
+                ScopedTimer          problemTotalTimer("problem_total");
+                ScopeTeardownTimer   problemTeardownTimer("problem_teardown");
                 auto problem = problems[problemIdx].get();
-                active.assign(devices.begin(), devices.begin() + problem->world());
+                active.assign(devices.begin(),
+                              devices.begin()
+                                  + (problemFactory.numSlices() > 1 ? devices.size()
+                                                                    : problem->world()));
 
-                reporters->report(ResultKey::ProblemIndex, problemIdx);
-                reporters->report(ResultKey::ProblemProgress,
-                                  concatenate(problemIdx, "/", lastProblemIdx));
+                {
+                    ScopedTimer timer("problem_report_index");
+                    reporters->report(ResultKey::ProblemIndex, problemIdx);
+                    reporters->report(ResultKey::ProblemProgress,
+                                      concatenate(problemIdx, "/", lastProblemIdx));
+                }
 
                 {
                     ScopedTimer timer("pre_problem");
@@ -1120,8 +1399,9 @@ int main(int argc, const char* argv[])
                 }
                 {
                     ScopedTimer timer("gpu_input_preparation");
-                    forEachDevice(active, [&](DeviceContext& ctx) {
-                        ctx.inputs = ctx.dataInit->prepareGPUInputs(problem);
+                    forEachDeviceIndexed(active, [&](DeviceContext& ctx, size_t d) {
+                        ctx.inputs = ctx.dataInit->prepareGPUInputs(
+                            problemFactory.sliceProblem(problem, d));
                     });
                 }
 
@@ -1131,12 +1411,24 @@ int main(int argc, const char* argv[])
                 size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
                 {
+                    // Nothing may still be writing into the previous problem's outputs.
+                    forEachDevice(devices,
+                                  [](DeviceContext&) { static_cast<void>(hipDeviceSynchronize()); });
+                    fullOutputs.clear();
+                    fullBatchD.clear();
+                }
+
+                {
                     ScopedTimer timer("rotating_buffer_preparation");
-                    forEachDevice(active, [&](DeviceContext& ctx) {
+                    forEachDeviceIndexed(active, [&](DeviceContext& ctx, size_t d) {
                         ctx.inputArr = ctx.dataInit->prepareRotatingGPUOutput(
-                            maxRotatingBufferNum, problem, ctx.inputs, ctx.stream);
+                            maxRotatingBufferNum,
+                            problemFactory.sliceProblem(problem, d),
+                            ctx.inputs,
+                            ctx.stream);
                         static_cast<void>(hipDeviceSynchronize());
                     });
+                    attachFullOutput(problem, 0, device0->inputArr.size());
                 }
 
                 // I-cache rotation auto-load: when --icache-rotate-copies=-1,
@@ -1243,6 +1535,8 @@ int main(int argc, const char* argv[])
                 bool resetInput = true;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
+                    ScopedTimer        solutionTotalTimer("solution_total");
+                    ScopeTeardownTimer solutionTeardownTimer("solution_teardown");
                     std::shared_ptr<ContractionSolution> solution;
                     {
                         ScopedTimer timer("solution_selection");
@@ -1263,7 +1557,12 @@ int main(int argc, const char* argv[])
                         listeners.preSolution(solution.get());
                     }
                     bool deviceLost = false;
-                    if(solutionIterator->runCurrentSolution() && runKernels)
+                    bool runThisSolution = false;
+                    {
+                        ScopedTimer timer("run_current_solution_check");
+                        runThisSolution = solutionIterator->runCurrentSolution() && runKernels;
+                    }
+                    if(runThisSolution)
                     {
                         try
                         {
@@ -1271,14 +1570,25 @@ int main(int argc, const char* argv[])
                             resetCommBuffers(*problem, active);
                             while(listeners.needMoreRunsInSolution())
                             {
+                                ScopedTimer        runIterTotalTimer("run_iteration_total");
+                                ScopeTeardownTimer runIterTeardownTimer("run_iteration_teardown");
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
-                                    forEachDevice(active, [&](DeviceContext& ctx) {
-                                        ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(problem);
-                                    });
+                                    struct ResetScope
+                                    {
+                                        ResetScope() { g_inGpuInputReset = true; }
+                                        ~ResetScope() { g_inGpuInputReset = false; }
+                                    } resetScope;
+                                    forEachDeviceIndexed(
+                                        active, [&](DeviceContext& ctx, size_t d) {
+                                            ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(
+                                                problemFactory.sliceProblem(problem, d));
+                                        });
+                                    attachFullOutput(problem, 0, 1);
                                 }
                                 resetInput = true;
+                                synchronizerValidator->beginRunIteration();
 
                                 std::vector<std::vector<std::vector<KernelInvocation>>> kernels;
                                 {
@@ -1299,9 +1609,12 @@ int main(int argc, const char* argv[])
                                                                                      active,
                                                                                      d,
                                                                                      k);
+                                            // --split-devices: the device solves its own slice
+                                            ContractionProblem const& deviceProblem
+                                                = *problemFactory.sliceProblem(problem, d);
                                             kernels[k][d]
                                                 = useUserArgs
-                                                      ? solution->solveTensileGPU(*problem,
+                                                      ? solution->solveTensileGPU(deviceProblem,
                                                                                   *inputs,
                                                                                   *hardware,
                                                                                   &dUA,
@@ -1309,7 +1622,7 @@ int main(int argc, const char* argv[])
                                                                                   nullptr,
                                                                                   0,
                                                                                   ctx.stream)
-                                                      : solution->solve(*problem,
+                                                      : solution->solve(deviceProblem,
                                                                         *inputs,
                                                                         *hardware,
                                                                         nullptr,
@@ -1318,12 +1631,14 @@ int main(int argc, const char* argv[])
                                         }
                                 }
 
+                                auto const   warmupSetupStart  = TimingClock::now();
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
                                 size_t       warmupEventCount  = kernels[0][0].size();
                                 TimingEvents warmupStartEvents(
                                     active, warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(
                                     active, warmupInvocations, warmupEventCount);
+                                recordTimingSince("warmup_events_setup", warmupSetupStart);
 
                                 // I-cache rotation counter: increments per launchKernels call
                                 // and selects which hipModule_t copy services the next launch.
@@ -1358,12 +1673,29 @@ int main(int argc, const char* argv[])
                                     }
                                 };
 
+                                // Whether this run iteration launched anything (for the
+                                // end-of-iteration attribution sync below).
+                                bool iterationLaunched = false;
+
                                 if(warmupInvocations > 0)
                                 {
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         listeners.preWarmup();
                                         launchAll(&warmupStartEvents, &warmupStopEvents, 0);
+                                        iterationLaunched = true;
+                                    }
+
+                                    // Attribution only: wait for warmup 0 under its own timer, so
+                                    // the validators' readbacks do not absorb the kernel's runtime.
+                                    // Not done without instrumentation, to keep the launch/host
+                                    // overlap of production runs.
+                                    if(g_timingInstrumentationEnabled)
+                                    {
+                                        ScopedTimer timer("warmup_first_sync");
+                                        forEachDevice(active, [](DeviceContext& ctx) {
+                                            HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                        });
                                     }
 
                                     {
@@ -1386,6 +1718,7 @@ int main(int argc, const char* argv[])
                                 listeners.preProfiler();
                                 rotateAndSelect();
                                 launchAll(&ProfilerStartEvents, &ProfilerStopEvents, 0);
+                                iterationLaunched = true;
                                 listeners.postProfiler();
 #endif
 
@@ -1396,15 +1729,25 @@ int main(int argc, const char* argv[])
 
                                 {
                                     ScopedTimer timer("benchmark_runs");
-                                    listeners.preSyncs();
+                                    {
+                                        ScopedTimer preSyncsTimer("benchmark_pre_syncs");
+                                        listeners.preSyncs();
+                                    }
                                     if(enq)
                                         for(int i = 0; i < syncs; i++)
                                         {
+                                            // Declared first => destroyed last: times the event
+                                            // destruction at the end of the iteration (mark() below).
+                                            ScopeTeardownTimer eventsTeardownTimer(
+                                                "benchmark_events_teardown");
+                                            auto const eventsSetupStart = TimingClock::now();
                                             TimingEvents startEvents(active, enq, eventCount);
                                             TimingEvents stopEvents(active, enq, eventCount);
                                             std::vector<size_t> slots;
                                             for(size_t j = 0; j < std::min(enq, slotCount); j++)
                                                 slots.push_back((launchIdx + j) % slotCount);
+                                            recordTimingSince("benchmark_events_setup",
+                                                              eventsSetupStart);
 
                                             {
                                                 ScopedTimer kernelTimer("gpu_kernel_execution");
@@ -1414,6 +1757,7 @@ int main(int argc, const char* argv[])
                                                 {
                                                     rotateAndSelect();
                                                     launchAll(nullptr, nullptr, 0);
+                                                    iterationLaunched = true;
 
                                                     if(icacheFlush)
                                                     {
@@ -1427,17 +1771,46 @@ int main(int argc, const char* argv[])
 
                                                 listeners.postEnqueues(startEvents, stopEvents);
                                             }
-                                            listeners.validateEnqueues(
-                                                slots, startEvents, stopEvents);
+                                            {
+                                                ScopedTimer validateEnqueuesTimer(
+                                                    "benchmark_validate_enqueues");
+                                                listeners.validateEnqueues(
+                                                    slots, startEvents, stopEvents);
+                                            }
+                                            eventsTeardownTimer.mark();
                                         }
 
-                                    listeners.postSyncs();
+                                    {
+                                        ScopedTimer postSyncsTimer("benchmark_post_syncs");
+                                        listeners.postSyncs();
+                                    }
+                                }
+
+                                // Attribution only: wait for everything this iteration queued
+                                // (e.g. warmups 1..N-1 with SyncsPerBenchmark: 0) under its own
+                                // timer. Otherwise the next solution's first blocking call (e.g.
+                                // its input reset or GPU readback validation) or an
+                                // end-of-iteration check would absorb it. Inside the try: a kernel
+                                // fault surfacing here takes the device-lost path below.
+                                if(g_timingInstrumentationEnabled && iterationLaunched)
+                                {
+                                    ScopedTimer timer("run_iteration_sync");
+                                    forEachDevice(active, [](DeviceContext& ctx) {
+                                        HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                    });
                                 }
 
                                 if(useUserArgs)
                                 {
                                     solution->relaseDeviceUserArgs(dUA, dUAHost);
                                 }
+
+                                // Check the Synchronizer after all of this iteration's launches,
+                                // before the next iteration's input reset (GuardPageAll runs two
+                                // iterations). The verdict is reported in postSolution. It can
+                                // throw, so it follows the release of the user args.
+                                synchronizerValidator->checkRunIteration();
+                                runIterTeardownTimer.mark();
                             }
                             forEachDevice(active, [](DeviceContext&) {
                                 HIP_CHECK_EXC(hipDeviceSynchronize());
@@ -1471,6 +1844,7 @@ int main(int argc, const char* argv[])
                         ScopedTimer timer("post_solution");
                         listeners.postSolution();
                     }
+                    solutionTeardownTimer.mark();
 
                     if(deviceLost || (exitOnError && listeners.error() > 0))
                     {
@@ -1484,6 +1858,7 @@ int main(int argc, const char* argv[])
                     ScopedTimer timer("post_problem");
                     listeners.postProblem();
                 }
+                problemTeardownTimer.mark();
             }
         }
 
@@ -1501,10 +1876,22 @@ int main(int argc, const char* argv[])
     // has already drained and cleared it, so the record would be lost.
     {
         auto flushStart = TimingClock::now();
+        recordTimingSince("main_total", mainStart);
         flushTimingBuffer();
         auto flushMs = std::chrono::duration<double, std::milli>(
             TimingClock::now() - flushStart).count();
         std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+        if(g_timingInstrumentationEnabled)
+        {
+            // Wall-clock stamps so the Python side can split process startup / teardown.
+            auto toNs = [](std::chrono::system_clock::time_point t) {
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch())
+                    .count();
+            };
+            std::clog << "TIMING_TS:main_start:" << toNs(mainStartWall) << "\n"
+                      << "TIMING_TS:main_end:" << toNs(std::chrono::system_clock::now()) << "\n";
+            std::clog.flush();
+        }
     }
 
     // error range in shell is [0-255]
