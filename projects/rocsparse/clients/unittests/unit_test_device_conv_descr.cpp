@@ -1464,6 +1464,13 @@ namespace
                                             nullptr,
                                             convert_buffer.get()),
                   st_ok);
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            rebuilt,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &convert_size,
+                                            convert_buffer.get()),
+                  st_ok);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         EXPECT_EQ(rebuilt_ind.read(), (std::vector<int32_t>{0, 1, 0, 1}));
         EXPECT_EQ(rebuilt_val.read(), (std::vector<float>{1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0}));
