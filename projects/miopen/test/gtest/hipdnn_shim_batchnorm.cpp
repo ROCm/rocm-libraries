@@ -269,8 +269,10 @@ miopenStatus_t InferInvVariance(miopen::Handle& handle, InferData& d, bool with_
         with_estimates ? d.estVariance_dev.get() : nullptr);
 }
 
-miopenStatus_t
-InferActivation(miopen::Handle& handle, InferData& d, miopenActivationDescriptor_t activ)
+miopenStatus_t InferActivation(miopen::Handle& handle,
+                               InferData& d,
+                               miopenActivationDescriptor_t activ,
+                               bool with_estimates = true)
 {
     return miopenBatchNormForwardInferenceActivation(&handle,
                                                      d.bn_mode,
@@ -286,8 +288,9 @@ InferActivation(miopen::Handle& handle, InferData& d, miopenActivationDescriptor
                                                      &d.estVariance.desc,
                                                      d.scale_dev.get(),
                                                      d.shift_dev.get(),
-                                                     d.estMean_dev.get(),
-                                                     d.estVariance_dev.get(),
+                                                     with_estimates ? d.estMean_dev.get() : nullptr,
+                                                     with_estimates ? d.estVariance_dev.get()
+                                                                    : nullptr,
                                                      d.epsilon,
                                                      activ);
 }
@@ -431,13 +434,16 @@ void FillTrueStats(Data& d, double eps)
 }
 
 // MIOpen silently runs training when the estimated stats are null, so the output
-// is x normalized with its own batch stats: the training reference's output.
+// is x normalized with its own batch stats: the training reference's output, with
+// the call's activation applied.
 void CheckInferWithoutEstimates(miopen::Handle& handle, InferData& d)
 {
     d.output.data = handle.Read<float>(d.out_dev, d.output.data.size());
     tensor<float> none;
     batchNormSpatialHostFwdTrain(
         d.input, d.out_ref, d.scale, d.shift, d.epsilon, 0.0, none, none, none, none);
+    activationHostInfer(
+        d.activ_mode, 0.0, d.activ_beta, d.activ_alpha, d.out_ref.data, d.out_ref.data);
     test::CompareTensor<float>(d.output, d.out_ref, kTol);
 }
 
@@ -1207,6 +1213,27 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
         if(ExpectServed(c.name, result))
             CheckInferWithoutEstimates(handle, d);
     }
+}
+
+// The activation entry runs training too, and keeps its activation.
+TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, ActivationRunsTrainingWithActivation)
+{
+    auto&& handle = get_handle();
+    InferData d;
+    SetUpInfer(d);
+    d.epsilon = 0.5;
+    SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationRELU);
+
+    hs::OwnedActivationDescriptor activ;
+    ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+    ASSERT_EQ(
+        miopenSetActivationDescriptor(activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
+        miopenStatusSuccess);
+
+    const auto result =
+        hs::CaptureCall([&] { return InferActivation(handle, d, activ.handle, false); });
+    if(ExpectServed("infer_activation_no_estimates", result))
+        CheckInferWithoutEstimates(handle, d);
 }
 
 // The inverse variance entry has no epsilon, so the training it runs uses the
