@@ -31,6 +31,7 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/errors.hpp>
 
+#include <cstdint>
 #include <limits>
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_COMPILE_PARALLEL_LEVEL)
@@ -89,6 +90,7 @@ using GPU_UnitTestConvSolverHipDirectFwdParallelCompileFwd_FP16 = GPU_UnitTestCo
 using GPU_UnitTestConvSolverHipDirectFwdTimeBudgetFwd_FP16      = GPU_UnitTestConvSolverFwd_FP16;
 using GPU_UnitTestConvSolverHipDirectFwdPatienceFwd_FP16        = GPU_UnitTestConvSolverFwd_FP16;
 using GPU_UnitTestConvSolverHipDirectFwdFailedMeasureFwd_FP16   = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdHugeTimeBudgetFwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
 
 using GPU_UnitTestConvSolverHipDirectFwdFwd_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
 using GPU_UnitTestConvSolverHipDirectFwdBwd_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
@@ -133,6 +135,19 @@ TEST_P(GPU_UnitTestConvSolverHipDirectFwdPatienceFwd_FP16, ConvHipDirectFwd)
 {
     // The time budget is far away, so only the patience can end the search.
     ScopedEnvironment<int> tuning_time_max(MIOPEN_TUNING_TIME_MS_MAX, 3600000);
+    ScopedEnvironment<int> tuning_patience(MIOPEN_TUNING_PATIENCE, 1);
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 4);
+    testing::internal::CaptureStderr();
+    this->RunTest(miopen::solver::conv::ConvHipDirectFwd{});
+    const auto log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("no improvement in 1 runs"), std::string::npos) << log;
+    EXPECT_EQ(log.find("tuning time budget"), std::string::npos) << log;
+};
+
+// A budget too large for a nanosecond count must not end the search early.
+TEST_P(GPU_UnitTestConvSolverHipDirectFwdHugeTimeBudgetFwd_FP16, ConvHipDirectFwd)
+{
+    ScopedEnvironment<std::uint64_t> tuning_time_max(MIOPEN_TUNING_TIME_MS_MAX, 10'000'000'000'000);
     ScopedEnvironment<int> tuning_patience(MIOPEN_TUNING_PATIENCE, 1);
     ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 4);
     testing::internal::CaptureStderr();
@@ -236,6 +251,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverHipDirectFwdPatienceFwd_FP16,
+                         testing::Combine(testing::Values(GetFullSearchTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectFwdHugeTimeBudgetFwd_FP16,
                          testing::Combine(testing::Values(GetFullSearchTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));

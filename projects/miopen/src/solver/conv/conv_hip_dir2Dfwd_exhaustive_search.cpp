@@ -569,7 +569,9 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
     bool stop                          = false;
 
     const auto time_budget_exhausted = [&] {
-        if(std::chrono::steady_clock::now() - start_time <= time_budget)
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time);
+        if(elapsed <= time_budget)
             return false;
         MIOPEN_LOG_W("Ending search, tuning time budget of " << time_budget.count()
                                                              << " ms is exhausted");
