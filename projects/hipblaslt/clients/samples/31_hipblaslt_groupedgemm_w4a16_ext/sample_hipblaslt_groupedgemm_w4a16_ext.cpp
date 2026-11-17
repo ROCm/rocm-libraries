@@ -16,6 +16,7 @@
 #include <hip/library_types.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -86,8 +87,12 @@ static int runCase(hipblasLtHandle_t           handle,
                    int64_t                     k,
                    int64_t                     maxN,
                    const std::vector<int32_t>& nDev,
-                   int                         iters)
+                   int                         iters,
+                   bool                        totalBound = false)
 {
+    // totalBound: the host problem is n = {R, 1, ..., 1} with R the total rows,
+    // which sizes the grid for any split of R rows; each group's buffers still
+    // hold maxN >= R columns.
     const int     G       = int(nDev.size());
     const int64_t kGroups = k / groupSize;
     const size_t  scaleB  = size_t(m) * kGroups * 2;
@@ -142,6 +147,16 @@ static int runCase(hipblasLtHandle_t           handle,
     std::vector<int64_t> vm(G, m), vn(G, maxN), vk(G, k), vb(G, 1), vlda(G, k), vldb(G, k),
         vldc(G, m), vldd(G, m), vsa(G, m * k), vsb(G, maxN * k), vsc(G, m * maxN),
         vsd(G, m * maxN);
+    if(totalBound)
+    {
+        int64_t R = 0;
+        for(int32_t v : nDev)
+            R += v;
+        if(R > maxN)
+            return 1;
+        std::fill(vn.begin(), vn.end(), 1);
+        vn[0] = R;
+    }
     float                                   alpha = 1.0f, beta = 0.0f;
     std::vector<hipblaslt_ext::GemmEpilogue> epi(G);
     std::vector<hipblaslt_ext::GemmInputs>   in(G);
@@ -267,6 +282,7 @@ static int runCase(hipblasLtHandle_t           handle,
 
 
     std::cout << "grouped w4a16 m=" << m << " k=" << k << " G=" << G << " maxN=" << maxN
+              << (totalBound ? " host n={R,1,..}" : "")
               << " n={";
     for(int g = 0; g < G; g++)
         std::cout << nDev[g] << (g + 1 < G ? "," : "}");
@@ -305,6 +321,24 @@ int main(int argc, char** argv)
     fails += runCase(handle, 1024, 2048, 2, {2, 0, 1, 2, 2, 0, 1, 2}, iters);
     // A token count whose nearest tile is split-K, with more groups than its 16 slots.
     fails += runCase(handle, 1024, 2048, 1, std::vector<int32_t>(60, 1), iters);
+    // Host bound on the total rows only: n = {R, 1, ..., 1} on the host, any
+    // split of R rows (empty groups included) on the device.
+    fails += runCase(handle, 1024, 2048, 16, {5, 0, 3, 1, 0, 4, 2, 1}, 0, true);
+    fails += runCase(handle, 2048, 512, 16, {5, 0, 3, 1, 0, 4, 2, 1}, 0, true);
+    {
+        // Prefill-like: 64 experts, uneven counts, the last group the largest.
+        std::mt19937                       r(7);
+        std::uniform_int_distribution<int> c(0, 9);
+        std::vector<int32_t>               n(64);
+        for(auto& v : n)
+            v = c(r) < 3 ? 0 : c(r);
+        n.back() = 61;
+        int32_t R = 0;
+        for(int32_t v : n)
+            R += v;
+        fails += runCase(handle, 1024, 2048, R, n, 0, true);
+        fails += runCase(handle, 2048, 512, R, n, 0, true);
+    }
     // Uneven groups below the host bound, including empty ones.
     fails += runCase(handle, 1024, 2048, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);
     fails += runCase(handle, 2048, 512, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);
