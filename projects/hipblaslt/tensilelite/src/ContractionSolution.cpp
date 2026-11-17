@@ -1088,17 +1088,6 @@ namespace TensileLite
         return magu.M;
     }
 
-    uint32_t
-        ContractionSolution::magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const
-    {
-        if(magicDivAlg == 1)
-            return magicNumberAlg1(x, magicShift);
-        else if(magicDivAlg == 2)
-            return magicNumberAlg2(x, magicShift);
-        else
-            throw std::runtime_error("bad magicDivAlg");
-    }
-
     uint32_t ContractionSolution::smallMagicNumber(uint32_t x) const
     {
         uint64_t  magicNum;
@@ -1221,8 +1210,7 @@ namespace TensileLite
             // The flat space is in padded tiles here too, so that a solution with
             // a K unit keeps one convention across every path it can take.
             uint32_t magicShift = 0;
-            const uint32_t magic = solution.magicNumber(
-                2,
+            const uint32_t magic = solution.magicNumberAlg2(
                 static_cast<uint32_t>(
                     skPaddedItersPerTile(itersPerTile, solution.skKGranularity())),
                 &magicShift);
@@ -1631,8 +1619,8 @@ namespace TensileLite
                         = skPaddedItersPerTile(sk3_itersPerTile, skKGranularity());
                     uint32_t magicNumberItersPerTile;
                     uint32_t magicShiftItersPerTile;
-                    magicNumberItersPerTile = magicNumber(
-                        2, sk3_paddedIters, &magicShiftItersPerTile);
+                    magicNumberItersPerTile
+                        = magicNumberAlg2(sk3_paddedIters, &magicShiftItersPerTile);
                     // Bit 30 = SK5 mode bit, bit 29 = uniform summation order.
                     // Both are stolen from the always-zero 5..30 window of
                     // magicNumberAlg2's shift field; bit 31 stays the "add"
@@ -1705,7 +1693,7 @@ namespace TensileLite
                 uint32_t magicNumberItersPerTile;
                 uint32_t magicShiftItersPerTile;
                 magicNumberItersPerTile
-                    = magicNumber(2, paddedItersPerTile, &magicShiftItersPerTile);
+                    = magicNumberAlg2(paddedItersPerTile, &magicShiftItersPerTile);
 
                 // MagicShiftItersPerTile wire format:
                 //   31    = magicNumberAlg2's "add" indicator (abit)
@@ -3209,7 +3197,7 @@ namespace TensileLite
                 = static_cast<uint32_t>(skPaddedItersPerTile(itersPerTile, skKGranularity()));
             skTotalIters    = static_cast<uint32_t>(numTiles * paddedItersPerTile);
             skMagicNumberItersPerTile
-                = magicNumber(2, paddedItersPerTile, &skMagicShiftItersPerTile);
+                = magicNumberAlg2(paddedItersPerTile, &skMagicShiftItersPerTile);
 
             bool twoTileStreamK = sizeMapping.isStreamK()
                                   || customKernel.workspaceType == CustomWorkspaceType::StreamK
@@ -3978,27 +3966,34 @@ namespace TensileLite
                 // ---- Packed batch dimension divisors ----
                 // arg.index comes from the kernel's custom.config, so it is untrusted;
                 // fall back to a dimension of 1 rather than indexing out of bounds.
-                case CustomArgSemantic::MagicNumberSize:
+                case CustomArgSemantic::MagicNumberSizeAlg1:
+                case CustomArgSemantic::MagicShiftSizeAlg1:
                 {
                     uint32_t dimSize = arg.index < problem.problemSizes().size()
                                            ? problem.problemSizes()[arg.index]
                                            : 1;
                     uint32_t magicShift;
-                    uint32_t magicNum = magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
-                    rv.args.template append<uint32_t>("MagicNumberSize", magicNum);
+                    uint32_t magicNum = magicNumberAlg1(dimSize, &magicShift);
+                    rv.args.template append<uint32_t>(
+                        toString(arg.semantic),
+                        arg.semantic == CustomArgSemantic::MagicNumberSizeAlg1 ? magicNum
+                                                                               : magicShift);
                     break;
                 }
-                case CustomArgSemantic::MagicShiftSize:
+                case CustomArgSemantic::MagicNumberSizeAlg2:
+                case CustomArgSemantic::MagicShiftSizeAlg2:
                 {
                     uint32_t dimSize = arg.index < problem.problemSizes().size()
                                            ? problem.problemSizes()[arg.index]
                                            : 1;
                     uint32_t magicShift;
-                    magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
-                    rv.args.template append<uint32_t>("MagicShiftSize", magicShift);
+                    uint32_t magicNum = magicNumberAlg2(dimSize, &magicShift);
+                    rv.args.template append<uint32_t>(
+                        toString(arg.semantic),
+                        arg.semantic == CustomArgSemantic::MagicNumberSizeAlg2 ? magicNum
+                                                                               : magicShift);
                     break;
                 }
-
                 // ---- Epilogue control args ----
                 case CustomArgSemantic::BiasType:
                     rv.args.template append<uint32_t>("BiasType", static_cast<uint32_t>(problem.bias().dataType()));
@@ -4087,7 +4082,7 @@ namespace TensileLite
 
                 // rocRoller workgroup mapping. libdivide branchfree magics of
                 // the WGM integer, numTilesN, the tail, and the main block,
-                // plus the two signed quotients. Not Tensile magicNumber().
+                // plus the two signed quotients. Not Tensile's magicNumberAlg1/2().
                 case CustomArgSemantic::RR_WorkgroupMapping:
                     rv.args.appendCustomType("RR_WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
                     break;
