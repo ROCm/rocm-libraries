@@ -19,6 +19,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 | `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
+| `hip/conv_dgrad_fma_1d_rdna/` | `hipkernel:hip_conv_dgrad_fma_1d_rdna` | `packs/HipConvDgradFma1dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_2d`, `gfx942_attention_unified_3d`, `gfx942_attention_dense`,
@@ -44,6 +45,12 @@ bundle is packed, for every build whose GPU targets include one of the gfx11 and
 targets its KDP declares. It needs neither rocKE nor DVC. Its descriptors are generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_fma_igemm_rdna.yaml`; edit the config and
 regenerate rather than editing the JSON.
+
+`hip/conv_dgrad_fma_1d_rdna/` holds the 1-D backward-data kernels (`kernels/ConvDgradFma1d.cpp`),
+which also serve the forward of a ConvTranspose1d: variants specialized at compile time on the
+filter width, stride and channel tile for common shapes, plus one generic variant per dtype
+and layout. No variant needs a workspace. Its descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_dgrad_fma_1d_rdna.yaml`.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

@@ -1,0 +1,16 @@
+# Integration test configuration for hipkernel:hip_conv_dgrad_fma_1d_rdna
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# The engine serves 1-D backward data (conv_dgrad) on the gfx11 and gfx12 RDNA targets: rank 3,
+# or rank 4 with a unit H axis, packed NCL or NLC, fp32 / fp16 / bf16, any stride, dilation and
+# padding, and groups with at least two dx channels each. It declines depthwise and 2-D / 3-D
+# problems, and the harness skips a declined case. No tolerance overrides: the common
+# ConvolutionBwdAttributes tolerance applies.
+#
+# No [[test_skips]] entry: the engine's pack ships only for RDNA targets, so another device
+# declines through the ordinary path. An entry cannot express "skip everywhere except
+# RDNA" -- the schema has no negation, and an empty `archs` list means EVERY arch
+# (TestSettings.hpp: `entry.archs.empty() || ...`).
