@@ -319,6 +319,20 @@ def test_packed_carrier_preflight_preserves_existing_budget(monkeypatch, free_ra
     assert writer.sgprPool.size() == 98
 
 
+@pytest.mark.parametrize("cluster, expected", [((1, 1), {"packed": True}), ((2, 2), None)])
+def test_streamk_cluster_keeps_borrowed_identity_path(cluster, expected):
+    # Cluster mapping rewrites PersistentPhantomTile, which packed identity does not save.
+    kernel, tensors, writer = _writer(cluster=cluster)
+    kernel.update(TileProcessingStrategy="StreamK", PrefetchGlobalRead=2, NoTailLoop=True)
+    writer.states.papNextTileVgpr = 12
+    writer.states.regCaps = {"MaxSgpr": 106, "MaxVgpr": 1024}
+    writer.sgprPool = RegisterPool(98, RegisterType.Sgpr, defaultPreventOverflow=False)
+    writer.sgprPool.add(20, 32, "scratch")
+    writer.vgprPool = RegisterPool(8, RegisterType.Vgpr, defaultPreventOverflow=False)
+    writer.vgprPool.add(0, 8, "scratch")
+    assert writer.papAddressCarrierPlan(kernel, tensors["A"], tensors["B"]) == expected
+
+
 @pytest.mark.parametrize("scales", [False, True])
 @pytest.mark.parametrize("prepared", [False, True])
 def test_streamk_packed_consumer_matches_ordinary_descriptors(monkeypatch, scales, prepared):
