@@ -1274,10 +1274,10 @@ typedef enum
     /** @brief Whether a deterministic algorithm is required (bool) */
     HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT = 3132,
 
-    /** @brief Maximum total query sequence length for packed layouts, a workspace hint (int64, optional) */
+    /** @brief Physical token span of the packed query buffer, at least max(offset[b] + len[b]) over the batch (int64, optional) */
     HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT = 3133,
 
-    /** @brief Maximum total key/value sequence length for packed layouts, a workspace hint (int64, optional) */
+    /** @brief Physical token span of the packed key/value buffers, at least max(offset[b] + len[b]) over the batch (int64, optional) */
     HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT = 3134,
 
     /** @} */

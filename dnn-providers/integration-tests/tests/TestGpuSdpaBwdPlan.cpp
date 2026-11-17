@@ -85,7 +85,7 @@ struct RawBwdSpec
     std::optional<DataType> dSinkType;
     // Philox seed, offset and an rng_dump output FLOAT [1, H, Sq, Skv] (with `dropout` set).
     bool rngDump = false;
-    // cuDNN set_deterministic_algorithm and set_max_total_seq_len_q (a workspace hint).
+    // cuDNN set_deterministic_algorithm and set_max_total_seq_len_q (the packed Q span).
     bool deterministic = false;
     std::optional<int64_t> maxTotalSeqLenQ;
 };
@@ -488,9 +488,10 @@ TEST(TestGpuSdpaBwdPlan, DeclinesLikeCpu)
              s.dropoutScaleInvDims = std::vector<int64_t>{1};
          }),
          false},
-        // Determinism is served (the references are deterministic); max_total_seq_len is a hint.
+        // Determinism is served (the references are deterministic); the references do not read
+        // max_total_seq_len, the packed buffer's token span.
         {"deterministic", editedSpec([](RawBwdSpec& s) { s.deterministic = true; }), true},
-        {"max_total_seq_len hint", editedSpec([](RawBwdSpec& s) { s.maxTotalSeqLenQ = 64; }), true},
+        {"max_total_seq_len", editedSpec([](RawBwdSpec& s) { s.maxTotalSeqLenQ = 64; }), true},
     };
 
     for(const auto& c : cases)

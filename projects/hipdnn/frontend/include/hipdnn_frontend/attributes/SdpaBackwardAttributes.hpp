@@ -56,7 +56,7 @@ namespace hipdnn_frontend::graph
  * - Attention scale (attn_scale_value or an Attn_scale tensor; 1.0 when neither is set)
  * - Attention sink (SINK_TOKEN input, DSINK_TOKEN output)
  * - Dropout keep-mask dump (RNG_DUMP output)
- * - Deterministic-algorithm request and max_total_seq_len_q/kv workspace hints
+ * - Deterministic-algorithm request and max_total_seq_len_q/kv (packed-buffer token spans)
  *
  * The sink, dSink and RNG-dump inputs and outputs, their getters, and the
  * is_deterministic_algorithm and max_total_seq_len_q/kv members were introduced in
@@ -140,13 +140,16 @@ public:
     // Enum attributes
     DiagonalAlignment diagonal_alignment = DiagonalAlignment::TOP_LEFT;
 
-    // Backward-only hints and requests (cuDNN set_deterministic_algorithm / set_max_total_seq_len_*)
+    // Backward-only requests and packed-layout spans (cuDNN set_deterministic_algorithm /
+    // set_max_total_seq_len_*)
     /// Request a deterministic backward pass; engines that cannot guarantee it decline the graph.
     bool is_deterministic_algorithm = false;
-    /// Total packed Q length in tokens (sum of all sequence lengths); a workspace hint no hipDNN
-    /// engine consumes. validate() requires a ragged Q, K, V or O when it is set.
+    /// Physical token span of the packed Q buffer: at least max(offset[b] + len[b]) over the
+    /// batch. An engine may read it to size buffers; engines that do not need it ignore it.
+    /// validate() requires a ragged Q, K, V or O when it is set, and a value of at least Q's S_max.
     std::optional<int64_t> max_total_seq_len_q;
-    /// Total packed K/V length in tokens; same contract as max_total_seq_len_q.
+    /// Physical token span of the packed K/V buffers; same contract as max_total_seq_len_q,
+    /// checked against K's S_max.
     std::optional<int64_t> max_total_seq_len_kv;
 
     // NOLINTEND(readability-identifier-naming)
@@ -431,8 +434,8 @@ public:
     {
         return setInput(InputNames::Dropout_scale_inv, std::move(value));
     }
-    /// @brief Set the attention-sink input tensor, [1, H_q, 1, 1], FLOAT, or Q's data type set on
-    ///        the sink itself (an untyped sink takes the graph I/O type and must then be FLOAT).
+    /// @brief Set the attention-sink input tensor, [1, H_q, 1, 1], FLOAT, or BFLOAT16/HALF equal to
+    ///        Q's data type set on the sink itself (an untyped sink takes the graph I/O type and must then be FLOAT).
     ///        The Stats input must be sink-inclusive. See docs/KNOWN_DIVERGENCES.md for the
     ///        hipDNN differences.
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -698,10 +701,11 @@ public:
         return recordUnsupported("SDPA score-modifier backprop is unsupported by hipDNN");
     }
     /**
-     * @brief Set the total packed Q length hint (cuDNN set_max_total_seq_len_q).
+     * @brief Set the physical token span of the packed Q buffer (cuDNN set_max_total_seq_len_q).
      *
-     * A workspace-size hint only. validate() requires a ragged (packed) Q, K, V or O when it
-     * is set, as cuDNN does; no positivity check is made.
+     * At least max(offset[b] + len[b]) over the batch. An engine may read it to size buffers.
+     * validate() requires a ragged (packed) Q, K, V or O when it is set, as cuDNN does, and
+     * rejects a value below Q's S_max with INVALID_VALUE (stricter than cuDNN).
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_max_total_seq_len_q(int64_t value)
@@ -709,7 +713,8 @@ public:
         max_total_seq_len_q = value;
         return *this;
     }
-    /// @brief Set the total packed K/V length hint (cuDNN set_max_total_seq_len_kv); see
+    /// @brief Set the physical token span of the packed K/V buffers (cuDNN
+    ///        set_max_total_seq_len_kv); validate() rejects a value below K's S_max. See
     ///        set_max_total_seq_len_q().
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_max_total_seq_len_kv(int64_t value)

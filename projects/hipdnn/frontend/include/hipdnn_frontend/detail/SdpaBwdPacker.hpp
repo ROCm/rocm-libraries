@@ -168,11 +168,17 @@ inline Error
                                                HIPDNN_TYPE_BOOLEAN,
                                                attributes.causal_mask_bottom_right,
                                                "SDPA bprop causal_mask_bottom_right"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT,
-                                               HIPDNN_TYPE_BOOLEAN,
-                                               attributes.is_deterministic_algorithm,
-                                               "SDPA bprop is_deterministic_algorithm"));
+    // Written only when requested, like every other attribute added after the first release, so
+    // a graph that uses none of them lowers through a backend that predates them.
+    if(attributes.is_deterministic_algorithm)
+    {
+        HIPDNN_CHECK_ERROR(
+            setDescriptorAttrScalar(opDesc.get(),
+                                    HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    attributes.is_deterministic_algorithm,
+                                    "SDPA bprop is_deterministic_algorithm"));
+    }
 
     // Set optional float scalar parameters
     if(attributes.dropout_probability.has_value())

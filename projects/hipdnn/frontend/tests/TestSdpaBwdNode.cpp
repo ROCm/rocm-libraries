@@ -8,6 +8,7 @@
 #include <cstring>
 #include <functional>
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <map>
 
 #include <hipdnn_frontend/Error.hpp>
@@ -1072,7 +1073,7 @@ TEST(TestSdpaBwdNode, PreValidateFailsSeedOffsetEmptyDims)
 }
 
 //==============================================================================
-// Sink / dSink: [1, H_q, 1, 1], FLOAT, or Q's data type set on the tensor itself
+// Sink / dSink: [1, H_q, 1, 1], FLOAT, or BFLOAT16/HALF equal to Q's data type set on the tensor itself
 //==============================================================================
 
 TEST(TestSdpaBwdNode, PreValidateSucceedsSinkAndDsinkFloat)
@@ -1307,14 +1308,68 @@ TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenWithRaggedOnlyO)
         << "any of Q, K, V, O counts as packed";
 }
 
-TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenNonPositive)
+TEST(TestSdpaBwdNode, PreValidateFailsMaxTotalSeqLenQBelowQSMax)
 {
+    // Q is [2, 8, 16, 64]: S_max = 16.
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_q()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_q(15);
+              }),
+              error_code_t::INVALID_VALUE);
     EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
                   a.get_k()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
-                  a.set_max_total_seq_len_q(0).set_max_total_seq_len_kv(-5);
+                  a.set_max_total_seq_len_q(0);
+              }),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsMaxTotalSeqLenKvBelowKSMax)
+{
+    // K is [2, 2, 32, 64]: S_max = 32.
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_k()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_kv(31);
+              }),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_q()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_kv(-5);
+              }),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenEqualToSMax)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_q()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_q(16).set_max_total_seq_len_kv(32);
               }),
               error_code_t::OK)
-        << "no positivity check, as cuDNN";
+        << "equal to S_max (a single sequence spanning the buffer) is valid";
+}
+
+TEST(TestSdpaBwdNode, PreValidateRaggedRuleStillPrecedesTheSMaxCheck)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_max_total_seq_len_q(1).set_max_total_seq_len_kv(1);
+              }),
+              error_code_t::GRAPH_NOT_SUPPORTED)
+        << "a dense graph is not supported, whatever the value";
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSinkInFp8Dtype)
+{
+    const auto fp8Graph = [](const std::shared_ptr<TensorAttributes>& sink) {
+        return validateBwd(
+            [&](SdpaBackwardAttributes& a) {
+                a.get_q()->set_data_type(DataType::FP8_E4M3);
+                a.set_sink_token(sink);
+            },
+            DataType::FP8_E4M3);
+    };
+    EXPECT_EQ(fp8Graph(makeTyped({1, 8, 1, 1}, DataType::FP8_E4M3)), error_code_t::INVALID_VALUE)
+        << "Q's type is only an option for BFLOAT16 and HALF";
+    EXPECT_EQ(fp8Graph(makeTyped({1, 8, 1, 1}, DataType::FLOAT)), error_code_t::OK);
 }
 
 TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenWithRaggedOnlyV)
@@ -1404,6 +1459,19 @@ protected:
                 *count = n;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    }
+
+    /// Makes the backend refuse @p names as an older backend does: SetAttribute on an
+    /// attribute it does not know reports NOT_SUPPORTED.
+    void rejectAttributes(std::initializer_list<hipdnnBackendAttributeName_t> names)
+    {
+        for(const auto name : names)
+        {
+            ON_CALL(
+                *_backend,
+                backendSetAttribute(::testing::_, name, ::testing::_, ::testing::_, ::testing::_))
+                .WillByDefault(::testing::Return(HIPDNN_STATUS_NOT_SUPPORTED));
+        }
     }
 
     void TearDown() override
@@ -1539,4 +1607,37 @@ TEST_F(TestSdpaBwdPackUnpack, UnsetNewFieldsStayUnsetAfterRoundTrip)
     EXPECT_FALSE(out.is_deterministic_algorithm);
     EXPECT_FALSE(out.max_total_seq_len_q.has_value());
     EXPECT_FALSE(out.max_total_seq_len_kv.has_value());
+}
+
+// A graph that uses none of the six attributes added with the backward parity work must lower
+// through a backend that predates them (the frontend works with every backend of its major
+// version); the boolean is therefore written only when true.
+TEST_F(TestSdpaBwdPackUnpack, GraphUsingNoNewFieldLowersThroughABackendThatRejectsThem)
+{
+    rejectAttributes({HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT,
+                      HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT,
+                      HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT,
+                      HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT,
+                      HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT,
+                      HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT});
+
+    SdpaBackwardAttributes attrs;
+    attrs.set_q(makeUidTensor(1, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_k(makeUidTensor(2, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_v(makeUidTensor(3, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_o(makeUidTensor(4, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_do(makeUidTensor(5, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_stats(makeUidTensor(6, {2, 8, 16, 1}, DataType::FLOAT));
+    attrs.set_dq(makeUidTensor(7, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_dk(makeUidTensor(8, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_dv(makeUidTensor(9, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_compute_data_type(DataType::FLOAT);
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode packed(std::move(attrs), graphAttrs);
+    std::unordered_map<int64_t, hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> operations;
+    const auto packError = packed.create_operation(tensorDescs, operations);
+    EXPECT_EQ(packError.code, error_code_t::OK) << packError.err_msg;
+    EXPECT_EQ(operations.size(), 1U);
 }

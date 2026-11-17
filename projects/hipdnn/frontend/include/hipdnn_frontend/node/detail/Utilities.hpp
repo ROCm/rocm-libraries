@@ -512,8 +512,9 @@ inline DataType effectiveTensorDataType(const std::shared_ptr<graph::TensorAttri
 
 // Validates an SDPA attention-sink tensor (forward sink_token, backward sink_token and
 // dsink_token) when present: dims exactly [1, H_q, 1, 1], and a data type of FLOAT (cuDNN) or,
-// set on the tensor itself, Q's effective data type (hipDNN extension; Q's own type, or the graph
-// I/O type when Q's is unset). A type the tensor does not set itself (unset, or supplied by
+// as a hipDNN extension, BFLOAT16 or HALF equal to Q's effective data type (Q's own type, or the
+// graph I/O type when Q's is unset) and set on the tensor itself. Any other type, including an
+// FP8 Q's own type, is rejected. A type the tensor does not set itself (unset, or supplied by
 // fill_from_context) counts only when it is FLOAT, so a FLOAT buffer left untyped is never read
 // in the graph's 16-bit I/O type.
 inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttributes>& tensor,
@@ -537,10 +538,15 @@ inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttribute
     const bool typedOnTensor = tensor->get_data_type() != DataType::NOT_SET
                                && !TensorAttributesAccess::isDataTypeFromContext(*tensor);
     // A type set on the tensor is never NOT_SET, so an unset Q type never matches it.
+    const bool sixteenBitMatchesQ
+        = typedOnTensor && effective == qEffectiveDataType
+          && (effective == DataType::BFLOAT16 || effective == DataType::HALF);
     HIPDNN_RETURN_IF_TRUE(
-        effective != DataType::FLOAT && (!typedOnTensor || effective != qEffectiveDataType),
+        effective != DataType::FLOAT && !sixteenBitMatchesQ,
         ErrorCode::INVALID_VALUE,
-        nodeName + ": " + role + " must have FLOAT data type, or Q's data type set on the tensor");
+        nodeName + ": " + role
+            + " must have FLOAT data type, or BFLOAT16/HALF equal to Q's data type set on the "
+              "tensor");
     return {};
 }
 

@@ -353,13 +353,15 @@ batch when `seq_len_q/kv` are set).
   (`scaled_dot_product_flash_attention.h:1532-1551`) shows no visible negation in the frontend. hipDNN pins `-`
   by derivation, finite differences and an FP64 autograd golden.
 - **Dtype:** cuDNN's frontend checks neither sink nor dSink; its tests allocate FLOAT `(1, H_q, 1, 1)`. hipDNN
-  accepts FLOAT, or Q's data type (the graph I/O data type when Q's is unset) set on the sink itself, dims
-  exactly `[1, H_q, 1, 1]`, in the forward and the backward, and dSink must have the sink's data type. An untyped
+  accepts FLOAT, or BFLOAT16 or HALF equal to Q's data type (the graph I/O data type when Q's is unset) set on
+  the sink itself, dims exactly `[1, H_q, 1, 1]`, in the forward and the backward, and dSink must have the sink's
+  data type. Any other type, an FP8 sink in an FP8 graph included, fails `validate()` with `INVALID_VALUE`
+  (`TestSdpaFwdNode.PreValidateSinkDataTypeReferentIsQ`, `TestSdpaBwdNode.PreValidateFailsSinkInFp8Dtype`). An untyped
   sink or dSink, including one whose type `fill_from_context` supplied from the graph, must be FLOAT, so a FLOAT
   buffer left untyped is never read as the graph's 16-bit type. The wider range is a supported superset: every
   graph cuDNN accepts is accepted unchanged, and a model-dtype sink (vLLM, HF) needs no conversion. The FlyDSL
   forward sink objects already read a 16-bit sink (hip-kernel-provider `flydsl/COVERAGE.md`). Behavior change in
-  the forward: the forward sink, previously FLOAT only, now also accepts Q's data type set on the sink
+  the forward: the forward sink, previously FLOAT only, now also accepts BFLOAT16 or HALF equal to Q's data type set on the sink
   (`TestSdpaFwdNode.PreValidateSinkShapeAndType`, `GraphValidateAcceptsASinkTypedInQsDataType`); an untyped sink
   in a 16-bit graph still fails (`GraphValidateRejectsUntypedSinkInAHalfGraph`). A dSink without a sink fails
   with `ATTRIBUTE_NOT_SET`; a sink without a dSink is accepted, as in cuDNN. Ragged Q/K/V/O with a sink is
@@ -370,8 +372,12 @@ batch when `seq_len_q/kv` are set).
   `TestCpuFpReferenceSdpaGradCheck.SinkDSink` and `SinkDSinkWithExplicitMaskDropout` (mutation: scaling D by
   `dropout_scale_inv` fails).
 - **vLLM:** sinks are in the model dtype and kernels upcast them.
-- **Future:** the FlyDSL forward matchers serve the FLOAT sink only; accepting the 16-bit sink their objects
-  already read is a follow-up.
+- **Providers:** an engine whose kernels read the caller's (sink-inclusive) LSE serves a graph with `sink_token`
+  and no `dsink_token` unchanged, since dQ, dK and dV depend on the sink only through Stats (cuDNN's backward reads
+  the sink only for dSink, `scaled_dot_product_flash_attention.h:1322, 1532-1551`). The ASM SDPA backward engine
+  and the merged FlyDSL backward engine serve such a graph; a dSink still makes them decline. FlyDSL split
+  behavior is unchanged. The FlyDSL forward matchers serve a FLOAT sink and a BFLOAT16 or HALF sink equal to Q's
+  data type, and decline any other sink data type.
 - **Note:** AITER's test uses an LSE without the sink for dSink; do not follow it.
 
 ### SEM-023: Max and Sum_exp row statistics
@@ -510,9 +516,9 @@ batch when `seq_len_q/kv` are set).
 
 ## Backward options and operands
 
-### SEM-029: Backward determinism and `max_total_seq_len` hints
+### SEM-029: Backward determinism and `max_total_seq_len`
 
-- **Status:** Aligned (store and validation); Extension (per-engine determinism claims).
+- **Status:** Aligned (store); Diverges (S_max check, below); Extension (per-engine determinism claims).
 - **cuDNN:** `set_deterministic_algorithm(bool)` and `set_max_total_seq_len_q/kv(int64_t)` are plain stores
   (cudnn-frontend v1.24.0 `graph_properties.h:2387-2394, 2475-2477`). `max_total_seq_len_q/kv` with no ragged
   offset on Q, K, V or O fails with `GRAPH_NOT_SUPPORTED` "only supported with packed layout"; one check covers
@@ -523,15 +529,25 @@ batch when `seq_len_q/kv` are set).
   the schema, the backend attributes (`HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT`,
   `HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT`, `HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT`) and JSON.
   `validate()` accepts both determinism values. `max_total_seq_len_q/kv` without a ragged Q, K, V or O fails with
-  `GRAPH_NOT_SUPPORTED`, as cuDNN does. A non-positive value is accepted.
+  `GRAPH_NOT_SUPPORTED`, as cuDNN does. The packer writes `HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT`
+  only when it is true and the unpacker reads a missing attribute as false, so a graph that uses none of the
+  six new backward fields lowers through a backend that rejects their ids
+  (`TestSdpaBwdPackUnpack.GraphUsingNoNewFieldLowersThroughABackendThatRejectsThem`).
+- **`max_total_seq_len_q/kv`:** the physical token span of the packed Q (K/V) buffer, at least
+  `max(offset[b] + len[b])` over the batch (cudnn-frontend `docs/operations/Attention.md:761-781`). It is
+  serialized and an engine may read it to size buffers and set its sequence-length arguments; the ASM SDPA
+  engine's grouped backward does. Engines that do not need it ignore it. Divergence from cuDNN, which checks only
+  raggedness: `validate()` fails with `INVALID_VALUE` when `max_total_seq_len_q` is below Q's S_max (`dims[2]`) or
+  `max_total_seq_len_kv` is below K's S_max; equal to S_max is valid. Pinned by
+  `TestSdpaBwdNode.PreValidateFailsMaxTotalSeqLenQBelowQSMax`, `PreValidateFailsMaxTotalSeqLenKvBelowKSMax`,
+  `PreValidateSucceedsMaxTotalSeqLenEqualToSMax` and `PreValidateRaggedRuleStillPrecedesTheSMaxCheck`.
 - **Determinism claims:** a request reaches every engine; an engine that cannot guarantee run-to-run bitwise
   equality declines it. The ASM backward engine declines (dQ accumulates with atomics). The CPU and GPU
   references serve it (sequential or fixed-order, one writer per output). The cache key separates graphs that
-  differ in `is_deterministic_algorithm` or in either hint. An out-of-tree plugin that does not read the field
+  differ in `is_deterministic_algorithm` or in either `max_total_seq_len`. An out-of-tree plugin that does not read the field
   ignores it.
-- **Hint:** no hipDNN engine or reference consumes `max_total_seq_len_q/kv`; the value is ignored and no silent
-  reset is implemented.
-- **Contract:** cuDNN for storage and validation. Determinism is per graph through `is_deterministic_algorithm`.
+- **Silent reset:** cuDNN resets the value on some backends and head dims; hipDNN does not.
+- **Contract:** cuDNN for storage and the ragged check, plus the S_max check above. Determinism is per graph through `is_deterministic_algorithm`.
 
 ### SEM-030: Philox seed and offset operands
 

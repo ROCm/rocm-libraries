@@ -68,7 +68,7 @@ The following table lists the operations currently executable through the GPU gr
 | Resample Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute; MAXPOOL requires INT32 indices |
 | SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | Native: BFP16, FP8 E4M3; other dtypes through the dense rewrite | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
-| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, Philox dropout with an `rng_dump` output, sink with `dsink` (FLOAT or Q's data type, fp32 accumulation), ALiBi; `is_deterministic_algorithm` accepted (fixed-order kernels), `max_total_seq_len_q/kv` ignored; ragged through the dense rewrite |
+| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, Philox dropout with an `rng_dump` output, sink with or without `dsink` (FLOAT, or BFLOAT16/HALF equal to Q's data type; fp32 accumulation), ALiBi; `is_deterministic_algorithm` accepted (fixed-order kernels), `max_total_seq_len_q/kv` not read; ragged through the dense rewrite |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 | Pointwise Binary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 

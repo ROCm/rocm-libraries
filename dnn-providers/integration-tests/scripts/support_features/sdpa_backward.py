@@ -75,8 +75,8 @@ NOT_FEATURES = {
     "dq_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
     "dk_tensor_uid": "required; its shape follows k's, so it varies nothing k does not",
     "dv_tensor_uid": "required; its shape follows v's, so it varies nothing v does not",
-    "max_total_seq_len_q": "a workspace hint, not a variant of the op",
-    "max_total_seq_len_kv": "a workspace hint, not a variant of the op",
+    "max_total_seq_len_q": "the packed buffer's token span, a property of the ragged layout, not a variant of the op",
+    "max_total_seq_len_kv": "the packed buffer's token span, a property of the ragged layout, not a variant of the op",
 }
 
 

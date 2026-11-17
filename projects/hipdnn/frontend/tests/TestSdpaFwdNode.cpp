@@ -803,7 +803,7 @@ TEST(TestSdpaFwdNode, PreValidateSeqLenShapeAndType)
     }
 }
 
-// Sink: [1, H_q, 1, 1], FLOAT (cuDNN), or Q's data type set on the sink itself; an untyped sink
+// Sink: [1, H_q, 1, 1], FLOAT (cuDNN), or BFLOAT16/HALF equal to Q's data type set on the sink itself; an untyped sink
 // takes the io type and must then be FLOAT.
 TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
 {
@@ -871,6 +871,11 @@ TEST(TestSdpaFwdNode, PreValidateSinkDataTypeReferentIsQ)
     EXPECT_EQ(validate(DataType::NOT_SET, DataType::NOT_SET, DataType::NOT_SET),
               error_code_t::INVALID_VALUE)
         << "sink and Q both unset: nothing to compare against";
+    EXPECT_EQ(validate(DataType::FP8_E4M3, DataType::FP8_E4M3, DataType::FP8_E4M3),
+              error_code_t::INVALID_VALUE)
+        << "Q's type is only an option for BFLOAT16 and HALF";
+    EXPECT_EQ(validate(DataType::FP8_E4M3, DataType::FLOAT, DataType::FP8_E4M3), error_code_t::OK)
+        << "a FLOAT sink serves an FP8 graph";
 }
 
 // A sink type supplied by fill_from_context counts as untyped; set on the sink afterwards, the

@@ -194,8 +194,8 @@ hipDNN's contract is cuDNN's semantics. In order of authority: `Attention.md:360
 | SEM-011 Stats | natural log, FP32, [B,Hq,Sq,1] | rank 3 or 4 |
 | SEM-014 dBias | sum of unscaled dS over broadcast dims | aligned |
 | SEM-015 dropout | explicit mask form; Philox needs `rng_dump` | explicit mask modelled; Philox served only with a backward `rng_dump` |
-| SEM-022 sinks | dSink = −Σ exp(sink − LSE) · D over live rows; sink and dSink FLOAT or Q's data type | modelled in both dtypes |
-| SEM-029 determinism, `max_total_seq_len` | `is_deterministic_algorithm` reaches engines; the hints need a ragged tensor | accepted; hints ignored |
+| SEM-022 sinks | dSink = −Σ exp(sink − LSE) · D over live rows; sink and dSink FLOAT, or BFLOAT16/HALF equal to Q's data type | modelled in both dtypes |
+| SEM-029 determinism, `max_total_seq_len` | `is_deterministic_algorithm` reaches engines; the totals are the packed token spans, need a ragged tensor and are at least S_max | accepted; totals not read |
 | SEM-021 ALiBi | cuDNN form, TOP_LEFT causal only | aligned |
 
 Open points: dQ, dK and dV at padded positions are expected to be 0 until a SEM entry decides (the
