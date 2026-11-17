@@ -1788,6 +1788,12 @@ def _frag_info(op_id: str) -> _FragInfo:
     return info
 
 
+# Per-lane widths, in dwords, that the ``buffer_load ... lds`` encoding has
+# (4, 12 and 16 bytes; there is no 2-dword form). An arch can issue the widths
+# up to its ``async_lds_max_dwords``: see :attr:`ArchTarget.async_lds_dwords`.
+LDS_DMA_ENCODED_DWORDS: tuple[int, ...] = (1, 3, 4)
+
+
 @dataclass(frozen=True)
 class MemoryCapabilities:
     has_async_lds: bool
@@ -2099,6 +2105,19 @@ class ArchTarget:
         not diagnose an over-wide one -- it aborts the whole process.
         """
         return self.memory.async_lds_max_dwords
+
+    @property
+    def async_lds_dwords(self) -> tuple[int, ...]:
+        """The per-lane DRAM->LDS DMA widths this arch can issue, in dwords.
+
+        The encoded widths (:data:`LDS_DMA_ENCODED_DWORDS`) up to
+        :attr:`async_lds_max_dwords`; ``()`` where the arch has no
+        ``buffer_load ... lds``. gfx942 -> ``(1,)``, gfx950 -> ``(1, 3, 4)``.
+        """
+        if not self.memory.has_async_lds:
+            return ()
+        cap = self.memory.async_lds_max_dwords
+        return tuple(w for w in LDS_DMA_ENCODED_DWORDS if w <= cap)
 
     @property
     def max_threads_per_block(self) -> int:

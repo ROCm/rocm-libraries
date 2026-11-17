@@ -137,6 +137,12 @@ int rocke_archtarget_max_vector_load_dwords(const rocke_archtarget_t* t, const c
  * max_vector_load_dwords, which is the register vector buffer-load width. */
 int rocke_archtarget_async_lds_max_dwords(const rocke_archtarget_t* t);
 
+/* ArchTarget.async_lds_dwords property: the DRAM->LDS DMA widths this arch can
+ * issue, in dwords, ascending (gfx942 {1}, gfx950 {1, 3, 4}, none elsewhere).
+ * Writes them to out and returns how many. */
+int rocke_archtarget_async_lds_dwords(const rocke_archtarget_t* t,
+                                      int out[ROCKE_LDS_DMA_ENCODED_DWORDS_N]);
+
 /* ArchTarget.max_threads_per_block property. */
 int rocke_archtarget_max_threads_per_block(const rocke_archtarget_t* t);
 

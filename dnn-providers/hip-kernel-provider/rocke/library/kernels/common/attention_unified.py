@@ -55,6 +55,7 @@ from rocke.helpers.attention import (
     use_2d_kernel,
 )
 
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.transforms import (
     TensorDescriptor,
@@ -1991,8 +1992,9 @@ def _fp8_qk_loader_fits(
 ) -> bool:
     """True iff the async-fp8 K loader can tile the per-iter K bytes.
 
-    ``raw.ptr.buffer.load.lds`` accepts dwords ∈ {1, 3, 4} = {4, 12, 16}
-    bytes per lane (a hardware quirk -- dwords=2 is rejected). We need
+    The loader exists only in the gfx950 tiled-2D kernel, so the per-lane
+    payloads are gfx950's LDS-DMA widths from the attention capability table
+    (dwords {1, 3, 4} = {4, 12, 16} bytes; there is no 2-dword form). We need
     one of those per-call payloads to evenly tile ``T*HD`` bytes given
     ``num_warps * 64`` lanes per CTA. ``tile_size`` / ``num_warps`` take the
     already-resolved selector outputs when the caller has them.
@@ -2003,8 +2005,8 @@ def _fp8_qk_loader_fits(
         num_warps = _select_2d_num_warps(problem, arch)
     tile_bytes = tile_size * problem.head_size
     threads = num_warps * 64
-    for bpl in (16, 12, 4):
-        payload = threads * bpl
+    for dwords in sorted(attn_arch_caps("gfx950").lds_dma_dwords, reverse=True):
+        payload = threads * dwords * 4
         if tile_bytes >= payload and tile_bytes % payload == 0:
             return True
     return False

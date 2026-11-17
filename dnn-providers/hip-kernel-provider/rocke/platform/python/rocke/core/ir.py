@@ -5664,7 +5664,7 @@ class IRBuilder:
         coherency: int = 0,
     ) -> None:
         """LLVM 23 async-marker variant of :meth:`async_buffer_load_lds`."""
-        if dwords not in (1, 3, 4):
+        if dwords not in _arch.LDS_DMA_ENCODED_DWORDS:
             raise ValueError(
                 f"buffer_load_lds_async dwords must be 1, 3, or 4 (got {dwords})"
             )
@@ -6276,7 +6276,7 @@ class IRBuilder:
         right hint for one-shot streaming loads in a
         ping-pong pipeline that won't reuse the data.
         """
-        if dwords not in (1, 3, 4):
+        if dwords not in _arch.LDS_DMA_ENCODED_DWORDS:
             raise ValueError(
                 f"async_buffer_load_lds_addr dwords must be 1, 3, or 4 (got {dwords})"
             )
@@ -7351,7 +7351,7 @@ class IRBuilder:
         :data:`CACHE_ALL` / :data:`CACHE_GLOBAL` /
         :data:`CACHE_STREAM` / :data:`NON_TEMPORAL`.
         """
-        if dwords not in (1, 3, 4):
+        if dwords not in _arch.LDS_DMA_ENCODED_DWORDS:
             raise ValueError(
                 f"async_buffer_load_lds dwords must be 1, 3, or 4 (got {dwords})"
             )
