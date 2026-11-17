@@ -102,7 +102,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # per-test pytest-timeout and its cumulative CTest TIMEOUT, the dgrad twin above gets
 # the same shared budget only because its own sample is smaller.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest "
+       "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} "
        "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
        "-v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -205,10 +205,10 @@ endif()
 
 # Library attention CPU tests (no GPU required): the gfx950 and gfx942 dense
 # additive-bias host contracts, gfx950 LDS budget model, dense block-order decodes,
-# spec-wrapper parity gate, the 3D decode split rule and K/V cache policy, the scalar
-# fallback's cache key and block-table stride kernarg, the unified attention
-# running-max carry and keyless guards on the emitted IR, the tiled 2D LSE
-# store on the emitted IR, the
+# the dense paged launch checks, spec-wrapper parity gate, the 3D decode split rule
+# and K/V cache policy, the scalar fallback's cache key and block-table stride
+# kernarg, the unified attention running-max carry and keyless guards on the
+# emitted IR, the tiled 2D LSE store on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
 # LDS alignment claims of the backward kernel with the slices dK / dV sink, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
@@ -238,6 +238,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_decode.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
+    "tests/library/tests/test_attention_dense_paged_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"

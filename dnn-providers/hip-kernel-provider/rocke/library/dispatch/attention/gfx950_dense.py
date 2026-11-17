@@ -32,7 +32,12 @@ from .candidate import (
     make_dense_candidate,
 )
 from .common import AttentionRequest, normalize_band
-from .dense_rules import dense_kv_segments, dense_wave_segments
+from .dense_rules import (
+    dense_kv_segments,
+    dense_paged_fields,
+    dense_paged_tile_fits,
+    dense_wave_segments,
+)
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -82,8 +87,11 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         wide_lds_dma=False,
         # Additive bias is grid-body only, and fp32 only (see _base_spec). fp8 KV is
         # grid-only too -- the spec rejects persistent/paged (so the persistent
-        # variants advertise neither).
-        features=_FEATURES | {"causal_bottom_right", "attn_bias", "fp8"},
+        # variants advertise neither). The spec also rejects bias with paged K/V or
+        # fp8 KV, so the candidates declare both features and a request for either
+        # pair is reported as a refused pin.
+        features=_FEATURES
+        | {"causal_bottom_right", "attn_bias", "layout_paged", "fp8"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches, so it serves hipDNN's fp32 attn_mask too.
@@ -92,7 +100,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right", "attn_bias"},
+        features=_FEATURES | {"causal_bottom_right", "attn_bias", "layout_paged"},
         nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
@@ -216,8 +224,14 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     shared_bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
     shared_ctas = -(-sq // shared_bm) * int(req.nhead_q) * int(req.batch)
     num_cus = int(req.num_cus) or _DEFAULT_NUM_PERSISTENT
-    window_tile = bool(window) and (
-        shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+    window_geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE]
+    # A paged request whose pages do not fit the window tile keeps the shared one.
+    window_tile = (
+        bool(window)
+        and shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+        and dense_paged_tile_fits(
+            req, int(window_geometry["block_m"]), int(window_geometry["block_n"])
+        )
     )
     geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
@@ -301,6 +315,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         right_bound=right_bound,
         kv_segments=kv_segments,
         use_additive_bias=use_bias,
+        **dense_paged_fields(req),
         kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )
 

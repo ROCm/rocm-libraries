@@ -1392,6 +1392,17 @@ std::optional<BoundTokens> graphMatchesFor(std::string_view engine, const MatchC
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
+    // Cumulative sequence lengths are not implemented on either layout: the dense layout has
+    // no padded-batch form and the paged one reads per-batch seq_len_q and seq_len_kv.
+    if(attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
+    {
+        logDecline(engine,
+                   "varlen",
+                   "cu_seq_len_q and cu_seq_len_kv are not implemented; the kernels read "
+                   "per-batch seq_len_q and seq_len_kv");
+        return std::nullopt;
+    }
     if(attributes.page_table_k_tensor_uid().has_value()
        || attributes.page_table_v_tensor_uid().has_value())
     {
