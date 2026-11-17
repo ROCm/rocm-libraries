@@ -192,23 +192,26 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_fp8)
-    {
-        return false;
-    }
     if(p->use_alibi || p->use_qq_bias)
     {
         return false;
     }
-    if(p->softcap > 0 || p->use_sinks)
+    if(p->softcap > 0)
     {
         return false;
     }
-    if(p->sliding_window > 0)
+    /* FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
+       at the working dtype), with no sliding window and no sinks. */
+    if(p->use_fp8 && (p->sliding_window > 0 || p->use_sinks))
     {
         return false;
     }
-    if(p->head_size != 64 && p->head_size != 128)
+    /* Sliding window and sinks ride the combo at D64 and D128 only. */
+    if((p->sliding_window > 0 || p->use_sinks) && p->head_size != 64 && p->head_size != 128)
+    {
+        return false;
+    }
+    if(p->head_size != 64 && p->head_size != 128 && p->head_size != 192)
     {
         return false;
     }
@@ -252,11 +255,14 @@ static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p
     {
         return false;
     }
-    return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
+    /* d192 takes the d128 interleave + nw=4 geometry. */
+    return (p->head_size == 128 || p->head_size == 192) && !p->use_fp8
+           && enable_single_batch_combo(p);
 }
 
 /* Python: _enable_i64_kv_addr(problem). Switch to i64 addressing when the paged
- * KV-cache exceeds 2 GiB (i32 buffer voffset overflows and silently corrupts).
+ * KV-cache exceeds the i32 buffer range. The K/V buffer resources are bounded at
+ * num_records=0x7FFF0000, so loads at or past that offset read zeros.
  * num_kv_blocks==0 means unknown size -> assume small / fast i32 path. */
 static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
 {
@@ -268,7 +274,7 @@ static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
     uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
                             * (uint64_t)p->head_size * (uint64_t)elem_bytes;
     uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
-    return cache_bytes > 0x80000000ULL; /* 2^31 bytes */
+    return cache_bytes > 0x7FFF0000ULL; /* Python _I32_KV_BUFFER_BYTES */
 }
 
 /* Python: _d256_gfx950_cohort(problem). */
@@ -289,9 +295,11 @@ static bool d256_gfx950_fast(const rocke_unified_attn_problem_t* p)
 static bool d256_gfx942_fast(const rocke_unified_attn_problem_t* p)
 {
     /* Excludes caches > 2 GiB (need i64 path, fall back to default builder). */
-    return arch_is("gfx942") && p->head_size == 256 && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
-           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_alibi
-           && !p->use_qq_bias && p->max_seqlen_q > 1 && (p->block_size == 16 || p->block_size == 32)
+    /* d192 rides the same lean 4-warp body as d256. */
+    return arch_is("gfx942") && (p->head_size == 192 || p->head_size == 256)
+           && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->sliding_window == 0
+           && p->softcap == 0 && !p->use_sinks && !p->use_alibi && !p->use_qq_bias
+           && p->max_seqlen_q > 1 && (p->block_size == 16 || p->block_size == 32)
            && !enable_i64_kv_addr(p);
 }
 
@@ -360,6 +368,11 @@ static bool enable_early_v_schedule(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
+    /* The FP8 sync-dequant loader has no async V issue to move earlier. */
+    if(p->use_fp8)
+    {
+        return false;
+    }
     return p->head_size == 64 && p->max_seqlen_q >= 2048;
 }
 
@@ -375,11 +388,17 @@ static bool enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
+    /* The FP8 sync-dequant loader has no in-flight V DMA to prefetch. */
+    if(p->use_fp8)
+    {
+        return false;
+    }
     if(enable_early_v_schedule(p))
     {
         return false;
     }
-    if(p->head_size == 128)
+    /* d128 (and d192, which follows it): vdbuf is a net drag -> OFF. */
+    if(p->head_size != 64)
     {
         return false;
     }
@@ -515,6 +534,11 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
     {
         return p->block_size;
     }
+    /* Single-batch d128 sliding-window combo: T=64. */
+    if(enable_single_batch_combo(p) && p->sliding_window > 0 && p->head_size == 128)
+    {
+        return 64;
+    }
     /* Single-batch d128/d64 prefill full-combo cohort: d128 -> 2*BS, d64 -> 128. */
     if(enable_single_batch_combo(p))
     {
@@ -528,6 +552,11 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
             }
 
             return 128;
+        }
+        /* FP8 K/V d128 and d192: T=64 (measured on gfx950). */
+        if(p->use_fp8 || p->head_size == 192)
+        {
+            return 64;
         }
         /* d128 occupancy lever: K-single-buffer (see enable_d128_small_tile). */
         if(enable_d128_small_tile(p))
@@ -993,7 +1022,9 @@ rocke_attention_tiled_2d_spec_t
     s.use_transposed_half_local_pv = enable_transposed_qk_32x32(p);
 
     /* Transposed sub-flags: mirrors Python scalar_state / skip_legacy_qreg / mask_opts */
-    bool scalar_state = combo || subflags;
+    /* Sinks on the transposed 32x32 path seed the running max per lane row, which
+     * only the scalar-state layout maps correctly, so sinks always take it. */
+    bool scalar_state = combo || subflags || (p->use_sinks && enable_transposed_qk_32x32(p));
     bool skip_legacy_qreg = combo || subflags;
     bool bias_active = (p->softcap > 0) || p->use_alibi || p->use_qq_bias;
     bool mask_opts = (combo_no_sw && !bias_active) || subflags;
@@ -1017,16 +1048,8 @@ rocke_attention_tiled_2d_spec_t
                                && (p->num_query_heads == 64) && (p->num_kv_heads == 8);
 
     s.use_register_pv = enable_register_pv(p);
-    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr -- fires when the paged KV
-     * cache exceeds 2 GiB (num_kv_blocks * block_stride > 0x80000000). */
-    if(p->num_kv_blocks > 0)
-    {
-        uint64_t elem_bytes = p->use_fp8 ? 1u : 2u;
-        uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
-                                * (uint64_t)p->head_size * elem_bytes;
-        uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
-        s.use_i64_kv_addr = (cache_bytes > 0x80000000ULL);
-    }
+    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr. */
+    s.use_i64_kv_addr = enable_i64_kv_addr(p);
 
     /* k_single_buffer: mirrors Python _enable_k_single_buffer -- d128 small-tile
      * cohort AND the geometry invariant block_m <= tile_size, DERIVED from the
@@ -1313,6 +1336,7 @@ bool rocke_unified_attn_segm_descriptors(rocke_ir_builder_t* b,
 bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
                                                  const rocke_unified_attn_problem_t* p,
                                                  rocke_value_t* block_tables,
+                                                 rocke_value_t* bt_stride,
                                                  rocke_value_t* seq_idx,
                                                  rocke_value_t* kpos,
                                                  rocke_value_t** out_physical,
@@ -1320,19 +1344,17 @@ bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
 {
     rocke_value_t* block_idx = NULL;
     rocke_value_t* token_in_block = NULL;
-    int max_blocks;
     rocke_value_t* physical;
 
     if(!rocke_unified_attn_magic_div_mod(b, kpos, p->block_size, &block_idx, &token_in_block))
     {
         return false;
     }
-    max_blocks = (p->max_seqlen_k + p->block_size - 1) / p->block_size;
-    physical = rocke_b_global_load_i32(
-        b,
-        block_tables,
-        rocke_b_add(b, rocke_b_mul(b, seq_idx, rocke_b_const_i32(b, max_blocks)), block_idx),
-        0 /* align default */);
+    physical
+        = rocke_b_global_load_i32(b,
+                                  block_tables,
+                                  rocke_b_add(b, rocke_b_mul(b, seq_idx, bt_stride), block_idx),
+                                  0 /* align default */);
 
     if(out_physical != NULL)
     {
@@ -1351,6 +1373,7 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
                                                 rocke_value_t* query,
                                                 rocke_value_t* key,
                                                 rocke_value_t* block_tables,
+                                                rocke_value_t* bt_stride,
                                                 rocke_value_t* seq_idx,
                                                 rocke_value_t* q_tok,
                                                 rocke_value_t* q_head,
@@ -1372,7 +1395,7 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
     int d;
 
     if(!rocke_unified_attn_physical_block_and_token(
-           b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
+           b, p, block_tables, bt_stride, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }
@@ -1407,12 +1430,11 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            score
-                = rocke_b_fadd(b,
-                               score,
-                               rocke_b_fmul(b,
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i)),
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i))));
+            /* C leaves argument evaluation order unspecified: emit the q extract
+             * before the k extract, as Python does. */
+            rocke_value_t* qf = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
+            rocke_value_t* kf = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
+            score = rocke_b_fadd(b, score, rocke_b_fmul(b, qf, kf));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the
@@ -1451,6 +1473,7 @@ rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
                                               const rocke_type_t* dtype,
                                               rocke_value_t* value,
                                               rocke_value_t* block_tables,
+                                              rocke_value_t* bt_stride,
                                               rocke_value_t* seq_idx,
                                               rocke_value_t* kv_head,
                                               rocke_value_t* kpos,
@@ -1462,7 +1485,7 @@ rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
     rocke_value_t* v_off;
 
     if(!rocke_unified_attn_physical_block_and_token(
-           b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
+           b, p, block_tables, bt_stride, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }

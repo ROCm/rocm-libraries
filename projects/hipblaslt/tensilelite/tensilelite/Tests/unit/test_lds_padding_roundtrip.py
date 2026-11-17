@@ -12,8 +12,8 @@ Sparse metadata is out of scope; LdsPadMetadata keeps its own narrow list.
 
 import pytest
 
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParametersForArch
-from Tensile.SolutionStructs.LdsPadding import (
+from tensilelite.Common.ValidParameters import checkParametersAreValid, validParametersForArch
+from tensilelite.SolutionStructs.LdsPadding import (
     get_fp4_mt_config,
     get_fp8_mt_config,
     get_fp16_mt_config,

@@ -168,6 +168,14 @@ foreach( lib ${HIPFFT_LIBRARY_TARGETS} )
     target_link_options( ${lib} PUBLIC -fprofile-instr-generate )
   endif()
 
+  #TODO:
+  # hipcc(with nvcc backend) build has problem for share library visibility,
+  # need to figure out the reason and enable visibility "hidden" for nvcc eventually.
+  if( NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
+    set_target_properties( ${lib}
+      PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON )
+  endif()
+
 endforeach()
 
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
@@ -179,14 +187,6 @@ endif()
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set_property(TARGET hipfft PROPERTY POSITION_INDEPENDENT_CODE ON)
   set ( CXX_FLAGS "${CXX_FLAGS} -Xcompiler=-fPIC" )
-endif()
-
-#TODO:
-# hipcc(with nvcc backend) build has problem for share library visibility,
-# need to figure out the reason and enable visibility "hidden" for nvcc eventually.
-if( NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
-  set_target_properties( hipfft
-    PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON )
 endif()
 
 # nvcc can not recognize shared library file name with suffix other than *.so when linking.

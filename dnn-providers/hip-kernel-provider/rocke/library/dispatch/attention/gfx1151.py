@@ -6,8 +6,8 @@ packed layouts.
 
 One kernel set per RDNA generation: requests name ``gfx11-generic`` (code
 objects load on gfx1100-gfx1154) or ``gfx12-generic`` (gfx1200/gfx1201). A
-request may still name ``gfx1151`` or ``gfx1201`` to build processor-specific
-objects.
+request may still name a processor to build processor-specific objects; every
+member of the two generics is admitted through its generic.
 
 Two kernels serve every RDNA request:
 
@@ -59,7 +59,11 @@ from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     wmma_fmha_fwd_v2_grid,
     wmma_fmha_fwd_v2_signature,
 )
-from rocke.core.arch import base_arch_from_target_id, generic_arch_from_target_id
+from rocke.core.arch import (
+    base_arch_from_target_id,
+    generic_arch_from_target_id,
+    listed_arch_for,
+)
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -75,6 +79,7 @@ from .common import (
     AttentionMaskType,
     AttentionRequest,
     FAMILY,
+    QUERY_SIDE_OPTIONS,
     _device_num_cus,
     _request_errors,
     _selector_matches,
@@ -90,8 +95,10 @@ from .wmma_rules import (
 # v7 retires the single-wave forward kernel: the prefill takes ``batch`` and a
 # flat 1-D grid, head widths are multiples of 8 inside a bucket, and decode-
 # shaped requests run the split-KV decode with its workspace and merge kernel.
-# Callers compiled against any earlier header must be rebuilt.
-ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v7"
+# Callers compiled against any earlier header must be rebuilt. v8 adds the
+# paged prefill's separate V page table (``block_table_v``) after
+# ``block_table``, which moves every later paged argument.
+ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v8"
 
 # Compute units of the reference gfx1151 part. Used only when the request names
 # no count and device 0 cannot run the requested object (cross-compiles and AOT
@@ -130,7 +137,11 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     return _DEFAULT_NUM_CUS
 
 
-# Every RDNA target the WMMA kernels are registered for.
+# Every RDNA target the WMMA kernels are registered for. A request admits a
+# target when this names the target or its generic (the row arch_specs.json
+# points the target at), and then runs that entry's objects and tuning space.
+# Members are named here (unlike the GEMM candidates' RDNA_WMMA_GEMM_ARCHES)
+# because each one carries its own tuning entry.
 RDNA_WMMA_ARCHES = ("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201")
 PREFILL_ALGORITHM = "wmma_fmha_fwd_v2"
 DECODE_ALGORITHM = "wmma_fmha_decode"
@@ -157,6 +168,8 @@ _RDNA_FEATURES = frozenset(
         # Every object takes its head widths (multiples of 8 within the bucket)
         # and its V head count at launch.
         "runtime_head_dims",
+        # The prefill's packed query-side options (the decode refuses them).
+        *QUERY_SIDE_OPTIONS,
     }
 )
 
@@ -273,7 +286,7 @@ def rdna_attention_use_decode(
     num_cus: int,
 ) -> bool:
     """Whether the split-KV decode kernel runs a request rather than the
-    prefill. A pure function, so a hipDNN native matcher can mirror it exactly.
+    prefill. A pure function the hipDNN native mirrors exactly.
 
     ``visible_keys`` is the key range any query row sees (``hi - lo`` of
     ``wmma_fmha_decode_kv_range``: the window's span, else ``seqlen_k``; the
@@ -330,6 +343,8 @@ def _prefill_spec(req: AttentionRequest) -> WmmaFmhaFwdV2Spec:
         use_qq_bias=bool(req.use_qq_bias),
         layout=layout,
         page_block_size=int(req.kv_block_size) if layout == "paged" else 0,
+        dense_q=req.dense_q,
+        seqused_q=req.seqused_q,
         kv_dtype="fp8e4m3" if bool(req.use_fp8) else "",
         block_m=64 if pair else 128,
         wave_pair=pair,
@@ -550,6 +565,8 @@ def _prefill_refusal(req: AttentionRequest) -> Optional[str]:
 
 
 def _decode_refusal(req: AttentionRequest) -> Optional[str]:
+    if req.dense_q or req.seqused_q:
+        return "dense_q / seqused_q requests run on the prefill kernel"
     try:
         spec = _decode_spec(req)
     except ValueError as error:
@@ -646,9 +663,11 @@ def _make_auto_candidate(kind: str) -> KernelCandidate:
         if not candidate.admits(req)[0]:
             return ()
         assert isinstance(req, AttentionRequest)
-        return wmma_variants(
-            _wmma_space(req.arch, kind), _wmma_problem(req, make_spec(req))
-        )
+        # admits() passed, so a list entry covers req.arch.
+        listed = listed_arch_for(req.arch, RDNA_WMMA_ARCHES)
+        assert listed is not None
+        space = _wmma_space(listed, kind)
+        return wmma_variants(space, _wmma_problem(req, make_spec(req)))
 
     if decode:
 

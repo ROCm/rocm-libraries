@@ -55,7 +55,8 @@ All contributions must meet the following requirements before they can be merged
 
 - **RFC Process**: For large or complex feature changes, contributors must provide a Request for Comments (RFC) proposal ahead of development.
   - This proposal should be discussed and iterated upon with maintainers prior to beginning feature work and implementation.
-  - RFCs should be submitted as a Markdown document added to `hipdnn/docs/rfcs` via a Pull Request (e.g., see [PR #3266](https://github.com/ROCm/rocm-libraries/pull/3266)).
+  - RFCs should be submitted as a Markdown document added to `projects/hipdnn/docs/rfcs` via a Pull Request (e.g., see [PR #3266](https://github.com/ROCm/rocm-libraries/pull/3266)).
+  - Every RFC carries a `Status` (`Planned`, `In progress`, `Implemented`, or `Rejected / Replaced`). Follow the header format in the [RFC index](./docs/rfcs/README.md), and update the status in the PR that changes the implementation state.
 - **Phased Implementation**: We strongly encourage landing changes in multiple phases.
 - **Small PRs**: Please keep Pull Requests small and focused.
   - This makes reviews easier to digest.

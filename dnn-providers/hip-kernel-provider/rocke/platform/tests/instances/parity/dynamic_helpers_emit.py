@@ -5,7 +5,7 @@
 # tests/parity/dynamic_helpers_emit.py -- Python reference emitter for the
 # runtime-shape (AOT) helpers: SoftwarePipeline.run_ping_pong_dynamic and the
 # dynamic coordinate transforms (EmbedDynamic, UnmergeMagicDynamic, PadDynamic,
-# DynamicTensorDescriptor).
+# DynamicTensorDescriptor), and the runtime-chunk chiplet remap.
 #
 # Those helpers are otherwise only byte-compared through the conv families,
 # which drive a narrow slice of their argument space. Each config here builds
@@ -18,7 +18,8 @@
 # under different names.
 #
 # arch = gfx950, llvm_flavor = AUTO, matching the C side.
-from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import F16, F32, I32, I64, IRBuilder, KernelDef, PtrType
+from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.transforms import (
@@ -206,6 +207,28 @@ def build_unmerge_mixed(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_mixed_strides(b: IRBuilder) -> None:
+    """DynamicTensorDescriptor.create with a Value, an int and an int-1 stride.
+
+    The tiled attention K/V descriptor's shape: the page stride is a kernarg,
+    the token stride a constant, the head dim contiguous. Covers both stride
+    hooks: offset (i32 terms) and offset_i64_split (the i64 page term).
+    """
+    o = _ptr(b, "O", I32)
+    o64 = _ptr(b, "O64", I64)
+    p_sb = b.param("p_sB", I32)
+    tid = b.thread_id_x()
+    desc = DynamicTensorDescriptor.create(
+        "kv_mixed", coord_names=("blk", "tok", "d"), strides=(p_sb, 64, 1)
+    )
+    off, _ = desc.offset(b, blk=tid, tok=tid, d=tid)
+    b.global_store(o, tid, off)
+    base_i64, within, _ = desc.offset_i64_split(b, "blk", blk=tid, tok=tid, d=tid)
+    b.global_store(o64, tid, base_i64)
+    b.global_store(o, within, tid)
+    b.ret()
+
+
 def build_pad_dynamic(b: IRBuilder) -> None:
     """embed_dynamic with every argument a Value, plus pad_dynamic variants.
 
@@ -241,6 +264,25 @@ def build_pad_dynamic(b: IRBuilder) -> None:
     b.global_store(o, tid, off)
     _store_through_valid(b, x, y, tid, off, valid)
     b.ret()
+
+
+def _chiplet_runtime(*, explicit_chunk: bool):
+    """chiplet_transform_chunked_runtime over a runtime grid size: the default
+    chunk (num_wgs / num_xcds, derived in-kernel) or an explicit runtime chunk.
+    """
+
+    def build(b: IRBuilder) -> None:
+        o = _ptr(b, "O", I32)
+        p_n = b.param("p_num_wgs", I32)
+        p_chunk = b.param("p_chunk", I32) if explicit_chunk else None
+        wgid = b.block_id_x()
+        remapped = chiplet_transform_chunked_runtime(
+            b, wgid, num_wgs=p_n, num_xcds=8, chunk_size=p_chunk
+        )
+        b.global_store(o, wgid, remapped)
+        b.ret()
+
+    return build
 
 
 CONFIGS = [
@@ -294,6 +336,12 @@ CONFIGS = [
     ),
     # 7: unmerge_magic_dynamic with mixed int/Value triples and a dim-1 triple.
     build_unmerge_mixed,
+    # 8: chiplet_transform_chunked_runtime, chunk derived from num_wgs.
+    _chiplet_runtime(explicit_chunk=False),
+    # 9: chiplet_transform_chunked_runtime with an explicit runtime chunk.
+    _chiplet_runtime(explicit_chunk=True),
+    # 10: DynamicTensorDescriptor with Value / int / int-1 strides, i32 and i64 paths.
+    build_mixed_strides,
 ]
 
 

@@ -145,9 +145,9 @@ function(add_instance_library INSTANCE_NAME)
     set(UNSUPPORTED_TARGETS "gfx900;gfx906;gfx906:xnack-;gfx90c")
     set(NON_XDL_TARGETS ${UNSUPPORTED_TARGETS} gfx1030 gfx1031 gfx1032 gfx1033 gfx1034 gfx1035 gfx1036 gfx10-3-generic amdgcnspirv)
     set(NON_WMMA_TARGETS ${NON_XDL_TARGETS} gfx908 gfx90a gfx942 gfx950 gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack-)
-    set(NON_MHA_TARGETS ${NON_XDL_TARGETS} gfx908:xnack- gfx908:xnack+ gfx908 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx11-generic gfx12-generic gfx1250 gfx1250-strict)
-    set(NON_MX_TARGETS ${NON_XDL_TARGETS} gfx908:xnack- gfx908:xnack+ gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx11-generic gfx12-generic)
-    set(NON_F8_TARGETS ${NON_XDL_TARGETS} gfx908:xnack- gfx908:xnack+ gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx11-generic)
+    set(NON_MHA_TARGETS ${NON_XDL_TARGETS} gfx908:xnack- gfx908:xnack+ gfx908 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx1200 gfx1201 gfx11-generic gfx12-generic gfx1250 gfx1250-strict)
+    set(NON_MX_TARGETS ${NON_XDL_TARGETS} gfx908:xnack- gfx908:xnack+ gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx1200 gfx1201 gfx11-generic gfx12-generic)
+    set(NON_F8_TARGETS ${NON_XDL_TARGETS} gfx908:xnack- gfx908:xnack+ gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx11-generic)
 
     message(DEBUG "remaining instances: ${ARGN}")
     #only continue if there are some source files left on the list
@@ -766,14 +766,7 @@ if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
     message(STATUS "Created top-level device_operations interface library")
 endif()
 
-# =============================================================================
-# Header Installation
-# =============================================================================
-
-set(DEV_OPS_INC_DIRS
-    ${PROJECT_SOURCE_DIR}/include/ck/
-    ${PROJECT_SOURCE_DIR}/library/include/ck/
-)
-rocm_install(DIRECTORY ${DEV_OPS_INC_DIRS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ck)
+# The CK headers are installed from the top-level CMakeLists.txt, so they are also
+# installed when no instance libraries are built (CK_HEADERS_ONLY).
 
 # =============================================================================

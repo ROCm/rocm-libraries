@@ -44,7 +44,7 @@ pytest session:
 Wiping the output between steps 1 and 3 confirms the artifact is genuinely
 self-contained and not relying on leftover build state.
 
-Each phase is launched in a subprocess so that Tensile's process-level global
+Each phase is launched in a subprocess so that TensileLite's process-level global
 state accumulated during the build phase cannot bleed into the run phase.
 The helpers are imported by name in the child process, keeping the logic
 defined in exactly one place (the build/run modules) rather than duplicated
@@ -75,7 +75,7 @@ def _call_helper_in_subprocess(
 ) -> None:
     """Call module.func(config, output_dir, artifact_dir, tensile_args) in a subprocess.
 
-    Each phase runs in a clean interpreter so Tensile's global state from the
+    Each phase runs in a clean interpreter so TensileLite's global state from the
     build phase cannot bleed into the run phase (uninstalled checkout case).
     PYTHONPATH is forwarded from sys.path so the child can import tensilelite.
     """

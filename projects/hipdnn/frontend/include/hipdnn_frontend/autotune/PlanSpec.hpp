@@ -42,11 +42,12 @@ struct EngineConfigInfo
     int64_t engineId = -1; // Used by add_engine_configs() to create the plan spec
     std::string engineName; // Informational, for filtering and logging
     std::vector<Knob> knobs; // Informational, shows the engine's available knobs.
-        // Ignored by add_engine_*() functions. Use add_engine_variants()
-        // or add_engine() to set custom knobs on engines for autotune().
+    // Ignored by add_engine_*() functions. Use add_engine_variants()
+    // or add_engine() to set custom knobs on engines for autotune().
     bool supportsExhaustive = false; // Informational. For filtering exhaustive-capable engines
     int64_t estimatedWorkspaceSize
-        = 0; // Informational, pre-compile workspace estimate, for filtering.
+        = 0; // Pre-compile workspace estimate. For engines that expose the benchmarking knob it covers
+    // the EXHAUSTIVE priming configuration in every mode, so it can exceed what a plan needs.
 };
 
 /**

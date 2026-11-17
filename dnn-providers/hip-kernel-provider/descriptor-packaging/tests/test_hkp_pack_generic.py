@@ -57,13 +57,17 @@ def _embedded(uid, arch=None):
     return ukd
 
 
+# The empty_arch fixture's engine and metadata descriptors (solo.ued.json, solo.kmd.json).
+_UED_ID = "7dfa7b97-7409-5013-8bc5-a644a26ab88d"
+_KMD_ID = "17fd20dc-1faf-5e2b-ac45-b610aa4ce4c4"
+
 _CONTRACT = {
     "specialization_contract": {
         "schema_version": 1,
         "consumers": [
             {
-                "engine_id": "ued-solo",
-                "kmd_id": "kmd-solo",
+                "engine_id": _UED_ID,
+                "kmd_id": _KMD_ID,
                 "metadata_fields": [],
                 "matcher_only_fields": ["block_size", "dtype"],
                 "bindings": {},
@@ -81,7 +85,7 @@ def _kdp(kid, arch, ukds):
         "name": kid,
         "arch": arch,
         "matchers": ["umd-solo"],
-        "engine": "ued-solo",
+        "engine": _UED_ID,
         "dispatch": "udd-solo",
         "kernelDescriptors": ukds,
     }

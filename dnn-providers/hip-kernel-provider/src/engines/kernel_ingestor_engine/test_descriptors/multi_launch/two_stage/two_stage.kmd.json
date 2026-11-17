@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "2f9909df-cc5b-493f-b127-73f9bf75167e",
+  "name": "two_stage variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}
