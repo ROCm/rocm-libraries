@@ -93,6 +93,7 @@
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_transpose_lds_reader_t (PV read)*/
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
 #include "rocke/instance_attention_strided_kv_internal.h"
+#include "rocke/instance_attention_tiled_common_internal.h" /* KvLdsSwizzle */
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
 #include "rocke/ir.h"
 /* apply_softcap_log2, binary_search_seq_idx, wave64_reduce_max/sum (+ the wide-K
@@ -385,6 +386,18 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* overall_expsum; /* wave64_reduce_sum(local_den)              */
     rocke_value_t* inv_l; /* safe reciprocal of overall_expsum         */
 } rocke_gfx950_attention_tiled_3d_build_ctx_t;
+
+/* Fill the shared KvLdsSwizzle view of this ctx (no IR). */
+static inline rocke_attn_tiled_kv_swizzle_t rocke_gfx950_attention_tiled_3d_kv_swizzle(
+    const rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx)
+{
+    rocke_attn_tiled_kv_swizzle_t s;
+    s.b = ctx->b;
+    s.HD = ctx->cfg.HD;
+    s.swizzle = ctx->cfg.KV_SWZ;
+    s.chunks_per_row = ctx->cfg.KV_CHUNKS_PER_ROW;
+    return s;
+}
 
 /* ============================================================ *
  * Shared host-side helper (no IR)

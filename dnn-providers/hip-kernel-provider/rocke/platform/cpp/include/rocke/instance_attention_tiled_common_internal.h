@@ -123,6 +123,26 @@ void rocke_attn_tiled_fp8_issue_dequant_loads(const rocke_attn_tiled_fp8_kv_load
 void rocke_attn_tiled_fp8_issue_v_mfma_stripe(const rocke_attn_tiled_fp8_kv_loader_t* ld,
                                               rocke_value_t* kv_tile_idx);
 
+/* --------------------------------------- tiled 3D K/V LDS swizzle (KvLdsSwizzle) *
+ *
+ * Optional 16-byte-chunk XOR swizzle of the tiled 3D K/V LDS rows. With
+ * ``swizzle`` off both helpers are identities and emit no IR. */
+typedef struct rocke_attn_tiled_kv_swizzle
+{
+    rocke_ir_builder_t* b;
+    int HD;
+    bool swizzle;
+    int chunks_per_row; /* 16-byte chunks per K/V LDS row (HD / 8) */
+} rocke_attn_tiled_kv_swizzle_t;
+
+/* col(row, col): LDS column of K/V element (row, col). */
+rocke_value_t* rocke_attn_tiled_kv_swz_col(const rocke_attn_tiled_kv_swizzle_t* s,
+                                           rocke_value_t* row,
+                                           rocke_value_t* col);
+/* src_linear(linear_half): the source element an async copy lane fetches. */
+rocke_value_t* rocke_attn_tiled_kv_swz_src_linear(const rocke_attn_tiled_kv_swizzle_t* s,
+                                                  rocke_value_t* linear_half);
+
 /* AccLayout.idx: flat index of the (N-tile, M-atom) PV accumulator. */
 static inline int rocke_attn_tiled_acc_idx(int acc_m_atoms, int n, int atom)
 {

@@ -648,21 +648,8 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
 rocke_value_t* rocke_gfx950_attention_tiled_3d_kv_col(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
 {
-    rocke_value_t* col_chunk;
-    rocke_value_t* row_ph;
-    rocke_value_t* chunk;
-    rocke_value_t* chunk_col;
-    rocke_value_t* in_chunk;
-    if(!CFG.KV_SWZ)
-    {
-        return col;
-    }
-    col_chunk = rocke_b_div(B, col, rocke_b_const_i32(B, 8));
-    row_ph = rocke_b_mod(B, row, rocke_b_const_i32(B, CFG.KV_CHUNKS_PER_ROW));
-    chunk = rocke_b_xor(B, col_chunk, row_ph);
-    chunk_col = rocke_b_mul(B, chunk, rocke_b_const_i32(B, 8));
-    in_chunk = rocke_b_mod(B, col, rocke_b_const_i32(B, 8));
-    return rocke_b_add(B, chunk_col, in_chunk);
+    rocke_attn_tiled_kv_swizzle_t s = rocke_gfx950_attention_tiled_3d_kv_swizzle(ctx);
+    return rocke_attn_tiled_kv_swz_col(&s, row, col);
 }
 
 /* _kv_src_linear(linear_half): the async copies write LDS in lane order, so
@@ -672,17 +659,8 @@ rocke_value_t*
     rocke_gfx950_attention_tiled_3d_kv_src_linear(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* linear_half)
 {
-    rocke_value_t* row;
-    rocke_value_t* row_base;
-    rocke_value_t* col;
-    if(!CFG.KV_SWZ)
-    {
-        return linear_half;
-    }
-    row = rocke_b_div(B, linear_half, rocke_b_const_i32(B, CFG.HD));
-    row_base = rocke_b_mul(B, row, rocke_b_const_i32(B, CFG.HD));
-    col = rocke_b_mod(B, linear_half, rocke_b_const_i32(B, CFG.HD));
-    return rocke_b_add(B, row_base, rocke_gfx950_attention_tiled_3d_kv_col(ctx, row, col));
+    rocke_attn_tiled_kv_swizzle_t s = rocke_gfx950_attention_tiled_3d_kv_swizzle(ctx);
+    return rocke_attn_tiled_kv_swz_src_linear(&s, linear_half);
 }
 
 /* _load_page_id_window(rel_page): lane l loads the id of the segment's page

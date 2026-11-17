@@ -24,6 +24,7 @@ __all__ = [
     "C32_DIST",
     "AccLayout",
     "Fp8KvSyncLoader",
+    "KvLdsSwizzle",
     "TiledLaneMap",
     "mfma_32x32_c_col",
     "mfma_32x32_c_row",
@@ -415,3 +416,40 @@ class Fp8KvSyncLoader:
                 fp8_vec,
                 self.elems_per_chunk,
             )
+
+
+@dataclass(frozen=True)
+class KvLdsSwizzle:
+    """Optional 16-byte-chunk XOR swizzle of the tiled 3D K/V LDS rows.
+
+    With ``swizzle`` off both methods are identities and emit no IR.
+    """
+
+    b: IRBuilder
+    hd: int
+    swizzle: bool
+    chunks_per_row: int
+
+    def col(self, row: Value, col: Value) -> Value:
+        # LDS column of K/V element (row, col): its 16-byte chunk is permuted
+        # by the row under the swizzle.
+        if not self.swizzle:
+            return col
+        b = self.b
+        chunk = b.xor(
+            b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(self.chunks_per_row))
+        )
+        return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
+
+    def src_linear(self, linear_half: Value) -> Value:
+        # The async copies write LDS in lane order, so under the swizzle each
+        # lane fetches the element its LDS position holds (col is its own
+        # inverse).
+        if not self.swizzle:
+            return linear_half
+        b = self.b
+        row = b.div(linear_half, b.const_i32(self.hd))
+        return b.add(
+            b.mul(row, b.const_i32(self.hd)),
+            self.col(row, b.mod(linear_half, b.const_i32(self.hd))),
+        )

@@ -562,3 +562,44 @@ void rocke_attn_tiled_fp8_issue_v_mfma_stripe(const rocke_attn_tiled_fp8_kv_load
         rocke_b_smem_store_vN(b, ld->v_lds, idx_store, 4, fp8_vec, CHUNK);
     }
 }
+
+/* --------------------------------------- tiled 3D K/V LDS swizzle (KvLdsSwizzle) */
+
+rocke_value_t* rocke_attn_tiled_kv_swz_col(const rocke_attn_tiled_kv_swizzle_t* s,
+                                           rocke_value_t* row,
+                                           rocke_value_t* col)
+{
+    rocke_ir_builder_t* b = s->b;
+    rocke_value_t* col_chunk;
+    rocke_value_t* row_ph;
+    rocke_value_t* chunk;
+    rocke_value_t* chunk_col;
+    rocke_value_t* in_chunk;
+    if(!s->swizzle)
+    {
+        return col;
+    }
+    col_chunk = rocke_b_div(b, col, rocke_b_const_i32(b, 8));
+    row_ph = rocke_b_mod(b, row, rocke_b_const_i32(b, s->chunks_per_row));
+    chunk = rocke_b_xor(b, col_chunk, row_ph);
+    chunk_col = rocke_b_mul(b, chunk, rocke_b_const_i32(b, 8));
+    in_chunk = rocke_b_mod(b, col, rocke_b_const_i32(b, 8));
+    return rocke_b_add(b, chunk_col, in_chunk);
+}
+
+rocke_value_t* rocke_attn_tiled_kv_swz_src_linear(const rocke_attn_tiled_kv_swizzle_t* s,
+                                                  rocke_value_t* linear_half)
+{
+    rocke_ir_builder_t* b = s->b;
+    rocke_value_t* row;
+    rocke_value_t* row_base;
+    rocke_value_t* col;
+    if(!s->swizzle)
+    {
+        return linear_half;
+    }
+    row = rocke_b_div(b, linear_half, rocke_b_const_i32(b, s->HD));
+    row_base = rocke_b_mul(b, row, rocke_b_const_i32(b, s->HD));
+    col = rocke_b_mod(b, linear_half, rocke_b_const_i32(b, s->HD));
+    return rocke_b_add(b, row_base, rocke_attn_tiled_kv_swz_col(s, row, col));
+}

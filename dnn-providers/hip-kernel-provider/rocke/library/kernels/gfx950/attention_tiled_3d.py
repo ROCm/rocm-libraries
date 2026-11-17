@@ -40,6 +40,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._attention_tiled_shared import KvLdsSwizzle
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
@@ -940,27 +941,10 @@ def build_unified_attention_3d_tiled(
         if I64_KV_ADDR:
             kv_stride_blk_i64 = b.zext(kv_stride_blk_b, I64)
 
-    def _kv_col(row: Value, col: Value) -> Value:
-        # LDS column of K/V element (row, col): its 16-byte chunk is permuted
-        # by the row under the swizzle.
-        if not KV_SWZ:
-            return col
-        chunk = b.xor(
-            b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(KV_CHUNKS_PER_ROW))
-        )
-        return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
-
-    def _kv_src_linear(linear_half: Value) -> Value:
-        # The async copies write LDS in lane order, so under the swizzle each
-        # lane fetches the element its LDS position holds (_kv_col is its own
-        # inverse).
-        if not KV_SWZ:
-            return linear_half
-        row = b.div(linear_half, b.const_i32(HD))
-        return b.add(
-            b.mul(row, b.const_i32(HD)),
-            _kv_col(row, b.mod(linear_half, b.const_i32(HD))),
-        )
+    # K/V LDS chunk swizzle; shared with the other arch's tiled 3D kernel.
+    kv_swz = KvLdsSwizzle(b=b, hd=HD, swizzle=KV_SWZ, chunks_per_row=KV_CHUNKS_PER_ROW)
+    _kv_col = kv_swz.col
+    _kv_src_linear = kv_swz.src_linear
 
     def _tile_page_ids(kv_tile_idx: Value) -> list:
         # A tile starts below seq_len, so its first page is always live.
