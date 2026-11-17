@@ -1430,6 +1430,9 @@ RppStatus rppt_slice(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
     if (srcGenericDescPtr->layout != dstGenericDescPtr->layout) return RPP_ERROR_LAYOUT_MISMATCH;
     if ((srcGenericDescPtr->numDims < 2) || (srcGenericDescPtr->numDims > 5))
         return RPP_ERROR_INVALID_SRC_DIMS;
+    // The kernels pick the copy from the source rank and walk the destination with its own strides,
+    // so both descriptors must have the same rank.
+    if (dstGenericDescPtr->numDims != srcGenericDescPtr->numDims) return RPP_ERROR_INVALID_DST_DIMS;
     if ((srcGenericDescPtr->numDims == 4) && (srcGenericDescPtr->layout != RpptLayout::NCHW) &&
         (srcGenericDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -1482,6 +1485,12 @@ RppStatus rppt_slice(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
+        // The HIP packed kernels interleave exactly three channels.
+        if ((srcGenericDescPtr->numDims > 3) &&
+            ((srcGenericDescPtr->layout == RpptLayout::NHWC) ||
+             (srcGenericDescPtr->layout == RpptLayout::NDHWC)) &&
+            (srcGenericDescPtr->dims[srcGenericDescPtr->numDims - 1] != 3))
+            return RPP_ERROR_INVALID_SRC_CHANNELS;
         if ((srcGenericDescPtr->dataType == RpptDataType::F32) &&
             (dstGenericDescPtr->dataType == RpptDataType::F32)) {
             return hip_exec_slice_tensor(

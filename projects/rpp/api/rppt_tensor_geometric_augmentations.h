@@ -325,28 +325,44 @@ RppStatus rppt_phase(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDescPtr,
                      rppHandle_t rppHandle, RppBackend executionBackend);
 
 /*! \brief Slice augmentation on HIP/HOST backend
- * \details This function performs slice augmentation on a generic 4D tensor.
+ * \details This function performs slice augmentation on a generic tensor with numDims = 2 to 5.
  *          Slice augmentation involves selecting a region of interest (ROI) from the source tensor
  *          and copying it to the destination tensor. Support added for f32 -> f32 and u8 -> u8
- * dataypes. \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory (for
- * HOST backend) \param [in] srcGenericDescPtr source tensor descriptor (Restrictions - numDims =
- * 2/3/4/5, dataType = U8/F32, layout = NCHW/NHWC for numDims = 4, NCDHW/NDHWC for numDims = 5,
- * channels = 1/3 for NCHW/NCDHW on HOST backend) \param [out] dstPtr destination tensor in HIP
- * memory (for HIP backend) or HOST memory (for HOST backend) \param [in] dstGenericDescPtr
- * destination tensor descriptor (Restrictions - dataType and layout = same as that of
- * srcGenericDescPtr) \param [in] anchorTensor starting index of the
- * slice for each dimension in input (1D tensor in pinned / HIP memory (for HIP backend) or HOST
- * memory (for HOST backend), of size = batchSize * numberOfDimensions) \param [in] shapeTensor
- * length of the slice for each dimension in input (1D tensor in pinned / HIP memory (for HIP
- * backend) or HOST memory (for HOST backend), of size = batchSize * numberOfDimensions) \param [in]
- * fillValue fill value that is used to fill output if enablePadding is set to true \param [in]
- * enablePadding boolean flag to specify if padding is enabled or not \param [in] roiTensor roi data
- * in pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend) (1D tensor of size =
- * batchSize * numberOfDimensions * 2) \param [in] rppHandle RPP HIP/HOST handle created with
- * <tt>\ref rppCreate()</tt> \param [in] executionBackend execution backend to run the augmentation
- * on (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref
- * RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
- * Unsuccessful completion.
+ *          dataypes.
+ *          - For numDims = 4/5 the channel axis is passed through whole: its anchorTensor and
+ *            shapeTensor entries are ignored, and the destination must have the same channel count
+ *            as the source.
+ *          - HIP backend: rows are read, written and filled 8 pixels at a time, so the slice width
+ *            is rounded up to a multiple of 8 pixels. Each source row must be readable for that
+ *            width from the anchor, each destination row stride must hold it, and destination
+ *            pixels between the slice width and that multiple may be overwritten.
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend)
+ * \param [in] srcGenericDescPtr source tensor descriptor (Restrictions - numDims = 2/3/4/5,
+ * dataType = U8/F32, layout = NCHW/NHWC for numDims = 4, NCDHW/NDHWC for numDims = 5, channels =
+ * 1/3 for NCHW/NCDHW on HOST backend, channels = 3 for NHWC/NDHWC on HIP backend)
+ * \param [out] dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend)
+ * \param [in] dstGenericDescPtr destination tensor descriptor (Restrictions - numDims, dataType and
+ * layout = same as that of srcGenericDescPtr)
+ * \param [in] anchorTensor starting index of the slice for each non-channel dimension in input
+ * (1D tensor in pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size =
+ * batchSize * numberOfDimensions; the channel entry is ignored)
+ * \param [in] shapeTensor length of the slice for each non-channel dimension in input (1D tensor in
+ * pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size = batchSize *
+ * numberOfDimensions; the channel entry is ignored)
+ * \param [in] fillValue fill value that is used to fill output if enablePadding is set to true
+ * (HOST memory for HOST backend; HIP memory or pinned memory for HIP backend, as it is read on the
+ * device)
+ * \param [in] enablePadding boolean flag to specify if padding is enabled or not
+ * \param [in] roiTensor roi data in pinned / HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend) (1D tensor of size = batchSize * numberOfDimensions * 2)
+ * \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt>
+ * \param [in] executionBackend execution backend to run the augmentation on
+ * (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND)
+ * \return A <tt> \ref RppStatus</tt> enumeration.
+ * \retval RPP_SUCCESS Successful completion.
+ * \retval RPP_ERROR* Unsuccessful completion.
  */
 RppStatus rppt_slice(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppPtr_t dstPtr,
                      RpptGenericDescPtr dstGenericDescPtr, Rpp32s* anchorTensor,
