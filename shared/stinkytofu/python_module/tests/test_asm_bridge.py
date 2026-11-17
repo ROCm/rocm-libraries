@@ -352,6 +352,39 @@ def test_emit_asm_supports_t00_descriptor_aliases_and_scalar_vcc_forms():
         assert expected in assembly
 
 
+@pytest.mark.parametrize("target", ["gfx1250", "gfx1250v0", "gfx1250-strict"])
+def test_emit_asm_supports_scalar_shift_left_add_forms(target):
+    # s_lshl{1,2,3,4}_add_u32: dst = (src0 << N) + src1, N = 1..4.
+    # Both gfx1250 steppings share the instruction set; gfx1250-strict is the toolchain name of gfx1250v0.
+    try:
+        _raw_emit_asm(target, 32, [])
+    except ValueError as error:
+        if "unsupported architecture" not in str(error):
+            raise
+        pytest.skip(f"{target} is not built (see STINKYTOFU_ARCHS_TO_BUILD)")
+    assembly = emit_asm(
+        target,
+        32,
+        [
+            {"kind": "instruction", "mnemonic": "s_lshl1_add_u32", "dst": [sgpr(0)],
+             "src": [sgpr(1), sgpr(2)]},
+            {"kind": "instruction", "mnemonic": "s_lshl2_add_u32", "dst": [sgpr(3)],
+             "src": [sgpr(4), sgpr(5)]},
+            {"kind": "instruction", "mnemonic": "s_lshl3_add_u32", "dst": [sgpr(6)],
+             "src": [sgpr(7), sgpr(8)]},
+            {"kind": "instruction", "mnemonic": "s_lshl4_add_u32", "dst": [sgpr(9)],
+             "src": [sgpr(10), sgpr(11)]},
+        ]
+    )
+    for expected in (
+        "s_lshl1_add_u32 s0, s1, s2",
+        "s_lshl2_add_u32 s3, s4, s5",
+        "s_lshl3_add_u32 s6, s7, s8",
+        "s_lshl4_add_u32 s9, s10, s11",
+    ):
+        assert expected in assembly
+
+
 def test_emit_asm_uses_selected_primary_or_promoted_descriptor_fields():
     primary = _raw_emit_asm(
         "gfx1250",
