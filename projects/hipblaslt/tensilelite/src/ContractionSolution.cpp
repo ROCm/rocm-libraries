@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -72,6 +73,15 @@ namespace TensileLite
 {
     namespace
     {
+        // OutputPeerD: the kernel adds this distance to every D store address to reach the peer
+        // D. It is taken between the two buffers' batch 0, so it is the same whether the kernel
+        // gets D as one pointer or as a batch pointer array (both D have the same layout).
+        int64_t peerDDistance(ContractionInputs const& inputs)
+        {
+            return static_cast<int64_t>(reinterpret_cast<intptr_t>(inputs.peerD)
+                                        - reinterpret_cast<intptr_t>(inputs.d));
+        }
+
         size_t checkedMultiply(size_t a, size_t b)
         {
             if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
@@ -2049,6 +2059,10 @@ namespace TensileLite
             }
         }
 
+        // After the activation arguments and before the amax ones, as in the kernel signature.
+        if(problemType.outputPeerD)
+            args.template append<int64_t>("DeltaPeerD", peerDDistance(inputs));
+
         if(problemType.outputAmaxD)
         {
             args.template append<const void*>("AddrAmaxOut", inputs.amaxD);
@@ -3862,6 +3876,9 @@ namespace TensileLite
                                                        problem.useGateResidual() ? gate.strides().at(index) : 0);
                     break;
                 }
+                case CustomArgSemantic::DeltaPeerD:
+                    rv.args.template append<int64_t>("DeltaPeerD", peerDDistance(inputs));
+                    break;
                 case CustomArgSemantic::AddressAmaxOut:
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
                     break;
