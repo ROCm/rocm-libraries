@@ -582,6 +582,10 @@ struct fmha_batch_prefill_args
     const void* k_ptr;
     const void* v_ptr;
     const void* bias_ptr; // bias or alibi_slope pointer
+    // PERTENSOR (qscale pertensor): device pointers to one fp32 descale each; O is
+    // softmax(scale_s * q_descale * k_descale * Q K^T) * (v_descale * V). The kernels read one
+    // element and cannot check the count. The gfx1250 FP8 page tile refuses null pointers at
+    // launch.
     const void* q_descale_ptr;
     const void* k_descale_ptr;
     const void* v_descale_ptr;

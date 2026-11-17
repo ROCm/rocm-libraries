@@ -25,7 +25,14 @@ namespace ck_tile {
 // D64/V64 or D128/V128, no mask or a left/right window aligned to the top-left or
 // bottom-right corner (causal is left unbounded, right 0; a bounded left is a sliding window),
 // optional sink tokens (sink_size) and per-head sink logits (sink_ptr), optional tanh logits soft
-// cap (no bias), optional elementwise bias or ALiBi, optional LSE output, no dropout. Build with
+// cap (no bias), optional elementwise bias or ALiBi, optional LSE output, no dropout.
+// FP8 (fp8bf16, BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile): FP8 Q and vectorized FP8
+// K/V pools with 16-element vectors (K [page, kv_head, dim / 16, token, 16], V [page, kv_head,
+// token / 16, dim, 16]), BF16 O, per-tensor descales (q/k/v_descale_ptr, one fp32 each: the
+// kernel reads one element and cannot check the count), D64/V64, P64, vLLM block table, M128,
+// no mask or a window as above, no sink tokens or logits, bias, soft cap or LSE. The FP8
+// instances are validated on gfx1250 only; they also compile for gfx1251, where the FP8 converts
+// are software conversions (float8_ext.hpp). Build with
 // the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
 // -fgpu-flush-denormals-to-zero) and one page-tile instance per translation unit, as generated: the
 // generated code depends on what shares the unit, and the measured code is that of such units (a
@@ -112,6 +119,11 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     static constexpr auto BiasEnum = FmhaPipeline::BiasEnum;
     static_assert(!kHasSink || FmhaMask::IsMasking, "sink tokens need a masked instance");
     static constexpr auto kKVLookupTable = Base::kKVLookupTable;
+    // Per-tensor descales (the FP8 pipeline): q_descale * k_descale scale the scores with scale_s,
+    // v_descale the pipeline's output. Applied around the pipeline call, which stays the one of
+    // the other instances.
+    static constexpr bool kPerTensorDescales =
+        Base::QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR;
     static constexpr index_t kBlockPerCu = Base::kBlockPerCu;
     static constexpr index_t kBlockSize  = Base::kBlockSize;
 
@@ -307,6 +319,10 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             require(kargs.bias_ptr != nullptr, "an elementwise-bias instance needs bias_ptr");
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             require(kargs.alibi_slope_ptr != nullptr, "an ALiBi instance needs the slopes");
+        if constexpr(kPerTensorDescales)
+            require(kargs.q_descale_ptr != nullptr && kargs.k_descale_ptr != nullptr &&
+                        kargs.v_descale_ptr != nullptr,
+                    "a per-tensor descale instance needs q/k/v_descale_ptr");
         if constexpr(KvSplits_ == 2)
             require(kargs.split_stride_o != 0 && kargs.split_stride_lse != 0,
                     "the KV split needs the workspace's split strides");
@@ -594,6 +610,11 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             else
                 return 0.f;
         }();
+        // Per-tensor descales, one fp32 each (CheckLaunch requires the pointers): q_descale *
+        // k_descale scale the scores with scale_s.
+        if constexpr(kPerTensorDescales)
+            kargs.scale_s *= *reinterpret_cast<const float*>(kargs.q_descale_ptr) *
+                             *reinterpret_cast<const float*>(kargs.k_descale_ptr);
         auto o_acc_tile = FmhaPipeline{}(q_window,
                                          k_window,
                                          v_window,
@@ -609,6 +630,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                          smem_ptr + Policy::GetLdsOffsetV0(),
                                          smem_ptr + Policy::GetLdsOffsetV1(),
                                          smem_ptr + Policy::GetLdsArenaSize());
+        // v_descale scales the output.
+        if constexpr(kPerTensorDescales)
+        {
+            const float v_descale = *reinterpret_cast<const float*>(kargs.v_descale_ptr);
+            tile_elementwise_inout([v_descale](auto& x) { x *= v_descale; }, o_acc_tile);
+        }
 
         const auto o_naive = make_naive_tensor_view<address_space_enum::global>(
             o_ptr,

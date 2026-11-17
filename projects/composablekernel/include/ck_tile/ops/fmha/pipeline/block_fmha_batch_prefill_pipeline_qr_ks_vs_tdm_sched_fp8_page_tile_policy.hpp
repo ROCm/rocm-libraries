@@ -218,11 +218,13 @@ struct FmhaBatchPrefillFp8PageTileRead
 
 // Policy of the gfx1250 FP8 (fp8bf16) batch-prefill page tile: FP8 Q / K / V / P with the FP8
 // WMMAs (16x16x64 QK, 16x16x128 PV), the vectorized KV layout with x = 16 and the page-tile window.
-// This part is the data path: the LDS arena, the K / V LDS layouts the window writes, the operand
-// reads (FmhaBatchPrefillFp8PageTileRead), the GEMMs and the P repack between them. It derives
-// from the default TDM policy (AsyncCopy, QLoadOnce) as the forward FP8 policy does
-// (block_fmha_pipeline_qr_ks_vs_tdm_sched_fp8_policy.hpp), not from that policy, whose LDS reads
-// assume its padded row-major tiles.
+// The data path: the LDS arena, the K / V LDS layouts the window writes, the operand reads
+// (FmhaBatchPrefillFp8PageTileRead), the GEMMs and the P repack between them. The tile loop of
+// BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile: its loop-shape predicates (those of the
+// BF16 page tile), the WMMA operand guard, the QK / PV stage runners and the members the schedule
+// layer reads. It derives from the default TDM policy (AsyncCopy, QLoadOnce) as the forward FP8
+// policy does (block_fmha_pipeline_qr_ks_vs_tdm_sched_fp8_policy.hpp), not from that policy, whose
+// LDS reads assume its padded row-major tiles.
 template <typename Geometry_, typename Tuning_, typename TileSchedule_>
 struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     : BlockFmhaPipelineQRKSVSTdmDefaultPolicy
@@ -420,6 +422,17 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         return desc;
     }
 
+    // The Q TDM box pads as the Q LDS descriptor does (both from LdsPaddingConfigQ).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
+    {
+        static_assert(IsSupportedProblem<Problem>());
+        using Padding = detail::EncodedTdmPadding<LdsPaddingConfigQ<Problem>>;
+        return make_tuple(number<Padding::kEnabled>{},
+                          number<Padding::kPadAmount>{},
+                          number<Padding::kPadInterval>{});
+    }
+
     // ---- operand reads and GEMMs ----
 
     // gemm_0 of one QK stage: the stage's kQkSuColumns keys (as BlockFmhaPipelineQRKSVSTdmSchedFp8
@@ -543,6 +556,479 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     {
         static_assert(IsSupportedProblem<Problem>());
         return GetLdsArenaSize();
+    }
+
+    // ---- the tile loop: members the schedule layer reads ----
+
+    // FmhaTdmSchedMode and FmhaTdmSchedSequentialTileSchedule read these. The output rescale is
+    // fused into the forward FP8 softmax's part 2 (the pipeline passes an empty rescale callback),
+    // so the early slot skips the post pass. No lead read; the tensor waits and stage tails of the
+    // derived tuning.
+    static constexpr bool kEarlyOutputRescale      = true;
+    static constexpr bool kLeadFirstLoad           = false;
+    static constexpr index_t kKPrefetchTensorCount = Tuning::kKWait;
+    static constexpr index_t kVPrefetchTensorCount = Tuning::kVWait;
+    static constexpr bool kPrefetchTailDrain       = Tuning::kTailDrain;
+    static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
+    static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
+
+    // fp32 O fragments of the PV WMMAs, as the forward FP8 policy's. One PV stage covers the KV
+    // tile, so every PV row is an output fragment.
+    using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
+    static_assert(OutputFragments::kNumFragments == Geometry::kPvMIter * Geometry::kPvNIter &&
+                      OutputFragments::kNumDmsb == 2 * Geometry::kPvMIter &&
+                      OutputFragments::kElementsPerFragment ==
+                          Geometry::PvWmma::kCM0PerLane * Geometry::PvWmma::kCM1PerLane,
+                  "output fragments do not match the PV geometry");
+    static_assert(Geometry::kPvStages == 1 &&
+                  Geometry::kPvWmmasPerStage == OutputFragments::kNumFragments);
+
+    // The softmax is the forward FP8 pipeline's: the static entry points RunSplitSoftmaxPart01 and
+    // RunSplitSoftmaxPart2AndGetScale of its policy on this geometry. They read the geometry and
+    // the problem, no LDS layout and no tuning member.
+    using SoftmaxPolicy = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<Geometry, Tuning>;
+    using ScoreSoftmax  = typename SoftmaxPolicy::ScoreSoftmax;
+    static_assert(std::is_same_v<typename SoftmaxPolicy::OutputFragments, OutputFragments>);
+
+    // K(i+1) is waited at NextK (WaitTensorReadyAtLoadNextK), not in the softmax: the lean D64
+    // loop's three barriers per tile. The forward FP8 policy defers it into the softmax.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool DeferTensorReady()
+    {
+        return false;
+    }
+
+    template <index_t Stage>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetQkTailDsCount()
+    {
+        return Tuning::template GetQkTailDsCount<Stage>();
+    }
+
+    template <index_t Stage>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetPvTailDsCount()
+    {
+        return Tuning::template GetPvTailDsCount<Stage>();
+    }
+
+    // Stage tail waits as the forward FP8 policy's: a count past the DS counter field still waits.
+    template <index_t Stage>
+    CK_TILE_DEVICE static void WaitQkStageTail()
+    {
+        static_assert(Stage >= 0 && Stage < Geometry::kQkStages);
+        s_wait_dscnt<kFmhaTdmSchedFp8DsWait<GetQkTailDsCount<Stage>()>>();
+    }
+
+    template <index_t Stage>
+    CK_TILE_DEVICE static void WaitPvStageTail()
+    {
+        static_assert(Stage >= 0 && Stage < Geometry::kPvStages);
+        s_wait_dscnt<kFmhaTdmSchedFp8DsWait<GetPvTailDsCount<Stage>()>>();
+    }
+
+    // ---- loop shape, copied from BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy ----
+
+    // The lean D64 loop of the page tile: the countdown loop, the tile's LDS read bases formed
+    // once ahead of every WMMA (MakeTileBases), and K(i+1) waited at the barrier in load_next_k,
+    // which publishes it before its first reader, the PV stage. D64/V64 N128, one page per wave
+    // slice (P >= 64), no sink and no bias. The FP8 pipeline implements this loop only.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseLeanD64Loop()
+    {
+        return Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 && Geometry::kN == 128 &&
+               Problem::kPageBlockSize >= 64 && !Problem::kHasSink &&
+               Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+    }
+
+    // The countdown loop keeps no tile index, which ALiBi and the sink tiles read.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseCountdownLoop()
+    {
+        constexpr bool kCountdown = UseLeanD64Loop<Problem>();
+        static_assert(!kCountdown ||
+                      (!Problem::kHasSink && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS));
+        return kCountdown;
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool WaitTensorReadyAtLoadNextK()
+    {
+        return UseLeanD64Loop<Problem>() && !DeferTensorReady<Problem>();
+    }
+
+    // Lean TDM issue (per-wave descriptor inputs derived once, make_lean_issue_state) of the lean
+    // D64 loop.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseLeanTdmIssue()
+    {
+        return UseLeanD64Loop<Problem>();
+    }
+
+    // Mask predicate of a score at (row, col): the unsigned forms make one unsigned compare per
+    // element. The causal mask also skips the row-validity test: rows at or past seqlen_q are never
+    // written out (the O view is bounded by seqlen_q), so their scores may be masked arbitrarily.
+    // This is the BF16 page tile's predicate for the problems this policy supports (P >= 64, no
+    // sink tokens).
+    template <typename Problem, typename Mask>
+    CK_TILE_DEVICE static bool IsMaskedOut(const Mask& mask, index_t row, index_t col)
+    {
+        static_assert(IsSupportedProblem<Problem>() && !Problem::kHasSink &&
+                      Problem::kPageBlockSize >= 64);
+        if constexpr(std::is_same_v<Mask, SimplifiedGenericAttentionMask<true>>)
+            return mask.IsOutOfBoundUnsignedStoredRow(row, col);
+        else
+            return mask.IsOutOfBound(row, col);
+    }
+
+    // P >= 64 page ids in VGPR lanes (load_page_id_batch of the page-tile window: one vector load
+    // per 32 tiles instead of one LDS publication per tile), without sink tokens, KV split or
+    // logits soft cap.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UsePageIdBatch()
+    {
+        return Problem::kPageBlockSize >= 64 && !Problem::kHasSink &&
+               !detail::fmha_tdm_is_split_partial_v<Problem> && !Problem::kHasLogitsSoftCap;
+    }
+
+    // Masked tiles whose KV loop forms the mask's interior key-tile range once per query tile and
+    // drops the split tail predicate: without sink tokens, KV split or logits soft cap.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseMaskLoopTrims()
+    {
+        return !Problem::kHasSink && !detail::fmha_tdm_is_split_partial_v<Problem> &&
+               !Problem::kHasLogitsSoftCap;
+    }
+
+    // ---- WMMA operand guard ----
+    // The guard of the hazard note in block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp, copied
+    // from BlockFmhaPipelineQRKSVSTdmSchedPolicy, which does not take the FP8 geometry: grouped
+    // full drains, operands kept allocated until the drain that covers them, and a RAW fence on
+    // each stage's last row.
+
+    static constexpr bool kWmmaOperandGuard = Options::kWmmaOperandGuard;
+
+    // RAW fence: waits until the WMMA that produced c has completed, and so has read its A/B
+    // operands. Reading the result makes the compiler insert the WMMA result wait before the
+    // instruction that follows.
+    template <typename CWarpTensor>
+    CK_TILE_DEVICE static void WaitWmmaOperandsRead(CWarpTensor& c)
+    {
+        auto x = c.get_thread_buffer()[number<0>{}];
+        asm volatile("v_mov_b32 %0, %0" : "+v"(x)::"memory");
+        c.get_thread_buffer()(number<0>{}) = x;
+    }
+
+    // Empty use: keeps an operand's registers live so no later load is allocated onto them. The
+    // asm operand is allocated in v0-v255. The FP8 buffer is bit-cast to 16-byte chunks (an 8-bit
+    // thread buffer has no get_as of another scalar type).
+    template <typename Tensor>
+    CK_TILE_DEVICE static void KeepOperandLive(const Tensor& t)
+    {
+        using Buffer            = remove_cvref_t<decltype(t.get_thread_buffer())>;
+        constexpr index_t kSize = sizeof(Buffer);
+        static_assert(kSize % 16 == 0);
+        const auto chunks = bit_cast<array<int32x4_t, kSize / 16>>(t.get_thread_buffer());
+#pragma unroll
+        for(index_t i = 0; i < kSize / 16; ++i)
+            asm volatile("" ::"v"(chunks[i]) : "memory");
+    }
+
+    // The Drain or KeepPending point of QK row Row of a grouped-drain schedule: the full drain
+    // (Drain only), then the keep-alive of the last-M K slices of the pairs it covers.
+    template <typename Placement, typename BlockGemm, index_t Row, bool Drain, typename KeepPair>
+    CK_TILE_DEVICE static void EmitQkGroupedDrain(KeepPair& keep_k_of_pair)
+    {
+        static_assert(Placement::kQkMIter == BlockGemm::MIterPerWarp);
+        constexpr auto kPairs = Placement::QkKeptPairs(Row, Drain);
+        __builtin_amdgcn_sched_barrier(0);
+        if constexpr(Drain)
+            // Full drain only: a counted va_vdst(k >= 1) does not cover the WAR.
+            asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
+        static_for<kPairs.begin, kPairs.end, 1>{}([&](auto q) { keep_k_of_pair(q); });
+        __builtin_amdgcn_sched_barrier(0);
+    }
+
+    // Grouped waits: the schedule runs FmhaTdmSchedGroupedDrainPlacement. The other placements
+    // keep a RAW fence after every last reader.
+    template <typename Mode>
+    CK_TILE_HOST_DEVICE static constexpr bool GroupedWait()
+    {
+        constexpr bool kGrouped =
+            kIsFmhaTdmSchedGroupedDrain<typename Mode::SelectedPolicy::Schedule::LocalPlacement>;
+        static_assert(!kGrouped || kWmmaOperandGuard,
+                      "the grouped drains belong to the WMMA operand guard");
+        return kGrouped;
+    }
+
+    // PV rows [kPvLastMRow, kPvWmmasPerStage) of the stage are its last M iteration.
+    static constexpr index_t kPvLastMRow = kFmhaTdmSchedPvLastMRow<Geometry>;
+
+    // The PV WMMAs are issued by the pipeline's WMMA emitter, which guards PV row r as follows.
+    // RAW fence after its WMMA: the last M iteration's rows, with grouped waits only the stage's
+    // last row.
+    template <typename Mode>
+    CK_TILE_HOST_DEVICE static constexpr bool PvRawFence(index_t r)
+    {
+        return kWmmaOperandGuard && r >= kPvLastMRow &&
+               (!GroupedWait<Mode>() || r == Geometry::kPvWmmasPerStage - 1);
+    }
+
+    // M iterations [0, n) whose P chunk (the PV A operand) the emitter keeps allocated after the
+    // RAW fence of row r: with grouped waits, every M iteration but the last at the stage's last
+    // row. P(m0) is last read in rows [0, kPvLastMRow), and the next-K reads of those rows and of
+    // the later ones are issued without a drain, so they could be allocated onto it while its
+    // WMMAs are in flight. (BlockFmhaPipelineQRKSVSTdmSchedPolicy keeps it only without QK tail
+    // reads; with them its static scan found no read placed there. Here P(m0) would otherwise stay
+    // allocated only because the quantized row sum reads P after the stage.)
+    template <typename Mode>
+    CK_TILE_HOST_DEVICE static constexpr index_t PvKeptPIters(index_t r)
+    {
+        if constexpr(GroupedWait<Mode>() && Geometry::kPvStageKIter == 1)
+            return r == Geometry::kPvWmmasPerStage - 1 ? Geometry::kPvMIter - 1 : 0;
+        else
+            return 0;
+    }
+
+    // Rows [begin, end) whose operands stay allocated (KeepOperandLive) at row r: with grouped
+    // waits, the placement's PvKeptRows; otherwise none.
+    template <typename Mode>
+    CK_TILE_HOST_DEVICE static constexpr FmhaTdmSchedRowRange PvKeptRows(index_t r,
+                                                                         bool after_fence)
+    {
+        if constexpr(GroupedWait<Mode>())
+        {
+            using Placement = typename Mode::SelectedPolicy::Schedule::LocalPlacement;
+            return Placement::PvKeptRows(r, after_fence);
+        }
+        else
+            return {r, r};
+    }
+
+    // ---- the tile's reads and stage runners ----
+
+    // LDS read bases of one tile (FmhaBatchPrefillFp8PageTileRead::LaneBase): row group 0 of the K
+    // tile that QK reads (its stages read row groups 1-3 at constant offsets), the V tile, and row
+    // group 0 of the next K tile (the PV stage's reads). Formed once per tile, ahead of every
+    // WMMA, and kept in VGPRs: formed next to their first reads instead, each base would be a VALU
+    // write between WMMAs, and the read that uses it would wait for the WMMA pipe (as the BF16
+    // page tile's PrepareTileBases). Each base is one dword of the low 256 VGPRs.
+    struct TileBases
+    {
+        uint32_t k;
+        uint32_t v;
+        uint32_t next_k;
+    };
+
+    template <typename KWindow, typename VWindow>
+    CK_TILE_DEVICE static TileBases
+    MakeTileBases(const KWindow& k_window, const VWindow& v_window, const KWindow& next_k_window)
+    {
+        TileBases bases{KReadFor<KWindow>::LaneBase(k_window),
+                        VReadFor<VWindow>::LaneBase(v_window),
+                        KReadFor<KWindow>::LaneBase(next_k_window)};
+        asm volatile("" : "+v"(bases.k));
+        asm volatile("" : "+v"(bases.v));
+        asm volatile("" : "+v"(bases.next_k));
+        return bases;
+    }
+
+    // QK WMMA WmmaOrdinal of a stage in the (n, k, m) order of the forward FP8 policy's
+    // RunQkSuWmma. With FenceLastMIter the last M iteration's WMMA, the last reader of its K
+    // slice, ends with the RAW fence.
+    template <index_t WmmaOrdinal,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              bool FenceLastMIter>
+    CK_TILE_DEVICE static void RunQkSuWmma(CBlockTensor& c_block_tensor,
+                                           const ABlockTensor& a_block_tensor,
+                                           const BBlockTensor& b_block_tensor,
+                                           bool_constant<FenceLastMIter>)
+    {
+        using WarpGemm    = typename BlockGemm::WarpGemm;
+        using AWarpDstr   = typename WarpGemm::AWarpDstr;
+        using BWarpDstr   = typename WarpGemm::BWarpDstr;
+        using CWarpDstr   = typename WarpGemm::CWarpDstr;
+        using AWarpTensor = typename WarpGemm::AWarpTensor;
+        using BWarpTensor = typename WarpGemm::BWarpTensor;
+        using CWarpTensor = typename WarpGemm::CWarpTensor;
+
+        constexpr auto a_warp_y_lengths =
+            to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_warp_y_lengths =
+            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_warp_y_lengths =
+            to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        constexpr index_t kKIter = BlockGemm::KIterPerWarp;
+        constexpr index_t kMIter = BlockGemm::MIterPerWarp;
+        static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < BlockGemm::NIterPerWarp * kKIter * kMIter);
+        constexpr index_t n_iter = WmmaOrdinal / (kKIter * kMIter);
+        constexpr index_t k_iter = (WmmaOrdinal / kMIter) % kKIter;
+        constexpr index_t m_iter = WmmaOrdinal % kMIter;
+
+        AWarpTensor a_warp_tensor;
+        a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, k_iter>{}, a_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+
+        BWarpTensor b_warp_tensor;
+        b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<n_iter, k_iter>{}, b_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+
+        CWarpTensor c_warp_tensor;
+        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+
+        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+        if constexpr(FenceLastMIter && m_iter == kMIter - 1)
+            WaitWmmaOperandsRead(c_warp_tensor);
+        c_block_tensor.set_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+            c_warp_tensor.get_thread_buffer());
+    }
+
+    // QK stage Stage of a tile: its WMMAs in the placement's rows, the reads of the next stage's
+    // operand between them through Read from base (stages before the last: K row group Stage + 1,
+    // a constant offset from row group 0; the last stage: the V tile), and the guard's points.
+    // Adapted from BlockFmhaPipelineQRKSVSTdmSchedPolicy::RunQkScheduledStage (no lead read, no
+    // k-major reads, FP8 reads); the kept K slices follow the (n, k, m) WMMA order.
+    template <index_t Stage,
+              typename Mode,
+              typename Read,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              typename NextBBlockTensor>
+    CK_TILE_DEVICE static void RunQkStage(const BlockGemm&,
+                                          CBlockTensor& c_block_tensor,
+                                          const ABlockTensor& a_block_tensor,
+                                          const BBlockTensor& b_block_tensor,
+                                          NextBBlockTensor& next_b_block_tensor,
+                                          uint32_t base)
+    {
+        using Problem          = typename Mode::SelectedProblem;
+        using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
+        using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
+        using Kind             = FmhaTdmSchedLoadKind;
+        constexpr bool kReadsV = Stage == Geometry::kQkStages - 1;
+        static_assert(Stage >= 0 && Stage < SelectedSchedule::kNumQkStages);
+        static_assert(Read::kNumAccess ==
+                      (kReadsV ? Geometry::kVStageLoadCount : Geometry::kKSuLoadCount));
+        static_assert(!Mode::SelectedPolicy::kLeadFirstLoad);
+        // Byte offset of K row group Stage + 1 (the next stage's keys) from row group 0.
+        constexpr index_t kOffset = [] {
+            if constexpr(kReadsV)
+                return index_t{0};
+            else
+                return MakeKLdsBlockDescriptor<Problem>().calculate_offset(
+                           make_multi_index((Stage + 1) * Geometry::kQkSuColumns, 0)) *
+                       static_cast<index_t>(sizeof(KDataType));
+        }();
+
+        auto emit_token = [&](auto kind, auto access) {
+            static_assert(decltype(kind)::value == (kReadsV ? Kind::VRead : Kind::KRead));
+            Read::template Load<decltype(access)::value>(next_b_block_tensor,
+                                                         base + static_cast<uint32_t>(kOffset));
+        };
+        // Grouped drains (FmhaTdmSchedGroupedDrainPlacement): the K slice of a pair's last-M WMMA
+        // stays allocated (an empty asm use) until after the drain that covers it, so the reads
+        // issued in between cannot be allocated onto it while that WMMA is in flight.
+        auto keep_k_of_pair = [&](auto pair) {
+            constexpr index_t kMIter = BlockGemm::MIterPerWarp;
+            constexpr index_t kKIter = BlockGemm::KIterPerWarp;
+            using KWarpDstr          = typename BlockGemm::WarpGemm::BWarpDstr;
+            constexpr auto k_lengths =
+                to_sequence(KWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto k_zeros = uniform_sequence_gen_t<KWarpDstr::NDimY, 0>{};
+            constexpr index_t kO   = kMIter * decltype(pair)::value + kMIter - 1; // last M reader
+            typename BlockGemm::WarpGemm::BWarpTensor kept;
+            kept.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+                merge_sequences(sequence<kO / (kKIter * kMIter), (kO / kMIter) % kKIter>{},
+                                k_zeros),
+                merge_sequences(sequence<1, 1>{}, k_lengths));
+            KeepOperandLive(kept);
+        };
+        auto emit_point = [&](auto, auto row, auto point) {
+            using Point            = FmhaTdmSchedSchedulePoint;
+            constexpr Point kPoint = decltype(point)::value;
+            if constexpr(kPoint == Point::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else if constexpr(kPoint == Point::Drain || kPoint == Point::KeepPending)
+                EmitQkGroupedDrain<typename SelectedSchedule::LocalPlacement,
+                                   BlockGemm,
+                                   decltype(row)::value,
+                                   kPoint == Point::Drain>(keep_k_of_pair);
+            else
+                __builtin_amdgcn_sched_barrier(LLVMSchedGroupMask::VALU |
+                                               LLVMSchedGroupMask::TRANS);
+        };
+        // With the guard, the last M iteration's WMMAs keep the RAW fence: with grouped waits only
+        // on the stage's last row, otherwise on every one.
+        auto emit_wmma = [&](auto, auto wmma) {
+            constexpr index_t kOrd  = decltype(wmma)::value;
+            constexpr bool kLastRow = kOrd == Geometry::kQkWmmasPerStage - 1;
+            RunQkSuWmma<kOrd, BlockGemm>(c_block_tensor,
+                                         a_block_tensor,
+                                         b_block_tensor,
+                                         bool_constant < kWmmaOperandGuard &&
+                                             (kLastRow || !GroupedWait<Mode>()) > {});
+        };
+        Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
+        WaitQkStageTail<Stage>();
+    }
+
+    // The PV stage of a tile: the WMMAs of the pipeline's emitter (which applies the guard's kept
+    // rows, RAW fence and kept P chunks), the reads of the next K tile's row group 0 from base
+    // between them, and the full drains of the grouped-drain points. The output rescale is fused
+    // into the softmax, so the rows emit none. Adapted from BlockFmhaPipelineQRKSVSTdmSchedPolicy::
+    // RunPvScheduledStageWithWmma (one stage, no lead read, FP8 reads).
+    template <index_t Stage,
+              typename Mode,
+              typename Read,
+              typename NextKTensor,
+              typename WmmaEmitter>
+    CK_TILE_DEVICE static void
+    RunPvStage(NextKTensor& next_k_tensor, uint32_t base, WmmaEmitter& emit_wmma)
+    {
+        using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
+        using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
+        using Kind             = FmhaTdmSchedLoadKind;
+        static_assert(Stage == SelectedSchedule::kNumPvStages - 1 &&
+                      Read::kNumAccess == Geometry::kKSuLoadCount);
+        static_assert(!Mode::SelectedPolicy::kLeadFirstLoad);
+        auto emit_token = [&](auto kind, auto access) {
+            static_assert(decltype(kind)::value == Kind::KRead);
+            Read::template Load<decltype(access)::value>(next_k_tensor, base);
+        };
+        auto emit_point = [](auto, auto, auto point) {
+            using Point            = FmhaTdmSchedSchedulePoint;
+            constexpr Point kPoint = decltype(point)::value;
+            if constexpr(kPoint == Point::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else if constexpr(kPoint == Point::Drain)
+            {
+                // The WMMA emitter keeps the operands of the drained rows allocated until the
+                // stage's last row (PvKeptRows).
+                __builtin_amdgcn_sched_barrier(0);
+                // Full drain only: a counted va_vdst(k >= 1) does not cover the WAR.
+                asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
+                __builtin_amdgcn_sched_barrier(0);
+            }
+            else
+                __builtin_amdgcn_sched_barrier(LLVMSchedGroupMask::VALU |
+                                               LLVMSchedGroupMask::TRANS);
+        };
+        auto no_rescale = [](auto) {};
+        Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point, no_rescale);
+        WaitPvStageTail<Stage>();
     }
 };
 
