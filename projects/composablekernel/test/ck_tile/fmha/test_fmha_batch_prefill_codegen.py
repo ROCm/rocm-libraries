@@ -12,14 +12,15 @@ from pathlib import Path
 _CK_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_CK_ROOT / "example" / "ck_tile" / "01_fmha"))
 
-from codegen.ops.fmha_batch_prefill import get_fwd_blobs  # noqa: E402
+from codegen.ops.fmha_batch_prefill import get_fwd_blobs, is_page_tile_tag  # noqa: E402
 
-_PAGE_TILE = "qr_tdm_sched"
-# 1920 M128 instances, 8 M64 small-grid instances (BF16, vectorized + vLLM, P64/P128,
-# D64/D128, dense/masked, no sink/bias/soft cap/LSE), 10 KV-split instances (M64 split:
-# the same set unmasked; M128 split: P128 D64, P64 D64, P64 D128, dense/masked) and 2
+# 16-bit page-tile instances: 1920 M128 instances, 8 M64 small-grid instances (BF16, vectorized
+# + vLLM, P64/P128, D64/D128, dense/masked, no sink/bias/soft cap/LSE), 10 KV-split instances (M64
+# split: the same set unmasked; M128 split: P128 D64, P64 D64, P64 D128, dense/masked) and 2
 # query-tail instances (P64 D128, dense/masked).
 _PAGE_TILE_KERNELS = 1940
+# FP8 (fp8bf16) page-tile instances: D64 M128, P64, vectorized + vLLM, dense/masked.
+_FP8_PAGE_TILE_KERNELS = 2
 _M64_SET = set(itertools.product(["bf16"], [64, 128], [64, 128], ["s_no", "s_mask"]))
 _SPLIT_SET = {(d, p, 64, "s_no") for d in (64, 128) for p in (64, 128)}
 _SPLIT_SET |= {
@@ -129,7 +130,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
     def test_gfx9_targets_keep_only_the_async_pipeline(self):
         pool, kernels = _blobs(["gfx942", "gfx950"])
         self.assertTrue(kernels)
-        self.assertFalse([k for k in kernels if k.F_pipeline.tag == _PAGE_TILE])
+        self.assertFalse([k for k in kernels if is_page_tile_tag(k.F_pipeline.tag)])
         # No arch guard is added when only gfx9 is generated.
         self.assertFalse([k for k in kernels if "__gfx9__" in k.template])
         self.assertNotIn("gfx125", pool.api)
@@ -142,7 +143,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
 
     def test_gfx125_generates_the_page_tile_product(self):
         pool, kernels = _blobs(["gfx1250"])
-        self.assertTrue(all(k.F_pipeline.tag == _PAGE_TILE for k in kernels))
+        self.assertTrue(all(is_page_tile_tag(k.F_pipeline.tag) for k in kernels))
         product = {
             (
                 k.F_dtype,
@@ -391,11 +392,91 @@ class BatchPrefillCodegenTest(unittest.TestCase):
             _blobs(["gfx942", "gfx1250"])
 
     def test_aiter_receipts_and_filter_keep_the_page_tile_kernels(self):
-        for receipt in (200, 600):
+        # Receipt 200 (aiter mha_batch_prefill) also takes the FP8 instances; receipt 600 (its C++
+        # API) takes no quantized instance.
+        for receipt, fp8 in ((200, _FP8_PAGE_TILE_KERNELS), (600, 0)):
             _, kernels = _blobs(["gfx1250"], receipt, kernel_filter="*_ndropout_*")
-            self.assertEqual(len(kernels), _PAGE_TILE_KERNELS, receipt)
+            self.assertEqual(len(kernels), _PAGE_TILE_KERNELS + fp8, receipt)
         _, kernels = _blobs(["gfx1250"], 100)
         self.assertEqual(kernels, [])
+
+    def test_fp8_page_tile_follows_the_receipt_rule(self):
+        # receipt_accepts admits fp8bf16 batch prefill for receipts 0, 1, 200 and any unlisted one
+        # (5 here) and excludes it for the others: the FP8 instances add to a receipt's 16-bit
+        # page-tile instances, whose counts are those of the codegen without FP8.
+        base = dict.fromkeys((0, 1, 5, 200, 600), 1940)
+        base.update(dict.fromkeys((2, 3, 4), 1460))
+        base.update(dict.fromkeys((100, 700, 800, 801), 0))
+        admitted = (0, 1, 5, 200)
+        for receipt, count in base.items():
+            _, kernels = _blobs(["gfx1250"], receipt)
+            fp8 = [k for k in kernels if k.F_dtype == "fp8bf16"]
+            self.assertEqual(len(kernels) - len(fp8), count, receipt)
+            expected = _FP8_PAGE_TILE_KERNELS if receipt in admitted else 0
+            self.assertEqual(len(fp8), expected, receipt)
+
+    def test_fp8_page_tile_instances_and_dispatch(self):
+        for receipt in (0, 200):
+            pool, kernels = _blobs(["gfx1250"], receipt)
+            fp8 = [k for k in kernels if k.F_dtype == "fp8bf16"]
+            self.assertEqual(
+                {(k.F_hdim, k.F_page_size, k.F_pipeline.F_mask) for k in fp8},
+                {(64, 64, "s_no"), (64, 64, "s_mask")},
+            )
+            for k in fp8:
+                p = k.F_pipeline
+                self.assertEqual(p.tag, "qr_tdm_fp8_sched")
+                self.assertEqual(
+                    (p.F_qscale, p.F_kv_memory_layout, p.F_kv_lookup_table),
+                    ("pertensor", "vectorized", "vllm"),
+                )
+                self.assertEqual(
+                    (p.F_lse, p.F_sink, p.F_bias, p.F_logits), ("f", "f", "no", "f")
+                )
+                self.assertEqual((k.F_tile.F_bm0, k.F_tile.F_kv_splits), (128, 1))
+                body = k.template
+                self.assertIn(
+                    "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile<",
+                    body,
+                )
+                self.assertIn("ck_tile::FmhaBatchPrefillQrTdmPageTileKernel<", body)
+                self.assertIn("k_::MakeCheckedKernel(kargs, grids)", body)
+                self.assertIn("(defined(__gfx125__))", body)
+            api = pool.api
+            # Page-tile arms of every data type take no kv_load_mode selection.
+            self.assertNotIn("kElementBytes", api)
+            self.assertNotIn("select_kv_load_mode", api)
+            start = api.index('t.data_type.compare("fp8bf16")')
+            end = api.find("t.data_type.compare(", start + 1)
+            arms = _arms(api[start : end if end >= 0 else len(api)])
+            self.assertEqual(len(arms), _FP8_PAGE_TILE_KERNELS)
+            # A dense arm and a masked arm (any window), each with its mask type.
+            self.assertEqual(
+                {
+                    (
+                        "SimplifiedGenericAttentionMask<true>" in trait,
+                        "t.mask_type != mask_enum::no_mask" in cond,
+                    )
+                    for cond, trait in arms
+                },
+                {(False, False), (True, True)},
+            )
+            for cond, trait in arms:
+                # One FP8 tile: every grid takes it (no grid clause).
+                self.assertNotIn("get_num_blocks", cond)
+                for clause in (
+                    "t.qscale_type == quant_scale_enum::pertensor",
+                    "t.page_size == 64",
+                    "(a.hdim_q == 64) && (a.hdim_v == 64)",
+                    "a.num_splits == 1",
+                    'device_name.compare(0, 6, "gfx125") == 0',
+                    "t.has_lse == false",
+                    "t.has_sink == false",
+                    "VECTORIZED_LAYOUT",
+                    "VLLM_BLOCK_TABLE_2D",
+                ):
+                    self.assertIn(clause, cond)
+                self.assertIn("BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED_FP8", trait)
 
 
 if __name__ == "__main__":

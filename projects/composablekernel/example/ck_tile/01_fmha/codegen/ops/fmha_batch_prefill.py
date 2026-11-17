@@ -81,12 +81,25 @@ KV_LOAD_MODE_ENUM_MAP = {
 FMHA_BATCH_PREFILL_PIPELINE_MAP = {
     "qr_async": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSAsync",
     "qr_tdm_sched": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile",
+    "qr_tdm_fp8_sched": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile",
 }
 
 FMHA_BATCH_PREFILL_KERNEL_MAP = {
     "qr_async": "ck_tile::FmhaBatchPrefillWithPagedKVCacheKernel",
     "qr_tdm_sched": "ck_tile::FmhaBatchPrefillQrTdmPageTileKernel",
+    "qr_tdm_fp8_sched": "ck_tile::FmhaBatchPrefillQrTdmPageTileKernel",
 }
+
+# Pipeline tags of the gfx125x page-tile kernel (FmhaBatchPrefillQrTdmPageTileKernel): BF16 / FP16,
+# and FP8 (fp8bf16). Their dispatch arms take no kv_load_mode selection (the kernel addresses the
+# pool with 64-bit offsets), they check the exact head dimensions, and their instances launch
+# through the kernel's checked launch.
+PAGE_TILE_TAGS = ("qr_tdm_sched", "qr_tdm_fp8_sched")
+
+
+def is_page_tile_tag(tag: str) -> bool:
+    return tag in PAGE_TILE_TAGS
+
 
 FMHA_BATCH_PREFILL_LAUNCH = """    auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
@@ -370,7 +383,7 @@ class FmhaFwdApiTrait:
 
     @property
     def kv_load_mode_check(self) -> str:
-        if self.pipeline_tag == "qr_tdm_sched":
+        if is_page_tile_tag(self.pipeline_tag):
             return "true"
         return (
             f"fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {self.bn0}, a.num_total_pages, "
@@ -426,7 +439,7 @@ class FmhaFwdApiTrait:
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"a.hdim_q % {bk0submax} == 0"
-        elif self.pipeline_tag == "qr_tdm_sched":
+        elif is_page_tile_tag(self.pipeline_tag):
             assert self.dpad == "f"
             return f"a.hdim_q == {self.bk0max}"
         else:
@@ -446,7 +459,7 @@ class FmhaFwdApiTrait:
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"a.hdim_v % {bk0submax} == 0"
-        elif self.pipeline_tag == "qr_tdm_sched":
+        elif is_page_tile_tag(self.pipeline_tag):
             assert self.dvpad == "f"
             return f"a.hdim_v == {self.bn1}"
         else:
@@ -618,7 +631,7 @@ class FmhaFwdApiPool:
                 )
             if_i = "if" if i == 0 else "else if"
             uses_kv_load_mode = any(
-                trait.pipeline_tag != "qr_tdm_sched"
+                not is_page_tile_tag(trait.pipeline_tag)
                 for traits in self.pool[dtype].values()
                 for trait in traits
             )
@@ -699,7 +712,7 @@ class FmhaFwdKernel:
 
     @property
     def template(self) -> str:
-        page_tile = self.F_pipeline.tag == "qr_tdm_sched"
+        page_tile = is_page_tile_tag(self.F_pipeline.tag)
         split = self.F_tile.F_kv_splits != 1
         tail = self.F_tile.F_query_tail_rows != 0
         assert not split or (page_tile and self.F_tile.F_kv_splits == 2)
@@ -1014,7 +1027,9 @@ class PageTileFactoryGfx125:
     """gfx125x page-tile kernel: BF16/FP16, D64/D128, linear or vectorized K/V pool, vLLM 2D or
     SGLang 1D page table, group mode, no mask or a causal/sliding window from either corner (optionally with sink
     tokens and per-head sink logits), optional tanh logits soft cap or elementwise bias or ALiBi,
-    optional LSE."""
+    optional LSE. FP8 (fp8bf16, per-tensor descales): D64 M128, 64-token pages of the vectorized
+    pool (x = 16), vLLM 2D table, no mask or a window as above, no sink, bias, soft cap
+    or LSE."""
 
     # Unsplit arms: the caller asks for no KV split (num_splits 1). A problem that asks for a split
     # and matches no split arm matches no arm: the dispatch returns -1.
@@ -1087,6 +1102,13 @@ class PageTileFactoryGfx125:
                        FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
                        m128_d128],
             }  # fmt: skip
+        elif dtype == "fp8bf16":
+            # FP8 WMMAs (16x16x64 QK, 16x16x128 PV): a full-head QK stage (bk0 = D) and one PV
+            # stage over the KV tile (bk1 = 128).
+            F = PageTileFactoryGfx125
+            return {
+                64 : [FmhaFwdTileSize(128, 128, 64,  64, 128, 64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  1, F.UNSPLIT, GFX125_ARCH)],
+            }  # fmt: skip
         else:
             return None
 
@@ -1094,6 +1116,9 @@ class PageTileFactoryGfx125:
     def accepts(
         dtype: str, tile: FmhaFwdTileSize, pipeline: FmhaFwdPipeline, page_size: int
     ) -> bool:
+        # FP8: 64-token pages only (the pipelines carry the rest of its scope).
+        if dtype == "fp8bf16":
+            return page_size == 64
         # M64 and KV-split tiles only for the measured and tested set: BF16, vectorized
         # K/V with the vLLM block table, P64/P128 pages, no sink, bias, soft cap or LSE;
         # the M64 split for the unmasked case only, the M128 split not for P128 D128, the
@@ -1124,6 +1149,12 @@ class PageTileFactoryGfx125:
         # them. The masked arm takes any window (causal, sliding, local) from either corner, like
         # the simplified-mask dispatch of the gfx9 kernels.
         pipelines = []
+        if dtype == "fp8bf16":
+            # Per-tensor descales; the vectorized pool and the vLLM table; no sink, bias, soft
+            # cap or LSE (the FP8 pipeline's scope).
+            for mask in ["s_no", "s_mask"]:
+                pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", "f", "f", "pertensor", mask, "f", "vectorized", "vllm"))  # fmt: skip
+            return pipelines
         for (
             logits,
             mask,
