@@ -10575,9 +10575,10 @@ class KernelWriterAssembly(KernelWriter):
     """Point the global reads at the next segment and wait until it has landed.
 
     Emitted where the current segment's last read is issued and another segment
-    follows. SrdA/SrdB go to the next segment's start, one GlobalReadIncs back when
-    stepBack, and LoopCounterL gains its iterations. The flag polled is
-    flag[bLast][A2AShardIdx - 1], bLast being the last block placed in b's group.
+    follows. SrdA/SrdB go to the next segment's start, one GlobalReadIncs (DepthU
+    under UseSubtileImpl) back when stepBack, and LoopCounterL gains its iterations.
+    The flag polled is flag[bLast][A2AShardIdx - 1], bLast being the last block placed
+    in b's group.
     Lane 0 of Serial carries the poll and is restored; no other VGPR is touched.
     """
     module    = Module("a2aSwitchSegment")
@@ -10622,25 +10623,26 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.argLoader.loadKernArg(rank, "KernArgAddress",
                                             sgprOffset=hex(base + layout["FusedMyRank"]), dword=1))
 
-      module.addComment0("iterations of the segment being left")
-      module.add(scalarStaticDivideAndRemainder(qReg=iters, rReg=-1, dReg="A2AKLocal", divisor=depthU,
-                                                tmpSgprRes=ContinuousRegister(prod, 2), doRemainder=False))
-      for tP in (tPA, tPB):
-        tc  = tP["tensorChar"]
-        inc = self.globalReadIncsOperand(tc, self.states.unrollIdx)
-        if self.states.use64bShadowLimit:
-          module.add(SMulHIU32(dst=sgpr(prod + 1), src0=sgpr(iters), src1=inc,
+      if not kernel["UseSubtileImpl"]:
+        module.addComment0("iterations of the segment being left")
+        module.add(scalarStaticDivideAndRemainder(qReg=iters, rReg=-1, dReg="A2AKLocal", divisor=depthU,
+                                                  tmpSgprRes=ContinuousRegister(prod, 2), doRemainder=False))
+        for tP in (tPA, tPB):
+          tc  = tP["tensorChar"]
+          inc = self.globalReadIncsOperand(tc, self.states.unrollIdx)
+          if self.states.use64bShadowLimit:
+            module.add(SMulHIU32(dst=sgpr(prod + 1), src0=sgpr(iters), src1=inc,
+                                 comment="bytes the %s reads advanced over it" % tc))
+            module.add(SMulI32(dst=sgpr(prod), src0=sgpr(iters), src1=inc))
+            module.add(SAddU32(dst=sgpr("ShadowLimit%s+0" % tc), src0=sgpr("ShadowLimit%s+0" % tc),
+                               src1=sgpr(prod), comment="limit as at the next segment's start"))
+            module.add(SAddCU32(dst=sgpr("ShadowLimit%s+1" % tc), src0=sgpr("ShadowLimit%s+1" % tc),
+                                src1=sgpr(prod + 1)))
+          else:
+            module.add(SMulI32(dst=sgpr(prod), src0=sgpr(iters), src1=inc,
                                comment="bytes the %s reads advanced over it" % tc))
-          module.add(SMulI32(dst=sgpr(prod), src0=sgpr(iters), src1=inc))
-          module.add(SAddU32(dst=sgpr("ShadowLimit%s+0" % tc), src0=sgpr("ShadowLimit%s+0" % tc),
-                             src1=sgpr(prod), comment="limit as at the next segment's start"))
-          module.add(SAddCU32(dst=sgpr("ShadowLimit%s+1" % tc), src0=sgpr("ShadowLimit%s+1" % tc),
-                              src1=sgpr(prod + 1)))
-        else:
-          module.add(SMulI32(dst=sgpr(prod), src0=sgpr(iters), src1=inc,
-                             comment="bytes the %s reads advanced over it" % tc))
-          module.add(SAddU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc), src1=sgpr(prod),
-                             comment="limit as at the next segment's start"))
+            module.add(SAddU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc), src1=sgpr(prod),
+                               comment="limit as at the next segment's start"))
 
       if subRounds > 1:
         first = prod
@@ -10716,7 +10718,8 @@ class KernelWriterAssembly(KernelWriter):
 
   def a2aSegmentSrd(self, kernel, tP, shifts, stepBack):
     """Srd<tc> := the tile base plus `shifts` (a2aShiftSrd index, alongK), one
-    GlobalReadIncs back when stepBack; Srd<tc>+2 from ShadowLimit<tc> if there is one."""
+    GlobalReadIncs (DepthU under UseSubtileImpl) back when stepBack; Srd<tc>+2 from
+    ShadowLimit<tc> if there is one."""
     module = Module("a2aSegmentSrd")
     tc     = tP["tensorChar"]
     module.add(SMovB32(dst=sgpr("Srd%s+0" % tc), src=sgpr("A2ATileBase%s+0" % tc),
@@ -10725,9 +10728,14 @@ class KernelWriterAssembly(KernelWriter):
     for idx, alongK in shifts:
       module.add(self.a2aShiftSrd(kernel, tP, idx, alongK))
     if stepBack:
-      module.add(SSubU32(dst=sgpr("Srd%s+0" % tc), src0=sgpr("Srd%s+0" % tc),
-                         src1=self.globalReadIncsOperand(tc, self.states.unrollIdx),
-                         comment="one GlobalReadIncs back"))
+      if kernel["UseSubtileImpl"]:
+        inc     = (self.states.a if tP["isA"] else self.states.b).tileInfo.depthUBytes
+        comment = "one DepthU back"
+      else:
+        inc     = self.globalReadIncsOperand(tc, self.states.unrollIdx)
+        comment = "one GlobalReadIncs back"
+      module.add(SSubU32(dst=sgpr("Srd%s+0" % tc), src0=sgpr("Srd%s+0" % tc), src1=inc,
+                         comment=comment))
       module.add(SSubBU32(dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc), src1=0))
     if self.states.use64bShadowLimit:
       module.add(SCmpEQU32(src0=sgpr("ShadowLimit%s+1" % tc), src1=0, comment="are we within 2^32?"))
@@ -10747,6 +10755,21 @@ class KernelWriterAssembly(KernelWriter):
     module.add(self.a2aSwitchSegment(kernel, tPA, tPB, stepBack))
     module.add(SBranch(labelName=targetLabel.getLabelName(), comment="read the next segment"))
     module.add(lastLabel)
+    return module
+
+  def a2aPrefetchSegment(self, kernel, tPA, tPB, idxPgr, skipLabel):
+    """Before prefetch batch idxPgr: once the current segment's reads have all been issued,
+    switch to the next segment, or branch to skipLabel if this is the last one."""
+    module      = Module("a2aPrefetchSegment")
+    loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+    comment     = "PGR=%d but only %d loop" % (kernel["PrefetchGlobalRead"], idxPgr)
+    contLabel   = Label(self.labels.getNameInc("A2APrefetch%d" % idxPgr), "")
+    module.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment=comment))
+    module.add(SCBranchSCC0(labelName=contLabel.getLabelName(), comment="segment has reads left"))
+    module.add(SCmpEQU32(src0=sgpr("A2AShardCounter"), src1=1, comment="last segment?"))
+    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=comment))
+    module.add(self.a2aSwitchSegment(kernel, tPA, tPB, stepBack=False))
+    module.add(contLabel)
     return module
 
   def a2aSecondCopyLabel(self, kernel, nta=0, ntb=0):
@@ -23040,17 +23063,10 @@ class KernelWriterAssembly(KernelWriter):
     # early exit check
     # jump to idxPgr=1 label (wait 0)
     loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-    imod.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     skipPGRn = Label(self.rapGetName("skipPGR%d_%d"%(kernel["PrefetchGlobalRead"], 1)), "")
     if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
-      # A2AGemm continues the prefetch in the next segment unless this is the last one.
-      prefetchLabel = Label(self.labels.getNameInc("A2APrefetch%d" % idxPgr), "")
-      imod.add(SCBranchSCC0(labelName=prefetchLabel.getLabelName(), comment="segment has reads left"))
-      imod.add(SCmpEQU32(src0=sgpr("A2AShardCounter"), src1=1, comment="last segment?"))
-      imod.add(SCBranchSCC1(labelName=skipPGRn.getLabelName(), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
-      imod.add(self.a2aSwitchSegment(kernel, tPA, tPB, stepBack=False))
-      imod.add(prefetchLabel)
-      return imod
+      return self.a2aPrefetchSegment(kernel, tPA, tPB, idxPgr, skipPGRn)
+    imod.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     imod.add(SCBranchSCC1(labelName=skipPGRn.getLabelName(), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     return imod
 

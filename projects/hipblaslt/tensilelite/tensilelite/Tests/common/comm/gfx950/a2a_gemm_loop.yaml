@@ -195,6 +195,44 @@ BenchmarkProblems:
           - Exact: {sizes: [3072, 2048, 1, 384], world: 3}
           - Exact: {sizes: [3072, 2048, 1, 512], world: 4}
 
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT 256x256
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT 128x128
+        - DepthU: [64]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
+        - ExpandPointerSwap: [False]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - A2ASubRounds: [1, 2, 4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 2}
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 4}
+          - Exact: {sizes: [3072, 2000, 1, 4096], world: 4}
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 8}
+          - Exact: {sizes: [3072, 2000, 1, 4096], world: 8}
+          - Exact: {sizes: [3072, 300, 1, 4096], world: 8}
+          - Exact: {sizes: [3072, 2048, 1, 128], world: 2}
+          - Exact: {sizes: [3072, 2048, 1, 256], world: 4}
+          - Exact: {sizes: [3072, 2048, 1, 512], world: 2}
+          - Exact: {sizes: [3072, 2048, 1, 512], world: 4}
+          - Exact: {sizes: [3072, 2048, 1, 512], world: 8}
+          - Exact: {sizes: [3072, 2048, 1, 1024], world: 4}
+          # Odd W, segments of 1-3 iterations and long ones.
+          - Exact: {sizes: [3072, 2048, 1, 192], world: 3}
+          - Exact: {sizes: [3072, 2048, 1, 576], world: 3}
+          - Exact: {sizes: [3072, 2048, 1, 3072], world: 3}
+          - Exact: {sizes: [3072, 2048, 1, 320], world: 5}
+
 LibraryLogic:
   ScheduleName: "a2a_gemm_loop_gfx950"
   DeviceNames: ["Device 75a0"]

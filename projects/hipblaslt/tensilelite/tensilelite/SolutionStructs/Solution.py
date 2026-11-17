@@ -2796,8 +2796,9 @@ class Solution(collections.abc.Mapping):
       if not state["ProblemType"]["DataTypeB"].isBFloat16():
         reject(state, printRejectionReason, "FusedA2A=A2AGemm requires a bf16 B")
         return
-      if state["UseSubtileImpl"]:
-        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires UseSubtileImpl=0")
+      if state["ProblemType"]["SwizzleTensorA"] or state["ProblemType"]["SwizzleTensorB"]:
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires SwizzleTensorA=SwizzleTensorB=False")
         return
       if state["DirectToVgprA"] or state["DirectToVgprB"]:
         reject(state, printRejectionReason,

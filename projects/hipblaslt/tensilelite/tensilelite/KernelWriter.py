@@ -5644,6 +5644,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["MXBlockB"]:
         module.addComment1("global read addresses: addresses mxsb")
         module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+    module.add(self.a2aSetupSegments(kernel, tensorParametersA, tensorParametersB))
 
 
     # List of tiles that need to be read form
@@ -5808,6 +5809,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.nonPostLoopSgpr.append("SubtileNGuard")
       self.states.storeAlign8 = True
 
+    module.add(self.a2aExitTally(kernel))
+
     # Start of post-loop code
     if 1:
       module.addComment0(" =============================================================== ")
@@ -5968,6 +5971,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if isPersistent(kernel):
         processingComponent = Component.TileProcessingStrategy.find(self)
         module.add(processingComponent.kernelEnd(self, kernel))
+      module.add(self.a2aDrainSendWait(kernel))
       module.add(SEndpgm(comment="Kernel End"))
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
