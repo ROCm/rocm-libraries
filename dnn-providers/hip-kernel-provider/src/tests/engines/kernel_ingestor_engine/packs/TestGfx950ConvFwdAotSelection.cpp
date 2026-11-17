@@ -104,7 +104,7 @@ const std::vector<AotSample>& aotSample()
 }
 
 /// A graph, as (N, C, K, Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW, groups), and the rows of
-/// aotSample() selected for it, in table order. gfx950_conv_fwd_aot_runtime_candidates
+/// aotSample() selected for it, in table order. conv_fwd_aot_runtime_candidates
 /// computes them, and test_make_conv_aot_config.py checks this table against it: keep
 /// one row per line.
 struct SelectionCase

@@ -36,9 +36,9 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
-#include "engines/kernel_ingestor_engine/packs/ConvFwdAotGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdAotSelection.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx1250ConvFwdGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvGraphPredicates.hpp"
 
 /**
@@ -50,7 +50,7 @@
  * match, the kernel matcher, the candidate filter, the score and the dispatch are written
  * once over an Engine (its arch, wave size, symbols and tokens). What differs is how a
  * kernel's metadata decodes into an instance and how that instance admits and launches a
- * problem: on gfx950 conv::AotInstance and conv::DirectInstance (ConvFwdAotGeometry.hpp),
+ * problem: on gfx950 conv::AotInstance and conv::DirectInstance (Gfx950ConvFwdGeometry.hpp),
  * on gfx1250 a gfx1250_conv_fwd::CatalogKernel (Gfx1250ConvFwdGeometry.hpp, the port of
  * rocKE's dispatcher for that arch's instance list). Both launch through rocKE's two
  * forward conv ABIs (conv_abi.py), so one dispatch handler runs both.

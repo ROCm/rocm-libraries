@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "engines/kernel_ingestor_engine/packs/ConvGeometryCommon.hpp"
+
 /**
  * @file Gfx1250ConvFwdTypes.hpp
  * @brief The problem and launch-plan vocabulary of hipkernel:Gfx1250ConvFwdAot's geometry.
@@ -36,16 +38,14 @@ inline const char* toString(DataType dtype)
     return dtype == DataType::BF16 ? "bf16" : "fp16";
 }
 
-/// gfx1250 target limits and WMMA constants the families share (rocKE's ArchTarget and
-/// arch_specs.json for gfx1250; restated by hand, not derived from the Python).
-constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
-/// Hardware cap on a grid Y or Z dimension (kernel_identity._MAX_GRID_DIM).
-constexpr int64_t MAX_GRID_DIM = 65535;
-/// Work-items one dispatch can address: a grid x extent times the block.
-constexpr int64_t MAX_DISPATCH_ITEMS = (int64_t{1} << 32) - 1;
-constexpr int64_t GFX1250_WAVE_SIZE = 32;
-constexpr int64_t GFX1250_MAX_THREADS_PER_BLOCK = 1024;
-constexpr int64_t GFX1250_LDS_BYTES = 327680;
+/// gfx1250 target limits (arch_specs.json) are the shared gfx950_conv::Target and caps the
+/// dgrad port also uses; the WMMA constants below are this family's.
+using gfx950_conv::I32_MAX;
+using gfx950_conv::MAX_DISPATCH_ITEMS;
+using gfx950_conv::MAX_GRID_DIM;
+constexpr int64_t GFX1250_WAVE_SIZE = gfx950_conv::GFX1250.waveSize;
+constexpr int64_t GFX1250_MAX_THREADS_PER_BLOCK = gfx950_conv::MAX_BLOCK_THREADS;
+constexpr int64_t GFX1250_LDS_BYTES = gfx950_conv::GFX1250.ldsCapacityBytes;
 constexpr int64_t WMMA_K = 32;
 constexpr int64_t CH_PAD = 8; ///< LDS row skew of a staged tile, in channels (16 bytes).
 constexpr int64_t TDM_MAX_EXTENT = 0xFFFF;
@@ -159,28 +159,6 @@ inline int64_t ceilDiv(int64_t a, int64_t b)
 inline int64_t alignUp(int64_t a, int64_t b)
 {
     return ceilDiv(a, b) * b;
-}
-
-/// CK Tile's unsigned magic division constants for @p divisor (rocke.helpers.magic_division):
-/// the multiplier as the signed i32 the kernel reads back with an unsigned mul-hi.
-struct Magic
-{
-    int64_t multiplier;
-    int64_t shift;
-};
-
-inline Magic magicNumbers(int64_t divisor)
-{
-    const auto d = static_cast<uint64_t>(divisor < 1 ? 1 : divisor);
-    uint64_t shift = 0;
-    while((uint64_t{1} << shift) < d)
-    {
-        ++shift;
-    }
-    const auto mult = (((uint64_t{1} << shift) - d) << 32) / d + 1;
-    const auto asI32 = mult >= (uint64_t{1} << 31) ? static_cast<int64_t>(mult) - (int64_t{1} << 32)
-                                                   : static_cast<int64_t>(mult);
-    return {asI32, static_cast<int64_t>(shift)};
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd

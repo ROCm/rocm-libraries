@@ -145,6 +145,13 @@ inline Refusal refuse(const ImplicitGemmKernel& kernel, const Problem& problem)
     {
         return "reduction extent Y*X*cpg reaches 2**23 (24-bit address products)";
     }
+    for(const auto divisor : {g.ho(), g.wo(), g.x, g.cpg()})
+    {
+        if(!gfx950_conv::magicDivision(divisor))
+        {
+            return "a magic-division divisor (Ho, Wo, X, C / groups) is outside [1, 2**31)";
+        }
+    }
     return std::nullopt;
 }
 

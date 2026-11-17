@@ -10,7 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGeometryCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvGeometryCommon.hpp"
 
 /// @file Gfx950ConvGraphPredicates.hpp
 /// The tensor and attribute checks of the gfx950 conv AOT engines' graph contracts, the

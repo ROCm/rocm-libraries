@@ -428,7 +428,7 @@ namespace
 {
 
 /// One graph and how many instances of each family each catalog selects for it, as
-/// gfx950_conv_fwd_aot_runtime_candidates in convolution_forward.py counts them over
+/// conv_fwd_aot_runtime_candidates in convolution_forward.py counts them over
 /// gfx950_conv_fwd_aot_seed.instances.json and the full catalog's per-dtype lists,
 /// gfx950_conv_fwd_aot_{fp16,bf16}.instances.json. Selected is the engine's selection
 /// among the instances that serve the graph (only the graph's widest vector widths, or

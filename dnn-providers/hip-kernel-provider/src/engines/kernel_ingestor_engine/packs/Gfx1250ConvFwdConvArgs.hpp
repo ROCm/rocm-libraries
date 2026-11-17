@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "engines/kernel_ingestor_engine/packs/Gfx1250ConvFwdTypes.hpp"
@@ -72,78 +75,27 @@ struct ConvGeometry
     }
 };
 
+/// The kernarg names of an ABI: the leading pointer/size block, then @p block. The blocks
+/// are the shared gfx950_conv lists (ConvGeometryCommon.hpp), which the gfx950 port
+/// matches the same way.
+template <size_t N>
+std::vector<std::string> fwdArgNames(const std::array<std::string_view, N>& block)
+{
+    std::vector<std::string> names(gfx950_conv::FWD_LEADING_KERNARG_NAMES.begin(),
+                                   gfx950_conv::FWD_LEADING_KERNARG_NAMES.end());
+    names.insert(names.end(), block.begin(), block.end());
+    return names;
+}
+
 inline const std::vector<std::string>& implicitFwdArgNames()
 {
-    static const std::vector<std::string> s_names = {"A",
-                                                     "B",
-                                                     "D",
-                                                     "A_bytes",
-                                                     "B_bytes",
-                                                     "D_bytes",
-                                                     "p_N",
-                                                     "p_Hi",
-                                                     "p_Wi",
-                                                     "p_C",
-                                                     "p_K",
-                                                     "p_Y",
-                                                     "p_X",
-                                                     "p_sH",
-                                                     "p_sW",
-                                                     "p_pH",
-                                                     "p_pW",
-                                                     "p_dH",
-                                                     "p_dW",
-                                                     "p_groups",
-                                                     "p_Ho",
-                                                     "p_Wo",
-                                                     "p_cpg",
-                                                     "p_kpg",
-                                                     "p_K_gemm",
-                                                     "p_M",
-                                                     "p_A_stride_n",
-                                                     "p_A_stride_hi",
-                                                     "p_A_stride_wi",
-                                                     "p_B_stride_k",
-                                                     "p_B_stride_y",
-                                                     "p_B_stride_x",
-                                                     "p_D_stride_n",
-                                                     "p_D_stride_ho",
-                                                     "p_D_stride_wo",
-                                                     "p_magic_m_Ho_mult",
-                                                     "p_magic_m_Ho_shift",
-                                                     "p_magic_m_Wo_mult",
-                                                     "p_magic_m_Wo_shift",
-                                                     "p_magic_k_X_mult",
-                                                     "p_magic_k_X_shift",
-                                                     "p_magic_k_cpg_mult",
-                                                     "p_magic_k_cpg_shift",
-                                                     "p_num_pid_m",
-                                                     "p_num_pid_n"};
+    static const auto s_names = fwdArgNames(gfx950_conv::IMPLICIT_GEMM_KERNARG_NAMES);
     return s_names;
 }
 
 inline const std::vector<std::string>& directFwdArgNames()
 {
-    static const std::vector<std::string> s_names = {"A",
-                                                     "B",
-                                                     "D",
-                                                     "A_bytes",
-                                                     "B_bytes",
-                                                     "D_bytes",
-                                                     "p_N",
-                                                     "p_Hi",
-                                                     "p_Wi",
-                                                     "p_Ho",
-                                                     "p_Wo",
-                                                     "p_groups",
-                                                     "p_total_c",
-                                                     "p_total_k",
-                                                     "p_A_stride_n",
-                                                     "p_A_stride_hi",
-                                                     "p_A_stride_wi",
-                                                     "p_D_stride_n",
-                                                     "p_D_stride_ho",
-                                                     "p_D_stride_wo"};
+    static const auto s_names = fwdArgNames(gfx950_conv::DIRECT_KERNARG_NAMES);
     return s_names;
 }
 
@@ -227,15 +179,19 @@ inline Arg convArg(const std::string& name, const ConvGeometry& g, int64_t tileM
                                                  {"p_magic_k_cpg_", g.cpg()}};
     for(const auto& m : magics)
     {
-        const auto magic = magicNumbers(m.divisor);
-        if(name == std::string(m.prefix) + "mult")
+        const bool isMult = name == std::string(m.prefix) + "mult";
+        if(!isMult && name != std::string(m.prefix) + "shift")
         {
-            return Arg::i32(name, magic.multiplier);
+            continue;
         }
-        if(name == std::string(m.prefix) + "shift")
+        // Refused as a plan by ImplicitGemm::refuse before an argument is built.
+        const auto magic = gfx950_conv::magicDivision(m.divisor);
+        if(!magic)
         {
-            return Arg::i32(name, magic.shift);
+            throw std::invalid_argument("magic-division divisor " + std::to_string(m.divisor)
+                                        + " is outside [1, 2^31)");
         }
+        return Arg::i32(name, isMult ? magic->multiplier : magic->shift);
     }
     if(tileM > 0 && name == "p_num_pid_m")
     {
