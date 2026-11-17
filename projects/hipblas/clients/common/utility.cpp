@@ -62,8 +62,12 @@ void d_vector_set_pad_length(size_t pad)
     g_DVEC_PAD = pad;
 }
 
-hipblas_rng_t hipblas_rng(69069);
-hipblas_rng_t hipblas_seed(hipblas_rng);
+hipblas_rng_t   hipblas_seed(69069); // A fixed seed to start at
+std::thread::id hipblas_main_thread_id = std::this_thread::get_id();
+
+// For the main thread, we use hipblas_seed; for other threads, we start with a
+// different seed but deterministically based on the thread id's hash function.
+thread_local hipblas_rng_t hipblas_rng = hipblas_get_seed();
 
 int64_t c_i32_overflow = int64_t(std::numeric_limits<int32_t>::max()) + 1; // 2147483648
 
