@@ -1639,6 +1639,44 @@ TEST(GPU_HipdnnShimBNTuning_FP32, NonePolicyDoesNotSearch)
     }
 }
 
+// MIOpen's batchnorm writes the perf db only while it searches, so under DbUpdate
+// it runs as under None, and the hipDNN path serves it as None. Inference without
+// the estimates runs training, so it is covered too.
+TEST(GPU_HipdnnShimBNTuning_FP32, DbUpdatePolicyRunsAsNone)
+{
+    auto&& handle = get_handle();
+    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbUpdate);
+    const ScopedFindEnforce find_enforce("");
+    const SearchLogScope search_log;
+
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        const auto result = TrainUnderPolicy(handle, d);
+        if(ExpectServed("dbupdate_policy_train", result))
+        {
+            EXPECT_FALSE(Searched(result)) << result.logged;
+            CheckTrain(handle, d, true, false);
+        }
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        const auto result = BwdUnderPolicy(handle, d);
+        if(ExpectServed("dbupdate_policy_bwd", result))
+        {
+            EXPECT_FALSE(Searched(result)) << result.logged;
+            CheckBwd(handle, d);
+        }
+    }
+    {
+        SCOPED_TRACE("infer");
+        InferData d;
+        if(ExpectServed("dbupdate_policy_infer", InferUnderPolicy(handle, d, false)))
+            CheckInferWithoutEstimates(handle, d);
+    }
+}
+
 // Used only by FindEnforceUnderNonePolicyMatchesMiopen.
 const BN2DTestCase& FindEnforceCase()
 {
@@ -1813,15 +1851,15 @@ void ExpectTrainingPolicyGap(miopen::Handle& handle, const std::string& prefix, 
 // The provider sets only None or Search on its handle, so it cannot run the
 // policies that also write or clean the perf db. The shim declines them for
 // training and backward, and for inference without the estimated stats, which
-// runs training. Each of the three policies gets its own cases.
+// runs training. Each of the two policies gets its own cases. DbUpdate writes
+// nothing for batchnorm and is served (DbUpdatePolicyRunsAsNone).
 TEST(GPU_HipdnnShimBNGaps_FP32, WriteOrCleanPoliciesAreDeclined)
 {
     auto&& handle = get_handle();
 
     for(const auto& [tuning_policy, prefix] :
-        {std::pair<miopenTuningPolicy_t, std::string>{miopenTuningPolicyDbUpdate,
-                                                      "tuning_policy_dbupdate"},
-         {miopenTuningPolicySearchDbUpdate, "tuning_policy_searchdbupdate"},
+        {std::pair<miopenTuningPolicy_t, std::string>{miopenTuningPolicySearchDbUpdate,
+                                                      "tuning_policy_searchdbupdate"},
          {miopenTuningPolicyDbClean, "tuning_policy_dbclean"}})
     {
         SCOPED_TRACE(prefix);
@@ -1858,6 +1896,29 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
         TrainData d;
         if(RecordTuningGap(
                "find_enforce_" + std::string(name) + "_train", TrainUnderPolicy(handle, d), reason))
+            CheckTrain(handle, d, true, false);
+    }
+}
+
+// A DbUpdate handle also wins over MIOPEN_FIND_ENFORCE in MIOpen, so MIOpen runs
+// as under None, but the provider would follow the variable. The shim declines
+// the variable's values that do more than None, on training only.
+TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyUnderFindEnforceIsDeclined)
+{
+    auto&& handle = get_handle();
+    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbUpdate);
+    const char* reason = "MIOPEN_FIND_ENFORCE";
+
+    const std::pair<const char*, const char*> values[] = {
+        {"search", "SEARCH"}, {"search_db_update", "SEARCH_DB_UPDATE"}, {"db_clean", "DB_CLEAN"}};
+    for(const auto& [name, value] : values)
+    {
+        SCOPED_TRACE(value);
+        const ScopedFindEnforce find_enforce(value);
+        TrainData d;
+        if(RecordTuningGap("dbupdate_find_enforce_" + std::string(name) + "_train",
+                           TrainUnderPolicy(handle, d),
+                           reason))
             CheckTrain(handle, d, true, false);
     }
 }

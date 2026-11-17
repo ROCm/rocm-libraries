@@ -73,15 +73,17 @@ namespace hipdnn {
 //   scale, bias or statistics not shaped {1, C, 1, ...} ({1, C, H, W, ...} in
 //   per-activation mode). MIOpen reshapes a 5-D x to 4-D, so a non-packed 5-D x
 //   is declined here, not rejected with miopenStatusBadParm.
-// - Spatial training or backward when the handle's tuning policy is DbUpdate,
+// - Spatial training or backward when the handle's tuning policy is
 //   SearchDbUpdate or DbClean. That includes inference without an estimated
 //   mean or variance, which runs training. The provider runs on its own handle
-//   and can only set None, or Search through its benchmarking knob. Inference
-//   with the estimates has no tunable solver, and neither has per-activation
-//   mode, so for them the policy does not matter.
+//   and can only set None, or Search through its benchmarking knob. DbUpdate
+//   changes nothing for batchnorm, so it runs as None. Inference with the
+//   estimates has no tunable solver, and neither has per-activation mode, so
+//   for them the policy does not matter.
 // - The same calls under miopenTuningPolicySearch while MIOPEN_FIND_ENFORCE asks
-//   for DB_UPDATE, SEARCH_DB_UPDATE or DB_CLEAN. MIOpen lets the Search policy
-//   win over the variable, and the provider lets the variable win over Search.
+//   for DB_UPDATE, SEARCH_DB_UPDATE or DB_CLEAN, or under DbUpdate while it asks
+//   for SEARCH, SEARCH_DB_UPDATE or DB_CLEAN. MIOpen lets the handle's policy
+//   win over the variable, and the provider lets the variable win.
 // - Under miopenTuningPolicySearch, a problem for which no hipDNN engine has the
 //   benchmarking knob. Any other engine would run the problem untuned.
 // To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.

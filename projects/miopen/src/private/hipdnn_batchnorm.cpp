@@ -287,7 +287,8 @@ bool ProviderCanApply(miopenTuningPolicy_t policy)
 // read that policy (Search tunes, DbClean drops the perf-db entry), so the
 // forwarded call has to carry it over. The provider sets None, or Search when
 // the plan has its benchmarking knob on, so Search is carried over as that knob.
-// It cannot express the other policies, which are declined until hipDNN can
+// DbUpdate changes nothing for batchnorm and runs as None. The provider cannot
+// express SearchDbUpdate or DbClean, which are declined until hipDNN can
 // carry the whole policy to the provider (ROCm/rocm-libraries#14372);
 // MIOPEN_DISABLE_HIPDNN_FOR sends these calls back to MIOpen meanwhile. The
 // inference and per-activation solvers are not tunable and ignore the policy,
@@ -310,11 +311,25 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
         return RecordFailure(status, "could not read the handle's tuning policy");
     if(problem.bnMode == miopenBNPerActivation)
         policy = miopenTuningPolicyNone;
+    // MIOpen's batchnorm writes the perf db only while it searches, so DbUpdate on
+    // its own runs as None (perfdb.rst). Unlike None, it keeps MIOPEN_FIND_ENFORCE
+    // out, which the provider cannot, so a variable asking for more is declined.
+    // Pass DbUpdate through once hipDNN carries the policy (#14372).
+    if(policy == miopenTuningPolicyDbUpdate)
+    {
+        const miopenTuningPolicy_t enforced = FindEnforcePolicy();
+        if(enforced != miopenTuningPolicyNone && enforced != miopenTuningPolicyDbUpdate)
+            return RecordFailure(miopenStatusUnsupportedOp,
+                                 "hipDNN batchnorm cannot apply miopenTuningPolicyDbUpdate "
+                                 "while MIOPEN_FIND_ENFORCE asks for SEARCH, SEARCH_DB_UPDATE "
+                                 "or DB_CLEAN; the provider would let the variable win");
+        policy = miopenTuningPolicyNone;
+    }
     if(!ProviderCanApply(policy))
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm cannot apply the handle's tuning policy; "
-                             "only miopenTuningPolicyNone and miopenTuningPolicySearch "
-                             "are forwarded");
+                             "only miopenTuningPolicyNone, DbUpdate and Search are "
+                             "forwarded");
     if(policy == miopenTuningPolicySearch && !ProviderCanApply(FindEnforcePolicy()))
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm cannot apply miopenTuningPolicySearch while "
