@@ -18,10 +18,31 @@ from check_release_wheel_contents import validate
 from stage_release_source import stage_source
 
 
-def build_wheel(source: Path, metadata_file: Path, stage: Path, destination: Path) -> Path:
+def build_wheel(
+    source: Path,
+    metadata_file: Path,
+    stage: Path,
+    destination: Path,
+    inputs_file: Path | None = None,
+) -> Path:
     metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
     revision = metadata["source_revision"]
     version = metadata["distribution_version"]
+    manifest = destination / ".published"
+    expected_wheel = destination / f"tensilelite-{version}-py3-none-any.whl"
+    if inputs_file and manifest.is_file() and expected_wheel.is_file():
+        try:
+            publication = json.loads(manifest.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            publication = None
+        inputs = [
+            Path(line) for line in inputs_file.read_text(encoding="utf-8").splitlines()
+        ]
+        inputs.append(inputs_file)
+        if publication == {"wheel": expected_wheel.name, "metadata": metadata} and all(
+            path.stat().st_mtime_ns <= manifest.stat().st_mtime_ns for path in inputs
+        ):
+            return expected_wheel
     environment = dict(os.environ)
     for key in ("TENSILELITE_SOURCE_REVISION", "TENSILELITE_ROCM_VERSION"):
         environment.pop(key, None)
@@ -30,7 +51,15 @@ def build_wheel(source: Path, metadata_file: Path, stage: Path, destination: Pat
         if "SOURCE_DATE_EPOCH" not in environment and shutil.which("git"):
             # Ask for this resolved commit's timestamp, even if HEAD has moved.
             timestamp = subprocess.run(
-                ["git", "-c", "safe.directory=*", "show", "-s", "--format=%ct", revision[:40]],
+                [
+                    "git",
+                    "-c",
+                    "safe.directory=*",
+                    "show",
+                    "-s",
+                    "--format=%ct",
+                    revision[:40],
+                ],
                 cwd=source,
                 capture_output=True,
                 text=True,
@@ -72,7 +101,8 @@ def build_wheel(source: Path, metadata_file: Path, stage: Path, destination: Pat
         if old != published:
             old.unlink()
     (destination / ".published").write_text(
-        json.dumps({"wheel": published.name, "metadata": metadata}, sort_keys=True) + "\n",
+        json.dumps({"wheel": published.name, "metadata": metadata}, sort_keys=True)
+        + "\n",
         encoding="utf-8",
     )
     return published
@@ -82,10 +112,15 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--metadata", required=True, type=Path)
+    parser.add_argument("--inputs", type=Path)
     parser.add_argument("--stage", required=True, type=Path)
     parser.add_argument("--destination", required=True, type=Path)
     args = parser.parse_args(argv)
-    print(build_wheel(args.source, args.metadata, args.stage, args.destination))
+    print(
+        build_wheel(
+            args.source, args.metadata, args.stage, args.destination, args.inputs
+        )
+    )
     return 0
 
 
