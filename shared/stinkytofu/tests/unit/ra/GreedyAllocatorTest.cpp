@@ -22,9 +22,11 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1137,4 +1139,32 @@ TEST_F(GreedyAllocatorTest, ThePlacementTableHasARowPerBlockAndMarksTheRefusal) 
         if (lines[i].ends_with("\t1")) ++refused;
     }
     EXPECT_EQ(refused, 1u);
+}
+
+TEST_F(GreedyAllocatorTest, ThePlacementTableShowsThePlannedBank) {
+    // Under quadrant=prefer the planned bank is the hint's, and v300 is in bank 1.
+    BasicBlock* entry = block("entry");
+    vMovZero(entry, 300);
+    dsStoreB32(entry, 300, 300);
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+
+    const std::string path = ::testing::TempDir() + "greedy_planned_bank.tsv";
+    AllocationContext preferring = setup.context();
+    preferring.preferProducerQuadrant = true;
+    preferring.blockDumpPath = path;
+    CompactingGreedyAllocator allocator;
+    ASSERT_TRUE(allocator.allocate(preferring).hasValue());
+
+    std::ifstream in(path);
+    std::vector<std::vector<std::string>> rows;
+    for (std::string line; std::getline(in, line);) {
+        std::vector<std::string>& row = rows.emplace_back();
+        std::istringstream fields(line);
+        for (std::string field; std::getline(fields, field, '\t');) row.push_back(field);
+    }
+    ASSERT_EQ(rows.size(), 2u) << "a header and the one block";
+    const auto column = std::find(rows[0].begin(), rows[0].end(), "plannedBank");
+    ASSERT_NE(column, rows[0].end());
+    EXPECT_EQ(rows[1][static_cast<size_t>(column - rows[0].begin())], "1");
 }

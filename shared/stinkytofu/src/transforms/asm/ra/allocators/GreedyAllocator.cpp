@@ -645,6 +645,9 @@ class Greedy {
             block.span = last > first ? last - first : 0;
             block.hintBase = hintBaseOf(block);
             block.pinReason = pinReasonOf(block);
+            if (context_.preferProducerQuadrant && block.regClass == RegType::V &&
+                block.hintBase.has_value())
+                block.plannedBank = *block.hintBase / kVgprBankSize;
         }
         indexPreferences();
     }
@@ -1042,12 +1045,11 @@ class Greedy {
     template <typename Acceptable>
     std::optional<uint32_t> pickBase(const Block& block, Acceptable acceptable) const {
         const uint32_t indexes = context_.target.indexCount(block.regClass);
-        // The producer's bank first, lowest base first, and the whole file only
+        // The planned bank first, lowest base first, and the whole file only
         // when it has no room. Staying in that bank outranks any pairing, so
         // nothing is scored inside it.
-        if (context_.preferProducerQuadrant && block.regClass == RegType::V &&
-            block.hintBase.has_value()) {
-            const uint32_t bankStart = *block.hintBase / kVgprBankSize * kVgprBankSize;
+        if (block.plannedBank.has_value()) {
+            const uint32_t bankStart = *block.plannedBank * kVgprBankSize;
             const uint32_t bankEnd = std::min(indexes, bankStart + kVgprBankSize);
             for (uint32_t base = bankStart; base + block.width <= bankEnd; ++base) {
                 if (acceptable(base)) return base;
@@ -1101,7 +1103,7 @@ class Greedy {
         std::ofstream out(context_.blockDumpPath);
         if (!out) return;
         out << "class\tleader\twidth\tmembers\tstart\tspan\tweight\tfreedom\tcapped\tpinned\thint"
-               "\tplaced\tbase\tevictions\trank\trefused\n";
+               "\tplannedBank\tplaced\tbase\tevictions\trank\trefused\n";
         for (const Block& block : blocks_) {
             out << regTypeToString(block.regClass) << '\t' << block.leader << '\t' << block.width
                 << '\t' << block.members.size() << '\t' << block.start << '\t' << block.span << '\t'
@@ -1109,8 +1111,9 @@ class Greedy {
                 << (block.maxIndex.has_value() ? 1 : 0) << '\t'
                 << (block.pinReason != nullptr ? 1 : 0) << '\t'
                 << (block.hintBase.has_value() ? static_cast<int64_t>(*block.hintBase) : -1) << '\t'
-                << (block.placed ? 1 : 0) << '\t' << block.base << '\t' << block.evictions << '\t'
-                << block.rank << '\t' << (&block == refused_ ? 1 : 0) << '\n';
+                << (block.plannedBank.has_value() ? static_cast<int64_t>(*block.plannedBank) : -1)
+                << '\t' << (block.placed ? 1 : 0) << '\t' << block.base << '\t' << block.evictions
+                << '\t' << block.rank << '\t' << (&block == refused_ ? 1 : 0) << '\n';
         }
     }
 
