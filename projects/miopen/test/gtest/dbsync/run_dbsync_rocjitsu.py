@@ -57,8 +57,9 @@ ROCJITSU_REF = "b2099a6b8703c089134ad526253752d26bbbf43a"  # 2026-09-10
 # "retarget": the upstream rocjitsu configs dir has no KMD config for gfx1102 or gfx1200, so we
 # derive one from the same-generation sibling that does exist (gfx1100_w7900.json for RDNA3,
 # gfx1201_r9700.json for RDNA4) by rewriting gfx_target_version. Both pairs share family_id, wave
-# size and LDS size, and HIP only needs the target version to pick the right code object -- which
-# is the thing that must match, or the run aborts with "invalid device function".
+# size and LDS size, and HIP only needs the target version to pick the right code object. Without
+# the rewrite the device reports the sibling arch and every param skips, which
+# check_one_param_ran turns into a failure.
 FAMILY_MAP = {
     "gfx94X-dcgpu": [
         {"arch": "gfx942", "rj_config": "gfx942_cdna3_kmd.json", "cus": [304, 228]},
