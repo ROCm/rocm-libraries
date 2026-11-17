@@ -177,7 +177,8 @@ Restack only.
   - If no SHA is found, CMake records none and warns at configure time: "no source
     revision found; client pairing disabled. Build from a git checkout or pass
     `-DTENSILELITE_SOURCE_REVISION=<sha>`." The client prints `none` for
-    `--source-revision` and never pairs (decision 3).
+    `--source-revision`; client use warns and allows when either revision is
+    unavailable (decision 3).
   - The `tensilelite-metadata` build prerequisite refreshes `metadata.json` and
     `TensileLiteClientVersion.hpp`. Unchanged contents preserve timestamps, so an
     unchanged identity does not recompile the client. Dirty edits, reverts, and
@@ -205,7 +206,7 @@ Restack only.
     `.info/version`, without the auxiliary full manifest. This precision cannot
     distinguish two nightlies with the same base release; it is retained.
 
-### #11019 `runtime-client-binding-foundation` (introduces `validate_client`, `_rocm.py`)
+### #11019 `runtime-client-binding-foundation` (introduces saved client bindings and `validate_client`)
 
 - Own `client_executable_name()` and `built_client_path()` in the top-level binding
   module. Invoke's build/binding tasks use the same filename and CMake layout.
@@ -216,9 +217,22 @@ Restack only.
   - **installed package:** read the SHA from `_build_info.py`, then require an exact
     match, including any dirty suffix;
   - **editable install:** there is no `_build_info.py`. Compute the SHA from git at
-    the first client request, from the package's own location, and cache it. Compare
-    commits only: a commit mismatch fails, uncommitted changes on either side warn;
-  - **no SHA available:** never pairs; the error says why.
+    the first client request, from the editable source root recorded by owning installation metadata, and cache
+    it on that installation object. Compare commits only: a commit mismatch fails;
+    differing full source states at the same commit warn. Equal clean or dirty
+    source states remain quiet;
+  - **a source revision is unavailable:** warn that source compatibility could not
+    be verified and allow pairing, for editable and regular installs alike. A
+    known revision is still checked without Git; malformed revisions and raised
+    resolver/stamp errors remain errors.
+- Identify ownership before source resolution. Support default and strict editable
+  layouts by checking source-file identity for symlinks and hardlinks; retain the
+  imported package directory as the binding key and the actual source root for
+  revision lookup. Reject unrelated or ambiguous metadata. Version lookup and
+  binding/reset operations perform no Git or stamp reads.
+- Translate expected revision/stamp/module failures to `ClientBindingError` with
+  path context and exception cause, so the configure CLI emits a nonzero ordinary
+  error diagnostic without traceback.
 - Never use `importlib.metadata.version()` for pairing; it is fixed at install time.
 - The diagnostics name both values and how to rebuild and bind a client from this
   checkout.
@@ -366,8 +380,12 @@ the docs branch #11254. Not gated; it lands with the lower stack.
   TheRock builds that expected value is the passed identity (decision 7).
 - Drop this branch's CMake changes to the compatibility wheel (decision 13).
 
-### #11023 `lazy-rocm-installation-model` (introduces the runtime adapters and `devrocm`)
+### #11023 `lazy-rocm-installation-model` (introduces `_rocm.py`, `_runtime.py`, runtime adapters and `devrocm`)
 
+- Introduce the fuller runtime modules and their tests here. The earlier eager,
+  required-client groundwork is removed from #11019. `ClientIdentity` is returned
+  even when source matching warns and allows use, so build-ROCm comparison remains
+  active. #11024 consumes selection and #11025 activates package initialization.
 - `TheRockCIRocm` is selected only by `TENSILELITE_ROCM_ADAPTER=therock-ci`. Any
   other value is an error. `THEROCK_PACKAGE_VERSION` being set no longer selects
   anything; it supplies the identity when present.
@@ -978,9 +996,11 @@ Supersedes D3's "package builds fail when no ROCm version can be determined", th
 
 ## Decision 2 — Pair `tensilelite` with `tensilelite-client` by the whole rocm-libraries SHA (Decided)
 
-The Python package and the client each carry the full `git rev-parse HEAD` of
-rocm-libraries. At first client use they must match exactly. Editable installs
-compare the commit only and warn about uncommitted changes (decision 3).
+When available, the Python package and client each carry the full `git rev-parse
+HEAD` of rocm-libraries. At first client use, regular installations require exact
+source-state equality. Editable installations require the same commit and warn
+when their recorded full source states differ. Equal clean or dirty states are
+quiet. If either revision is unavailable, warn and allow use (decision 3).
 
 Justification:
 
@@ -1011,10 +1031,13 @@ CMake):
    - then the same command prefix with `rev-parse HEAD`.
 3. **`TENSILELITE_SOURCE_REVISION`:** 40-hex, optionally with a dirty suffix. If git
    also produced a SHA and the base commits differ, fail instead of overriding.
-4. **Nothing found:** no SHA, which never pairs, for pip and CMake alike. CMake warns
-   at configure time, the client prints `none`, and `validate_client()`'s error says
-   to build from a git checkout or pass the commit through
-   `TENSILELITE_SOURCE_REVISION` (`-DTENSILELITE_SOURCE_REVISION` for CMake).
+4. **Nothing found:** no SHA, for pip and CMake alike. CMake warns at configure
+   time and the client prints `none`. At client use, an unavailable revision on
+   either side warns and allows pairing for editable and regular installations.
+   This supports source ZIP installs without Git; an unstamped third-party wheel
+   is indistinguishable and receives the same fallback. Raised resolver failures
+   and malformed stamps or reported revisions remain errors. Executable, query
+   and later ROCm checks still apply. Known stamps still compare without Git.
    No substitute ID is generated: an invented ID records nothing about which source
    was built, can't go through `parse_revision` without leaking into the version
    label, and makes wheels non-reproducible. Every known build path has git or
@@ -1063,9 +1086,12 @@ changes.
 **Comparison** (at the first client request):
 
 - installed package: exact string match;
-- editable install: compute from git lazily; a commit mismatch fails, uncommitted
-  changes on either side warn (option (b) of the review). There is no override
-  variable.
+- editable install: resolve lazily from the owning source root and cache per
+  installation object. Fresh operations get fresh objects. A commit mismatch
+  fails; differing full source states at one commit warn. Equal clean or dirty
+  states are quiet. There is no runtime override variable;
+- either source revision unavailable: warn and allow, in both installation modes.
+  Preserve known comparisons and reject malformed values or raised resolver errors.
 
 Justification. Each point below was verified in scratch experiments by a packaging
 review on 2026-11-10 (pip 26.2.1, setuptools 82, tox 4.56.1, git 2.43):
