@@ -47,13 +47,13 @@ namespace {
 // agree with the rank:
 //
 //   numDims 3 -> (N,H,W)         layout NCHW   -- no channel axis
-//   numDims 4 -> (N,C,H,W)       layout NCHW   -- planar, C must be 1 or 3
-//              (N,H,W,C)       layout NHWC   -- packed, C = 3
-//   numDims 5 -> (N,C,D,H,W)     layout NCDHW  -- planar, C must be 1 or 3
-//              (N,D,H,W,C)     layout NDHWC  -- packed, C = 3
+//   numDims 4 -> (N,C,H,W)       layout NCHW   -- planar
+//              (N,H,W,C)       layout NHWC   -- packed
+//   numDims 5 -> (N,C,D,H,W)     layout NCDHW  -- planar
+//              (N,D,H,W,C)     layout NDHWC  -- packed
 //
-// C must be 1 or 3 (get_layout_params only handles those). The kernels apply the anchor to the
-// spatial axes only, contrary to the API doc, so the channel axis is passed through whole.
+// HOST planar takes C = 1 or 3 (get_layout_params only handles those) and HIP packed C = 3. The
+// kernels apply the anchor to the spatial axes only, so the channel axis is passed through whole.
 enum class SliceLayout { Planar, Packed };
 
 // Inside: the slice lies within the ROI (no padding). Padded: the slice runs off the trailing end
