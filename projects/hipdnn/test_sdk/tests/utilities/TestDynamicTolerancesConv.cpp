@@ -2073,6 +2073,9 @@ using ConvBackwardLowPrecisionCases = ::testing::Types<OutputCase<ConvDirection:
                                                        OutputCase<ConvDirection::WRW, bfloat16>>;
 TYPED_TEST_SUITE(ConvBackwardLowPrecisionToleranceFixture, ConvBackwardLowPrecisionCases, );
 
+namespace
+{
+
 // The largest lambda each 16-bit backward case was measured to need near zero, in eps * sigma
 // (tolerances.md, "Which backward solvers need lambda"), with the solvers that set it: Winograd
 // for backward data half, CK grouped backward data with split-K for bfloat16, and the split-K
@@ -2090,6 +2093,8 @@ constexpr double measuredLambda()
         return std::is_same_v<T, half> ? 21.62 : 11.53;
     }
 }
+
+} // namespace
 
 // lambda is the allowance for intermediates kept in the output type. Near zero the band is that
 // allowance: the largest measured error passes, an error just below lambda * eps * sigma passes,
