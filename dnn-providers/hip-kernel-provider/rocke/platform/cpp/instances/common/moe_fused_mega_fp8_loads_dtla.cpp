@@ -6,7 +6,7 @@
  * (rocke/instances/common/moe_fused_mega_fp8.py).
  *
  * SCOPE (this TU only): FP8 OPERAND LOADS + DIRECT-TO-LDS STAGING.
- *   Python lines 983-1216:
+ *   Python functions:
  *     _global_load_fp8_vec   -> rocke_moe_fp8_global_load_fp8_vec
  *     _load_a_fp8            -> rocke_moe_fp8_load_a_fp8
  *     _load_b_fp8            -> rocke_moe_fp8_load_b_fp8
@@ -27,8 +27,8 @@
  * locals (the resolved atom, the lane decode) they are read from ctx.
  *
  * NOTE on _load_a_fp8_lds: the internal-header prototype declares it in this
- * bucket's surface, but its Python body lives in the STAGE-2 down-GEMM span
- * (lines 1224-1255), outside the 983-1216 scope assigned here. It is stubbed
+ * bucket's surface, but its Python body lives in the STAGE-2 down-GEMM span,
+ * outside the scope assigned here. It is stubbed
  * to-link below so the gate/up + down peers can bind; the down-GEMM part-file
  * owns its faithful body.
  */
@@ -45,7 +45,7 @@
 #include "rocke/ir.h"
 
 /* ===================================================================== *
- * _global_load_fp8_vec (Python lines 983-1002)
+ * _global_load_fp8_vec
  *
  *   if n <= 16:
  *       return b.global_load_vN(ptr, addr, FP8E4M3, n)
@@ -84,7 +84,7 @@ rocke_value_t* rocke_moe_fp8_global_load_fp8_vec(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- * _load_a_fp8 (Python lines 1005-1017)
+ * _load_a_fp8
  *
  *   m_row = b.add(m_tile_base, lane_decode.m_in_atom)
  *   k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.a_per_lane))
@@ -111,7 +111,7 @@ rocke_value_t* rocke_moe_fp8_load_a_fp8(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- * _load_b_fp8 (Python lines 1020-1039)
+ * _load_b_fp8
  *
  *   n_col = b.add(n_tile_base, lane_decode.n_in_atom)
  *   k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
@@ -140,7 +140,7 @@ rocke_value_t* rocke_moe_fp8_load_b_fp8(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- * _load_a_fp8_lds  (Python lines 1224-1255 -- STAGE-2 down-GEMM span)
+ * _load_a_fp8_lds  (STAGE-2 down-GEMM span)
  *
  *   m_row = b.add(m_tile_base, lane_decode.m_in_atom)
  *   k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.a_per_lane))
@@ -197,7 +197,7 @@ rocke_value_t* rocke_moe_fp8_load_a_fp8_lds(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- * _dtla_stage_b_fp8 (Python lines 1072-1114)
+ * _dtla_stage_b_fp8
  *
  *   n_col = b.add(n_tile_base, lane_decode.n_in_atom)
  *   k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
@@ -261,7 +261,7 @@ void rocke_moe_fp8_dtla_stage_b_fp8(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- * _dtla_read_b_fp8 (Python lines 1117-1145)
+ * _dtla_read_b_fp8
  *
  *   frag = atom.b_per_lane
  *   chunks = (frag + DTLA_CHUNK - 1) // DTLA_CHUNK
@@ -304,7 +304,7 @@ rocke_value_t* rocke_moe_fp8_dtla_read_b_fp8(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- * _xdtla_stage_a_fp8 (Python lines 1159-1191; _USE_X_DTLA path)
+ * _xdtla_stage_a_fp8 (_USE_X_DTLA path)
  *
  *   m_row = b.add(m_tile_base, lane_decode.m_in_atom)
  *   k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.a_per_lane))
@@ -365,7 +365,7 @@ void rocke_moe_fp8_xdtla_stage_a_fp8(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- * _xdtla_read_a_fp8 (Python lines 1194-1216; _USE_X_DTLA path)
+ * _xdtla_read_a_fp8 (_USE_X_DTLA path)
  *
  *   frag = atom.a_per_lane
  *   chunks = (frag + DTLA_CHUNK - 1) // DTLA_CHUNK

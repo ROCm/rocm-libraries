@@ -7,15 +7,13 @@
  * rocke/instances/common/moe_fused_mega_fp8.py.
  *
  * Implements (Python -> C99 phase function):
- *   _emit_fp8_gateup_group_gemm  (lines 504-630)
- *       -> rocke_moe_fp8_emit_fp8_gateup_group_gemm
- *   _emit_fp8_gateup_fused_kloop (lines 633-980; legacy / DTLA / cluster paths)
+ *   _emit_fp8_gateup_fused_kloop (legacy / DTLA / cluster paths)
  *       -> rocke_moe_fp8_emit_fp8_gateup_fused_kloop
- *   _silu_mul_f32                (lines 1481-1492)
+ *   _silu_mul_f32
  *       -> rocke_moe_fp8_silu_mul_f32
- *   _store_hidden_f32_pass       (lines 1495-1537)
+ *   _store_hidden_f32_pass
  *       -> rocke_moe_fp8_store_hidden_f32_pass
- *   f32_view_store / f32_view_load (lines 1540-1546)
+ *   f32_view_store / f32_view_load
  *       -> rocke_moe_fp8_f32_view_store / rocke_moe_fp8_f32_view_load
  *
  * Binds only to the shared ctx + peer prototypes in
@@ -48,7 +46,7 @@ static rocke_value_t* moe_fp8_atom_zero_acc(rocke_ir_builder_t* b, const rocke_m
 }
 
 /* ===================================================================== *
- * STAGE 1b: SiLU*up + dyn-quant helpers (Python lines 1481-1546)
+ * STAGE 1b: SiLU*up + dyn-quant helpers
  * ===================================================================== */
 
 /* f32_view_store: b.smem_store_vN(view.base, [row, col], val, 1). */
@@ -145,171 +143,7 @@ rocke_value_t* rocke_moe_fp8_store_hidden_f32_pass(rocke_moe_fp8_build_ctx_t* ct
 }
 
 /* ===================================================================== *
- * STAGE 1a: legacy per-(mi,ni) gate+up group GEMM (Python lines 504-630)
- * ===================================================================== */
-
-void rocke_moe_fp8_emit_fp8_gateup_group_gemm(rocke_moe_fp8_build_ctx_t* ctx,
-                                              rocke_value_t* A,
-                                              rocke_value_t* WGate,
-                                              rocke_value_t* WUp,
-                                              rocke_value_t* AScale,
-                                              rocke_value_t* WGateScale,
-                                              rocke_value_t* WUpScale,
-                                              rocke_value_t* m_tile_base,
-                                              rocke_value_t* n_tile_base,
-                                              rocke_value_t* K,
-                                              rocke_value_t* stride_a_scale,
-                                              rocke_value_t* stride_gate_scale,
-                                              rocke_value_t* stride_up_scale,
-                                              const char* tag,
-                                              rocke_value_t** out_gate,
-                                              rocke_value_t** out_up)
-{
-    rocke_ir_builder_t* b = ctx->b;
-    const rocke_mfma_atom_t* atom = ctx->atom;
-    const rocke_lane_decode_t* lane_decode = &ctx->lane_decode;
-
-    rocke_value_t* c_group_k = rocke_b_const_i32(b, ROCKE_MOE_FP8_GROUP_K);
-    rocke_value_t* c_atom_k = rocke_b_const_i32(b, atom->k);
-    int atoms_per_group = ROCKE_MOE_FP8_GROUP_K / atom->k; /* 4 */
-
-    rocke_value_t* m_row = rocke_b_add(b, m_tile_base, lane_decode->m_in_atom);
-    rocke_value_t* n_col = rocke_b_add(b, n_tile_base, lane_decode->n_in_atom);
-
-    rocke_value_t* a_row_scale_base = rocke_b_mul(b, m_row, stride_a_scale);
-    rocke_value_t* n_blk = rocke_b_div(b, n_col, c_group_k);
-
-    rocke_value_t* zero = moe_fp8_atom_zero_acc(b, atom);
-    rocke_value_t* gate_zero = moe_fp8_atom_zero_acc(b, atom);
-    rocke_value_t* up_zero = moe_fp8_atom_zero_acc(b, atom);
-
-    rocke_value_t* num_groups = rocke_b_div(b, K, c_group_k);
-
-    char nm_gate[64];
-    char nm_up[64];
-    char nm_kg[64];
-    rocke_iter_arg_t outer_args[2];
-    rocke_for_t outer;
-
-    /* iter_arg names: "gate_outer_{tag}", "up_outer_{tag}"; iv "kg_{tag}". */
-    snprintf(nm_gate, sizeof(nm_gate), "gate_outer_%s", tag ? tag : "");
-    snprintf(nm_up, sizeof(nm_up), "up_outer_%s", tag ? tag : "");
-    snprintf(nm_kg, sizeof(nm_kg), "kg_%s", tag ? tag : "");
-    outer_args[0].name = nm_gate;
-    outer_args[0].init = gate_zero;
-    outer_args[1].name = nm_up;
-    outer_args[1].init = up_zero;
-
-    {
-        rocke_value_t* lo_kg = rocke_b_const_i32(b, 0);
-        rocke_value_t* st_kg = rocke_b_const_i32(b, 1);
-        outer = rocke_b_scf_for_iter(b,
-                                     lo_kg,
-                                     num_groups,
-                                     st_kg,
-                                     outer_args,
-                                     2,
-                                     nm_kg,
-                                     /*unroll=*/false,
-                                     /*elide_trailing_barrier=*/true);
-    }
-
-    rocke_b_region_enter(b, outer.body);
-    {
-        rocke_value_t* kg = outer.iv;
-        rocke_value_t* gate_outer = outer.iter_vars[0];
-        rocke_value_t* up_outer = outer.iter_vars[1];
-
-        rocke_value_t* a_scale_off = rocke_b_add(b, a_row_scale_base, kg);
-        rocke_value_t* a_scale_v = rocke_b_global_load_f32(b, AScale, a_scale_off, 0);
-        rocke_value_t* gate_scale_off
-            = rocke_b_add(b, rocke_b_mul(b, kg, stride_gate_scale), n_blk);
-        rocke_value_t* up_scale_off = rocke_b_add(b, rocke_b_mul(b, kg, stride_up_scale), n_blk);
-        rocke_value_t* gate_scale_v = rocke_b_global_load_f32(b, WGateScale, gate_scale_off, 0);
-        rocke_value_t* up_scale_v = rocke_b_global_load_f32(b, WUpScale, up_scale_off, 0);
-        rocke_value_t* gate_ab = rocke_b_fmul(b, a_scale_v, gate_scale_v);
-        rocke_value_t* up_ab = rocke_b_fmul(b, a_scale_v, up_scale_v);
-
-        rocke_value_t* k_group_base = rocke_b_mul(b, kg, c_group_k);
-
-        char nm_g[64];
-        char nm_u[64];
-        char nm_kk[64];
-        rocke_iter_arg_t inner_args[2];
-        rocke_for_t ginner;
-
-        snprintf(nm_g, sizeof(nm_g), "g_acc_%s", tag ? tag : "");
-        snprintf(nm_u, sizeof(nm_u), "u_acc_%s", tag ? tag : "");
-        snprintf(nm_kk, sizeof(nm_kk), "kk_%s", tag ? tag : "");
-        inner_args[0].name = nm_g;
-        inner_args[0].init = zero;
-        inner_args[1].name = nm_u;
-        inner_args[1].init = zero;
-
-        {
-            rocke_value_t* lo_kk = rocke_b_const_i32(b, 0);
-            rocke_value_t* hi_kk = rocke_b_const_i32(b, atoms_per_group);
-            rocke_value_t* st_kk = rocke_b_const_i32(b, 1);
-            ginner = rocke_b_scf_for_iter(b,
-                                          lo_kk,
-                                          hi_kk,
-                                          st_kk,
-                                          inner_args,
-                                          2,
-                                          nm_kk,
-                                          /*unroll=*/false,
-                                          /*elide_trailing_barrier=*/true);
-        }
-
-        rocke_b_region_enter(b, ginner.body);
-        {
-            rocke_value_t* kk = ginner.iv;
-            rocke_value_t* g_acc = ginner.iter_vars[0];
-            rocke_value_t* u_acc = ginner.iter_vars[1];
-
-            rocke_value_t* k_tile_base = rocke_b_add(b, k_group_base, rocke_b_mul(b, kk, c_atom_k));
-            rocke_value_t* a_frag = rocke_moe_fp8_load_a_fp8(ctx, A, m_tile_base, k_tile_base, K);
-            rocke_value_t* gb_frag
-                = rocke_moe_fp8_load_b_fp8(ctx, WGate, n_tile_base, k_tile_base, K);
-            rocke_value_t* ub_frag
-                = rocke_moe_fp8_load_b_fp8(ctx, WUp, n_tile_base, k_tile_base, K);
-            rocke_value_t* g_new = rocke_moe_fp8_emit_mfma(ctx, a_frag, gb_frag, g_acc);
-            rocke_value_t* u_new = rocke_moe_fp8_emit_mfma(ctx, a_frag, ub_frag, u_acc);
-            rocke_value_t* yld[2];
-            yld[0] = g_new;
-            yld[1] = u_new;
-            rocke_b_scf_yield(b, yld, 2);
-        }
-        rocke_b_region_leave(b);
-
-        {
-            rocke_value_t* group_gate = (ginner.op != NULL) ? ginner.op->results[0] : NULL;
-            rocke_value_t* group_up = (ginner.op != NULL) ? ginner.op->results[1] : NULL;
-            rocke_value_t* gate_scale_vec = rocke_b_vector_splat(b, gate_ab, atom->c_per_lane);
-            rocke_value_t* up_scale_vec = rocke_b_vector_splat(b, up_ab, atom->c_per_lane);
-            rocke_value_t* gate_outer_new
-                = rocke_b_vector_fma(b, group_gate, gate_scale_vec, gate_outer);
-            rocke_value_t* up_outer_new = rocke_b_vector_fma(b, group_up, up_scale_vec, up_outer);
-            rocke_value_t* yld[2];
-            yld[0] = gate_outer_new;
-            yld[1] = up_outer_new;
-            rocke_b_scf_yield(b, yld, 2);
-        }
-    }
-    rocke_b_region_leave(b);
-
-    if(out_gate != NULL)
-    {
-        *out_gate = (outer.op != NULL) ? outer.op->results[0] : NULL;
-    }
-    if(out_up != NULL)
-    {
-        *out_up = (outer.op != NULL) ? outer.op->results[1] : NULL;
-    }
-}
-
-/* ===================================================================== *
- * STAGE 1a: gate+up fp8 GEMM fused across ALL ni (Python lines 633-980)
+ * STAGE 1a: gate+up fp8 GEMM fused across ALL ni
  * ===================================================================== */
 
 /* _a_at(kk): _load_a_fp8 at k_group_base + kk*atom.k. */
