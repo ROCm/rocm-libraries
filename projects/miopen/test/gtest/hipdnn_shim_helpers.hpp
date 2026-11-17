@@ -561,11 +561,9 @@ inline void ExpectForwardedDecline(const CallResult& result, const char* reason 
 }
 
 // A decline on the forwarded path, with its status and its logged reason.
-inline void ExpectDeclinedBecause(const CallResult& result,
-                                  const char* reason,
-                                  miopenStatus_t expected = miopenStatusUnsupportedOp)
+inline void ExpectDeclinedBecause(const CallResult& result, const char* reason)
 {
-    EXPECT_EQ(result.status, expected) << reason;
+    EXPECT_EQ(result.status, miopenStatusUnsupportedOp) << reason;
     ExpectForwardedDecline(result, reason);
 }
 
