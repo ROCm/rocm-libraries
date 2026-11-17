@@ -1019,6 +1019,13 @@ The kernel name records only the mode: no tag for mode 0, so a kernel that does 
 
 `auto` tries `allocate` and, when that colouring is refused, `hold`. With no such operand in the kernel it is a single attempt. Constraints and live ranges are built once, only the scope differs between attempts, and only the colouring that succeeds is applied. The report names the treatment that won and, after a fallback, quotes the refusal; when both refuse, the missed remark gives each reason. `tests/filecheck/allocation_unbankable_bank0_conflict_test.stir` is the conflict in miniature. In an allocator chain, each allocator makes its own attempts before the next one is tried.
 
+**Matrix operands without the pin.** `ProducerPinMatrix` ships `Active`. Two `Off` rules (section 14.5) hand the matrix operands back to the allocator instead, chosen per kernel through `rules=` and `noRule=`:
+
+- `noRule=ProducerPinMatrix,rules=ProducerShapeMatrix` keeps each accumulator chain and each A or B tile on one register tuple, and lets all of them move.
+- `noRule=ProducerPinMatrix,rules=ProducerPinAccumulator+ProducerShapeMatrix` keeps the accumulators where the producer put them, and moves A and B.
+
+Neither falls back to the pin when it refuses, so a kernel neither can colour is dropped, as it would be with the pin simply removed. As the paragraph on kernel names says, a configuration does not rename the kernel, so comparing these needs one Tensile run per configuration.
+
 **Dumps.** `StinkyTofuRegisterAllocationDump` (`ModuleOptions::RegisterAllocationDump`) writes the files listed in section 3.3. It is a global switch rather than part of the configuration, so turning it on renames no kernel.
 
 ## 13. Vocabulary, for a reader arriving from LLVM
@@ -1278,6 +1285,20 @@ The family is `isMatrixInstruction`: dest and every VGPR source, including slotl
 It ships `Active`. A hard rule the input already violates would turn those kernels silently uncoloured; the producer's own colouring is tautological for a pin, because that colouring *is* the producer registers. `tests/filecheck/allocation_rule_producer_pin_matrix_test.stir` is the end-to-end check.
 
 This is not `AllocationScope::pinRegisters`. HeldRange withholds a physical register for the whole function; this pins a *value* to its hint, and the register is free again when the value dies.
+
+#### `ProducerShapeMatrix` — offset, `Off`
+
+Matrix operand values the producer put on one register tuple share one tuple, wherever it goes. After lifting, every WMMA destination and every load is a value of its own, so an accumulator chain and a rotating A or B tile arrive as runs of unrelated blocks. In a kernel that fills the register file, those fall apart into hundreds of short blocks that no placement order fits back together: without `ProducerPinMatrix`, every compacting order refuses the MXF8 TN MAF loop-model kernel. The pin avoids that by fixing each block at its producer register. This rule keeps the grouping and gives up only the position, so compaction, or a placement that chooses banks, can move a whole chain or tile.
+
+**Why `addRelations`.** A group spans instructions — a load and the WMMAs that read it, every link of a chain — and `addPreferences` sees one instruction at a time. `addRelations` sees the function, and appends one `AffinitySet` per unit of each producer tuple, keyed on the tuple's base and width as well as the unit. Keying on the register alone joins two tuple shapes that overlap in the producer's numbering: a tail loop reading B at `v[858:873]` next to a main loop reading it at `v[860:875]` chains every tile the two touch into one block.
+
+The family is `isMatrixInstruction`, dest and every source with an MSB slot; slotless scale fields stay with the `unbankable` policy. The members of a set all sat on one register in the producer's colouring, which is legal, so a set is always satisfiable and the audit is silent by construction. `ProducerPinMatrix` implies the rule, and with the pin in force it adds nothing, so it ships `Off` and is opted into with `rules=ProducerShapeMatrix,noRule=ProducerPinMatrix`. Every in-place accumulator chain becomes one set, so `WmmaAccumulatorReuse` adds nothing on top. `tests/filecheck/allocation_rule_producer_shape_matrix_test.stir` is the end-to-end check.
+
+#### `ProducerPinAccumulator` — pin, `Off`
+
+The accumulator fields of a matrix instruction, dst and src2, keep the registers the producer assigned; A and B do not. The accumulators are most of a GEMM's VGPRs and every register the epilogue reads, so pinning them keeps the epilogue as the producer laid it out while the operands are free to move.
+
+It is meant to run with `ProducerShapeMatrix`, which keeps each A and B tile together as it moves: `rules=ProducerPinAccumulator+ProducerShapeMatrix,noRule=ProducerPinMatrix`. On its own it leaves those tiles to fall apart into one block per load, which refuses a crowded kernel just as dropping the pin does. It ships `Off` for the same reason as `ProducerShapeMatrix`. `tests/filecheck/allocation_rule_producer_pin_accumulator_test.stir` is the end-to-end check.
 
 ### 14.6. Diagnostics
 
