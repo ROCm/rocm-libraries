@@ -39,6 +39,7 @@
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
+#include "plancache_autotune.hpp"
 #include "util.hpp"
 
 // The elementwise kernels walk a single index space defined by the output, so an input may only
@@ -264,6 +265,10 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorDestroy", msg);
 
+    if(handle != nullptr)
+    {
+        hiptensor::PlancacheAutotuneMgr::instance()->releasePlanCache(handle->getPlanCache());
+    }
     delete handle;
 
     return HIPTENSOR_STATUS_SUCCESS;

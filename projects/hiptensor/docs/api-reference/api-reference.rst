@@ -143,8 +143,10 @@ hipTensor API functions can be called concurrently from multiple host threads:
 * Each concurrent call must use its own output tensor and workspace. Calls that write
   the same memory, or that share a workspace, race on the GPU.
 * With ``HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL``, threads that execute the same plan
-  interleave the candidate kernels they try. Every candidate solves the problem, but the
-  kernel a given call uses is not deterministic until autotuning completes.
+  interleave the candidate kernels they try, so the kernel a given call uses is not
+  deterministic until autotuning completes. A candidate that cannot run the problem makes
+  that call fail; autotuning then moves on to the next candidate and never caches the
+  failed one.
   Autotuning is tracked separately for each problem and handle, and each timing is
   credited to the kernel that produced it, so concurrent calls on different problems do
   not affect each other's result. Calls from all threads on the same problem count

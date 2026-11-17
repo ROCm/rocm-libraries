@@ -33,6 +33,7 @@
 
 #include "device/hiptensor_device_reduce_multiblock.hpp"
 #include "hiptensor_options.hpp"
+#include "util.hpp"
 #include <hiptensor_element_wise_operation.hpp>
 
 namespace std
@@ -162,14 +163,10 @@ namespace hiptensor
             args.mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
 
             // Fill problem metrics
-            auto product = [](std::vector<std::size_t> const& v) {
-                return std::accumulate(
-                    v.cbegin(), v.cend(), std::size_t{1}, std::multiplies<std::size_t>{});
-            };
-            args.mMetrics.mElements = product(a_lengths);
+            args.mMetrics.mElements = elementsFromLengths(a_lengths);
             args.mMetrics.mBytes
                 = sizeof(typename Traits::TensorInDataType) * args.mMetrics.mElements
-                  + sizeof(typename Traits::TensorOutDataType) * product(c_lengths);
+                  + sizeof(typename Traits::TensorOutDataType) * elementsFromLengths(c_lengths);
 
             // Arg test
             args.mValid = deviceOp->IsSupportedArgument(args.mInvokerArgPtr.get());

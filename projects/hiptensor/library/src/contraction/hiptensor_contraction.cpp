@@ -559,6 +559,12 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
         autotuneMgr->saveAutotune<hiptensor::ContractionSolution>(
             hiptensor::AutotuneOps::Autotune_Contraction, cSolution, time, handle, plan);
     }
+    else
+    {
+        // Move incremental autotuning past this candidate instead of retrying it forever.
+        autotuneMgr->failAutotune<hiptensor::ContractionSolution>(
+            hiptensor::AutotuneOps::Autotune_Contraction, handle, plan);
+    }
 
     return errorCode;
 }
@@ -1649,6 +1655,8 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
                  "Trinary contraction step 1 (T = A*B) failed (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContractTrinary", msg);
+        autotuneMgr->failAutotune<hiptensor::ContractionSolution>(
+            hiptensor::AutotuneOps::Autotune_ContractionTrinary, handle, plan);
         return errorCode;
     }
 
@@ -1688,6 +1696,8 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
                  "Trinary contraction step 2 (E = alpha*T*C + beta*D) failed (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContractTrinary", msg);
+        autotuneMgr->failAutotune<hiptensor::ContractionSolution>(
+            hiptensor::AutotuneOps::Autotune_ContractionTrinary, handle, plan);
         return errorCode;
     }
 
