@@ -40,6 +40,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -1170,6 +1171,73 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     return debugEvalCmp(problem, stream, "prob", problem.beta(), "==", "sol", 0.0);
+                }
+            };
+
+            // Rejects alpha 0. The numeric value is runtimeAlpha, not the Any/One
+            // restriction, which does not distinguish zero from any other value.
+            struct AlphaNotZero : public Predicate_CRTP<AlphaNotZero, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                AlphaNotZero() = default;
+
+                static std::string Type()
+                {
+                    return "AlphaNotZero";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.runtimeAlpha() != 0.0;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.runtimeAlpha(), "!=", "sol", 0.0);
+                }
+            };
+
+            // The custom kernel packs these strides as uint32. A value that does not
+            // fit is truncated, so the published solution must reject it.
+            struct StrideFitsInUint32
+                : public Predicate_CRTP<StrideFitsInUint32, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                StrideFitsInUint32() = default;
+
+                static std::string Type()
+                {
+                    return "StrideFitsInUint32";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    const auto fits = [](TensileLite::TensorDescriptor const& tensor) {
+                        if(tensor.strides().size() < 3)
+                            return true;
+                        constexpr size_t limit = size_t(std::numeric_limits<uint32_t>::max());
+                        return tensor.strides()[1] <= limit && tensor.strides()[2] <= limit;
+                    };
+                    return fits(problem.a()) && fits(problem.b()) && fits(problem.c())
+                           && fits(problem.d());
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    const bool rv = (*this)(problem);
+                    PredicateDebugger::printRow(stream, rv, this->type(), "strides fit in uint32");
+                    return rv;
                 }
             };
 
@@ -2311,6 +2379,46 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.stridedBatched(), "==", "sol", value);
+                }
+            };
+
+            // StridedBatchedEqual reads stridedBatched(), which the public path
+            // sets true for pointer-array batches too. This is the batch mode.
+            struct BatchModeEqual : public Predicate_CRTP<BatchModeEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                BatchModeEqual() = default;
+                explicit BatchModeEqual(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "BatchModeEqual";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return static_cast<int>(problem.batchMode()) == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        static_cast<int>(problem.batchMode()),
+                                        "==",
+                                        "sol",
+                                        value);
                 }
             };
 

@@ -19,6 +19,9 @@ namespace hipblaslt_jit
                                                 hipblasLtMatmulHeuristicResult_t& result,
                                                 Diagnostics&                      diagnostics);
 
+    // Heuristic queries under HIPBLASLT_JIT=1 or 2 ask this backend after ones
+    // registered earlier, and after HipKittens when that backend is built.
+    // The JIT tests register the replay backend.
     HIPBLASLT_EXPORT void addHeuristicBackend(std::shared_ptr<const Jit> jit);
 
     HIPBLASLT_EXPORT hipblasStatus_t makeGemmRequest(hipblasLtHandle_t                   handle,

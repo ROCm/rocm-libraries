@@ -90,6 +90,8 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::AlphaValue>(),
                      Base::template Pair<Predicates::Contraction::BetaValue>(),
                      Base::template Pair<Predicates::Contraction::BetaZero>(),
+                     Base::template Pair<Predicates::Contraction::AlphaNotZero>(),
+                     Base::template Pair<Predicates::Contraction::StrideFitsInUint32>(),
                      Base::template Pair<Predicates::Contraction::BetaOne>(),
                      Base::template Pair<Predicates::Contraction::HighPrecisionAccumulateEqual>(),
                      Base::template Pair<Predicates::Contraction::KernelLanguageCompatible>(),
@@ -152,7 +154,8 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
                      Base::template Pair<Predicates::Contraction::Int4EncodingA>(),
-                     Base::template Pair<Predicates::Contraction::MXScaleFormatEquals>()});
+                     Base::template Pair<Predicates::Contraction::MXScaleFormatEquals>(),
+                     Base::template Pair<Predicates::Contraction::BatchModeEqual>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -347,6 +350,18 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::BetaZero, IO>
             : public AutoMappingTraits<Predicates::Contraction::BetaZero, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::AlphaNotZero, IO>
+            : public AutoMappingTraits<Predicates::Contraction::AlphaNotZero, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::StrideFitsInUint32, IO>
+            : public AutoMappingTraits<Predicates::Contraction::StrideFitsInUint32, IO>
         {
         };
 
@@ -719,6 +734,11 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
             : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::BatchModeEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::BatchModeEqual, IO>
         {
         };
     } // namespace Serialization
