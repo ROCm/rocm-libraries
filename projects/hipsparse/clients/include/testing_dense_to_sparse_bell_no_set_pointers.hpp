@@ -267,9 +267,10 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(
         dcol, hbell_col_ind_cpu.data(), sizeof(I) * bell_col_ind_size, hipMemcpyHostToDevice));
 
-    // Create blocked ELL descriptor with null pointers; ellCols is discovered during analysis.
-    hipsparseLocalBlockedEll matB(
-        mb * blockDim, nb * blockDim, ellBlockSize, ellCols, dcol, dval, typeI, idx_base, typeT);
+    // The descriptor uses the dense dimensions. Rounding rows and columns up
+    // to a multiple of the block size described a larger matrix than the one
+    // being converted. The column-index array stays sized from the block-row count.
+    hipsparseLocalBlockedEll matB(m, n, ellBlockSize, ellCols, dcol, dval, typeI, idx_base, typeT);
 
     // Query DenseToSparse buffer size.
     size_t bufferSize;

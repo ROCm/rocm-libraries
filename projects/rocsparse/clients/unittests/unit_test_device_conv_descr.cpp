@@ -1583,6 +1583,8 @@ namespace
         expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo);
     }
 
+    // dense_to_sparse has no ELL conversion. This still guards the dimension
+    // check, which runs before the not_implemented return.
     TEST_F(ConvDescr, DenseToSparseDimMismatchEll)
     {
         expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell);
