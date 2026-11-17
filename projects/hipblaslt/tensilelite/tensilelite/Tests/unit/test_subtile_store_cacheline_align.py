@@ -23,6 +23,7 @@ from rocisa.instruction import BufferStoreB128, VPermlane16SwapB32
 from tensilelite.Common.GlobalParameters import defaultBenchmarkCommonParameters
 from tensilelite.Common.RequiredParameters import getRequiredParametersMin
 from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components import GlobalWriteBatch as gwb
 from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter, storeCachelineAlignEnabled
 from tensilelite.Components.Subtile.LogicalScheduler import LogicalScheduler
 from tensilelite.SolutionStructs import Naming
@@ -261,6 +262,84 @@ def test_plain_cacheline_align_emits_two_full_line_stores_and_a_two_wait_state_f
     assert _text(stores[1]).split()[1].startswith("v[%d:" % H_EVEN)
     # the next line's first convert overwrites H: gfx940+ needs 2 wait states (s_nop 1)
     assert re.fullmatch(r"s_nop\s+1", _text(insts[-1]))
+
+
+# ---------------------------------------------------------------- per-wave line start
+
+@pytest.mark.parametrize("miwt0, miwg0, selector", [
+    (4, 2, None), (8, 2, None), (12, 2, None), (16, 2, None),   # whole lines: every wave starts one
+    (2, 2, None),                                               # one pair per wave: nothing to align
+    (6, 2, "wave"), (10, 2, "wave"), (6, 4, "wave"), (14, 2, "wave"),
+    (6, 1, "tile"), (10, 1, "tile"), (18, 1, "tile"),
+    (6, 3, None),                                               # not derivable from one bit
+])
+def test_line_start_selector(miwt0, miwg0, selector):
+    w = _writer(fused=False)
+    w.kernel.update(MIWaveTile=[miwt0, 4], MIWaveGroup=[miwg0, 4])
+    assert w._cachelineAlignLineStartSelector() == selector
+
+
+def _interiorWriter(miwt0, miwg0, align=True):
+    w = _writer(fused=False, align=align)
+    w.kernel.update(MIWaveTile=[miwt0, 4], MIWaveGroup=[miwg0, 4], WavefrontSize=64)
+    w.parentWriter.states.subtilePairPackSlot = 5
+    names = iter(range(100))
+    w.parentWriter.labels = SimpleNamespace(getNameInc=lambda n: "%s_%d" % (n, next(names)))
+    w._epilogScratchSgpr = lambda n: 40
+    w._epilogScratchFree = lambda r: None
+    built = []
+
+    def body(forceSlc, cachelineAlignParity):
+        built.append((cachelineAlignParity, w.parentWriter.states.subtilePairPackSlot))
+        w.parentWriter.states.subtilePairPackSlot += 3      # a body advances the ring
+        return Module("body%d" % cachelineAlignParity)
+
+    w._buildSubtileInteriorStoreBody = body
+    return w, built
+
+
+@pytest.mark.parametrize("miwt0, miwg0, test", [
+    (10, 2, r"s_bitcmp1_b32\s+s40,\s*6"),               # wave position in M = Serial bit 6
+    (18, 1, r"s_bitcmp1_b32\s+s\[sgprWorkGroup0\],\s*0"),
+])
+def test_interior_body_is_emitted_per_line_start(miwt0, miwg0, test):
+    w, built = _interiorWriter(miwt0, miwg0)
+    m = w._buildSubtileInteriorStores()
+    # both alignments, each built from the same pack-ring state
+    assert built == [(0, 5), (1, 5)]
+    text = [_text(i) for i in m.flatitems()]
+    assert any(re.fullmatch(test, t) for t in text), text
+    order = [t for t in text if t.startswith(("s_cbranch", "s_branch", "label_"))]
+    assert len(order) == 4
+    assert order[0].startswith("s_cbranch_scc1") and order[0].split()[1] == order[2].rstrip(":")
+    assert order[1].startswith("s_branch") and order[1].split()[1] == order[3].rstrip(":")
+    names = [x.name for x in m.items() if isinstance(x, Module)]
+    assert names == ["body0", "body1"]
+
+
+@pytest.mark.parametrize("miwt0, align", [(8, True), (10, False)])
+def test_interior_body_is_emitted_once_when_every_wave_starts_a_line(miwt0, align):
+    w, built = _interiorWriter(miwt0, 2, align=align)
+    m = w._buildSubtileInteriorStores()
+    assert built == [(0, 5)] and m.name == "body0"
+
+
+# ---------------------------------------------------------------- MT320x256 serial store
+
+def test_cacheline_align_puts_the_mt320x256_serial_store_on_permlane16_with_a_wider_fence(monkeypatch):
+    monkeypatch.setattr(gwb, "isMxf4SubtilePath", lambda kernel: True)
+    k = {"ISA": (9, 5, 0), "MatrixInstM": 16, "MacroTile0": 320, "MacroTile1": 256}
+    on = dict(k, StoreCachelineAlign=True)
+    other = dict(on, MacroTile0=256, MacroTile1=320)
+    # develop: serial store keeps ds_bpermute, woven store uses permlane16, fence is 1
+    assert gwb.plsinStorePermlane16Active(k, None) is False
+    assert gwb.plsinStorePermlane16Active(k, [1]) is True
+    assert gwb.serialStoreFenceWaitStates(k, None) == 1
+    # cacheline align on: serial store too, behind two wait states; the woven store is unchanged
+    assert gwb.plsinStorePermlane16Active(on, None) is True
+    assert gwb.serialStoreFenceWaitStates(on, None) == 2
+    assert gwb.serialStoreFenceWaitStates(on, [1]) == 1
+    assert gwb.serialStoreFenceWaitStates(other, None) == 1
 
 
 # ---------------------------------------------------------------- scheduler units

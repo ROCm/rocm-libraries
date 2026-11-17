@@ -30,7 +30,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
   DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAddU64, SAndB32, \
-  SAndB64, SAtomicDec, SAtomicInc, SBarrier, SBfmB32, SBfmB64, SBranch, SCBranchExecNZ, SCBranchExecZ, \
+  SAndB64, SAtomicDec, SAtomicInc, SBarrier, SBitcmp1B32, SBfmB32, SBfmB64, SBranch, SCBranchExecNZ, SCBranchExecZ, \
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SCmpLeU32, SMinU32, SEndpgm, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulHIU32, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
@@ -79,7 +79,10 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     the exception: its serial store (plain NLL / post-loop / Lend fused) has
     only ``s_nop 0`` between ``buffer_store_dwordx4`` (reads ``vPack``) and the
     next pair's ``v_cvt_pk``, which is not a reliable WAR fence. Keep
-    ``ds_bpermute`` + ``s_waitcnt`` on those arms.
+    ``ds_bpermute`` + ``s_waitcnt`` on those arms -- unless the store cacheline align is on:
+    the cacheline align needs the permlane16 layout, so those arms take it too and the fence
+    is widened to the two wait states a dwordx4 store's data registers require
+    (``serialStoreFenceWaitStates``).
 
     Fused PLSIN Weave is eligible: last-K MFMAs sit in the pair gaps, so the
     next convert cannot overwrite ``vPack`` until the store has latched.
@@ -94,9 +97,23 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
         return False
     if kernel.get("MatrixInstM") != 16:
         return False
-    if kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256:
-        return weaveGroups is not None
+    if _isSerialFenceTile(kernel):
+        return weaveGroups is not None or storeCachelineAlignEnabled(kernel)
     return True
+
+
+def _isSerialFenceTile(kernel) -> bool:
+    return kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256
+
+
+def serialStoreFenceWaitStates(kernel, weaveGroups) -> int:
+    """Wait states between a paired ``buffer_store_dwordx4`` and the next pair's
+    convert into the same pack quad. One everywhere develop already uses permlane16;
+    two where only the store cacheline align put the serial store on it (see
+    plsinStorePermlane16Active)."""
+    if _isSerialFenceTile(kernel) and weaveGroups is None and storeCachelineAlignEnabled(kernel):
+        return 2
+    return 1
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
@@ -4130,6 +4147,56 @@ class GlobalWriteBatchWriter:
       self._weaveEmitGroup(module, q)
 
   def _buildSubtileInteriorStores(self, forceSlc: bool = False) -> Module:
+    """The guard-free interior store body, see _buildSubtileInteriorStoreBody.
+
+    The store cacheline align pairs the two halves of the same 128B lines. When a wave is an odd
+    number of half-lines tall (MIWaveTile[0] % 4 == 2), waves alternate between starting
+    on a line and starting mid-line, so one fixed pairing is aligned in every other wave
+    only. Emit the body once per alignment and let each wave pick its own at run time."""
+    sel = self._cachelineAlignLineStartSelector() if self._plainCachelineAlignActive() else None
+    if sel is None:
+      return self._buildSubtileInteriorStoreBody(forceSlc, self._cachelineAlignLineStartParity())
+    slot = self.parentWriter.states.subtilePairPackSlot
+    body0 = self._buildSubtileInteriorStoreBody(forceSlc, 0)
+    self.parentWriter.states.subtilePairPackSlot = slot   # both bodies leave the same state
+    body1 = self._buildSubtileInteriorStoreBody(forceSlc, 1)
+    mod = Module("subtileInteriorStoresPerWave")
+    midLine = Label(self.parentWriter.labels.getNameInc("subtile_cacheline_align_midline"),
+                    "this wave starts mid-line: lines start at odd pairs")
+    done = Label(self.parentWriter.labels.getNameInc("subtile_cacheline_align_done"), "")
+    if sel == "wave":
+      sT = self._epilogScratchSgpr(1)
+      mod.add(VReadfirstlaneB32(dst=sgpr(sT), src=vgpr("Serial"), comment="lane 0 serial of this wave"))
+      mod.add(SBitcmp1B32(src0=sgpr(sT), src1=int(log2(self.kernel["WavefrontSize"])),
+                          comment="SCC = wave position in M, bit 0"))
+      self._epilogScratchFree(sT)
+    else:
+      mod.add(SBitcmp1B32(src0=sgpr("WorkGroup0"), src1=0, comment="SCC = tile position in M, bit 0"))
+    mod.add(SCBranchSCC1(labelName=midLine.getLabelName(), comment="odd -> starts mid-line"))
+    mod.add(body0)
+    mod.add(SBranch(labelName=done.getLabelName(), comment="interior stores done"))
+    mod.add(midLine)
+    mod.add(body1)
+    mod.add(done)
+    return mod
+
+  def _cachelineAlignLineStartSelector(self):
+    """How a wave tells whether its first paired store starts a 128B line, or None when
+    every wave does. A wave is MIWaveTile[0]/2 half-lines tall; if that is odd the wave's
+    first half-line index is (WorkGroup0 * MIWaveGroup[0] + waveId0) mod 2:
+      "wave": MIWaveGroup[0] even -> bit 0 of the wave's position in M (waveId0)
+      "tile": MIWaveGroup[0] == 1 -> bit 0 of WorkGroup0."""
+    miwt0 = self.kernel["MIWaveTile"][0]
+    if miwt0 % 4 != 2 or miwt0 < 6:
+      return None
+    miwg0 = self.kernel["MIWaveGroup"][0]
+    if miwg0 == 1:
+      return "tile"
+    if miwg0 % 2 == 0:
+      return "wave"
+    return None
+
+  def _buildSubtileInteriorStoreBody(self, forceSlc: bool, cachelineAlignParity: int) -> Module:
     """Lever 1 (SubtileBf16EpilogueOpt Stage2) — guard-free/mask-free interior store body.
 
     Re-emits the 16bit subtile stores for the current batch WITHOUT `_emitSubtileOobGuard`
@@ -4236,7 +4303,7 @@ class GlobalWriteBatchWriter:
           # Store cacheline align with the next pair of this N-group when the two are the halves of
           # the same 128B lines (both in this batch, 64B apart).
           b0, b1 = elementIdx + 1, elementIdx + 2
-          if (plainCachelineAlign and ((tt0 - 1) // 2) % 2 == self._cachelineAlignLineStartParity() and b1 < nE
+          if (plainCachelineAlign and ((tt0 - 1) // 2) % 2 == cachelineAlignParity and b1 < nE
               and self.batchElements[b0][0] == blockIdxN and self.batchElements[b0][1] == tt0 + 1
               and self.batchElements[b1][0] == blockIdxN and self.batchElements[b1][1] == tt0 + 2
               and self.ss.elementAddr[b0].addrDVgpr == partnerAddrCalc.addrDVgpr
@@ -4575,7 +4642,8 @@ class GlobalWriteBatchWriter:
     # A rotating ring hands the next store a different quad, so there is nothing
     # left for this wait state to fence.
     if not self._pairPackRotating():
-      module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
+      ws = serialStoreFenceWaitStates(self.kernel, self._weaveMfmaGroups())
+      module.add(SNop(waitState=ws - 1, comment=f"{ws} wait state{'s' if ws > 1 else ''}: WAR hazard between store src and next pack dst"))
 
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
@@ -4702,7 +4770,8 @@ class GlobalWriteBatchWriter:
 
   def _cachelineAlignLineStartParity(self) -> int:
     """Pair-in-column index parity (0/1) of the pair holding the FIRST half of a 128B line.
-    Fixed 0: correct for every wave when MIWaveTile[0] % 4 == 0."""
+    Fixed 0: correct for every wave when MIWaveTile[0] % 4 == 0. The plain interior body
+    selects it per wave instead where that does not hold (_cachelineAlignLineStartSelector)."""
     return 0
 
   def _cachelineAlignStoreNow(self, module, addrCalc, tt0, forceSlc, vPack, vAddr, tag):
