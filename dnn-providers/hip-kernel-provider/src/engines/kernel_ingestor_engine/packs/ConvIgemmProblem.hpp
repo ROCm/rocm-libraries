@@ -190,6 +190,9 @@ bool inputChannelsFirst(const IgemmProblem& problem);
 /// layouts coincide.
 bool outputPackedChannelsFirst(const IgemmProblem& problem);
 
+/// The same for @p problem's gathered input (forward x, backward data dy).
+bool inputPackedChannelsFirst(const IgemmProblem& problem);
+
 /// @p problem without the input staging, for a channels-first-input config: the remaining staged
 /// operands keep their order in the workspace.
 IgemmProblem withoutInputStaging(const IgemmProblem& problem);

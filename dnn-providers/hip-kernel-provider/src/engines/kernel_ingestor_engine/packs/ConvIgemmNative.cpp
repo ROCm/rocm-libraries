@@ -723,21 +723,35 @@ bool inputChannelsFirst(const IgemmProblem& problem)
     return input.needed && input.transpose;
 }
 
+namespace
+{
+
+/// Whether the activation x (@p onX) or y of @p problem is packed channels-first: staged by the
+/// transpose, or not staged (packed channels-last) with every spatial extent 1, where the two
+/// layouts coincide.
+bool packedChannelsFirst(const IgemmProblem& problem, bool onX)
+{
+    const auto& staging = onX ? problem.x : problem.y;
+    if(staging.needed)
+    {
+        return staging.transpose;
+    }
+    const auto& b = problem.base.args;
+    const auto& spatial = onX ? b.inSpatial : b.outSpatial;
+    return channelsFirst(onX ? b.xStrides : b.yStrides,
+                         {b.n, onX ? b.c : b.k, spatial[0], spatial[1], spatial[2]});
+}
+
+} // namespace
+
 bool outputPackedChannelsFirst(const IgemmProblem& problem)
 {
-    if(outputChannelsFirst(problem))
-    {
-        return true;
-    }
-    // Not staged: packed channels-last, which is packed channels-first too when every spatial
-    // extent is 1 (the layouts coincide).
-    const auto& b = problem.base.args;
-    const bool forward = problem.direction == ConvDirection::FORWARD;
-    const auto& output = forward ? problem.y : problem.x;
-    const auto& spatial = forward ? b.outSpatial : b.inSpatial;
-    return !output.needed
-           && channelsFirst(forward ? b.yStrides : b.xStrides,
-                            {b.n, forward ? b.k : b.c, spatial[0], spatial[1], spatial[2]});
+    return packedChannelsFirst(problem, problem.direction != ConvDirection::FORWARD);
+}
+
+bool inputPackedChannelsFirst(const IgemmProblem& problem)
+{
+    return packedChannelsFirst(problem, problem.direction == ConvDirection::FORWARD);
 }
 
 IgemmProblem withoutInputStaging(const IgemmProblem& problem)
@@ -1353,7 +1367,7 @@ bool kernelMatches(const MatchContext& context,
         fit.halo = tile->halo;
         fit.dim = tile->atom.rfind("mfma32", 0) == 0 ? 32 : 16;
         fit.ldsBytes = arch == "gfx950" ? 160 * 1024 : 64 * 1024;
-        if(!conv_igemm::inputChannelsFirst(*problem)
+        if(!conv_igemm::inputPackedChannelsFirst(*problem)
            || !conv_igemm::outputPackedChannelsFirst(*problem)
            || !conv_igemm::cfxFits(*problem, fit) || !bufferLoads(*problem))
         {
