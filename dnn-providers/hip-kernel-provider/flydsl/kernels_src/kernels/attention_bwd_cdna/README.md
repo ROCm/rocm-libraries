@@ -1,6 +1,6 @@
 # attention_bwd_cdna
 
-The gfx950 SDPA backward kernels: prep, dK/dV, dQ, merged, dBias reduce, dSink reduce and tail-zero, in a 16-bit and an fp32 (native f32 MFMA) family, with the modules they share. The files are written for this provider except `fmha_common_gfx1201.py` and `fmha_abi_gfx1201.py`, which are AOTriton's (see *Origin*); each file's header says which. "The sweep" is the AMD-internal FlyDSL backward kernel sweep these sources and pins come from.
+The CDNA SDPA backward kernels (gfx950; the fp32 kernels also build for gfx942 and gfx90a): prep, dK/dV, dQ, merged, dBias reduce, dSink reduce and tail-zero, in a 16-bit and an fp32 (native f32 MFMA) family, with the modules they share. The files are written for this provider except `fmha_common_gfx1201.py` and `fmha_abi_gfx1201.py`, which are AOTriton's (see *Origin*); each file's header says which. "The sweep" is the AMD-internal FlyDSL backward kernel sweep these sources and pins come from.
 
 ## Origin
 
