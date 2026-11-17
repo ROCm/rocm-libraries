@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -91,7 +91,8 @@ const vector<vector<int>> large_opt_range
     = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
 // for weekly_lapack tests (large batch_count)
-const vector<vector<int>> large_batch_size_range = {{7, 7}, {17, 17}};
+// each size_range vector is a {m, n};
+const vector<vector<int>> large_batch_size_range = {{17, 9}, {9, 17}};
 const vector<vector<int>> large_batch_opt_range
     = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
