@@ -475,6 +475,20 @@ namespace
             m_mat = mat;
         }
 
+        // Analysis stage of the current v2 descriptor. preprocess() replaces that
+        // descriptor once it has been analyzed, so this is the same-descriptor path.
+        rocsparse_status analyze_same_descr()
+        {
+            size_t                 bytes = 0;
+            const rocsparse_status sized = v2_buffer_size(rocsparse_v2_spmv_stage_analysis, &bytes);
+            if(sized != rocsparse_status_success)
+            {
+                return sized;
+            }
+            device_vector<char> buffer(std::max<size_t>(bytes, 1));
+            return v2(rocsparse_v2_spmv_stage_analysis, bytes, bytes ? buffer.ptr : nullptr);
+        }
+
         // The v1 preprocess stage alone, with the buffer of the last preprocess().
         rocsparse_status preprocess_stage()
         {
@@ -1312,6 +1326,51 @@ namespace
             c.alg   = fc.second.alg;
             c.trans = fc.second.trans;
             preprocess_during_capture<double>(handle, fc.first, c);
+            if(HasFailure())
+                return;
+        }
+        // Atomic COO analysis synchronizes, so it is refused during capture too.
+        config coo;
+        coo.alg = rocsparse_spmv_alg_coo_atomic;
+        preprocess_during_capture<double>(handle, fmt::coo, coo);
+    }
+
+    // A second analysis on the same v2 descriptor, after set_pointers, must not
+    // adopt the CSR, CSC or BSR info built for the previous arrays.
+    template <typename T>
+    void v2_reanalysis_same_descr(rocsparse_handle handle, fmt f, const config& c)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans);
+
+        const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
+        device_problem<T, int32_t> d1(sc.p1), d2(sc.p2);
+
+        spmat_guard mat;
+        create(mat, sc.p1, d1);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "initial product"));
+
+        ASSERT_EQ(set_pointers(mat, sc.p2, d2), rocsparse_status_success);
+        EXPECT_EQ(s.analyze_same_descr(), rocsparse_status_invalid_value)
+            << "analysis of the same descriptor";
+        EXPECT_EQ(s.compute(), rocsparse_status_invalid_value) << "compute after the refusal";
+        EXPECT_TRUE(expect_near(s.y0(), s.y(), "y after the refused compute"));
+    }
+
+    TEST_F(L2SetPointers, v2_reanalysis_of_the_same_descriptor)
+    {
+        for(const auto& fc : cases_with_analysis())
+        {
+            config c;
+            c.alg   = fc.second.alg;
+            c.trans = fc.second.trans;
+            c.v2    = true;
+            v2_reanalysis_same_descr<double>(handle, fc.first, c);
             if(HasFailure())
                 return;
         }

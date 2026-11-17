@@ -89,14 +89,15 @@ hipsparseStatus_t hipsparseSpMVDescr_st::release_discarded_entries(hipStream_t s
         return HIPSPARSE_STATUS_SUCCESS;
     }
 
-    // Destroying a rocSPARSE SpMV descriptor synchronizes the device, which is
-    // illegal while the stream is being captured. The retired entries are kept
-    // until a call outside the capture releases them.
+    // Destroying a rocSPARSE SpMV descriptor synchronizes the device, and so does
+    // the analysis a fresh entry would run. Both are illegal while the stream is
+    // being captured. The retired entries are kept, and the caller must not build
+    // a new entry, until a call outside the capture releases them.
     hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
     RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
     if(capture_status != hipStreamCaptureStatusNone)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
     for(auto& entry : this->m_retired_entries)

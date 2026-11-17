@@ -67,8 +67,10 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p vecX, \p beta, 
-*          \p vecY, or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
-*          or vector dimensions are incompatible.
+*          \p vecY, or \p pBufferSizeInBytes is nullptr, \p opA is invalid, the matrix 
+*          or vector dimensions are incompatible, or this is the first call after
+*          \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or \ref hipsparseCooSetPointers
+*          while the stream of \p handle is being captured.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
 HIPSPARSE_EXPORT
@@ -134,7 +136,9 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
-*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, or \p alg is incorrect.
+*               \p externalBuffer pointer is invalid, \p opA, \p computeType, or \p alg is incorrect, or this is the
+*               first call after \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or \ref hipsparseCooSetPointers
+*               while the stream of \p handle is being captured.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
@@ -274,15 +278,16 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  routine is blocking with respect to the host.
 *
 *  \note
-*  Only the \ref hipsparseSpMV_bufferSize and the \ref hipsparseSpMV routines support execution in a hipGraph context.
-*  The \ref hipsparseSpMV_preprocess stage does not support hipGraph.
+*  Only the \ref hipsparseSpMV_bufferSize and the \ref hipsparseSpMV routines support execution in a hipGraph context,
+*  except the first such call after \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or
+*  \ref hipsparseCooSetPointers. The \ref hipsparseSpMV_preprocess stage does not support hipGraph.
 *
 *  \note
 *  With the rocSPARSE backend, the first \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or
 *  \p hipsparseSpMV call after \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or
-*  \ref hipsparseCooSetPointers retires the state kept for the previous arrays, which is destroyed by the next call made
-*  outside the capture, because destroying it synchronizes the device. Make that first call outside the capture of the
-*  stream of \p handle: the analysis of the new arrays that it runs is not supported while the stream is being captured.
+*  \ref hipsparseCooSetPointers retires the state kept for the previous arrays. While the stream of \p handle is being
+*  captured, that first call returns \ref HIPSPARSE_STATUS_INVALID_VALUE and leaves the capture valid, because analyzing
+*  the new arrays synchronizes the device. The retired state is destroyed by the next call made outside the capture.
 *
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
@@ -307,7 +312,9 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
-*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
+*               \p externalBuffer pointer is invalid, \p opA, \p computeType, or \p alg is incorrect, or this is the
+*               first call after \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or \ref hipsparseCooSetPointers
+*               while the stream of \p handle is being captured.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */

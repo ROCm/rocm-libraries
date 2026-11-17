@@ -738,9 +738,10 @@ public:
     void discard_entries();
 
     // Destroy the retired entries. The compute buffers are freed on stream;
-    // destroying the rocSPARSE SpMV descriptors synchronizes the device, so the
-    // entries are kept, and success is returned, while the stream is being
-    // captured.
+    // destroying the rocSPARSE SpMV descriptors synchronizes the device, and so
+    // does the analysis a fresh entry would run. Returns
+    // HIPSPARSE_STATUS_INVALID_VALUE, and keeps the entries, while the stream
+    // is being captured.
     hipsparseStatus_t release_discarded_entries(hipStream_t stream);
 
     // Look up an entry matching (operation, alg, scalar_datatype,
