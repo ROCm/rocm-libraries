@@ -242,6 +242,33 @@ def _metadata(spec) -> str:
     )
 
 
+def _arch_facts(args) -> list[tuple[str, int, str]]:
+    """The gfx1250 limits and Python budgets the C++ port restates, as (name, value,
+    source): arch limits from arch_specs.json, kernel budgets from the builder modules.
+    The unit test static_asserts the port's constants against them."""
+    from kernels.common import conv_direct_fwd_gstream_wmma as gstream
+    from kernels.common import conv_direct_fwd_tapouter_wmma as tapouter
+    from kernels.common import conv_direct_fwd_wmma as fwd_wmma
+    from kernels.common import conv_fwd_wmma_gate as gate
+
+    path = args.rocke_root / "platform/python/rocke/core/arch/data/arch_specs.json"
+    arch = json.loads(path.read_text(encoding="utf-8"))["arches"]["gfx1250"]
+    return [
+        ("WAVE_SIZE", arch["wave_size"], "arch_specs.json wave_size"),
+        ("LDS_CAPACITY_BYTES", arch["lds_capacity_bytes"], "arch_specs.json"),
+        (
+            "MAX_THREADS_PER_BLOCK",
+            arch["limits"]["max_threads_per_block"],
+            "arch_specs.json limits",
+        ),
+        ("WMMA_K", gate.WMMA_K, "conv_fwd_wmma_gate.WMMA_K"),
+        ("CH_PAD", gate.CH_PAD, "conv_fwd_wmma_gate.CH_PAD"),
+        ("GSTREAM_VGPR_BUDGET", gstream.GSTREAM_VGPR_BUDGET, "gstream_wmma"),
+        ("TAPOUTER_VGPR_BUDGET", tapouter.TAPOUTER_VGPR_BUDGET, "tapouter_wmma"),
+        ("FWD_WMMA_VGPR_BUDGET", fwd_wmma.FWD_WMMA_VGPR_BUDGET, "direct_fwd_wmma"),
+    ]
+
+
 def _header(args, cf, specs, rng) -> None:
     """The unit test's golden header (see the module docstring)."""
     if args.problems_from_header:
@@ -286,6 +313,13 @@ def _header(args, cf, specs, rng) -> None:
         "{",
         "",
         "// clang-format off",
+        "",
+        "/// gfx1250 limits and kernel budgets the C++ port restates; the unit test",
+        "/// static_asserts the port against them.",
+        *[
+            f"inline constexpr int64_t {name} = {value}; ///< {source}"
+            for name, value, source in _arch_facts(args)
+        ],
         "",
         "/// N, C, K, H, W, Y, X, groups, stride h/w, pad h/w, dilation h/w, bf16.",
         f"inline constexpr std::array<std::array<int32_t, {len(_FIELDS) + 1}>, {len(unique)}> PROBLEMS = {{{{",

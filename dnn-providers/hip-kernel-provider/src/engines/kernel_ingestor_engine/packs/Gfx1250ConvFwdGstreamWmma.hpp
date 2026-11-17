@@ -34,12 +34,15 @@
  * and ceilDiv / alignUp are exact for any sign. A ZeroDivisionError of the spec is a
  * refusal (the dispatcher catches it).
  *
+ * Pinned by static_assert in TestGfx1250ConvFwdAotGeometry against the generated vector
+ * header (arch_specs.json and the builders' budgets): wave size, max_threads_per_block,
+ * lds_capacity_bytes, WMMA_K, CH_PAD and the VGPR budgets.
+ *
  * Unchecked agreements (restated by hand, not derived from the Python):
- * - gfx1250's ArchTarget: wave32, TDM, the 16x16x32 fp16/bf16 WMMA atom,
- *   limits.max_threads_per_block = 1024, lds_capacity_bytes = 327680;
+ * - gfx1250's ArchTarget: TDM and the 16x16x32 fp16/bf16 WMMA atom;
  * - the scheduler strategies of codegen_policy.SchedulerStrategy;
  * - the spec dataclasses' knob defaults (FwdGstreamWmmaSpec here, the others in theirs);
- * - GSTREAM_VGPR_BUDGET = 448, CH_PAD = 8, WMMA_K = 32, the TDM extent cap 0xFFFF;
+ * - the TDM extent cap 0xFFFF;
  * - these families take no wave size from the identity or the target
  *   (direct_spec_takes_target_wave is false for them) and have no wave_size knob: the spec
  *   keeps its default, 32 (WMMA_SPEC_WAVE_SIZE).

@@ -15,6 +15,17 @@ namespace gfx1250_conv_fwd_aot_vectors
 
 // clang-format off
 
+/// gfx1250 limits and kernel budgets the C++ port restates; the unit test
+/// static_asserts the port against them.
+inline constexpr int64_t WAVE_SIZE = 32; ///< arch_specs.json wave_size
+inline constexpr int64_t LDS_CAPACITY_BYTES = 327680; ///< arch_specs.json
+inline constexpr int64_t MAX_THREADS_PER_BLOCK = 1024; ///< arch_specs.json limits
+inline constexpr int64_t WMMA_K = 32; ///< conv_fwd_wmma_gate.WMMA_K
+inline constexpr int64_t CH_PAD = 8; ///< conv_fwd_wmma_gate.CH_PAD
+inline constexpr int64_t GSTREAM_VGPR_BUDGET = 448; ///< gstream_wmma
+inline constexpr int64_t TAPOUTER_VGPR_BUDGET = 512; ///< tapouter_wmma
+inline constexpr int64_t FWD_WMMA_VGPR_BUDGET = 512; ///< direct_fwd_wmma
+
 /// N, C, K, H, W, Y, X, groups, stride h/w, pad h/w, dilation h/w, bf16.
 inline constexpr std::array<std::array<int32_t, 15>, 4082> PROBLEMS = {{
     {1, 1024, 1024, 7, 7, 7, 7, 1024, 1, 1, 3, 3, 1, 1, 1},

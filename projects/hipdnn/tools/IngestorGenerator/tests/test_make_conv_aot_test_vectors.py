@@ -84,6 +84,22 @@ def test_the_golden_header_regenerates_from_the_in_tree_adapter(tmp_path):
     )
 
 
+def test_the_header_pins_the_arch_limits_and_budgets_the_port_restates():
+    """The unit test static_asserts the C++ port against these; they must be rocKE's
+    own values (arch_specs.json, the builders' VGPR budgets), not hand copies."""
+    import argparse
+
+    sys.path[:0] = [
+        str(_ROCKE / "library"),
+        str(_ROCKE / "platform" / "python"),
+    ]
+    facts = vectors._arch_facts(argparse.Namespace(rocke_root=_ROCKE))
+    text = _text(_HEADER)
+    assert facts
+    for name, value, _ in facts:
+        assert f"inline constexpr int64_t {name} = {value};" in text, name
+
+
 def test_problems_from_header_reads_back_the_recorded_set():
     problems = vectors.problems_from_header(_HEADER)
     text = _HEADER.read_text(encoding="utf-8")

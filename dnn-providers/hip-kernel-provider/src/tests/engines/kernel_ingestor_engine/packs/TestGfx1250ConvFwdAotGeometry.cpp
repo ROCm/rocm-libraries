@@ -29,6 +29,20 @@
  * the header stale is caught by the tooling test
  * test_make_conv_aot_test_vectors.py::test_the_golden_header_regenerates_from_the_in_tree_adapter.
  */
+// The port's gfx1250 limits and kernel budgets are restated by hand in the engine headers;
+// the generated vector header carries rocKE's values (arch_specs.json and the builders'
+// budgets), so a drift on either side fails the build.
+namespace pinned = ::gfx1250_conv_fwd_aot_vectors;
+namespace port = ::hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd;
+static_assert(port::GFX1250_WAVE_SIZE == pinned::WAVE_SIZE);
+static_assert(port::GFX1250_LDS_BYTES == pinned::LDS_CAPACITY_BYTES);
+static_assert(port::GFX1250_MAX_THREADS_PER_BLOCK == pinned::MAX_THREADS_PER_BLOCK);
+static_assert(port::WMMA_K == pinned::WMMA_K);
+static_assert(port::CH_PAD == pinned::CH_PAD);
+static_assert(port::GSTREAM_VGPR_BUDGET == pinned::GSTREAM_VGPR_BUDGET);
+static_assert(port::TAPOUTER_VGPR_BUDGET == pinned::TAPOUTER_VGPR_BUDGET);
+static_assert(port::direct_fwd_wmma::VGPR_BUDGET == pinned::FWD_WMMA_VGPR_BUDGET);
+
 namespace
 {
 
