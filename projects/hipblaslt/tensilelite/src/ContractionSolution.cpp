@@ -6861,6 +6861,7 @@ namespace TensileLite
                 .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
                        static_cast<size_t>(sizeMapping.macroTile.y),
                        static_cast<size_t>(sizeMapping.depthU)},
+                .tree_split_needs_divisor = customTreeSplitNeedsDivisor(),
             };
 
             reductionStrat = origami::streamk::select_reduction(
@@ -7054,6 +7055,12 @@ namespace TensileLite
                          customKernel.streamKReductions.end(),
                          mode)
                != customKernel.streamKReductions.end();
+    }
+
+    bool ContractionSolution::customTreeSplitNeedsDivisor() const
+    {
+        return handwrittenCustomKernel() && customKernelReduces(CustomReductionMode::Parallel)
+               && !internalArgsSupport.perTileExtraIters;
     }
 
     bool ContractionSolution::customDataParallelClamp(origami::reduction_t reduction) const
@@ -8107,6 +8114,7 @@ namespace TensileLite
                         // the DataParallel launch itself has no reduction strategy.
                         .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
                                                   ? origami::reduction_t::tree : reductionStrat,
+                        .tree_split_needs_divisor = self.customTreeSplitNeedsDivisor(),
                     };
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
