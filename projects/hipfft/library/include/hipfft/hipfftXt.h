@@ -34,6 +34,7 @@
 #include <cufftXt.h>
 #endif
 
+#include <hip/library_types.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
