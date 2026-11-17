@@ -138,9 +138,11 @@ def snapshot(directory, root_pid=None, executable=None):
     if asan_runtime:
         # The Python CLI loads ASAN-instrumented libamd_smi through ctypes.
         # Preload its runtime; omit interpreter leak checks for this probe only.
+        # Include bundled libdrm for dynamically loaded GPU queries.
         smi_command = [
             "env",
             f"LD_PRELOAD={asan_runtime.resolve()}",
+            f"LD_LIBRARY_PATH={bin_dir.parent.resolve()}/lib/rocm_sysdeps/lib:{os.environ.get('LD_LIBRARY_PATH', '')}",
             f"ASAN_OPTIONS={os.environ.get('ASAN_OPTIONS', '')}:detect_leaks=0",
             *smi_command,
         ]
