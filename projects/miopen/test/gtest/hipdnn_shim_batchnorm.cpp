@@ -2295,15 +2295,17 @@ struct RawProblem
 } // namespace
 
 // MIOpen fails these after its parameter checks, with UnknownError for a rank
-// its problem description does not know and NotImplemented when no solver
-// applies. The hipDNN path must return the same status rather than decline them
-// as unsupported. Each problem passes the parameter checks, so y matches x on
-// forward and dx matches dy on backward.
+// its problem description does not know, InvalidValue for a mode its network
+// config cannot name and NotImplemented when no solver applies. The hipDNN path
+// must return the same status rather than decline them as unsupported. Each
+// problem passes the parameter checks, so y matches x on forward and dx matches
+// dy on backward.
 TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
 {
     auto&& handle = get_handle();
     const std::vector<std::size_t> nchw{2, 4, 8, 8};
-    const char* no_solver = "no batchnorm solver";
+    const char* no_solver    = "no batchnorm solver";
+    const char* unknown_mode = "Wrong Batchnorm Mode provided";
 
     {
         SCOPED_TRACE("rank 3 train");
@@ -2326,7 +2328,23 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
         p.mode            = static_cast<miopenBatchNormMode_t>(2);
         const auto result = hs::CaptureCall([&] { return p.Train(handle); });
         hs::ExpectStatusParity(
-            "no_solver_unknown_mode_train", result, miopenStatusNotImplemented, no_solver);
+            "no_solver_unknown_mode_train", result, miopenStatusInvalidValue, unknown_mode);
+    }
+    {
+        SCOPED_TRACE("unknown mode infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.mode            = static_cast<miopenBatchNormMode_t>(2);
+        const auto result = hs::CaptureCall([&] { return p.Infer(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_unknown_mode_infer", result, miopenStatusInvalidValue, unknown_mode);
+    }
+    {
+        SCOPED_TRACE("unknown mode bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.mode            = static_cast<miopenBatchNormMode_t>(2);
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_unknown_mode_bwd", result, miopenStatusInvalidValue, unknown_mode);
     }
     {
         SCOPED_TRACE("tanh infer");

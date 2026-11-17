@@ -94,8 +94,7 @@ namespace hipdnn {
 // dbias, and a null bias on spatial backward with an activation. MIOpen would
 // dereference these and crash, so there is no MIOpen behavior to match. A
 // bn_mode other than miopenBNSpatial or miopenBNPerActivation returns
-// miopenStatusNotImplemented on training, as MIOpen does, and
-// miopenStatusUnsupportedOp on inference and backward.
+// miopenStatusInvalidValue, as MIOpen does.
 //
 // Some entry points have no separate previous and next running statistics.
 // They update the statistics in place, so the wrapper binds the same buffer to

@@ -337,6 +337,18 @@ miopenStatus_t CheckSpatialRank(const BnProblem& problem)
                          "batchnorm supports only 4-D and 5-D tensors (Unknown spatial dim!)");
 }
 
+// MIOpen names the mode in the network config it builds for every direction
+// before it looks for a solver, and throws InvalidValue for a mode it does not
+// know.
+miopenStatus_t CheckMode(const BnProblem& problem)
+{
+    if(problem.bnMode == miopenBNSpatial || problem.bnMode == miopenBNPerActivation)
+        return miopenStatusSuccess;
+    return RecordFailure(miopenStatusInvalidValue,
+                         "batchnorm supports only spatial and per-activation modes "
+                         "(Wrong Batchnorm Mode provided)");
+}
+
 bool IsSolverIoType(miopenDataType_t type)
 {
     return type == miopenFloat || type == miopenHalf || type == miopenBFloat16;
@@ -370,11 +382,10 @@ bool IsSolverActivation(miopenActivationMode_t act)
 
 // When no MIOpen solver applies, MIOpen fails with NotImplemented ("No solver
 // found"), so the forwarded call does too. Training has a spatial and a
-// per-activation solver, so neither takes any other mode, and only the spatial
-// one limits the activation. Inference has one solver for both modes, which
-// limits it. Backward has a spatial and a per-activation solver, and the
-// per-activation one accepts spatial problems with any activation, so backward
-// never fails on one.
+// per-activation solver, and only the spatial one limits the activation.
+// Inference has one solver for both modes, which limits it. Backward has a
+// spatial and a per-activation solver, and the per-activation one accepts
+// spatial problems with any activation, so backward never fails on one.
 miopenStatus_t CheckSolverExists(const BnProblem& problem)
 {
     if(!HasSolverDataTypes(problem.tensors))
@@ -383,12 +394,7 @@ miopenStatus_t CheckSolverExists(const BnProblem& problem)
     bool limitsActivation = false;
     switch(problem.kind)
     {
-    case GraphKind::BnFwdTraining:
-        if(problem.bnMode != miopenBNSpatial && problem.bnMode != miopenBNPerActivation)
-            return RecordFailure(miopenStatusNotImplemented,
-                                 "MIOpen has no batchnorm solver for this mode");
-        limitsActivation = problem.bnMode == miopenBNSpatial;
-        break;
+    case GraphKind::BnFwdTraining: limitsActivation = problem.bnMode == miopenBNSpatial; break;
     case GraphKind::BnFwdInference:
     case GraphKind::BnFwdInferenceInvVar: limitsActivation = true; break;
     case GraphKind::BnBackward:
@@ -405,11 +411,13 @@ miopenStatus_t CheckSolverExists(const BnProblem& problem)
     return miopenStatusSuccess;
 }
 
-// The checks between MIOpen's scale-factor checks and its solver: the rank,
-// then whether any solver applies.
+// The checks between MIOpen's scale-factor checks and its solver: the rank, the
+// mode, then whether any solver applies.
 miopenStatus_t CheckProblem(const BnProblem& problem)
 {
     if(const miopenStatus_t status = CheckSpatialRank(problem); status != miopenStatusSuccess)
+        return status;
+    if(const miopenStatus_t status = CheckMode(problem); status != miopenStatusSuccess)
         return status;
     return CheckSolverExists(problem);
 }
@@ -444,25 +452,22 @@ std::optional<fe::graph::PointwiseAttributes> ActivationAttributes(const BnProbl
 
 // What the MIOpen provider can run, whatever the kind. Empty when it can, and
 // otherwise the reason it cannot. The hipDNN path forwards only:
-// - spatial or per-activation mode;
 // - no activation in per-activation mode, and in spatial mode PASTHRU, RELU,
 //   CLIPPEDRELU or CLAMP;
 // - dims and strides no larger than INT_MAX, and no vectorized layout;
 // - packed tensors, with y and dx in the shape and layout of x;
 // - scale, bias and statistics shaped {1, C, 1, ...}, or {1, C, H, W, ...} in
 //   per-activation mode.
-// The rank (4 or 5) and the data types are not checked here: CheckProblem has
-// already limited the rank, and the parameter checks and CheckProblem have
-// already given every data tensor the type of x. CheckTuningPolicy declines the
-// tuning policies the provider cannot honor.
+// The rank (4 or 5), the mode and the data types are not checked here:
+// CheckProblem has already limited the rank and the mode, and the parameter
+// checks and CheckProblem have already given every data tensor the type of x.
+// CheckTuningPolicy declines the tuning policies the provider cannot honor.
 std::string CheckSupported(const BnProblem& problem)
 {
     const std::vector<TensorInfo>& tensors = problem.tensors;
     const TensorInfo& x                    = tensors[kIdxX];
     const bool perActivation               = problem.bnMode == miopenBNPerActivation;
 
-    if(problem.bnMode != miopenBNSpatial && !perActivation)
-        return "hipDNN batchnorm supports only spatial and per-activation modes";
     // MIOpen's per-activation kernels ignore the activation
     // (https://github.com/ROCm/rocm-libraries/issues/15445), so there is no
     // result to match.
