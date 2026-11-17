@@ -1262,12 +1262,18 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
 }
 
 // The inverse variance entry has no epsilon, so the training it runs uses the
-// default one, 1e-5, and the reference does too.
+// default one, 1e-5, and the reference does too. x is scaled down to within
+// +-2e-3, so its variance (about 1.3e-6) is below epsilon: at 1e-5, y reaches about
+// 0.6; at 1e-3 it would stay below 0.07, far outside kTol. With the test data's x,
+// whose variance is about 1.3, any epsilon up to 1e-3 would pass.
 TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, InvVarianceRunsTrainingAtDefaultEpsilon)
 {
     auto&& handle = get_handle();
     InferData d;
     SetUpInfer(d);
+    for(auto& v : d.input.data)
+        v *= 1e-3f;
+    d.in_dev          = handle.Write(d.input.data);
     d.epsilon         = 1e-5;
     const auto result = hs::CaptureCall([&] { return InferInvVariance(handle, d, false); });
     if(ExpectServed("infer_inv_variance_no_estimates", result))
