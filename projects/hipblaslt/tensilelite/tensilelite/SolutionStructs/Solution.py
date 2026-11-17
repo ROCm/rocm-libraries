@@ -7220,8 +7220,12 @@ class Solution(collections.abc.Mapping):
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
     ldsNumBytesReduction = state["LocalSplitU"] * state["MacroTile0"] * state["MacroTile1"] * int(state["ProblemType"]["ComputeDataType"].numBytes()) if state["LocalSplitU"] > 1 else 0
+    separateLsu = bool(state["PrefetchAcrossPersistent"] and state["LocalSplitU"] > 1)
+    state.pop("LdsOffsetLSU", None)
     state["LocalSplitUReuseLDS"] = 1
-    if ldsNumBytesReduction > state["MaxLDS"]:
+    # PAP keeps the successor's compute banks live through reduction. It needs
+    # one complete scratch allocation; reusing the whole LDS would overwrite PAP.
+    if ldsNumBytesReduction > state["MaxLDS"] and not separateLsu:
       state["LocalSplitUReuseLDS"] = math.ceil(ldsNumBytesReduction / state["MaxLDS"])
       # reserve all the LDS to LSU.
       ldsNumBytesReduction = state["MaxLDS"]
@@ -7314,7 +7318,8 @@ class Solution(collections.abc.Mapping):
       state["LDSSegInterleaveOffsets"] = {}
 
     # lds size is the greater of the two
-    ldsNumBytes = max(ldsNumBytesAB, ldsNumBytesReduction, ldsNumBytesOccupancy)
+    ldsNumBytes = max(ldsNumBytesAB, 0 if separateLsu else ldsNumBytesReduction,
+                      ldsNumBytesOccupancy)
 
     if state["NumElementsPerBatchStore"] == -1:
       if ldsNumBytes > 32768 or \
@@ -7634,6 +7639,31 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
+
+    if separateLsu:
+      # Both compute banks and the vector epilogue must survive LSU. Prefer
+      # unused padding between ordinary TDM banks; other layouts append scratch.
+      ordinaryTwoBank = (
+        state["enableTDMA"] and state["enableTDMB"] and numLdsBlk == 2
+        and state["1LDSBuffer"] == 0 and not decouplePGR
+        and not any(state[key] for key in ("UseSubtileImpl", "StoreSwapAddr",
+                    "DirectToVgprA", "DirectToVgprB", "LDSSegmentInterleave",
+                    "LDSSegmentBRotate", "StoreRemapVectorWidth"))
+        and not any(state["ProblemType"][key] for key in
+                    ("MXBlockA", "MXBlockB", "Sparse", "Gradient")))
+      state["LdsOffsetLSU"] = roundUpToNearestMultiple(ldsNumBytes, 16)
+      if ordinaryTwoBank:
+        # In this resolved layout, every low-bank component precedes aligned B.
+        # The power-of-two bank stride leaves any trailing padding unused.
+        gapStart = roundUpToNearestMultiple(state["LdsOffsetB"] + state["LdsNumElementsAlignedB"], 16)
+        gapEnd = gapStart + ldsNumBytesReduction
+        epilogueDisjoint = (not epilogueSize or gapEnd <= state["LdsOffsetBias"]
+                            or gapStart >= state["LdsOffsetBias"] + epilogueSize)
+        if gapEnd <= state["LdsOffsetA_Blk"] and epilogueDisjoint:
+          state["LdsOffsetLSU"] = gapStart
+      # The final capacity check also refuses PAP reductions needing multiple
+      # passes instead of silently assigning already-live LDS to reduction.
+      ldsNumBytes = max(ldsNumBytes, state["LdsOffsetLSU"] + ldsNumBytesReduction)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
     if state["ProblemType"]["OutputAmaxD"]:

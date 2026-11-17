@@ -2262,3 +2262,144 @@ def test_persistent_handoff_scope(assignment, tdma, tdmb, threads, drains, barri
     items = list(beforeReentry.flatitems())
     assert sum(isinstance(item, SWaitCnt) for item in items) == drains
     assert sum(isinstance(item, SBarrier) for item in items) == barriers
+
+
+# PAP's successor data remains live while LocalSplitU reduces the current tile.
+def _pap_lsu_params(wave_tile=(1, 2), dest="S", **overrides):
+    params = dict(
+        mi=[16, 16, 128, 1, 1, *wave_tile, 1, 2], WorkGroup=[16, 4, 2],
+        DepthU=512, PrefetchAcrossPersistent=1, SuppressNoLoadLoop=False,
+        SourceSwap=True, LDSTrInst=True, StreamKForceDPOnly=0,
+        ProblemType=dict(DataType="F8", MacDataTypeA="F8", MacDataTypeB="F8",
+                         DestDataType=dest, MXBlockA=0, MXBlockB=0,
+                         TransposeA=False, UseBias=1, UseScaleAlphaVec=1))
+    params.update(overrides)
+    return params
+
+
+def _pap_lsu_live_ranges(sol):
+    ranges = []
+    for bank in (0, sol["LdsOffsetA_Blk"]):
+        for tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
+            size = sol["LdsNumElementsAligned" + tc]
+            if size:
+                start = bank + sol["LdsOffset" + tc]
+                ranges.append((start, start + size))
+    # The test fixture enables one bias vector and one scale-alpha vector.
+    ranges.append((sol["LdsOffsetBias"], sol["LdsOffsetBias"] + sol["NumThreads"] * 4 * 2))
+    return ranges
+
+
+@pytest.mark.parametrize("wave_tile", [(1, 2), (2, 4)])
+@pytest.mark.parametrize("dest", ["S", "H", "B"])
+def test_pap_lsu_scratch_preserves_live_banks_and_epilogue(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, wave_tile, dest):
+    sol, reason = _derive(gfx1250_iim, assembler, capsys,
+                         **_pap_lsu_params(wave_tile, dest))
+    assert sol["Valid"], reason
+    assert sol["LocalSplitU"] == 2 and sol["LocalSplitUReuseLDS"] == 1
+    scratch = sol["LdsOffsetLSU"]
+    end = scratch + sol["LocalSplitU"] * sol["MacroTile0"] * sol["MacroTile1"] * 4
+    assert scratch % 16 == 0
+    assert scratch == sol["LdsOffsetB"] + sol["LdsNumElementsAlignedB"]
+    assert end <= sol["LdsOffsetA_Blk"]
+    assert all(end <= lo or scratch >= hi for lo, hi in _pap_lsu_live_ranges(sol))
+    assert sol["_SeparateEpilogueLds"]
+    # Gap reuse adds no LDS beyond the already separate vector epilogue.
+    assert sol["LdsBytesNoAmax"] == sol["LdsNumBytes"] == sol["LdsOffsetBias"] + sol["NumThreads"] * 4 * 2
+    assert sol["LdsNumBytes"] <= sol["MaxLDS"]
+
+
+@pytest.mark.parametrize("scaled", [False, True])
+def test_pap_lsu_appends_when_gap_is_too_small_or_layout_is_scaled(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, scaled):
+    params = _pap_lsu_params() if scaled else _pap_lsu_params((2, 4), DepthU=256)
+    if scaled:
+        params["ProblemType"].update(MXBlockA=32, MXBlockB=32, TransposeA=True)
+    sol, reason = _derive(gfx1250_iim, assembler, capsys, **params)
+    assert sol["Valid"], reason
+    size = sol["LocalSplitU"] * sol["MacroTile0"] * sol["MacroTile1"] * 4
+    gap_size = sol["LdsOffsetA_Blk"] - sol["LdsOffsetB"] - sol["LdsNumElementsAlignedB"]
+    assert (gap_size >= size) == scaled
+    scratch = sol["LdsOffsetLSU"]
+    assert all(scratch >= hi for _, hi in _pap_lsu_live_ranges(sol))
+    assert scratch + size == sol["LdsBytesNoAmax"] == sol["LdsNumBytes"]
+
+
+def test_pap_lsu_combined_allocation_must_fit(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    params = _pap_lsu_params((2, 4), DepthU=256)
+    sol, reason = _derive(gfx1250_iim, assembler, capsys, **params)
+    assert sol["Valid"], reason
+    exact, reason = _derive(gfx1250_iim, assembler, capsys,
+                           **dict(params, MaxLDS=sol["LdsNumBytes"]))
+    assert exact["Valid"] and exact["LdsOffsetLSU"] == sol["LdsOffsetLSU"], reason
+    limited, reason = _derive(gfx1250_iim, assembler, capsys,
+                             **dict(params, MaxLDS=sol["LdsNumBytes"] - 16))
+    assert not limited["Valid"]
+    assert "bytes of LDS" in reason
+
+
+@pytest.mark.parametrize("pap,workgroup", [(0, [16, 4, 2]), (1, [16, 4, 1])])
+def test_inactive_pap_lsu_scratch_discards_stale_offset(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap, workgroup):
+    params = _pap_lsu_params(PrefetchAcrossPersistent=pap, WorkGroup=workgroup)
+    clean, reason = _derive(gfx1250_iim, assembler, capsys, **params)
+    assert clean["Valid"], reason
+    stale, reason = _derive(gfx1250_iim, assembler, capsys,
+                           **dict(params, LdsOffsetLSU=123456))
+    assert stale["Valid"], reason
+    assert stale.get("LdsOffsetLSU", 0) == clean.get("LdsOffsetLSU", 0) == 0
+    assert stale["LdsNumBytes"] == clean["LdsNumBytes"]
+
+
+@pytest.mark.parametrize("wave_tile,depth", [((1, 2), 512), ((2, 4), 512), ((2, 4), 256)])
+def test_pap_lsu_emitted_reads_and_writes_use_disjoint_scratch(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, wave_tile, depth):
+    from config_harness import assert_assembles
+    sol, asm = _emit_asm(gfx1250_iim, assembler, **_pap_lsu_params(wave_tile, DepthU=depth))
+    assert sol["Valid"] and asm, capsys.readouterr().out
+    assert_assembles(asm, "pap_lsu_scratch")
+    # These are the actual emitted address roots, not a second implementation
+    # of allocation. Both must move: changing only one loses the reduction data.
+    roots = list(re.finditer(
+        r"v_add(?:_nc)?_u32 v(?P<reg>\d+), (?P<base>\d+), v(?P=reg)\s*// separate LSU scratch", asm))
+    assert len(roots) == 2
+    write_base, read_base = (int(root["base"]) for root in roots)
+    first_store = asm.index("ds_store", roots[0].end())
+    first_load = asm.index("ds_load", roots[1].end())
+    assert roots[0].end() < first_store < roots[1].start() < first_load
+    stores = re.findall(r"ds_store_\w+ v(\d+),", asm[first_store:roots[1].start()])
+    load = re.match(r"ds_load_\w+ [^,\n]+, v(\d+)\b", asm[first_load:])
+    assert stores and set(stores) == {roots[0]["reg"]}
+    assert load and load[1] == roots[1]["reg"]
+    nacc = sol["MacroTile0"] * sol["MacroTile1"] // 64
+    data_per_wave = nacc * 32 * 4
+    writes, reads = set(), set()
+    for tid in range(128):
+        lane, wave, split = tid % 32, (tid // 32) % 2, tid // 64
+        common = lane * 4 + wave * data_per_wave
+        for i in range(nacc):
+            start = write_base + common + split * 2 * data_per_wave + i * 128
+            writes.update(range(start, start + 4))
+        for i in range(nacc // 2):
+            for reduction_split in range(2):
+                start = read_base + common + split * (data_per_wave // 2) + reduction_split * 2 * data_per_wave + i * 128
+                reads.update(range(start, start + 4))
+    scratch_end = sol["LdsOffsetLSU"] + sol["LocalSplitU"] * sol["MacroTile0"] * sol["MacroTile1"] * 4
+    assert reads == writes == set(range(sol["LdsOffsetLSU"], scratch_end))
+    assert all(writes.isdisjoint(range(lo, hi)) for lo, hi in _pap_lsu_live_ranges(sol))
+    assert re.search(r"s_mov_b32 m0, " + hex(sol["LdsNumBytes"]) + r"\b", asm)
+
+
+def test_pap_lsu_does_not_reuse_the_whole_lds_budget(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    params = _pap_lsu_params(
+        (8, 16), DepthU=64, mi=[16, 16, 32, 1, 1, 8, 16, 1, 2],
+        ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=0, UseScaleAlphaVec=0))
+    pap, reason = _derive(gfx1250_iim, assembler, capsys, **params)
+    assert not pap["Valid"] and "bytes of LDS" in reason
+    assert pap["LocalSplitUReuseLDS"] == 1
+    plain, reason = _derive(gfx1250_iim, assembler, capsys,
+                           **dict(params, PrefetchAcrossPersistent=0))
+    assert plain["Valid"], reason
+    assert plain["LocalSplitUReuseLDS"] > 1

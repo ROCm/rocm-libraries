@@ -272,6 +272,9 @@ class LSUOn(LSU):
                     comment="tmp = (waveNum * dataPerWave) * lsu_id"))
                 module.add(VAddU32(vgpr(addr), vgpr(tmpVgpr), vgpr(addr), \
                     comment="addr += tmp"))
+                if kernel.get("LdsOffsetLSU", 0):
+                    module.add(VAddU32(vgpr(addr), kernel["LdsOffsetLSU"], vgpr(addr),
+                        comment="separate LSU scratch from live PAP data"))
 
             if reUseIdx > 0:
                 module.add(SWaitCnt(dscnt=0, comment="wait for all reads"))
@@ -316,6 +319,9 @@ class LSUOn(LSU):
                     comment="lsu offset = lsu_id * LSU Process Offset"))
                 module.add(VAddU32(dst=vgpr(addr), src0=vgpr(addr), src1=vgpr(tmpVgpr), \
                     comment="addr += lsu offset"))
+                if kernel.get("LdsOffsetLSU", 0):
+                    module.add(VAddU32(vgpr(addr), kernel["LdsOffsetLSU"], vgpr(addr),
+                        comment="separate LSU scratch from live PAP data"))
                 for i in range(1,numAddr):
                     module.add(VAddU32(vgpr(addr+i), maxLDSConstOffset*i, vgpr(addr), \
                     comment="addr += maxLDSConstOffset*%u"%(i)))
