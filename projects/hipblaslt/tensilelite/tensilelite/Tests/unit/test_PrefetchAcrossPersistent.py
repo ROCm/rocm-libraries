@@ -1907,10 +1907,10 @@ class _PapSetRefreshWriter:
         return Module("tail bank")
 
 
-def _pap_set_kernel(fuse, num_waves, mx):
+def _pap_set_kernel(fuse, num_waves, mx, **ov):
     blocks = {"MXBlockA": 32, "MXBlockB": 32} if mx else {"MXBlockA": 0, "MXBlockB": 0}
     return _ks(fuse=fuse, NumWaves=num_waves, ProblemType=blocks, LdsOffsetA_Blk=0x8000,
-               TileProcessingStrategy="StreamK", WorkAssignment="StaticGrid")
+               TileProcessingStrategy="StreamK", WorkAssignment="StaticGrid", **ov)
 
 
 def _pap_set_calls(kernel, entry, monkeypatch):
@@ -1946,18 +1946,22 @@ def _expected_pap_calls(fuse, mx, steps, tail):
     return [[(step,) + pair for step in steps for pair in pairs] + tail(None)] + ([[]] if mx else [])
 
 
+@pytest.mark.parametrize("stagger_u", [0, 32])
 @pytest.mark.parametrize("fuse, num_waves, mx, owners", _PAP_SET_CELLS)
-def test_pap_refresh_rebuilds_every_set_before_offsetting_any(monkeypatch, fuse, num_waves, mx, owners):
+def test_pap_refresh_rebuilds_every_set_before_offsetting_any(monkeypatch, fuse, num_waves, mx, owners, stagger_u):
     """The scale pair of a separate-set row is refreshed on the A/B call, each bank restored once."""
-    kernel = _pap_set_kernel(fuse, num_waves, mx)
+    kernel = _pap_set_kernel(fuse, num_waves, mx, StaggerU=stagger_u)
     assert _PapSetRefreshWriter().papTdmDescriptorSetOwners(kernel) == owners
     out = _pap_set_calls(kernel, kwa_module.KernelWriterAssembly.papTdmUpdateDescriptor, monkeypatch)
-    expected = _expected_pap_calls(fuse, mx, ("update" if fuse == 0 else "init", "offset", "k offset"), lambda pair: [])
+    incremental = kwa_module.KernelWriterAssembly.papTdmSupportsIncrementalUpdate(kernel)
+    expected = _expected_pap_calls(fuse, mx, ("update" if incremental else "init", "offset", "k offset"), lambda pair: [])
     assert [calls for calls, _ in out] == expected
     restored = [re.findall(r"s_add_u32 s\[sgprtdm(\w+)Group0\+1\][^\n]*restore PAP LDS bank", text)
                 for _, text in out]
-    if fuse == 0:
+    if incremental:
         assert restored == [[]] + ([[]] if mx else [])
+    elif fuse == 0:
+        assert restored == [["A"]] + ([["MXSA"]] if mx else [])
     else:
         assert restored == [owners] + ([[]] if mx else [])
 

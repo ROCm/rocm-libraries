@@ -25464,8 +25464,9 @@ class KernelWriterAssembly(KernelWriter):
   def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP, waveIdxSgpr: int | str = "WaveIdx", *, updateOnly=False) -> Module:
     """Initialize a wave's descriptor, or refresh its tile-dependent fields.
 
-    updateOnly is used by the audited DataParallel PAP path before the current
-    tail. Descriptor ownership, layout, strides and multicast masks are unchanged
+    updateOnly is used by the persistent (DataParallel and StreamK) PAP refresh
+    before the current tail, gated by papTdmSupportsIncrementalUpdate.
+    Descriptor ownership, layout, strides and multicast masks are unchanged
     between tiles; the LDS address already names PAP's destination bank. Enable,
     global address, tensor dimensions and iterate count must be refreshed.
     """
