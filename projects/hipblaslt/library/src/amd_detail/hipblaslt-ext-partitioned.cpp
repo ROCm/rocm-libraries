@@ -377,7 +377,11 @@ namespace hipblaslt_ext
             if(b == 0)
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
 
+        // Hints cost device queries, so none of their work runs unless HIPBLASLT_LOG_MASK has 4.
+        const bool hints = (get_logger_layer_mode() & rocblaslt_layer_mode_log_hints) != 0;
+
         // Where the partitions are, for HIPBLASLT_LOG_MASK=4.
+        if(hints)
         {
             const std::set<int> distinct(s.devices.begin(), s.devices.end());
             if(distinct.size() == 1)
@@ -559,6 +563,7 @@ namespace hipblaslt_ext
             offset[i] = static_cast<int64_t>(i) * base;
             size[i]   = i + 1 < parts ? base : total - offset[i];
         }
+        if(hints)
         {
             const char* names[4] = {"A", "B", "C", "D"};
             const void* bases[4] = {in.a[0], in.b[0], in.c[0], in.d[0]};
@@ -681,6 +686,7 @@ namespace hipblaslt_ext
                 slice = greedy;
         }
         // A hint when a split matrix still mostly lives on another device than its partition.
+        if(hints)
         for(size_t i = 0; i < parts; i++)
             for(auto const& mat : split)
             {
