@@ -283,6 +283,7 @@ jobs:
         --group-add 992
         --group-add 110
         --env-file /etc/podinfo/gha-gpu-isolation-settings
+        ${{ inputs.replay && inputs.replay != 'none' && '--mount type=bind,source=/proc,target=/node-proc,readonly' || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.test_matrix) }}
@@ -331,6 +332,31 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
+
+      - name: Verify node process visibility for diagnostics
+        if: ${{ inputs.replay && inputs.replay != 'none' }}
+        run: |
+          mkdir -p test_logs
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          records: dict[str, object] = {}
+          for name in ("/proc/1/comm", "/proc/self/status", "/node-proc/1/comm", "/node-proc/self/status"):
+              try:
+                  value = Path(name).read_text()
+                  if name.endswith("/status"):
+                      value = "\n".join(line for line in value.splitlines() if line.startswith(("Name:", "Pid:", "NSpid:")))
+                  records[name] = value.strip()
+              except OSError as error:
+                  records[name] = str(error)
+          records["device_coredumps"] = [str(path) for path in Path("/sys/class/devcoredump").glob("devcd*")]
+          text = json.dumps(records, indent=2) + "\n"
+          Path("test_logs/node-process-visibility.json").write_text(text)
+          print(text)
+          if records["/node-proc/1/comm"] != "systemd":
+              raise SystemExit("Node procfs is not visible: peer GPU PIDs cannot be reliably attributed; keep replays paused.")
+          PY
 
       - name: Install artifact dependencies
         run: pip install --constraint build_tools/packaging/linux/requirements.txt boto3 pyzstd
