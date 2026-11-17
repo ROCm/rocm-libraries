@@ -42,6 +42,19 @@ namespace rocsparse
     {
         return a > 0 && b > std::numeric_limits<int64_t>::max() / a;
     }
+
+    // Blocked ELL stores whole blocks, so ell_cols may round the column count
+    // up to a multiple of the block size. Reject a width past that, and fall
+    // back to cols when the rounded width does not fit in int64_t.
+    static bool bell_ell_cols_too_wide(int64_t cols, int64_t ell_block_dim, int64_t ell_cols)
+    {
+        const int64_t block_cols = rocsparse::ceil_div(cols, ell_block_dim);
+        if(size_product_overflows(block_cols, ell_block_dim))
+        {
+            return ell_cols > cols;
+        }
+        return ell_cols > block_cols * ell_block_dim;
+    }
 }
 
 // LCOV_EXCL_START
@@ -2712,7 +2725,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(4, ell_block_dim);
     ROCSPARSE_CHECKARG(4, ell_block_dim, (ell_block_dim == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
-    ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols > cols), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(5,
+                       ell_cols,
+                       rocsparse::bell_ell_cols_too_wide(cols, ell_block_dim, ell_cols),
+                       rocsparse_status_invalid_size);
 
     // rows * ell_cols is the value-array length; it must fit in int64_t.
     ROCSPARSE_CHECKARG(
@@ -2793,7 +2809,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(4, ell_block_dim);
     ROCSPARSE_CHECKARG(4, ell_block_dim, (ell_block_dim == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
-    ROCSPARSE_CHECKARG(5, ell_cols, ell_cols > cols, rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(5,
+                       ell_cols,
+                       rocsparse::bell_ell_cols_too_wide(cols, ell_block_dim, ell_cols),
+                       rocsparse_status_invalid_size);
 
     // rows * ell_cols is the value-array length; it must fit in int64_t.
     ROCSPARSE_CHECKARG(

@@ -61,7 +61,7 @@ rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          ha
     // Stream
     hipStream_t stream = handle->stream;
 
-    const int64_t mb = (m + ell_block_size - 1) / ell_block_size;
+    const int64_t mb = rocsparse::ceil_div(m, ell_block_size);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_nnz_kernel<256>),
                                        dim3(rocsparse::get_grid_size_x(handle, mb, 256)),
@@ -151,7 +151,7 @@ rocsparse_status rocsparse::dense2bell_template(rocsparse_handle          handle
     // Stream
     hipStream_t stream = handle->stream;
 
-    const int64_t mb              = (m + ell_block_size - 1) / ell_block_size;
+    const int64_t mb              = rocsparse::ceil_div(m, ell_block_size);
     const int64_t ell_block_width = ell_cols / ell_block_size;
 
     if(mb == 0 || ell_block_width == 0)

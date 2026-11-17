@@ -32,6 +32,7 @@
 #include "rocsparse_dense2csx_impl.hpp"
 #include "rocsparse_nnz_impl.hpp"
 
+#include <limits>
 #include <map>
 
 // LCOV_EXCL_START
@@ -75,13 +76,6 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // The public entry checks this too. Kept so an internal caller still
-        // rejects a mismatch before any write.
-        ROCSPARSE_CHECKARG(2,
-                           mat_B,
-                           (mat_B->rows != mat_A->rows || mat_B->cols != mat_A->cols),
-                           rocsparse_status_invalid_size);
-
         if(temp_buffer == nullptr)
         {
             ROCSPARSE_CHECKARG_POINTER(4, buffer_size);
@@ -100,8 +94,12 @@ namespace rocsparse
             else if(mat_B->format == rocsparse_format_bell)
             {
                 const int64_t mb = rocsparse::ceil_div(mat_B->rows, mat_B->block_dim);
+                if(mb > static_cast<int64_t>(std::numeric_limits<size_t>::max() / sizeof(int64_t)))
+                {
+                    return rocsparse_status_invalid_size;
+                }
 
-                *buffer_size = sizeof(int64_t) * mb;
+                *buffer_size = sizeof(int64_t) * static_cast<size_t>(mb);
             }
             return rocsparse_status_success;
         }

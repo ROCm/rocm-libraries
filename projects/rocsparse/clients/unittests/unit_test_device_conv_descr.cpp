@@ -1351,6 +1351,9 @@ namespace
             expect_bell(4, 4, 0, 2, g_dummy, g_dummy, st_size);
             expect_bell(-1, 4, 2, 2, g_dummy, g_dummy, st_size);
             expect_bell(4, 4, 2, 2, nullptr, nullptr, st_ptr);
+            // A partial last block column rounds ell_cols up to the next block.
+            expect_bell(3, 3, 2, 4, g_dummy, g_dummy, st_ok);
+            expect_bell(3, 3, 2, 6, g_dummy, g_dummy, st_size);
         });
 
         Spmat small;
@@ -1379,6 +1382,109 @@ namespace
         nnz = -1;
         EXPECT_EQ(rocsparse_spmat_get_nnz(c, &nnz), st_ok);
         EXPECT_EQ(nnz, fit * 4);
+    }
+
+    // A dense 3x3 matrix with block size 2 fills both block columns, so analysis
+    // reports ell_cols 4. That width is past cols and must still build a descriptor.
+    TEST_F(ConvDescr, BellPartialBlockColumnRoundUp)
+    {
+        constexpr int64_t        m  = 3;
+        constexpr int64_t        n  = 3;
+        constexpr int64_t        bd = 2;
+        const std::vector<float> host(static_cast<size_t>(m * n), 1.0f);
+        DevBuf<float>            values(host);
+        rocsparse_dnmat_descr    dense = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &dense, m, n, n, values.get(), f32, rocsparse_order_column),
+                  st_ok);
+
+        Spmat analyzed;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &analyzed, m, n, dir_r, bd, 0, nullptr, nullptr, i32, base0, f32),
+                  st_ok);
+        size_t buffer_size = 0;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            analyzed,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &buffer_size,
+                                            nullptr),
+                  st_ok);
+        DevBuf<char> buffer(buffer_size == 0 ? size_t{1} : buffer_size);
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            analyzed,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            nullptr,
+                                            buffer.get()),
+                  st_ok);
+
+        int64_t              rows = 0, cols = 0, got_bd = 0, ell_cols = 0;
+        rocsparse_direction  dir{};
+        void *               col_ind = nullptr, *val = nullptr;
+        rocsparse_indextype  it{};
+        rocsparse_index_base base{};
+        rocsparse_datatype   dt{};
+        ASSERT_EQ(
+            rocsparse_bell_get(
+                analyzed, &rows, &cols, &dir, &got_bd, &ell_cols, &col_ind, &val, &it, &base, &dt),
+            st_ok);
+        EXPECT_EQ(std::make_tuple(rows, cols, ell_cols), std::make_tuple(m, n, int64_t{4}));
+
+        const int64_t   brows = (m + bd - 1) / bd;
+        DevBuf<int32_t> rebuilt_ind(static_cast<size_t>(brows * (ell_cols / bd)));
+        DevBuf<float>   rebuilt_val(static_cast<size_t>(m * ell_cols));
+        Spmat           rebuilt;
+        ASSERT_EQ(rocsparse_create_bell_descr(&rebuilt,
+                                              rows,
+                                              cols,
+                                              dir,
+                                              got_bd,
+                                              ell_cols,
+                                              rebuilt_ind.get(),
+                                              rebuilt_val.get(),
+                                              it,
+                                              base,
+                                              dt),
+                  st_ok);
+
+        size_t convert_size = 0;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            rebuilt,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &convert_size,
+                                            nullptr),
+                  st_ok);
+        DevBuf<char> convert_buffer(convert_size == 0 ? size_t{1} : convert_size);
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            rebuilt,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            nullptr,
+                                            convert_buffer.get()),
+                  st_ok);
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(dense), st_ok);
+
+        // mb = ceil(INT64_MAX / 2) and 8 * mb does not fit in size_t.
+        Spmat huge;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &huge, k_max, 1, dir_r, 2, 1, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        rocsparse_dnmat_descr huge_dense = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &huge_dense, k_max, 1, 1, g_dummy, f32, rocsparse_order_column),
+                  st_ok);
+        size_t huge_buffer = 7;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle,
+                                            huge_dense,
+                                            huge,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &huge_buffer,
+                                            nullptr),
+                  st_size);
+        EXPECT_EQ(huge_buffer, 7);
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(huge_dense), st_ok);
     }
 
     // dense2bell_nnz_template writes ell_cols through &mat_B->ell_cols and does not

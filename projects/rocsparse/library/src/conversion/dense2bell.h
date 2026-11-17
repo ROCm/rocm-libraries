@@ -194,7 +194,7 @@ namespace rocsparse
 
         const int64_t ell_cols    = ell_block_width * ell_block_size;
         const int64_t block_elems = ell_block_size * ell_block_size;
-        const int64_t nb          = (n + ell_block_size - 1) / ell_block_size;
+        const int64_t nb = (n > 0 && ell_block_size > 0) ? ((n - 1) / ell_block_size + 1) : 0;
 
         for(int64_t bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
