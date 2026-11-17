@@ -66,6 +66,24 @@ class TestSpec(unittest.TestCase):
         gn, gm, g = implicit_gemm_conv_grid(off)
         self.assertEqual(implicit_gemm_conv_grid(on), (gn, g, gm))
 
+    def test_launch_grid_swap_lives_in_one_place(self):
+        """ConvArgs.grid and the sweep's grid agree with the kernel's grid."""
+        from benchmarks.common.benchmark_implicit_gemm_conv import _grid_for_spec
+        from kernels.common.conv_args import ConvArgs
+
+        for kw in (dict(), dict(group_fast_raster=True)):
+            spec = _spec(**kw)
+            args = ConvArgs.from_problem(
+                spec.problem, tile_m=spec.tile_m, tile_n=spec.tile_n
+            )
+            gfr = spec.group_fast_raster
+            want = implicit_gemm_conv_grid(spec)
+            self.assertEqual(args.grid(group_fast_raster=gfr), want)
+            self.assertEqual(_grid_for_spec(spec, spec.problem), want)
+        gx, gy, gz = args.grid()
+        self.assertEqual(args.grid(group_fast_raster=True), (gx, gz, gy))
+        self.assertEqual(args.grid(group_merge=1, split_k=1), (gx, gy, gz))
+
     def test_validator(self):
         self.assertTrue(is_valid_spec(_spec(group_fast_raster=True), _WMMA)[0])
         for kw, why in (
