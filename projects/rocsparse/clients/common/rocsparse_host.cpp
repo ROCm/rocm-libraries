@@ -9561,7 +9561,9 @@ void host_bsrpad_value(rocsparse_int m,
             // then we pad.
             for(rocsparse_int i = start_local_index; i < block_dim; ++i)
             {
-                bsr_val[(end - 1) * block_dim * block_dim + i * block_dim + i] = value;
+                bsr_val[static_cast<int64_t>(end - 1) * block_dim * block_dim
+                        + static_cast<int64_t>(i) * block_dim + i]
+                    = value;
             }
         }
         else
@@ -9574,7 +9576,9 @@ void host_bsrpad_value(rocsparse_int m,
                     // then we pad.
                     for(int i = start_local_index; i < block_dim; ++i)
                     {
-                        bsr_val[index * block_dim * block_dim + i * block_dim + i] = value;
+                        bsr_val[static_cast<int64_t>(index) * block_dim * block_dim
+                                + static_cast<int64_t>(i) * block_dim + i]
+                            = value;
                     }
 
                     break;
