@@ -7,21 +7,36 @@
 #if MIOPEN_BACKEND_HIP
 
 #include <half/half.hpp>
+using half = half_float::half;
+#include <hip_float8.hpp>
 #include <miopen/bfloat16.hpp>
+#include <miopen/check_numerics.hpp>
 #include <miopen/handle.hpp>
+#include <miopen/logger.hpp>
 #include <miopen/target_properties.hpp>
+#include <miopen/tensor.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <iostream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
 
 #include "get_handle.hpp"
+#include "gtest_common.hpp"
+
+MIOPEN_LIB_ENV_VAR(MIOPEN_CHECK_NUMERICS)
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_LOGGING_QUIETING_DISABLE)
 
 namespace {
+
+using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;
+using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 
 // Private kernel ABI: keep in sync with MIOpenCheckNumerics.cpp/check_numerics.cpp.
 struct NumericsResult
@@ -42,8 +57,12 @@ const char* KernelName()
         return "check_numerics_fp32";
     else if constexpr(std::is_same_v<T, half_float::half>)
         return "check_numerics_fp16";
-    else
+    else if constexpr(std::is_same_v<T, bfloat16>)
         return "check_numerics_bf16";
+    else if constexpr(std::is_same_v<T, float8_fnuz>)
+        return "check_numerics_fp8";
+    else
+        return "check_numerics_bf8";
 }
 
 template <class T>
@@ -82,7 +101,8 @@ struct NumericsCase
     int has_zero;
     int has_nan;
     int has_inf;
-    bool compute_stats = true;
+    bool compute_stats        = true;
+    std::vector<T> ieee_input = {};
 };
 
 template <class T>
@@ -132,13 +152,74 @@ std::vector<NumericsCase<T>> GetCases()
 }
 
 template <class T>
+std::vector<T> MakeRawInput(std::initializer_list<uint8_t> values)
+{
+    std::vector<T> input;
+    input.reserve(values.size());
+    for(uint8_t value : values)
+        input.emplace_back(value);
+    return input;
+}
+
+template <class T>
+std::vector<NumericsCase<T>> GetFp8Cases()
+{
+    constexpr bool fp8        = std::is_same_v<T, float8_fnuz>;
+    constexpr float largest   = fp8 ? 240.0f : 57344.0f;
+    constexpr uint8_t one     = fp8 ? 0x38 : 0x3c;
+    constexpr uint8_t maximum = fp8 ? 0x77 : 0x7b;
+    constexpr uint8_t nan     = fp8 ? 0x7c : 0x7e;
+    // Raw FNUZ and IEEE-bias encodings represent the same independently known values.
+    // FNUZ has no infinity: 0x80 is NaN, not negative zero or infinity.
+    return {{"PositiveOnly",
+             MakeRawInput<T>({0x40, 0x7f}),
+             1.0f,
+             largest,
+             0,
+             0,
+             0,
+             true,
+             MakeRawInput<T>({one, maximum})},
+            {"NegativeOnly",
+             MakeRawInput<T>({0xc0, 0xff}),
+             -largest,
+             -1.0f,
+             0,
+             0,
+             0,
+             true,
+             MakeRawInput<T>({uint8_t(one | 0x80), uint8_t(maximum | 0x80)})},
+            {"NanAndZeroWithStats",
+             MakeRawInput<T>({0x00, 0x80, 0x40, 0xc0}),
+             -1.0f,
+             1.0f,
+             1,
+             1,
+             0,
+             true,
+             MakeRawInput<T>({0x00, nan, one, uint8_t(one | 0x80)})},
+            {"NanAndZeroWithoutStats",
+             MakeRawInput<T>({0x00, 0x80, 0x40, 0xc0}),
+             -1.0f,
+             1.0f,
+             1,
+             1,
+             0,
+             false,
+             MakeRawInput<T>({0x00, nan, one, uint8_t(one | 0x80)})}};
+}
+
+template <class T>
 class CheckNumerics : public ::testing::TestWithParam<NumericsCase<T>>
 {
 public:
     void RunTest()
     {
-        const auto& test  = this->GetParam();
-        const auto result = RunKernel(test.input, test.compute_stats);
+        const auto& test = this->GetParam();
+        const bool ieee =
+            !test.ieee_input.empty() && miopen::UsesIeeeExponentBias(get_handle().GetDeviceName());
+        const auto& input = ieee ? test.ieee_input : test.input;
+        const auto result = RunKernel(input, test.compute_stats);
         if(test.compute_stats)
         {
             // Exact equality matters: ULP-based float comparisons can accept zero
@@ -161,15 +242,109 @@ struct CaseName
     }
 };
 
+// Like the logging tests, redirect cerr with RAII so exceptions and fatal assertions
+// cannot leave the following test's log output redirected.
+struct NumericsLogCapture
+{
+    std::ostringstream stream;
+    std::streambuf* previous = std::cerr.rdbuf(stream.rdbuf());
+    ~NumericsLogCapture() { std::cerr.rdbuf(previous); }
+};
+
+void ExpectLogValue(const std::string& log,
+                    const std::string& key,
+                    float expected,
+                    float tolerance = 0.0f)
+{
+    const auto marker = " " + key + "=";
+    const auto offset = log.find(marker);
+    ASSERT_NE(offset, std::string::npos) << "Missing numerical field " << key << " in " << log;
+    const float actual = std::stof(log.substr(offset + marker.size()));
+    if(std::isnan(expected))
+        EXPECT_TRUE(std::isnan(actual)) << key;
+    else if(tolerance == 0.0f)
+        EXPECT_EQ(actual, expected) << key;
+    else
+        EXPECT_NEAR(actual, expected, tolerance) << key;
+}
+
+class CheckNumericsInput : public ::testing::TestWithParam<bool>
+{
+protected:
+    // Explicit severity works for both debug and release logging defaults. Override
+    // quieting through a scoped environment, not the suite-global LoggingQuiet flag.
+    ScopedEnvironment<int> numerics{
+        MIOPEN_CHECK_NUMERICS, miopen::CheckNumerics::Info | miopen::CheckNumerics::ComputeStats};
+    ScopedEnvironment<std::string> log_level{MIOPEN_LOG_LEVEL, "6"};
+    ScopedEnvironment<std::string> quieting{MIOPEN_DEBUG_LOGGING_QUIETING_DISABLE, "1"};
+};
+
 } // namespace
 
 using GPU_CheckNumerics_FP32  = CheckNumerics<float>;
 using GPU_CheckNumerics_FP16  = CheckNumerics<half_float::half>;
 using GPU_CheckNumerics_BFP16 = CheckNumerics<bfloat16>;
 
+using GPU_CheckNumerics_FP8       = CheckNumerics<float8_fnuz>;
+using GPU_CheckNumerics_BFP8      = CheckNumerics<bfloat8_fnuz>;
+using GPU_CheckNumericsInput_FP32 = CheckNumericsInput;
+
 TEST_P(GPU_CheckNumerics_FP32, ExtremaAndFlags) { this->RunTest(); }
 TEST_P(GPU_CheckNumerics_FP16, ExtremaAndFlags) { this->RunTest(); }
 TEST_P(GPU_CheckNumerics_BFP16, ExtremaAndFlags) { this->RunTest(); }
+TEST_P(GPU_CheckNumerics_FP8, ExtremaAndFlags) { this->RunTest(); }
+TEST_P(GPU_CheckNumerics_BFP8, ExtremaAndFlags) { this->RunTest(); }
+
+TEST_P(GPU_CheckNumericsInput_FP32, StatsAndFlags)
+{
+    auto& handle        = get_handle();
+    const bool abnormal = GetParam();
+    constexpr float inf = std::numeric_limits<float>::infinity();
+    constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> input;
+    if(abnormal)
+    {
+        input = {2.0f, 0.0f, nan, inf, -inf, -4.0f};
+    }
+    else
+    {
+        // More than the capped host grid can cover in one pass, across multiple blocks.
+        // This validates every element, not the exact geometry: an uncapped grid is valid too.
+        const size_t count = 256 * 8 * handle.GetMaxHardwareComputeUnits() + 512;
+        input.resize(count);
+        for(size_t i = 0; i < count; i += 4)
+        {
+            input[i]     = -4.0f;
+            input[i + 1] = 2.0f;
+            input[i + 2] = 0.0f;
+            input[i + 3] = 8.0f;
+        }
+        // Put unique extrema beyond the first grid-stride pass.
+        input[count - 4] = -16.0f;
+        input[count - 1] = 20.0f;
+    }
+    auto input_dev = handle.Write(input);
+    const miopen::TensorDescriptor desc(miopenFloat, {input.size()});
+
+    NumericsLogCapture capture;
+    EXPECT_EQ(miopen::checkNumericsInput(handle, desc, input_dev.get()), abnormal);
+    const auto log = capture.stream.str();
+    // Logs use six significant digits; allow their rounding, not reduction error.
+    ExpectLogValue(log, "mean", abnormal ? nan : 1.5f, 5e-6f);
+    ExpectLogValue(log, "absmean", abnormal ? nan : 3.5f + 24.0f / input.size(), 5e-6f);
+    ExpectLogValue(log, "min", abnormal ? -inf : -16.0f);
+    ExpectLogValue(log, "max", abnormal ? inf : 20.0f);
+    ExpectLogValue(log, "zeros", 1);
+    ExpectLogValue(log, "nans", abnormal ? 1 : 0);
+    ExpectLogValue(log, "infs", abnormal ? 1 : 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CheckNumericsInput_FP32,
+                         ::testing::Values(false, true),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                             return info.param ? "Nonfinite" : "FiniteGridStride";
+                         });
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_CheckNumerics_FP32,
@@ -182,6 +357,14 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_CheckNumerics_BFP16,
                          ::testing::ValuesIn(GetCases<bfloat16>()),
+                         CaseName{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CheckNumerics_FP8,
+                         ::testing::ValuesIn(GetFp8Cases<float8_fnuz>()),
+                         CaseName{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CheckNumerics_BFP8,
+                         ::testing::ValuesIn(GetFp8Cases<bfloat8_fnuz>()),
                          CaseName{});
 
 #endif

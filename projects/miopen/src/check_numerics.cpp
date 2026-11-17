@@ -84,27 +84,16 @@ bool checkNumericsImpl(
         handle.Create(sizeof(CheckNumericsResult)); // TODO - someday avoid slow malloc/free here
     handle.WriteTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
 
-    // Let each thread work on a single element
     const size_t threadsPerBlock = 256;
+    const size_t blocksForTensor = (numElements + threadsPerBlock - 1) / threadsPerBlock;
 
-    // Calculate based on tensor size
-    const size_t totalThreads = numElements;
-    const size_t minBlocks    = (totalThreads + threadsPerBlock - 1) / threadsPerBlock;
+    // The grid-stride loop covers the tensor with a bounded number of blocks.
+    // Limit contenders for the shared statistics atomics, not hardware occupancy.
+    const size_t blocksPerCU = 8;
+    const size_t numBlocks =
+        std::min(blocksForTensor, handle.GetMaxHardwareComputeUnits() * blocksPerCU);
 
-    // Calculate based on hardware occupancy
-    const size_t numCUs                = handle.GetMaxHardwareComputeUnits();
-    const size_t minWavesPerCU         = 4;    // Minimum occupancy target
-    const size_t maxWavesPerCU         = 2048; // Maximum to avoid over-subscription
-    const size_t wavesPerBlock         = threadsPerBlock / handle.GetWavefrontWidth();
-    const size_t minBlocksForOccupancy = (numCUs * minWavesPerCU) / wavesPerBlock;
-    const size_t maxBlocksForOccupancy = (numCUs * maxWavesPerCU) / wavesPerBlock;
-
-    // Clamp minBlocks to the occupancy range [min, max]
-    size_t numBlocks = std::max(minBlocks, minBlocksForOccupancy);
-    numBlocks        = std::min(numBlocks, maxBlocksForOccupancy);
-
-    const bool computeStats = (mode & CheckNumerics::ComputeStats) != 0;
-    // TODO - some constants we should get from the device:
+    const bool computeStats       = (mode & CheckNumerics::ComputeStats) != 0;
     std::string program_name      = "MIOpenCheckNumerics.cpp";
     std::string kernel_name       = GetKernelName(dDesc.GetType());
     const std::vector<size_t> vld = {size_t{threadsPerBlock}, size_t{1}, size_t{1}};
