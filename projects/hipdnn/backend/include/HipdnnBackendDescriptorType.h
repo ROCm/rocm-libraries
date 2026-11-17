@@ -36,8 +36,8 @@ typedef enum
      * Engines are discovered through heuristics and provide different
      * performance/precision trade-offs.
      * Finalization validates applicability without fetching plugin EngineDetails.
-     * Name, knob-info, and behavior-note queries load and validate that metadata
-     * lazily, so their first read can fail after successful finalization.
+     * Name, knob-info, behavior-note, and numerical-note queries load and validate
+     * that metadata lazily, so their first read can fail after successful finalization.
      */
     HIPDNN_BACKEND_ENGINE_DESCRIPTOR = 1,
 
