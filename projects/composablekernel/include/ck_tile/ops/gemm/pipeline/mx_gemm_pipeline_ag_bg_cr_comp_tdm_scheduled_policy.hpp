@@ -454,7 +454,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return kPrefetchLdsRead && kSplitBLdsRead;
     }
 
-    /// LDS reads of a K step, clamped to the 6-bit s_wait_dscnt immediate.
+    /// LDS reads of a K step, clamped to the 6-bit s_wait_dscnt immediate. Above the clamp (FP8
+    /// and BF8 tiles with 16 repeats, or 8 x 8) each wait also drains the oldest reads of the
+    /// next K step before the WMMAs: still correct, but less read latency is hidden. The waits
+    /// are only correct while GetLdsReads is at most the ds_loads a K step issues.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetReadsPerStep()
     {

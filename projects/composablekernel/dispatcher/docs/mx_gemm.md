@@ -160,16 +160,15 @@ python3 mx_gemm_full_benchmark.py comp_tdm_scheduled_tuning_gfx1250.json \
 A kernel whose cluster does not divide the problem's grid, or whose shape traits do not
 cover the problem, is reported as `SKIPPED`.
 
-The tuned instances of three problems each have a config and a problem file:
-`comp_tdm_scheduled_maf_gfx1250.json` (4096 × 4096 × 65536),
-`comp_tdm_scheduled_medium_gfx1250.json` (2048 × 2048 × 65536) and
-`comp_tdm_scheduled_mab_gfx1250.json` (65536 × 16 × 65536), the instances example 56 names
-`maf`, `medium` and `mab256`. With `--init trig` the sweep driver times them on example
-56's inputs, so the times compare with the example's:
+The tuned instances of three problems each have a config:
+`comp_tdm_scheduled_maf_gfx1250.json`, `comp_tdm_scheduled_medium_gfx1250.json` and
+`comp_tdm_scheduled_mab_gfx1250.json`, the instances example 56 names `maf`, `medium` and
+`mab256`. With `--init trig` the sweep driver times them on example 56's inputs, so the
+times compare with the example's:
 
 ```bash
 python3 mx_gemm_full_benchmark.py comp_tdm_scheduled_maf_gfx1250.json \
-    --arch gfx1250 --dtype fp4 --problems mx_gemm/configs/comp_tdm_scheduled_maf_problems.json \
+    --arch gfx1250 --dtype fp4 --problems mx_gemm/configs/comp_tdm_scheduled_problems.json \
     --init trig --csv maf.csv
 ```
 
@@ -267,7 +266,7 @@ used as given.
 | `bridge_ci_config_gfx950.json` | Default on gfx950. Small sweep covering all three gfx950 pipelines. |
 | `bridge_ci_config_gfx1250.json` | Default on gfx1250. Small sweep covering all six gfx1250 pipelines. |
 | `comp_tdm_scheduled_tuning_gfx1250.json` | `comp_tdm_scheduled` with every tuning key listed: a product of the five knobs (270 FP4 kernels). |
-| `comp_tdm_scheduled_{maf,medium,mab}_gfx1250.json` | The tuned `comp_tdm_scheduled` instance of each problem (1 FP4 kernel each); `comp_tdm_scheduled_{maf,medium,mab}_problems.json` hold the problems. |
+| `comp_tdm_scheduled_{maf,medium,mab}_gfx1250.json` | The tuned `comp_tdm_scheduled` instance of each problem (1 FP4 kernel each). |
 | `default_ci_config.json` | Old-TE CI sweep: `comp_async`, with and without persistence. |
 | `default_config.json` | Old-TE full gfx950 sweep (194 FP4 / 150 FP8 kernels). |
 | `default_config_gfx1250.json` | Old-TE full gfx1250 sweep (64 kernels per input type). |

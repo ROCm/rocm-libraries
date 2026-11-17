@@ -23,7 +23,7 @@
         "cluster_dim": {"values": [[4, 4]]},
         "gl2_prefetch_distance": {"values": [4]},
         "prefetch_lds_read": {"values": [true]},
-        "split_b_lds_read": {"values": [true]},
+        "split_b_lds_read": {"values": [false]},
         "interleave_lds_regions": {"values": [true]},
         "edge": {"values": [false]},
         "tail_steps": {"values": [0]},
