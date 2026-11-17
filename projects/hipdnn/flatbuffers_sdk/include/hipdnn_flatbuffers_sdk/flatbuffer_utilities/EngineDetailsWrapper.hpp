@@ -5,6 +5,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -37,6 +38,13 @@ public:
     virtual std::string name() const
     {
         return {};
+    }
+
+    /// std::nullopt when the engine details do not state numerical notes; an empty
+    /// vector when the provider explicitly reports none.
+    virtual std::optional<std::vector<int32_t>> numericalNotes() const
+    {
+        return std::nullopt;
     }
 };
 
@@ -122,6 +130,19 @@ public:
             notes.push_back(rawNotes->Get(i));
         }
         return notes;
+    }
+
+    std::optional<std::vector<int32_t>> numericalNotes() const override
+    {
+        throwIfNotValid();
+
+        auto rawNotes = _shallowEngineDetails->numerical_notes();
+        if(rawNotes == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        return std::vector<int32_t>(rawNotes->begin(), rawNotes->end());
     }
 
     const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob>>&

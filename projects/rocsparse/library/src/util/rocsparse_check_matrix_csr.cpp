@@ -290,6 +290,14 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
+        // No rows to check when m = 0. nnz must be zero so it matches the row pointer.
+        if(m == 0)
+        {
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_value, nnz != 0);
+            *data_status = rocsparse_data_status_success;
+            return rocsparse_status_success;
+        }
+
         return rocsparse_status_continue;
     }
 }

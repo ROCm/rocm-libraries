@@ -3,8 +3,13 @@
 
 #include <gtest/gtest.h>
 
-#include "AsmSdpaConfigHelpers.hpp"
+#include <cstdio>
+#include <cstdlib>
 
+#include "AsmSdpaConfigHelpers.hpp"
+#include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
+
+using asm_sdpa_engine::GraphTestCase;
 using asm_sdpa_engine::SdpaFwdTestCase;
 
 TEST(TestSdpaFwdCase, ConstructorDerivesKDimsFromQAndV)
@@ -63,4 +68,45 @@ TEST(TestSdpaFwdCase, GetNameTopLeftCausal)
 
     auto name = SdpaFwdTestCase::getName(info);
     EXPECT_EQ(name, "gfx942_B1_Hq2_Hkv2_Sq128_Skv128_Dqk192_Dv128_TopLeftCausal");
+}
+
+namespace
+{
+
+// Builds a GROUP-mode graph with the helper and exits 0 iff the frontend validates it.
+[[noreturn]] void validateGroupModeGraph()
+{
+    const fmha_v3_fwdConfig config{"group_mode_kernel",
+                                   "group_mode_object",
+                                   "gfx942",
+                                   "bf16",
+                                   128,
+                                   128,
+                                   0,
+                                   hip_kernel_provider_common::BatchMode::GROUP,
+                                   0,
+                                   256,
+                                   32};
+    const GraphTestCase tc(config, "GroupMode", "gfx942");
+    const auto built = asm_sdpa_engine::buildSdpaFwdGraph(tc);
+    const auto result = built.graph->validate();
+    std::fprintf(stderr, "group mode validate: %s\n", result.get_message().c_str());
+    std::exit(result.is_good() ? 0 : 1);
+}
+
+} // namespace
+
+// GROUP mode adds seq_len_q / seq_len_kv, which the frontend requires to be INT32
+// [B, 1, 1, 1] on every SDPA forward graph. Graph::validate() initializes frontend
+// logging, which replaces this binary's log-recording callback for every later test,
+// so it runs in a re-executed child (threadsafe death-test style). The suite name ends
+// in Death because hipDNN's test-name validator reserves "Test" for the leading keyword.
+TEST(TestSdpaFwdCaseDeath, GroupModeGraphPassesFrontendValidation)
+{
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    // EXPECT_EXIT expands to a switch over AssumeRole() with no default label.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch-default"
+    EXPECT_EXIT(validateGroupModeGraph(), testing::ExitedWithCode(0), "group mode validate");
+#pragma clang diagnostic pop
 }

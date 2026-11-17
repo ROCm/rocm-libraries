@@ -1937,6 +1937,15 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::MoveToAcceleratorAsync()");
 
+        // A Move*Async() is already active, both copies exist until Sync()
+        if((this->asyncf_ == true) && (this->matrix_accel_ != NULL) && (this->matrix_host_ != NULL))
+        {
+            LOG_VERBOSE_INFO(4,
+                             "*** info: LocalMatrix::MoveToAcceleratorAsync() transfer already "
+                             "active - doing nothing");
+            return;
+        }
+
 #ifdef DEBUG_MODE
         this->Check();
 #endif
@@ -1967,6 +1976,15 @@ namespace rocalution
     void LocalMatrix<ValueType>::MoveToHostAsync(void)
     {
         log_debug(this, "LocalMatrix::MoveToHostAsync()");
+
+        // A Move*Async() is already active, both copies exist until Sync()
+        if((this->asyncf_ == true) && (this->matrix_accel_ != NULL) && (this->matrix_host_ != NULL))
+        {
+            LOG_VERBOSE_INFO(4,
+                             "*** info: LocalMatrix::MoveToHostAsync() transfer already active - "
+                             "doing nothing");
+            return;
+        }
 
         if((_rocalution_available_accelerator()) && (this->matrix_ == this->matrix_accel_))
         {
@@ -2012,10 +2030,9 @@ namespace rocalution
                                      "*** info: LocalMatrix::MoveToHostAsync() accelerator to host "
                                      "transfer (synced)");
                 }
-
                 // MoveToAcceleratorAsync();
-                if((_rocalution_available_accelerator() == true)
-                   && (this->matrix_ == this->matrix_host_))
+                else if((_rocalution_available_accelerator() == true)
+                        && (this->matrix_ == this->matrix_host_))
                 {
                     _rocalution_sync();
 
@@ -5211,7 +5228,7 @@ namespace rocalution
                 }
             }
 
-            // LCOV_EXCL_STop
+            // LCOV_EXCL_STOP
         }
     }
 
@@ -5793,7 +5810,7 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::DiagonalMatrixMultR()", (const void*&)diag);
 
-        assert((diag.GetSize() == this->GetM()) || (diag.GetSize() == this->GetN()));
+        assert(diag.GetSize() == this->GetN());
 
         assert(((this->matrix_ == this->matrix_host_) && (diag.vector_ == diag.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (diag.vector_ == diag.vector_accel_)));
@@ -5873,7 +5890,7 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::DiagonalMatrixMultL()", (const void*&)diag);
 
-        assert((diag.GetSize() == this->GetM()) || (diag.GetSize() == this->GetN()));
+        assert(diag.GetSize() == this->GetM());
 
         assert(((this->matrix_ == this->matrix_host_) && (diag.vector_ == diag.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (diag.vector_ == diag.vector_accel_)));
@@ -6018,56 +6035,53 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        bool err = this->matrix_->Transpose();
+
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
         {
-            bool err = this->matrix_->Transpose();
+            LOG_INFO("Computation of LocalMatrix::Transpose() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
-            // LCOV_EXCL_START
+        if(err == false)
+        {
+            // Move to host
+            bool is_accel = this->is_accel_();
+            this->MoveToHost();
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+            // Convert to CSR
+            unsigned int format   = this->GetFormat();
+            int          blockdim = this->GetBlockDimension();
+            this->ConvertToCSR();
+
+            if(this->matrix_->Transpose() == false)
             {
                 LOG_INFO("Computation of LocalMatrix::Transpose() failed");
                 this->Info();
                 FATAL_ERROR(__FILE__, __LINE__);
             }
 
-            if(err == false)
+            if(format != CSR)
             {
-                // Move to host
-                bool is_accel = this->is_accel_();
-                this->MoveToHost();
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::Transpose() is performed in CSR format");
 
-                // Convert to CSR
-                unsigned int format   = this->GetFormat();
-                int          blockdim = this->GetBlockDimension();
-                this->ConvertToCSR();
-
-                if(this->matrix_->Transpose() == false)
-                {
-                    LOG_INFO("Computation of LocalMatrix::Transpose() failed");
-                    this->Info();
-                    FATAL_ERROR(__FILE__, __LINE__);
-                }
-
-                if(format != CSR)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::Transpose() is performed in CSR format");
-
-                    this->ConvertTo(format, blockdim);
-                }
-
-                if(is_accel == true)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::Transpose() is performed on the host");
-
-                    this->MoveToAccelerator();
-                }
+                this->ConvertTo(format, blockdim);
             }
 
-            // LCOV_EXCL_STOP
+            if(is_accel == true)
+            {
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: LocalMatrix::Transpose() is performed on the host");
+
+                this->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
 
 #ifdef DEBUG_MODE
         this->Check();
@@ -6089,57 +6103,61 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        // The backends transpose into a CSR matrix, and T is overwritten
+        if(T->GetFormat() != CSR)
         {
-            bool err = this->matrix_->Transpose(T->matrix_);
+            T->Clear();
+            T->ConvertToCSR();
+        }
 
-            // LCOV_EXCL_START
+        bool err = this->matrix_->Transpose(T->matrix_);
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+        {
+            LOG_INFO("Computation of LocalMatrix::Transpose() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+
+        if(err == false)
+        {
+            // Move to host
+            LocalMatrix<ValueType> mat_host;
+            mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
+            mat_host.CopyFrom(*this);
+
+            T->MoveToHost();
+
+            // Convert to CSR
+            mat_host.ConvertToCSR();
+
+            if(mat_host.matrix_->Transpose(T->matrix_) == false)
             {
                 LOG_INFO("Computation of LocalMatrix::Transpose() failed");
-                this->Info();
+                mat_host.Info();
                 FATAL_ERROR(__FILE__, __LINE__);
             }
 
-            if(err == false)
+            if(this->GetFormat() != CSR)
             {
-                // Move to host
-                LocalMatrix<ValueType> mat_host;
-                mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
-                mat_host.CopyFrom(*this);
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::Transpose() is performed in CSR format");
 
-                T->MoveToHost();
-
-                // Convert to CSR
-                mat_host.ConvertToCSR();
-
-                if(mat_host.matrix_->Transpose(T->matrix_) == false)
-                {
-                    LOG_INFO("Computation of LocalMatrix::Transpose() failed");
-                    mat_host.Info();
-                    FATAL_ERROR(__FILE__, __LINE__);
-                }
-
-                if(this->GetFormat() != CSR)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::Transpose() is performed in CSR format");
-
-                    T->ConvertTo(this->GetFormat(), this->GetBlockDimension());
-                }
-
-                if(this->is_accel_() == true)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::Transpose() is performed on the host");
-
-                    T->MoveToAccelerator();
-                }
+                T->ConvertTo(this->GetFormat(), this->GetBlockDimension());
             }
 
-            // LCOV_EXCL_STOP
+            if(this->is_accel_() == true)
+            {
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: LocalMatrix::Transpose() is performed on the host");
+
+                T->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
 
 #ifdef DEBUG_MODE
         T->Check();
@@ -7007,8 +7025,7 @@ namespace rocalution
             prolong->MoveToHost();
 
             // Convert to CSR
-            unsigned int format   = mat_host.GetFormat();
-            int          blockdim = mat_host.GetBlockDimension();
+            unsigned int format = mat_host.GetFormat();
             mat_host.ConvertToCSR();
 
             if(mat_host.matrix_->AMGSmoothedAggregationProlongNnz(
@@ -8235,61 +8252,58 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        bool err
+            = this->matrix_->CreateFromMap(*map.vector_, static_cast<int>(n), static_cast<int>(m));
+
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
         {
-            bool err = this->matrix_->CreateFromMap(
-                *map.vector_, static_cast<int>(n), static_cast<int>(m));
+            LOG_INFO("Computation of LocalMatrix::CreateFromMap() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
-            // LCOV_EXCL_START
+        if(err == false)
+        {
+            LocalVector<int> map_host;
+            map_host.CopyFrom(map);
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+            // Move to host
+            this->MoveToHost();
+
+            // Convert to CSR
+            unsigned int format   = this->GetFormat();
+            int          blockdim = this->GetBlockDimension();
+            this->ConvertToCSR();
+
+            if(this->matrix_->CreateFromMap(
+                   *map_host.vector_, static_cast<int>(n), static_cast<int>(m))
+               == false)
             {
                 LOG_INFO("Computation of LocalMatrix::CreateFromMap() failed");
                 this->Info();
                 FATAL_ERROR(__FILE__, __LINE__);
             }
 
-            if(err == false)
+            if(format != CSR)
             {
-                LocalVector<int> map_host;
-                map_host.CopyFrom(map);
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::CreateFromMap() is performed in CSR format");
 
-                // Move to host
-                this->MoveToHost();
-
-                // Convert to CSR
-                unsigned int format   = this->GetFormat();
-                int          blockdim = this->GetBlockDimension();
-                this->ConvertToCSR();
-
-                if(this->matrix_->CreateFromMap(
-                       *map_host.vector_, static_cast<int>(n), static_cast<int>(m))
-                   == false)
-                {
-                    LOG_INFO("Computation of LocalMatrix::CreateFromMap() failed");
-                    this->Info();
-                    FATAL_ERROR(__FILE__, __LINE__);
-                }
-
-                if(format != CSR)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::CreateFromMap() is performed in CSR format");
-
-                    this->ConvertTo(format, blockdim);
-                }
-
-                if(map.is_accel_() == true)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::CreateFromMap() is performed on the host");
-
-                    this->MoveToAccelerator();
-                }
+                this->ConvertTo(format, blockdim);
             }
 
-            // LCOV_EXCL_STOP
+            if(map.is_accel_() == true)
+            {
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::CreateFromMap() is performed on the host");
+
+                this->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
 
 #ifdef DEBUG_MODE
         this->Check();
@@ -8973,7 +8987,7 @@ namespace rocalution
         }
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void LocalMatrix<ValueType>::CompressAdd(const LocalVector<int64_t>&   l2g,
                                              const LocalVector<int64_t>&   global_ghost_col,
@@ -9068,7 +9082,7 @@ namespace rocalution
 #endif
     }
 
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     void LocalMatrix<ValueType>::RSExtPIProlongNnz(int64_t                     global_column_begin,

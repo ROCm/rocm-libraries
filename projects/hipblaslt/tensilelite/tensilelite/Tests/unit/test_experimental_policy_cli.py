@@ -11,9 +11,9 @@ import pytest
 import yaml
 
 from config_harness import _isolated_globals_with_isa, _toolchain_for, solutions_from_config
-from Tensile.BenchmarkStructs import _expandGroupedParameters, constructLazyForkPermutations
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.ExperimentalLibrary import (
+from tensilelite.BenchmarkStructs import _expandGroupedParameters, constructLazyForkPermutations
+from tensilelite.Common.GlobalParameters import globalParameters
+from tensilelite.ExperimentalLibrary import (
     ExperimentalLibraryError, augment_config, main, parse_set_arg,
 )
 
@@ -194,11 +194,11 @@ def test_nonpolicy_augmentation_preserves_groups():
 
 
 def _main_cli_policy_lines(tmp_path, yaml_globals, overrides):
-    from Tensile.ClientWriter import writeClientConfigIni
-    from Tensile.Contractions import ProblemType as ContractionProblemType
-    from Tensile.SolutionStructs import FactorDimArgs
-    from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy, ProblemType
-    from Tensile.Tensile import Tensile
+    from tensilelite.ClientWriter import writeClientConfigIni
+    from tensilelite.Contractions import ProblemType as ContractionProblemType
+    from tensilelite.SolutionStructs import FactorDimArgs
+    from tensilelite.SolutionStructs.Problem import ProblemSizesMockDummy, ProblemType
+    from tensilelite import run
 
     config = tmp_path / "input.yaml"
     config.write_text(yaml.safe_dump({"GlobalParameters": dict(PrintLevel=0, **yaml_globals)}))
@@ -208,7 +208,7 @@ def _main_cli_policy_lines(tmp_path, yaml_globals, overrides):
     with _isolated_globals_with_isa(_toolchain_for("gfx942")[1]):
         # No benchmark steps are needed to exercise the real entry point's
         # YAML/CLI precedence and the resulting client configuration.
-        Tensile(argv)
+        run.main(argv)
         problem = ProblemType({"OperationType": "GEMM", "DataType": "s", "Batched": True}, False)
         ini = tmp_path / "ClientParameters.ini"
         writeClientConfigIni(

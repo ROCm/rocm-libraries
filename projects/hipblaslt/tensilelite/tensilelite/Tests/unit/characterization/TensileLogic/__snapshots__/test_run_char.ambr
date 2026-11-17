@@ -109,7 +109,7 @@
     }),
     'gp_config': dict({
     }),
-    'jobs': 48,
+    'jobs': 12,
     'num_files': 1,
   })
 # ---

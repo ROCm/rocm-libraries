@@ -43,7 +43,7 @@
 #include <sstream>
 
 #ifndef SUPPORT_MULTINODE
-// LCOV_EXCL_START
+// COVERAGE_EXCL_NO_MPI_START
 #endif
 
 namespace rocalution
@@ -477,6 +477,8 @@ namespace rocalution
                                              this->pm_->GetLocalNrow(),
                                              this->pm_->GetLocalNcol());
 
+        this->InitEmptyGhost_();
+
         // Initialize communication pattern
         this->InitCommPattern_();
     }
@@ -509,6 +511,8 @@ namespace rocalution
                                              nnz,
                                              this->pm_->GetLocalNrow(),
                                              this->pm_->GetLocalNcol());
+
+        this->InitEmptyGhost_();
 
         // Initialize communication pattern
         this->InitCommPattern_();
@@ -1333,14 +1337,12 @@ namespace rocalution
 
         // Only CSR matrices are supported
         LocalMatrix<ValueType> R_int;
-        LocalMatrix<ValueType> R_gst;
         LocalMatrix<ValueType> A_int;
         LocalMatrix<ValueType> A_gst;
         LocalMatrix<ValueType> P_int;
         LocalMatrix<ValueType> P_gst;
 
         const LocalMatrix<ValueType>* R_int_ptr = &R.matrix_interior_;
-        const LocalMatrix<ValueType>* R_gst_ptr = &R.matrix_ghost_;
         const LocalMatrix<ValueType>* A_int_ptr = &A.matrix_interior_;
         const LocalMatrix<ValueType>* A_gst_ptr = &A.matrix_ghost_;
         const LocalMatrix<ValueType>* P_int_ptr = &P.matrix_interior_;
@@ -3207,14 +3209,8 @@ namespace rocalution
         // Start with fresh P operator
         prolong->Clear();
 
-        int64_t global_row_begin = this->pm_->GetGlobalRowBegin();
-        int64_t global_row_end   = this->pm_->GetGlobalRowEnd();
         int64_t global_col_begin = this->pm_->GetGlobalColumnBegin();
         int64_t global_col_end   = this->pm_->GetGlobalColumnEnd();
-
-        // Communication sizes
-        int nsend = this->pm_->GetNumSenders();
-        int nrecv = this->pm_->GetNumReceivers();
 
         // Obtain the local to global ghost mapping
         LocalVector<int64_t> l2g;
@@ -3336,18 +3332,10 @@ namespace rocalution
         // Rename P
         prolong->object_name_ = "Prolongation Operator of " + this->object_name_;
 
-        const int*     boundary_index = this->pm_->GetBoundaryIndex();
-        const int64_t* ghost_mapping  = this->pm_->GetGhostToGlobalMap();
-
-        int            prolong_nsend          = prolong->pm_self_->GetNumSenders();
-        int            prolong_nrecv          = prolong->pm_self_->GetNumReceivers();
-        const int*     prolong_boundary_index = prolong->pm_self_->GetBoundaryIndex();
-        const int64_t* prolong_ghost_mapping  = prolong->pm_self_->GetGhostToGlobalMap();
-
-        int64_t prolong_global_row_begin = prolong->pm_->GetGlobalRowBegin();
-        int64_t prolong_global_row_end   = prolong->pm_->GetGlobalRowEnd();
-        int64_t prolong_global_col_begin = prolong->pm_->GetGlobalColumnBegin();
-        int64_t prolong_global_col_end   = prolong->pm_->GetGlobalColumnEnd();
+        // GetGhostToGlobalMap() exchanges the map with the neighbors on its first call,
+        // so make that call here, where all ranks take part
+        this->pm_->GetGhostToGlobalMap();
+        prolong->pm_self_->GetGhostToGlobalMap();
 
         if(this->GetFormat() != CSR)
         {
@@ -3425,14 +3413,8 @@ namespace rocalution
         // Start with fresh P operator
         prolong->Clear();
 
-        int64_t global_row_begin = this->pm_->GetGlobalRowBegin();
-        int64_t global_row_end   = this->pm_->GetGlobalRowEnd();
         int64_t global_col_begin = this->pm_->GetGlobalColumnBegin();
         int64_t global_col_end   = this->pm_->GetGlobalColumnEnd();
-
-        // Communication sizes
-        int nsend = this->pm_->GetNumSenders();
-        int nrecv = this->pm_->GetNumReceivers();
 
         // fine to coarse map
         LocalVector<int> f2c_map;
@@ -3544,24 +3526,16 @@ namespace rocalution
         // Rename P
         prolong->object_name_ = "Prolongation Operator of " + this->object_name_;
 
-        const int*     boundary_index = this->pm_->GetBoundaryIndex();
-        const int64_t* ghost_mapping  = this->pm_->GetGhostToGlobalMap();
-
-        int            prolong_nsend          = prolong->pm_self_->GetNumSenders();
-        int            prolong_nrecv          = prolong->pm_self_->GetNumReceivers();
-        const int*     prolong_boundary_index = prolong->pm_self_->GetBoundaryIndex();
-        const int64_t* prolong_ghost_mapping  = prolong->pm_self_->GetGhostToGlobalMap();
-
-        int64_t prolong_global_row_begin = prolong->pm_->GetGlobalRowBegin();
-        int64_t prolong_global_row_end   = prolong->pm_->GetGlobalRowEnd();
-        int64_t prolong_global_col_begin = prolong->pm_->GetGlobalColumnBegin();
-        int64_t prolong_global_col_end   = prolong->pm_->GetGlobalColumnEnd();
+        // GetGhostToGlobalMap() exchanges the map with the neighbors on its first call,
+        // so make that call here, where all ranks take part
+        this->pm_->GetGhostToGlobalMap();
+        prolong->pm_self_->GetGhostToGlobalMap();
 
         if(this->GetFormat() != CSR)
         {
             LOG_VERBOSE_INFO(
                 2,
-                "*** warning: GlobalMatrix::AMGSmoothedAggregation() is performed in CSR format");
+                "*** warning: GlobalMatrix::AMGUnsmoothedAggregation() is performed in CSR format");
         }
 
 #ifdef DEBUG_MODE
@@ -4605,6 +4579,22 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    void GlobalMatrix<ValueType>::InitEmptyGhost_(void)
+    {
+        // A rank without ghost entries can still have boundary rows that its neighbors need.
+        // The setup of the parallel AMG reads the ghost row of every local row, so the ghost
+        // part needs one (empty) row per local row, as SetGhostDataPtrCSR() with nnz = 0 gives.
+        if(this->matrix_ghost_.GetM() == 0)
+        {
+            this->matrix_ghost_.AllocateCSR("Ghost of " + this->object_name_,
+                                            0,
+                                            this->pm_->GetLocalNrow(),
+                                            this->pm_->GetNumReceivers());
+            this->matrix_ghost_.ConvertTo(COO);
+        }
+    }
+
+    template <typename ValueType>
     void GlobalMatrix<ValueType>::InitCommPattern_(void)
     {
 #ifdef SUPPORT_MULTINODE
@@ -4659,5 +4649,5 @@ namespace rocalution
 } // namespace rocalution
 
 #ifndef SUPPORT_MULTINODE
-// LCOV_EXCL_STOP
+// COVERAGE_EXCL_NO_MPI_STOP
 #endif

@@ -15,7 +15,7 @@
 # c96e3fb0519 (run the file 2-3x; any FAIL on a "FAIL" row reproduces the bug).
 # Note: under hipblaslt-bench (real 256-CU device library) the same kernels
 # fail one K-iteration earlier (K=2*DU=512) because the device StreamK grid
-# splits differently; the Tensile prediction-client flow needs K=3*DU.
+# splits differently; the TensileLite prediction-client flow needs K=3*DU.
 #
 # Classified from the partial sweep on c96e3fb0519
 # (/home/bnemanic/mxfp8_run4/combined.csv, 46 FAIL_VERIFY / 81):

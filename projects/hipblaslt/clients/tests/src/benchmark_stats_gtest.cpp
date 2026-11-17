@@ -265,6 +265,64 @@ TEST(RotatingBufferPlan, OverflowingMemoryBudgetUnboundedFallsBackToOneBlock)
 }
 
 // ---------------------------------------------------------------------------
+// rotating block footprint
+// ---------------------------------------------------------------------------
+
+TEST(RotatingFootprint, TensorTakesWholeColumnsAndBatches)
+{
+    using hipblaslt_bench::rotating_tensor_elements;
+    // One batch is ld * cols, whatever the stride.
+    EXPECT_EQ(rotating_tensor_elements(80, 32, 1, 12345), 80 * 32);
+    // Several take the stride per batch, a whole copy each at a zero stride,
+    // and one copy when the stride is shorter than ld.
+    EXPECT_EQ(rotating_tensor_elements(80, 32, 3, 4000), 4000 * 3);
+    EXPECT_EQ(rotating_tensor_elements(80, 32, 3, 0), 80 * 32 * 3);
+    EXPECT_EQ(rotating_tensor_elements(80, 32, 3, 40), 80 * 32);
+}
+
+TEST(RotatingFootprint, BiasTakesItsStridePerBatch)
+{
+    using hipblaslt_bench::rotating_bias_elements;
+    EXPECT_EQ(rotating_bias_elements(64, 0, 4), 64);
+    EXPECT_EQ(rotating_bias_elements(64, 80, 4), 80 * 4);
+}
+
+TEST(RotatingFootprint, CountsCOnlyWhenRead)
+{
+    hipblaslt_bench::RotatingTensors t;
+    t.a = t.b = t.c = t.d = 2 << 20;
+    t.e                   = 1 << 20;
+    t.bias = t.scale_alpha_vec = t.scale_a = t.scale_b = 256;
+    EXPECT_EQ(hipblaslt_bench::rotating_block_bytes(t), 4 * (2 << 20) + (1 << 20) + 4 * 256);
+    t.reads_c = false;
+    EXPECT_EQ(hipblaslt_bench::rotating_block_bytes(t), 3 * (2 << 20) + (1 << 20) + 4 * 256);
+}
+
+TEST(RotatingFootprint, GeneralBatchedCountsMatricesPerBatchAndNoE)
+{
+    hipblaslt_bench::RotatingTensors t;
+    t.a = t.b = t.c = t.d = 1000;
+    t.e                   = 500;
+    t.bias                = 64;
+    t.general_batched     = true;
+    t.num_batches         = 3;
+    EXPECT_EQ(hipblaslt_bench::rotating_block_bytes(t), 4 * 1000 * 3 + 64);
+}
+
+TEST(RotatingFootprint, SaturatesRatherThanOverflowing)
+{
+    constexpr int64_t most = std::numeric_limits<int64_t>::max();
+    EXPECT_EQ(hipblaslt_bench::rotating_tensor_elements(int64_t(1) << 40, int64_t(1) << 40, 1, 0),
+              most);
+    hipblaslt_bench::RotatingTensors t;
+    t.a = most;
+    t.b = 1;
+    EXPECT_EQ(hipblaslt_bench::rotating_block_bytes(t), most);
+    // A footprint that saturated still plans a valid block count.
+    EXPECT_EQ(compute_rotating_buffer_plan(false, 0, 2, 10, 512LL << 20, most).block_count, 1);
+}
+
+// ---------------------------------------------------------------------------
 // rate_per_second
 // ---------------------------------------------------------------------------
 

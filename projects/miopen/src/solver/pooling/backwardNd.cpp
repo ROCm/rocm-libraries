@@ -45,7 +45,7 @@ bool PoolingBackwardNd::IsApplicable(const ExecutionContext&,
                 && problem.GetPooling().GetWorkspaceIndexMode() == miopenPoolingWorkspaceIndexMask);
 }
 
-ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
+ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext& context,
                                             const miopen::pooling::ProblemDescription& problem,
                                             const PerformanceConfigPoolingNdBackward& config) const
 {
@@ -146,7 +146,7 @@ ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
             {"MLO_POOLING_INDEX_TYPE",
              get_pooling_index_type_name(problem.GetPooling().GetIndexType())},
         }
-        << GetDataTypeKBP(problem.GetDYDesc().GetType());
+        << GetDataTypeKBP(problem.GetDYDesc().GetType(), context.GetStream().GetDeviceName());
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 

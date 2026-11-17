@@ -1,0 +1,144 @@
+{
+  "version": "1.0",
+  "id": "daac46c8-97fb-4012-b00c-500f0bf3b955",
+  "name": "Gfx942AttentionDense variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "causal",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "ragged",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "emit_lse",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "batch",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "seqlen_q",
+      "type": "int",
+      "default_value": 512
+    },
+    {
+      "name": "seqlen_kv",
+      "type": "int",
+      "default_value": 512
+    },
+    {
+      "name": "block_m",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "block_n",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "lds_row_pad",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "pv_priority",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "persistent",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_persistent",
+      "type": "int",
+      "default_value": 304
+    },
+    {
+      "name": "persist_decode",
+      "type": "string",
+      "default_value": "auto"
+    },
+    {
+      "name": "nonpersist_decode",
+      "type": "string",
+      "default_value": "qb_minor"
+    },
+    {
+      "name": "kv_segments",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "lds_num_buffers",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "v_reg_prefetch",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "causal_diag_split",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "o_store_width",
+      "type": "int",
+      "default_value": 4
+    },
+    {
+      "name": "pv_loop_order",
+      "type": "string",
+      "default_value": "d_major"
+    },
+    {
+      "name": "lds_k_group_pad",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "use_cfvst",
+      "type": "int"
+    },
+    {
+      "name": "use_exp2_fast",
+      "type": "int"
+    }
+  ]
+}

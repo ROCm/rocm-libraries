@@ -411,6 +411,19 @@ Tests:
     devices: [0, 2, 4]
 
 # nightly
+  # AIROCBLAS-1437
+  - name: dot_ILP64_multi_pass_batch
+    category: nightly
+    pointer_mode_host: false
+    initialization: hpl
+    arguments:
+      - { N: 2147483649, incx: 1, incy: 1, stride_x: 0, stride_y: 0, batch_count: 2 }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - dot_batched: *single_precision
+      - dot_strided_batched: *single_precision
+
   - name: blas1
     category: nightly
     N: [ 1000000 ]

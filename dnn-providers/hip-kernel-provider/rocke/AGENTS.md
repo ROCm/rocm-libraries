@@ -21,7 +21,8 @@ artifact, and treat uncertainty as confidential until a human resolves it:
 ## The #1 invariant: byte-identity
 
 The Python engine (`platform/python/rocke/core/lower_llvm.py`) and the C++ engine
-(`platform/cpp/`) **MUST emit the same LLVM-IR bytes** for every kernel family. Any
+(`platform/cpp/`, plus `library/cpp/` for library-owned families) **MUST emit the
+same LLVM-IR bytes** for every kernel family. Any
 op / instance / atom / fusion / arch change must be made in **both** engines in the
 same change; if output is meant to change, re-bless the golden in the same change.
 
@@ -29,8 +30,10 @@ Prove it — GREEN for every family at every LLVM flavor:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
-python tools/check_byte_identity.py                            # llvm20
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24
 python tools/check_byte_identity.py --only gemm                # scope to a family
 ```
 
@@ -43,12 +46,30 @@ rocke/
 │   ├── cpp/           C++20 engine (librocke_core.a) + pybind bindings
 │   ├── dsl_docs/      the field manual (see platform/dsl_docs/README.md)
 │   └── tools/ tests/ cmake/
-└── library/         # the SDPA product — build-time-only Python (NOT installed, no wheel)
+└── library/         # the kernel library (SDPA/MHA, conv, ...): build-time Python + C++ mirrors (archive ships as ckc::rocke_library)
     ├── kernels/ builders/ dispatch/ benchmarks/ tests/
+    └── cpp/           C++ mirrors of library families (librocke_library.a + rocke_library_engine)
 ```
 
+A library family owns both halves of its byte-identity contract: the Python
+builder in `library/kernels/` and its C++ mirror in `library/cpp/`, with parity
+emitters and their golden in `library/tests/parity/`. `platform/CMakeLists.txt`
+adds `library/cpp` when the sibling tree exists; its targets link `rocke_core`,
+never the reverse, and `tools/check_byte_identity.py` gates them with the
+engine's own families. Library tests enrol in CI through
+`library/tests/ctest_lists.cmake`.
+
 One-way dependency: **`library → platform` only**; platform never imports
-`kernels`/`builders`/`dispatch` and stays standalone-installable.
+`kernels`/`builders`/`dispatch`/`benchmarks` or the `rocke_library_engine`
+binding (statically; the ratchet counts static imports, and
+`test_arch_domain_lane` only probes the binding with `importorskip`) and
+stays standalone-installable. The
+back-edges that predate the rule (parity-harness cases, examples, tools) are
+frozen per file in
+[`platform/tests/test_library_reach.py`](platform/tests/test_library_reach.py)
+(enforced by the `rocke-library-reach` hook in the root
+`.pre-commit-config.yaml`): a count may only go down, and a new platform file
+may not add one.
 
 **No cycles inside `library/` either.** The packages are layered lowest → highest
 and may only import *downward*:
@@ -81,6 +102,9 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **Helpers** — reuse them, write the missing ones, fix the broken ones, each
+  with a test, in the kernel's PR. New families too; the C++ mirror is not a
+  reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
@@ -103,7 +127,10 @@ A change is not done until it clears [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md
 for its change type (new family / new knob / new feature / perf optimization) — the
 single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
-[`TESTING.md`](TESTING.md). Language style:
+[`TESTING.md`](TESTING.md). Kernel changes that enrolled pinned GPU reference
+cases reach must keep those suites green, and new pinned coverage starts at the
+[pinned reference quickstart](library/tests/reference_common/docs/quickstart.md).
+Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
 [`style/CPP_STYLE.md`](style/CPP_STYLE.md).
 
@@ -130,13 +157,15 @@ the matching doc first.
 | Launch / benchmark harness | [kernel-launch-guide.md](platform/dsl_docs/optimization/utilities/skills/kernel-launch-guide.md) |
 | Bisect a perf regression | [bisect-perf-regression.md](platform/dsl_docs/optimization/utilities/skills/bisect-perf-regression.md) |
 | Real bug signatures + measured wins | [empirical-case-studies.md](platform/dsl_docs/optimization/utilities/skills/empirical-case-studies.md) |
+| Attention decode on gfx942/gfx950 (3D split-KV): defaults, per-lever outcomes, replay | [attention_3d_decode/CASE_STUDY.md](library/builders/common/attention_3d_decode/CASE_STUDY.md) |
 | Per-arch facts (MFMA atoms, LDS banks, occupancy caps, sched intrinsics) | [arch/gfx942.md](platform/dsl_docs/optimization/arch/gfx942.md), [arch/gfx950.md](platform/dsl_docs/optimization/arch/gfx950.md) |
 
 Hard rule from the runbook: **never report speed without correctness** — run the
 relevant parity/verify harness (attention → `library/builders/**/parity_*.py`;
 non-attention → `platform/python/rocke/examples/common/*parity*.py`) and stay within
 the runbook §1.4 tolerances before claiming any win. Leave a replayable case study in
-the relevant `examples/<arch>/<workload>/` folder.
+the relevant `examples/<arch>/<workload>/` folder (`library/builders/<arch>/<workload>/`
+for a library family).
 
 ## Deeper material
 

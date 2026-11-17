@@ -51,17 +51,16 @@ from kernels.common.attention_bwd import (
 )
 from kernels.common._attention_bwd_refusals import resource_refusal
 
+from ._attention_bwd_lds_model import lds_hazards, traced_spec
 from ._attention_bwd_test_utils import distinct_configs
 from .test_attention_bwd_ir import (
     ARCHS,
     _derived,
     _user_accesses,
     _walk,
-    lds_hazards,
     q_loops,
     spec_of,
     step_bodies,
-    traced_spec,
 )
 
 _PADDABLE = ("q", "do", "ds", "pt", "k_stage", "v_stage", "k_res", "v_res", "dkv_out")

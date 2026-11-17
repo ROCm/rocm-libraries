@@ -34,6 +34,7 @@
 #include <HipdnnAttentionImplementation.h>
 #include <HipdnnBackendBehaviorNote.h>
 #include <HipdnnBackendHeuristicType.h>
+#include <HipdnnBackendNumericalNote.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
@@ -296,11 +297,14 @@ typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mod
  * @brief Specifies the heuristic mode for engine selection
  *
  * Controls how the hipDNN backend selects execution plans and engines.
+ *
+ * A and B request the SelectionHeuristic::ModeA / ModeB prediction policies through the
+ * heuristic descriptor's policy order; the backend mode stays HIPDNN_HEUR_MODE_FALLBACK.
  */
 enum class HeuristicMode
 {
-    A = 0, ///< cuDNN heuristic mode A (mapped to fallback for now)
-    B = 1, ///< cuDNN heuristic mode B (mapped to fallback for now)
+    A = 0, ///< Request the ModeA policy: rank calibrated no-search engine predictions
+    B = 1, ///< Request the ModeB policy: rank exact configuration predictions, engine fallback
     FALLBACK = 2, ///< Use fallback heuristics for engine selection
     OPENSOURCE = 3, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
 };
@@ -336,8 +340,7 @@ typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
  * @brief Numerical-precision/behavior metadata reported by an engine.
  *
  * Value set mirrors the cuDNN frontend NumericalNote_t for source compatibility.
- * hipDNN does not yet surface per-plan numerical-note metadata, so these are
- * accepted for API parity and triaged by the cuDNN-compatibility shim.
+ * Engines report their numerical notes through Graph::get_numerical_notes_for_engine.
  */
 enum class NumericalNote : int32_t
 {
@@ -364,8 +367,8 @@ typedef NumericalNote NumericalNote_t; ///< @brief Type alias for NumericalNote
  */
 enum class BuildPlanPolicy
 {
-    HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
-    ALL ///< Build all available plans
+    HEURISTICS_CHOICE, ///< Compile the active plan; fall back to other ranked plans if it fails
+    ALL ///< Build all available plans, skipping any that fail to compile
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 
@@ -1041,7 +1044,8 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
-    // All cuDNN heuristic modes currently fold to hipDNN fallback.
+    // Every frontend mode maps to the one backend mode; A and B select prediction policies
+    // through the policy order instead (see createEngineHeuristicDescriptorForGraph).
     case HeuristicMode::FALLBACK:
     case HeuristicMode::A:
     case HeuristicMode::B:
@@ -1086,6 +1090,62 @@ inline bool isKnownBehaviorNote(const BehaviorNote& note)
     case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
     case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
     case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// @brief Convert backend numerical note to frontend numerical note.
+/// @return The frontend numerical note, or std::nullopt if the backend value is
+///         not known to this frontend. Frontend and backend numbering are
+///         independent (the frontend reserves 0 for NOT_SET), so values are
+///         mapped by name and never reinterpreted numerically.
+inline std::optional<NumericalNote> fromHipdnnNumericalNote(hipdnnBackendNumericalNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_NUMERICAL_NOTE_TENSOR_CORE:
+        return NumericalNote::TENSOR_CORE;
+    case HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS:
+        return NumericalNote::DOWN_CONVERT_INPUTS;
+    case HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION:
+        return NumericalNote::REDUCED_PRECISION_REDUCTION;
+    case HIPDNN_NUMERICAL_NOTE_FFT:
+        return NumericalNote::FFT;
+    case HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC:
+        return NumericalNote::NONDETERMINISTIC;
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD:
+        return NumericalNote::WINOGRAD;
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4:
+        return NumericalNote::WINOGRAD_TILE_4x4;
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6:
+        return NumericalNote::WINOGRAD_TILE_6x6;
+    case HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13:
+        return NumericalNote::WINOGRAD_TILE_13x13;
+    case HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP:
+        return NumericalNote::STRICT_NAN_PROP;
+    default:
+        return std::nullopt;
+    }
+}
+
+/// @brief Return true if a numerical note is known to this frontend version.
+/// NOT_SET is not a note an engine can report and is not known.
+inline bool isKnownNumericalNote(const NumericalNote& note)
+{
+    switch(note)
+    {
+    case NumericalNote::TENSOR_CORE:
+    case NumericalNote::DOWN_CONVERT_INPUTS:
+    case NumericalNote::REDUCED_PRECISION_REDUCTION:
+    case NumericalNote::FFT:
+    case NumericalNote::NONDETERMINISTIC:
+    case NumericalNote::WINOGRAD:
+    case NumericalNote::WINOGRAD_TILE_4x4:
+    case NumericalNote::WINOGRAD_TILE_6x6:
+    case NumericalNote::WINOGRAD_TILE_13x13:
+    case NumericalNote::STRICT_NAN_PROP:
         return true;
     default:
         return false;

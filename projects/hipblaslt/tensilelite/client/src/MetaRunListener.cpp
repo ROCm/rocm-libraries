@@ -32,21 +32,63 @@
 #include "ClientConfig.hpp"
 #include "ResultReporter.hpp"
 #include "RunListener.hpp"
+#include "TimingInstrumentation.hpp"
 
+#include <cxxabi.h>
 #include <cstddef>
+#include <cstdlib>
+#include <string>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_map>
 
 namespace TensileLite
 {
     namespace Client
     {
+        namespace
+        {
+            // Returns a stable "<prefix><ListenerType>" category string (ScopedTimer needs
+            // storage that outlives the timing buffer). Only called when timing is enabled.
+            // One cache per Tag so each call site only does a type_index lookup.
+            template <int Tag>
+            const char* listenerCategory(char const* prefix, RunListener const& listener)
+            {
+                static std::unordered_map<std::type_index, std::string> names;
+                auto idx = std::type_index(typeid(listener));
+                auto it  = names.find(idx);
+                if(it == names.end())
+                {
+                    int         status = 0;
+                    char*       dem    = abi::__cxa_demangle(typeid(listener).name(), nullptr, nullptr, &status);
+                    std::string name   = (status == 0 && dem) ? dem : typeid(listener).name();
+                    std::free(dem);
+                    // Strip the namespace: ':' is the field separator of the TIMING: lines.
+                    auto pos = name.rfind("::");
+                    if(pos != std::string::npos)
+                        name = name.substr(pos + 2);
+                    it = names.emplace(idx, std::string(prefix) + name).first;
+                }
+                return it->second.c_str();
+            }
+        }
+
         void MetaRunListener::addListener(std::shared_ptr<RunListener> listener)
         {
             if(!m_firstProblem)
                 throw std::runtime_error("Can't add listeners after benchmarking has begun.");
 
             listener->setReporter(m_reporter);
+            listener->setDevices(m_devices);
 
             m_listeners.push_back(listener);
+        }
+
+        void MetaRunListener::setDevices(std::vector<std::shared_ptr<DeviceContext>> const* devices)
+        {
+            m_devices = devices;
+            for(auto const& listener : m_listeners)
+                listener->setDevices(devices);
         }
 
         void MetaRunListener::setReporter(std::shared_ptr<ResultReporter> reporter)
@@ -99,7 +141,15 @@ namespace TensileLite
         void MetaRunListener::preSolution(ContractionSolution* const solution)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->preSolution(solution);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<0>("pre_solution_listener.", **iter));
+                    (*iter)->preSolution(solution);
+                }
+                else
+                    (*iter)->preSolution(solution);
+            }
         }
 
         void MetaRunListener::postSolution()
@@ -141,19 +191,26 @@ namespace TensileLite
         }
 
         void MetaRunListener::postWarmup(TimingEvents const& startEvents,
-                                         TimingEvents const& stopEvents,
-                                         hipStream_t const&  stream)
+                                         TimingEvents const& stopEvents)
         {
             for(auto iter = m_listeners.rbegin(); iter != m_listeners.rend(); iter++)
-                (*iter)->postWarmup(startEvents, stopEvents, stream);
+                (*iter)->postWarmup(startEvents, stopEvents);
         }
 
-        void MetaRunListener::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                              TimingEvents const&            startEvents,
-                                              TimingEvents const&            stopEvents)
+        void MetaRunListener::validateWarmups(std::vector<size_t> const& slots,
+                                              TimingEvents const&        startEvents,
+                                              TimingEvents const&        stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateWarmups(inputs, startEvents, stopEvents);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<1>("validate_warmups_listener.", **iter));
+                    (*iter)->validateWarmups(slots, startEvents, stopEvents);
+                }
+                else
+                    (*iter)->validateWarmups(slots, startEvents, stopEvents);
+            }
         }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -216,26 +273,33 @@ namespace TensileLite
                 (*iter)->setNumEnqueuesPerSync(count);
         }
 
-        void MetaRunListener::preEnqueues(hipStream_t const& stream)
+        void MetaRunListener::preEnqueues()
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->preEnqueues(stream);
+                (*iter)->preEnqueues();
         }
 
         void MetaRunListener::postEnqueues(TimingEvents const& startEvents,
-                                           TimingEvents const& stopEvents,
-                                           hipStream_t const&  stream)
+                                           TimingEvents const& stopEvents)
         {
             for(auto iter = m_listeners.rbegin(); iter != m_listeners.rend(); iter++)
-                (*iter)->postEnqueues(startEvents, stopEvents, stream);
+                (*iter)->postEnqueues(startEvents, stopEvents);
         }
 
-        void MetaRunListener::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                               TimingEvents const&            startEvents,
-                                               TimingEvents const&            stopEvents)
+        void MetaRunListener::validateEnqueues(std::vector<size_t> const& slots,
+                                               TimingEvents const&        startEvents,
+                                               TimingEvents const&        stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateEnqueues(inputs, startEvents, stopEvents);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<2>("validate_enqueues_listener.", **iter));
+                    (*iter)->validateEnqueues(slots, startEvents, stopEvents);
+                }
+                else
+                    (*iter)->validateEnqueues(slots, startEvents, stopEvents);
+            }
         }
 
         void MetaRunListener::finalizeReport()
