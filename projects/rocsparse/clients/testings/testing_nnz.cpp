@@ -85,13 +85,14 @@ void testing_nnz(const Arguments& arg)
     // The output is followed by sentinel entries that nnz must not change. They catch an
     // overrun of any length, including a one-entry overrun and MN == 0.
     //
-    static constexpr rocsparse_int nnz_tail     = 4;
-    static constexpr rocsparse_int nnz_sentinel = 0x5a5a5a5a;
+    static constexpr rocsparse_int nnz_tail      = 4;
+    static constexpr int           nnz_fill_byte = 0x5a;
 
     host_vector<T>             h_A(LD * N);
     host_vector<rocsparse_int> h_nnzPerRowColumn(MN);
     host_vector<rocsparse_int> hd_nnzPerRowColumn(MN + nnz_tail);
-    host_vector<rocsparse_int> h_nnzTail(nnz_tail, nnz_sentinel);
+    host_vector<rocsparse_int> h_nnzTail(nnz_tail);
+    memset(h_nnzTail.data(), nnz_fill_byte, sizeof(rocsparse_int) * nnz_tail);
     host_vector<rocsparse_int> h_nnzTotalDevHostPtr(1);
     host_vector<rocsparse_int> hd_nnzTotalDevHostPtr(1);
 
@@ -146,7 +147,7 @@ void testing_nnz(const Arguments& arg)
         // Pointer mode device for nnz and call.
         //
         CHECK_HIP_ERROR(
-            hipMemset(d_nnzPerRowColumn, 0x5a, sizeof(rocsparse_int) * (MN + nnz_tail)));
+            hipMemset(d_nnzPerRowColumn, nnz_fill_byte, sizeof(rocsparse_int) * (MN + nnz_tail)));
         CHECK_HIP_ERROR(hipMemset(d_nnzTotalDevHostPtr, 0xff, sizeof(rocsparse_int)));
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_nnz<T>(
@@ -176,7 +177,7 @@ void testing_nnz(const Arguments& arg)
         //
         rocsparse_int dh_nnz = -1;
         CHECK_HIP_ERROR(
-            hipMemset(d_nnzPerRowColumn, 0x5a, sizeof(rocsparse_int) * (MN + nnz_tail)));
+            hipMemset(d_nnzPerRowColumn, nnz_fill_byte, sizeof(rocsparse_int) * (MN + nnz_tail)));
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_nnz<T>(
             handle, dirA, M, N, descrA, d_A, LD, d_nnzPerRowColumn, &dh_nnz));
