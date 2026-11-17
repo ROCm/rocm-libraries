@@ -36,15 +36,19 @@ namespace rpptest {
 /*
 Reference model: audio arithmetic
 
-RPP op
+RPP ops
   rppt_audio_tensor_mul_scalar   (Audio / Arithmetic)
+  rppt_audio_tensor_add_tensor   (Audio / Arithmetic)
 
 Description
-  Multiplies every value of each sample by one scalar shared by the whole
-  batch. F32 only. Computed in double and stored once.
+  mul_scalar multiplies every value of each sample by one scalar shared by
+  the whole batch. add_tensor adds a per-sample scalar (srcPtr2 holds one
+  value per sample) to every value of that sample. F32 only. Computed in
+  double and stored once.
 
 Expression
-  dst = src * scalar
+  mul_scalar:  dst = src * scalar
+  add_tensor:  dst = src1 + src2[n]
 
 Notes
   - srcLengthTensor counts floats, not frames: both kernels walk that many
@@ -58,6 +62,13 @@ inline void audio_mul_scalar_reference(const Rpp32f* src, Rpp32f* dst, const Rpp
                                        const std::vector<Rpp32s>& lengths, Rpp32f scalar) {
     for_each_audio_element(desc, lengths, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t idx) {
         dst[idx] = static_cast<Rpp32f>(static_cast<double>(src[idx]) * scalar);
+    });
+}
+
+inline void audio_add_tensor_reference(const Rpp32f* src, const Rpp32f* addends, Rpp32f* dst,
+                                       const RpptDesc& desc, const std::vector<Rpp32s>& lengths) {
+    for_each_audio_element(desc, lengths, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t idx) {
+        dst[idx] = static_cast<Rpp32f>(static_cast<double>(src[idx]) + addends[n]);
     });
 }
 
