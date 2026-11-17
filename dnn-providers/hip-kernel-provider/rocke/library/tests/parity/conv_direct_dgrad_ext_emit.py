@@ -37,8 +37,9 @@
 # (mfma=True at wave_size 32, gfx1250): 5x5 and 7x7, 1 / 4 / 8 waves, the tall
 # 28- and 32-row tiles and shorter ones, every w_fold, fp16 and bf16, and a
 # 3x3 single pass; 68 (9x9: the fragments exceed the VGPR cap), 69 (wave32
-# on gfx950), 70 (wave64 on gfx1250) and 71 / 72 (fwd at stride 1 / 2: the
-# forward mode is wave64 only) all reject.
+# on gfx950) and 70 (wave64 on gfx1250) reject; 71 is the depthwise fwd at
+# stride 1 (the gfx1250 depthwise forward's kernel) and 72 (fwd at stride 2,
+# a wave64 mode) rejects.
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -625,8 +626,8 @@ _WMMA_WIN_CFGS = (
     (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", dict(block_waves=8, w_fold=2, prefetch_rows=2, block_h=14, **_W32)),
     # wave64 (the MFMA form) on gfx1250: both engines reject.
     (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx1250", dict(mfma=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14)),
-    # fwd (the rotated filter) at stride 1 and 2: the forward mode is wave64
-    # only, both engines reject.
+    # fwd (the rotated filter) at stride 1: the depthwise forward on the
+    # WMMA; at stride 2 (a wave64 mode) both engines reject.
     (2, 14, 14, 64, 3, 3, 1, "fp16", "gfx1250", dict(fwd=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14, **_W32)),
     (2, 14, 14, 64, 3, 3, 1, "bf16", "gfx1250", dict(fwd=True, out_stride=2, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14, **_W32)),
 )  # fmt: skip

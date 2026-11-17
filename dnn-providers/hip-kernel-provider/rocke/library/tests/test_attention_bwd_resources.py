@@ -12,6 +12,7 @@ missing.
 from __future__ import annotations
 
 import copy
+import os
 import struct
 
 import pytest
@@ -219,7 +220,44 @@ def test_agpr_copy_ceiling_model():
     assert (c.reads, c.writes) == (2 * 32 * 128 // 256, 0)
 
 
+# --------------------------------------------------------------------------- tools
+def test_find_objdump_accepts_relocated_rocm_lib_layout(tmp_path, monkeypatch):
+    executable = tmp_path / "lib" / "llvm" / "bin" / "llvm-objdump"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    monkeypatch.setenv("LLVM_OBJDUMP", "")
+    monkeypatch.delenv("ROCM_HOME", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    monkeypatch.setattr(res.shutil, "which", lambda _name: None)
+    assert res.find_objdump() == str(executable)
+    assert os.environ["LLVM_OBJDUMP"] == str(executable)
+
+
 # --------------------------------------------------------------------------- gate
+def test_validate_objdump_reports_execution_failure_once(monkeypatch):
+    def denied(*_args, **_kwargs):
+        raise PermissionError("not executable")
+
+    monkeypatch.setattr(res.subprocess, "run", denied)
+    assert "PermissionError" in res.validate_objdump("llvm-objdump")
+
+
+def test_validate_objdump_accepts_version_probe(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+
+    monkeypatch.setattr(res.subprocess, "run", run)
+    assert res.validate_objdump("llvm-objdump") is None
+    assert calls == [
+        (
+            ["llvm-objdump", "--version"],
+            {"check": True, "capture_output": True, "timeout": 60},
+        )
+    ]
+
+
 def test_gate_flags_copy_traffic_and_records_flavor():
     blob = _elf(META, _kd(128), "k0")
     g = res.evaluate_resource_gate(
@@ -233,7 +271,12 @@ def test_gate_flags_copy_traffic_and_records_flavor():
         flavor="llvm22",
         comgr="comgr3.0/rocm7.2",
     )
-    assert "agpr_copy_traffic" in g.failures and not g.passed and g.valid
+    assert (
+        "agpr_copy_traffic" in g.failures
+        and not g.passes_reference_policy
+        and g.matches_reference_toolchain
+        and g.valid
+    )
     rec = g.record()
     assert rec["flavor"] == "llvm22" and rec["q_loop_agpr_copies"]["reads"] == 1
 
@@ -243,7 +286,12 @@ def test_gate_is_invalid_off_the_production_flavor():
     g = res.evaluate_resource_gate(
         blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm20"
     )
-    assert not g.failures and not g.valid and not g.passed
+    assert (
+        not g.failures
+        and not g.matches_reference_toolchain
+        and not g.valid
+        and not g.passes_reference_policy
+    )
 
 
 @pytest.mark.parametrize(
@@ -310,6 +358,7 @@ def _compile_dense_gfx942(agpr_alloc=None):
         pytest.skip(f"comgr unavailable: {exc}")
 
 
+@pytest.mark.compiler_integration
 def test_compiled_code_object_resources_and_loop_copies():
     """The AGPR-reserving variant splits arch VGPR / AGPR and shows loop copies."""
     if res.find_objdump() is None:
@@ -476,6 +525,6 @@ def test_gate_is_invalid_with_a_non_production_comgr(monkeypatch):
         g = res.evaluate_resource_gate(
             blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm22", comgr=comgr
         )
-        assert g.valid is ok, comgr
+        assert g.matches_reference_toolchain is ok, comgr
     assert res.comgr_is_production("comgr3.0/rocm7.2")
     assert not res.comgr_is_production("comgr3.0/rocm7.21")
