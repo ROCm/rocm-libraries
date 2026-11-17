@@ -333,11 +333,6 @@ CACHE_WGRAD_DEEPK_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
     (64, 64, 512, 4, 4),
     (128, 128, 128, 4, 4),
 )
-# Arches where the deep-K geometries were measured and validated. The LDS fit
-# is enforced independently by is_valid_wgrad_spec (a 64x64x512 16-bit tile
-# pair is 128 KB; RDNA parts cap at 64 KB and the validator refuses them).
-# This set records the arches that were actually tested, not the LDS limit.
-CACHE_WGRAD_DEEPK_ARCHES: Tuple[str, ...] = ("gfx1250",)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
 # accumulators no longer fit the 256 AGPRs MFMA accumulates into, so the
@@ -676,9 +671,11 @@ def _geometries(
 
     ``direction`` selects the grid: wgrad gets the filter-shaped tile and warp
     extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
-    base grid; WMMA wgrad on the :data:`CACHE_WGRAD_DEEPK_ARCHES` then adds the
-    :data:`CACHE_WGRAD_DEEPK_GEOMETRIES` after it. It must be threaded through wherever a geometry list is built
-    for a direction, or the chunk bounds stop matching the list the worker
+    base grid; WMMA wgrad then adds the
+    :data:`CACHE_WGRAD_DEEPK_GEOMETRIES` after it; targets whose LDS cannot hold
+    them (a 64x64x512 16-bit tile pair is 128 KB) are filtered by
+    :func:`_spec_is_valid`, not by a per-arch list. It must be threaded through
+    wherever a geometry list is built for a direction, or the chunk bounds stop matching the list the worker
     walks.
     """
     tile_mn, warp_mn = _grid_axes(direction)
@@ -714,11 +711,7 @@ def _geometries(
         if atom is None or tile_k % atom.k:
             continue
         yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom
-    if (
-        direction == "wgrad"
-        and mma_family == "wmma"
-        and target.gfx in CACHE_WGRAD_DEEPK_ARCHES
-    ):
+    if direction == "wgrad" and mma_family == "wmma":
         atom = target.mma.select_largest_k(
             family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=16, n=16
         )
