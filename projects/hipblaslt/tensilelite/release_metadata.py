@@ -22,6 +22,7 @@ CMake runs this file to give the native client the same values:
 from __future__ import annotations
 
 import json
+from email.parser import Parser
 from pathlib import Path
 import re
 import runpy
@@ -31,7 +32,9 @@ from typing import Optional
 _COMPONENT_RELEASE_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){2}$")
 _ROCM_IDENTITY_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){2}(?:[a-z0-9.]+)?$")
 _SOURCE_ROOT = Path(__file__).resolve().parent
-_source_revision = runpy.run_path(str(_SOURCE_ROOT / "tensilelite" / "_source_revision.py"))
+_source_revision = runpy.run_path(
+    str(_SOURCE_ROOT / "tensilelite" / "_source_revision.py")
+)
 
 
 def canonical_rocm_identity(value: str) -> str:
@@ -52,7 +55,9 @@ def canonical_rocm_identity(value: str) -> str:
 def component_version() -> str:
     value = (_SOURCE_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     if not _COMPONENT_RELEASE_RE.fullmatch(value):
-        raise RuntimeError("TensileLite VERSION must contain an X.Y.Z release; " f"got {value!r}")
+        raise RuntimeError(
+            "TensileLite VERSION must contain an X.Y.Z release; " f"got {value!r}"
+        )
     return value
 
 
@@ -64,7 +69,9 @@ def render_build_info(revision: Optional[str]) -> str:
     return _source_revision["render_build_info"](revision)
 
 
-def distribution_version(revision: Optional[str], rocm_identity: Optional[str] = None) -> str:
+def distribution_version(
+    revision: Optional[str], rocm_identity: Optional[str] = None
+) -> str:
     """Return the distribution version.
 
     With a ROCm identity: ``<component>+rocm<identity>`` or, for a development
@@ -75,8 +82,25 @@ def distribution_version(revision: Optional[str], rocm_identity: Optional[str] =
     if rocm_identity:
         identity = canonical_rocm_identity(rocm_identity)
         tag = "devrocm" if ".dev" in identity else "rocm"
-        return f"{component_version()}+{tag}{identity}"
-    return _source_revision["distribution_version"](component_version(), revision)
+        version = f"{component_version()}+{tag}{identity}"
+    else:
+        version = _source_revision["distribution_version"](
+            component_version(), revision
+        )
+    # A saved sdist owns both its source stamp and published distribution version.
+    # Keep the backend and native/canonical metadata query on the same authority.
+    pkg_info = _SOURCE_ROOT / "PKG-INFO"
+    if not pkg_info.is_file():
+        return version
+    recorded = Parser().parsestr(pkg_info.read_text(encoding="utf-8"))["Version"]
+    if not recorded:
+        raise RuntimeError("The saved sdist PKG-INFO contains no Version")
+    if rocm_identity and recorded != version:
+        raise RuntimeError(
+            f"TENSILELITE_ROCM_VERSION={rocm_identity} gives {version}, but this sdist was made "
+            f"as {recorded}"
+        )
+    return recorded
 
 
 def main(argv: list[str]) -> int:
@@ -85,7 +109,11 @@ def main(argv: list[str]) -> int:
         "{version [--rocm-identity IDENTITY] | metadata [--rocm-identity IDENTITY] | source-revision}"
     )
     identity = None
-    if argv[:1] in (["version"], ["metadata"]) and len(argv) == 3 and argv[1] == "--rocm-identity":
+    if (
+        argv[:1] in (["version"], ["metadata"])
+        and len(argv) == 3
+        and argv[1] == "--rocm-identity"
+    ):
         identity = argv[2] or None
         argv = argv[:1]
     if len(argv) != 1 or argv[0] not in ("version", "source-revision", "metadata"):
