@@ -21,10 +21,10 @@ Section 1.5 records their scope and validation. TheRock PRs and the reply to
 archana remain pending. TheRock branches merged cleanly onto `main` as checked
 on 2026-11-11; a full TheRock build has not run.
 
-**Local review update (2026-11-17):** #11018 and #11019 review batches are
-committed locally. All six #15579 resolutions are implemented or recorded in
-local documentation/drafts, and descendants are restacked without updating
-`develop`. No changes from these review batches have been pushed or posted.
+**Review update (2026-11-17):** #11018 and #11019 review batches are
+implemented. All six #15579 resolutions and the #15580 installed binding
+fixture correction are implemented or documented. The 17-branch stack is
+restacked on `develop` at `1a219615ebf0`.
 Complete Python SDK native-build support remains follow-up work; the runtime
 SDK adapter is already implemented separately. Section 1.5 records the #15579
 validation and its limits. The preceding status and SHA table are historical.
@@ -988,6 +988,11 @@ Where the implementation went beyond or differs from section 1.2:
   the owner task/target suite passed 51 cases. Final stack source/binding/runtime
   validation passed 565 cases with one optional installed-artifact-root check
   skipped. It does not cover the separate #15580 installed binding fixture issue.
+  The subsequent #15580 correction finds the fixture helper in the actually
+  loaded package. After rebasing on `develop` at `1a219615ebf0`, all 565
+  source/binding/runtime cases pass (one optional artifact-root check skipped),
+  and all 82 binding cases pass against a real installed wheel with separately
+  copied tests. The original installed fixture reproduces 47 failures.
 
 ---
 
