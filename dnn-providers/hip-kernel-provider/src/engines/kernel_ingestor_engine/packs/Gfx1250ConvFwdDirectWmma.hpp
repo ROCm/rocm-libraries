@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "engines/kernel_ingestor_engine/packs/Gfx1250ConvFwdDirect.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx1250ConvFwdGstreamWmma.hpp"
 
 /**
  * @file Gfx1250ConvFwdDirectWmma.hpp
@@ -50,7 +51,6 @@ namespace direct_fwd_wmma
 
 constexpr int64_t VGPR_BUDGET = 512; ///< FWD_WMMA_VGPR_BUDGET
 constexpr int64_t POLY_ZERO_LANE_CH = 8;
-constexpr double MIN_TILE_EFFICIENCY = 0.5;
 
 /// wmma_fwd_halo_extent: input rows (columns) a tile of @p tile output rows (columns) reads.
 inline int64_t haloExtent(int64_t stride, int64_t tile, int64_t k, int64_t dil)
@@ -264,13 +264,14 @@ struct FwdWmmaSpec
         const auto nWt = ceilDiv(vp.wo(), k.tileW);
         return ceilDiv(vp.n, k.tileN) * groupsEff() * nHt * nWt * nKt;
     }
-    /// fwd_wmma_tile_efficiency: the share of the padded tile grid that is real work.
-    double tileEfficiency() const
+    /// fwd_wmma_tile_efficiency below the direct_spec_for_problem floor (0.5): the share of
+    /// the padded tile grid that is real work, compared exactly on the integers.
+    Refusal tileEfficiencyRefusal() const
     {
         const auto work = vp.n * vp.ho() * vp.wo() * kpgEff();
         const auto padded = alignUp(vp.n, k.tileN) * alignUp(vp.ho(), k.tileH())
                             * alignUp(vp.wo(), k.tileW) * alignUp(kpgEff(), k.blockK());
-        return static_cast<double>(work) / static_cast<double>(padded);
+        return tileEfficiencyReason(work, padded);
     }
 };
 
@@ -278,30 +279,7 @@ struct FwdWmmaSpec
 /// always pass on gfx1250 but the spec's own wave size.
 inline Refusal fwdWmmaGate(const DirectFwdWmmaKernel& k, const DirectProblem& p)
 {
-    if(k.waveSize != GFX1250_WAVE_SIZE)
-    {
-        return "direct_fwd_wmma is a wave32 kernel";
-    }
-    const std::initializer_list<std::pair<const char*, int64_t>> dims = {{"N", p.n},
-                                                                         {"H", p.h},
-                                                                         {"W", p.w},
-                                                                         {"groups", p.groups},
-                                                                         {"cpg", p.cpg},
-                                                                         {"kpg", p.kpg},
-                                                                         {"KH", p.kh},
-                                                                         {"KW", p.kw}};
-    for(const auto& [name, value] : dims)
-    {
-        if(value < 1)
-        {
-            return std::string(name) + " must be >= 1";
-        }
-    }
-    if(p.padW < -1)
-    {
-        return "pad_w must be -1 (PAD) or a column padding of at least 0";
-    }
-    return std::nullopt;
+    return wmmaFwdGate(p, k.waveSize, /*perAxisPad=*/true);
 }
 
 /// The strided_view / fold_n rules of fwd_wmma_reason, on the real problem.
@@ -673,11 +651,7 @@ inline Refusal refuse(const DirectFwdWmmaKernel& kernel, const Problem& problem)
     {
         return why;
     }
-    if(spec.tileEfficiency() < direct_fwd_wmma::MIN_TILE_EFFICIENCY)
-    {
-        return "tile efficiency < 0.5 on this shape";
-    }
-    return std::nullopt;
+    return spec.tileEfficiencyRefusal();
 }
 
 inline Plan plan(const DirectFwdWmmaKernel& kernel, const Problem& problem)
