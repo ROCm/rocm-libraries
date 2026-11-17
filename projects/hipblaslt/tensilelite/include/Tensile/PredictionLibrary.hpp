@@ -325,7 +325,9 @@ namespace TensileLite
                         continue;
                     }
 #if ORIGAMI_ENABLE_NN
-                    if(std::isnan(r.latency))
+                    // An analytical result has a latency and an NN result has a score. An entry
+                    // with neither was not scored by the model, so it only counts as a fallback.
+                    if(std::isnan(r.latency) && std::isnan(r.score))
                         continue;
 #endif
                     considerSolution(solution_list[r.config.index].second);
@@ -336,6 +338,11 @@ namespace TensileLite
                 }
 
 #if ORIGAMI_ENABLE_NN
+                // No scored entry produced a supported solution, so take the unscored entries in
+                // the order rank_configs returned them, which is input order. This is deliberate.
+                // It matches the analytical path, where rank_configs ranks the configs it rejected
+                // when it rejected every candidate, so the caller gets a usable kernel rather
+                // than an empty list.
                 if(rv.empty())
                 {
                     for(const auto& r : prediction_result)

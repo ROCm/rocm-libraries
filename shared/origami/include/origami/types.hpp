@@ -30,6 +30,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <ostream>
 #include <string>
 #include <tuple>
@@ -731,13 +732,21 @@ struct config_t {
 };
 
 /**
- * @brief Latency prediction result given kernel configuration.
+ * @brief Prediction result for one kernel configuration.
  *
- * Combines a configuration with its estimated latency.
+ * Exactly one of `latency` and `score` carries the ranking, depending on the model:
+ *  - analytical model: `latency` is the estimated time, lower is better, and `score` is NaN;
+ *  - NN model: `score` is the model score, higher is better, and `latency` is NaN. A score is
+ *    a unitless ranking value and may be negative, so it is not a time and must not be passed
+ *    to compute_perf_gflops. An entry the model did not score has both fields NaN and is
+ *    listed after the scored ones, in input order.
+ *
+ * rank_configs returns results best first in both cases.
  */
 struct prediction_result_t {
   double latency;
   config_t config;
+  double score = std::numeric_limits<double>::quiet_NaN();
 };
 
 /**

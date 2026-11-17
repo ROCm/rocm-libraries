@@ -437,6 +437,17 @@ NN routing is controlled by `rank_options_t` fields and environment variables. E
 | `nn` | ML ranking only; throws if no model resolves or inference fails |
 | `nn_fallback` | ML when a model is available; otherwise analytical |
 
+#### Result fields
+
+Each `prediction_result_t` returned by `rank_configs` carries the ranking in one of two fields, and results are always ordered best first:
+
+| Ranked by | `latency` | `score` |
+|-----------|-----------|---------|
+| Analytical model | Estimated time, lower is better | NaN |
+| NN model | NaN | Model score, higher is better; unitless and may be negative |
+
+An entry the NN model did not score has both fields NaN and is listed after the scored ones, in input order. Do not pass a score to `compute_perf_gflops`. Because `ORIGAMI_INFERENCE_MODE` is applied inside `rank_configs`, code that reads `latency` from `rank_configs` or `select_config` gets NaN when it runs with that variable set to `nn` or `nn_fallback` and a model resolves. Check `score` as well, or leave the variable unset.
+
 #### Backend selection
 
 | `ORIGAMI_NN_BACKEND` | Behavior |
@@ -464,7 +475,7 @@ Only one directory is searched. When a hint directory is given, `ORIGAMI_NN_WEIG
 
 ### hipBLASLt Integration
 
-The default inference mode is analytical, so hipBLASLt reaches the tilewright path only when `ORIGAMI_INFERENCE_MODE` is `nn` or `nn_fallback`. `PredictionLibrary` does not parse any weights while a logic file loads. It records the logic stem and directory, and loads the model on the first ranking call whose resolved inference mode is `nn` or `nn_fallback`. A missing manifest is cached as a failed lookup for the life of the process, so place the weights before the first lookup.
+The default inference mode is analytical, so hipBLASLt reaches the tilewright path only when `ORIGAMI_INFERENCE_MODE` is `nn` or `nn_fallback`. `PredictionLibrary` does not parse any weights while a logic file loads. It records the logic stem and directory, and loads the model on the first ranking call whose resolved inference mode is `nn` or `nn_fallback`. A missing manifest is cached as a failed lookup for the life of the process, so place the weights before the first lookup. `PredictionLibrary` skips results that have neither a latency nor a score, and if no scored result gives a supported solution it falls back to the unscored ones in input order, as the analytical path does when it rejects every candidate.
 
 Example: run hipblaslt-bench with tilewright NN fallback on gfx950 bf16 TN layout:
 

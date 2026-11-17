@@ -28,7 +28,7 @@ model_handle_t first_valid(model_handle_t a, model_handle_t b, model_handle_t c)
 
 bool any_scored(const std::vector<prediction_result_t>& results) {
   for (const auto& r : results) {
-    if (std::isfinite(r.latency)) return true;
+    if (std::isfinite(r.score)) return true;
   }
   return false;
 }
@@ -60,9 +60,11 @@ class TilewrightRecommender final : public IRecommender {
     const double kNaN = std::numeric_limits<double>::quiet_NaN();
     std::vector<prediction_result_t> results;
     results.reserve(tw_results.size());
+    // The model produces a score, not a time, so latency stays NaN. An unscored entry has
+    // neither a latency nor a score.
     for (const twrec::rank_entry_t& r : tw_results) {
-      const double latency = r.scored ? -r.score : kNaN;
-      results.push_back(prediction_result_t{latency, configs[r.config_index]});
+      results.push_back(
+          prediction_result_t{kNaN, configs[r.config_index], r.scored ? r.score : kNaN});
     }
     return results;
   }

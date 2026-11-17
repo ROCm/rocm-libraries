@@ -221,7 +221,8 @@ NB_MODULE(origami, m) {
   nanobind::class_<origami::prediction_result_t>(m, "prediction_result_t")
       .def(nanobind::init<>())
       .def_rw("latency", &origami::prediction_result_t::latency)
-      .def_rw("config", &origami::prediction_result_t::config);
+      .def_rw("config", &origami::prediction_result_t::config)
+      .def_rw("score", &origami::prediction_result_t::score);
 
   nanobind::class_<origami::gemm::context_t>(m, "context_t")
       .def(nanobind::init<>())
