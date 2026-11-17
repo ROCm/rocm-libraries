@@ -32,7 +32,7 @@ import time
 from joblib import Parallel, delayed
 from joblib import cpu_count as lokyCpuCount
 
-from .Utilities import tqdm
+from .Utilities import printWarning, tqdm
 
 # All pools started concurrently by one machine's pytest-xdist workers together use at most this
 # many processes per available CPU; a single process never uses more than one per CPU.
@@ -110,7 +110,16 @@ def shutdownWorkerPool():
         from joblib.externals.loky import reusable_executor
     except ImportError:  # pragma: no cover - joblib without loky
         return
-    executor = getattr(reusable_executor, "_executor", None)
+    # loky has no public call for "end the reusable pool", so this reaches its
+    # module-level executor. Say so if a joblib upgrade moves it, rather than
+    # silently keeping every worker alive.
+    if not hasattr(reusable_executor, "_executor"):
+        printWarning(
+            "loky's reusable_executor has no _executor attribute; the worker "
+            "pool is not recycled between phases"
+        )
+        return
+    executor = reusable_executor._executor
     if executor is None:
         return
     executor.shutdown(wait=True, kill_workers=False)

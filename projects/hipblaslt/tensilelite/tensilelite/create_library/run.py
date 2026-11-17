@@ -918,6 +918,9 @@ def writeSolutionsAndKernelsTCL(
             slim = processed_kernel._replace(src=None, header=None)
             # Hand the 20-100 MiB this kernel's module tree and text occupied
             # back to the OS instead of letting it inflate the worker's RSS.
+            # With CpuThreads 1 this runs in the parent beside the source
+            # compile thread; glibc's malloc_trim takes the arena locks, so
+            # that is safe and costs well under a millisecond.
             del processed_kernel, written_kernel, assembled_kernel
             releaseFreedMemory()
             return slim
