@@ -546,6 +546,27 @@ void case_vector_builders_refuse_a_scalar_first_operand()
         "vector.cmp failed - first operand type='i32', expected a vector type");
 }
 
+/* An i1 is a C++ bool in HIP, where ~ promotes to int (~true is -2, still
+ * true): the HIP lowering negates an i1 with ! and keeps ~ for the other
+ * integers (test_lshr.py). */
+void case_hip_not_is_logical_on_i1()
+{
+    for(const rocke_type_t* type : {rocke_i1(), rocke_i32()})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_hip_not");
+        rocke_value_t* negated = rocke_b_lnot(&b, rocke_b_param(&b, "value", type, nullptr));
+        rocke_b_ret(&b);
+        const bool is_i1 = type == rocke_i1();
+        const std::string want = std::string(is_i1 ? "bool " : "int ") + (negated->name + 1) + " = "
+                                 + (is_i1 ? "!" : "~") + "value;";
+        const std::string hip = lower_hip(&b);
+        EXPECT(hip.find(want) != std::string::npos,
+               std::string("HIP not of ") + type->name + ": want '" + want + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
 void expect_builder_refusal(bool add, const rocke_type_t* ta, const rocke_type_t* tb)
 {
     rocke_ir_builder_t b;
@@ -1324,6 +1345,7 @@ int main(int argc, char** argv)
     case_mixed_operand_types();
     case_builder_refuses_an_operand_with_no_type();
     case_vector_builders_refuse_a_scalar_first_operand();
+    case_hip_not_is_logical_on_i1();
     case_compares_refused_by_the_ir_rule();
     case_compare_builders_refuse_what_the_ir_rule_refuses();
     case_builder_refusals();

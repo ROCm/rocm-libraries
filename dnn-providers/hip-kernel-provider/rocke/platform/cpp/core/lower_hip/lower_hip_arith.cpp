@@ -467,17 +467,19 @@ static rocke_status_t rocke_h_op_arith_umin(rocke_h_lowerer_t* lw, const rocke_o
     return h_select_by_compare(lw, op, "<");
 }
 
-/* def _op_arith_not(self, op):
- *     (v,) = op.operands
- *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = ~{_name(v)};") */
+/* Python _op_arith_not: bitwise NOT, logical NOT on an i1. */
 static rocke_status_t rocke_h_op_arith_not(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
+    /* An i1 is a C++ bool, where ~ promotes to int (~true is -2, still true),
+     * so an i1 takes ! (Python _op_arith_not). */
+    const char* negate = rocke_i_type_is(r->type, "i1") ? "!" : "~";
     rocke_h_emitf(lw,
-                  "%s %s = ~%s;",
+                  "%s %s = %s%s;",
                   rocke_h_type_to_hip(lw, r->type),
                   rocke_h_name(lw, r),
+                  negate,
                   rocke_h_name(lw, v));
     return lw->status;
 }
