@@ -359,10 +359,12 @@ rocsparse_status rocsparse::csrmv_partition<I, J>::compute(rocsparse_handle hand
     // Stream
     hipStream_t stream = handle->stream;
 
-    // Temporary arrays to hold device data
+    // Temporary arrays to hold device data. hipMemcpyDefault, unlike
+    // hipMemcpyDeviceToHost, also accepts row pointers in host memory that HIP
+    // did not allocate, which unified memory allows.
     this->row_ptr.resize(m + 1);
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        this->row_ptr.data(), csr_row_ptr, sizeof(I) * (m + 1), hipMemcpyDeviceToHost, stream));
+        this->row_ptr.data(), csr_row_ptr, sizeof(I) * (m + 1), hipMemcpyDefault, stream));
 
     // Wait for host transfer to finish
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
