@@ -25,8 +25,12 @@
  *******************************************************************************/
 #pragma once
 
-// Minimal <type_traits> definitions for runtime compilation without a host C++ standard library.
-#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<type_traits>)
+// Minimal <type_traits> for runtime compilation. Always used instead of the host STL: a host STL
+// that the runtime compiler can see may not be parseable by the device compiler. An
+// already-included real <type_traits> is respected, as a second definition would clash. Extend this
+// fallback when a kernel needs a trait that is missing here.
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_TYPE_TRAITS) && \
+    !defined(_LIBCPP_TYPE_TRAITS)
 
 namespace std {
 

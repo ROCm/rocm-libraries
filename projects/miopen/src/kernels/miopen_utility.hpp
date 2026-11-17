@@ -25,8 +25,9 @@
  *******************************************************************************/
 #pragma once
 
-// Minimal std::forward for runtime compilation without a host C++ standard library.
-#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<utility>)
+// Minimal std::forward for runtime compilation, never using the host C++ standard library (see
+// miopen_type_traits.hpp). An already-included real <utility> is respected.
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_UTILITY) && !defined(_LIBCPP_UTILITY)
 
 #include "miopen_type_traits.hpp" // std::remove_reference
 
