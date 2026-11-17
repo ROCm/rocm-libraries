@@ -568,10 +568,10 @@ The counted backward synchronization split is the reference implementation:
 fast validator/model/mutation contracts remain in source discovery; the
 exhaustive IR/LDS matrix and pinned representative compile/final-ISA/resource
 subset are explicit source-runner stages and registered installed CTests. The
-new CTests start at comprehensive/full so scheduled coverage owns them without
-adding work to quick/standard pre-merge and post-merge runs. The scheduled
-TheRock job does not build rocKE yet
-([§5.0.2](#502-ci-shards-and-rocke-item-sharding)). Fast
+new CTests start at comprehensive/full, the scheduled tiers, so they add no
+work to quick/standard pre-merge and post-merge runs;
+[§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI jobs run
+comprehensive and full today. Fast
 counted/resource files remain source-runner coverage rather than expanding the
 existing quick attention CTest. The compiler gate preserves the
 existing resource-table qualification:
@@ -863,19 +863,22 @@ State the reason for a quick addition in the pull request.
 the CI shards item by item ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)).
 
 **comprehensive and full** are for explicit resource gates and other
-scheduled-only entries. Today no TheRock job that runs them builds rocKE
-([§5.0.2](#502-ci-shards-and-rocke-item-sharding)), so an installed entry
-placed there runs only in developer runs; say so in the pull request. Do not
-move a test there to make room.
+scheduled-only entries. [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says
+which CI jobs run these tiers today; say in the pull request where an installed
+entry placed there runs.
+Do not move a test there to make room.
 
 **Until existing entries are re-tiered.** Most installed entries are listed
 under quick today: every `rocke_pytest_<part>`, `rocke_tiling_pytest`,
 `rocke_tiling_gpu_pytest` and most library entries. A new file under
 `platform/tests`, under the tiling tests, or under
 `library/tests/dispatch/attention/` or `library/tests/sdpa/` joins one of them
-with no edit, so it runs in quick: `rocke_library_attention_pytest` and
-`rocke_library_sdpa_pytest` collect those two directories whole. Another
-library file runs once it is added to an entry's file list.
+with no edit, so it runs in quick. The exception is
+`platform/tests/instances/differential/`: only its golden check is installed,
+so a new test file there runs only in `tests/run_all.py`.
+`rocke_library_attention_pytest` and `rocke_library_sdpa_pytest` collect the two
+library directories whole. Another library file runs once it is added to an
+entry's file list.
 Such a test may stay in a quick entry only if each item is within Q2 and the
 change adds at most Q3 to quick. Otherwise register a standard entry, modeled on
 `rocke_ctest_shard_pytest` in `platform/CMakeLists.txt`:
@@ -1080,8 +1083,10 @@ The tree's `conftest.py` says which tests carry the `gpu` marker.
 [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI job runs which
 tier. A quick entry carries every tier's label, so every TheRock job that
 builds rocKE runs it. A comprehensive entry carries only the comprehensive and
-full labels, and the only TheRock job that runs comprehensive does not build
-rocKE yet, so **no CI job runs the visualization tests today**. `tests/run_all.py` does not run them
+full labels, so it runs only in the jobs
+[§5.0.2](#502-ci-shards-and-rocke-item-sharding) lists for those tiers, and none
+of them runs this installed entry today: **no CI job runs the visualization
+tests**. `tests/run_all.py` does not run them
 either (it collects `platform/tests`). Run them before merging a change to the visualization
 package, from `platform/`:
 

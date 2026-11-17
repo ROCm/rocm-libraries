@@ -107,8 +107,8 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
   reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Test placement** — place each new or moved test by
   [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test),
-  in an item-sharded entry at the tier it gives: standard by default, quick
-  only for smoke.
+  at the tier and in the entry it gives: standard by default, quick only for
+  smoke.
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
