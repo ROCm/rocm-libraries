@@ -129,7 +129,7 @@ jobs:
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
       # Unset: the strict-mode check falls back to the runner name's -gpuN.
-      # --memory is this job's memory budget, not just a runaway guard: RUNNERS_PER_HOST=4
+      # --memory is this job's memory budget, not just a runaway guard: GPUS_PER_HOST=4
       # of these share one ~499 GiB machine, so the cap has to be near host/4 for four
       # concurrent jobs to fit. 110g leaves ~59 GiB for the OS and Docker. A larger cap
       # is not a real boundary: a job can sit under it while the host still goes OOM,
@@ -158,6 +158,8 @@ jobs:
       run:
         shell: bash
     env:
+      # GPUs on this host, each with its own runner: the jobs share the host's CPUs.
+      GPUS_PER_HOST: "4"
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
       # The pinned ROCm SDK nightly; the install and the compiler check both read it.
@@ -345,8 +347,6 @@ jobs:
           # gtest shards sharing the GPU, so one shard's CPU reference checks overlap
           # another's GPU work.
           HIPBLASLT_TEST_SHARDS: "4"
-          # Runners (one per GPU) sharing this host's CPUs.
-          RUNNERS_PER_HOST: "4"
         run: |
           set -o pipefail
           # The CPU reference's OpenMP and OpenBLAS pools start one thread per host CPU by
@@ -354,7 +354,7 @@ jobs:
           # runs ~7x slower. Split the CPUs between all shards instead. BLIS is capped at
           # 8 threads in-process (blis_interface.cpp), but only while OMP_NUM_THREADS is
           # unset, so keep that cap here.
-          T=$(( $(nproc) / (RUNNERS_PER_HOST * HIPBLASLT_TEST_SHARDS) ))
+          T=$(( $(nproc) / (GPUS_PER_HOST * HIPBLASLT_TEST_SHARDS) ))
           [ "$T" -ge 1 ] || T=1
           export OMP_NUM_THREADS=$T OPENBLAS_NUM_THREADS=$T BLIS_NUM_THREADS=$(( T < 8 ? T : 8 ))
           cd projects/hipblaslt
@@ -517,8 +517,6 @@ jobs:
         if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
-          # Runners (one per GPU) sharing this host's CPUs.
-          RUNNERS_PER_HOST: "4"
         run: |
           set -o pipefail
           cd projects/hipblaslt/tensilelite
@@ -543,14 +541,9 @@ jobs:
           # Per-test timeout: decouple_pgr_tdm_fuse_gfx1250.yaml's sweep (#12825) runs past 600 s.
           # Each worker's kernel-generation pool starts one process per CPU it may run on
           # (CpuThreads: -1). With all host CPUs visible, 3 workers' pools at once filled
-          # the job's 110 GiB memory limit; pin the step to this GPU's share of the CPUs.
-          read -r -a cpus <<< "$(python3 -c 'import os; print(*sorted(os.sched_getaffinity(0)))')"
-          per=$(( ${#cpus[@]} / RUNNERS_PER_HOST ))
-          [ "$per" -ge 1 ] || per=1
-          slot=$(( ROCR_VISIBLE_DEVICES % RUNNERS_PER_HOST ))
-          mine=$(IFS=,; echo "${cpus[*]:slot*per:per}")
-          echo "TensileLite CPUs (${per} of ${#cpus[@]}): ${mine}"
-          taskset -c "$mine" \
+          # the job's 110 GiB memory limit, so run on this GPU's share of the CPUs.
+          # Locally: GPUS_PER_HOST=4 ROCR_VISIBLE_DEVICES=<gpu> gpu_cpu_slice.py -- <command>
+          python3 "$GITHUB_WORKSPACE/.github/scripts/gpu_cpu_slice.py" -- \
           tox -v -e py3 -- tensilelite/Tests -m common "${K_ARG[@]}" \
             --timeout=1200 -n 4 -rfxX 2>&1 \
             | sed -E -e 's/ in [0-9]+(\.[0-9]+)?s\b//g' -e 's/ \([0-9]+:[0-9]{2}:[0-9]{2}\)//g' \
