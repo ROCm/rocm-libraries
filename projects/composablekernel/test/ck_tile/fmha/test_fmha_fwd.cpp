@@ -3608,12 +3608,11 @@ TEST_P(PagedSplitKV, DataTypeConfig)
     CHECK_SPLITKV_RESULT(result);
 }
 
-// Paged KV combined with split-K. `SplitKV` above never pages and `PagedKV`
-// never splits, so the combination is otherwise never exercised. Pages stay at
-// 128 and above, like `PagedKV`: only gfx1100 has a tile that carries the
-// cross-page merge, and this suite builds for gfx9 and gfx12, where the runner
-// rejects anything smaller.
-class PagedSplitKV
+// Paged split-kv over both K/V layouts. `PagedSplitKV` above keeps i_perm
+// fixed; this suite adds that axis. Pages stay at 128 and above, like
+// `PagedKV`: smaller pages need the cross-page merge that only the gfx1100
+// tile carries, and test_fmha_fwd_splitkv_gfx1100.cpp covers those.
+class PagedSplitKVLayout
     : public TestWithParam<std::tuple<std::tuple<int, int>,
                                       bool,
                                       mode_enum,
@@ -3622,10 +3621,10 @@ class PagedSplitKV
 {
 };
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(PagedSplitKV);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(PagedSplitKVLayout);
 
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         PagedSplitKV,
+                         PagedSplitKVLayout,
                          Combine(SplitKVHDimValues,
                                  Bool(), // layouts of k and v controlled by i_perm
                                  ModeValues,
@@ -3633,7 +3632,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                  Values(std::tuple{2, 3, 1, 200, 1024, "0"},
                                         std::tuple{2, 2, -1, 128, 2000, "t:128,128"})));
 
-TEST_P(PagedSplitKV, DataTypeConfig)
+TEST_P(PagedSplitKVLayout, DataTypeConfig)
 {
     auto [hdims, i_perm, mode, page_block_size, dims_mask]     = GetParam();
     auto [hdim_q, hdim_v]                                      = hdims;
