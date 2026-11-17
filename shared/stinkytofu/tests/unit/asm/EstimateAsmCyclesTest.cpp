@@ -1221,3 +1221,198 @@ TEST_F(EstimateAsmCyclesTest, AnalysisDoesNotMutateIROrMetadata) {
         << "EstimateAsmCyclesAnalysis must not publish total-cycles function "
            "metadata as a side effect of AM.getResult().";
 }
+
+// Prologue blocks, including a peeled InitC clone whose label contains
+// LoopBeginL, sum into preloop. The primary loop is the range from
+// label_LoopBeginL through the block that branches back to it, even when that
+// back-edge is missing from the CFG. The tail and epilogue after that branch
+// sum into postloop.
+TEST_F(EstimateAsmCyclesTest, SplitsPreLoopMainLoopAndPostLoop) {
+    BasicBlock* init =
+        func->createBasicBlockBefore(loopBB, "label_InitCIterWmma_label_LoopBeginL_0");
+    BasicBlock* pre = func->createBasicBlockBefore(init, "prologue");
+    BasicBlock* body = func->createBasicBlockAfter(loopBB, "loop_body");
+    BasicBlock* tail = func->createBasicBlock("label_TailLoopBeginL");
+    BasicBlock* post = func->createBasicBlock("epilogue");
+
+    auto add = [&](BasicBlock* bb, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        inst->addDestReg(StinkyRegister("v", 0, 1));
+        inst->addSrcReg(StinkyRegister("v", 1, 1));
+        inst->addSrcReg(StinkyRegister("v", 2, 1));
+        inst->issueCycles = issueCycles;
+    };
+    add(pre, 3);
+    add(init, 4);
+    add(loopBB, 5);
+    add(body, 2);
+    add(tail, 6);
+    add(post, 7);
+
+    // Back-edge instruction with no CFG edge. The pass must still close the
+    // loop on this branch. Loop-body accounting stops before counting it.
+    {
+        AsmIRBuilder builder(*body, arch);
+        StinkyInstruction* branch = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        branch->addModifier(LabelData("label_LoopBeginL"));
+        branch->issueCycles = 1;
+    }
+    func->setGemmTileConfig(gemmConfig);
+
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    EXPECT_EQ(phases.preLoopCycles, 7u);
+    EXPECT_EQ(phases.mainLoopCycles, 7u);
+    EXPECT_EQ(phases.postLoopCycles, 13u);
+}
+
+// Two post-loop edges join again. The phase total is the heavier path, not the
+// sum of both sides.
+TEST_F(EstimateAsmCyclesTest, PostLoopLongestPathKeepsHeavierEdge) {
+    BasicBlock* fork = func->createBasicBlockAfter(loopBB, "fork");
+    BasicBlock* light = func->createBasicBlockAfter(fork, "light");
+    BasicBlock* heavy = func->createBasicBlockAfter(light, "heavy");
+    BasicBlock* join = func->createBasicBlockAfter(heavy, "join");
+
+    auto add = [&](BasicBlock* bb, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        inst->addDestReg(StinkyRegister("v", 0, 1));
+        inst->addSrcReg(StinkyRegister("v", 1, 1));
+        inst->addSrcReg(StinkyRegister("v", 2, 1));
+        inst->issueCycles = issueCycles;
+    };
+    add(loopBB, 5);
+    add(fork, 1);
+    add(light, 4);
+    add(heavy, 10);
+    add(join, 3);
+
+    {
+        AsmIRBuilder builder(*loopBB, arch);
+        StinkyInstruction* back = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        back->addModifier(LabelData("label_LoopBeginL"));
+        back->issueCycles = 1;
+    }
+    {
+        AsmIRBuilder builder(*fork, arch);
+        StinkyInstruction* toHeavy = builder.create(getMCIDByUOp(GFX::s_cbranch_scc1, arch));
+        toHeavy->addModifier(LabelData("heavy"));
+        toHeavy->issueCycles = 0;
+    }
+    {
+        AsmIRBuilder builder(*light, arch);
+        StinkyInstruction* toJoin = builder.create(getMCIDByUOp(GFX::s_branch, arch));
+        toJoin->addModifier(LabelData("join"));
+        toJoin->issueCycles = 0;
+    }
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    EXPECT_EQ(phases.preLoopCycles, 0u);
+    EXPECT_EQ(phases.mainLoopCycles, 5u);
+    // fork -> heavy -> join. The light edge is the shorter side.
+    EXPECT_EQ(phases.postLoopCycles, 14u);
+}
+
+// The partial-tile store is heavier, but the estimate stays on NonEdge.
+TEST_F(EstimateAsmCyclesTest, PostLoopUsesNonEdgeStore) {
+    BasicBlock* check = func->createBasicBlockAfter(loopBB, "check");
+    BasicBlock* nonEdge = func->createBasicBlockAfter(check, "label_GW_B0_FD0_VW8_GSU1_NonEdge");
+    BasicBlock* edge = func->createBasicBlockAfter(nonEdge, "label_GW_B0_FD0_VW8_GSU1_Then");
+    BasicBlock* join = func->createBasicBlockAfter(edge, "join");
+
+    auto add = [&](BasicBlock* bb, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        inst->addDestReg(StinkyRegister("v", 0, 1));
+        inst->addSrcReg(StinkyRegister("v", 1, 1));
+        inst->addSrcReg(StinkyRegister("v", 2, 1));
+        inst->issueCycles = issueCycles;
+    };
+    add(loopBB, 5);
+    add(check, 1);
+    add(nonEdge, 4);
+    add(join, 1);
+    add(edge, 30);
+
+    auto branchTo = [&](BasicBlock* bb, GFX op, std::string const& label, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(op, arch));
+        inst->addModifier(LabelData(label));
+        inst->issueCycles = issueCycles;
+    };
+    branchTo(loopBB, GFX::s_cbranch_scc0, "label_LoopBeginL", 1);
+    branchTo(check, GFX::s_cbranch_scc1, "label_GW_B0_FD0_VW8_GSU1_Then", 0);
+    branchTo(nonEdge, GFX::s_branch, "join", 0);
+    branchTo(edge, GFX::s_branch, "join", 0);
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    EXPECT_EQ(phases.preLoopCycles, 0u);
+    EXPECT_EQ(phases.mainLoopCycles, 5u);
+    EXPECT_EQ(phases.postLoopCycles, 6u);
+}
+
+// B0's edge fork is an annotated s_setpc_b64, not a short cbranch. The
+// partial-tile blocks are also disconnected once that edge is dropped, and
+// must not count as their own path.
+TEST_F(EstimateAsmCyclesTest, PostLoopSetpcUsesNonEdgeStore) {
+    BasicBlock* check = func->createBasicBlockAfter(loopBB, "check");
+    BasicBlock* longBranch = func->createBasicBlockAfter(check, "long_branch");
+    BasicBlock* nonEdge =
+        func->createBasicBlockAfter(longBranch, "label_GW_B0_FD0_VW8_GSU1_NonEdge");
+    BasicBlock* edge = func->createBasicBlockAfter(nonEdge, "label_GW_B0_FD0_VW8_GSU1_Then");
+    BasicBlock* orphan = func->createBasicBlockAfter(edge, "label_GW_B0_FD0_VW1_GSU1_Then");
+    BasicBlock* join = func->createBasicBlockAfter(orphan, "join");
+
+    auto add = [&](BasicBlock* bb, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        inst->addDestReg(StinkyRegister("v", 0, 1));
+        inst->addSrcReg(StinkyRegister("v", 1, 1));
+        inst->addSrcReg(StinkyRegister("v", 2, 1));
+        inst->issueCycles = issueCycles;
+    };
+    add(loopBB, 5);
+    add(check, 1);
+    add(nonEdge, 4);
+    add(join, 1);
+    add(edge, 30);
+    add(orphan, 100);
+
+    auto branchTo = [&](BasicBlock* bb, GFX op, std::string const& label, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(op, arch));
+        inst->addModifier(LabelData(label));
+        inst->issueCycles = issueCycles;
+    };
+    branchTo(loopBB, GFX::s_cbranch_scc0, "label_LoopBeginL", 1);
+    branchTo(check, GFX::s_cbranch_scc0, "label_GW_B0_FD0_VW8_GSU1_NonEdge", 0);
+    {
+        AsmIRBuilder builder(*longBranch, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_setpc_b64, arch));
+        inst->addSrcReg(StinkyRegister("s", 28, 2));
+        inst->addModifier(LabelData("label_GW_B0_FD0_VW8_GSU1_Then"));
+        inst->issueCycles = 0;
+    }
+    branchTo(nonEdge, GFX::s_branch, "join", 0);
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    EXPECT_EQ(phases.preLoopCycles, 0u);
+    EXPECT_EQ(phases.mainLoopCycles, 5u);
+    EXPECT_EQ(phases.postLoopCycles, 6u);
+}
