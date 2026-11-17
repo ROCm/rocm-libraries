@@ -438,26 +438,36 @@ TEST_F(MergeBarrierPassTest, NonLoopBlockUntouched) {
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
 }
 
+// A fixed tensor count is relative to the tensor ops issued before the
+// barrier, so hoisting the later signal across a tensor load would weaken it.
 TEST_F(MergeBarrierPassTest, EarlierTensorContractPreventsMerge) {
     auto* signal0 = createSignal(0);
     createWait(0);
+    StinkyInstruction* load =
+        createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/16, /*memTokens=*/{5});
     auto* signal1 = createSignal(1);
-    createWait(1);
+    auto* wait1 = createWait(1);
     signal0->addModifier<SWaitTensorCntData>(SWaitTensorCntData{1});
     runPasses(0);
     EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
-    EXPECT_LT(getPos(signal0), getPos(signal1));
+    EXPECT_LT(getPos(signal0), getPos(load));
+    EXPECT_LT(getPos(load), getPos(signal1));
+    EXPECT_EQ(getPos(signal1) + 1, getPos(wait1));
 }
 
 TEST_F(MergeBarrierPassTest, LaterTensorContractPreventsMerge) {
     auto* signal0 = createSignal(0);
     createWait(0);
+    StinkyInstruction* load =
+        createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/16, /*memTokens=*/{5});
     auto* signal1 = createSignal(1);
-    createWait(1);
+    auto* wait1 = createWait(1);
     signal1->addModifier<SWaitTensorCntData>(SWaitTensorCntData{1});
     runPasses(0);
     EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
-    EXPECT_LT(getPos(signal0), getPos(signal1));
+    EXPECT_LT(getPos(signal0), getPos(load));
+    EXPECT_LT(getPos(load), getPos(signal1));
+    EXPECT_EQ(getPos(signal1) + 1, getPos(wait1));
 }
