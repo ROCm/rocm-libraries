@@ -6,6 +6,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Numerics] Fixed CheckNumerics statistics-mode argument handling, global launch dimensions,
+  and minimum/maximum reductions for same-sign, zero, infinity, and BF16 subnormal inputs.
+  Bound the grid-stride reduction to eight blocks per hardware compute unit to limit
+  contention on statistics atomics.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
   with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
