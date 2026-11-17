@@ -147,6 +147,10 @@ the combined owner task/target suite passes **51 cases**. Final stack source,
 binding and runtime validation passes **565 cases**, with one optional actual
 installed-artifact-root check skipped. This source-tree run does not cover the
 separate installed-artifact binding fixture issue tracked for #15580.
+That fixture was subsequently corrected in #15580 to find the helper in the
+actually loaded package. The rebased stack passes all 82 binding cases against
+an installed wheel with separately copied tests, and 565 source/binding/runtime
+cases with one optional artifact-root check skipped.
 
 Relevant existing GPU/tool/stepping cases pass **19 cases**. The broad stepping
 module has 919 passes and four inherited StreamK fence expectation failures;
