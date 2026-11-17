@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <deque>
@@ -29,9 +30,11 @@
 #include <memory>
 #include <optional>
 #include <queue>
+#include <set>
 #include <span>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "dag/ReadyQueue.hpp"
@@ -42,12 +45,136 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/LoopDetection.hpp"
 
 #define DEBUG_TYPE "EstimateAsmCyclesPass"
 
 namespace {
 using namespace stinkytofu;
 constexpr const char* kEstimateAsmTotalCyclesMetadataKey = "EstimateAsmCyclesPass.totalCycles";
+constexpr const char* kEstimateAsmPreLoopCyclesMetadataKey = "EstimateAsmCyclesPass.preLoopCycles";
+constexpr const char* kEstimateAsmMainLoopCyclesMetadataKey =
+    "EstimateAsmCyclesPass.mainLoopCycles";
+constexpr const char* kEstimateAsmPostLoopCyclesMetadataKey =
+    "EstimateAsmCyclesPass.postLoopCycles";
+
+// The unrolled K loop, not a peeled InitC clone or the tail loop. Those labels
+// also contain "LoopBeginL", so a substring match picks the wrong boundary.
+bool isPrimaryLoopHeader(stinkytofu::BasicBlock const& bb) {
+    auto const& label = bb.getLabel();
+    return label == "label_LoopBeginL" || label == "LoopBeginL";
+}
+
+// Global-write edge fork. NonEdge is the full tile. Then/Else are the
+// partial-tile stores, reached by a short cbranch or by an annotated
+// s_setpc_b64. The estimate always keeps NonEdge.
+bool isGlobalWriteEdgeTarget(std::string const& target) {
+    bool const globalWrite = target.find("GW_") != std::string::npos;
+    auto endsWith = [](std::string const& s, std::string const& suffix) {
+        return s.size() >= suffix.size() &&
+               s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    return globalWrite && (endsWith(target, "_Then") || endsWith(target, "_Else"));
+}
+
+// Longest path in one phase. Back-edges are dropped, so a loop body counts once.
+// Exclusive edges contribute only the heavier side.
+uint32_t longestPathCycles(std::vector<BasicBlock*> const& nodes,
+                           std::unordered_map<BasicBlock*, std::vector<BasicBlock*>> const& succ,
+                           std::unordered_map<BasicBlock*, uint32_t> const& cost,
+                           std::unordered_set<BasicBlock*> const& ignoredRoots) {
+    std::unordered_set<BasicBlock*> inSet(nodes.begin(), nodes.end());
+    std::unordered_map<BasicBlock*, int> color;
+    std::set<std::pair<BasicBlock*, BasicBlock*>> backEdges;
+    auto dfs = [&](auto const& self, BasicBlock* bb) -> void {
+        color[bb] = 1;
+        auto const it = succ.find(bb);
+        if (it != succ.end()) {
+            for (BasicBlock* next : it->second) {
+                if (inSet.count(next) == 0) continue;
+                if (color[next] == 1) {
+                    backEdges.insert({bb, next});
+                } else if (color[next] == 0) {
+                    self(self, next);
+                }
+            }
+        }
+        color[bb] = 2;
+    };
+    for (BasicBlock* bb : nodes) {
+        if (color[bb] == 0) dfs(dfs, bb);
+    }
+
+    std::unordered_map<BasicBlock*, int> indegree;
+    std::unordered_map<BasicBlock*, std::vector<BasicBlock*>> forward;
+    for (BasicBlock* bb : nodes) indegree[bb] = 0;
+    for (BasicBlock* bb : nodes) {
+        auto const it = succ.find(bb);
+        if (it == succ.end()) continue;
+        for (BasicBlock* next : it->second) {
+            if (inSet.count(next) == 0 || backEdges.count({bb, next}) != 0) continue;
+            forward[bb].push_back(next);
+            indegree[next] += 1;
+        }
+    }
+
+    // A skipped global-write edge leaves its target with no predecessor. That
+    // block is not an alternate entry; only blocks reachable from a real entry
+    // contribute. Other indegree-0 blocks stay entries, so an unmodeled fork
+    // still keeps its heavier side.
+    std::unordered_set<BasicBlock*> reachable;
+    std::queue<BasicBlock*> walk;
+    for (BasicBlock* bb : nodes) {
+        if (indegree[bb] == 0 && ignoredRoots.count(bb) == 0) {
+            reachable.insert(bb);
+            walk.push(bb);
+        }
+    }
+    while (!walk.empty()) {
+        BasicBlock* bb = walk.front();
+        walk.pop();
+        for (BasicBlock* next : forward[bb]) {
+            if (reachable.insert(next).second) walk.push(next);
+        }
+    }
+
+    std::unordered_map<BasicBlock*, int> reachIndegree;
+    for (BasicBlock* bb : reachable) reachIndegree[bb] = 0;
+    for (BasicBlock* bb : reachable) {
+        for (BasicBlock* next : forward[bb]) {
+            if (reachable.count(next) != 0) reachIndegree[next] += 1;
+        }
+    }
+
+    std::queue<BasicBlock*> ready;
+    std::unordered_map<BasicBlock*, uint32_t> dist;
+    for (BasicBlock* bb : reachable) {
+        auto const costIt = cost.find(bb);
+        uint32_t const blockCost = costIt == cost.end() ? 0 : costIt->second;
+        dist[bb] = reachIndegree[bb] == 0 ? blockCost : 0;
+        if (reachIndegree[bb] == 0) ready.push(bb);
+    }
+    while (!ready.empty()) {
+        BasicBlock* bb = ready.front();
+        ready.pop();
+        for (BasicBlock* next : forward[bb]) {
+            if (reachable.count(next) == 0) continue;
+            uint32_t const nextCost = cost.count(next) ? cost.at(next) : 0;
+            dist[next] = std::max(dist[next], dist[bb] + nextCost);
+            reachIndegree[next] -= 1;
+            if (reachIndegree[next] == 0) ready.push(next);
+        }
+    }
+    uint32_t best = 0;
+    for (BasicBlock* bb : reachable) best = std::max(best, dist[bb]);
+    return best;
+}
+
+// Legacy keeps the per-instruction query on the old loop-body slice.
+// LoopBody counts one iteration of a block in the primary-loop range and stops
+// at the back-edge. EntireBlock counts every instruction, which is what
+// prologue and epilogue blocks contribute.
+enum class BlockCycleScope { Legacy, LoopBody, EntireBlock };
 
 // The DAG issue model charges s_set_vgpr_msb its own issue cycle. On gfx1250 it can
 // issue in the same cycle as the instruction immediately before it when that
@@ -143,34 +270,151 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         (void)AM;
-        // Reset total cycles before processing
+        // Reset total and phase cycles before processing.
         totalCycles_ = 0;
+        phaseCycles_ = {};
 
-        // Process all basic blocks
-        for (BasicBlock& bb : func) {
-            // Skip filtered basic blocks
-            if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-
-            // std::cout << "Processing basic block: " << bb.getLabel() << "\n";
-            // Only process the loopWithPrefetch block
-
-            // if(bb.getLabel() == "LocalReadDoA_I0" || bb.getLabel() == "LocalReadDoB_I0")
-            // {
-            //     calculateLocalReadBytes(bb, passCtx);
-
-            // }
-            // else if(bb.getLabel() == "LocalRead")
-            // {
-            //     analyzeBankConflicts(bb, passCtx);
-            // }
-            // else if(bb.getLabel() == "label_LoopBeginL")
-            // {
-            //     calculateMathClocksInUnrolledLoop(bb, passCtx);
-            // }
-            calculateMathClocksInUnrolledLoop(bb, passCtx);
+        // The per-instruction query is a read-only slice of the unrolled loop.
+        // Phase totals are for the publishing pass, which sees the whole kernel.
+        if (perInstructionCycleQuery_) {
+            for (BasicBlock& bb : func) {
+                if (!passCtx.shouldProcessBasicBlock(bb)) continue;
+                calculateMathClocksInUnrolledLoop(bb, passCtx, BlockCycleScope::Legacy);
+            }
+            PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] totalCycles=" << totalCycles_ << "\n");
+            return PreservedAnalyses::all();
         }
-        PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] totalCycles=" << totalCycles_ << "\n");
-        if (publishMetadata_) func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+
+        // detectLoops walks CFG successor edges. The K-loop back-edge is the
+        // branch to label_LoopBeginL, but that edge is often missing after later
+        // passes split the body. Close the range on the branch instruction itself:
+        // every block from the header through the block that branches back is the
+        // loop. detectLoops still contributes when its edges are present.
+        std::vector<BasicBlock*> ordered;
+        ordered.reserve(func.size());
+        for (BasicBlock& bb : func) ordered.push_back(&bb);
+
+        std::unordered_set<BasicBlock*> loopBlocks;
+        for (const Loop& loop : detectLoops(func)) {
+            if (loop.headerBB != nullptr && isPrimaryLoopHeader(*loop.headerBB)) {
+                loopBlocks.insert(loop.bodyBBs.begin(), loop.bodyBBs.end());
+            }
+        }
+
+        auto branchesToPrimaryLoop = [](BasicBlock& bb) {
+            for (IRBase& irNode : bb) {
+                StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&irNode);
+                if (inst == nullptr || !isBranch(*inst)) continue;
+                std::string const target = getBranchTarget(*inst);
+                if (target == "label_LoopBeginL" || target == "LoopBeginL") return true;
+            }
+            return false;
+        };
+
+        std::optional<size_t> headerIdx;
+        std::optional<size_t> latchIdx;
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            if (!headerIdx.has_value() && isPrimaryLoopHeader(*ordered[i])) headerIdx = i;
+            if (branchesToPrimaryLoop(*ordered[i])) latchIdx = i;
+        }
+        if (headerIdx.has_value() && latchIdx.has_value() && *latchIdx >= *headerIdx) {
+            for (size_t i = *headerIdx; i <= *latchIdx; ++i) loopBlocks.insert(ordered[i]);
+        } else if (loopBlocks.empty() && headerIdx.has_value()) {
+            loopBlocks.insert(ordered[*headerIdx]);
+        }
+
+        std::optional<size_t> rangeBegin;
+        std::optional<size_t> rangeEnd;
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            if (loopBlocks.count(ordered[i]) == 0) continue;
+            if (!rangeBegin.has_value()) rangeBegin = i;
+            rangeEnd = i;
+        }
+
+        std::unordered_map<std::string, BasicBlock*> labelMap;
+        for (BasicBlock* bb : ordered) {
+            if (!bb->getLabel().empty()) labelMap.emplace(bb->getLabel(), bb);
+        }
+        std::unordered_map<BasicBlock*, std::vector<BasicBlock*>> succ;
+        std::unordered_set<BasicBlock*> ignoredEdgeRoots;
+        for (BasicBlock* bb : ordered) {
+            if (isGlobalWriteEdgeTarget(bb->getLabel())) ignoredEdgeRoots.insert(bb);
+        }
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            BasicBlock* bb = ordered[i];
+            StinkyInstruction* term = nullptr;
+            for (auto it = bb->rbegin(); it != bb->rend(); ++it) {
+                if (StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) {
+                    term = inst;
+                    break;
+                }
+            }
+            bool fallsThrough = true;
+            if (term != nullptr && isBranch(*term)) {
+                std::string const target = getBranchTarget(*term);
+                // Branch to the partial-tile store, either a short cbranch or a
+                // long s_setpc_b64. Leave it untaken so the path stays on NonEdge.
+                bool const skipEdgeStore = isGlobalWriteEdgeTarget(target);
+                auto const targetIt = labelMap.find(target);
+                if (skipEdgeStore && targetIt != labelMap.end())
+                    ignoredEdgeRoots.insert(targetIt->second);
+                if (!skipEdgeStore && targetIt != labelMap.end())
+                    succ[bb].push_back(targetIt->second);
+                if (!isConditionalBranch(*term)) fallsThrough = false;
+            }
+            if (term != nullptr && isEndOfFunction(*term)) fallsThrough = false;
+            if (fallsThrough && i + 1 < ordered.size()) {
+                BasicBlock* next = ordered[i + 1];
+                if (std::find(succ[bb].begin(), succ[bb].end(), next) == succ[bb].end()) {
+                    succ[bb].push_back(next);
+                }
+            }
+        }
+
+        std::unordered_map<BasicBlock*, uint32_t> blockCost;
+        std::string primaryLoopLabels;
+        std::vector<BasicBlock*> preBlocks;
+        std::vector<BasicBlock*> postBlocks;
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            BasicBlock& bb = *ordered[i];
+            bool const inLoop = rangeBegin.has_value() && i >= *rangeBegin && i <= *rangeEnd;
+            uint32_t blockCycles = 0;
+            if (passCtx.shouldProcessBasicBlock(bb)) {
+                if (inLoop) {
+                    if (!primaryLoopLabels.empty()) primaryLoopLabels += ",";
+                    primaryLoopLabels += bb.getLabel();
+                }
+                calculateMathClocksInUnrolledLoop(
+                    bb, passCtx, inLoop ? BlockCycleScope::LoopBody : BlockCycleScope::EntireBlock);
+                blockCycles = totalCycles_;
+            }
+            blockCost[&bb] = blockCycles;
+            if (inLoop) {
+                phaseCycles_.mainLoopCycles += blockCycles;
+            } else if (rangeBegin.has_value() && i > *rangeEnd) {
+                postBlocks.push_back(&bb);
+            } else {
+                preBlocks.push_back(&bb);
+            }
+        }
+        phaseCycles_.preLoopCycles =
+            longestPathCycles(preBlocks, succ, blockCost, ignoredEdgeRoots);
+        phaseCycles_.postLoopCycles =
+            longestPathCycles(postBlocks, succ, blockCost, ignoredEdgeRoots);
+        PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] primaryLoop=" << primaryLoopLabels
+                             << "\n");
+        totalCycles_ =
+            phaseCycles_.preLoopCycles + phaseCycles_.mainLoopCycles + phaseCycles_.postLoopCycles;
+        PASS_DEBUG(
+            std::cerr << "[EstimateAsmCyclesPass] preLoopCycles=" << phaseCycles_.preLoopCycles
+                      << " mainLoopCycles=" << phaseCycles_.mainLoopCycles << " postLoopCycles="
+                      << phaseCycles_.postLoopCycles << " totalCycles=" << totalCycles_ << "\n");
+        if (publishMetadata_) {
+            func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+            func.setMetaData(kEstimateAsmPreLoopCyclesMetadataKey, phaseCycles_.preLoopCycles);
+            func.setMetaData(kEstimateAsmMainLoopCyclesMetadataKey, phaseCycles_.mainLoopCycles);
+            func.setMetaData(kEstimateAsmPostLoopCyclesMetadataKey, phaseCycles_.postLoopCycles);
+        }
 
         return PreservedAnalyses::all();
     }
@@ -178,6 +422,10 @@ class EstimateAsmCyclesPassImpl : public Pass {
     /// Get the total cycles calculated by this pass
     unsigned int getTotalCycles() const {
         return totalCycles_;
+    }
+
+    EstimateAsmCyclePhases getPhaseCycles() const {
+        return phaseCycles_;
     }
 
     /// Per-instruction cumulative cycle positions recorded during the last run.
@@ -222,7 +470,9 @@ class EstimateAsmCyclesPassImpl : public Pass {
     }
 
     /// Process a single basic block to estimate asm cycles
-    void calculateMathClocksInUnrolledLoop(BasicBlock& bb, PassContext& passCtx) {
+    void calculateMathClocksInUnrolledLoop(BasicBlock& bb, PassContext& passCtx,
+                                           BlockCycleScope scope) {
+        totalCycles_ = 0;
         // Collect all instructions in this basic block
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& irNode : bb) {
@@ -240,7 +490,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
         // such as _CBWave0). computeEstimatedCyclesPerInstruction() also covers blocks that
         // embed that label.
         std::size_t startIdx = 0;
-        if (bb.getLabel().find("label_LoopBeginL") == std::string::npos &&
+        if (scope == BlockCycleScope::Legacy &&
+            bb.getLabel().find("label_LoopBeginL") == std::string::npos &&
             bb.getLabel() != "LoopBeginL") {
             startIdx = instructions.size();
             if (perInstructionCycleQuery_) {
@@ -267,7 +518,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             if (useSchedulerTiming) {
                 // A back-edge to this loop ends the unroll body. The branch itself
                 // is not part of the total.
-                if (isBranch(*inst) || isCall(*inst)) {
+                if (scope != BlockCycleScope::EntireBlock && (isBranch(*inst) || isCall(*inst))) {
                     const LabelData* labelData = inst->getModifier<LabelData>();
                     if (labelData != nullptr && labelData->label.find("label_LoopBeginL") == 0) {
                         break;
@@ -332,6 +583,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
+    EstimateAsmCyclePhases phaseCycles_{};
 };
 
 char EstimateAsmCyclesPassImpl::ID = 0;
@@ -352,6 +604,15 @@ EstimateAsmCyclesAnalysis::Result EstimateAsmCyclesAnalysis::run(Function& func,
     return calculateEstimateAsmCycles(func, passCtx);
 }
 
+EstimateAsmCyclePhasesAnalysis::Result EstimateAsmCyclePhasesAnalysis::run(Function& func,
+                                                                           AnalysisManager& AM) {
+    (void)AM;
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(func.getGemmTileConfig());
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    return calculateEstimateAsmCyclePhases(func, passCtx);
+}
+
 EstimateAsmCyclesPerInstructionAnalysis::Result EstimateAsmCyclesPerInstructionAnalysis::run(
     Function& func, AnalysisManager& AM) {
     (void)AM;
@@ -368,6 +629,15 @@ unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getTotalCycles();
+}
+
+EstimateAsmCyclePhases calculateEstimateAsmCyclePhases(Function& func, PassContext& passCtx) {
+    EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
+    AnalysisManager AM;
+    (void)pass.run(func, passCtx, AM);
+    return pass.getPhaseCycles();
 }
 
 std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPerInstruction(
