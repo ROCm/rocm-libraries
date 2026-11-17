@@ -24,6 +24,14 @@ Exit status is the child's exit status; a child killed by a signal gives
 
 Linux only: it reads /proc/<pid>/smaps_rollup (kernel 4.14 or later), which is
 readable for processes of the same user or with CAP_SYS_PTRACE.
+
+The default interval of 0.5 s is about what one sample costs on a tree of 100
+processes: reading smaps_rollup walks each process's page tables, and on a 96
+worker build a sample took 0.25 to 0.39 s, so a shorter interval just runs
+samples back to back. On the gfx942 Equality subset (98 workers, 21 s) the
+peak summed PSS agreed within 2% at 1, 0.5, 0.25 and 0.1 s (9.32, 9.52, 9.48,
+9.46 GiB) and the sampled build took no longer than the unsampled one
+(21.5 to 21.8 s versus 21.0 to 22.8 s).
 """
 
 import argparse
@@ -95,10 +103,12 @@ def read_file(path: str):
 
 
 def proc_table():
-    """Return {pid: (ppid, starttime)} for all processes.
+    """Return {pid: (ppid, starttime, session)} for all processes.
 
     starttime (clock ticks since boot, /proc/<pid>/stat field 22) tells a
-    reused pid apart from the process that held it before.
+    reused pid apart from the process that held it before; session is the
+    session id, which every descendant of the command shares because the
+    command is started as a session leader.
     """
     table = {}
     for entry in os.listdir("/proc"):
@@ -108,26 +118,37 @@ def proc_table():
         if not data:
             continue
         # comm may contain spaces/parens; the fields after ')' start at field 3,
-        # so ppid is index 1 and starttime index 19.
+        # so ppid is index 1, session index 3 and starttime index 19.
         rpar = data.rfind(b")")
         fields = data[rpar + 2 :].split()
         try:
-            table[int(entry)] = (int(fields[1]), int(fields[19]))
+            table[int(entry)] = (int(fields[1]), int(fields[19]), int(fields[3]))
         except (IndexError, ValueError):
             continue
     return table
 
 
-def descendants(root: int, table):
+def tree_members(root: int, table):
+    """Pids of the command's tree: the root's descendants by parent pid, plus
+    every process in the root's session, which keeps a worker that init
+    adopted after the root died."""
     children = defaultdict(list)
-    for pid, (ppid, _) in table.items():
-        children[ppid].append(pid)
+    for pid, info in table.items():
+        children[info[0]].append(pid)
     out = []
+    seen = set()
     stack = [root]
     while stack:
         pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
         out.append(pid)
         stack.extend(children.get(pid, ()))
+    for pid, info in table.items():
+        if pid not in seen and len(info) > 2 and info[2] == root:
+            seen.add(pid)
+            out.append(pid)
     return out
 
 
@@ -179,10 +200,6 @@ class Sampler(threading.Thread):
         self.phase = "startup"
         self.phase_lock = threading.Lock()
         self.rows = []
-        # (pid, starttime) -> class. Keyed on the start time as well so a pid
-        # recycled by a later process (a build spawns 200k assemblers) is
-        # classified afresh; entries of dead processes are dropped each sample.
-        self.cmdline_cache = {}
         self.readable = 0  # processes whose smaps_rollup could be read, ever
         self.peaks = {
             "rss_sum": (0, 0.0, ""),
@@ -208,26 +225,26 @@ class Sampler(threading.Thread):
     def sample(self):
         t = time.monotonic() - self.t0
         table = proc_table()
-        pids = descendants(self.root_pid, table)
+        pids = tree_members(self.root_pid, table)
         by_class = defaultdict(lambda: {"rss": 0, "pss": 0, "uss": 0, "count": 0})
         rss_sum = pss_sum = uss_sum = 0
         # The root is listed even when it exited between proc_table() and here.
         pids = [pid for pid in pids if pid in table]
-        live = {(pid, table[pid][1]) for pid in pids}
-        self.cmdline_cache = {k: v for k, v in self.cmdline_cache.items() if k in live}
         for pid in pids:
             vals = smaps_rollup(pid)
             if vals is None:
                 continue
             self.readable += 1
-            key = (pid, table[pid][1])
-            cls = self.cmdline_cache.get(key)
-            if cls is None:
+            # Classified afresh every sample: a cache keyed on the pid would
+            # survive pid reuse (a build spawns 200k assemblers) and one keyed
+            # on (pid, starttime) would survive exec, which changes the command
+            # but neither value. One small /proc read per process is cheap next
+            # to smaps_rollup.
+            if pid == self.root_pid:
+                cls = "python-main"
+            else:
                 raw = read_file(f"/proc/{pid}/cmdline") or b""
                 cls = classify(raw.decode("utf-8", "replace"))
-                if pid == self.root_pid:
-                    cls = "python-main"
-                self.cmdline_cache[key] = cls
             rss, pss, uss = vals["Rss"], vals["Pss"], vals["Uss"]
             rss_sum += rss
             pss_sum += pss
@@ -399,6 +416,42 @@ def exit_status(returncode: int) -> int:
     return returncode
 
 
+class OutputPump(threading.Thread):
+    """Forwards the command's stdout lines to the phase tracker, the log and stdout.
+
+    Runs on its own thread so the main thread can wait for the root process
+    independently of the pipe, which a surviving worker may hold open after
+    the root is gone. If handling a line fails (the log's filesystem is full,
+    say) the error is kept, the command's group is terminated through
+    ``on_error`` and the pipe is still drained so no writer blocks on it.
+    """
+
+    def __init__(self, stream, sampler, log, echo, on_error):
+        super().__init__(daemon=True)
+        self.stream = stream
+        self.sampler = sampler
+        self.log = log
+        self.echo = echo
+        self.on_error = on_error
+        self.error = None
+
+    def run(self):
+        for line in self.stream:
+            if self.error is not None:
+                continue
+            try:
+                phase = phase_from_line(line)
+                if phase:
+                    self.sampler.set_phase(phase)
+                if self.log:
+                    self.log.write(line)
+                if self.echo:
+                    sys.stdout.write(line)
+            except Exception as e:  # noqa: BLE001 - any output failure ends the run
+                self.error = e
+                self.on_error()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -415,6 +468,13 @@ def main(argv=None):
         "--quiet", action="store_true", help="do not echo the child's output"
     )
     ap.add_argument(
+        "--grace",
+        type=float,
+        default=10.0,
+        help="seconds to wait for the command's remaining processes after it exits "
+        "before terminating them (default 10)",
+    )
+    ap.add_argument(
         "cmd", nargs=argparse.REMAINDER, help="command to run (prefix with --)"
     )
     args = ap.parse_args(argv)
@@ -424,14 +484,13 @@ def main(argv=None):
     if not cmd:
         ap.error("no command given")
 
-    log = open(args.log, "w") if args.log else None
     # Unbuffered child stdout so phase markers arrive when they are printed,
     # not when a pipe buffer happens to fill.
     env = dict(os.environ, PYTHONUNBUFFERED="1")
-    # The child leads its own process group so that a signal to memwatch can
-    # be forwarded to every descendant: signalling only the child would leave
-    # its workers and assemblers alive, holding stdout open, and the read loop
-    # below would wait for them.
+    # The child leads its own session and process group so that a signal to
+    # memwatch, or the cleanup below, reaches every descendant: signalling
+    # only the child would leave its workers and assemblers alive, holding
+    # stdout open.
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -446,29 +505,56 @@ def main(argv=None):
     sampler.start()
     t0 = time.monotonic()
 
-    def forward(sig, _frame):
+    def signal_group(sig):
         try:
             os.killpg(proc.pid, sig)
         except ProcessLookupError:
             pass
 
+    def forward(sig, _frame):
+        signal_group(sig)
+
     signal.signal(signal.SIGINT, forward)
     signal.signal(signal.SIGTERM, forward)
 
-    for line in proc.stdout:
-        phase = phase_from_line(line)
-        if phase:
-            sampler.set_phase(phase)
+    log = None
+    pump = None
+    try:
+        log = open(args.log, "w") if args.log else None
+        pump = OutputPump(
+            proc.stdout,
+            sampler,
+            log,
+            echo=not args.quiet,
+            on_error=lambda: signal_group(signal.SIGTERM),
+        )
+        pump.start()
+        # Wait for the root itself, not for end-of-file: a worker that the
+        # root left behind can hold the pipe open indefinitely.
+        proc.wait()
+        pump.join(args.grace)
+        if pump.is_alive():
+            # Survivors of the root are not part of a build that finished
+            # normally; terminate them so the run, and the summary, can end.
+            print(
+                f"memwatch: command exited but processes of its group are still "
+                f"running after {args.grace:g}s; terminating them",
+                file=sys.stderr,
+            )
+            signal_group(signal.SIGTERM)
+            pump.join(5)
+            if pump.is_alive():
+                signal_group(signal.SIGKILL)
+                pump.join(5)
+        elapsed = time.monotonic() - t0
+    finally:
+        sampler.stop_event.set()
+        sampler.join()
         if log:
-            log.write(line)
-        if not args.quiet:
-            sys.stdout.write(line)
-    proc.wait()
-    elapsed = time.monotonic() - t0
-    sampler.stop_event.set()
-    sampler.join()
-    if log:
-        log.close()
+            try:
+                log.close()
+            except OSError:
+                pass
 
     summary = sampler.summary(elapsed, proc.returncode, cmd)
     with open(args.out, "w") as f:
@@ -507,6 +593,13 @@ def main(argv=None):
             f"  {ph[:50]:50s} rss {v['rss_sum_GiB']:8.3f} GiB  pss {v['pss_sum_GiB']:8.3f} GiB"
         )
     print(f"summary written to {args.out}")
+    if pump.error is not None:
+        print(
+            f"memwatch: error: could not handle the command's output ({pump.error}); "
+            "the command was terminated",
+            file=sys.stderr,
+        )
+        return exit_status(proc.returncode) or 1
     return exit_status(proc.returncode)
 
 

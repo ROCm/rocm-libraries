@@ -111,7 +111,7 @@ def test_largest_rss_and_largest_pss_are_tracked_separately(monkeypatch):
     monkeypatch.setattr(
         memwatch,
         "proc_table",
-        lambda: {1: (0, 1), 10: (1, 50), 11: (10, 60), 12: (10, 70)},
+        lambda: {1: (0, 1, 1), 10: (1, 50, 10), 11: (10, 60, 10), 12: (10, 70, 10)},
     )
     monkeypatch.setattr(memwatch, "smaps_rollup", lambda pid: smaps.get(pid))
     monkeypatch.setattr(memwatch, "read_file", lambda path: b"/bin/sleep\x0030")
@@ -129,48 +129,76 @@ def test_largest_rss_and_largest_pss_are_tracked_separately(monkeypatch):
     assert summary["per_class_peak"]["other"]["largest_single_pss_MiB"] == 40.0
 
 
+def _fixed_smaps(pid):
+    return {"Rss": 1 << 20, "Pss": 1 << 20, "Uss": 1 << 20}
+
+
+def _cmdline_reader(by_pid):
+    def read_file(path):
+        for pid, cmdline in by_pid.items():
+            if path.endswith(f"/{pid}/cmdline"):
+                return cmdline
+        return b"/venv/bin/python3\x00-m\x00tensilelite.create_library"
+
+    return read_file
+
+
+CLANG = b"/opt/rocm/lib/llvm/bin/clang\x00-c\x00k.s"
+WORKER = b"/venv/bin/python3\x00-m\x00joblib.externals.loky.backend.popen_loky_posix"
+
+
 def test_a_recycled_pid_is_classified_afresh(monkeypatch):
     tables = iter(
         [
-            {1: (0, 1), 10: (1, 50), 11: (10, 60)},  # pid 11 is an assembler
-            {1: (0, 1), 10: (1, 50), 11: (10, 900)},  # pid 11 reused by a worker
+            {1: (0, 1, 1), 10: (1, 50, 10), 11: (10, 60, 10)},  # pid 11 is an assembler
+            {
+                1: (0, 1, 1),
+                10: (1, 50, 10),
+                11: (10, 900, 10),
+            },  # pid 11 reused by a worker
         ]
     )
-    cmdlines = [
-        b"/opt/rocm/lib/llvm/bin/clang\x00-c\x00k.s",
-        b"/venv/bin/python3\x00-m\x00joblib.externals.loky.backend.popen_loky_posix",
-    ]
+    cmdlines = {11: CLANG}
     monkeypatch.setattr(memwatch, "proc_table", lambda: next(tables))
-    monkeypatch.setattr(
-        memwatch,
-        "smaps_rollup",
-        lambda pid: {"Rss": 1 << 20, "Pss": 1 << 20, "Uss": 1 << 20},
-    )
-    monkeypatch.setattr(
-        memwatch,
-        "read_file",
-        lambda path: (
-            cmdlines[0]
-            if path.endswith("/11/cmdline")
-            else b"/venv/bin/python3\x00-m\x00tensilelite.create_library"
-        ),
-    )
+    monkeypatch.setattr(memwatch, "smaps_rollup", _fixed_smaps)
+    monkeypatch.setattr(memwatch, "read_file", _cmdline_reader(cmdlines))
     monkeypatch.setattr(memwatch, "mem_available", lambda: None)
     sampler = memwatch.Sampler(root_pid=10, interval=1.0, csv_path=None)
     sampler.sample()
     assert sampler.rows[0]["clang.n"] == 1 and sampler.rows[0]["loky-worker.n"] == 0
-    cmdlines.reverse()
+    cmdlines[11] = WORKER
     sampler.sample()
     assert sampler.rows[1]["clang.n"] == 0 and sampler.rows[1]["loky-worker.n"] == 1
-    assert set(sampler.cmdline_cache) == {
-        (10, 50),
-        (11, 900),
-    }  # the dead (11, 60) entry is gone
+
+
+def test_a_process_that_execs_is_reclassified(monkeypatch):
+    # Same pid and start time; only the command line changes, as after exec.
+    monkeypatch.setattr(
+        memwatch,
+        "proc_table",
+        lambda: {1: (0, 1, 1), 10: (1, 50, 10), 11: (10, 60, 10)},
+    )
+    monkeypatch.setattr(memwatch, "smaps_rollup", _fixed_smaps)
+    cmdlines = {11: b"/bin/sh\x00-c\x00exec clang -c k.s"}
+    monkeypatch.setattr(memwatch, "read_file", _cmdline_reader(cmdlines))
+    monkeypatch.setattr(memwatch, "mem_available", lambda: None)
+    sampler = memwatch.Sampler(root_pid=10, interval=1.0, csv_path=None)
+    sampler.sample()
+    assert sampler.rows[0]["sh.n"] == 1 and sampler.rows[0]["clang.n"] == 0
+    cmdlines[11] = CLANG
+    sampler.sample()
+    assert sampler.rows[1]["sh.n"] == 0 and sampler.rows[1]["clang.n"] == 1
+
+
+def test_a_worker_adopted_by_init_stays_in_the_tree():
+    # Root 10 died; its worker 11 now has ppid 1 but still carries session 10.
+    table = {1: (0, 1, 1), 11: (1, 60, 10), 20: (1, 5, 20)}
+    assert memwatch.tree_members(10, table) == [10, 11]
 
 
 def test_a_root_that_exited_before_the_sample_is_skipped(monkeypatch):
     # /proc listing taken after the child exited: the root is not in the table.
-    monkeypatch.setattr(memwatch, "proc_table", lambda: {1: (0, 1)})
+    monkeypatch.setattr(memwatch, "proc_table", lambda: {1: (0, 1, 1)})
     monkeypatch.setattr(
         memwatch, "smaps_rollup", lambda pid: {"Rss": 1, "Pss": 1, "Uss": 1}
     )
@@ -181,7 +209,7 @@ def test_a_root_that_exited_before_the_sample_is_skipped(monkeypatch):
 
 
 def test_unreadable_smaps_is_reported_rather_than_silent_zero(monkeypatch):
-    monkeypatch.setattr(memwatch, "proc_table", lambda: {1: (0, 1), 10: (1, 50)})
+    monkeypatch.setattr(memwatch, "proc_table", lambda: {1: (0, 1, 1), 10: (1, 50, 10)})
     monkeypatch.setattr(memwatch, "smaps_rollup", lambda pid: None)
     monkeypatch.setattr(memwatch, "mem_available", lambda: None)
     sampler = memwatch.Sampler(root_pid=10, interval=1.0, csv_path=None)
@@ -309,3 +337,96 @@ def test_sigterm_to_memwatch_reaches_the_whole_process_group(tmp_path):
         time.sleep(0.05)
     else:
         pytest.fail(f"grandchild {grandchild} still running")
+
+
+def _is_gone(pid, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        state = Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0]
+        if state == "Z":
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_an_output_failure_terminates_the_command(tmp_path):
+    marker = tmp_path / "pid"
+    # A 70 KiB line overflows the log's buffer so the write to /dev/full fails
+    # at once; the child would then sleep for 30 s.
+    child = (
+        "import os, time, pathlib\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "print('x' * 70000, flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    out = tmp_path / "summary.json"
+    t0 = time.monotonic()
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(MEMWATCH),
+            "--interval",
+            "0.05",
+            "--out",
+            str(out),
+            "--log",
+            "/dev/full",
+            "--quiet",
+            "--",
+            sys.executable,
+            "-c",
+            child,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert (
+        time.monotonic() - t0 < 20
+    ), "memwatch kept running after the log write failed"
+    assert proc.returncode != 0
+    assert "could not handle the command's output" in proc.stderr, proc.stderr
+    assert _is_gone(int(marker.read_text())), "the command survived the output failure"
+
+
+def test_root_death_with_a_surviving_worker_ends_the_run(tmp_path):
+    marker = tmp_path / "pid"
+    # The root spawns a worker that keeps stdout open, then kills itself with
+    # SIGKILL. The worker is reparented to init but stays in the session.
+    child = (
+        "import os, signal, subprocess, pathlib\n"
+        "p = subprocess.Popen(['sleep', '30'])\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
+        "os.kill(os.getpid(), signal.SIGKILL)\n"
+    )
+    out = tmp_path / "summary.json"
+    t0 = time.monotonic()
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(MEMWATCH),
+            "--interval",
+            "0.05",
+            "--grace",
+            "1",
+            "--out",
+            str(out),
+            "--quiet",
+            "--",
+            sys.executable,
+            "-c",
+            child,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert time.monotonic() - t0 < 20, "memwatch waited for the worker's pipe"
+    assert proc.returncode == 137, proc.stdout + proc.stderr
+    assert "still running" in proc.stderr
+    assert json.loads(out.read_text())["returncode"] == -9
+    assert _is_gone(int(marker.read_text())), "the surviving worker was not terminated"
