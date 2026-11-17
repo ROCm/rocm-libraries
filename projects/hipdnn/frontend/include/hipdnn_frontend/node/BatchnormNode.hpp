@@ -102,9 +102,11 @@ public:
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why:
         // - BatchNorm operates per-channel: statistics (mean, variance) are computed for each channel.
-        // - Learnable parameters (scale and bias) are also associated with channels, but may now
-        //   use any broadcastable shape.
-        // - Mean and inverse variance tensors remain strictly per-channel (channel-only shape).
+        // - Scale and bias must have the same shape and carry the channel count of x. A scale with
+        //   more than one dimension whose first dimension is 1 ([1, C], [1, C, 1, ..., 1]) carries
+        //   it at index 1; every other scale ([C], [C, 1, ..., 1]) carries it at index 0. Only the
+        //   channel dimension is checked here.
+        // - Mean and inverse variance tensors are strictly per-channel (channel-only shape).
         // - Backend providers may enforce additional constraints on scale and bias shapes.
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
@@ -114,10 +116,8 @@ public:
         // Validate that scale and bias tensors have matching shapes
         HIPDNN_CHECK_ERROR(
             detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
-        // Scale (and therefore bias) carries the channel count at index 0 for rank 1 ([C]) and
-        // at index 1 otherwise ([1, C], [1, C, 1, ..., 1])
         const auto& scaleDims = scale->get_dim();
-        const size_t scaleChannelIndex = scaleDims.size() == 1 ? 0 : 1;
+        const size_t scaleChannelIndex = (scaleDims.size() > 1 && scaleDims[0] == 1) ? 1 : 0;
         HIPDNN_RETURN_IF_NE(scaleDims[scaleChannelIndex],
                             channels,
                             ErrorCode::INVALID_VALUE,

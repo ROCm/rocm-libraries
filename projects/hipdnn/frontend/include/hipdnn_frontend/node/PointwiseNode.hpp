@@ -157,9 +157,6 @@ public:
         return {};
     }
 
-private:
-    static constexpr size_t K_MAX_INPUT_COUNT = 3;
-
     // Number of inputs the mode reads: IN_0 for unary, IN_0 and IN_1 for binary, all three for
     // ternary. Returns 0 for a mode in none of these classes.
     static size_t modeInputCount(PointwiseMode mode)
@@ -178,6 +175,9 @@ private:
         }
         return 0;
     }
+
+private:
+    static constexpr size_t K_MAX_INPUT_COUNT = 3;
 
     Error nullInputError(size_t slot) const
     {

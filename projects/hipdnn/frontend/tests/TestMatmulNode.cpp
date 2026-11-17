@@ -192,10 +192,17 @@ TEST(TestMatmulNode, PreValidateNodeRejectsOutputColsNotMatchingB)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
+// Only the rank check rejects these: {2, 4} matches the batch and row dims of A, and {4, 5, 1}
+// on 2-D inputs matches the rows and columns.
 TEST(TestMatmulNode, PreValidateNodeRejectsOutputRankMismatch)
 {
-    auto err = preValidateWithOutputDims({2, 4, 8}, {2, 8, 5}, {4, 5});
-    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    auto lowerRank = preValidateWithOutputDims({2, 4, 8}, {2, 8, 5}, {2, 4});
+    EXPECT_EQ(lowerRank.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(lowerRank.err_msg.find("same rank"), std::string::npos) << lowerRank.err_msg;
+
+    auto higherRank = preValidateWithOutputDims({4, 8}, {8, 5}, {4, 5, 1});
+    EXPECT_EQ(higherRank.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(higherRank.err_msg.find("same rank"), std::string::npos) << higherRank.err_msg;
 }
 
 TEST(TestMatmulNode, PreValidateNodeRejectsOutputBatchNotBroadcastResult)

@@ -397,8 +397,18 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        appendOptionalMatchTensor(key, config_tensor::IN_1, pointwise.attributes.get_input_1());
-        appendOptionalMatchTensor(key, config_tensor::IN_2, pointwise.attributes.get_input_2());
+        // Inputs beyond the mode's operand count are left out of the lowered operation, so the
+        // key leaves them out too.
+        const size_t usedInputCount
+            = graph::PointwiseNode::modeInputCount(pointwise.attributes.get_mode());
+        if(usedInputCount >= 2)
+        {
+            appendOptionalMatchTensor(key, config_tensor::IN_1, pointwise.attributes.get_input_1());
+        }
+        if(usedInputCount >= 3)
+        {
+            appendOptionalMatchTensor(key, config_tensor::IN_2, pointwise.attributes.get_input_2());
+        }
         return PrioritizedAutotuneConfigMatchKey{match_priority::POINTWISE, std::move(key)};
     }
     case graph::NodeType::UNKNOWN:

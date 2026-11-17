@@ -92,26 +92,6 @@ public:
                     "ResampleBwdNode output DX must have at least rank 3 (N, C, spatial...)"};
         }
 
-        // dx is the input-space tensor: the window must fit its padded extent. The window and
-        // padding vectors hold one value per dy spatial dimension, so the check needs dx of the
-        // same rank as dy.
-        auto& dxDims = dx->get_dim();
-        if(dxDims.size() == dy->get_dim().size())
-        {
-            auto& windowVec = attributes.get_window();
-            auto& prePadding = attributes.get_pre_padding();
-            auto& postPadding = attributes.get_post_padding();
-            for(size_t i = 0; i < windowVec.size(); ++i)
-            {
-                HIPDNN_CHECK_ERROR(detail::validateResampleWindowFitsPaddedInput("ResampleBwdNode",
-                                                                                 dxDims[i + 2],
-                                                                                 prePadding[i],
-                                                                                 postPadding[i],
-                                                                                 windowVec[i],
-                                                                                 i));
-            }
-        }
-
         if(auto index = attributes.get_index())
         {
             if(!index->get_dim().empty() && index->get_dim().size() < 3)

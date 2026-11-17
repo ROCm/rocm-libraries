@@ -47,6 +47,16 @@ void expectTensorIdOrder(const detail::AutotuneConfigMatchKey& key,
     }
 }
 
+std::shared_ptr<graph::TensorAttributes> makeUidTensor(const std::string& name, int64_t uid)
+{
+    const std::vector<int64_t> dims = {2, 3, 4, 5};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto tensor = std::make_shared<graph::TensorAttributes>(
+        graph::makeTensorAttributes(name, dims, strides));
+    tensor->set_uid(uid);
+    return tensor;
+}
+
 } // namespace
 
 class TestGraphMatchKey : public ::testing::Test
@@ -294,6 +304,45 @@ TEST_F(TestGraphMatchKey, PointwiseBinaryIncludesPointwiseModeCriterion)
         (detail::AutotuneConfigCriteria{{config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_ADD}}));
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("y")});
     expectTensorIdOrder(*key, {config_tensor::IN_0, config_tensor::IN_1});
+}
+
+// Inputs beyond the mode's operand count are left out of the lowered operation, so the key
+// carries only the operands the mode reads, as the backend key built from that operation does.
+TEST_F(TestGraphMatchKey, PointwiseUnaryKeyOmitsSurplusInput)
+{
+    graph::Graph graphObj;
+    const auto x = makeUidTensor("x", 1);
+    const auto surplus = makeUidTensor("surplus", 2);
+    graph::PointwiseAttributes attrs;
+    attrs.set_mode(PointwiseMode::IDENTITY);
+    graphObj.pointwise(x, surplus, attrs);
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(key->criteria,
+              (detail::AutotuneConfigCriteria{
+                  {config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_IDENTITY}}));
+    expectTensorIdOrder(*key, {config_tensor::IN_0});
+    expectTensorUidOrder(*key, {x});
+}
+
+TEST_F(TestGraphMatchKey, PointwiseBinaryKeyOmitsSurplusInput)
+{
+    graph::Graph graphObj;
+    const auto x = makeUidTensor("x", 1);
+    const auto y = makeUidTensor("y", 2);
+    const auto surplus = makeUidTensor("surplus", 3);
+    graph::PointwiseAttributes attrs;
+    attrs.set_mode(PointwiseMode::ADD);
+    graphObj.pointwise(x, y, surplus, attrs);
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(
+        key->criteria,
+        (detail::AutotuneConfigCriteria{{config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_ADD}}));
+    expectTensorIdOrder(*key, {config_tensor::IN_0, config_tensor::IN_1});
+    expectTensorUidOrder(*key, {x, y});
 }
 
 #ifdef HIPDNN_ENABLE_SDPA

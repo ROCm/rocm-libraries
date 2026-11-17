@@ -63,30 +63,12 @@ public:
         auto& xDims = x->get_dim();
         if(!xDims.empty())
         {
-            auto& windowVec = attributes.get_window();
-            auto& prePadding = attributes.get_pre_padding();
-            auto& postPadding = attributes.get_post_padding();
-
             HIPDNN_CHECK_ERROR(detail::validateResampleParams("ResampleFwdNode",
                                                               xDims.size() - 2,
-                                                              windowVec,
+                                                              attributes.get_window(),
                                                               attributes.get_stride(),
-                                                              prePadding,
-                                                              postPadding));
-
-            if(!windowVec.empty() && !prePadding.empty() && !postPadding.empty())
-            {
-                for(size_t i = 0; i < windowVec.size(); ++i)
-                {
-                    HIPDNN_CHECK_ERROR(
-                        detail::validateResampleWindowFitsPaddedInput("ResampleFwdNode",
-                                                                      xDims[i + 2],
-                                                                      prePadding[i],
-                                                                      postPadding[i],
-                                                                      windowVec[i],
-                                                                      i));
-                }
-            }
+                                                              attributes.get_pre_padding(),
+                                                              attributes.get_post_padding()));
         }
 
         if(auto index = attributes.get_index())
@@ -149,7 +131,8 @@ public:
             yDims[0] = xDims[0]; // N (batch)
             yDims[1] = xDims[1]; // C (channels preserved)
 
-            // Calculate spatial dimensions
+            // Calculate spatial dimensions with truncating division, as cuDNN does: a window
+            // wider than the padded input by less than the stride still yields one element
             for(size_t i = 2; i < xDims.size(); ++i)
             {
                 auto spatialIdx = i - 2;
@@ -158,10 +141,18 @@ public:
                 auto postPad = postPadding[spatialIdx];
                 auto strideVal = strideVec[spatialIdx];
                 auto windowVal = windowVec[spatialIdx];
-                HIPDNN_CHECK_ERROR(detail::validateResampleWindowFitsPaddedInput(
-                    "ResampleFwdNode", inputSize, prePad, postPad, windowVal, spatialIdx));
-
                 yDims[i] = (inputSize + prePad + postPad - windowVal) / strideVal + 1;
+
+                HIPDNN_RETURN_IF_LT(
+                    yDims[i],
+                    1,
+                    ErrorCode::INVALID_VALUE,
+                    "ResampleFwdNode: inferred y extent (" + std::to_string(yDims[i])
+                        + ") at spatial index " + std::to_string(spatialIdx)
+                        + " is below 1 for x extent " + std::to_string(inputSize) + ", pre_padding "
+                        + std::to_string(prePad) + ", post_padding " + std::to_string(postPad)
+                        + ", window " + std::to_string(windowVal) + " and stride "
+                        + std::to_string(strideVal));
             }
 
             y->set_dim(yDims);

@@ -8,7 +8,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
-// NOTE: Frontend allows broadcastable shapes for scale/bias.
+// NOTE: Frontend checks only the channel dimension of scale/bias.
 // Backend providers (e.g. MIOpen) may still reject unsupported shapes.
 TEST(TestBatchnormNode, PreValidateAcceptsBroadcastableScaleBias)
 {
@@ -178,6 +178,26 @@ TEST(TestBatchnormNode, PreValidateRejectsRank2ScaleBiasChannelMismatch)
 {
     auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {1, 32});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBatchnormNode, PreValidateAcceptsReducedRankScaleBias)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1, 1});
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsReducedRankScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32, 1, 1});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("(index 0) must be 64, got 32"), std::string::npos)
+        << error.get_message();
+}
+
+TEST(TestBatchnormNode, PreValidateAcceptsChannelFirstRank2ScaleBias)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1});
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 }
 
 TEST(TestBatchnormNode, PreValidateNode)

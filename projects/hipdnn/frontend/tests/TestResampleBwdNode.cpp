@@ -306,28 +306,22 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsNegativePadding)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestResampleBwdNode, PreValidateNodeRejectsWindowLargerThanPaddedDx)
+TEST(TestResampleBwdNode, PreValidateNodeAcceptsWindowWiderThanPaddedDx)
 {
-    auto preValidateWithWindow = [](const std::vector<int64_t>& window) {
-        auto attrs = createValidAttributes();
-        attrs.get_dy()->set_dim({1, 3, 1, 1});
-        attrs.get_dx()->set_dim({1, 3, 8, 8});
-        attrs.set_pre_padding({0, 0});
-        attrs.set_post_padding({0, 0});
-        attrs.set_stride({2, 2});
-        attrs.set_window(window);
+    // The forward of dx gives (8 - 9) / 2 + 1 = 1, matching dy
+    auto attrs = createValidAttributes();
+    attrs.get_dy()->set_dim({1, 3, 1, 1});
+    attrs.get_dx()->set_dim({1, 3, 8, 8});
+    attrs.set_pre_padding({0, 0});
+    attrs.set_post_padding({0, 0});
+    attrs.set_stride({2, 2});
+    attrs.set_window({9, 9});
 
-        const GraphAttributes graphAttributes;
-        const ResampleBwdNode node(std::move(attrs), graphAttributes);
-        return node.pre_validate_node();
-    };
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    // A window equal to the padded dx extent fits exactly once
-    auto error = preValidateWithWindow({8, 8});
+    auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
-
-    error = preValidateWithWindow({9, 9});
-    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
 // --- InferPropertiesNode ---

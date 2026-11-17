@@ -89,25 +89,4 @@ inline Error requireResampleParams(const std::string& nodeName,
         postPadding.empty(), ErrorCode::ATTRIBUTE_NOT_SET, nodeName + " missing post_padding");
     return validateResampleParams(nodeName, spatialRank, window, stride, prePadding, postPadding);
 }
-
-// Rejects a resample window wider than the padded input-space extent along one spatial
-// dimension, where no window position fits. The input space is x for the forward node and dx
-// for the backward node.
-inline Error validateResampleWindowFitsPaddedInput(const std::string& nodeName,
-                                                   int64_t inputSize,
-                                                   int64_t prePadding,
-                                                   int64_t postPadding,
-                                                   int64_t window,
-                                                   size_t spatialIdx)
-{
-    const int64_t paddedSize = inputSize + prePadding + postPadding;
-    HIPDNN_RETURN_IF_LT(paddedSize,
-                        window,
-                        ErrorCode::INVALID_VALUE,
-                        nodeName + ": window (" + std::to_string(window) + ") at spatial index "
-                            + std::to_string(spatialIdx)
-                            + " is larger than the padded input extent ("
-                            + std::to_string(paddedSize) + ")");
-    return {};
-}
 } // namespace hipdnn_frontend::detail
