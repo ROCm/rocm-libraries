@@ -96,6 +96,17 @@ def _validate_cli(wheel, source_root, *extra):
     )
 
 
+def test_release_source_staging_preserves_an_sdist_revision(tmp_path):
+    source = tmp_path / "sdist"
+    (source / "tensilelite").mkdir(parents=True)
+    (source / "PKG-INFO").write_text("Name: tensilelite\n")
+    stamp = f"SOURCE_REVISION = {_SHA!r}\n"
+    (source / "tensilelite/_build_info.py").write_text(stamp)
+    destination = tmp_path / "staged"
+    runpy.run_path(str(_STAGER))["stage_source"](source, destination)
+    assert (destination / "tensilelite/_build_info.py").read_text() == stamp
+
+
 def test_release_wheel_records_the_given_revision_and_validates(tmp_path):
     """Build the wheel as hipBLASLt's CMake does: staged source, explicit commit."""
     source_root = _isolated_source(tmp_path)

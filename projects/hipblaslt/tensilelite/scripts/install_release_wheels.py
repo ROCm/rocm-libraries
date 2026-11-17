@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path, PurePosixPath
 import shutil
 import zipfile
-
 
 _CANONICAL_PATHS = (
     Path("tensilelite"),
@@ -57,9 +57,21 @@ def install_wheels(wheels: list[Path], destination: Path) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--destination", required=True, type=Path)
-    parser.add_argument("wheels", nargs="+", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--copy-wheels", type=Path)
+    parser.add_argument("wheels", nargs="*", type=Path)
     args = parser.parse_args(argv)
-    install_wheels(args.wheels, args.destination)
+    wheels = list(args.wheels)
+    if args.manifest:
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        wheels.append(args.manifest.parent / manifest["wheel"])
+    if not wheels:
+        parser.error("provide wheels or --manifest")
+    install_wheels(wheels, args.destination)
+    if args.copy_wheels:
+        args.copy_wheels.mkdir(parents=True, exist_ok=True)
+        for wheel in wheels:
+            shutil.copy2(wheel, args.copy_wheels / wheel.name)
     return 0
 
 
