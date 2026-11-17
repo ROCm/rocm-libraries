@@ -32,18 +32,20 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # cost: the prediction is exact rational arithmetic over every output
 # coordinate, so both the launches and the CPU contracts, which prove the
 # prediction over the eight cases, are too slow for the quick tier's budget.
-# Both are standard-tier (ROCKE_ENGINE_test_categories_external.yaml)
-# and bake in the standard label so `ctest -L standard` finds them without
-# that file's labelling; the quick tier keeps its budget.
+# Both start at the standard tier (the python-standard category of
+# ROCKE_ENGINE_test_categories_external.yaml) and bake in the standard label
+# so `ctest -L standard` finds them without that file's labelling; the quick
+# tier keeps its budget. Every test of both modules is self-contained, so the
+# shard plugin may split them, and a shard that receives no test passes.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_structured_logit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_structured_analytical_gfx942.py\" -v -rs --timeout=120)\n")
+       "add_test(rocke_oracle_free_structured_logit_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_structured_analytical_gfx942.py\" -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_structured_logit_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_structured_logit_cpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_structured_contracts.py\" -v -rs --timeout=60)\n")
+       "add_test(rocke_oracle_free_structured_logit_cpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_structured_contracts.py\" -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_structured_logit_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"

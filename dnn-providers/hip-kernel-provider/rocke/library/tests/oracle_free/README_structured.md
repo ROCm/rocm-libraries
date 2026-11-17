@@ -151,9 +151,16 @@ A-F covers an AMDGPU backend behaviour: affected compilers select some
 unflagged `fptrunc(fmul float)` FP16 stores as `v_fma_mix{lo,hi}_f16`, which
 rounds the exact product once. LLVM PR
 [#236759](https://github.com/llvm/llvm-project/pull/236759), still open, proposes
-to make that fold require `contract`. The ISA contract accepts a compiler that
-folds and one that does not, and checks that the denominator combine is never
-fused.
+to make that fold require `contract`. The fused instruction adds a zero to the
+product: `+0.0` (disassembled as `0`) in the older affected compilers, and
+`-0.0` (`neg(0)`) since LLVM PR
+[#214544](https://github.com/llvm/llvm-project/pull/214544), which corrected
+the sign of a zero product. With `-0.0` the store is `q(o R)` for every
+operand. With `+0.0` it differs only where the exact product is `-0`, which
+the modeled path, with `o` and `R` nonnegative, does not reach. The ISA
+contract accepts a compiler that folds, with either addend, and one that does
+not; it requires both factors of the fused product to be read as plain
+registers, and checks that the denominator combine is never fused.
 
 **Tier A**, the certified correctly rounded target `q(y*)` with a small ULP
 radius, is diagnostic: it names the failure class, never the verdict. A
@@ -308,7 +315,7 @@ evaluates a softmax over data.
 From the `rocke/library` directory (NumPy and pytest only; Torch is not needed):
 
 ```bash
-# CPU contracts. About three minutes: the prediction is exact rational
+# CPU contracts. Several minutes: the prediction is exact rational
 # arithmetic over every coordinate of the eight cases.
 python -m pytest tests/oracle_free/test_structured_contracts.py -vv
 

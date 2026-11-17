@@ -1429,15 +1429,17 @@ def test_ir_schedule_contract_rejects_a_wrong_bound_or_window() -> None:
 # ISA contract (A-F): the FP16 output epilogue is the only fused site.
 #
 # Affected AMDGPU LLVM revisions select ``fptrunc(fmul float)`` without
-# ``contract`` as ``v_fma_mix{lo,hi}_f16 R, o, 0`` (one rounding) at some sites
-# and as an FP32 multiply then ``v_cvt_f16_f32`` (two) at others; a compiler
-# that requires ``contract`` for the fold selects none. The classifier follows
-# each 16-bit half of the epilogue registers into the four-half output stores,
-# so a store element is "single", "double" or "unknown". FP32 FMAs are allowed
-# only inside the expansion of the one division ``fdiv 1.0, l``; that the
-# expansion returns ``RN(1 / l)`` is assumption A-DIV, which this contract
-# does not show: it pins which expansion the kernel holds
-# (``division_dataflow``).
+# ``contract`` as ``v_fma_mix{lo,hi}_f16 R, o, <zero>`` (one rounding) at some
+# sites and as an FP32 multiply then ``v_cvt_f16_f32`` (two) at others; a
+# compiler that requires ``contract`` for the fold selects none. The zero
+# addend is ``+0.0``, printed ``0``, in the older revisions and ``-0.0``,
+# printed ``neg(0)``, in the later ones (``_ISA_ZERO_ADDENDS``). The
+# classifier follows each 16-bit half of the epilogue registers into the
+# four-half output stores, so a store element is "single", "double" or
+# "unknown". FP32 FMAs are allowed only inside the expansion of the one
+# division ``fdiv 1.0, l``; that the expansion returns ``RN(1 / l)`` is
+# assumption A-DIV, which this contract does not show: it pins which
+# expansion the kernel holds (``division_dataflow``).
 # ---------------------------------------------------------------------------
 
 _ISA_REGISTER = re.compile(r"^v(\d+)$|^v\[(\d+):(\d+)\]$")
@@ -1446,6 +1448,14 @@ _ISA_FP32_FMA = re.compile(
     r"^v_(?:pk_)?fma(?:c|ak|mk)?_f32|^v_mac_f32|^v_mad_f32|^v_div_fmas_f32"
 )
 _ISA_MIX = ("v_fma_mix", "v_mad_mix")
+# The addend of the epilogue's mixed-precision FMA, as the disassembler prints
+# it: the constant 0 (``+0.0``), or the same constant with the negate modifier
+# (``-0.0``). In round-to-nearest ``x + (-0.0) = x`` for every ``x``, so with
+# ``neg(0)`` the instruction is the exact product rounded once to FP16, for
+# every operand. With ``0`` it differs in one case only: an exact product of
+# ``-0.0`` is stored as ``+0.0``. The modeled accumulator and reciprocal are
+# nonnegative, so both forms store ``q(o R)`` on the modeled path.
+_ISA_ZERO_ADDENDS = ("0", "neg(0)")
 _ISA_SCALAR = re.compile(r"^s(\d+)$|^s\[(\d+):(\d+)\]$")
 _ISA_LOADS = ("global_load", "ds_read", "buffer_load", "scratch_load", "flat_load")
 # VALU instructions whose second operand is a destination too: the scale flag
@@ -1509,7 +1519,7 @@ class EpilogueIsa:
     "single" (``v_fma_mix*``), "double" (FP32 multiply then ``v_cvt_f16_f32``)
     or "unknown". ``mix_sites`` counts every mixed-precision FMA of the kernel,
     the KV loop included; ``unmodeled_mix`` lists those that are not the
-    epilogue's ``R * o + 0``."""
+    epilogue's ``R * o`` with a zero addend (``_ISA_ZERO_ADDENDS``)."""
 
     divisions: int = 0
     division: tuple[str, ...] | None = None  # see ``division_dataflow``
@@ -1599,19 +1609,28 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
         destination = _isa_registers(operands[0]) or []
         sources = [_isa_registers(item) for item in operands[1:]]
         reads_reciprocal = any(reciprocal in (item or []) for item in sources)
+        # The two factors of a product. A factor that is not a register
+        # operand as written (a negated or absolute value, a constant) is not
+        # the modeled ``o`` or ``R``.
+        factors = sources[:2]
+        plain_factors = len(factors) == 2 and None not in factors
         update: dict[tuple[int, int], str] = {}
         if name.startswith(_ISA_MIX):
             if (
                 name in ("v_fma_mixlo_f16", "v_fma_mixhi_f16")
-                and operands[-1] == "0"
-                and reciprocal in (sources[0] or []) + (sources[1] or [])
+                and len(operands) == 4
+                and operands[-1] in _ISA_ZERO_ADDENDS
+                and plain_factors
+                and [item == [reciprocal] for item in factors].count(True) == 1
             ):
                 half = 0 if name == "v_fma_mixlo_f16" else 1
                 update[(destination[0], half)] = "single"
             else:
                 model.unmodeled_mix.append(f"{name} {', '.join(operands)}")
-        elif name in ("v_mul_f32_e32", "v_mul_f32_e64", "v_pk_mul_f32") and (
-            reads_reciprocal
+        elif (
+            name in ("v_mul_f32_e32", "v_mul_f32_e64", "v_pk_mul_f32")
+            and reads_reciprocal
+            and plain_factors
         ):
             for register in destination:
                 products.add(register)
@@ -1854,6 +1873,12 @@ _ISA_STORES = {
         "global_store_dwordx2 v[4:5], v[0:1], off",
     ),
 }
+# The first store with the ``-0.0`` addend of a later compiler, which the
+# disassembler prints as ``neg(0)``.
+_ISA_STORE_NEGATIVE_ZERO_ADDEND = tuple(
+    line.removesuffix(", 0") + ", neg(0)" if line.startswith("v_fma_mix") else line
+    for line in _ISA_STORES[frozenset({0, 1})]
+)
 
 
 @pytest.mark.parametrize(
@@ -1867,6 +1892,19 @@ def test_isa_classifier_reads_each_epilogue_form(lanes: frozenset[int]) -> None:
     assert not model.fma_outside_division and not model.unmodeled_mix
     assert model.single_lanes == lanes
     assert model.mix_sites == (2 if lanes else 0)
+
+
+def test_isa_classifier_reads_either_spelling_of_the_zero_addend() -> None:
+    """A-F: the fused store is the exact product rounded once to FP16 with
+    the addend ``+0.0`` (printed ``0``) and with ``-0.0`` (printed ``neg(0)``),
+    so both spellings classify as the same single-rounded elements."""
+    store = _ISA_STORE_NEGATIVE_ZERO_ADDEND
+    assert sum(line.endswith(", neg(0)") for line in store) == 2
+    model = classify_epilogue_isa(_isa_excerpt(*_ISA_DIVISION, *store))
+    assert model.divisions == 1
+    assert not model.fma_outside_division and not model.unmodeled_mix
+    assert model.single_lanes == frozenset({0, 1})
+    assert model.mix_sites == 2
 
 
 def test_division_dataflow_is_the_pinned_expansion() -> None:
@@ -1924,14 +1962,53 @@ def test_division_dataflow_is_the_pinned_expansion() -> None:
         ("v_fmac_f32_e32 v40, v41, v42", "fma_outside_division"),
         ("v_pk_fma_f32 v[40:41], v[42:43], v[44:45], v[46:47]", "fma_outside_division"),
         ("v_fma_mixlo_f16 v2, v32, v0, v5", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, v32, v0, 1.0", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, v32, v0, neg(1.0)", "unmodeled_mix"),
         ("v_mad_mixlo_f16 v2, v32, v0, 0", "unmodeled_mix"),
+        ("v_mad_mixlo_f16 v2, v32, v0, neg(0)", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, v32, -v0, 0", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, v32, |v0|, neg(0)", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, -v32, v0, neg(0)", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, v32, 2.0, 0", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, v32, v32, 0", "unmodeled_mix"),
+        ("v_fma_mixlo_f16 v2, v0, v1, neg(0)", "unmodeled_mix"),
     ],
 )
 def test_isa_classifier_rejects_an_unmodeled_fusion(extra: str, finding: str) -> None:
-    """A denominator FMA after the division, a mix FMA with an addend or the
-    other mix family is not the A-F epilogue and must be reported."""
+    """A denominator FMA after the division, a mix FMA with a nonzero addend,
+    the other mix family, and a mix FMA whose factors are not the reciprocal
+    and one other plain register (a negated or absolute factor, a constant,
+    the reciprocal twice, no reciprocal) are not the A-F epilogue and must be
+    reported."""
     lines = (*_ISA_DIVISION, extra, *_ISA_STORES[frozenset({0, 1})])
     assert getattr(classify_epilogue_isa(_isa_excerpt(*lines)), finding)
+
+
+def test_isa_classifier_requires_plain_factors_of_the_fp32_product() -> None:
+    """The double-rounded element is ``v_cvt_f16_f32`` of an FP32 product of
+    the reciprocal and one other plain register. A product with a negated or
+    constant factor is not that product, so its element stays unknown."""
+
+    def stores(second_multiply: str) -> list[tuple[str, ...]]:
+        lines = (
+            *_ISA_DIVISION,
+            "v_mul_f32_e32 v0, v32, v0",
+            second_multiply,
+            "v_cvt_f16_f32_e32 v0, v0",
+            "v_cvt_f16_f32_e32 v1, v1",
+            "v_pack_b32_f16 v0, v0, v1",
+            "global_store_dword v[4:5], v0, off",
+        )
+        return classify_epilogue_isa(_isa_excerpt(*lines)).stores
+
+    assert stores("v_mul_f32_e32 v1, v1, v32") == [("double", "double")]
+    for multiply in (
+        "v_mul_f32_e64 v1, -v1, v32",
+        "v_mul_f32_e64 v1, |v1|, v32",
+        "v_mul_f32_e64 v1, v32, -v1",
+        "v_mul_f32_e32 v1, 2.0, v32",
+    ):
+        assert stores(multiply) == [("double", "unknown")], multiply
 
 
 @pytest.mark.parametrize(
@@ -2343,10 +2420,12 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
 
     - One division, and every FP32 FMA lies inside it: the denominator combine
       ``fadd(fmul(l, alpha), l_tile)`` is not fused.
-    - Every ``v_fma_mix*`` of the kernel, the KV loop included, is
-      ``R * o + 0`` feeding an output store; BF16 has none. FP16 stores are
-      classified element by element. No mix instruction at all is a compiler
-      that requires ``contract`` for the fold, and is accepted.
+    - Every ``v_fma_mix*`` of the kernel, the KV loop included, is ``R * o``
+      with a zero addend, ``+0.0`` or ``-0.0`` (``_ISA_ZERO_ADDENDS``), and
+      both factors read as plain registers, feeding an output store; BF16 has
+      none. FP16 stores are classified element by element. No mix instruction
+      at all is a compiler that requires ``contract`` for the fold, and is
+      accepted.
     - A named artifact (by HSACO digest) must show its recorded lanes. A digest
       no artifact names, from a compiler version an artifact was recorded
       under, raises a warning: the recorded digests are out of date for it.
