@@ -6352,9 +6352,9 @@ namespace TensileLite
                 .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
             };
             origami::config_t origami_config = {
-                .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
-                       static_cast<size_t>(sizeMapping.macroTile.y),
-                       static_cast<size_t>(sizeMapping.depthU)},
+                .mt                       = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                             static_cast<size_t>(sizeMapping.macroTile.y),
+                                             static_cast<size_t>(sizeMapping.depthU)},
                 .tree_split_needs_divisor = customTreeSplitNeedsDivisor(),
             };
 

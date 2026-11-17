@@ -159,9 +159,10 @@ reduction_t select_reduction(const problem_t& problem,
       // For problems with large k and low number of tiles, use parallel reduction
       // TODO Benchmark to check if limits are correct
       constexpr int MinItersForParallel = 64;
-      // A kernel whose tree split needs F | iters_per_tile rarely splits
-      // above cu_count / 4 tiles, and never above cu_count / 2; parallel
-      // reduction has neither limit.
+      // tree_split_needs_divisor drops the tile bound below cu_count. The tree
+      // grid keeps tiles * F <= cu_count, so above cu_count / 2 tiles no kernel
+      // gets F >= 2 from it, and from cu_count / 4 to cu_count / 2 a kernel
+      // that needs a divisor splits only when 2 or 3 divides iters_per_tile.
       const size_t MaxTilesForParallel
           = config.tree_split_needs_divisor ? cu_count : cu_count / 4;
       if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)

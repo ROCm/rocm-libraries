@@ -624,8 +624,15 @@ struct config_t {
 
   /// The kernel's tree reduction can only split a tile's K iterations into
   /// equal parts (no per-tile extra iterations), while it also completes
-  /// parallel reduction. k_split_aware then admits parallel reduction for any
-  /// tile count below the CU count and sizes that split by wave fill.
+  /// parallel reduction. Read only by grid_selection_t::k_split_aware:
+  /// - select_reduction: parallel for any tiles < CU count with at least 64
+  ///   iterations per tile, instead of only up to CU count / 4 tiles.
+  /// - select_grid_size with reduction_strategy == parallel, no CU cap
+  ///   (problem.num_cus) and tiles > CU count / 4: the smallest split F, at
+  ///   most two waves of tiles * F workgroups, that best fills the last wave.
+  ///   At or below CU count / 4 tiles, or under a CU cap, the grid is unchanged.
+  /// Like occupancy and workspace_size it is a launch-policy input, not part
+  /// of the kernel's identity, so operator== and hash() leave it out.
   bool tree_split_needs_divisor = false;
 
   /// Prediction mode for latency estimation.
