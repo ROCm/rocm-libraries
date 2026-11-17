@@ -227,22 +227,43 @@ namespace TensileLite
 
             // Slice factory of --split-devices N. --split-dim M: M becomes this device's share
             // (A split, B replicated). --split-dim N: N becomes its share (B split, A replicated).
+            // --split-dim B: the batch becomes its share (A, B, C and D all split).
             // The shares are cut in createProblems, once D's type and strides are known: they are
             // rounded so every device's D slice starts on 256 bytes when that is nearly free.
             if(m_sliceCount > 1)
             {
-                m_splitN   = args["split-dim"].as<std::string>() == "N";
+                auto const dim = args["split-dim"].as<std::string>();
+                if(dim != "M" && dim != "N" && dim != "B")
+                    throw std::runtime_error(
+                        concatenate("--split-dim must be M, N or B, got '", dim, "'"));
+                m_splitN     = dim == "N";
+                m_splitBatch = dim == "B";
                 if(args.count("split-align")
                    && !SliceAlignment::parseMode(args["split-align"].as<std::string>(),
                                                  m_splitAlign))
                     throw std::runtime_error("--split-align must be auto, off or force");
-                auto mFree = std::find_if(m_freeIndices.begin(),
-                                          m_freeIndices.end(),
-                                          [&](auto const& f) { return f.isA != m_splitN; });
-                if(mFree == m_freeIndices.end())
-                    throw std::runtime_error(concatenate("--split-devices: problem has no free index in ",
-                                                         m_splitN ? "B" : "A"));
-                m_splitFree        = *mFree;
+                if(m_splitBatch)
+                {
+                    if(m_batchIndices.size() != 1)
+                        throw std::runtime_error(
+                            "--split-dim B needs a problem with exactly one batch index");
+                    auto const& batch = m_batchIndices[0];
+                    m_splitAxis       = {batch.a, batch.b, batch.c, batch.d};
+                }
+                else
+                {
+                    auto mFree = std::find_if(m_freeIndices.begin(),
+                                              m_freeIndices.end(),
+                                              [&](auto const& f) { return f.isA != m_splitN; });
+                    if(mFree == m_freeIndices.end())
+                        throw std::runtime_error(
+                            concatenate("--split-devices: problem has no free index in ",
+                                        m_splitN ? "B" : "A"));
+                    m_splitAxis = {mFree->isA ? mFree->i : SplitAxis::npos,
+                                   mFree->isA ? SplitAxis::npos : mFree->i,
+                                   mFree->c,
+                                   mFree->d};
+                }
                 m_fullProblemSizes = m_problemSizes;
             }
 
@@ -433,12 +454,13 @@ namespace TensileLite
             }
         }
 
-        // Rows (or columns) of the split dimension each of the first sliceCount-1 devices takes,
-        // cut from the full-size problem. Plain is total / sliceCount, rounded up as --split-align
-        // says so that every cut matrix's slice starts on 256 bytes; see
+        // Rows, columns or batches of the split dimension each of the first sliceCount-1 devices
+        // takes, cut from the full-size problem. Plain is total / sliceCount, rounded up as
+        // --split-align says so that every cut matrix's slice starts on 256 bytes; see
         // Tensile/SliceAlignment.hpp. The cut matrices are the ones PartitionedGemm gives the rule
-        // (the split operand, C and D), so the client runs the slices the library runs, although
-        // its A, B and C are per-device buffers whose slices start at the buffer.
+        // (the split operand, C and D; all four for a batch split), so the client runs the slices
+        // the library runs, although its A, B and C are per-device buffers whose slices start at
+        // the buffer.
         size_t ClientProblemFactory::splitShare(ContractionProblemGemm const& full) const
         {
             // 256 bytes = 2048 bits; elementSize is a float and fractional for fp4 and fp6.
@@ -449,23 +471,29 @@ namespace TensileLite
             auto const step = [](TensorDescriptor const& t, size_t dim) {
                 return static_cast<int64_t>(t.strides().at(dim));
             };
-            auto const&                         op = m_splitN ? full.b() : full.a();
-            std::vector<SliceAlignment::Matrix> cut{
-                {m_splitN ? "B" : "A", step(op, m_splitFree.i), bits(op)},
-                {"C", step(full.c(), m_splitFree.c), bits(full.c())},
-                {"D", step(full.d(), m_splitFree.d), bits(full.d())}};
-            size_t total = full.d().sizes().at(m_splitFree.d);
+            std::vector<SliceAlignment::Matrix> cut;
+            if(m_splitAxis.a != SplitAxis::npos)
+                cut.push_back({"A", step(full.a(), m_splitAxis.a), bits(full.a())});
+            if(m_splitAxis.b != SplitAxis::npos)
+                cut.push_back({"B", step(full.b(), m_splitAxis.b), bits(full.b())});
+            cut.push_back({"C", step(full.c(), m_splitAxis.c), bits(full.c())});
+            cut.push_back({"D", step(full.d(), m_splitAxis.d), bits(full.d())});
+            size_t total = full.d().sizes().at(m_splitAxis.d);
             auto   r     = SliceAlignment::split(
                 static_cast<int64_t>(total), m_sliceCount, cut, m_splitAlign);
             if(r.share == 0)
                 throw std::runtime_error(concatenate("--split-devices=",
                                                      m_sliceCount,
                                                      " is larger than ",
-                                                     m_splitN ? "N=" : "M=",
+                                                     m_splitBatch ? "batch="
+                                                     : m_splitN   ? "N="
+                                                                  : "M=",
                                                      total));
+            auto const dim = m_splitBatch ? SliceAlignment::Dim::Batch
+                             : m_splitN   ? SliceAlignment::Dim::N
+                                          : SliceAlignment::Dim::M;
             if(m_sliceIdx == 0)
-                for(auto const& line : SliceAlignment::hints(
-                        r, m_splitN ? SliceAlignment::Dim::N : SliceAlignment::Dim::M, m_sliceCount))
+                for(auto const& line : SliceAlignment::hints(r, dim, m_sliceCount))
                     std::cout << "--split-devices: " << line << std::endl;
             return static_cast<size_t>(r.share);
         }
@@ -492,10 +520,10 @@ namespace TensileLite
             auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(full);
             if(m_slices.empty() || gemm == nullptr)
                 return 0;
-            auto const& free = m_slices[0]->m_splitFree;
+            auto const& axis = m_slices[0]->m_splitAxis;
             // The share the slice factories cut this problem with.
             size_t share = m_slices[0]->m_splitShares.at(m_problemIndex.at(full));
-            return device * share * gemm->d().strides().at(free.d);
+            return device * share * gemm->d().strides().at(axis.d);
         }
 
         std::vector<size_t> ClientProblemFactory::sliceBatchOffsets(ContractionProblem const* full,
@@ -667,10 +695,10 @@ namespace TensileLite
                                     auto fullStrides = [&](ContractionProblemGemm::TENSOR t) {
                                         return probe.tensors()[t].strides();
                                     };
-                                    size_t total = m_fullProblemSizes[i].at(m_splitFree.d);
+                                    size_t total      = m_fullProblemSizes[i].at(m_splitAxis.d);
                                     size_t share = splitShare(probe);
                                     auto sliceSizes = m_fullProblemSizes[i];
-                                    sliceSizes.at(m_splitFree.d)
+                                    sliceSizes.at(m_splitAxis.d)
                                         = m_sliceIdx + 1 < m_sliceCount
                                               ? share
                                               : total - share * (m_sliceCount - 1);
@@ -688,11 +716,12 @@ namespace TensileLite
                                         if(tight.strides() == strides)
                                             strides.clear();
                                     };
-                                    // The split operand (A for M, B for N) and C shrink with the
-                                    // slice; the other operand is replicated whole.
-                                    if(!m_splitN)
+                                    // The split operand (A for M, B for N, both for the batch)
+                                    // and C shrink with the slice; an operand the split does not
+                                    // cut is replicated whole.
+                                    if(m_splitAxis.a != SplitAxis::npos)
                                         retighten(ContractionProblemGemm::TENSOR::A, aS);
-                                    else
+                                    if(m_splitAxis.b != SplitAxis::npos)
                                         retighten(ContractionProblemGemm::TENSOR::B, bS);
                                     retighten(ContractionProblemGemm::TENSOR::C, cS);
                                     // D keeps the full strides: the slice sits inside a full-size D

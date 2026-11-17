@@ -1,0 +1,88 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# One GEMM split along the batch over the two partitions of a DPX gfx1250 (SplitDevices: 2). 4, 5 and
+# 6 batches: the second partition takes the rest when the batch count is odd.
+# Kernel parameters are the validated ones of gemm/gfx12/tdm_general_batched_gfx1250.yaml.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # gfx1250 only
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  Architecture: gfx1250
+  SplitDevices: 2
+  SplitDim: B
+  BoundsCheck: 0
+  CodeObjectVersion: "4"
+  CpuThreads: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  EnqueuesPerSync: 1
+  KernelTime: False
+  NumElementsToValidate: -1
+  NumWarmups: 0
+  SyncsPerBenchmark: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+
+BenchmarkProblems:
+  -
+    - # BF16 TN, batched
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TileProcessingStrategy: ["None"]
+        - TDMIterateMode: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        # GSU=2 deterministically exercises the pointer-array output-conversion
+        # path in addition to the direct GSU=1 kernel.
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - DirectToVgprSparseMetadata: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 4, 128]
+          - Exact: [128, 128, 5, 512]
+          - Exact: [512, 512, 6, 256]

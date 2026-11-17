@@ -51,5 +51,23 @@ namespace TensileLite
             }
             return "";
         }
+
+        // The same check for a batch split (--split-dim B). The batch cuts A, B and C, so every
+        // device needs its own batches of them and none can be shared. D can: every device holds
+        // it in full size and writes its own batches.
+        inline std::string splitBatchPlacementError(std::string const& placement)
+        {
+            auto const formatError = splitPlacementFormatError(placement);
+            if(!formatError.empty())
+                return formatError;
+
+            char const* const names[3] = {"A", "B", "C"};
+            for(size_t t : {size_t(0), size_t(1), size_t(2)})
+                if(placement[t] == 'S')
+                    return std::string("--split-placement: ") + names[t]
+                           + " cannot be shared in a batch split, because the split cuts it (only D"
+                             " can be shared)";
+            return "";
+        }
     }
 }
