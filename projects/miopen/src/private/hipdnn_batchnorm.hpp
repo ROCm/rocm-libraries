@@ -49,10 +49,6 @@ namespace hipdnn {
 // Some problems take a different route through hipDNN than through MIOpen:
 // - Per-activation mode runs as spatial batchnorm on x viewed as {N, C*H*W, 1,
 //   1}, which normalizes each element over the batch exactly as MIOpen does.
-//   Inference, training and backward then ignore the activation, because
-//   MIOpen's per-activation kernels never apply it (a MIOpen bug,
-//   https://github.com/ROCm/rocm-libraries/issues/15445). Inference still
-//   rejects the activations its solver does not accept.
 // - CLIPPEDRELU and CLAMP run as ReLU with an upper clip, and with a lower and
 //   an upper clip.
 // - Backward without the saved statistics, at an epsilon other than 1e-5 or
@@ -69,6 +65,11 @@ namespace hipdnn {
 // - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP on spatial
 //   backward, the only call that both accepts and applies one. A null
 //   activation descriptor means no activation, as it does in MIOpen.
+// - Any activation other than PASTHRU in per-activation mode. MIOpen's
+//   per-activation kernels ignore it (a MIOpen bug,
+//   https://github.com/ROCm/rocm-libraries/issues/15445), so there is no
+//   result to match. Inference with an activation its solver does not accept
+//   still fails with miopenStatusNotImplemented, as in MIOpen.
 // - Tensors that are not packed, data tensors of different shapes, or
 //   scale, bias or statistics not shaped {1, C, 1, ...} ({1, C, H, W, ...} in
 //   per-activation mode). MIOpen reshapes a 5-D x to 4-D, so a non-packed 5-D x
@@ -93,7 +94,8 @@ namespace hipdnn {
 // dbias, and a null bias on spatial backward with an activation. MIOpen would
 // dereference these and crash, so there is no MIOpen behavior to match. A
 // bn_mode other than miopenBNSpatial or miopenBNPerActivation returns
-// miopenStatusUnsupportedOp.
+// miopenStatusNotImplemented on training, as MIOpen does, and
+// miopenStatusUnsupportedOp on inference and backward.
 //
 // Some entry points have no separate previous and next running statistics.
 // They update the statistics in place, so the wrapper binds the same buffer to

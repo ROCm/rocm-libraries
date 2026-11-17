@@ -167,21 +167,6 @@ const char* ReadProblem(BnProblem& problem,
     return nullptr;
 }
 
-// MIOpen's per-activation kernels never apply the activation, so MIOpen runs
-// per-activation inference, training and backward as if it were PASTHRU, and so
-// does the forwarded call. This copies a MIOpen bug,
-// https://github.com/ROCm/rocm-libraries/issues/15445; drop it when MIOpen fixes
-// that. Call it after CheckProblem where MIOpen's solver still limits the
-// activation.
-void DropPerActivationActivation(BnProblem& problem)
-{
-    if(problem.bnMode != miopenBNPerActivation)
-        return;
-    problem.act      = miopenActivationPASTHRU;
-    problem.actAlpha = 0.0;
-    problem.actBeta  = 0.0;
-}
-
 // MIOpen's BadParm checks for the forward entry points, in its order, so a
 // forwarded call fails the way the native one does. A truncated x has no
 // reliable dims, so the checks that read them are left to CheckSupported.
@@ -385,10 +370,11 @@ bool IsSolverActivation(miopenActivationMode_t act)
 
 // When no MIOpen solver applies, MIOpen fails with NotImplemented ("No solver
 // found"), so the forwarded call does too. Training has a spatial and a
-// per-activation solver, and only the spatial one limits the activation.
-// Inference has one solver for both modes, which limits it. Backward has a
-// spatial and a per-activation solver, and the per-activation one accepts
-// spatial problems with any activation, so backward never fails on one.
+// per-activation solver, so neither takes any other mode, and only the spatial
+// one limits the activation. Inference has one solver for both modes, which
+// limits it. Backward has a spatial and a per-activation solver, and the
+// per-activation one accepts spatial problems with any activation, so backward
+// never fails on one.
 miopenStatus_t CheckSolverExists(const BnProblem& problem)
 {
     if(!HasSolverDataTypes(problem.tensors))
@@ -397,7 +383,12 @@ miopenStatus_t CheckSolverExists(const BnProblem& problem)
     bool limitsActivation = false;
     switch(problem.kind)
     {
-    case GraphKind::BnFwdTraining: limitsActivation = problem.bnMode == miopenBNSpatial; break;
+    case GraphKind::BnFwdTraining:
+        if(problem.bnMode != miopenBNSpatial && problem.bnMode != miopenBNPerActivation)
+            return RecordFailure(miopenStatusNotImplemented,
+                                 "MIOpen has no batchnorm solver for this mode");
+        limitsActivation = problem.bnMode == miopenBNSpatial;
+        break;
     case GraphKind::BnFwdInference:
     case GraphKind::BnFwdInferenceInvVar: limitsActivation = true; break;
     case GraphKind::BnBackward:
@@ -451,8 +442,19 @@ std::optional<fe::graph::PointwiseAttributes> ActivationAttributes(const BnProbl
     return std::nullopt;
 }
 
-// What the MIOpen provider can run, whatever the kind. Empty when it can.
-// CheckProblem has already limited the rank to 4 or 5.
+// What the MIOpen provider can run, whatever the kind. Empty when it can, and
+// otherwise the reason it cannot. The hipDNN path forwards only:
+// - spatial or per-activation mode;
+// - no activation in per-activation mode, and in spatial mode PASTHRU, RELU,
+//   CLIPPEDRELU or CLAMP;
+// - dims and strides no larger than INT_MAX, and no vectorized layout;
+// - packed tensors, with y and dx in the shape and layout of x;
+// - scale, bias and statistics shaped {1, C, 1, ...}, or {1, C, H, W, ...} in
+//   per-activation mode.
+// The rank (4 or 5) and the data types are not checked here: CheckProblem has
+// already limited the rank, and the parameter checks and CheckProblem have
+// already given every data tensor the type of x. CheckTuningPolicy declines the
+// tuning policies the provider cannot honor.
 std::string CheckSupported(const BnProblem& problem)
 {
     const std::vector<TensorInfo>& tensors = problem.tensors;
@@ -461,6 +463,11 @@ std::string CheckSupported(const BnProblem& problem)
 
     if(problem.bnMode != miopenBNSpatial && !perActivation)
         return "hipDNN batchnorm supports only spatial and per-activation modes";
+    // MIOpen's per-activation kernels ignore the activation
+    // (https://github.com/ROCm/rocm-libraries/issues/15445), so there is no
+    // result to match.
+    if(perActivation && problem.act != miopenActivationPASTHRU)
+        return "hipDNN per-activation batchnorm does not support an activation";
     if(problem.act != miopenActivationPASTHRU && !ActivationAttributes(problem, false))
         return std::string("hipDNN batchnorm does not support the ") +
                ActivationModeName(problem.act) + " activation";
@@ -470,8 +477,6 @@ std::string CheckSupported(const BnProblem& problem)
         return reason;
     if(!std::all_of(tensors.begin(), tensors.end(), IsPacked))
         return "hipDNN batchnorm supports only packed tensors";
-    // The parameter checks and CheckProblem have already given every data tensor
-    // the type of x.
     for(size_t index : {kIdxY, kIdxDx})
     {
         if(index >= tensors.size())
@@ -818,7 +823,6 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
     if(const char* reason = ReadProblem(
            problem, {xDesc, yDesc, scaleDesc, biasDesc, meanDesc, varianceDesc}, activDesc))
         return RecordFailure(miopenStatusBadParm, reason);
-    DropPerActivationActivation(problem);
 
     if(const char* reason = CheckForwardParams(problem, true, x, y, scale, bias))
         return RecordFailure(miopenStatusBadParm, reason);
@@ -935,9 +939,6 @@ miopenStatus_t ForwardInference(miopenHandle_t handle,
         return status;
     if(const miopenStatus_t status = CheckProblem(problem); status != miopenStatusSuccess)
         return status;
-    // After CheckProblem: MIOpen's inference solver rejects other activations
-    // in both modes, and only then skips the ones it accepts.
-    DropPerActivationActivation(problem);
 
     if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
@@ -1051,7 +1052,6 @@ miopenStatus_t Backward(miopenHandle_t handle,
                        {xDesc, dyDesc, scaleDesc, biasDesc, meanDesc, varianceDesc, dxDesc},
                        activDesc))
         return RecordFailure(miopenStatusBadParm, reason);
-    DropPerActivationActivation(problem);
     // Without an activation the fused entry point is plain backward, and sharing
     // its kind lets the two share a plan.
     problem.kind = problem.act == miopenActivationPASTHRU ? GraphKind::BnBackward
@@ -1074,7 +1074,9 @@ miopenStatus_t Backward(miopenHandle_t handle,
     // MIOpen would write through these, so a null one has no behavior to match.
     if(dscale == nullptr || dbias == nullptr)
         return RecordFailure(miopenStatusBadParm, "dscale and dbias must not be null");
-    if(problem.act != miopenActivationPASTHRU && bias == nullptr)
+    // Per-activation mode is declined with an activation, below.
+    if(problem.bnMode == miopenBNSpatial && problem.act != miopenActivationPASTHRU &&
+       bias == nullptr)
         return RecordFailure(miopenStatusBadParm,
                              "batchnorm backward with an activation needs the bias");
 

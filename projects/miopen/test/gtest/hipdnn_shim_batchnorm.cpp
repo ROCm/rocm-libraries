@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1112,59 +1113,6 @@ TEST(GPU_HipdnnShimBNPerActivation3D_FP32, MatchesCpuReference)
     }
 }
 
-// MIOpen's per-activation kernels ignore the activation, so the call is served and
-// its results are those without it
-// (https://github.com/ROCm/rocm-libraries/issues/15445). TANH is one the provider
-// has no mapping for. Training and backward serve it all the same; inference has
-// no solver for it in either mode, so it fails with NotImplemented on both paths.
-TEST(GPU_HipdnnShimBNPerActivation_FP32, IgnoresActivation)
-{
-    auto&& handle = get_handle();
-
-    for(const auto mode : {miopenActivationRELU, miopenActivationTANH})
-    {
-        const std::string name = mode == miopenActivationRELU ? "relu" : "tanh";
-        SCOPED_TRACE(name);
-
-        hs::OwnedActivationDescriptor activ;
-        ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
-        ASSERT_EQ(miopenSetActivationDescriptor(activ.handle, mode, 0.1, 0.3, 0.0),
-                  miopenStatusSuccess);
-        {
-            SCOPED_TRACE("train");
-            TrainData d;
-            SetUpTrain(d, miopenBNPerActivation);
-            const auto result =
-                hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
-            if(ExpectServed("per_activation_" + name + "_train", result))
-                CheckTrain(handle, d, true, true);
-        }
-        {
-            SCOPED_TRACE("infer");
-            InferData d;
-            SetUpInfer(d, miopenBNPerActivation);
-            const auto result =
-                hs::CaptureCall([&] { return InferActivation(handle, d, activ.handle); });
-            if(mode == miopenActivationTANH)
-                hs::ExpectStatusParity("per_activation_tanh_infer",
-                                       result,
-                                       miopenStatusNotImplemented,
-                                       "no batchnorm solver");
-            else if(ExpectServed("per_activation_" + name + "_infer", result))
-                CheckInfer(handle, d);
-        }
-        {
-            SCOPED_TRACE("bwd");
-            BwdData d;
-            SetUpBwd(d, miopenBNPerActivation);
-            const auto result =
-                hs::CaptureCall([&] { return BwdActivation(handle, d, true, activ.handle); });
-            if(ExpectServed("per_activation_" + name + "_bwd", result))
-                CheckBwd(handle, d);
-        }
-    }
-}
-
 // CLIPPEDRELU and CLAMP forward as ReLU with an upper clip, and with both clips.
 // The clips are set wide enough that every branch of the activation and of its
 // gradient is taken. Backward is covered as well as forward, because it is the
@@ -1818,9 +1766,11 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
 // ---------------------------------------------------------------------------
 // Gaps: MIOpen serves these, the hipDNN path declines them
 
-// The hipDNN path declines a tuning gap with UnsupportedOp. RecordGapOutcome also
+// The hipDNN path declines a batchnorm gap with UnsupportedOp. RecordGapOutcome also
 // accepts NotImplemented, which conv declines need, so this checks the status too.
-bool RecordTuningGap(const std::string& case_name, const hs::CallResult& result, const char* reason)
+bool RecordDeclinedGap(const std::string& case_name,
+                       const hs::CallResult& result,
+                       const char* reason)
 {
     const bool served = hs::RecordGapOutcome(case_name, result, reason);
     if(hs::ForwardingEnabled() && !served)
@@ -1836,20 +1786,20 @@ void ExpectTrainingPolicyGap(miopen::Handle& handle, const std::string& prefix, 
     {
         SCOPED_TRACE("train");
         TrainData d;
-        if(RecordTuningGap(prefix + "_train", TrainUnderPolicy(handle, d), reason))
+        if(RecordDeclinedGap(prefix + "_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
     }
     {
         SCOPED_TRACE("bwd");
         BwdData d;
-        if(RecordTuningGap(prefix + "_bwd", BwdUnderPolicy(handle, d), reason))
+        if(RecordDeclinedGap(prefix + "_bwd", BwdUnderPolicy(handle, d), reason))
             CheckBwd(handle, d);
     }
     {
         SCOPED_TRACE("infer");
         InferData d;
         const auto result = InferUnderPolicy(handle, d, false);
-        if(RecordTuningGap(prefix + "_infer", result, reason))
+        if(RecordDeclinedGap(prefix + "_infer", result, reason))
             CheckInferWithoutEstimates(handle, d);
     }
 }
@@ -1900,7 +1850,7 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
         SCOPED_TRACE(value);
         const ScopedFindEnforce other(value);
         TrainData d;
-        if(RecordTuningGap(
+        if(RecordDeclinedGap(
                "find_enforce_" + std::string(name) + "_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
     }
@@ -1922,10 +1872,64 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyUnderFindEnforceIsDeclined)
         SCOPED_TRACE(value);
         const ScopedFindEnforce find_enforce(value);
         TrainData d;
-        if(RecordTuningGap("dbupdate_find_enforce_" + std::string(name) + "_train",
-                           TrainUnderPolicy(handle, d),
-                           reason))
+        if(RecordDeclinedGap("dbupdate_find_enforce_" + std::string(name) + "_train",
+                             TrainUnderPolicy(handle, d),
+                             reason))
             CheckTrain(handle, d, true, false);
+    }
+}
+
+// MIOpen's per-activation kernels ignore the activation, so it serves the call with
+// the results of one without it (https://github.com/ROCm/rocm-libraries/issues/15445).
+// hipDNN's per-activation batchnorm has no activation, so the forwarded path declines
+// the call rather than return a result that ignores what was asked. Inference has no
+// MIOpen solver for TANH in either mode, so it fails with NotImplemented on both paths.
+TEST(GPU_HipdnnShimBNGaps_FP32, PerActivationActivationIsDeclined)
+{
+    auto&& handle      = get_handle();
+    const char* reason = "does not support an activation";
+
+    for(const auto mode : {miopenActivationRELU, miopenActivationTANH})
+    {
+        const std::string name = mode == miopenActivationRELU ? "relu" : "tanh";
+        SCOPED_TRACE(name);
+
+        hs::OwnedActivationDescriptor activ;
+        ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+        ASSERT_EQ(miopenSetActivationDescriptor(activ.handle, mode, 0.1, 0.3, 0.0),
+                  miopenStatusSuccess);
+        {
+            SCOPED_TRACE("train");
+            TrainData d;
+            SetUpTrain(d, miopenBNPerActivation);
+            const auto result =
+                hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
+            if(RecordDeclinedGap("per_activation_" + name + "_train", result, reason))
+                CheckTrain(handle, d, true, true);
+        }
+        {
+            SCOPED_TRACE("infer");
+            InferData d;
+            SetUpInfer(d, miopenBNPerActivation);
+            const auto result =
+                hs::CaptureCall([&] { return InferActivation(handle, d, activ.handle); });
+            if(mode == miopenActivationTANH)
+                hs::ExpectStatusParity("per_activation_tanh_infer",
+                                       result,
+                                       miopenStatusNotImplemented,
+                                       "no batchnorm solver");
+            else if(RecordDeclinedGap("per_activation_" + name + "_infer", result, reason))
+                CheckInfer(handle, d);
+        }
+        {
+            SCOPED_TRACE("bwd");
+            BwdData d;
+            SetUpBwd(d, miopenBNPerActivation);
+            const auto result =
+                hs::CaptureCall([&] { return BwdActivation(handle, d, true, activ.handle); });
+            if(RecordDeclinedGap("per_activation_" + name + "_bwd", result, reason))
+                CheckBwd(handle, d);
+        }
     }
 }
 
@@ -2069,7 +2073,7 @@ struct RawProblem
     miopenStatus_t Train(miopen::Handle& handle)
     {
         return miopenBatchNormForwardTrainingActivation(&handle,
-                                                        miopenBNSpatial,
+                                                        mode,
                                                         &one,
                                                         &zero,
                                                         &x.desc,
@@ -2094,7 +2098,7 @@ struct RawProblem
     miopenStatus_t Infer(miopen::Handle& handle)
     {
         return miopenBatchNormForwardInferenceActivation(&handle,
-                                                         miopenBNSpatial,
+                                                         mode,
                                                          &one,
                                                          &zero,
                                                          &x.desc,
@@ -2116,7 +2120,7 @@ struct RawProblem
     miopenStatus_t Bwd(miopen::Handle& handle)
     {
         return miopenBatchNormalizationBackward(&handle,
-                                                miopenBNSpatial,
+                                                mode,
                                                 &one,
                                                 &zero,
                                                 &one,
@@ -2136,6 +2140,7 @@ struct RawProblem
                                                 variance.dev.get());
     }
 
+    miopenBatchNormMode_t mode = miopenBNSpatial;
     RawTensor x, y, dy, dx, scale, bias, mean, variance, dscale, dbias;
     hs::OwnedActivationDescriptor activ;
     float one  = 1.0f;
@@ -2169,6 +2174,14 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
         const auto result = hs::CaptureCall([&] { return p.Train(handle); });
         hs::ExpectStatusParity(
             "no_solver_tanh_train", result, miopenStatusNotImplemented, no_solver);
+    }
+    {
+        SCOPED_TRACE("unknown mode train");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.mode            = static_cast<miopenBatchNormMode_t>(2);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_unknown_mode_train", result, miopenStatusNotImplemented, no_solver);
     }
     {
         SCOPED_TRACE("tanh infer");
@@ -2378,5 +2391,36 @@ TEST(GPU_HipdnnShimBNDeclined_FP32, UnsupportedProblemsAreDeclinedWithReason)
         p.y = RawTensor(handle, vectorized);
         expect_declined_because(hs::CaptureCall([&] { return p.Infer(handle); }),
                                 "vectorized tensor layouts");
+    }
+    {
+        // Only a dim of length 1 has the large stride, so the buffers stay small.
+        SCOPED_TRACE("stride above INT_MAX infer");
+        const std::vector<std::size_t> lens{1, 4, 8, 8};
+        const std::size_t above_int_max =
+            static_cast<std::size_t>(std::numeric_limits<int>::max()) + 1;
+        const miopen::TensorDescriptor wide(
+            miopenFloat, lens, std::vector<std::size_t>{above_int_max, 64, 8, 1});
+        RawProblem p(handle, lens, miopenFloat, miopenFloat, miopenFloat);
+        p.x = RawTensor(handle, wide);
+        p.y = RawTensor(handle, wide);
+        expect_declined_because(hs::CaptureCall([&] { return p.Infer(handle); }), "above INT_MAX");
+    }
+    {
+        // Packed NHWC strides, while x and dy are NCHW.
+        SCOPED_TRACE("dx layout bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.dx = RawTensor(
+            handle,
+            miopen::TensorDescriptor(miopenFloat, nchw, std::vector<std::size_t>{256, 1, 32, 4}));
+        expect_declined_because(hs::CaptureCall([&] { return p.Bwd(handle); }),
+                                "same shape and layout");
+    }
+    {
+        // The statistics keep the spatial shape {1, C, 1, 1}.
+        SCOPED_TRACE("per-activation scale infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.mode = miopenBNPerActivation;
+        expect_declined_because(hs::CaptureCall([&] { return p.Infer(handle); }),
+                                "{1, C, H, W, ...}");
     }
 }
