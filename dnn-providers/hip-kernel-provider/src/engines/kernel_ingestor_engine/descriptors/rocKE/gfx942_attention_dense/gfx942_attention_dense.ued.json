@@ -29,10 +29,5 @@
     "use_cfvst",
     "use_exp2_fast",
     "lds_k_group_pad"
-  ],
-  "predict_engine": {
-    "gfx942": [
-      "5d17863f-691b-44bd-bcab-e7a5c6225538"
-    ]
-  }
+  ]
 }
