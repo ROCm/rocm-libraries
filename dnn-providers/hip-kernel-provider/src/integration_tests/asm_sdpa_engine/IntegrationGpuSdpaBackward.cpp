@@ -1,14 +1,23 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <cmath>
+#include <memory>
+#include <optional>
+#include <vector>
+
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -115,6 +124,71 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
     };
 }
 
+// Cases for the sink-without-dSink test: unmasked, batched and multi-head, and causal.
+std::vector<SdpaBwdTestCase> getSdpaBwdSinkTestCases()
+{
+    return {
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}),
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}),
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}, std::nullopt, -1, 0, true),
+    };
+}
+
+// A bf16 gradient may miss the reference by this fraction of the reference's largest element.
+constexpr double K_SINK_REL_TOLERANCE = 4e-2;
+
+// Compares a bf16 gradient with the reference at K_SINK_REL_TOLERANCE of the reference's largest
+// element. A NaN, such as an element no kernel wrote, counts as a miss.
+class RelativeToLargestValidator : public IReferenceValidation
+{
+public:
+    explicit RelativeToLargestValidator(double relativeTolerance)
+        : _relativeTolerance(relativeTolerance)
+    {
+    }
+
+    bool allClose(ITensor& reference, ITensor& implementation) const override
+    {
+        const size_t count = reference.elementSpace();
+        if(count == 0 || implementation.elementSpace() != count
+           || reference.elementSize() != sizeof(bfloat16)
+           || implementation.elementSize() != sizeof(bfloat16))
+        {
+            ADD_FAILURE() << "the gradient must be a non-empty bf16 tensor of the reference's size";
+            return false;
+        }
+        const auto* expected = static_cast<const bfloat16*>(reference.rawHostData());
+        const auto* actual = static_cast<const bfloat16*>(implementation.rawHostData());
+
+        double largest = 0.0;
+        for(size_t i = 0; i < count; ++i)
+        {
+            largest
+                = std::max(largest, std::abs(static_cast<double>(static_cast<float>(expected[i]))));
+        }
+        const double bound = _relativeTolerance * largest;
+        size_t misses = 0;
+        size_t firstMiss = 0;
+        for(size_t i = 0; i < count; ++i)
+        {
+            const double diff = std::abs(static_cast<double>(static_cast<float>(actual[i]))
+                                         - static_cast<double>(static_cast<float>(expected[i])));
+            if(!(diff <= bound))
+            {
+                firstMiss = misses == 0 ? i : firstMiss;
+                ++misses;
+            }
+        }
+        EXPECT_EQ(misses, 0U) << "first miss at element " << firstMiss << ": got "
+                              << static_cast<float>(actual[firstMiss]) << ", expected "
+                              << static_cast<float>(expected[firstMiss]) << ", bound " << bound;
+        return misses == 0;
+    }
+
+private:
+    double _relativeTolerance;
+};
+
 template <typename DataType>
 class SdpaBackward : public IntegrationGraphVerificationHarness<DataType, SdpaBwdTestCase>
 {
@@ -156,22 +230,36 @@ protected:
         const std::vector<int64_t> statsStrides = generateStrides(statsDims);
         ShallowTensor<float> shallowStats(statsTensor.rawHostData(), statsDims, statsStrides);
 
+        SdpaFwdOptions<float> fwdOptions;
+        fwdOptions.setScale(_attnScaleValue)
+            .setBand(_leftBound, _rightBound, _topLeftAlignment)
+            .setLse(&shallowStats);
+
+        // A sink large enough to move the Stats well past the tolerance: the Stats must carry
+        // it, as the backward kernels read the sink only through them.
+        std::optional<ShallowTensor<float>> shallowSink;
+        if(_sinkAttr)
+        {
+            auto& sinkTensor = bundle.getTensor(_sinkAttr->get_uid());
+            auto* sinkValues = static_cast<float*>(sinkTensor.rawHostData());
+            for(size_t head = 0; head < sinkTensor.elementSpace(); ++head)
+            {
+                sinkValues[head] = 6.0F + 0.5F * static_cast<float>(head);
+            }
+            sinkTensor.markHostModified();
+            shallowSink.emplace(sinkTensor.rawHostData(), sinkTensor.dims(), sinkTensor.strides());
+            fwdOptions.setSink(&*shallowSink);
+        }
+
         CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
-            shallowQ,
-            shallowK,
-            shallowV,
-            shallowO,
-            SdpaFwdOptions<float>{}
-                .setScale(_attnScaleValue)
-                .setBand(_leftBound, _rightBound, _topLeftAlignment)
-                .setLse(&shallowStats));
+            shallowQ, shallowK, shallowV, shallowO, fwdOptions);
 
         // Mark O and stats as host-modified so the GPU bundle syncs to device
         oTensor.markHostModified();
         statsTensor.markHostModified();
     }
 
-    void runGraphTest(float tolerance)
+    void runGraphTest(float tolerance, bool withSink = false)
     {
         if(hip_kernel_provider_common::getDeviceString(this->stream()) != "gfx942")
         {
@@ -246,6 +334,17 @@ protected:
                                                      : DiagonalAlignment::BOTTOM_RIGHT);
         }
 
+        // sink_token without dsink_token: [1, H_q, 1, 1], FLOAT.
+        std::shared_ptr<TensorAttributes> sink;
+        if(withSink)
+        {
+            sink = std::make_shared<TensorAttributes>();
+            sink->set_dim({1, testCase.qDims[1], 1, 1})
+                .set_stride({testCase.qDims[1], 1, 1, 1})
+                .set_data_type(hipdnn_frontend::DataType::FLOAT);
+            bwdAttributes.set_sink_token(sink);
+        }
+
         auto [dq, dk, dv] = graph.sdpa_backward(q, k, v, o, dO, stats, std::move(bwdAttributes));
 
         dq->set_output(true).set_data_type(getDataTypeEnumFromType<DataType>());
@@ -269,10 +368,115 @@ protected:
         _vAttr = v;
         _oAttr = o;
         _statsAttr = stats;
+        _sinkAttr = sink;
         _attnScaleValue = testCase.attnScaleValue;
         _leftBound = testCase.leftBound;
         _rightBound = testCase.rightBound;
         _topLeftAlignment = testCase.topLeftAlignment;
+
+        if(withSink)
+        {
+            // Pin the ASM engine: a graph another engine serves would pass the comparison below
+            // and leave the ASM kernels unexercised.
+            auto result = graph.build_operation_graph(this->_handle);
+            ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+            std::vector<int64_t> rankedEngineIds;
+            result = graph.get_ranked_engine_ids(rankedEngineIds);
+            ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+            const auto asmEngineId = hipdnn_data_sdk::utilities::engineNameToId(
+                hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME);
+            ASSERT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), asmEngineId),
+                      rankedEngineIds.end())
+                << "the ASM SDPA engine did not offer to serve a backward graph with a sink and "
+                   "no dSink on gfx942";
+            result = graph.create_execution_plan_ext(asmEngineId, {});
+            ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+            result = graph.check_support();
+            ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+            result = graph.build_plans();
+            ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+            int64_t servedEngineId = 0;
+            result = graph.get_execution_plan_engine_id(servedEngineId);
+            ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+            ASSERT_EQ(servedEngineId, asmEngineId);
+
+            GraphVerificationContext sinkContext(graph);
+            for(const auto& gradient : {dq, dk, dv})
+            {
+                this->registerValidator(
+                    sinkContext,
+                    gradient,
+                    std::make_unique<RelativeToLargestValidator>(K_SINK_REL_TOLERANCE));
+            }
+            VerificationRun run;
+            ASSERT_NO_FATAL_FAILURE(this->prepareVerification(sinkContext, 0, run));
+            // Poison the gradients so an element the kernels do not write fails the comparison.
+            run.gpuBundle.sentinelFillOutputTensors();
+            ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, graph, this->_handle));
+
+            // The reference above carries the sink in its Stats. Without the sink the same
+            // inputs must give gradients that differ by far more than the tolerance, or the
+            // comparison could not tell a sink-inclusive Stats from a sink-free one.
+            const auto cpuShallow = [&run](int64_t uid) {
+                auto& tensor = run.cpuBundle.getTensor(uid);
+                return std::make_unique<ShallowTensor<DataType>>(
+                    tensor.rawHostData(), tensor.dims(), tensor.strides());
+            };
+            const auto qRef = cpuShallow(q->get_uid());
+            const auto kRef = cpuShallow(k->get_uid());
+            const auto vRef = cpuShallow(v->get_uid());
+            const auto dORef = cpuShallow(dO->get_uid());
+            hipdnn_data_sdk::utilities::Tensor<DataType> oFree(oDims);
+            hipdnn_data_sdk::utilities::Tensor<float> lseFree(statsDims);
+            hipdnn_data_sdk::utilities::Tensor<DataType> dqFree(testCase.qDims);
+            hipdnn_data_sdk::utilities::Tensor<DataType> dkFree(testCase.kDims);
+            hipdnn_data_sdk::utilities::Tensor<DataType> dvFree(testCase.vDims);
+            SdpaFwdOptions<float> freeFwdOptions;
+            freeFwdOptions.setScale(testCase.attnScaleValue)
+                .setBand(testCase.leftBound, testCase.rightBound, testCase.topLeftAlignment)
+                .setLse(&lseFree);
+            CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
+                *qRef, *kRef, *vRef, oFree, freeFwdOptions);
+            SdpaBwdOptions<float> freeBwdOptions;
+            freeBwdOptions.setScale(testCase.attnScaleValue)
+                .setBand(testCase.leftBound, testCase.rightBound, testCase.topLeftAlignment)
+                .setLse(&lseFree);
+            CpuFpReferenceSdpa::backward<DataType,
+                                         DataType,
+                                         DataType,
+                                         DataType,
+                                         DataType,
+                                         DataType,
+                                         DataType,
+                                         DataType,
+                                         float,
+                                         float>(
+                *qRef, *kRef, *vRef, oFree, *dORef, dqFree, dkFree, dvFree, freeBwdOptions);
+
+            const auto separates
+                = [&run](int64_t uid,
+                         const hipdnn_data_sdk::utilities::Tensor<DataType>& withoutSink) {
+                      auto& reference = run.cpuBundle.getTensor(uid);
+                      const auto* withSinkValues
+                          = static_cast<const DataType*>(reference.rawHostData());
+                      const auto* freeValues = withoutSink.memory().hostData();
+                      float largest = 0.0F;
+                      float largestDiff = 0.0F;
+                      for(size_t i = 0; i < reference.elementSpace(); ++i)
+                      {
+                          const auto a = static_cast<float>(withSinkValues[i]);
+                          const auto b = static_cast<float>(freeValues[i]);
+                          largest = std::max(largest, std::abs(a));
+                          largestDiff = std::max(largestDiff, std::abs(a - b));
+                      }
+                      return static_cast<double>(largestDiff)
+                             > 4.0 * K_SINK_REL_TOLERANCE * static_cast<double>(largest);
+                  };
+            ASSERT_TRUE(separates(dq->get_uid(), dqFree)) << "dQ does not depend on the sink";
+            ASSERT_TRUE(separates(dk->get_uid(), dkFree)) << "dK does not depend on the sink";
+            ASSERT_TRUE(separates(dv->get_uid(), dvFree)) << "dV does not depend on the sink";
+            return;
+        }
 
         GraphVerificationContext context(graph);
         this->registerValidator(context, dq, tolerance);
@@ -290,6 +494,7 @@ private:
     std::shared_ptr<TensorAttributes> _vAttr;
     std::shared_ptr<TensorAttributes> _oAttr;
     std::shared_ptr<TensorAttributes> _statsAttr;
+    std::shared_ptr<TensorAttributes> _sinkAttr;
     std::optional<float> _attnScaleValue;
     int64_t _leftBound = -1;
     int64_t _rightBound = -1;
@@ -299,6 +504,18 @@ private:
 using IntegrationGpuSdpaBwdBf16 = SdpaBackward<bfloat16>;
 
 using IntegrationGpuSdpaBwdFp16 = SdpaBackward<hipdnn_data_sdk::types::half>;
+
+// Backward with a sink and no dSink, pinned to the ASM SDPA engine. The inputs are small enough
+// that the sink (6.0 and up) is comparable to the logits and moves the Stats and every gradient.
+class IntegrationGpuSdpaBwdSinkBf16 : public SdpaBackward<bfloat16>
+{
+public:
+    IntegrationGpuSdpaBwdSinkBf16()
+    {
+        _minVal = -0.5F;
+        _maxVal = 0.5F;
+    }
+};
 
 } // namespace
 
@@ -344,3 +561,15 @@ TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaBwdFp16,
                          testing::ValuesIn(getSdpaBwdTestCases()));
+
+// dQ/dK/dV depend on the sink only through the forward Stats, which the ASM kernels read from the
+// caller's buffer, so the engine serves a sink without a dSink. The Stats and O fed to the
+// backward come from the reference forward with the sink.
+TEST_P(IntegrationGpuSdpaBwdSinkBf16, SinkWithoutDsinkMatchesSinkInclusiveReference)
+{
+    runGraphTest(0.0F, /*withSink=*/true);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuSdpaBwdSinkBf16,
+                         testing::ValuesIn(getSdpaBwdSinkTestCases()));

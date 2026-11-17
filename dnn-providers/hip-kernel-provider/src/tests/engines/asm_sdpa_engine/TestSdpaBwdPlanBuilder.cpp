@@ -2546,9 +2546,35 @@ protected:
     flatbuffers::FlatBufferBuilder _base;
 };
 
-TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesSinkToken)
+// dQ/dK/dV depend on the sink only through the forward Stats, which the kernels read from the
+// caller's buffer, so a sink without a dSink is served. The decline is the dSink output below.
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableAcceptsSinkTokenWithoutDsink)
 {
-    EXPECT_FALSE(isApplicable(addBwdSinkToken(_base)));
+    EXPECT_TRUE(isApplicable(addBwdSinkToken(_base)));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesSinkTokenWithDsinkToken)
+{
+    const auto dims = std::vector<int64_t>{4, 8, 256, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto withBoth = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        /*withScale=*/false,
+        /*alibiMask=*/false,
+        /*paddingMask=*/false,
+        /*causalMask=*/false,
+        /*overrideShapeEnabled=*/false,
+        /*withSinkToken=*/true,
+        /*withDsinkToken=*/true);
+    EXPECT_FALSE(isApplicable(withBoth));
 }
 
 TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesDsinkToken)
@@ -2566,8 +2592,8 @@ TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesDeterministicAlgorithm)
     EXPECT_FALSE(isApplicable(withBwdDeterministicAlgorithm(_base)));
 }
 
-// max_total_seq_len_q/kv only size workspace for ragged graphs, which the engine already
-// declines; on a graph it accepts they must not change the decision.
+// max_total_seq_len_q/kv give the physical token span of a packed (ragged) buffer. The engine
+// declines ragged graphs, so on a graph it accepts they must not change the decision.
 TEST_F(TestSdpaBwdUnservedFields, IsApplicableIgnoresMaxTotalSeqLen)
 {
     EXPECT_TRUE(isApplicable(withBwdMaxTotalSeqLen(_base, 1024, 2048)));
