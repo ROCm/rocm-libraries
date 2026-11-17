@@ -451,8 +451,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
     # engine folder has none. The census reads a shard only for an arch where all three slots
-    # ship, and the suite keys its inventory on the arch the entry names: gfx950 content for
-    # gfx950, gfx11-generic content for every gfx11 member. The merged engine's census above
+    # ship, and the suite keys its inventory on the arch the entry names: its own content for
+    # gfx950, gfx942 and gfx90a, gfx11-generic content for every gfx11 member. The merged engine's census above
     # is registered only where merged content ships (gfx950).
     set(_hkp_split_arches)
     foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
@@ -477,35 +477,37 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
                 RefusesPlanSerialization
                 TheChunkContractKeepsAnAlignedBiasOffDirectRowsWithAStagedAlternative
+                PrepVecTailIsOneOnTheCdna9RowsAndTheKmdDefaultElsewhere
                 EveryProbeGraphIsServedByTheRowsTheModelNames
                 TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe
         )
     endif()
-    # The host half of the split engine's parity cases checks the gfx11 shard against the
-    # matcher contract. The suite is compiled into the census binary whatever GPU_TARGETS
+    # The host half of the split engine's parity cases checks the gfx11, gfx90a and gfx942
+    # shards against the matcher contract. The suite is compiled into the census binary whatever GPU_TARGETS
     # holds: TheRock installs one copy of that binary for every family's test job, so a
     # copy built without gfx11 targets must still contain the suite a gfx11 entry runs. The
     # suite skips, which a census entry reports as a failure, when the shard it is handed
-    # holds no gfx11 pack. Only the registration is per arch: an entry for each gfx11 arch
-    # the three slot ops ship for, and none in a configuration without one.
+    # holds no pack of the entry's family. Only the registration is per arch: an entry for each
+    # gfx11, gfx90a and gfx942 arch the three slot ops ship for, and none in a configuration
+    # without one.
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         target_sources(hip_kernel_provider_census_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslSdpaBwdParityGraphs.cpp
         )
     endif()
-    set(_hkp_gfx11_split_arches)
+    set(_hkp_parity_split_arches)
     foreach(_arch IN LISTS _hkp_split_arches)
-        if(_arch MATCHES "^gfx11")
-            list(APPEND _hkp_gfx11_split_arches ${_arch})
+        if(_arch MATCHES "^gfx11" OR _arch STREQUAL "gfx90a" OR _arch STREQUAL "gfx942")
+            list(APPEND _hkp_parity_split_arches ${_arch})
         endif()
     endforeach()
-    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_gfx11_split_arches)
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_parity_split_arches)
         # The pin names the parameterised cases of FlydslSdpaBwdParityCases.hpp, one per
         # case of the shared list the device half also launches.
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
-            ARCHES ${_hkp_gfx11_split_arches}
+            ARCHES ${_hkp_parity_split_arches}
             SUITES TestFlydslSdpaBwdParityGraphs
             EXPECTED_CASES
                 IsServedOrDeclinedAsTheMatcherContractStates/ComputesBottomRightCausalCrossAttentionWithFewerQueriesThanKeys
