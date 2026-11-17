@@ -36,39 +36,49 @@ rocblas_status rocsolver_gesvd_batched_impl(rocblas_handle handle,
                                             const rocblas_svect right_svect,
                                             const rocblas_int m,
                                             const rocblas_int n,
-                                            W A,
+                                            W A_arg,
                                             const rocblas_int lda,
-                                            TT* S,
+                                            TT* S_arg,
                                             const rocblas_stride strideS,
-                                            T* U,
+                                            T* U_arg,
                                             const rocblas_int ldu,
                                             const rocblas_stride strideU,
-                                            T* V,
+                                            T* V_arg,
                                             const rocblas_int ldv,
                                             const rocblas_stride strideV,
-                                            TT* E,
+                                            TT* E_arg,
                                             const rocblas_stride strideE,
                                             const rocblas_workmode fast_alg,
-                                            rocblas_int* info,
-                                            const rocblas_int batch_count)
+                                            rocblas_int* info_arg,
+                                            const rocblas_int batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("gesvd_batched", "--left_svect", left_svect, "--right_svect", right_svect,
                         "-m", m, "-n", n, "--lda", lda, "--strideS", strideS, "--ldu", ldu,
                         "--strideU", strideU, "--ldv", ldv, "--strideV", strideV, "--strideE",
-                        strideE, "--fast_alg", fast_alg, "--batch_count", batch_count);
+                        strideE, "--fast_alg", fast_alg, "--batch_count", batch_count_arg);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
-    // argument checking
-    rocblas_status st = rocsolver_gesvd_argCheck(handle, left_svect, right_svect, m, n, A, lda, S,
-                                                 U, ldu, V, ldv, E, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+    {
+        auto const A = A_arg;
+        auto const S = S_arg;
+        auto const U = U_arg;
+        auto const V = V_arg;
+        auto const E = E_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
+
+        // argument checking
+        rocblas_status st = rocsolver_gesvd_argCheck(handle, left_svect, right_svect, m, n, A, lda,
+                                                     S, U, ldu, V, ldv, E, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
@@ -87,10 +97,19 @@ try
     // size of array of pointers (only for batched case)
     size_t size_workArr;
 
-    rocsolver_gesvd_getMemorySize<true, T, TT>(
-        left_svect, right_svect, m, n, batch_count, fast_alg, &size_scalars, &size_work_workArr,
-        &size_Abyx_norms_tmptr, &size_Abyx_norms_trfact_X, &size_diag_tmptr_Y, &size_tau_splits,
-        &size_tempArrayT, &size_tempArrayC, &size_workArr);
+    // break up large batch_count into multiple invocations, each with
+    // batch_count no larger than max_batch_count
+    rocblas_int const max_batch_count = 64 * 1024 - 1;
+    rocblas_int const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    rocblas_int const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+    {
+        auto const batch_count = bid_inc;
+
+        rocsolver_gesvd_getMemorySize<true, T, TT>(
+            left_svect, right_svect, m, n, batch_count, fast_alg, &size_scalars, &size_work_workArr,
+            &size_Abyx_norms_tmptr, &size_Abyx_norms_trfact_X, &size_diag_tmptr_Y, &size_tau_splits,
+            &size_tempArrayT, &size_tempArrayC, &size_workArr);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
@@ -119,12 +138,26 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_gesvd_template<true, false, T>(
-        handle, left_svect, right_svect, m, n, A, shiftA, lda, strideA, S, strideS, U, ldu, strideU,
-        V, ldv, strideV, E, strideE, fast_alg, info, batch_count, (T*)scalars, work_workArr,
-        (T*)Abyx_norms_tmptr, (T*)Abyx_norms_trfact_X, (T*)diag_tmptr_Y, (T*)tau_splits,
-        (T*)tempArrayT, (T*)tempArrayC, (T**)workArr);
+    for(rocblas_int isweep = 0; isweep < nsweep; isweep++)
+    {
+        rocblas_int const bid = isweep * bid_inc;
+        rocblas_int const batch_count = std::min(batch_count_arg - bid, bid_inc);
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const S = (S_arg == nullptr) ? nullptr : S_arg + bid * strideS;
+        auto const U = (U_arg == nullptr) ? nullptr : U_arg + bid * strideU;
+        auto const V = (V_arg == nullptr) ? nullptr : V_arg + bid * strideV;
+        auto const E = (E_arg == nullptr) ? nullptr : E_arg + bid * strideE;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        ROCBLAS_CHECK(rocsolver_gesvd_template<true, false, T>(
+            handle, left_svect, right_svect, m, n, A, shiftA, lda, strideA, S, strideS, U, ldu,
+            strideU, V, ldv, strideV, E, strideE, fast_alg, info, batch_count, (T*)scalars,
+            work_workArr, (T*)Abyx_norms_tmptr, (T*)Abyx_norms_trfact_X, (T*)diag_tmptr_Y,
+            (T*)tau_splits, (T*)tempArrayT, (T*)tempArrayC, (T**)workArr));
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {
