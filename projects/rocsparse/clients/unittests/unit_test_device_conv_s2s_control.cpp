@@ -49,11 +49,10 @@ namespace
     using ConvS2s = ConvTest;
 
     constexpr auto st_ni   = rocsparse_status_not_implemented;
-    constexpr auto st_bad  = rocsparse_status_invalid_pointer;
-    constexpr auto idx32   = rocsparse_indextype_i32;
+    constexpr auto idx32   = i32;
     constexpr auto idx64   = rocsparse_indextype_i64;
-    constexpr auto base    = rocsparse_index_base_zero;
-    constexpr auto f32_r   = rocsparse_datatype_f32_r;
+    constexpr auto base    = base0;
+    constexpr auto f32_r   = f32;
     constexpr auto f64_c   = rocsparse_datatype_f64_c;
     constexpr auto alg     = rocsparse_sparse_to_sparse_alg_default;
     constexpr auto stage_a = rocsparse_sparse_to_sparse_stage_analysis;
@@ -1035,8 +1034,8 @@ namespace
         bool             supported;
     };
 
-    // Routes whose converters skip the value copy when the target value pointer is
-    // null. Identity copies reject a null target value array.
+    // A null target value pointer is a symbolic conversion for every pair, including
+    // an identity copy. The index arrays are still written.
     constexpr SymbolicPair k_symbolic[] = {
         {rocsparse_format_coo_aos, rocsparse_format_coo, true},
         {rocsparse_format_coo_aos, rocsparse_format_csr, true},
@@ -1048,10 +1047,10 @@ namespace
         {rocsparse_format_csr, rocsparse_format_coo_aos, true},
         {rocsparse_format_coo, rocsparse_format_csc, true},
         {rocsparse_format_coo_aos, rocsparse_format_csc, true},
-        {rocsparse_format_coo, rocsparse_format_coo, false},
-        {rocsparse_format_csr, rocsparse_format_csr, false},
-        {rocsparse_format_csc, rocsparse_format_csc, false},
-        {rocsparse_format_coo_aos, rocsparse_format_coo_aos, false},
+        {rocsparse_format_coo, rocsparse_format_coo, true},
+        {rocsparse_format_csr, rocsparse_format_csr, true},
+        {rocsparse_format_csc, rocsparse_format_csc, true},
+        {rocsparse_format_coo_aos, rocsparse_format_coo_aos, true},
     };
 
     // nnz 0 accepts a null value pointer. set_pointers does not, so the value pointer
@@ -1182,7 +1181,7 @@ namespace
 
         if(!pair.supported)
         {
-            EXPECT_EQ(status, st_bad);
+            EXPECT_EQ(status, st_ptr);
             // Rejected before any index is written.
             EXPECT_TRUE(dst_primary.is_fill(k_sentinel)) << label;
             if(!tgt_aos)

@@ -948,11 +948,6 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle    handle_,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    if(nitems_ == 0)
-    {
-        return rocsparse_status_success;
-    }
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
         handle_, nitems_, target_indextype_, target_, 1, source_indextype_, source_, 1));
     return rocsparse_status_success;

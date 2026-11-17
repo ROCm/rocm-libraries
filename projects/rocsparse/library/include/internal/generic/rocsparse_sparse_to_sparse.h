@@ -60,6 +60,9 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
 *               pointer is invalid.
+*  \retval      rocsparse_status_invalid_size if an element count of the intermediate CSR
+*               matrix does not fit in \p size_t, a BSR block product overflows, or
+*               \p source is batched.
 *  \retval      rocsparse_status_not_implemented if the conversion between the formats of \p source
 *               and \p target is not supported, for example when either uses
 *               \ref rocsparse_format_bell or \ref rocsparse_format_sell.
@@ -104,6 +107,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer if a source row, column, or index array is
+*               set and the corresponding target array is null. A null target value array
+*               requests a symbolic conversion and is not an error.
 *  \retval      rocsparse_status_not_implemented if the conversion between the formats of \p source
 *               and \p target is not supported, for example when either uses
 *               \ref rocsparse_format_bell or \ref rocsparse_format_sell.

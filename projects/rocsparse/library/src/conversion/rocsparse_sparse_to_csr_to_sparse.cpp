@@ -283,17 +283,36 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         case rocsparse_format_ell:
         {
             size_t col_bytes = 0;
+            size_t val_bytes = 0;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
                 intermediate->nnz, rocsparse::indextype_sizeof(intermediate->col_type), col_bytes));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
+                intermediate->nnz, rocsparse::datatype_sizeof(intermediate->data_type), val_bytes));
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_col__, col_bytes));
+            {
+                const hipError_t val_error = rocsparse_hipMalloc(&TEMP_val__, val_bytes);
+                if(val_error != hipSuccess)
+                {
+                    (void)rocsparse_hipFree(TEMP_col__);
+                    TEMP_col__ = nullptr;
+                    RETURN_IF_HIP_ERROR(val_error);
+                }
+            }
             //
             // MUST BE CONDITIONAL
             //
-            size_t val_bytes = 0;
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
-                intermediate->nnz, rocsparse::datatype_sizeof(intermediate->data_type), val_bytes));
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_val__, val_bytes));
-            rocsparse_csr_set_pointers(intermediate, TEMP_row__, TEMP_col__, TEMP_val__);
+            {
+                const rocsparse_status set_status
+                    = rocsparse_csr_set_pointers(intermediate, TEMP_row__, TEMP_col__, TEMP_val__);
+                if(set_status != rocsparse_status_success)
+                {
+                    (void)rocsparse_hipFree(TEMP_col__);
+                    (void)rocsparse_hipFree(TEMP_val__);
+                    TEMP_col__ = nullptr;
+                    TEMP_val__ = nullptr;
+                    RETURN_IF_ROCSPARSE_ERROR(set_status);
+                }
+            }
             break;
         }
 
