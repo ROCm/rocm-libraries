@@ -4,10 +4,12 @@
 # Default to amdclang / amdclang++ for standalone builds when no compiler is
 # specified.  Must be include()'d BEFORE the project() call.
 
-if(NOT DEFINED ENV{ROCM_PATH})
-    set(_ROCM_PATH "/opt/rocm")
-else()
+if(ROCM_PATH)
+    set(_ROCM_PATH "${ROCM_PATH}")
+elseif(DEFINED ENV{ROCM_PATH})
     set(_ROCM_PATH "$ENV{ROCM_PATH}")
+else()
+    set(_ROCM_PATH "/opt/rocm")
 endif()
 
 # --- C++ compiler ---
