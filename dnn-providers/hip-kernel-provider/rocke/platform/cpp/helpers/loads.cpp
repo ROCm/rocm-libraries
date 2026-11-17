@@ -1103,6 +1103,11 @@ bool rocke_reg_transpose_tile_loader_partial(const rocke_reg_transpose_tile_load
     return self != NULL && regt_active_threads(self) < self->block_size;
 }
 
+bool rocke_reg_transpose_tile_loader_guard_applies(const rocke_reg_transpose_tile_loader_t* self)
+{
+    return rocke_reg_transpose_tile_loader_partial(self) && self->vec > 1;
+}
+
 static const rocke_type_t* regt_elem(const rocke_reg_transpose_tile_loader_t* self)
 {
     return self->elem_dtype != NULL ? self->elem_dtype : rocke_f16();
@@ -1323,10 +1328,18 @@ void rocke_reg_transpose_tile_loader_load_global(rocke_ir_builder_t* b,
     rocke_value_t* c_oob = rocke_b_const_i32(b, self->oob_sentinel);
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
     const bool partial = rocke_reg_transpose_tile_loader_partial(self);
+    if(guard && !(rocke_reg_transpose_tile_loader_guard_applies(self) && masked))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "RegTransposeTileLoader.load_global: guard needs partial "
+                        "participation, masked reads and vec > 1");
+        return;
+    }
     rocke_value_t* active = NULL;
     if(partial && masked)
         active = regt_active(b, self, tid);
-    if(active != NULL && guard && self->vec > 1)
+    if(active != NULL && guard)
     {
         regt_load_global_guarded(
             b, self, tid, descriptor, descriptor_user, rsrc, active, run_fn, run_user, staged);

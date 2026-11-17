@@ -434,9 +434,15 @@ rocke_status_t rocke_reg_transpose_tile_loader_init(rocke_reg_transpose_tile_loa
 /* RegTransposeTileLoader.partial: only the first active_threads threads load. */
 bool rocke_reg_transpose_tile_loader_partial(const rocke_reg_transpose_tile_loader_t* self);
 
+/* RegTransposeTileLoader.guard_applies: whether load_global can take
+ * guard=true (partial participation and vec > 1). */
+bool rocke_reg_transpose_tile_loader_guard_applies(const rocke_reg_transpose_tile_loader_t* self);
+
 /* RegTransposeTileLoader.load_global: emit the global reads into `staged`.
  * `masked` (Python default true) and `guard` (default false) as in Python;
- * `run_fn` NULL is run_descriptor=None. No-op if `b` is in error. */
+ * `guard` without partial participation, `masked` and vec > 1 records
+ * ROCKE_ERR_VALUE (Python raises ValueError). `run_fn` NULL is
+ * run_descriptor=None. No-op if `b` is in error. */
 void rocke_reg_transpose_tile_loader_load_global(rocke_ir_builder_t* b,
                                                  const rocke_reg_transpose_tile_loader_t* self,
                                                  rocke_value_t* tid,

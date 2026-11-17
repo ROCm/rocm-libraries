@@ -959,6 +959,27 @@ class RegTransposeTileLoader:
     def units_per_thread(self) -> int:
         return self.micro_tiles // self.active_threads
 
+    @property
+    def guard_applies(self) -> bool:
+        """Whether :meth:`load_global` can take ``guard=True``: partial
+        participation and ``vec > 1`` (it also needs ``masked``)."""
+        return self.partial and self.vec > 1
+
+    def _unit_row_col(
+        self, b: IRBuilder, tid: Value, e: int, c_kc, c_vec, c_k_run, *, clamp: bool
+    ):
+        """``(row, col)`` of this thread's ``e``-th unit, the decode both read
+        paths share. ``clamp``: idle waves decode the last unit so every
+        address they form stays inside the tile."""
+        u = b.add(b.mul(b.const_i32(e), b.const_i32(self.active_threads)), tid)
+        if clamp:
+            u = b.select(
+                b.cmp_lt(u, b.const_i32(self.micro_tiles)),
+                u,
+                b.const_i32(self.micro_tiles - 1),
+            )
+        return b.mul(b.div(u, c_kc), c_vec), b.mul(b.mod(u, c_kc), c_k_run)
+
     def _active(self, b: IRBuilder, tid: Value) -> Value:
         """Wave-uniform predicate: this thread's wave carries a micro-tile."""
         wave = b.to_sgpr_u32(b.div(tid, b.const_i32(self.wave_size)))
@@ -982,8 +1003,8 @@ class RegTransposeTileLoader:
         outside the :meth:`store_lds` guard (the returned list carries that
         guard). :meth:`load` puts both under one branch and passes ``False``.
 
-        ``guard`` (partial participation, ``masked``, ``vec > 1`` only;
-        otherwise ignored): issue the reads inside their own wave-uniform
+        ``guard`` (partial participation, ``masked``, ``vec > 1`` only; a
+        ``ValueError`` elsewhere, see :attr:`guard_applies`): issue the reads inside their own wave-uniform
         if/else on the same predicate, the idle waves yielding zeros, instead
         of masking them. For register-prefetch loops: with the reads in the
         loop body and their only use in the :meth:`store_lds` branch that
@@ -1007,10 +1028,16 @@ class RegTransposeTileLoader:
         c_elem_bytes = b.const_i32(elem_bytes)
         c_oob = b.const_i32(self.oob_sentinel)
         c0 = b.const_i32(0)
+        if guard and not (self.guard_applies and masked):
+            raise ValueError(
+                "RegTransposeTileLoader.load_global: guard needs partial "
+                f"participation, masked reads and vec > 1 (partial={self.partial}, "
+                f"masked={masked}, vec={self.vec})"
+            )
         active = None
         if self.partial and masked:
             active = self._active(b, tid)
-        if active is not None and guard and self.vec > 1:
+        if active is not None and guard:
             return self._load_global_guarded(
                 b,
                 tid=tid,
@@ -1022,17 +1049,11 @@ class RegTransposeTileLoader:
         staged = _RegTransposeStaged()
         staged.active = active
         for e in range(self.units_per_thread):
-            u = b.add(b.mul(b.const_i32(e), b.const_i32(self.active_threads)), tid)
-            if self.partial:
-                # Idle waves decode a clamped unit so every address they form
-                # stays inside the tile; their reads are masked or skipped.
-                u = b.select(
-                    b.cmp_lt(u, b.const_i32(self.micro_tiles)),
-                    u,
-                    b.const_i32(self.micro_tiles - 1),
-                )
-            row = b.mul(b.div(u, c_kc), c_vec)
-            col = b.mul(b.mod(u, c_kc), c_k_run)
+            # Idle waves decode a clamped unit so every address they form stays
+            # inside the tile; their reads are masked or skipped.
+            row, col = self._unit_row_col(
+                b, tid, e, c_kc, c_vec, c_k_run, clamp=self.partial
+            )
             vs = []
             run = run_descriptor(b, row, col) if run_descriptor is not None else None
             for j in range(REGT_K_RUN):
@@ -1078,14 +1099,9 @@ class RegTransposeTileLoader:
         c0 = b.const_i32(0)
         units = []
         for e in range(self.units_per_thread):
-            u = b.add(b.mul(b.const_i32(e), b.const_i32(self.active_threads)), tid)
-            u = b.select(
-                b.cmp_lt(u, b.const_i32(self.micro_tiles)),
-                u,
-                b.const_i32(self.micro_tiles - 1),
+            row, col = self._unit_row_col(
+                b, tid, e, c_kc, c_vec, c_k_run, clamp=True
             )
-            row = b.mul(b.div(u, c_kc), c_vec)
-            col = b.mul(b.mod(u, c_kc), c_k_run)
             run = run_descriptor(b, row, col) if run_descriptor is not None else None
             offs = []
             for j in range(REGT_K_RUN):

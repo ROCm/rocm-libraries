@@ -4962,7 +4962,8 @@ static void wgrad_rtp_fetch(rocke_conv_build_ctx_t* ctx,
                                                 /*masked=*/true,
                                                 ma->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
                                                 ma,
-                                                guard,
+                                                guard && rocke_reg_transpose_tile_loader_guard_applies(
+                                                             &ctx->a_regt_loader),
                                                 &out->a);
     rocke_reg_transpose_tile_loader_load_global(b,
                                                 &ctx->b_regt_loader,
@@ -4973,7 +4974,8 @@ static void wgrad_rtp_fetch(rocke_conv_build_ctx_t* ctx,
                                                 /*masked=*/true,
                                                 mb->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
                                                 mb,
-                                                guard,
+                                                guard && rocke_reg_transpose_tile_loader_guard_applies(
+                                                             &ctx->b_regt_loader),
                                                 &out->b);
 }
 

@@ -4127,7 +4127,7 @@ def build_implicit_gemm_conv_wgrad(
                     tid=tid,
                     descriptor=_masked(_a_fn, tile_ok),
                     rsrc=dy_rsrc,
-                    guard=True,
+                    guard=a_sync_loader.guard_applies,
                     **_ra,
                 ),
                 b_sync_loader.load_global(
@@ -4135,7 +4135,7 @@ def build_implicit_gemm_conv_wgrad(
                     tid=tid,
                     descriptor=_masked(_b_fn, tile_ok),
                     rsrc=x_rsrc,
-                    guard=True,
+                    guard=b_sync_loader.guard_applies,
                     **_rb,
                 ),
             )

@@ -106,6 +106,21 @@ def test_partial_participation_and_guarded_reads():
     assert guarded.count("br i1") > plain.count("br i1")
 
 
+def test_guard_is_refused_where_it_cannot_apply():
+    # Not partial: every wave loads, there is nothing to guard.
+    full = L(tile_rows=128, tile_cols=32, block_size=128, wave_size=32, vec=4)
+    assert not full.partial and not full.guard_applies
+    with pytest.raises(ValueError, match="guard needs partial participation"):
+        _kernel(full, split=True, guard=True)
+    # Partial but scalar (vec == 1): the guarded form needs vec > 1.
+    scalar = L(tile_rows=256, tile_cols=16, block_size=1024, wave_size=32, vec=1)
+    assert scalar.partial and not scalar.guard_applies
+    with pytest.raises(ValueError, match="guard needs partial participation"):
+        _kernel(scalar, split=True, guard=True)
+    wide = L(tile_rows=256, tile_cols=16, block_size=1024, wave_size=32, vec=8)
+    assert wide.guard_applies
+
+
 def test_col_swizzle_applies_to_every_store():
     calls = []
 
