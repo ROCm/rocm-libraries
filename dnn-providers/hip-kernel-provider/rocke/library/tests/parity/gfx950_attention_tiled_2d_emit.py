@@ -1356,10 +1356,10 @@ _CONFIGS[85] = {**_CONFIGS[75], "emit_lse": True}
 # requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
-    79: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    79: r"use_additive_bias does not support use_transposed_mask_once",
     80: r"use_register_pv v1 does not support ALiBi, QQ bias, or additive bias",
     81: r"use_additive_bias does not support use_transposed_invariant_hoist",
-    82: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    82: r"use_additive_bias does not support the non-transposed 32x32 path",
     83: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
     84: r"transposed softmax VALU opts do not support .*additive bias",
 }
