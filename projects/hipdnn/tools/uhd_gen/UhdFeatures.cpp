@@ -3,6 +3,7 @@
 
 #include <array>
 #include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
+#include <hipdnn_plugin_sdk/heuristics/OptionalFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <iostream>
 #include <limits>
@@ -108,40 +109,88 @@ void bindRow(FeatureExtractionContext& context, const nlohmann::json& row)
         }
     }
 }
+
+/// The JSON request on stdin, bounded in size and nesting.
+nlohmann::json readRequest()
+{
+    constexpr size_t MAX_REQUEST_BYTES = size_t{256} * 1024 * 1024;
+    std::string input;
+    std::array<char, 65536> buffer{};
+    while(std::cin.read(buffer.data(), static_cast<std::streamsize>(buffer.size()))
+          || std::cin.gcount() > 0)
+    {
+        if(input.size() + static_cast<size_t>(std::cin.gcount()) > MAX_REQUEST_BYTES)
+        {
+            throw JsonLogicError("Feature request exceeds 256 MiB");
+        }
+        input.append(buffer.data(), static_cast<size_t>(std::cin.gcount()));
+    }
+    if(!std::cin.eof())
+    {
+        throw JsonLogicError("Failed to read feature request");
+    }
+    return nlohmann::json::parse(
+        input, [](int depth, nlohmann::json::parse_event_t, nlohmann::json&) {
+            if(depth > 140)
+            {
+                throw JsonLogicError("Feature request exceeds nesting bound");
+            }
+            return true;
+        });
 }
 
-int main(int argc, char** /*argv*/)
+/// `--lint`: the references of `signature` that leave a valid graph unscorable, for a model of
+/// `metric` (RFC 0019 section 6.2; OptionalFeatures.hpp).
+nlohmann::json lint(const nlohmann::json& request)
+{
+    if(!request.is_object() || !request.contains("signature")
+       || !request.at("signature").is_array())
+    {
+        throw JsonLogicError("Lint request requires a signature array");
+    }
+    const auto metric = request.value("metric", nlohmann::json()).is_string()
+                            ? request.at("metric").get<std::string>()
+                            : std::string();
+    const auto signature = request.at("signature").get<std::vector<nlohmann::json>>();
+    // Compiling refuses a signature the runtime would refuse, before it is linted.
+    static_cast<void>(FeatureExtractor(signature, {}));
+    auto unguarded = nlohmann::json::array();
+    for(const auto& found :
+        hipdnn_plugin_sdk::heuristics::unguardedOptionalReferences(signature, metric))
+    {
+        unguarded.push_back({{"reference", found.reference},
+                             {"pattern", found.feature->pattern},
+                             {"kind", toString(found.feature->kind)},
+                             {"node_types", found.feature->nodeTypes}});
+    }
+    return {{"unguarded", std::move(unguarded)}};
+}
+}
+
+int main(int argc, char** argv)
 {
     try
     {
-        if(argc != 1)
+        const std::string mode = argc == 2 ? argv[1] : "";
+        if(argc > 2 || (argc == 2 && mode != "--optional-features" && mode != "--lint"))
         {
-            throw JsonLogicError("Usage: hipdnn_uhd_features < request.json");
+            throw JsonLogicError(
+                "Usage: hipdnn_uhd_features [--optional-features | --lint] < request.json");
         }
-        constexpr size_t MAX_REQUEST_BYTES = size_t{256} * 1024 * 1024;
-        std::string input;
-        std::array<char, 65536> buffer{};
-        while(std::cin.read(buffer.data(), static_cast<std::streamsize>(buffer.size()))
-              || std::cin.gcount() > 0)
+        if(mode == "--optional-features")
         {
-            if(input.size() + static_cast<size_t>(std::cin.gcount()) > MAX_REQUEST_BYTES)
-            {
-                throw JsonLogicError("Feature request exceeds 256 MiB");
-            }
-            input.append(buffer.data(), static_cast<size_t>(std::cin.gcount()));
+            std::cout << nlohmann::json{{"optional_features",
+                                         hipdnn_plugin_sdk::heuristics::optionalFeaturesJson()}}
+                             .dump()
+                      << '\n';
+            return 0;
         }
-        if(!std::cin.eof())
+        const auto request = readRequest();
+        if(mode == "--lint")
         {
-            throw JsonLogicError("Failed to read feature request");
+            std::cout << lint(request).dump() << '\n';
+            return 0;
         }
-        const auto request = nlohmann::json::parse(
-            input, [](int depth, nlohmann::json::parse_event_t, nlohmann::json&) {
-                if(depth > 140)
-                {
-                    throw JsonLogicError("Feature request exceeds nesting bound");
-                }
-                return true;
-            });
         if(!request.is_object() || !request.contains("signature")
            || !request.at("signature").is_array() || !request.contains("rows")
            || !request.at("rows").is_array())
