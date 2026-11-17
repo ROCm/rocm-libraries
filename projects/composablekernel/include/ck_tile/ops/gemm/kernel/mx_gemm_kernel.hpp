@@ -291,9 +291,7 @@ struct MxGemmKernel
     template <typename T>
     using has_grid_x_walks_n = decltype(T::kGridXWalksN);
     template <typename T>
-    using has_launch_threads = decltype(T::kThreads);
-    template <typename T>
-    using has_kernel_name = decltype(T::GetKernelName());
+    using has_lds_capacity = decltype(T::kLdsCapacityBytes);
     template <typename T>
     using has_unsupported_reason =
         decltype(T::GetUnsupportedReason(index_t{}, index_t{}, index_t{}));
@@ -310,71 +308,29 @@ struct MxGemmKernel
     /// IsSupportedArgument runs that check, with packed operands and E at k_batch == 1, instead of
     /// the generic MX TDM checks.
     static constexpr bool kPipelineChecks = is_detected<has_unsupported_reason, MxGemmPipeline>{};
-    /// The pipeline sets the launch's threads and cluster (its tuning), not the tile shape.
-    static constexpr bool kPipelineLaunch = is_detected<has_launch_threads, MxGemmPipeline>{};
 
+    // comp_tdm_scheduled's partitioner and LDS budget.
     static constexpr bool CheckPipelineConfig()
     {
-        if constexpr(kPipelineLaunch)
-        {
-            static_assert(TilePartitioner::MPerBlock == MxGemmPipeline::kTileM &&
-                              TilePartitioner::NPerBlock == MxGemmPipeline::kTileN &&
-                              TilePartitioner::KPerBlock == MxGemmPipeline::kTileK,
-                          "MX GEMM: the tile partitioner's tile must be the pipeline's");
-            static_assert(max(MxGemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize()) <=
-                              MxGemmPipeline::kLdsCapacityBytes,
-                          "MX GEMM: the pipeline's and the epilogue's LDS exceed the capacity");
-        }
-        if constexpr(kPipelineChecks)
-        {
-            static_assert(BaseKernel::NumDTensor == 0,
-                          "MX GEMM: the pipeline's epilogues take no Ds tensors");
-        }
         if constexpr(is_detected<has_grid_x_walks_n, MxGemmPipeline>{})
         {
             static_assert(
                 !MxGemmPipeline::kGridXWalksN ||
                     std::is_same_v<
                         TilePartitioner,
-                        GemmTile2DNMajorPartitioner<typename TilePartitioner::BlockGemmShape>>,
+                        GemmTile2DNMajorPartitioner<typename MxGemmPipeline::BlockGemmShape>>,
                 "MX GEMM: the pipeline walks N tiles along grid x and M tiles along grid y, with "
-                "its cluster over both, as GemmTile2DNMajorPartitioner");
+                "its cluster over both, as GemmTile2DNMajorPartitioner of its shape");
+        }
+        if constexpr(is_detected<has_lds_capacity, MxGemmPipeline>{})
+        {
+            static_assert(max(MxGemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize()) <=
+                              MxGemmPipeline::kLdsCapacityBytes,
+                          "MX GEMM: the pipeline's and the epilogue's LDS exceed the capacity");
         }
         return true;
     }
     static_assert(CheckPipelineConfig());
-
-    [[nodiscard]] CK_TILE_HOST static const std::string GetName()
-    {
-        if constexpr(is_detected<has_kernel_name, MxGemmPipeline>{})
-            return MxGemmPipeline::GetKernelName();
-        else
-            return BaseKernel::GetName();
-    }
-
-    CK_TILE_HOST static auto BlockSize()
-    {
-        if constexpr(kPipelineLaunch)
-            return dim3(MxGemmPipeline::kThreads);
-        else
-            return BaseKernel::BlockSize();
-    }
-
-    static constexpr bool ClusterLaunch = []() {
-        if constexpr(kPipelineLaunch)
-            return MxGemmPipeline::kHasCluster;
-        else
-            return BaseKernel::ClusterLaunch;
-    }();
-
-    CK_TILE_HOST static constexpr auto ClusterSize()
-    {
-        if constexpr(kPipelineLaunch)
-            return dim3(
-                MxGemmPipeline::kClusterX, MxGemmPipeline::kClusterY, MxGemmPipeline::kClusterZ);
-        else
-            return BaseKernel::ClusterSize();
-    }
 
     /// Whether this TDM pipeline runs MX split-K correctly with a split-K-capable epilogue: only
     /// a pipeline that declares kSupportsTdmSplitK (comp_tdm_v3). The others keep the TDM
@@ -556,13 +512,7 @@ struct MxGemmKernel
             return "A and B must be packed: their strides must be K";
         if(kargs.stride_E != kargs.N)
             return "E must be packed: its stride must be N";
-        if(const char* why = MxGemmPipeline::GetUnsupportedReason(kargs.M, kargs.N, kargs.K))
-            return why;
-        if(kargs.as_ptr[0] == nullptr || kargs.bs_ptr[0] == nullptr ||
-           kargs.as_scale_ptr[0] == nullptr || kargs.bs_scale_ptr[0] == nullptr ||
-           kargs.e_ptr == nullptr)
-            return "null operand";
-        return nullptr;
+        return MxGemmPipeline::GetUnsupportedReason(kargs.M, kargs.N, kargs.K);
     }
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
@@ -575,7 +525,7 @@ struct MxGemmKernel
             if(const char* why = GetUnsupportedReason(kargs))
             {
                 if(EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                    CK_TILE_ERROR(GetName(), ": ", why);
+                    CK_TILE_ERROR(BaseKernel::GetName(), ": ", why);
                 return false;
             }
             return BaseKernel::IsTdmArgumentSupported("MX GEMM",
@@ -586,12 +536,7 @@ struct MxGemmKernel
                                                       kargs.e_ptr) &&
                    BaseKernel::IsTdmDeviceSupported("MX GEMM");
         }
-        else
-            return IsGenericArgumentSupported(kargs);
-    }
 
-    CK_TILE_HOST static bool IsGenericArgumentSupported(const KernelArgs& kargs)
-    {
         const bool log = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
 
         if(kargs.k_batch < 1)

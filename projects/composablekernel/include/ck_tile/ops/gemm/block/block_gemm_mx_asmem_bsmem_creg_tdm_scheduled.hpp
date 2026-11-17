@@ -7,6 +7,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v1.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_mx_tdm_scheduled_codegen.hpp"
 
 namespace ck_tile {
 
@@ -129,10 +130,10 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
     {
         static_for<0, 2, 1>{}([&](auto parity) {
             const index_t buffer = parity * kBufferStride;
-            origins[0][parity]   = opaque_scalar(FragmentOrigin<true>(buffer));
-            origins[1][parity]   = opaque_scalar(FragmentOrigin<false>(buffer));
-            origins[2][parity]   = opaque_scalar(ScaleOrigin<true>(buffer));
-            origins[3][parity]   = opaque_scalar(ScaleOrigin<false>(buffer));
+            origins[0][parity]   = detail::opaque_scalar(FragmentOrigin<true>(buffer));
+            origins[1][parity]   = detail::opaque_scalar(FragmentOrigin<false>(buffer));
+            origins[2][parity]   = detail::opaque_scalar(ScaleOrigin<true>(buffer));
+            origins[3][parity]   = detail::opaque_scalar(ScaleOrigin<false>(buffer));
         });
     }
 

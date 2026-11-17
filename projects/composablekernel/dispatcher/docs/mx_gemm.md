@@ -83,8 +83,9 @@ Tile Engine build.
 
 `comp_tdm_scheduled` (`MxGemmPipelineAgBgCrCompTDMScheduled`) is a gfx1250 MX GEMM whose
 loop is scheduled in the source: `E = A @ B^T`, with FP4, FP8 or BF8 inputs and an FP8, FP16 or BF16 E
-(FP8 saturating to ±448). The bridge and Tile Engine build it with one input type
-(FP4 or FP8) and an FP16 E. Example 56
+(FP8 saturating to ±448). The bridge builds it with one input type (FP4 or FP8) and an
+FP16 E, through the sweep driver `mx_gemm_full_benchmark.py`; the Tile Engine CMake build
+rejects it. Example 56
 (`example/ck_tile/56_gemm_comp_tdm_scheduled_mx`) and the C++ tests cover the rest.
 
 It takes two epilogues. `direct` (`MxDirectStoreEpilogue`, the default) stores E from
@@ -95,17 +96,17 @@ to run any N.
 
 Scales are K-major, `[ceil(K / 128)][MN][4]` E8M0 bytes. The kernel reads the
 scales of one tile with a single TDM box. Callers pass the natural `[MN][K / 32]`
-scales as for the other pipelines; the bridge and the Tile Engine profiler
-convert them with `ck_tile::mx_scale_to_kmajor` when the generated
-`SelectedKernel` declares `KMajorScales`. The kernel checks the problem itself
+scales as for the other pipelines; the bridge converts them with
+`ck_tile::mx_scale_to_kmajor` when the generated `SelectedKernel` declares
+`KMajorScales`. The kernel checks the problem itself
 (`IsSupportedArgument` on its `MxGemmKernelArgs`; `GetUnsupportedReason`
 says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
 32, and the K tail, the tile parity and partial M and N tiles must match the
 instance's shape traits.
 
 `comp_tdm_scheduled` takes the cluster and its policy's knobs
-(`MxGemmPipelineAgBgCrCompTDMScheduledPolicy`) as a tuning, set per kernel (dispatcher) or as
-a product (Tile Engine). Missing keys take the defaults:
+(`MxGemmPipelineAgBgCrCompTDMScheduledPolicy`) as a tuning, set per kernel or as a product
+(a `tuning_config` section in the sweep's JSON). Missing keys take the defaults:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -135,7 +136,7 @@ MxGemmKernelConfig(datatype="fp4", gpu_target="gfx1250", pipeline="comp_tdm_sche
                    tuning={"cluster_dim": [2, 2], "gl2_prefetch_distance": 2})
 ```
 
-In a Tile Engine JSON, add a `tuning_config` section; every combination of its
+In a sweep JSON, add a `tuning_config` section; every combination of its
 values is tried with every tile, and invalid combinations are dropped by the
 policy's rules (`mx_gemm/mx_tdm_scheduled.py`):
 
@@ -163,19 +164,18 @@ python3 mx_gemm_full_benchmark.py comp_tdm_scheduled_tuning_gfx1250.json \
 A kernel whose cluster does not divide the problem's grid, or whose shape traits do not
 cover the problem, is reported as `SKIPPED`.
 
-`mx_gemm/run_comp_tdm_scheduled_bench.sh` times the tuned instances of three problems on
-one GPU, each config with its problem file: `comp_tdm_scheduled_maf_gfx1250.json`
-(4096 × 4096 × 65536), `comp_tdm_scheduled_medium_gfx1250.json` (2048 × 2048 × 65536) and
+The tuned instances of three problems each have a config and a problem file:
+`comp_tdm_scheduled_maf_gfx1250.json` (4096 × 4096 × 65536),
+`comp_tdm_scheduled_medium_gfx1250.json` (2048 × 2048 × 65536) and
 `comp_tdm_scheduled_mab_gfx1250.json` (65536 × 16 × 65536), the instances example 56 names
-`maf`, `medium` and `mab256`. It times them on example 56's inputs (`--init trig`), so
-the times compare with the example's:
+`maf`, `medium` and `mab256`. With `--init trig` the sweep driver times them on example
+56's inputs, so the times compare with the example's:
 
 ```bash
-GPU=0 CASES="maf medium mab" tile_engine/ops/gemm/mx_gemm/run_comp_tdm_scheduled_bench.sh
+python3 mx_gemm_full_benchmark.py comp_tdm_scheduled_maf_gfx1250.json \
+    --arch gfx1250 --dtype fp4 --problems mx_gemm/configs/comp_tdm_scheduled_maf_problems.json \
+    --init trig --csv maf.csv
 ```
-
-Its header lists the settings; builds and results go to `WORK_DIR`
-(default `./comp_tdm_scheduled_bench`).
 
 ## Run the bridge
 
@@ -270,7 +270,6 @@ used as given.
 | --- | --- |
 | `bridge_ci_config_gfx950.json` | Default on gfx950. Small sweep covering all three gfx950 pipelines. |
 | `bridge_ci_config_gfx1250.json` | Default on gfx1250. Small sweep covering all six gfx1250 pipelines. |
-| `comp_tdm_scheduled_gfx1250.json` | `comp_tdm_scheduled` with a `tuning_config` product (10 FP4 kernels). |
 | `comp_tdm_scheduled_tuning_gfx1250.json` | `comp_tdm_scheduled` with every tuning key listed: both epilogues and a product of the five knobs (540 FP4 kernels). |
 | `comp_tdm_scheduled_{maf,medium,mab}_gfx1250.json` | The tuned `comp_tdm_scheduled` instance of each problem (1 FP4 kernel each); `comp_tdm_scheduled_{maf,medium,mab}_problems.json` hold the problems. |
 | `default_ci_config.json` | Old-TE CI sweep: `comp_async`, with and without persistence. |
@@ -438,9 +437,9 @@ no GPU or HIP compiler is needed:
 python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_cmake.py -v
 ```
 
-The `comp_tdm_scheduled` suite checks the tuning configuration, the Tile Engine kernel
-list and generated headers, the dispatcher generator and the compile flags; it
-needs neither a GPU nor a compiler:
+The `comp_tdm_scheduled` suite checks the tuning configuration, the dispatcher
+generator and the compile flags, and that the Tile Engine CMake builder rejects the
+pipeline; it needs neither a GPU nor a compiler:
 
 ```bash
 python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_tdm_scheduled.py -v

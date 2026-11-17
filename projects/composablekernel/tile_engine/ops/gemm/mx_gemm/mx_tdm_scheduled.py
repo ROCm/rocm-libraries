@@ -682,37 +682,6 @@ def schedule_tunings() -> List[Dict[str, object]]:
     ]
 
 
-def encode_tuning(tuning: Optional[Dict]) -> str:
-    """A tuning as a ``key=value,...`` token (no characters CMake or a shell treat specially)."""
-    t = normalize_tuning(tuning)
-    parts = []
-    for key in sorted(t):
-        value = t[key]
-        if isinstance(value, tuple):
-            value = "x".join(str(v) for v in value)
-        elif isinstance(value, bool):
-            value = "1" if value else "0"
-        parts.append(f"{key}={value}")
-    return ",".join(parts)
-
-
-def decode_tuning(token: str) -> Dict[str, object]:
-    """The inverse of encode_tuning."""
-    raw = dict(part.split("=", 1) for part in token.split(",") if part)
-    out: Dict[str, object] = {}
-    for key, value in raw.items():
-        default = {**TUNING_DEFAULTS, **SHAPE_DEFAULTS}.get(key)
-        if key == "cluster_dim":
-            out[key] = tuple(int(v) for v in value.split("x"))
-        elif isinstance(default, bool):
-            out[key] = value == "1"
-        elif isinstance(default, int):
-            out[key] = int(value)
-        else:
-            out[key] = value
-    return normalize_tuning(out)
-
-
 def expand_tuning_config(tuning_config: Optional[Dict]) -> List[Dict[str, object]]:
     """The product of a ``tuning_config`` section ({"key": {"values": [...]}}), normalized."""
     tuning_config = tuning_config or {}
@@ -779,21 +748,6 @@ def spec_from_tile(
     )
 
 
-def tile_from_spec(spec: MxTdmScheduledSpec) -> Dict[str, int]:
-    """The tile_engine tile config of a spec."""
-    return {
-        "tile_m": spec.tile_m,
-        "tile_n": spec.tile_n,
-        "tile_k": spec.tile_k,
-        "warp_m": spec.warp_m,
-        "warp_n": spec.warp_n,
-        "warp_k": 1,
-        "warp_tile_m": spec.atom_m,
-        "warp_tile_n": 16,
-        "warp_tile_k": 128,
-    }
-
-
 def instance_store_width(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> int:
     t = normalize_tuning(tuning)
     width = int(t["store_width"]) or spec.max_store_width
@@ -835,26 +789,6 @@ def validate_instance(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
     return "ok"
 
 
-def instance_unsupported_reason(
-    spec: MxTdmScheduledSpec, tuning: Optional[Dict]
-) -> str:
-    """MxGemmKernel::GetUnsupportedReason of the comp_tdm_scheduled instance on spec's M, N and K: "" if it
-    runs them, else the reason code or the shape trait it lacks."""
-    reason = spec.validate()
-    if reason != "ok":
-        return reason
-    t = normalize_tuning(tuning)
-    if (spec.edge_m or spec.edge_n) and not t["edge"]:
-        return "edge"
-    if (spec.wide_a or spec.wide_b or spec.wide_d) and not t["wide"]:
-        return "wide"
-    if spec.tail_steps != t["tail_steps"]:
-        return "tail_steps"
-    if spec.N % instance_store_width(spec, t):
-        return "store_width"
-    return ""
-
-
 def cpp_cluster_sequence(tuning: Optional[Dict]) -> str:
     """The ClusterTileGemmShape cluster of a tuning: (M tiles, N tiles, 1) = (y, x, 1)."""
     cx, cy, _ = normalize_tuning(tuning)["cluster_dim"]
@@ -894,16 +828,12 @@ __all__ = [
     "cpp_cluster_sequence",
     "cpp_kernel_traits",
     "cpp_policy_type",
-    "decode_tuning",
-    "encode_tuning",
     "expand_tuning_config",
     "instance_name_suffix",
     "instance_store_width",
-    "instance_unsupported_reason",
     "is_default_tuning",
     "normalize_tuning",
     "schedule_tunings",
     "spec_from_tile",
-    "tile_from_spec",
     "validate_instance",
 ]

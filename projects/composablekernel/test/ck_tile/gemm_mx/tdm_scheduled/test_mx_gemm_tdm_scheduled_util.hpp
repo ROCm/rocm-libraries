@@ -279,6 +279,12 @@ Inputs make_kernel_inputs(index_t M, index_t N, long_index_t K, int scale_shift 
 template <typename Kernel>
 float launch(const ck_tile::stream_config& s, const typename Kernel::KernelArgs& kargs)
 {
+    using Pipeline = typename Kernel::MxGemmPipeline;
+    static_assert(Kernel::ClusterLaunch == Pipeline::kHasCluster &&
+                      Kernel::ClusterSize().x == Pipeline::kClusterX &&
+                      Kernel::ClusterSize().y == Pipeline::kClusterY &&
+                      Kernel::ClusterSize().z == 1,
+                  "the launch's cluster is the pipeline's: N tiles along x, M tiles along y");
     if(!Kernel::IsSupportedArgument(kargs))
     {
         const char* why = Kernel::GetUnsupportedReason(kargs);

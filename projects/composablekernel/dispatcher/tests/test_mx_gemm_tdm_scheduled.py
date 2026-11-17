@@ -5,11 +5,11 @@
 
 """CPU-only tests of comp_tdm_scheduled in tile_engine and the dispatcher.
 
-The tuning token, the tile_engine listing and generation, the dispatcher codegen and the
-compile flags. No GPU or hipcc is required.
+The tuning, the validation rules, the dispatcher codegen and the compile flags, and that the
+tile_engine CMake builder rejects the pipeline (it runs through the dispatcher). No GPU or hipcc
+is required.
 """
 
-import dataclasses
 import json
 import subprocess
 import sys
@@ -45,22 +45,6 @@ TILE = {
 
 
 class TestTuning(unittest.TestCase):
-    def test_token_round_trip(self):
-        tunings = sched.expand_tuning_config(
-            {
-                "cluster_dim": {"values": [[4, 4], [2, 1, 1]]},
-                "gl2_prefetch_distance": {"values": [4, 2]},
-                "split_b_lds_read": {"values": [True, False]},
-                "interleave_lds_regions": {"values": [True, False]},
-                "store_width": {"values": [0, 4]},
-            }
-        )
-        self.assertEqual(len(tunings), 32)
-        for t in tunings:
-            token = sched.encode_tuning(t)
-            self.assertNotRegex(token, r"[\s;|\"'$]")
-            self.assertEqual(sched.decode_tuning(token), t)
-
     def test_unknown_key(self):
         with self.assertRaises(ValueError):
             sched.normalize_tuning({"gl2": 4})
@@ -104,20 +88,6 @@ class TestTuning(unittest.TestCase):
             sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
             "_c2x2_lsi0_noedge_tail2",
         )
-
-    def test_instance_runs_problem(self):
-        tile = sched.tile_from_spec(sched.MxTdmScheduledSpec())
-        spec = sched.spec_from_tile(tile, {}, M=1000, N=1000, K=4096, out_dtype="fp16")
-        self.assertEqual(sched.instance_unsupported_reason(spec, {}), "")
-        self.assertEqual(
-            sched.instance_unsupported_reason(spec, {"edge": False}), "edge"
-        )
-        # Any tile count: 4096 / 512 is even, 4608 / 512 odd.
-        odd = dataclasses.replace(spec, K=4096 + 512)
-        self.assertEqual(sched.instance_unsupported_reason(odd, {}), "")
-        tail = dataclasses.replace(spec, K=4096 + 256)
-        self.assertEqual(sched.instance_unsupported_reason(tail, {}), "tail_steps")
-        self.assertEqual(sched.instance_unsupported_reason(tail, {"tail_steps": 2}), "")
 
 
 class TestValidationUtils(unittest.TestCase):
@@ -242,171 +212,32 @@ class TestValidationUtils(unittest.TestCase):
         self.assertTrue(ok, reason)
 
 
-def _builder(*args, cwd=None):
-    return subprocess.run(
-        [sys.executable, str(BUILDER), *args],
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-        check=True,
-    )
-
-
 class TestTileEngine(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self.tmp.name)
-        self.addCleanup(self.tmp.cleanup)
-
-    def _config(
-        self,
-        tuning_config=None,
-        pipelines=("comp_tdm_scheduled",),
-        epilogues=("direct",),
-    ):
-        config = json.loads(
-            (_MX / "configs" / "comp_tdm_scheduled_gfx1250.json").read_text()
-        )
-        config["trait_config"]["pipeline"]["values"] = list(pipelines)
-        config["trait_config"]["epilogue"]["values"] = list(epilogues)
-        if tuning_config is None:
-            config.pop("tuning_config")
-        else:
-            config["tuning_config"] = tuning_config
-        path = self.dir / "config.json"
-        path.write_text(json.dumps(config))
-        return path
-
-    def _list(self, config):
-        _builder(
-            "--working_path",
-            str(self.dir),
-            "--datatype",
-            "fp4",
-            "--layout",
-            "rcr",
-            "--config_json",
-            str(config),
-            "--gpu_target",
-            "gfx1250",
-            "--list_kernels",
-        )
-        lines = (self.dir / "mx_gemm_kernel_list.txt").read_text().splitlines()
-        self.assertEqual(
-            int((self.dir / "mx_gemm_kernel_count.txt").read_text()), len(lines)
-        )
-        return [line.split("|") for line in lines]
-
-    def test_shipped_config(self):
-        rows = self._list(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json")
-        self.assertEqual(len(rows), 10)
-        names = [r[0] for r in rows]
-        self.assertEqual(len(set(names)), len(names))
-        for name, tile, trait, token, suffix in rows:
-            self.assertEqual(
-                trait, "comp_tdm_scheduled_direct_intrawave_False_False_False_False"
+    def test_builder_rejects_comp_tdm_scheduled(self):
+        config = _MX / "configs" / "comp_tdm_scheduled_maf_gfx1250.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(BUILDER),
+                    "--working_path",
+                    tmp,
+                    "--datatype",
+                    "fp4",
+                    "--layout",
+                    "rcr",
+                    "--config_json",
+                    str(config),
+                    "--gpu_target",
+                    "gfx1250",
+                    "--list_kernels",
+                ],
+                capture_output=True,
+                text=True,
             )
-            self.assertEqual(name, f"mx_gemm_fp4_rcr_{trait}_{tile}{suffix}")
-            tuning = sched.decode_tuning(token)
-            spec = sched.spec_from_tile(conv_tile(tile), tuning, out_dtype="fp16")
-            self.assertEqual(sched.validate_instance(spec, tuning), "ok")
-            self.assertEqual(sched.instance_name_suffix(spec, tuning), suffix)
-
-    def test_tunings_filtered(self):
-        rows = self._list(
-            self._config(
-                {
-                    "prefetch_lds_read": {"values": [False, True]},
-                    "split_b_lds_read": {"values": [True, False]},
-                }
-            )
-        )
-        tunings = {sched.encode_tuning(sched.decode_tuning(r[3])) for r in rows}
-        for t in tunings:
-            t = sched.decode_tuning(t)
-            self.assertFalse(not t["prefetch_lds_read"] and t["split_b_lds_read"])
-        self.assertEqual(len(tunings), 3)
-
-    def test_mixed_pipelines(self):
-        config = self._config(
-            None, ("comp_tdm", "comp_tdm_scheduled"), ("tdm", "direct")
-        )
-        rows = self._list(config)
-        self.assertTrue(any(len(r) == 3 and "_comp_tdm_tdm_" in r[0] for r in rows))
-        self.assertTrue(
-            all(len(r) == 5 for r in rows if "_comp_tdm_scheduled_" in r[0])
-        )
-        self.assertTrue(all(r[4] == "_c4x4" for r in rows if len(r) == 5))
-
-    def test_gen_single(self):
-        rows = self._list(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json")
-        name, tile, trait, token, suffix = next(
-            r for r in rows if r[4].startswith("_c2x2")
-        )
-        _builder(
-            "--working_path",
-            str(self.dir),
-            "--datatype",
-            "fp4",
-            "--layout",
-            "rcr",
-            "--config_json",
-            str(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json"),
-            "--gpu_target",
-            "gfx1250",
-            "--gen_single",
-            "--kernel_name",
-            name,
-            "--tile_config",
-            tile,
-            "--trait_combo",
-            trait,
-            "--tuning",
-            token,
-        )
-        header = (
-            self.dir / f"mx_gemm_single_{name[len('mx_gemm_') :]}.hpp"
-        ).read_text()
-        self.assertIn(f'KERNEL_NAME = "{name}"', header)
-        self.assertIn("static constexpr bool KMajorScales = true;", header)
-        self.assertIn("ck_tile::sequence<2, 2, 1>", header)
-        self.assertIn("ck_tile::GemmTile2DNMajorPartitioner", header)
-        self.assertIn("Kernel::MakeKernelArgs(args)", header)
-        self.assertIn("using CDataType = ck_tile::fp16_t;", header)
-
-    def test_invalid_single_rejected(self):
-        with self.assertRaises(subprocess.CalledProcessError):
-            _builder(
-                "--working_path",
-                str(self.dir),
-                "--datatype",
-                "fp4",
-                "--layout",
-                "rcr",
-                "--config_json",
-                str(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json"),
-                "--gpu_target",
-                "gfx1250",
-                "--gen_single",
-                "--kernel_name",
-                "x",
-                "--tile_config",
-                "256x256x512_2x2x1_32x16x128",
-                "--trait_combo",
-                "comp_tdm_scheduled_direct_intrawave_False_False_False_False",
-                "--tuning",
-                sched.encode_tuning({"prefetch_lds_read": False}),
-            )
-
-
-def conv_tile(tile_str):
-    groups = [[int(v) for v in g.split("x")] for g in tile_str.split("_")]
-    keys = ("tile", "warp", "warp_tile")
-    return {
-        f"{k}_{d}": groups[i][j]
-        for i, k in enumerate(keys)
-        for j, d in enumerate("mnk")
-    }
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("mx_gemm_full_benchmark.py", result.stderr)
+            self.assertFalse(list(Path(tmp).iterdir()))
 
 
 def _cfg(**extra):

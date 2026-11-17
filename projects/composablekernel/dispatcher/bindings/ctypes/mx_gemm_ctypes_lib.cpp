@@ -35,8 +35,9 @@
  *
  * The scale pre-shuffle mirrors mx_gemm_profiler.hpp exactly: pack params are
  * derived from SelectedKernel tile dims at compile time (not hardcoded). A
- * SelectedKernel with KMajorScales (comp_tdm_scheduled) takes K-major scales instead,
- * [ceil(K/128)][MN][4], and checks K itself.
+ * SelectedKernel with KMajorScales (comp_tdm_scheduled) skips that pre-shuffle and
+ * takes K-major scales, [ceil(K/128)][MN][4], which only this library builds (the
+ * profiler has no K-major path), and checks K itself.
  */
 
 #include <hip/hip_runtime.h>

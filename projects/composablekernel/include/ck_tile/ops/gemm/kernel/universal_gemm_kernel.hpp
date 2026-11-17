@@ -367,9 +367,12 @@ struct UniversalGemmKernel
 
     CK_TILE_HOST static constexpr auto ClusterSize()
     {
-        return dim3(TilePartitioner::BlockGemmShape::kclusterM,
-                    TilePartitioner::BlockGemmShape::kclusterN,
-                    TilePartitioner::BlockGemmShape::kclusterK);
+        using S = typename TilePartitioner::BlockGemmShape;
+        // The 2D partitioner walks N tiles along grid x and M tiles along grid y.
+        if constexpr(kPartitionerGrid2D)
+            return dim3(S::kclusterN, S::kclusterM, S::kclusterK);
+        else
+            return dim3(S::kclusterM, S::kclusterN, S::kclusterK);
     }
 
     /**
@@ -428,10 +431,7 @@ struct UniversalGemmKernel
     {
         // Balances K-dimension work across batches to maximize parallelism while minimizing
         // load imbalance. Uses ceil division to distribute remainder work evenly.
-        /// KArgs: KernelArgs, or a derived kernel's arguments with the same K, k_batch and stride
-        /// members.
-        template <typename KArgs>
-        __device__ SplitKBatchOffset(const KArgs& kargs, const index_t k_id = blockIdx.z)
+        __device__ SplitKBatchOffset(const KernelArgs& kargs, const index_t k_id = blockIdx.z)
         {
             if constexpr(!kPipelineSupportsSplitK)
             {
@@ -537,8 +537,8 @@ struct UniversalGemmKernel
 
     template <typename T>
     using has_split_k = decltype(T::kSupportsSplitK);
-    /// False for a pipeline that only runs k_batch == 1: SplitKBatchOffset is then the whole K
-    /// with no offset, and IsSupportedArgument rejects k_batch != 1.
+    /// False for a pipeline that only runs k_batch == 1 (its kernel rejects k_batch != 1):
+    /// SplitKBatchOffset is then the whole K with no offset.
     static constexpr bool kPipelineSupportsSplitK = []() {
         if constexpr(is_detected<has_split_k, GemmPipeline>{})
             return static_cast<bool>(GemmPipeline::kSupportsSplitK);
@@ -548,8 +548,8 @@ struct UniversalGemmKernel
 
     template <typename T>
     using has_exact_pad_mn = decltype(T::kExactPadMN);
-    /// True for a pipeline whose kPadM / kPadN are false only when its tiles divide M / N: the D
-    /// and E views then pad M and N only as kPadM and kPadN say.
+    /// True for a pipeline whose kPadM is false only when its tiles divide M: the E view then pads
+    /// M only as kPadM says.
     static constexpr bool kPipelineExactPadMN = []() {
         if constexpr(is_detected<has_exact_pad_mn, GemmPipeline>{})
             return static_cast<bool>(GemmPipeline::kExactPadMN);
@@ -822,7 +822,7 @@ struct UniversalGemmKernel
         // for a k_batch beyond the K-step count, where SplitKBatchOffset yields a negative
         // splitted_k and the A/B descriptor extents underflow, and for an epilogue with no split-K
         // store path at all, where RunGemm can only trap.
-        if constexpr(!EpilogueSupportsSplitK || !kPipelineSupportsSplitK)
+        if constexpr(!EpilogueSupportsSplitK)
         {
             if(kargs.k_batch != 1)
             {
@@ -1392,10 +1392,8 @@ struct UniversalGemmKernel
         // row-major D, so force the contiguous (N) pad: a partial N tile then reads zeros instead
         // of running past the row end into the next row. Rows past M are already outside the
         // buffer range and read as zero. Only TDM kernels with Ds are affected.
-        constexpr bool kTdmD =
-            has_skip_check_valid_launch_params::value && NumDTensor > 0 && !kPipelineExactPadMN;
+        constexpr bool kTdmD  = has_skip_check_valid_launch_params::value && NumDTensor > 0;
         constexpr bool kPadDN = GemmPipeline::kPadN || kTdmD;
-        constexpr bool kPadDM = kDGlobalLoad && (!kPipelineExactPadMN || GemmPipeline::kPadM);
 
         // Step 1: Create tensor views
         const auto& ds_tensor_view = generate_tuple(
@@ -1415,10 +1413,11 @@ struct UniversalGemmKernel
                 using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
                 if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
                 {
-                    return pad_tensor_view(ds_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                      number<TilePartitioner::NPerBlock>{}),
-                                           MakeBlockPadSequence<kPadDM, true, kPadDN, false>());
+                    return pad_tensor_view(
+                        ds_tensor_view[i],
+                        make_tuple(number<TilePartitioner::MPerBlock>{},
+                                   number<TilePartitioner::NPerBlock>{}),
+                        MakeBlockPadSequence<kDGlobalLoad, true, kPadDN, false>());
                 }
                 else
                 {
@@ -1665,8 +1664,8 @@ struct UniversalGemmKernel
         }
     }
 
-    template <typename KArgs>
-    CK_TILE_DEVICE static auto GetTileCoordinates(const KArgs& kargs) -> tuple<index_t, index_t>
+    CK_TILE_DEVICE static auto
+    GetTileCoordinates(const KernelArgs& kargs) -> tuple<index_t, index_t>
     {
         if constexpr(kPartitionerGrid2D)
         {

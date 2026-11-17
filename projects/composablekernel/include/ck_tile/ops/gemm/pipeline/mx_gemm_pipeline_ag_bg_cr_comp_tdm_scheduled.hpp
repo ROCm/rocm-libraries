@@ -199,11 +199,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kClusterX         = BlockGemmShape::kclusterN;
     static constexpr index_t kClusterY         = BlockGemmShape::kclusterM;
     static constexpr index_t kClusterZ         = BlockGemmShape::kclusterK;
-    static constexpr index_t kGl2Distance      = Policy::kGl2PrefetchDistance;
-    static constexpr index_t kReadsPerStep     = Policy::template GetReadsPerStep<Problem>();
-    static constexpr index_t kLdsRowBytes      = Policy::template GetLdsRowBytes<Problem>();
-    static constexpr index_t kLdsBufferStride  = Policy::template GetLdsBufferStride<Problem>();
-    static constexpr index_t kLatePending      = Policy::template GetLatePendingReads<Problem>();
+    static_assert(kClusterZ == 1, "comp_tdm_scheduled: the cluster spans no K");
+    static constexpr index_t kGl2Distance     = Policy::kGl2PrefetchDistance;
+    static constexpr index_t kReadsPerStep    = Policy::template GetReadsPerStep<Problem>();
+    static constexpr index_t kLdsRowBytes     = Policy::template GetLdsRowBytes<Problem>();
+    static constexpr index_t kLdsBufferStride = Policy::template GetLdsBufferStride<Problem>();
+    static constexpr index_t kLatePending     = Policy::template GetLatePendingReads<Problem>();
     /// The sched_fence mask of the pipeline's fences: LDS reads and WMMAs stay put, ALU work may
     /// cross.
     static constexpr int32_t kAluMayCross =
@@ -395,8 +396,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
               // The last K step is partial (and its scales zero-padded) only with a K tail.
               k_atoms(integer_divide_nonnegative<Policy::kAtomK>(
                   Traits::kHasTail ? K + Policy::kAtomK - 1 : K)),
-              a_scale_stride(opaque_scalar(M * 4)),
-              b_scale_stride(opaque_scalar(N * 4)),
+              a_scale_stride(detail::opaque_scalar(M * 4)),
+              b_scale_stride(detail::opaque_scalar(N * 4)),
               block_gemm(smem_, wave_m, wave_n)
         {
             if constexpr(kHasCluster)
@@ -778,7 +779,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                             const index_t local = start ? index - start : index;
                             const uint8_t* here = address(number<cat>{}, local);
                             pointer =
-                                first ? here : select_address(index < start + count, here, pointer);
+                                first
+                                    ? here
+                                    : detail::select_address(index < start + count, here, pointer);
                             first = false;
                         }
                     });

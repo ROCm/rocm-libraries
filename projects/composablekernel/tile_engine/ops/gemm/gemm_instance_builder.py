@@ -1069,9 +1069,9 @@ struct SelectedKernel {{
         false, false>;"""
 
         # Tile partitioner. comp_tdm_v3 walks the output tiles in plain row-major
-        # order (tile id -> (id / NBlocks, id % NBlocks)); GemmTile2DPartitioner
-        # gives the same order but does not build with GemmKernel outside cluster
-        # launch.
+        # order (tile id -> (id / NBlocks, id % NBlocks)), the raster of the
+        # rocKE kernel it ports; GemmTile2DPartitioner gives the same order but
+        # does not build with GemmKernel outside cluster launch.
         if pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE:
             instance_code += """
 

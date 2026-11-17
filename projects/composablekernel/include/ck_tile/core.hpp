@@ -125,7 +125,6 @@
 #include "ck_tile/core/tensor/transpose_tile.hpp"
 #include "ck_tile/core/tensor/update_tile.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
-#include "ck_tile/core/utility/codegen_control.hpp"
 #include "ck_tile/core/utility/data_cache_prefetch.hpp"
 #include "ck_tile/core/utility/debug.hpp"
 #include "ck_tile/core/utility/env.hpp"
