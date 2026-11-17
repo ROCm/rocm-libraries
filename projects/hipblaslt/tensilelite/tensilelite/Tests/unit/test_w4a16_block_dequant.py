@@ -280,6 +280,25 @@ def test_grouped_single_kernel_split_k_packs_gemms_in_the_workspace(toolchain):
     assert "0x190000" not in src
 
 
+@pytest.mark.parametrize("gsu", [1, 2])
+def test_grouped_wave32_searches_many_gemms_in_parallel(toolchain, gsu):
+    """Past 16 gemms a wave32 grouped kernel finds its gemm with one vector load
+    per 32 gemms and a DPP prefix sum of their tiles instead of scalar batches.
+    Split-K still moves the workspace past the earlier gemms' workgroups."""
+    kw = {} if gsu == 1 else {"GlobalSplitU": 2, "GlobalSplitUAlgorithm": "MultipleBufferSingleKernel"}
+    sol = _solution(toolchain, blockSize=32, depthU=64, zeroPoint=True,
+                    problemType={"GroupedGemm": True, "SupportUserArgs": True}, **kw)
+    assert sol.get("Valid") is True
+    _, src = _emit_solution(toolchain, sol)
+    assert "many gemms: wave search" in src
+    search = src[src.index("wave-parallel search"):]
+    search = search[:search.index("s_branch label_FOUND")]
+    assert search.count("buffer_load_b128") == 1
+    assert [int(x) for x in re.findall(r"row_shr:(\d+) bound_ctrl", search)] == [1, 2, 4, 8]
+    assert "exec_lo, 0xffff0000" in search
+    assert ("numWG*waves*4 bytes" in search) == (gsu == 2)
+
+
 @pytest.mark.parametrize("kw", [{"PrefetchGlobalRead": 2}, {"ScheduleIterAlg": 1}])
 def test_prefetch_and_schedule_are_each_fine_alone(toolchain, kw):
     """The reject above is on the *combination*, so pin that neither setting is

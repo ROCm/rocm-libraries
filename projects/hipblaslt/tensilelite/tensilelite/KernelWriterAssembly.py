@@ -2872,6 +2872,103 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SSetRegIMM32B32(HWRegContainer(reg="26", value=[bitPos, 1]), src=1, comment="Disable WMMA arb stall"))
     return mod
 
+  def groupedWaveSearch(self, kernel, gsuComponent, labelFound, sgprNumsOfGemm, sgprArgAddr,
+                        sgprFirstOffset, sgprStride, sgprIdx, sgprAccumTiles, sgprNumWG, sgprTmp, sgprSizes):
+    """
+    Wave32 grouped GEMM search: each lane loads the sizes of one gemm, so one
+    load covers 32 gemms. A DPP prefix sum of the per-gemm tile counts and
+    s_ff1 on (WorkGroup0 - accum < prefix) find the workgroup's gemm. Lanes
+    past the last gemm read 0 (buffer range check). The last gemm takes every
+    leftover workgroup. Leaves the state the FOUND path expects: sizes in
+    SizesFree, 1-based gemm index, accumulated tiles through the gemm and its
+    tile count.
+    """
+    module = Module("groupedWaveSearch")
+    lanes = 32
+    module.addComment1("Grouped Gemm:: wave-parallel search, %u gemms per load" % lanes)
+    vSizes = self.vgprPool.checkOutAligned(4, 4, tag="groupedSearchSizes")
+    vTiles = self.vgprPool.checkOut(1, tag="groupedSearchTiles")
+    vScan = self.vgprPool.checkOut(1, tag="groupedSearchScan")
+    vOff = self.vgprPool.checkOut(1, tag="groupedSearchOff")
+    vTmp = self.vgprPool.checkOutAligned(2, 2, tag="groupedSearchTmp")
+    vDiv = self.vgprPool.checkOut(1, tag="groupedSearchDiv")
+    labelLoop = Label(self.labels.getNameInc("GroupedWaveSearch"), "")
+    labelHit = Label(self.labels.getNameInc("GroupedWaveSearchHit"), "")
+    labelLast = Label(self.labels.getNameInc("GroupedWaveSearchLast"), "")
+    with self.allocTmpSgpr(8, 4, tag="groupedWaveSearch") as tmp:
+      srd = tmp.idx
+      sRel = tmp.idx + 4
+      sLane = tmp.idx + 5
+      sVal = tmp.idx + 6
+      sChunkBytes = tmp.idx + 7
+      module.add(SAddU32(dst=sgpr(srd), src0=sgpr(sgprArgAddr), src1=sgpr(sgprFirstOffset), comment="sizes SRD: first gemm"))
+      module.add(SAddCU32(dst=sgpr(srd + 1), src0=sgpr(sgprArgAddr + 1), src1=0))
+      module.add(SMulI32(dst=sgpr(srd + 2), src0=sgpr(sgprNumsOfGemm), src1=sgpr(sgprStride), comment="num_records: all gemms"))
+      module.add(SMovB32(dst=sgpr(srd + 3), src="Srd127_96"))
+      module.add(SLShiftLeftB32(dst=sgpr(sChunkBytes), src=sgpr(sgprStride), shiftHex=log2(lanes), comment="stride * %u" % lanes))
+      module.add(VAndB32(dst=vgpr(vOff), src0=lanes - 1, src1=vgpr("Serial"), comment="lane"))
+      module.add(VMulLOU32(dst=vgpr(vOff), src0=sgpr(sgprStride), src1=vgpr(vOff), comment="lane * stride"))
+      module.add(SMovB32(dst=sgpr(sgprIdx), src=0, comment="first gemm of the chunk"))
+      module.add(SMovB32(dst=sgpr(sgprAccumTiles), src=0))
+      module.add(labelLoop)
+      module.add(BufferLoadB128(dst=vgpr(vSizes, 4), vaddr=vgpr(vOff), saddr=sgpr(srd, 4), soffset=0,
+                                mubuf=MUBUFModifiers(offen=True, offset12=0), comment="M, N, B, K of gemm idx+lane"))
+      module.add(SWaitCnt(vlcnt=0))
+      tmpRes = ContinuousRegister(idx=vTmp, size=2)
+      for d, mt in ((0, kernel["MacroTile0"]), (1, kernel["MacroTile1"])):
+        dst = vTiles if d == 0 else vDiv
+        module.add(VAddU32(dst=vgpr(vScan), src0=mt - 1, src1=vgpr(vSizes + d)))
+        module.add(vectorStaticDivide(dst, vScan, mt, tmpRes))
+      module.add(VMulLOU32(dst=vgpr(vTiles), src0=vgpr(vTiles), src1=vgpr(vDiv), comment="tiles0 * tiles1"))
+      module.add(VMulLOU32(dst=vgpr(vTiles), src0=vgpr(vTiles), src1=vgpr(vSizes + 2), comment="* batch"))
+      if kernel["GlobalSplitU"] != 0 and not self.gsuIsOne(kernel):
+        module.add(SAndB32(dst=sgpr(sVal), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+        module.add(VMulLOU32(dst=vgpr(vTiles), src0=sgpr(sVal), src1=vgpr(vTiles), comment="* GSU"))
+      # Inclusive prefix sum: within 16-lane rows by DPP, then row 0's total into row 1.
+      module.add(VMovB32(dst=vgpr(vScan), src=vgpr(vTiles)))
+      for shift in (1, 2, 4, 8):
+        module.add(SNop(waitState=1, comment="VALU write -> DPP read"))
+        inst = VAddU32(dst=vgpr(vScan), src0=vgpr(vScan), src1=vgpr(vScan), comment="prefix row_shr:%u" % shift)
+        inst.dpp = DPPModifiers(row_shr=shift, bound_ctrl=0)
+        module.add(inst)
+      module.add(VReadlaneB32(dst=sgpr(sVal), src0=vgpr(vScan), src1=15, comment="row 0 total"))
+      module.add(SNop(waitState=4, comment="v_readlane SGPR -> VALU"))
+      module.add(SMovB32(dst=EXEC(), src=hex(0xFFFF0000), comment="row 1"))
+      module.add(VAddU32(dst=vgpr(vScan), src0=sgpr(sVal), src1=vgpr(vScan)))
+      module.add(SMovB32(dst=EXEC(), src=-1))
+      module.add(SSubU32(dst=sgpr(sRel), src0=sgpr("WorkGroup0"), src1=sgpr(sgprAccumTiles), comment="workgroup within the chunk"))
+      module.add(VCmpLtU32(dst=VCC(), src0=sgpr(sRel), src1=vgpr(vScan), comment="workgroup before the end of gemm idx+lane?"))
+      module.add(SFf1B32(dst=sgpr(sLane), src=VCC(), comment="first such lane, -1 if none"))
+      module.add(SCmpLtU32(src0=sgpr(sLane), src1=lanes))
+      module.add(SCBranchSCC1(labelName=labelHit.getLabelName()))
+      module.add(VReadlaneB32(dst=sgpr(sVal), src0=vgpr(vScan), src1=lanes - 1, comment="chunk total"))
+      module.add(SAddU32(dst=sgpr(sgprIdx), src0=sgpr(sgprIdx), src1=lanes))
+      module.add(SCmpLtU32(src0=sgpr(sgprIdx), src1=sgpr(sgprNumsOfGemm)))
+      module.add(SCBranchSCC0(labelName=labelLast.getLabelName()))
+      module.add(SAddU32(dst=sgpr(sgprAccumTiles), src0=sgpr(sgprAccumTiles), src1=sgpr(sVal)))
+      module.add(VAddU32(dst=vgpr(vOff), src0=sgpr(sChunkBytes), src1=vgpr(vOff), comment="next chunk"))
+      module.add(SBranch(labelName=labelLoop.getLabelName()))
+      # Past the last gemm: it takes the leftover workgroups.
+      module.add(labelLast)
+      module.add(SSubU32(dst=sgpr(sgprIdx), src0=sgpr(sgprIdx), src1=lanes))
+      module.add(SSubU32(dst=sgpr(sLane), src0=sgpr(sgprNumsOfGemm), src1=1))
+      module.add(SSubU32(dst=sgpr(sLane), src0=sgpr(sLane), src1=sgpr(sgprIdx), comment="lane of the last gemm"))
+      module.add(labelHit)
+      for d in range(4):
+        module.add(VReadlaneB32(dst=sgpr(sgprSizes + d), src0=vgpr(vSizes + d), src1=sgpr(sLane), comment="sizes of the found gemm"))
+      module.add(VReadlaneB32(dst=sgpr(sgprNumWG), src0=vgpr(vTiles), src1=sgpr(sLane), comment="its tiles"))
+      module.add(VReadlaneB32(dst=sgpr(sVal), src0=vgpr(vScan), src1=sgpr(sLane), comment="tiles through it"))
+      module.add(SAddU32(dst=sgpr(sgprAccumTiles), src0=sgpr(sgprAccumTiles), src1=sgpr(sVal)))
+      module.add(SAddU32(dst=sgpr(sgprIdx), src0=sgpr(sgprIdx), src1=sgpr(sLane)))
+      module.add(SAddU32(dst=sgpr(sgprIdx), src0=sgpr(sgprIdx), src1=1, comment="1-based gemm index"))
+      # GSU workspace offsets are linear in the skipped workgroups.
+      module.add(SSubU32(dst=sgpr(sVal), src0=sgpr(sgprAccumTiles), src1=sgpr(sgprNumWG), comment="tiles of earlier gemms"))
+      module.add(gsuComponent.defineAndResources(self, kernel, sgprTmp, sgprSizes, sgprSizes + 1, sVal, sgprAccumTiles))
+    for v in (vSizes, vTiles, vScan, vOff, vTmp, vDiv):
+      self.vgprPool.checkIn(v)
+    module.add(SBranch(labelName=labelFound.getLabelName()))
+    return module
+
   def defineAndResources(self, kernel, tPA, tPB, tPM):
     module = Module("allocateResources")
     module.add(self.macroAndSet(kernel, tPA, tPB))
@@ -3440,6 +3537,15 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMulI32(dst=sgpr(tmpSgprAddrM), src0=sgpr(sgprNumsOfGemm), src1=4)) # offset wgTable
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
 
+        gsuComponent = Component.GSU.find(self)
+        label_FOUND = Label("FOUND", "")
+        # The wave search pays a vector load and a scan; for a few gemms the
+        # scalar batches are cheaper (decode).
+        labelWaveSearch = None
+        if kernel["WavefrontSize"] == 32:
+          labelWaveSearch = Label(self.labels.getNameInc("GroupedUseWaveSearch"), "")
+          module.add(SCmpGtU32(src0=sgpr(sgprNumsOfGemm), src1=16, comment="many gemms: wave search"))
+          module.add(SCBranchSCC1(labelName=labelWaveSearch.getLabelName()))
         # Batched linear search: load the sizes of SEARCH_BATCH gemms, wait once,
         # then scan them. Scalar loads may return out of order, so only a full
         # wait is safe; batching divides the serialized load latencies a
@@ -3447,11 +3553,9 @@ class KernelWriterAssembly(KernelWriter):
         # the last gemm repeat the last one. The last gemm takes every
         # workgroup left over (they exit once its tiles are known).
         SEARCH_BATCH = 4
-        gsuComponent = Component.GSU.find(self)
         module.addComment1("Grouped Gemm:: batched search, %u gemms per wait" % SEARCH_BATCH)
         module.add(SMovB32(dst=sgpr(tmpSgprLoopCounter), src=1))
         module.add(SMovB32(dst=sgpr(tmpSgprAccumTiles), src=0))
-        label_FOUND = Label("FOUND", "")
         with self.allocTmpSgpr(4 * SEARCH_BATCH + 1, 4, tag="groupedSearchBatch") as batchSgpr:
           regs = [batchSgpr.idx + 4 * j for j in range(SEARCH_BATCH)]
           tmpAddr = batchSgpr.idx + 4 * SEARCH_BATCH
@@ -3494,6 +3598,11 @@ class KernelWriterAssembly(KernelWriter):
             if j:
               module.add(SAddU32(dst=sgpr(tmpSgprLoopCounter), src0=sgpr(tmpSgprLoopCounter), src1=j))
             module.add(SBranch(labelName=label_FOUND.getLabelName()))
+        if labelWaveSearch is not None:
+          module.add(labelWaveSearch)
+          module.add(self.groupedWaveSearch(kernel, gsuComponent, label_FOUND, sgprNumsOfGemm, tmpSgprArgAddress0,
+                                            tmpSgprAddrM, tmpSgprArgOffsett, tmpSgprLoopCounter, tmpSgprAccumTiles,
+                                            tmpSgprNumWG0, tmpSgpr0, tmpSgprM))
 
         # gemmIndex found
         tmpSgprWgLeft = tmpSgpr.idx
