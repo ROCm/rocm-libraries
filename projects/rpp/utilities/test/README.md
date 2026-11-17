@@ -92,7 +92,7 @@ src/
     image/     image ops, grouped by category (color, geometric, ...)
     misc/      misc ops, grouped by category
     voxel/     voxel ops, grouped by category
-    audio/     audio ops, grouped by category (built only when rpp has audio support)
+    audio/     audio ops, grouped by category
 ```
 
 Adding an op = a `reference/<op>_ref.hpp` golden model plus a short `TEST_P` under `tests/`.
