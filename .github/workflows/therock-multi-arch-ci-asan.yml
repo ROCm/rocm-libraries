@@ -12,11 +12,14 @@
 name: TheRock Multi-Arch CI ASAN
 
 on:
+  # TheRock's configure step skips draft PRs unless the ci:run-on-draft label
+  # is set, so ready_for_review must start a new run.
   pull_request:
     types:
       - opened
       - synchronize
       - reopened
+      - ready_for_review
       - labeled
   workflow_dispatch:
     inputs:

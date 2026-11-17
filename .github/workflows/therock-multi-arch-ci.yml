@@ -21,11 +21,15 @@ on:
     branches:
       - develop
       - release/therock-*
+  # TheRock's configure step skips builds and tests on draft PRs unless the
+  # ci:run-on-draft label is set, so ready_for_review must start a new run.
+  # Without it the draft's skipped run stays the PR's only (green) result.
   pull_request:
     types:
       - opened
       - synchronize
       - reopened
+      - ready_for_review
       - labeled
       - unlabeled
   workflow_dispatch:
