@@ -29,8 +29,10 @@ _deps/
 #     (./kernel_cache, relative to wherever the benchmark is run from) ---
 kernel_cache/
 
-# --- Local scratch: logs, generated capability reports, ad-hoc studies ---
+# --- Local scratch: logs, perf JSON dumps, generated capability reports,
+#     ad-hoc studies ---
 *.log
+# The probe writes this basename relative to whichever directory invokes it.
 capabilities.json
 logs/
 scratch/
