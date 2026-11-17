@@ -1,8 +1,8 @@
 # RFC 0025: Per-engine numerical notes
 
-- Contributors: TBD
+- Contributors: Brian Harrison, Garby Gilbert
 - **Status**: Implemented
-- **Status notes**: Backend `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`, `EngineDetails.numerical_notes`, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, note filtering on the native and Python `Graph` with cuDNN's filter semantics for every engine filter, and real-note filtering in the cuDNN v9 and v8 compatibility layers ship together. No in-tree provider reports a precision note.
+- **Status notes**: Shipped in #15493: the backend attribute, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and note filtering in the cuDNN v9 and v8 layers. #15792 added note filtering on the native and Python `Graph`. Only MIOpen reports notes, and only `NONDETERMINISTIC`; no provider reports any other note (§5).
 - **Last verified**: 2026-11-13 against `develop` (7d8674e8542)
 - **Follows**: [RFC 0010: Per-engine behavior notes](./0010_BehaviorNotes.md)
 
