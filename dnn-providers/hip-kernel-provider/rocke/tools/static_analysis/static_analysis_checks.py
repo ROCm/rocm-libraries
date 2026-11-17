@@ -24,7 +24,7 @@
 # Usage (install optional tools separately; see the guide; run from the repo root):
 #   pre-commit install --hook-type pre-push --allow-missing-config \
 #       -c dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
-#   pre-commit run rocke-radon --hook-stage pre-push --files <paths> \
+#   pre-commit run rocke-radon --files <paths> \
 #       -c dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
 # Direct (the tool must be importable by this python). Use this form, not
 # `pre-commit run --all-files`, for all of rocke: pre-commit splits a long file
