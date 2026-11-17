@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "8137b5b4-547e-4777-898f-e6e9d9cfffd6",
+  "name": "hip_conv_dgrad_fma_1d_rdna selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.hip_conv_dgrad_fma_1d_rdna.score"
+  }
+}
