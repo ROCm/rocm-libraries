@@ -1,4 +1,4 @@
-#Origami : Analytical Solution Selection for GEMM Kernels
+# Origami : Analytical Solution Selection for GEMM Kernels
 
 **Origami** provides a fast, analytical, deterministic methodology to select optimal GEMM configuration (such as tile size) for out-of-the-box GEMM performance. Origami estimates performance by sweeping over candidate configs (tile sizes and mapping) to select the optimal configuration based on **compute** and **memory latencies**.
 
@@ -15,14 +15,14 @@
   - [Python](#build-and-install-origami-python)
   - [C++](#build-and-install-origami-c)
   - [CMake Options](#cmake-options)
-  - [Origami Tests](#origami-tests)
-  - [Neural Network (NN) Backend](#neural-network-nn-backend)
-    - [Supported Backends](#supported-backends)
-    - [Building with NN On or Off](#building-with-nn-on-or-off)
-    - [Model Weights](#model-weights)
-    - [Runtime Configuration](#runtime-configuration)
-    - [hipBLASLt Integration](#hipblaslt-integration)
-    - [NN Tests](#nn-tests)
+- [Origami Tests](#origami-tests)
+- [Neural Network (NN) Backend](#neural-network-nn-backend)
+  - [Supported Backends](#supported-backends)
+  - [Building with NN On or Off](#building-with-nn-on-or-off)
+  - [Model Weights](#model-weights)
+  - [Runtime Configuration](#runtime-configuration)
+  - [hipBLASLt Integration](#hipblaslt-integration)
+  - [NN Tests](#nn-tests)
 - [Debug Logging](#debug-logging)
   - [Text Log](#text-log)
   - [CSV Log](#csv-log)
@@ -256,7 +256,7 @@ cmake --install build/
 |--------|-------------|---------|
 | `ORIGAMI_BUILD_SHARED_LIBS` | Build shared libraries | `ON` |
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
-| `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
+| `ORIGAMI_BUILD_TESTING` | Build the C++ tests (and the Python binding tests when `ORIGAMI_ENABLE_PYTHON=ON`) | `OFF` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
 | `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, TWREC loader, tilewright ranking in `rank_configs`). | `OFF` |
 
@@ -332,15 +332,17 @@ When `ORIGAMI_ENABLE_NN=OFF`, all NN code is compiled out and `rank_configs` alw
 
 **tilewright** is a split-tree, per-cell two-tower MLP recommender. Models are keyed by Tensile logic-library stem (dtype + transpose) and discovered from `origami_nn_index` colocated with the kernel library.
 
-**gfx950 weights shipped in-tree** (`data/nn/tilewright/gfx950/`):
+**gfx950 weights** (downloaded into `data/nn/tilewright/gfx950/`; they are not stored in git, see [Model Weights](#model-weights)):
 
 | Dtype family | Tensile type | Transpose layouts |
 |------------|--------------|-------------------|
 | bf16 BBS (`bf16_r`) | `BB_BB` | TN, NN, TT, NT (all four) |
 | fp8 F8BS | `F8F8_BF8` | NN only |
-| mxfp8 S_MX_B | `SS_SS` | TN, NN, TT, NT (all four) |
+| fp32 with xf32 compute (`f32_r`, `--compute_type xf32_r`) | `SS_SS` (`S_MX_B`) | TN, NN, TT, NT (all four) |
 
-If no model exists for a given logic stem, `load_models_for_logic` returns `invalid_handle` (`-1`) and `rank_configs` falls back to analytical when `ORIGAMI_INFERENCE_MODE=nn_fallback`.
+If no model exists for a given logic stem, `load_models_for_logic` returns `invalid_handle` (`-1`) and `rank_configs` falls back to analytical when `ORIGAMI_INFERENCE_MODE=nn_fallback`. The miss is cached for the life of the process, so place the weights before the first lookup.
+
+A model is also declined at rank time when its architecture does not match the hardware being ranked for (for example a gfx950 model on gfx942). `nn_fallback` then uses the analytical path, and `nn` throws.
 
 ### Building with NN On or Off
 
@@ -369,7 +371,7 @@ cmake -S . -B build/ \
 cmake --build build/ --parallel
 ```
 
-Download tilewright weights into `shared/origami/data/nn/tilewright/gfx950/`. A hipBLASLt build with `ORIGAMI_ENABLE_NN=ON` copies that directory next to each Tensile library, and `PredictionLibrary` loads the copy from the logic-file directory. Set `ORIGAMI_NN_WEIGHTS_DIR` to that download directory to load it directly.
+Download tilewright weights into `shared/origami/data/nn/tilewright/gfx950/`. The download locations are currently only accessible from an AMD-internal S3 bucket. A hipBLASLt build with `ORIGAMI_ENABLE_NN=ON` copies that directory next to each Tensile library, and `PredictionLibrary` loads the copy from the logic-file directory. Callers that do not pass a directory, such as an application calling `load_models_for_logic` directly, can set `ORIGAMI_NN_WEIGHTS_DIR` to the download directory instead (see [Weights directory](#weights-directory)).
 
 **hipBLASLt** uses the same `ORIGAMI_ENABLE_NN` option (default **OFF**). Enable NN when configuring hipBLASLt:
 
@@ -397,7 +399,7 @@ shared/origami/data/nn/tilewright/<arch>/
   *.tilewright.wts.yaml     # int4_b64 weight sidecar
 ```
 
-Index format (tab-separated):
+Index format (tab-separated; lines starting with `#` are comments, and the backend is `tilewright` or `embedding_similarity`):
 
 ```
 <logic_stem>  tilewright  <manifest.yaml>
@@ -413,6 +415,12 @@ auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
 ```
 
 To load a single manifest directly (for example in a test), pass its path to `origami::nn::load_model`.
+
+A manifest is rejected, with a message on stderr, when its `feature_names_hash` does not match the hash compiled into this build. Regenerate or re-download the weights if you see `TWREC manifest rejected: feature_names_hash ...` after updating Origami. A rejected manifest is remembered, so a manifest shared by several stems is parsed only once.
+
+`origami::nn::unload_model(handle)` is safe to call while another thread is still ranking with that model: the model stays alive until the ranking call returns. Unloading drops the cached lookup for that handle, so the next lookup loads the model again. Cached misses are not cleared.
+
+`origami::nn::nn_inference_requested(mode)` returns whether `rank_configs` would use ML for a call that requests `mode`, after the `ORIGAMI_INFERENCE_MODE` override is applied. Callers such as hipBLASLt use it to defer loading weights until a call can use them.
 
 
 ### Runtime Configuration
@@ -435,21 +443,26 @@ NN routing is controlled by `rank_options_t` fields and environment variables. E
 | `tilewright` | Force tilewright backend |
 | `embedding_similarity` | Force embedding-similarity backend (not yet implemented) |
 
+#### Weights directory
+
+| Source | Behavior |
+|--------|----------|
+| `hint_dir` passed to `load_models_for_logic` / `load_model_by_index` | Used first. hipBLASLt passes the directory of the logic file |
+| `ORIGAMI_NN_WEIGHTS_DIR` | Used when no hint directory is given |
+
+Only one directory is searched. When a hint directory is given, `ORIGAMI_NN_WEIGHTS_DIR` is not consulted, even if the hint directory has no entry for the stem; hipBLASLt always passes one, so it ignores the variable. The directory must contain `origami_nn_index` and the manifests it lists. Both sources name a directory, so the old `ORIGAMI_NN_WEIGHTS` override, which replaced the path of every manifest, is no longer read.
+
 #### Diagnostics
 
 | Variable | Description |
 |----------|-------------|
-| `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts) |
+| `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts). Also prints when a model is declined because its architecture does not match the hardware, and, in hipBLASLt, one `PredictionLibrary stem=... dir=... tilewright_handle=...` line per logic library when its model is loaded |
 | `ORIGAMI_TW_LOG` | Log top-1 tilewright pick per `rank_configs` call (`[TW_PICK]` line on stderr) |
 | `ORIGAMI_TW_CELL` | Debug: force TWREC cell index (overrides routing); also via `rank_options.nn.force_cell` |
 
-#### hipBLASLt row filter
-
-| Variable | Description |
-|----------|-------------|
-| `TENSILE_PREDICTION_LIB=1` | Use `PredictionMatching` rows in `ExactLogicLibrary` (required for NN path in hipBLASLt bench) |
-
 ### hipBLASLt Integration
+
+The default inference mode is analytical, so hipBLASLt reaches the tilewright path only when `ORIGAMI_INFERENCE_MODE` is `nn` or `nn_fallback`. `PredictionLibrary` does not parse any weights while a logic file loads. It records the logic stem and directory, and loads the model on the first ranking call whose resolved inference mode is `nn` or `nn_fallback`. A missing manifest is cached as a failed lookup for the life of the process, so place the weights before the first lookup.
 
 Example: run hipblaslt-bench with tilewright NN fallback on gfx950 bf16 TN layout:
 
@@ -464,6 +477,12 @@ hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
 ```
 
 Use `ORIGAMI_INFERENCE_MODE=nn` to require ML ranking (no silent analytical fallback). Set `ORIGAMI_NN_DIAG=1` to verify model load for the active logic stem.
+
+| Variable | Description |
+|----------|-------------|
+| `TENSILE_PREDICTION_LIB=1` | Use `PredictionMatching` rows in `ExactLogicLibrary`, so tuned Equality and Range rows do not pre-empt ranking |
+
+The NN path is reached through the `PredictionMatching` rows, so a shape that matches an Equality or Range row is not ranked by NN unless this variable is set. Shapes that match no such row reach NN without it. `TENSILE_PREDICTION_LIB=1` makes hipBLASLt skip every `EqualityMatching` and `RangeMatching` logic row. Hand-written kernels that only appear in those rows, such as the gfx950 skinny `n == 1` TN kernel, are then never candidates. Set it only for the process under test. Exporting it globally makes tests that expect those kernels, such as `HandwrittenAlgoReuse_smoke`, fail.
 
 ### NN Tests
 
@@ -483,6 +502,8 @@ cmake --build build/ --parallel
 ```
 
 When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out.
+
+Tests tagged `[nn][tilewright]` need the downloaded weights. The tests read them from `shared/origami/data/nn/tilewright/gfx950/` (set at configure time) and call `SKIP()` when they are missing, so a checkout without weights reports those tests as skipped rather than failed. `SKIP()` needs Catch2 3.3 or newer. Tests that do not load weights, such as the `rank_options_t` defaults and the `nn_inference_requested` check, always run.
 
 ## Debug Logging
 
