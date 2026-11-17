@@ -1777,11 +1777,10 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
     if(tf32_error)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
     char operand_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_binary_arity_op_error(op, operand_error, sizeof operand_error))
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", operand_error);
-    if(rocke_i_integer_element_op_error(op, operand_error, sizeof operand_error)
-       || rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
-        rocke_ll_fail(L, ROCKE_ERR_TYPE, "%s", operand_error);
+    const rocke_status_t operand_status
+        = rocke_i_operand_rules_error(op, operand_error, sizeof operand_error);
+    if(operand_status != ROCKE_OK)
+        rocke_ll_fail(L, operand_status, "%s", operand_error);
     rocke_opcode_t oc = op->opcode;
     rocke_ll_op_fn fn = NULL;
     if(oc > ROCKE_OP_INVALID && oc < ROCKE_OP__COUNT)

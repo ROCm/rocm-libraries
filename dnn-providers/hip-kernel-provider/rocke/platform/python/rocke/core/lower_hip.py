@@ -32,12 +32,10 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
     F64,
-    _binary_arity_error,
     _fcmp_error,
     _int_add_wrap_error,
     _int_cmp_error,
-    _integer_element_op_error,
-    _operand_types_op_error,
+    _operand_rules_error,
     _scf_for_error,
     _scf_if_error,
     _vector_cmp_error,
@@ -570,12 +568,9 @@ class _Lowerer:
         named_op_id = named_mma_op_id(op.name)
         if named_op_id is not None:
             backend_for(self.arch).require_mma_available(named_op_id)
-        arity_error = _binary_arity_error(op)
-        if arity_error:
-            raise ValueError(arity_error)
-        operand_error = _integer_element_op_error(op) or _operand_types_op_error(op)
-        if operand_error:
-            raise TypeError(operand_error)
+        operand_error = _operand_rules_error(op)
+        if operand_error is not None:
+            raise operand_error
         if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
             self._emit_wmma_gfx1250_scaled(op)
             return

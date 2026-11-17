@@ -762,6 +762,17 @@ const char* rocke_i_integer_element_error(const char* op_name,
  * through the builders. */
 const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
+/* Mirrors ir._operand_rules_error, which returns the exception whose status
+ * this returns: ROCKE_OK, or the refusal's status with its text written into
+ * `buf`, with the shared operand rules (arity, integer element, operand types)
+ * applied in one order. The arity rule (rocke_i_binary_arity_op_error,
+ * ROCKE_ERR_VALUE) comes first, as the other rules read the operands it
+ * counts; then the integer-element rule (rocke_i_integer_element_op_error) and
+ * the operand rule (rocke_i_operand_types_op_error), each ROCKE_ERR_TYPE, as
+ * the builders check them. Every lowering refuses it before it lowers an op,
+ * and the constant folder does not fold an op it refuses. */
+rocke_status_t rocke_i_operand_rules_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* Mirrors ir._refuse_non_integer: throw ckc::TypeError with
  * rocke_i_integer_element_error's text when `operand_type`'s element is not an
  * integer or i1. */

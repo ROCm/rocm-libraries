@@ -919,14 +919,14 @@ void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b,
  * ops (smax, smin) refuse an unsigned element type, and the bitwise ops and
  * shifts (rocke_i_is_integer_element_op) one that is not an integer or i1
  * (TypeError); then a second operand of another type is a TypeError
- * (rocke_i_refuse_operand_types). */
+ * (rocke_i_refuse_operand_types). The rules every binary op shares are
+ * rocke_i_binop's, which builds the op. */
 static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
                                             rocke_opcode_t opcode,
                                             rocke_value_t* a,
                                             rocke_value_t* c,
                                             const char* hint)
 {
-    rocke_value_t* ops[2];
     if(!rocke_i_live(b))
         return NULL;
     if(!a || !c)
@@ -939,12 +939,7 @@ static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
         rocke_i_refuse_unsigned("vector_smax", a->type, NULL);
     if(opcode == ROCKE_OP_VECTOR_SMIN)
         rocke_i_refuse_unsigned("vector_smin", a->type, NULL);
-    if(rocke_i_is_integer_element_op(opcode))
-        rocke_i_refuse_non_integer(rocke_opcode_name(opcode), a->type);
-    ops[0] = a;
-    ops[1] = c;
-    rocke_i_refuse_operand_types(b, rocke_opcode_name(opcode), ops, 2);
-    return rocke_i_op1(b, opcode, ops, 2, a->type, NULL, hint);
+    return rocke_i_binop(b, opcode, a, c, hint);
 }
 
 rocke_value_t* rocke_b_vector_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
