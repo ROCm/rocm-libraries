@@ -249,19 +249,16 @@ std::optional<double>
                         || (op.right_bound() && *op.right_bound() == 0);
     const bool bottomRight = op.causal_mask_bottom_right()
                              || op.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT;
-    std::optional<int64_t> left;
-    if(op.left_bound() && *op.left_bound() >= 0)
+    // A negative bound is unbounded, as an absent one is.
+    std::optional<int64_t> left = op.left_bound();
+    if(left && *left < 0)
     {
-        left = *op.left_bound();
+        left.reset();
     }
-    std::optional<int64_t> right;
-    if(causal)
+    std::optional<int64_t> right = causal ? std::optional<int64_t>{0} : op.right_bound();
+    if(right && *right < 0)
     {
-        right = 0;
-    }
-    else if(op.right_bound() && *op.right_bound() >= 0)
-    {
-        right = *op.right_bound();
+        right.reset();
     }
     const auto pairs = bandPairs(sq, sk, bottomRight ? sk - sq : 0, left, right);
     return 2.0 * static_cast<double>(batch) * static_cast<double>(heads)

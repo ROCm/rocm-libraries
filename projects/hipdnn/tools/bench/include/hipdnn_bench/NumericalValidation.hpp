@@ -411,10 +411,18 @@ inline std::vector<uint8_t> declaredImage(hipdnn_frontend::DataType dataType,
         case DataType::UINT8:
         case DataType::BOOLEAN:
         {
-            const int64_t low = dataType == DataType::INT8 ? std::numeric_limits<int8_t>::min() : 0;
-            const int64_t high = dataType == DataType::INT8    ? std::numeric_limits<int8_t>::max()
-                                 : dataType == DataType::UINT8 ? std::numeric_limits<uint8_t>::max()
-                                                               : 1;
+            // BOOLEAN takes 0 or 1 only.
+            int64_t low = 0;
+            int64_t high = 1;
+            if(dataType == DataType::INT8)
+            {
+                low = INT8_MIN;
+                high = INT8_MAX;
+            }
+            else if(dataType == DataType::UINT8)
+            {
+                high = std::numeric_limits<uint8_t>::max();
+            }
             if(value < low || value > high)
             {
                 return {};

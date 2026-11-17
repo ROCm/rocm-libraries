@@ -133,7 +133,7 @@ public:
         {
             values[index] = first + (static_cast<int64_t>(index) * step);
         }
-        add(tensor->uid(), std::move(values));
+        add(tensor->uid(), values);
     }
 
     /// Every element of @p tensor is @p value.
@@ -142,7 +142,7 @@ public:
         ramp(tensor, 0, value);
     }
 
-    void add(int64_t uid, std::vector<int64_t> values)
+    void add(int64_t uid, const std::vector<int64_t>& values)
     {
         if(_conflicted.count(uid) != 0)
         {
@@ -244,7 +244,7 @@ inline void declareRouting(const fb::TensorAttributes* offsets,
     {
         values[group] = static_cast<int64_t>(group) * *rows / *groups;
     }
-    contents.add(offsets->uid(), std::move(values));
+    contents.add(offsets->uid(), values);
 }
 
 /// A ragged tensor's batches where the dense layout puts them: offset i is i batch strides,
@@ -259,7 +259,7 @@ inline void declareRaggedOffsets(const fb::Graph& graph, ContentsBuilder& conten
     {
         const auto* offsets = findTensor(graph, tensor->ragged_offset_tensor_uid());
         const auto multiplier = tensor->ragged_offset_multiplier();
-        if(offsets == nullptr || tensor->strides() == nullptr || tensor->strides()->size() == 0
+        if(offsets == nullptr || tensor->strides() == nullptr || tensor->strides()->empty()
            || multiplier < 1 || tensor->strides()->Get(0) % multiplier != 0)
         {
             continue;
