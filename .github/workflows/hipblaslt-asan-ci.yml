@@ -1,4 +1,5 @@
 name: hipBLASLt ASAN CI
+run-name: ${{ inputs.replay_token || format('hipBLASLt ASAN CI {0}', github.run_id) }}
 
 on:
   pull_request:
@@ -12,6 +13,7 @@ on:
       - "test/therock/test_hipblaslt.py"
       - "test/therock/test_hipsparselt.py"
       - "test/therock/lsan.supp"
+      - ".github/scripts/host_asan_diagnostics.py"
       - ".github/workflows/hipblaslt-asan-ci.yml"
       - ".github/actions/ci-env/**"
   workflow_dispatch:
@@ -21,18 +23,27 @@ on:
         type: choice
         options: [quick, standard, comprehensive, full]
         required: true
+      replay:
+        description: Temporary diagnostic replay of a frozen gfx950 incident build
+        type: choice
+        options: [none, validate, hipblaslt, hipsparselt]
+        default: none
+      replay_token:
+        description: Unique name supplied by the external replay script
+        type: string
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
 env:
   TEST_TYPE: ${{ inputs.test_type || (github.event_name == 'pull_request' && 'quick') || 'standard' }}
+  REPLAY: ${{ inputs.replay || 'none' }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ inputs.replay && inputs.replay != 'none' && 'host-asan-diagnostic-replay' || format('{0}-{1}', github.workflow, github.event.number || github.run_id) }}
+  cancel-in-progress: ${{ !inputs.replay || inputs.replay == 'none' }}
 
 jobs:
   setup:
@@ -41,7 +52,9 @@ jobs:
     outputs:
       # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
       # these jobs exercise its actual math-libs build system.
-      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      therock_ref: ${{ inputs.replay && inputs.replay != 'none' && 'c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827' || steps.ci-env.outputs.therock-ref }}
+      artifact_run_id: ${{ steps.matrix.outputs.artifact_run_id }}
+      source_sha: ${{ steps.matrix.outputs.source_sha }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
       test_type: ${{ env.TEST_TYPE }}
@@ -104,15 +117,46 @@ jobs:
                        | .value as $arch
                        | $arch.components[]
                        | {family: $family, component: ascii_downcase, runs_on: $arch.runs_on}]}')
+          if [[ "$REPLAY" != none ]]; then
+            test "$TEST_TYPE" = standard
+            test "$GITHUB_REF" = refs/heads/users/rkayaith/host-asan-hang-diagnostics
+            test "$GITHUB_RUN_ATTEMPT" = 1
+            component="$REPLAY"
+            if [[ "$REPLAY" = validate ]]; then
+              component=hipblaslt
+            fi
+            test=$(echo "$test" | jq -c --arg component "$component" \
+              '{include: [.include[] | select(.family == "gfx950" and .component == $component)]}')
+          fi
+          case "$REPLAY" in
+            hipblaslt|validate)
+              echo 'artifact_run_id=43688159315'
+              echo 'source_sha=756abe9af8525b83e729433d130686490c461c3c'
+              ;;
+            hipsparselt)
+              echo 'artifact_run_id=43569196548'
+              echo 'source_sha=4e81d94c6b489ce7d37e9a7381bf2cdb4ebf7a89'
+              ;;
+            none)
+              echo "artifact_run_id=$GITHUB_RUN_ID"
+              echo "source_sha=$GITHUB_SHA"
+              ;;
+            *) exit 1 ;;
+          esac >> "$GITHUB_OUTPUT"
           # Other test types use the longest limits allowed.
           timeouts=$(echo "$timeouts" | jq -c --arg test_type "$TEST_TYPE" \
             'map_values(map_values(.[$test_type] // {command_timeout: "0", step_timeout_minutes: 360, job_timeout_minutes: 7200}))')
+          if [[ "$REPLAY" = validate ]]; then
+            timeouts=$(echo "$timeouts" | jq -c \
+              '.gfx950.hipblaslt = {command_timeout: "7m", step_timeout_minutes: 12, job_timeout_minutes: 20}')
+          fi
           echo "build_matrix=${build}" >> "$GITHUB_OUTPUT"
           echo "test_matrix=${test}" >> "$GITHUB_OUTPUT"
           echo "timeouts=${timeouts}" >> "$GITHUB_OUTPUT"
 
   build:
     name: "Build (hipBLASLt / hipSPARSELt | ${{ matrix.family }} | HOST_ASAN)"
+    if: ${{ !inputs.replay || inputs.replay == 'none' }}
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 600
@@ -223,12 +267,15 @@ jobs:
 
   test:
     name: "Test ${{ matrix.component }} HOST_ASAN | ${{ matrix.family }} (${{ needs.setup.outputs.test_type }})"
+    if: ${{ !cancelled() && needs.setup.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: ${{ fromJSON(needs.setup.outputs.timeouts)[matrix.family][matrix.component].job_timeout_minutes }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
+        --cap-add SYS_PTRACE
+        --cap-add SYSLOG
         --group-add video
         --device /dev/kfd
         --device /dev/dri
@@ -244,13 +291,15 @@ jobs:
         shell: bash
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      ARTIFACT_RUN_ID: ${{ needs.setup.outputs.artifact_run_id }}
+      SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+      THEROCK_REF: ${{ needs.setup.outputs.therock_ref }}
       OUTPUT_ARTIFACTS_DIR: "./build"
       THEROCK_BIN_DIR: "./build/bin"
       THEROCK_DIR: ${{ github.workspace }}
       AMDGPU_FAMILIES: ${{ matrix.family }}
       ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
-      THEROCK_RUN_ID: ${{ github.run_id }}-host-asan-${{ matrix.family }}
+      THEROCK_RUN_ID: ${{ needs.setup.outputs.artifact_run_id }}-host-asan-${{ matrix.family }}
       HSA_XNACK: "0"
       TEST_COMPONENT: ${{ matrix.component }}
     steps:
@@ -265,10 +314,18 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           path: rocm-libraries
+          ref: ${{ needs.setup.outputs.source_sha }}
           sparse-checkout: |
             .github/scripts
             test/therock
           sparse-checkout-cone-mode: true
+
+      - name: Checkout diagnostic helper
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: diagnostics
+          sparse-checkout: .github/scripts
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -291,15 +348,12 @@ jobs:
       - name: Check test executable
         run: test -x "${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test"
 
-      - name: Driver / GPU sanity check
-        timeout-minutes: 3
-        env:
-          RUNNER_NAME: ${{ runner.name }}
+      - name: Install diagnostic debugger
+        timeout-minutes: 2
+        continue-on-error: ${{ !inputs.replay || inputs.replay == 'none' }}
         run: |
-          echo "Runner: ${RUNNER_NAME}"
-          export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
-          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
-          timeout -k 10 120 python3 ./build_tools/print_driver_gpu_info.py || true
+          sudo -n apt-get update -o Acquire::Retries=0 -o Acquire::http::Timeout=15
+          sudo -n apt-get install -y --no-install-recommends gdb
 
       - name: ASAN runtime environment
         run: |
@@ -315,6 +369,16 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
+      - name: Record driver and GPU state
+        timeout-minutes: 3
+        continue-on-error: ${{ !inputs.replay || inputs.replay == 'none' }}
+        env:
+          RUNNER_NAME: ${{ runner.name }}
+        run: |
+          python diagnostics/.github/scripts/host_asan_diagnostics.py \
+            --output-dir test_logs/before-tests
+          sha256sum "${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test" > test_logs/test-executable.sha256
+
       - name: Set up Python YAML converter
         run: |
           python3 -m venv "${VENV_DIR}"
@@ -322,6 +386,7 @@ jobs:
           echo "${VENV_DIR}/bin" >> "$GITHUB_PATH"
 
       - name: Test ${{ matrix.component }} (${{ needs.setup.outputs.test_type }})
+        id: test
         # Hangs used to run to the 180-minute step limit and clustered on
         # specific hosts. Cap tests using the resolved command timeout and
         # name the runner.
@@ -336,21 +401,38 @@ jobs:
         run: |
           mkdir -p ./test_logs
           status=0
-          timeout -k 60 "${TEST_COMMAND_TIMEOUT}" python3 "rocm-libraries/test/therock/test_${TEST_COMPONENT}.py" 2>&1 \
+          executable="${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test"
+          command=(python -u "rocm-libraries/test/therock/test_${TEST_COMPONENT}.py")
+          if [[ "$REPLAY" = validate ]]; then
+            # Exercise the same monitor/timeout/upload path without running a suite.
+            executable=/usr/bin/sleep
+            command=(python -u -c 'import subprocess; subprocess.run(["/usr/bin/sleep", "600"], check=True)')
+          fi
+          python diagnostics/.github/scripts/host_asan_diagnostics.py \
+            --output-dir test_logs --log-file "test_logs/${TEST_COMPONENT}-test_output.log" \
+            --executable "$executable" --quiet-seconds 300 \
+            -- timeout -k 60 "${TEST_COMMAND_TIMEOUT}" \
+            "${command[@]}" 2>&1 \
             | tee "./test_logs/${TEST_COMPONENT}-test_output.log" || status=$?
           if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
             echo "::error::${TEST_COMPONENT} HOST_ASAN test timed out after ${TEST_COMMAND_TIMEOUT} on runner ${RUNNER_NAME}"
           fi
           exit "${status}"
 
-      - name: Upload failed test logs
-        if: ${{ failure() }}
+      - name: Upload test logs and hang diagnostics
+        if: ${{ always() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: asan-logs-${{ matrix.component }}-${{ matrix.family }}
           path: test_logs
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
+
+      - name: Pause replay after a captured stall, including recovered tests
+        if: ${{ inputs.replay && inputs.replay != 'none' && steps.test.outputs.hang_diagnostics == 'true' }}
+        run: |
+          echo '::error::Diagnostic snapshot captured; review artifacts before another replay.'
+          exit 1
 
   summary:
     name: "hipBLASLt ASAN CI Summary"
@@ -370,6 +452,9 @@ jobs:
         run: |
           echo "Build (hipBLASLt / hipSPARSELt HOST_ASAN): ${BUILD}"
           echo "Test  (hipBLASLt / hipSPARSELt HOST_ASAN): ${TEST}"
+          if [[ "$REPLAY" != none && "$BUILD" = skipped ]]; then
+            BUILD=success
+          fi
           if [[ "$BUILD" != "success" || "$TEST" != "success" ]]; then
             echo "::error::hipBLASLt ASAN failed (build=${BUILD} test=${TEST})"
             exit 1
