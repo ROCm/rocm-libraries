@@ -30,6 +30,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/FusedA2A.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
+#include <Tensile/SliceAlignment.hpp>
 #include <Tensile/Tensile.hpp>
 
 #include "ProgramOptions.hpp"
@@ -84,8 +85,6 @@ namespace TensileLite
         private:
             void createProblems(std::vector<ContractionProblemGemm>& rv);
 
-            // Largest (aligned - last) / aligned the share may be rounded up at.
-            static constexpr double SplitMaxImbalance = 0.01;
             size_t splitShare(size_t total, size_t step, rocisa::DataType dType) const;
 
             std::vector<std::shared_ptr<ContractionProblem>> m_problems;
@@ -148,6 +147,7 @@ namespace TensileLite
             size_t                            m_sliceIdx   = 0;
             size_t                            m_sliceCount = 1;
             bool                              m_splitN     = false;
+            SliceAlignment::Mode              m_splitAlign = SliceAlignment::Mode::Auto;
             // Per problem, the share of the split dimension devices 0..N-2 take (the last device
             // takes the rest). Cut once per problem from the full problem's D, so the slice sizes
             // and sliceOffsetInD agree.

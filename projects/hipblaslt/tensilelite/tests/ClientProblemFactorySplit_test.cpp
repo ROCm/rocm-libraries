@@ -341,3 +341,24 @@ TEST(ClientProblemFactorySplit, NShareIsRoundedToTheDPitch)
     EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).b().sizes()[1], 49962u);
     EXPECT_EQ(factory.sliceOffsetInD(full, 1), 50048u * 3u);
 }
+
+TEST(ClientProblemFactorySplit, SplitAlignOffKeepsThePlainShare)
+{
+    auto args = makeArgs({1000010, 64, 1, 64}, 2, "M");
+    TensileLite::TestUtils::setOption(args, "split-align", std::string("off"));
+    ClientProblemFactory factory(args);
+    auto*                full = factory.problems()[0].get();
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 0)).c().sizes()[0], 500005u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[0], 500005u);
+}
+
+TEST(ClientProblemFactorySplit, SplitAlignForceRoundsEvenWhenUnbalanced)
+{
+    auto args = makeArgs({200, 64, 1, 64}, 2, "M");
+    TensileLite::TestUtils::setOption(args, "split-align", std::string("force"));
+    ClientProblemFactory factory(args);
+    auto*                full = factory.problems()[0].get();
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 0)).c().sizes()[0], 128u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[0], 72u);
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 128u);
+}

@@ -234,6 +234,7 @@ namespace TensileLite
                 ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
                 ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest; that share is rounded up so each device's D slice starts on a multiple of 256 bytes when the last device then has at most 1% less work, else it is not rounded and a hint says how to pad. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
+                ("split-align",            po::value<std::string>()->default_value("auto"), "With --split-devices, how the share of the split dimension is rounded so each device's D slice starts on a multiple of 256 bytes: auto = round up when the balance changes by at most 1%; off = always size/N (to measure the misaligned case); force = always round up, as long as the last device keeps work.")
                 ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. A shared A, B or C is the copy of the last device, whose slice is the largest; a shared D is the one of device-idx, and every device writes its slice into it.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
@@ -969,6 +970,12 @@ int main(int argc, const char* argv[])
         if(splitM > 1 && args["split-dim"].as<std::string>() != "M"
            && args["split-dim"].as<std::string>() != "N")
             throw std::runtime_error("--split-dim must be M or N");
+        if(splitM > 1)
+        {
+            auto const& a = args["split-align"].as<std::string>();
+            if(a != "auto" && a != "off" && a != "force")
+                throw std::runtime_error("--split-align must be auto, off or force");
+        }
         if(splitM > 1 && fusedA2A)
             throw std::runtime_error("--split-devices cannot be combined with --fused-a2a");
         if(splitM > 1 && args["use-user-args"].as<bool>())
