@@ -198,7 +198,7 @@ rocsparse_status rocsparse::gcsc2csr(rocsparse_handle     handle,
     case rocsparse_datatype_bf16_r:
     {
         // LCOV_EXCL_START
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         // LCOV_EXCL_STOP
     }
     case rocsparse_datatype_u32_r:

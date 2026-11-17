@@ -788,6 +788,24 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     ASSERT_EQ(status, rocsparse_status_success);
     EXPECT_EQ(printed, "");
     EXPECT_NE(log.sink.str().find(expected.str()), std::string::npos) << log.sink.str();
+
+    // f64 into f32 complex rounds the real part the same way. The error is the
+    // distance between the source and that rounded real part.
+    device_vector<rocsparse_float_complex> d_complex(std::vector<rocsparse_float_complex>(
+        convert_nitems, rocsparse_float_complex(-1.0f, -1.0f)));
+    ScopedDebugLog                         log_complex(handle);
+    testing::internal::CaptureStdout();
+    const rocsparse_status complex_status  = rocsparse::convert_array(handle,
+                                                                     convert_nitems,
+                                                                     rocsparse_datatype_f32_c,
+                                                                     d_complex.ptr,
+                                                                     rocsparse_datatype_f64_r,
+                                                                     d_source.ptr);
+    const std::string      complex_printed = testing::internal::GetCapturedStdout();
+    ASSERT_EQ(complex_status, rocsparse_status_success);
+    EXPECT_EQ(complex_printed, "");
+    EXPECT_NE(log_complex.sink.str().find(expected.str()), std::string::npos)
+        << log_complex.sink.str();
 }
 
 // ===========================================================================

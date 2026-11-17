@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -186,8 +186,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         //
         // Attach the intermediate.
         //
-        descr_->m_intermediate = intermediate;
-        rocsparse_sparse_to_sparse_descr intermediate_descr;
+        descr_->m_intermediate                              = intermediate;
+        rocsparse_sparse_to_sparse_descr intermediate_descr = nullptr;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_sparse_to_sparse_descr(
             &intermediate_descr, source_, intermediate, rocsparse_sparse_to_sparse_alg_default));
 
@@ -195,7 +195,28 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         // Compute buffer size for intermediate conversion.
         //
         size_t buffer_size{};
-        void*  buffer{};
+        void*  buffer = nullptr;
+        // The same-type CSR conversion below can fail for f16 and bf16. Free the
+        // buffer and the algorithm descriptor on every exit after they exist.
+        // The intermediate matrix stays on descr_->m_intermediate.
+        struct stage_cleanup
+        {
+            void*&                            buffer;
+            rocsparse_sparse_to_sparse_descr& descr;
+            ~stage_cleanup()
+            {
+                if(buffer != nullptr)
+                {
+                    rocsparse_hipFree(buffer);
+                    buffer = nullptr;
+                }
+                if(descr != nullptr)
+                {
+                    rocsparse_destroy_sparse_to_sparse_descr(descr);
+                    descr = nullptr;
+                }
+            }
+        } cleanup{buffer, intermediate_descr};
 
         {
             size_t buffer_size_analysis{};
@@ -226,7 +247,11 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                                        buffer_size,
                                        buffer));
 
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(buffer));
+        {
+            const hipError_t free_error = rocsparse_hipFree(buffer);
+            buffer                      = nullptr;
+            RETURN_IF_HIP_ERROR(free_error);
+        }
 
         //
         // Here we know unknown size of intermediate if any.
@@ -293,8 +318,17 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         //
         // Free the buffer.
         //
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(buffer));
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_sparse_to_sparse_descr(intermediate_descr));
+        {
+            const hipError_t free_error = rocsparse_hipFree(buffer);
+            buffer                      = nullptr;
+            RETURN_IF_HIP_ERROR(free_error);
+        }
+        {
+            const rocsparse_status destroy_status
+                = rocsparse_destroy_sparse_to_sparse_descr(intermediate_descr);
+            intermediate_descr = nullptr;
+            RETURN_IF_ROCSPARSE_ERROR(destroy_status);
+        }
 
         //
         // Request the buffer size of the conversion from the csr format to the target.

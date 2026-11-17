@@ -42,7 +42,8 @@ rocsparse_status rocsparse::gcoo2coo_aos(rocsparse_handle     handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Values first: an unsupported data type pair is rejected before anything is written.
+    // Values first: an unsupported value type pair is rejected before any array
+    // is written. An index conversion can still fail after the values are written.
     if(source_val != nullptr && target_val != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(

@@ -57,7 +57,9 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
 *               pointer is invalid.
-*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the
+*               formats of \p source and \p target. Data type support is checked by
+*               \ref rocsparse_sparse_to_sparse.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle                 handle,
@@ -93,27 +95,24 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *    From the CSC, ELL and BSR formats, this needs \ref rocsparse_sparse_to_sparse_permissive, and
 *    the conversion goes through an intermediate CSR matrix. CSC, ELL and BSR to COO with an
 *    \ref rocsparse_datatype_f16_r or \ref rocsparse_datatype_bf16_r source still go through the
-*    existing same-type CSR conversion, which rejects those two types. Today that returns
-*    \ref rocsparse_status_invalid_value for CSC and \ref rocsparse_status_not_implemented for
-*    ELL and BSR. That is the current behaviour of those kernels. COO AoS from CSC, ELL and BSR
-*    uses the same intermediate conversion.
+*    existing same-type CSR conversion, which returns \ref rocsparse_status_not_implemented for
+*    those two types. COO AoS from CSC, ELL and BSR uses the same intermediate conversion.
 *  - \ref rocsparse_format_csr target: the values are also converted from the COO and COO AoS
 *    formats.
 *  - \ref rocsparse_format_csc, \ref rocsparse_format_ell or \ref rocsparse_format_bsr target: only
 *    from the same format.
 *
-*  Other combinations return \ref rocsparse_status_not_implemented, except the f16 and bf16 CSC
-*  to COO route above, which currently returns \ref rocsparse_status_invalid_value. The ELL to
-*  CSR and CSR to BSR conversions (also to BSR in permissive mode) only return it in the
+*  Other combinations return \ref rocsparse_status_not_implemented. The ELL to CSR and CSR to
+*  BSR conversions (also to BSR in permissive mode) only return it in the
 *  \ref rocsparse_sparse_to_sparse_stage_compute stage, after the
 *  \ref rocsparse_sparse_to_sparse_stage_analysis stage has written the row pointer array of
 *  \p target.
 *
-*  A matrix with zero nonzeros is an exception. For the conversions above that convert the
-*  values, its sparsity pattern is converted and \ref rocsparse_status_success is returned for
-*  any pair of data types. The CSR to CSC, CSC to CSR and BSR to CSR conversions only check the
-*  data types when the value arrays of both \p source and \p target are set, so they also convert
-*  a matrix with zero nonzeros and no value arrays for any pair of data types.
+*  A conversion that writes values returns \ref rocsparse_status_not_implemented for an
+*  unsupported value type pair even when the matrix has zero nonzeros, if both value arrays
+*  are set. The CSR to CSC, CSC to CSR and BSR to CSR conversions only check the data types
+*  when the value arrays of both \p source and \p target are set, so a matrix with no value
+*  arrays is converted for any pair of data types.
 *
 *  Conversions to a single-precision type round each value (each real and imaginary part) to
 *  nearest. Values that overflow single precision become infinity of the same sign, NaN is
@@ -138,7 +137,14 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
-*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
+*  \retval      rocsparse_status_invalid_handle the library context was not initialized.
+*  \retval      rocsparse_status_invalid_pointer \p descr, \p source, \p target, or \p buffer
+*               is invalid.
+*  \retval      rocsparse_status_invalid_value \p stage is not a valid enumeration.
+*  \retval      rocsparse_status_type_mismatch the source and target matrix descriptors differ,
+*               or an index value does not fit in the target index type.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats
+*               or data types of \p source and \p target, or the matrix is batched.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
 *  \snippet example_rocsparse_sparse_to_sparse.cpp doc example

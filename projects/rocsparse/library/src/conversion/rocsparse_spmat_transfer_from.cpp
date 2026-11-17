@@ -104,7 +104,8 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
 
     //
     // Every target array that will be written, then VAL_DATA: an invalid pointer or an
-    // unsupported data type pair is rejected before anything is written.
+    // unsupported value type pair is rejected before anything is written. An index
+    // conversion can still fail after the values are written.
     //
     ROCSPARSE_CHECKARG(1,
                        target,

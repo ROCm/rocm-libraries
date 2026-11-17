@@ -1488,8 +1488,7 @@ namespace
                && (std::is_same_v<S, _Float16> || std::is_same_v<S, rocsparse_bfloat16>))
             {
                 EXPECT_EQ(sparse_to_sparse(handle, source.descr, target.descr, c.permissive),
-                          c.sf == rocsparse_format_csc ? rocsparse_status_invalid_value
-                                                       : rocsparse_status_not_implemented);
+                          rocsparse_status_not_implemented);
                 EXPECT_EQ(target.read_a(), std::vector<int32_t>(target.host.a.size(), -7));
                 EXPECT_EQ(target.read_b(), std::vector<int32_t>(target.host.b.size(), -7));
                 EXPECT_EQ(target.read_val(), std::vector<T>(want.val.size(), fill));
@@ -1586,9 +1585,9 @@ namespace
                   st_ok);
         ASSERT_EQ(tf == rocsparse_format_csr
                       ? rocsparse_create_csr_descr(
-                            &target, 1, n, n, t_a, t_b, t_val.get(), i32, i32, base0, dt_of<D>())
+                          &target, 1, n, n, t_a, t_b, t_val.get(), i32, i32, base0, dt_of<D>())
                       : rocsparse_create_coo_descr(
-                            &target, 1, n, n, t_a, t_b, t_val.get(), i32, base0, dt_of<D>()),
+                          &target, 1, n, n, t_a, t_b, t_val.get(), i32, base0, dt_of<D>()),
                   st_ok);
         ASSERT_EQ(sparse_to_sparse(handle, source, target), st_ok);
         if(tf == rocsparse_format_csr)
@@ -1616,10 +1615,11 @@ namespace
             for_each_widening(S2sWidening{handle, tf});
     }
 
-    // A matrix with zero nonzeros, from f32 values into i32 values. The conversions that
-    // convert the values convert its pattern for any pair of data types. CSR -> CSC,
-    // CSC -> CSR and BSR -> CSR only check the data types when both matrices have value
-    // arrays.
+    // A matrix with zero nonzeros, from f32 values into i32 values. An unsupported
+    // value type pair is rejected when both value arrays are set, including when
+    // nnz is zero. CSR -> CSC, CSC -> CSR and BSR -> CSR only check the data types
+    // when both matrices have value arrays, so they still convert a matrix that
+    // has none.
     TEST_F(ConvInternal, SparseToSparseMixedDatatypesEmpty)
     {
         Silence                    silence;
@@ -1630,16 +1630,15 @@ namespace
         struct Case
         {
             rocsparse_format sf, tf;
-            bool             converts_values;
         };
-        const Case cases[] = {{rocsparse_format_csr, rocsparse_format_csr, true},
-                              {rocsparse_format_csr, rocsparse_format_coo, true},
-                              {rocsparse_format_coo, rocsparse_format_csr, true},
-                              {rocsparse_format_csr, rocsparse_format_coo_aos, true},
-                              {rocsparse_format_coo_aos, rocsparse_format_csr, true},
-                              {rocsparse_format_csr, rocsparse_format_csc, false},
-                              {rocsparse_format_csc, rocsparse_format_csr, false},
-                              {rocsparse_format_bsr, rocsparse_format_csr, false}};
+        const Case cases[] = {{rocsparse_format_csr, rocsparse_format_csr},
+                              {rocsparse_format_csr, rocsparse_format_coo},
+                              {rocsparse_format_coo, rocsparse_format_csr},
+                              {rocsparse_format_csr, rocsparse_format_coo_aos},
+                              {rocsparse_format_coo_aos, rocsparse_format_csr},
+                              {rocsparse_format_csr, rocsparse_format_csc},
+                              {rocsparse_format_csc, rocsparse_format_csr},
+                              {rocsparse_format_bsr, rocsparse_format_csr}};
         const auto has_ptr = [](rocsparse_format f) {
             return f == rocsparse_format_csr || f == rocsparse_format_csc
                    || f == rocsparse_format_bsr;
@@ -1668,7 +1667,7 @@ namespace
                                      t_idx,
                                      values ? t_val.get() : nullptr),
                           st_ok);
-                if(values && !c.converts_values)
+                if(values)
                 {
                     EXPECT_EQ(sparse_to_sparse(handle, source, target),
                               rocsparse_status_not_implemented);

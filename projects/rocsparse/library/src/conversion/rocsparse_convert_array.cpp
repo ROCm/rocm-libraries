@@ -494,12 +494,11 @@ namespace rocsparse
                 const size_t gid = base + tid;
                 if(gid < nitems_)
                 {
-                    const SOURCE s  = source_[gid];
-                    const SOURCE sf = floating_data_t<SOURCE>(s);
-                    const TARGET t{static_cast<floating_data_t<TARGET>>(sf),
-                                   static_cast<floating_data_t<TARGET>>(0)};
+                    const SOURCE                  s    = source_[gid];
+                    const floating_data_t<TARGET> real = static_cast<floating_data_t<TARGET>>(s);
+                    const TARGET                  t{real, static_cast<floating_data_t<TARGET>>(0)};
 
-                    const floating_data_t<SOURCE> e = rocsparse::abs(s - sf);
+                    const floating_data_t<SOURCE> e = rocsparse::abs(s - static_cast<SOURCE>(real));
                     err                             = (e > err) ? e : err;
                     target_[gid]                    = t;
                 }
@@ -678,19 +677,36 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        if(nitems_ == 0)
-        {
-            host_error[0] = 0;
-            return rocsparse_status_success;
-        }
-
         using kernel_t = rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>;
         static constexpr uint32_t BLOCKSIZE = 1024;
+        // Reject an unsupported pair before the empty-array shortcut, so the
+        // answer depends on the types and not on nnz.
         if constexpr(!rocsparse::has_run_kernel_t<kernel_t, BLOCKSIZE>::value)
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
                 rocsparse_status_not_implemented,
                 "the conversion between these two data types is not implemented");
+        }
+        else if(nitems_ == 0)
+        {
+            host_error[0] = 0;
+            return rocsparse_status_success;
+        }
+        else if constexpr(rocsparse::is_exact_real_widening_v<TARGET, SOURCE>)
+        {
+            // These kernels never write conversion_error_. Skip the memset,
+            // the readback and the stream sync.
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (kernel_t::template run<BLOCKSIZE>),
+                dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
+                dim3(BLOCKSIZE),
+                0,
+                handle_->stream,
+                nitems_,
+                (TARGET*)target__,
+                (const SOURCE*)source__,
+                (floating_data_t<SOURCE>*)nullptr);
+            host_error[0] = 0;
         }
         else
         {
