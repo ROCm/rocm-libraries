@@ -362,3 +362,22 @@ TEST(ClientProblemFactorySplit, SplitAlignForceRoundsEvenWhenUnbalanced)
     EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[0], 72u);
     EXPECT_EQ(factory.sliceOffsetInD(full, 1), 128u);
 }
+
+TEST(ClientProblemFactorySplit, NShareIsRoundedToThePaddedLdbToo)
+{
+    // The share is cut with the split operand and C as well as D, as PartitionedGemm cuts it.
+    // float, M = 64: the D and C pitch is 256 bytes, so they never need rounding. A padded
+    // ldb of 65 floats = 260 bytes needs g = 2048 / gcd(2048, 65 * 32) = 64 columns, so plain
+    // 50005 rounds up to 50048 (the last device keeps 49962, 0.2% less). Cut with D only, the
+    // share stays 50005.
+    const size_t useDefault = TensorDescriptor::UseDefaultStride;
+    auto         args       = makeArgs({64, 100010, 1, 64}, 2, "N");
+    TensileLite::TestUtils::setOption(
+        args, "b-strides", std::vector<std::vector<size_t>>{{useDefault, 65, useDefault}});
+    ClientProblemFactory factory(args);
+    auto*                full = factory.problems()[0].get();
+    ASSERT_EQ(gemm(full).b().strides()[1], 65u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 0)).c().sizes()[1], 50048u);
+    EXPECT_EQ(gemm(factory.sliceProblem(full, 1)).c().sizes()[1], 49962u);
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 50048u * 64u);
+}

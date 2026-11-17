@@ -433,20 +433,30 @@ namespace TensileLite
             }
         }
 
-        // Rows of the split dimension each of the first sliceCount-1 devices takes. Plain is
-        // total / sliceCount, rounded up so that a device's D slice starts on 256 bytes
-        // (step = D's stride along the split dimension, in elements) as --split-align says; see
-        // Tensile/SliceAlignment.hpp.
-        size_t ClientProblemFactory::splitShare(size_t           total,
-                                                size_t           step,
-                                                rocisa::DataType dType) const
+        // Rows (or columns) of the split dimension each of the first sliceCount-1 devices takes,
+        // cut from the full-size problem. Plain is total / sliceCount, rounded up as --split-align
+        // says so that every cut matrix's slice starts on 256 bytes; see
+        // Tensile/SliceAlignment.hpp. The cut matrices are the ones PartitionedGemm gives the rule
+        // (the split operand, C and D), so the client runs the slices the library runs, although
+        // its A, B and C are per-device buffers whose slices start at the buffer.
+        size_t ClientProblemFactory::splitShare(ContractionProblemGemm const& full) const
         {
             // 256 bytes = 2048 bits; elementSize is a float and fractional for fp4 and fp6.
-            int64_t bits = std::llround(DataTypeInfo::Get(dType).elementSize * 8.0f);
-            auto    r    = SliceAlignment::split(static_cast<int64_t>(total),
-                                              m_sliceCount,
-                                              {{"D", static_cast<int64_t>(step), bits}},
-                                              m_splitAlign);
+            auto const bits = [](TensorDescriptor const& t) {
+                return static_cast<int64_t>(
+                    std::llround(DataTypeInfo::Get(t.dataType()).elementSize * 8.0f));
+            };
+            auto const step = [](TensorDescriptor const& t, size_t dim) {
+                return static_cast<int64_t>(t.strides().at(dim));
+            };
+            auto const&                         op = m_splitN ? full.b() : full.a();
+            std::vector<SliceAlignment::Matrix> cut{
+                {m_splitN ? "B" : "A", step(op, m_splitFree.i), bits(op)},
+                {"C", step(full.c(), m_splitFree.c), bits(full.c())},
+                {"D", step(full.d(), m_splitFree.d), bits(full.d())}};
+            size_t total = full.d().sizes().at(m_splitFree.d);
+            auto   r     = SliceAlignment::split(
+                static_cast<int64_t>(total), m_sliceCount, cut, m_splitAlign);
             if(r.share == 0)
                 throw std::runtime_error(concatenate("--split-devices=",
                                                      m_sliceCount,
@@ -650,19 +660,15 @@ namespace TensileLite
                                 auto aS = aStrides, bS = bStrides, cS = cStrides, dS = dStrides;
                                 if(m_sliceCount > 1)
                                 {
-                                    // The problem at the full size. Its D descriptor gives the
-                                    // split dimension's stride and the element size that the
-                                    // share is rounded with.
+                                    // The problem at the full size. Its descriptors give the
+                                    // strides along the split dimension and the element sizes
+                                    // that the share is rounded with.
                                     auto probe       = make(m_fullProblemSizes[i], aS, bS, cS, dS);
                                     auto fullStrides = [&](ContractionProblemGemm::TENSOR t) {
                                         return probe.tensors()[t].strides();
                                     };
                                     size_t total = m_fullProblemSizes[i].at(m_splitFree.d);
-                                    size_t share = splitShare(
-                                        total,
-                                        fullStrides(ContractionProblemGemm::TENSOR::D)
-                                            .at(m_splitFree.d),
-                                        probe.d().dataType());
+                                    size_t share = splitShare(probe);
                                     auto sliceSizes = m_fullProblemSizes[i];
                                     sliceSizes.at(m_splitFree.d)
                                         = m_sliceIdx + 1 < m_sliceCount
