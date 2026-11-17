@@ -175,6 +175,30 @@ inline void forEachUnencodableVgprOperand(const StinkyInstruction& inst, Callbac
                             });
 }
 
+/// Whether \p inst can carry a VGPR bank word at all. Scalar, branch, call,
+/// barrier, wait and side-effect instructions never need an s_set_vgpr_msb,
+/// whatever their operands.
+inline bool carriesVgprMsb(const StinkyInstruction& inst) {
+    return !(inst.is(InstFlag::IF_SALU) || inst.is(InstFlag::IF_SMemLoad) ||
+             inst.is(InstFlag::IF_SMemStore) || inst.is(InstFlag::IF_SMemAtomic) ||
+             inst.is(InstFlag::IF_Branch) || inst.is(InstFlag::IF_Call) ||
+             inst.is(InstFlag::IF_Barrier) || inst.is(InstFlag::IF_WaitCnt) ||
+             inst.is(InstFlag::IF_HasSideEffect));
+}
+
+/// Calls \p callback once per VGPR operand of \p inst that decides a slot of its
+/// bank word, as (operand, index, isDest, slot), in field order. When two
+/// operands share a slot, the later one is what the word holds.
+template <typename Callback>
+inline void forEachVgprMsbSlotOperand(const StinkyInstruction& inst, Callback&& callback) {
+    forEachVgprOperandField(inst,
+                            [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+                                if (slot < 0) return;
+                                if (getMsbFromVgpr(reg) < 0) return;
+                                callback(reg, operand, isDest, slot);
+                            });
+}
+
 /// Record the per-slot VGPR banks of \p inst; \p hasVgpr set if any VGPR is seen.
 ///
 /// \p bankOf names the bank of each slotted VGPR operand, called as
@@ -184,18 +208,16 @@ inline void forEachUnencodableVgprOperand(const StinkyInstruction& inst, Callbac
 template <typename BankOf>
 inline void collectVgprMsbSlotsWith(const StinkyInstruction* inst, BankOf&& bankOf, int msbSrc[3],
                                     int& msbDst, bool& hasVgpr) {
-    forEachVgprOperandField(*inst,
-                            [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
-                                if (slot < 0) return;
-                                if (getMsbFromVgpr(reg) < 0) return;
-                                const int msb = bankOf(reg, operand, isDest);
+    forEachVgprMsbSlotOperand(
+        *inst, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+            const int msb = bankOf(reg, operand, isDest);
 
-                                hasVgpr = true;
-                                if (slot == 3)
-                                    msbDst = msb;
-                                else
-                                    msbSrc[slot] = msb;
-                            });
+            hasVgpr = true;
+            if (slot == 3)
+                msbDst = msb;
+            else
+                msbSrc[slot] = msb;
+        });
 }
 
 inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst,
@@ -211,13 +233,7 @@ inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], in
 /// carry an MSB or which field maps to which slot.
 template <typename BankOf>
 inline std::pair<int, bool> computeRequiredMsbWith(const StinkyInstruction* inst, BankOf&& bankOf) {
-    if (inst->is(InstFlag::IF_SALU) || inst->is(InstFlag::IF_SMemLoad) ||
-        inst->is(InstFlag::IF_SMemStore) || inst->is(InstFlag::IF_SMemAtomic) ||
-        inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Call) ||
-        inst->is(InstFlag::IF_Barrier) || inst->is(InstFlag::IF_WaitCnt) ||
-        inst->is(InstFlag::IF_HasSideEffect)) {
-        return {-1, false};
-    }
+    if (!carriesVgprMsb(*inst)) return {-1, false};
 
     int msbSrc[3] = {0, 0, 0};
     int msbDst = 0;
