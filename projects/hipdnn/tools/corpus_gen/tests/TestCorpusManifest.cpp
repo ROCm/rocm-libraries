@@ -251,6 +251,47 @@ TEST(TestCorpusManifest, TheCsvAndTheJsonCarryTheSameValuesForEveryRow)
     }
 }
 
+TEST(TestCorpusManifest, AFormIsAFacetColumnAfterTheRegimeFacetsAndNotPartOfTheRegime)
+{
+    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
+    std::ifstream file(path);
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    std::vector<ManifestEntry> entries{
+        sdpaEntry("a", 2048, 2048, "sweep", "draw 1", "prefill_short"),
+        sdpaEntry("b", 2048, 2048, "sweep", "draw 2", "prefill_short")};
+    entries[0].entry.point["form"] = std::string("padded");
+    entries[1].entry.point["form"] = std::string("plain");
+    for(auto& entry : entries)
+    {
+        entry.formAxes = parsed.metadata->formLabel;
+    }
+
+    const auto manifest = corpusManifest(entries, sdpaContext());
+    EXPECT_EQ(manifest["graphs"][0]["form"], "padded");
+    EXPECT_EQ(manifest["graphs"][1]["form"], "plain");
+    // The regime is what it was: a form is a column of its own, not a fourth facet of the label.
+    EXPECT_EQ(manifest["graphs"][0]["regime"], "prefill_short");
+    EXPECT_EQ(manifest["graphs"][0]["grouping"], "mha");
+
+    const auto rows = parseCsv(corpusManifestCsv(entries));
+    ASSERT_EQ(rows.size(), 3u);
+    const auto& header = rows.front();
+    const auto column = [&header](const std::string& name) {
+        return static_cast<size_t>(std::find(header.begin(), header.end(), name) - header.begin());
+    };
+    ASSERT_LT(column("form"), header.size());
+    EXPECT_EQ(column("form"), column("grouping") + 1) << "form follows the last regime facet";
+    EXPECT_EQ(rows[1][column("form")], "padded");
+    EXPECT_EQ(rows[2][column("form")], "plain");
+    EXPECT_EQ(rows[1][column("regime")], "prefill_short");
+    for(const auto& row : rows)
+    {
+        EXPECT_EQ(row.size(), header.size());
+    }
+}
+
 TEST(TestCorpusManifest, AnOriginCarryingACommaDoesNotShiftTheRow)
 {
     // `origin` is free text, so it is the column an unquoted writer would break.
@@ -345,6 +386,7 @@ std::vector<uint8_t> builtSdpaGraph(int64_t seqlenQ)
     auto point = sdpaPoint(seqlenQ, 4096);
     point["alignment"] = std::string("top_left");
     point["generate_stats"] = false;
+    point["form"] = std::string("plain");
     const auto built = buildGraphFor(*parsed.metadata, point);
     EXPECT_TRUE(built.ok()) << built.error;
     return built.bytes;

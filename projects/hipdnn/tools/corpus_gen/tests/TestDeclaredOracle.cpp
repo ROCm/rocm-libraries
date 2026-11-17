@@ -44,6 +44,7 @@ ProblemPoint sdpaPoint()
                         {"is_causal", true},
                         {"alignment", std::string("top_left")},
                         {"generate_stats", false},
+                        {"form", std::string("plain")},
                         {"dtype", std::string("bf16")}};
 }
 

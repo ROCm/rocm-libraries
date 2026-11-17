@@ -343,7 +343,13 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
 
     EXPECT_TRUE(found.problems.empty());
     EXPECT_TRUE(found.saturated);
-    EXPECT_LE(found.proposed, static_cast<int64_t>(request.maxCombinations) * request.probeBudget);
+    // `maxCombinations` bounds the strided sample; the combinations that make every categorical
+    // value appear at least once come on top of it.
+    size_t totalCombinations = 0;
+    const auto lanes = detail::categoricalCombinations(
+                           metadata.parameters, request.maxCombinations, totalCombinations)
+                           .size();
+    EXPECT_LE(found.proposed, static_cast<int64_t>(lanes) * request.probeBudget);
 }
 
 TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)
@@ -377,4 +383,148 @@ TEST(TestRegimeFocus, AFloorIsAskedOfEveryRegimeNoQuotaNames)
     EXPECT_EQ(floors.count("decode_short_mha"), 0U) << "a named quota is not overridden";
     EXPECT_EQ(floors.size(), declaredRegimeLabels(metadata).size() - 1);
     EXPECT_EQ(floors.at("decode_long_gqa").pins, (std::map<std::string, int64_t>{{"seqlen_q", 1}}));
+}
+
+namespace
+{
+
+/// A form of the shipped forward, over the point `sdpaPoint` builds.
+ProblemPoint sdpaFormPoint(const std::string& form, int64_t seqlenQ = 2048)
+{
+    auto point = sdpaPoint(seqlenQ, 2048);
+    point["form"] = form;
+    return point;
+}
+
+} // namespace
+
+TEST(TestFormLabel, TheShippedDeclarationNamesTheFormAndLeavesTheRegimeAlone)
+{
+    const auto metadata = shippedSdpa();
+    ASSERT_EQ(metadata.formLabel.size(), 1U);
+    EXPECT_EQ(metadata.formLabel.front().name, "form");
+
+    // Forms cross regimes: every form of one problem shape is the same regime, so no regime
+    // name (or quota keyed on one) changes when the form does.
+    const auto plain = regimeLabel(metadata, sdpaFormPoint("plain"));
+    for(const auto* form :
+        {"scale_unset", "scale_tensor", "dropout", "padded", "ragged", "bias", "sink"})
+    {
+        EXPECT_EQ(regimeLabel(metadata, sdpaFormPoint(form)), plain) << form;
+        EXPECT_EQ(formQuotaKeys(metadata, sdpaFormPoint(form)),
+                  std::vector<std::string>{std::string("form:") + form});
+    }
+    EXPECT_EQ(plain, "prefill_short_mha");
+    EXPECT_EQ(formQuotaKeys(metadata, sdpaFormPoint("plain")),
+              std::vector<std::string>{"form:plain"});
+    EXPECT_EQ(declaredRegimeLabels(metadata).size(), 4U * 2U * 3U);
+}
+
+TEST(TestFormLabel, AFormAxisOverAnUndeclaredParameterIsALoadError)
+{
+    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
+      "schema_version": "0.1",
+      "operation": "toy",
+      "stratification_axis": "arithmetic_intensity",
+      "graph_builder": {
+        "function": "createValidLayernormFpropGraph",
+        "source": "hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp",
+        "arguments": []
+      },
+      "parameters": {"groups": {"type": "int64"}},
+      "form_label": [
+        {"name": "form",
+         "labels": [{"label": "padded", "when": {"==": ["$q.form", "padded"]}}],
+         "otherwise": "plain"}
+      ]
+    })"));
+
+    ASSERT_FALSE(load.errors.empty());
+    EXPECT_NE(load.errors.front().find("form_label"), std::string::npos) << load.errors.front();
+    EXPECT_NE(load.errors.front().find("form"), std::string::npos) << load.errors.front();
+}
+
+TEST(TestFormLabel, ALabelWithAColonCouldReadAsAFormKeyAndIsRefused)
+{
+    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
+      "schema_version": "0.1",
+      "operation": "toy",
+      "stratification_axis": "arithmetic_intensity",
+      "graph_builder": {
+        "function": "createValidLayernormFpropGraph",
+        "source": "hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp",
+        "arguments": []
+      },
+      "parameters": {"groups": {"type": "int64"}},
+      "regime_label": [
+        {"name": "phase",
+         "labels": [{"label": "form:padded", "when": {"==": ["$q.groups", 1]}}],
+         "otherwise": "other"}
+      ]
+    })"));
+
+    ASSERT_FALSE(load.errors.empty());
+    EXPECT_NE(load.errors.front().find("form:padded"), std::string::npos) << load.errors.front();
+}
+
+TEST(TestFormFocus, EveryLabelOfTheAxisCompilesToAFocusKeyedAxisColonLabel)
+{
+    const auto metadata = shippedSdpa();
+    const auto floors = formFloors(metadata);
+
+    std::set<std::string> keys;
+    for(const auto& floor : floors)
+    {
+        keys.insert(floor.first);
+    }
+    EXPECT_EQ(keys,
+              (std::set<std::string>{"form:plain",
+                                     "form:scale_unset",
+                                     "form:scale_tensor",
+                                     "form:dropout",
+                                     "form:padded",
+                                     "form:ragged",
+                                     "form:bias",
+                                     "form:sink"}));
+
+    const auto& padded = floors.at("form:padded");
+    EXPECT_EQ(padded.label, "padded");
+    EXPECT_EQ(padded.formAxis, "form");
+    EXPECT_EQ(padded.categoricalPins.at("form"), ParameterValue(std::string("padded")));
+    EXPECT_TRUE(padded.pins.empty());
+
+    // `otherwise` implies only negations, so it pins nothing and the label check decides.
+    EXPECT_TRUE(floors.at("form:plain").categoricalPins.empty());
+}
+
+TEST(TestFormFocus, ALabelTheAxisDoesNotDeclareIsRefused)
+{
+    const auto metadata = shippedSdpa();
+    std::string error;
+    EXPECT_FALSE(compileFormFocus(metadata, "form", "paged", error).has_value());
+    EXPECT_NE(error.find("paged"), std::string::npos) << error;
+    error.clear();
+    EXPECT_FALSE(compileFormFocus(metadata, "layout", "padded", error).has_value());
+    EXPECT_NE(error.find("layout"), std::string::npos) << error;
+}
+
+TEST(TestFormFocus, AFocusedSearchReturnsOnlyPointsOfThatForm)
+{
+    const auto metadata = shippedSdpa();
+    for(const auto* form : {"padded", "plain"})
+    {
+        const auto floors = formFloors(metadata);
+        const auto found = exploreRegime(metadata,
+                                         floors.at(std::string("form:") + form),
+                                         focusRequest(),
+                                         6,
+                                         SERVES_EVERYTHING,
+                                         {},
+                                         {});
+        ASSERT_FALSE(found.problems.empty()) << form;
+        for(const auto& point : found.problems)
+        {
+            EXPECT_EQ(std::get<std::string>(point.at("form")), form);
+        }
+    }
 }

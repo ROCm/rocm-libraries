@@ -130,6 +130,7 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
         {
             categorical["generate_stats"] = false;
         }
+        categorical["form"] = std::string{"plain"};
 
         std::mt19937_64 rng(4);
         for(const auto& archetype : metadata.archetypes)
@@ -162,7 +163,8 @@ TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderIt
                               {"is_causal", true},
                               {"alignment", std::string{"top_left"}},
                               {"dtype", std::string{"bf16"}},
-                              {"generate_stats", false}};
+                              {"generate_stats", false},
+                              {"form", std::string{"plain"}}};
 
     const std::set<int64_t> ratios{1, 2, 4, 16};
     for(int i = 0; i < 100; ++i)
