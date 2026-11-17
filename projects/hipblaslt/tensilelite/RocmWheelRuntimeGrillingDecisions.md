@@ -25,6 +25,19 @@ not superseded root-discovery experiments.
 
 ## Current findings
 
+### Native build relation (2026-11-17, #15579 review)
+
+The runtime selection above is independent of Invoke's native-build root.
+`--rocm-path` selects build inputs; binding stores the client path without a
+runtime root. The client build-ROCm check supplies compatibility validation
+under Q134. A different build/runtime directory alone does not prove failure.
+
+Invoke now uses the selected build root for compilers and automatic GPU tools,
+including `rocminfo` stepping restoration. This does not replace G007's runtime
+enumerator policy. Complete Python SDK native-build support remains the
+follow-up in [InvokeInstallPythonRocmSupport.md](InvokeInstallPythonRocmSupport.md);
+it is separate from the implemented no-devel SDK runtime adapter.
+
 ### F1 — TheRock has two distinct package roles
 
 `rocm-sdk-devel` remains TheRock's complete development-prefix package: it
