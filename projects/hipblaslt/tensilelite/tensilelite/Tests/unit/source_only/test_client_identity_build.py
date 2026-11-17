@@ -4,6 +4,7 @@
 """Compile the production metadata module without HIP or a GPU."""
 
 import json
+import ast
 import os
 from pathlib import Path
 import shutil
@@ -269,3 +270,93 @@ def test_source_export_override_survives_rebuild(project):
     assert _query(build) == _SHA
     assert _query(build, "--version") == "5.0.0+g" + _SHA
     assert _query(build, "--build-rocm") == "10.3.0 base"
+
+
+def test_canonical_wheel_and_client_stay_paired_through_incremental_builds(project):
+    src, build = project
+    # Use the real distributable package and production wheel build module.
+    stager = _ROOT / "tensilelite/scripts/stage_release_source.py"
+    _run(
+        sys.executable,
+        str(stager),
+        "--source",
+        str(_ROOT / "tensilelite"),
+        "--destination",
+        str(src / "tensilelite"),
+    )
+    shutil.copyfile(_ROOT / "cmake/TensileLiteWheel.cmake", src / "cmake/TensileLiteWheel.cmake")
+    cmake = src / "CMakeLists.txt"
+    cmake.write_text(cmake.read_text() + """
+include(cmake/TensileLiteWheel.cmake)
+hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+""")
+    _git(src, "add", ".")
+    _git(src, "commit", "-qm", "wheel fixture")
+    _configure(src, build)
+    manifest = build / "tensilelite-release-wheels/.published"
+
+    def build_and_check():
+        _run(
+            "cmake",
+            "--build",
+            str(build),
+            "--target",
+            "tensilelite-client",
+            "tensilelite-canonical-release-wheel",
+            "--parallel",
+            "2",
+        )
+        import zipfile
+
+        publication = json.loads(manifest.read_text())
+        wheel = manifest.parent / publication["wheel"]
+        revision = _query(build)
+        assert revision == _current(src)
+        assert publication["metadata"]["source_revision"] == revision
+        assert publication["metadata"]["distribution_version"] == _query(build, "--version")
+        assert wheel.name == "tensilelite-" + _query(build, "--version") + "-py3-none-any.whl"
+        assert list(manifest.parent.glob("*.whl")) == [wheel]
+        with zipfile.ZipFile(wheel) as archive:
+            stamp = archive.read("tensilelite/_build_info.py").decode()
+            assignment = next(
+                node for node in ast.parse(stamp).body if isinstance(node, ast.Assign)
+            )
+            assert ast.literal_eval(assignment.value) == revision
+        return revision
+
+    clean = build_and_check()
+    before = manifest.stat().st_mtime_ns, (build / "tensilelite-client").stat().st_mtime_ns
+    build_and_check()
+    assert (
+        manifest.stat().st_mtime_ns,
+        (build / "tensilelite-client").stat().st_mtime_ns,
+    ) == before
+    source = src / "tensilelite/_tensilelite_client_binding.py"
+    original = source.read_text()
+    source.write_text(original + "\n# first edit\n")
+    first = build_and_check()
+    assert first.startswith(clean + ".dirty.")
+    source.write_text(original + "\n# second edit\n")
+    assert build_and_check() != first
+    source.write_text(original)
+    assert build_and_check() == clean
+    # A commit outside the package must change its stamp and version too.
+    (src / "other-component.txt").write_text("new commit outside tensilelite\n")
+    _git(src, "add", ".")
+    _git(src, "commit", "-qm", "other component")
+    assert build_and_check() == _git(src, "rev-parse", "HEAD")
+    unpacked = build / "unpacked"
+    _run(
+        sys.executable,
+        str(src / "tensilelite/scripts/install_release_wheels.py"),
+        "--manifest",
+        str(manifest),
+        "--destination",
+        str(unpacked),
+        "--copy-wheels",
+        str(unpacked / "wheels"),
+    )
+    assert list((unpacked / "wheels").glob("*.whl"))
+    assert (unpacked / "_tensilelite_client_binding.py").is_file()
+    assert (unpacked / "tensilelite_configure_client.py").is_file()
+    assert _git(src, "rev-parse", "HEAD") in (unpacked / "tensilelite/_build_info.py").read_text()

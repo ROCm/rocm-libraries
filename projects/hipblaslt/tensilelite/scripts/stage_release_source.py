@@ -10,7 +10,6 @@ import argparse
 from pathlib import Path
 import shutil
 
-
 _IGNORED_NAMES = {
     ".agents",
     ".codex",
@@ -50,7 +49,16 @@ def _ignore(_directory: str, names: list[str]) -> set[str]:
 def stage_source(source: Path, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
-    shutil.copytree(source, destination, ignore=_ignore)
+
+    def ignore(directory, names):
+        ignored = _ignore(directory, names)
+        # An sdist is authoritative for its saved revision. Preserve that stamp
+        # while still excluding stray stamps in ordinary checkout builds.
+        if (source / "PKG-INFO").is_file() and Path(directory) == source / "tensilelite":
+            ignored.discard("_build_info.py")
+        return ignored
+
+    shutil.copytree(source, destination, ignore=ignore)
 
 
 def main(argv=None) -> int:
