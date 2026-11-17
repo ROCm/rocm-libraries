@@ -799,16 +799,16 @@ carries one 8-bit biased E8M0 scale (bias 127).
 
 Per-element math::
 
- A_real[i] = mantissa[i] * 2^(A_scale[i // 32] - 127)
+ A_real[m, k] = A[m, k] * 2^(AScale[k // 32, m] - 127)
 
-The kernel scales each group's MFMA result with
-:func:`rocke.helpers.fma_with_mx_scale_pair` (see the MX GEMM section
-of ``instances/gemm.md`` for the scale contract, why the two scale
-exponents are added as integers, and why each update is exact).
+Both scale tensors are K-major (``AScale`` is ``(K / 32, M)``, ``BScale``
+``(K / 32, N)``). gfx950 applies the scales in its scaled MFMA; gfx942 scales
+each group's MFMA result with :func:`rocke.helpers.add_mx_scaled_dot`. See the
+MX GEMM section of ``instances/gemm.md`` for the numerical contract and the
+structure.
 
-v1 ships fp8 and bf8 mantissa with ``group_k=32`` (the MX spec
-default); fp4 and fp6 mantissa variants land with the matching
-unpack helpers in v2.
+It reads fp8 and bf8 mantissas with ``group_k=32`` (the MX spec default); fp4
+and fp6 mantissas are not supported yet.
 
  failure modes:
 

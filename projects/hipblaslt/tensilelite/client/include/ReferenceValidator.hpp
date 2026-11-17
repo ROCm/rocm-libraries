@@ -45,6 +45,8 @@ namespace TensileLite
     namespace Client
     {
 
+        class ClientProblemFactory;
+
         class ReferenceValidator : public RunListener
         {
         public:
@@ -127,6 +129,11 @@ namespace TensileLite
                 return m_referenceInputs[card];
             }
 
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
         protected:
             // Allow lifecycle tests to observe validation without device transfers.
             virtual void validateSlots(std::vector<size_t> const& slots);
@@ -134,21 +141,27 @@ namespace TensileLite
         private:
             void allocateResultBuffer(size_t bytes);
 
+            // The problem device `card` runs: its slice under --split-devices, else m_problem.
+            ContractionProblem* deviceProblem(size_t card) const;
+
             bool shouldSkipNullTensor(const std::string& tensorName,
                                       bool hasNullPointer,
                                       bool hasZeroElements) const;
 
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
             std::vector<std::vector<uint8_t>>           m_referenceRecvs;
+            std::vector<std::vector<uint8_t>>           m_a2aGemmB;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
             ContractionProblem* m_problem = nullptr;
 
+            ClientProblemFactory const* m_split = nullptr;
+
             bool m_enabled;
-            bool m_fusedA2A              = false;
-            bool m_validateAfterEnqueues = false;
+            FusedA2A m_fusedA2A              = FusedA2A::Disabled;
+            bool     m_validateAfterEnqueues = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -175,6 +188,7 @@ namespace TensileLite
 
             bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
             void referenceRecvs(ContractionProblemGemm const& problem);
+            void interleaveA2AGemmReferences(ContractionProblemGemm const& problem);
         };
     } // namespace Client
 } // namespace TensileLite
