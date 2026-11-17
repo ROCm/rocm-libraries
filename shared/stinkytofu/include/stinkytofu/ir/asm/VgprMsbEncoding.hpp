@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -238,5 +239,59 @@ inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
     return computeRequiredMsbWith(
         inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); });
 }
+
+/// What has to happen before one instruction, as VgprMsbTracker::step() works it out.
+struct VgprMsbStep {
+    /// An s_set_vgpr_msb is needed before the instruction.
+    bool emit = false;
+    /// It is the first since a label, which InsertVgprMsbPass precedes with an s_nop.
+    bool firstAfterLabel = false;
+    /// The word it replaces, when one was set. Msb16 packs it into the high byte.
+    std::optional<int> previousWord;
+};
+
+/// The bank word in force while instructions are walked in order.
+///
+/// An instruction needs a switch whenever its word differs from the current one,
+/// comparing every slot: computeRequiredMsb() writes 0 into the slots an
+/// instruction does not use. Nothing is known at the start of a block, after a
+/// call, or after a label, which may be reached from anywhere.
+///
+/// InsertVgprMsbPass emits by this, and anything predicting what it will emit
+/// steps the same object, so the two cannot drift.
+class VgprMsbTracker {
+   public:
+    /// A label: no word is known, and the next switch follows an s_nop.
+    void label() {
+        current_ = kLabelBegin;
+    }
+
+    /// The start of a block, or a call, after which the callee's word is unknown.
+    void reset() {
+        current_ = kNotRequired;
+    }
+
+    /// One instruction, needing \p required when \p hasVgpr, as computeRequiredMsb()
+    /// returns them.
+    VgprMsbStep step(int required, bool hasVgpr) {
+        VgprMsbStep result;
+        if (!hasVgpr || required == current_) {
+            // The next switch no longer directly follows the label, so it needs
+            // no s_nop.
+            if (current_ == kLabelBegin) current_ = kNotRequired;
+            return result;
+        }
+        result.emit = true;
+        result.firstAfterLabel = current_ == kLabelBegin;
+        if (current_ >= 0) result.previousWord = current_;
+        current_ = required;
+        return result;
+    }
+
+   private:
+    static constexpr int kNotRequired = -1;
+    static constexpr int kLabelBegin = -2;
+    int current_ = kNotRequired;
+};
 
 }  // namespace stinkytofu
