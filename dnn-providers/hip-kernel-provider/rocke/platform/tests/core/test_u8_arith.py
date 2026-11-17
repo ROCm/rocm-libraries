@@ -199,6 +199,16 @@ _UNSIGNED_CASES = {
             "arith.umax failed - operand type='i32', expected an unsigned integer scalar",
         ),
     ),
+    "umax_of_vector": (
+        lambda b, x, y: b.umax(b.vector_splat(x, 4), b.vector_splat(y, 4)),
+        (
+            TypeError,
+            (
+                "arith.umax failed - operand type='vec<u8x4>', expected an "
+                "unsigned integer scalar"
+            ),
+        ),
+    ),
     "uitofp_f32_of_i32": (
         lambda b, x, y: b.uitofp_f32(b.const_i32(1)),
         (ValueError, "uitofp_f32 expects an unsigned integer input, got i32"),
