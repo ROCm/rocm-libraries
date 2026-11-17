@@ -17,6 +17,9 @@
 //   CONV_IGEMM_SWZ      1: XOR-swizzled LDS tiles read in whole 16-byte chunks (16-bit, VEC 8)
 //   CONV_IGEMM_DMA      2 to 4: gfx950 buffer loads straight into a ring of that many swizzled
 //                       LDS stages (SWZ 1, K1_BUFFER 1)
+//   CONV_IGEMM_CFX      1: 1-D problems read the gathered activation in place from packed
+//                       channels-first memory and write the output channels-first (K1_BUFFER 1;
+//                       the matrix-core kernel with CF 1, or the FMA kernel)
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 //   K1_LARGE            1: 64-bit positions within an image (large-image configs, images past
 //                       2^31 - 1 pixels)
@@ -46,6 +49,9 @@
 #endif
 #ifndef CONV_IGEMM_DMA
 #define CONV_IGEMM_DMA 0
+#endif
+#ifndef CONV_IGEMM_CFX
+#define CONV_IGEMM_CFX 0
 #endif
 
 #if CONV_IGEMM_FMA
@@ -86,7 +92,8 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPA
               CONV_IGEMM_VEC,
               CONV_IGEMM_DIR,
               CONV_IGEMM_WD,
-              CONV_IGEMM_PACK>(a CONV_EPI_ARG);
+              CONV_IGEMM_PACK,
+              CONV_IGEMM_CFX>(a CONV_EPI_ARG);
 #else
     k1ConvMma<CONV_IGEMM_T,
               CONV_IGEMM_ATOM,
@@ -105,7 +112,8 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPA
               CONV_IGEMM_PACK,
               CONV_IGEMM_CF,
               CONV_IGEMM_SWZ,
-              CONV_IGEMM_DMA>(a CONV_EPI_ARG);
+              CONV_IGEMM_DMA,
+              CONV_IGEMM_CFX>(a CONV_EPI_ARG);
 #endif
 }
 

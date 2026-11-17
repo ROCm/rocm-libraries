@@ -26,7 +26,8 @@
     "dma",
     "fuse",
     "large",
-    "patch"
+    "patch",
+    "cfx"
   ],
   "behavior_notes": [
     "runtime_compilation"

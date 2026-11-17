@@ -1735,6 +1735,284 @@ struct K1Tiles
     }
 };
 
+// ---------------------------------------------------------------------------------------------
+// Register transpose of the channels-first loaders: KV vectors of consecutive positions (one per
+// channel) to the KV channels of position e, as one vector (16-bit: channel pairs packed into
+// dwords by byte permutes, the low halves for an even position, the high halves for an odd one).
+template <class R>
+__device__ inline unsigned k1Word(const R& r, int i)
+{
+    if constexpr(sizeof(R) == 4)
+        return r;
+    else
+        return r[i];
+}
+template <class R>
+__device__ inline void k1SetWord(R& r, int i, unsigned v)
+{
+    if constexpr(sizeof(R) == 4)
+        r = v;
+    else
+        r[i] = v;
+}
+template <class T, int KV, class RawK, class RawM>
+__device__ inline RawK k1TransposeRow(const RawM (&v)[KV], int e)
+{
+    RawK r;
+    if constexpr(sizeof(T) == 2)
+    {
+        const unsigned sel = (e & 1) != 0 ? 0x07060302u : 0x05040100u;
+#pragma unroll
+        for(int j = 0; j < KV; j += 2)
+            k1SetWord(
+                r, j / 2, __builtin_amdgcn_perm(k1Word(v[j + 1], e / 2), k1Word(v[j], e / 2), sel));
+    }
+    else
+    {
+#pragma unroll
+        for(int j = 0; j < KV; ++j)
+            k1SetWord(r, j, k1Word(v[j], e));
+    }
+    return r;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Channels-first A tile (CFX 1): the gathered tensor (forward x, backward data dy) is read in
+// place from packed N C (D H) W, where consecutive GEMM rows are consecutive output positions
+// along the width. The launcher decides which problems it serves (the gathered tensor packed
+// channels-first, the output written by the CF epilogue, the block's images addressed by 32-bit
+// buffer offsets); B (the filter) is loaded exactly as in K1Tiles, the tap-outer reduction
+// unchanged.
+//
+// A unit is KV consecutive reduction channels of MV consecutive rows. A thread loads each of its
+// channels' MV positions as one vector (width stride 1, all MV rows in one output row and their
+// input positions inside the input row) or element by element (a row edge, padding, an image
+// boundary, a width stride above 1), and stores the unit transposed: MV runs of KV channels, one
+// LDS store per row. Units take channels fastest, so a wave's LDS stores spread over the rows'
+// banks while each channel's loads stay runs of consecutive positions.
+template <class T, int BM, int BN, int BK, int VEC, int THREADS, int DIR>
+struct K1TilesCf : K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0>
+{
+    typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0> Base;
+    static constexpr int ELEMS = BM * BK / THREADS; // A elements a thread loads per k-step
+    static constexpr int VMAX = 16 / static_cast<int>(sizeof(T));
+    static constexpr int MV = ELEMS / 2 < VMAX ? ELEMS / 2 : VMAX;
+    static constexpr int KV0 = ELEMS / MV;
+    static constexpr int KV = KV0 < VMAX ? KV0 : VMAX;
+    static constexpr int RG = BM / MV; // row groups
+    static constexpr int CPASSES = ELEMS / (MV * KV);
+    static_assert(K1_BUFFER != 0 || sizeof(T) == 0,
+                  "channels-first tiles address the block's images by buffer offsets");
+    static_assert(ELEMS >= 2 && BM * BK == ELEMS * THREADS && BM % MV == 0 && BK % KV == 0
+                      && ELEMS % (MV * KV) == 0,
+                  "channels-first tile units");
+    typedef typename K1Raw<MV * sizeof(T)>::type RawM; // MV positions of one channel
+    typedef typename K1Raw<KV * sizeof(T)>::type RawK; // KV channels of one row
+    typedef typename K1Raw<sizeof(T)>::type One;
+    // Element views of the vectors, by value (bit casts keep them in registers).
+    struct ElemsM
+    {
+        One v[MV];
+    };
+
+    int plane; // gathered tensor's pixels per channel (D H W)
+    int cImg[CPASSES]; // image of the unit's first row, from the block's first image
+    int cD[CPASSES], cH[CPASSES], cW[CPASSES]; // first row's output position
+    int cRows[CPASSES]; // the unit's rows that exist (MV when all of them do)
+    int cRg[CPASSES], cKg[CPASSES];
+    RawM ca[CPASSES][KV];
+
+    __device__ void init(const K1Args& a,
+                         const K1Gather& gth,
+                         const K1TapMap& mp,
+                         int g,
+                         long long m0,
+                         int n0,
+                         int tid)
+    {
+        Base::init(a, gth, mp, g, m0, n0, tid);
+        const K1Gather& gt = this->gather;
+        plane = gt.in[0] * gt.in[1] * gt.in[2];
+        const long long spatial = static_cast<long long>(gt.out[0]) * gt.out[1] * gt.out[2];
+        const long long firstImage = m0 / spatial;
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            cKg[p] = u % (BK / KV);
+            cRg[p] = u / (BK / KV);
+            const long long m = m0 + cRg[p] * MV;
+            const long long img = m / spatial;
+            int rest = static_cast<int>(m - img * spatial);
+            cImg[p] = static_cast<int>(img - firstImage);
+            cW[p] = rest % gt.out[2];
+            rest /= gt.out[2];
+            cH[p] = rest % gt.out[1];
+            cD[p] = rest / gt.out[1];
+            const long long left = gt.rows - m;
+            cRows[p] = left >= MV ? MV : (left > 0 ? static_cast<int>(left) : 0);
+        }
+    }
+
+    /// One channel's MV rows of unit @p p at tap offsets (td, th, tw) into ca[p][j] (zeros when
+    /// !cOk).
+    __device__ void loadChannel(int p, int j, int c, int td, int th, int tw, bool cOk)
+    {
+        const K1Gather& gt = this->gather;
+        const int sw = gt.stride[2];
+        const int chans = gt.chans;
+        const int chan0 = static_cast<int>(gt.chanOffset);
+        const int id = cD[p] * gt.stride[0] - gt.pad[0] + td;
+        const int ih = cH[p] * gt.stride[1] - gt.pad[1] + th;
+        const int iw = cW[p] * sw - gt.pad[2] + tw;
+        const bool rowIn = (static_cast<unsigned>(id) < static_cast<unsigned>(gt.in[0]))
+                           & (static_cast<unsigned>(ih) < static_cast<unsigned>(gt.in[1]));
+        // One vector when the MV rows are consecutive positions of one input row, all inside.
+        if((sw == 1) & (cRows[p] == MV) & (cW[p] + MV <= gt.out[2]) & rowIn & (iw >= 0)
+           & (iw + MV <= gt.in[2]))
+        {
+            const int off
+                = ((cImg[p] * chans + chan0 + c) * plane + (id * gt.in[1] + ih) * gt.in[2] + iw)
+                  * static_cast<int>(sizeof(T));
+            ca[p][j] = k1BufferLoad<RawM>(this->aRsrc,
+                                          cOk ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+            return;
+        }
+        // Element by element, walking the rows' output positions.
+        ElemsM e;
+        int img = cImg[p], od = cD[p], oh = cH[p], ow = cW[p];
+#pragma unroll
+        for(int i = 0; i < MV; ++i)
+        {
+            const int xd = od * gt.stride[0] - gt.pad[0] + td;
+            const int xh = oh * gt.stride[1] - gt.pad[1] + th;
+            const int xw = ow * sw - gt.pad[2] + tw;
+            const bool ok = cOk & (i < cRows[p])
+                            & (static_cast<unsigned>(xd) < static_cast<unsigned>(gt.in[0]))
+                            & (static_cast<unsigned>(xh) < static_cast<unsigned>(gt.in[1]))
+                            & (static_cast<unsigned>(xw) < static_cast<unsigned>(gt.in[2]));
+            const int off
+                = ((img * chans + chan0 + c) * plane + (xd * gt.in[1] + xh) * gt.in[2] + xw)
+                  * static_cast<int>(sizeof(T));
+            e.v[i]
+                = k1BufferLoad<One>(this->aRsrc, ok ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+            if(++ow == gt.out[2])
+            {
+                ow = 0;
+                if(++oh == gt.out[1])
+                {
+                    oh = 0;
+                    if(++od == gt.out[0])
+                    {
+                        od = 0;
+                        ++img;
+                    }
+                }
+            }
+        }
+        ca[p][j] = __builtin_bit_cast(RawM, e);
+    }
+
+    /// The cursor's iteration into the registers (A in place, B as K1Tiles), the cursor one on.
+    __device__ void load()
+    {
+        const int it = this->curIt;
+        const int c0 = this->curC * BK;
+        const int qs = this->curQs, qr = this->curQr, qt = this->curQt;
+        ++this->curIt;
+        if(++this->curC == this->cChunks)
+        {
+            this->curC = 0;
+            if(++this->curQs == this->gather.taps[2])
+            {
+                this->curQs = 0;
+                if(++this->curQr == this->gather.taps[1])
+                {
+                    this->curQr = 0;
+                    ++this->curQt;
+                }
+            }
+        }
+        const int td = qt * this->gather.step[0], th = qr * this->gather.step[1],
+                  tw = qs * this->gather.step[2];
+        const bool itOk = it < this->endIt;
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+#pragma unroll
+            for(int j = 0; j < KV; ++j)
+            {
+                const int c = c0 + cKg[p] * KV + j;
+                loadChannel(p, j, c, td, th, tw, itOk & (c < this->gather.cgroup));
+            }
+        const int c = c0 + this->kv;
+        this->loadBTap(qt, qr, qs, c0, c, (c < this->gather.cgroup) & itOk, itOk);
+    }
+
+    /// Row @p e of unit @p p: its KV channels as one vector.
+    __device__ RawK rowOf(int p, int e) const
+    {
+        return k1TransposeRow<T, KV, RawK>(ca[p], e);
+    }
+
+    // Row-major LDS tiles: As[m][k], Bs[n][k], ld elements per row.
+    __device__ void storeRows(T* As, T* Bs, int ld) const
+    {
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+#pragma unroll
+            for(int e = 0; e < MV; ++e)
+                *reinterpret_cast<RawK*>(As + (cRg[p] * MV + e) * ld + cKg[p] * KV) = rowOf(p, e);
+        this->storeB(Bs, ld, 0);
+    }
+
+    // Swizzled row-major LDS tiles (K1Swz), 16-bit, VEC 8: a unit's KV channels stay within one
+    // 16-byte chunk.
+    __device__ void storeRowsSwz(T* As, T* Bs) const
+    {
+        typedef K1Swz<BK> Swz;
+        static_assert(VEC * sizeof(T) == 16 && 8 % KV == 0, "swizzled tiles");
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+#pragma unroll
+            for(int e = 0; e < MV; ++e)
+            {
+                const int r = cRg[p] * MV + e;
+                const int k = cKg[p] * KV;
+                *reinterpret_cast<RawK*>(As + Swz::at(r, Swz::key(r), k & ~7) + (k & 7))
+                    = rowOf(p, e);
+            }
+#pragma unroll
+        for(int p = 0; p < Base::B_PASSES; ++p)
+            if(this->bRow(p))
+            {
+                const int r = this->row + p * Base::ROWS_PER_PASS;
+                *reinterpret_cast<typename Base::Raw*>(Bs + Swz::at(r, Swz::key(r), this->kv))
+                    = this->rb[p];
+            }
+    }
+
+    // k-major LDS tiles (the FMA kernel): As[k][m] takes each channel's MV positions as they
+    // were loaded, Bs[k][n] as in K1Tiles.
+    __device__ void storeColumns(T* As, T* Bs, int ldA, int ldB) const
+    {
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+#pragma unroll
+            for(int j = 0; j < KV; ++j)
+                *reinterpret_cast<RawM*>(As + (cKg[p] * KV + j) * ldA + cRg[p] * MV) = ca[p][j];
+#pragma unroll
+        for(int p = 0; p < Base::B_PASSES; ++p)
+        {
+            if(!this->bRow(p))
+                continue;
+            const T* v = reinterpret_cast<const T*>(&this->rb[p]);
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                Bs[(this->kv + e) * ldB + this->row + p * Base::ROWS_PER_PASS] = v[e];
+        }
+    }
+};
+
 // Backward data reads the filter as wT[g][tap][c][k]: per group and tap, w's [kg][cg] slice
 // transposed through 32 x 32 LDS tiles. Grid (ceil(cg / 32), ceil(kg / 32), groups * taps),
 // 256 threads.
@@ -1801,6 +2079,8 @@ struct K1Halo
     static constexpr int RPP = THREADS / ROW_THREADS;
     static constexpr int PASSES = HR / RPP;
     static_assert(HR % RPP == 0, "halo rows");
+    /// Rows from the block's first staged pixel to LDS row 0 (K1HaloCf aligns its base).
+    static constexpr int delta = 0;
     __amdgpu_buffer_rsrc_t rsrc;
     long long pix0, base, pixels;
     int chans, cgroup, kv, row, chanOffset;
@@ -1845,6 +2125,143 @@ struct K1Halo
                 Split::storeSplit(r[p], As + (row + p * RPP) * ld + kv, plane);
             else
                 *reinterpret_cast<Raw*>(As + (row + p * RPP) * ld + kv) = r[p];
+        }
+    }
+};
+
+/// The halo A tile of a problem whose gathered tensor is packed channels-first (CFX 1), read in
+/// place. The caller gives the linear (image, d, h, w) pixels its rows' taps reach, first to last
+/// (any stride, padding or output extent); a channel's pixels of one image are contiguous, so
+/// the run is loaded channel by channel. LDS row 0 is pixel base, the first pixel rounded down to
+/// a whole vector of MV pixels, so a channel's MV pixels are one aligned vector load wherever the
+/// image's pixel count is a multiple of MV. A unit is KV channels of MV pixels, stored transposed
+/// (one LDS row per pixel, as K1TilesCf). The launcher checks the run fits HR rows.
+template <class T, int HR, int BK, int THREADS>
+struct K1HaloCf
+{
+    static constexpr int MV = 16 / static_cast<int>(sizeof(T));
+#ifndef K1_CF_HKV
+#define K1_CF_HKV 4
+#endif
+    static constexpr int KV = sizeof(T) == 2 ? K1_CF_HKV : K1_CF_HKV / 2;
+    static constexpr int KG = BK / KV;
+    static constexpr int UNITS = HR / MV * KG;
+    static constexpr int PASSES = (UNITS + THREADS - 1) / THREADS;
+    static_assert(HR % MV == 0 && BK % KV == 0, "channels-first halo units");
+    typedef typename K1Raw<MV * sizeof(T)>::type RawM;
+    typedef typename K1Raw<KV * sizeof(T)>::type RawK;
+    typedef typename K1Raw<sizeof(T)>::type One;
+    struct ElemsM
+    {
+        One v[MV];
+    };
+    __amdgpu_buffer_rsrc_t rsrc;
+    int delta;
+    int chans, cgroup, chanOffset, lin, need;
+    long long base; // linear pixel of LDS row 0
+    int uOff[PASSES], uPos[PASSES], uMask[PASSES], uRg[PASSES], uKg[PASSES];
+    bool uVec[PASSES], uLive[PASSES];
+    long long pixels;
+    RawM r[PASSES][KV];
+
+    __device__ void
+        init(const void* src, const K1Gather& g, long long firstPixel, long long lastPixel, int tid)
+    {
+        chans = g.chans;
+        cgroup = g.cgroup;
+        chanOffset = static_cast<int>(g.chanOffset);
+        lin = g.in[0] * g.in[1] * g.in[2]; // pixels per channel
+        const long long images = g.rows / (static_cast<long long>(g.out[0]) * g.out[1] * g.out[2]);
+        pixels = images * lin;
+        base = firstPixel >= 0 ? firstPixel / MV * MV : -((-firstPixel + MV - 1) / MV) * MV;
+        delta = static_cast<int>(firstPixel - base);
+        need = static_cast<int>(lastPixel - base + 1);
+        // The buffer starts at the image of the first real pixel.
+        const long long img0 = base > 0 ? base / lin : 0;
+        const long long imageElems = static_cast<long long>(chans) * lin;
+        rsrc = k1Rsrc(static_cast<const T*>(src) + img0 * imageElems,
+                      (pixels / lin - img0) * imageElems * static_cast<long long>(sizeof(T)));
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            uKg[p] = u % KG;
+            uRg[p] = u / KG;
+            uLive[p] = u < UNITS && uRg[p] * MV < need;
+            const long long p0 = base + uRg[p] * MV;
+            // Floor division: pixels before the first have image -1.
+            const long long img = p0 >= 0 ? p0 / lin : -((-p0 + lin - 1) / lin);
+            uPos[p] = static_cast<int>(p0 - img * lin);
+            uOff[p] = static_cast<int>(((img - img0) * chans + chanOffset) * lin + uPos[p]);
+            uMask[p] = 0;
+#pragma unroll
+            for(int i = 0; i < MV; ++i)
+                uMask[p] |= (p0 + i >= 0 && p0 + i < pixels ? 1 : 0) << i;
+            uVec[p] = p0 >= 0 && uPos[p] + MV <= lin && p0 + MV <= pixels;
+        }
+    }
+
+    __device__ void load(int c0)
+    {
+        // Element offset of channel c's unit pixels: uOff + c lin, plus (chans - 1) lin at each
+        // image boundary the unit crosses (the next image's same channel).
+        const int jump = (chans - 1) * lin;
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            const int cb = c0 + uKg[p] * KV;
+            if(uVec[p])
+            {
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const bool cOk = uLive[p] & (cb + j < cgroup);
+                    const int off = (uOff[p] + (cb + j) * lin) * static_cast<int>(sizeof(T));
+                    r[p][j] = k1BufferLoad<RawM>(
+                        rsrc, cOk ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+                }
+                continue;
+            }
+#pragma unroll
+            for(int j = 0; j < KV; ++j)
+            {
+                const bool cOk = uLive[p] & (cb + j < cgroup);
+                ElemsM e;
+                int o = uOff[p] + (cb + j) * lin, pos = uPos[p];
+#pragma unroll
+                for(int i = 0; i < MV; ++i)
+                {
+                    const bool ok = cOk & (((uMask[p] >> i) & 1) != 0);
+                    e.v[i] = k1BufferLoad<One>(
+                        rsrc,
+                        ok ? static_cast<unsigned>(o * static_cast<int>(sizeof(T)))
+                           : K1_OUT_OF_RANGE);
+                    ++o;
+                    if(++pos == lin)
+                    {
+                        pos = 0;
+                        o += jump;
+                    }
+                }
+                r[p][j] = __builtin_bit_cast(RawM, e);
+            }
+        }
+    }
+
+    /// Row-major As[row][k] (ld per row); S is T (no three-bf16 form).
+    template <class S, class Split>
+    __device__ void store(S* As, int ld, int /*plane*/) const
+    {
+        static_assert(sizeof(S) == sizeof(T), "channels-first halo: native math only");
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            if(!uLive[p])
+                continue;
+#pragma unroll
+            for(int e = 0; e < MV; ++e)
+                *reinterpret_cast<RawK*>(As + (uRg[p] * MV + e) * ld + uKg[p] * KV)
+                    = k1TransposeRow<T, KV, RawK>(r[p], e);
         }
     }
 };
@@ -1912,6 +2329,8 @@ __device__ inline void k1LdsBarrier()
 // two k-steps at a time: no LDS bank conflicts on the fragment reads (16-bit, VEC 8, no halo,
 // direct filter or tap packing; the flat reduction, PACK 2, swizzles at the LDS store, so it
 // takes no DMA).
+// CFX 1: 1-D problems read the gathered tensor in place from packed channels-first activations
+// (K1TilesCf), with the CF output: no activation is staged.
 
 template <class T,
           class Atom,
@@ -1930,7 +2349,8 @@ template <class T,
           int PACK = 0,
           int CF = 0,
           int SWZ = 0,
-          int DMA = 0>
+          int DMA = 0,
+          int CFX = 0>
 __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1954,7 +2374,10 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     constexpr int OUT = CF ? WM * WN * DIM * OLDC : WM * WN * DIM * OLD;
     // Halo: A is [PLANES][AROWS][LD], the staged rows and one zero row, then one B tile.
     constexpr int HRPP = THREADS / (BK / VEC);
-    constexpr int HROWS = (BM + K1_HALO_CAP + HRPP - 1) / HRPP * HRPP;
+    // Channels-first halo rows: up to a vector of pixels more, for its aligned base.
+    constexpr int CFMV = 16 / static_cast<int>(sizeof(T));
+    constexpr int HROWS = CFX != 0 ? (HALO * BM + K1_HALO_CAP + 2 * CFMV - 1) / CFMV * CFMV
+                                   : (BM + K1_HALO_CAP + HRPP - 1) / HRPP * HRPP;
     constexpr int AROWS = HALO ? HROWS + 1 : BM;
     constexpr int APL = AROWS * LD; // A plane stride, in S
     constexpr int HSTAGE_S = PLANES * (AROWS + BN) * LD;
@@ -1976,6 +2399,10 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                   "DMA: swizzled tiles, 2 to 4 LDS stages, no tap packing");
     static_assert(K1_PATCH == 0 || DIR == K1_FORWARD || CF == 0,
                   "patch backward data writes channels-last dx");
+    static_assert(CFX == 0
+                      || (CF != 0 && !SPLIT && WD == 0 && PACK == 0 && DMA == 0 && K1_PATCH == 0),
+                  "channels-first input: CF output, native math, no direct filter, tap packing, "
+                  "DMA or patch view");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
 
@@ -2017,7 +2444,9 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     }
 #endif
 
-    K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
+    typename K1If<CFX != 0,
+                  K1TilesCf<T, BM, BN, BK, VEC, THREADS, DIR>,
+                  K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>>::type tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
     if constexpr(DMA != 0 && PACK == 2)
     {
@@ -2211,8 +2640,53 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         // after them (one B buffer: two barriers per tap).
         long long minShift = 0;
         k1HaloFits(gather, K1_HALO_CAP, minShift);
-        K1Halo<T, HROWS, BK, VEC, THREADS> halo;
-        halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, m0 + minShift, tid);
+        typename K1If<CFX != 0,
+                      K1HaloCf<T, HROWS, BK, THREADS>,
+                      K1Halo<T, HROWS, BK, VEC, THREADS>>::type halo;
+        // Channels-first: the linear input pixel of row m's tap 0 (pads aside), and the tap
+        // offsets' range, give the run of pixels the block reads.
+        const K1Pos cfSpatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
+        const int cfPlane = gather.in[0] * gather.in[1] * gather.in[2];
+        auto cfPixel = [&](long long m) {
+            const long long img = m / cfSpatial;
+            K1Pos rest = static_cast<K1Pos>(m - img * cfSpatial);
+            const int w = static_cast<int>(rest % gather.out[2]);
+            rest /= gather.out[2];
+            const int h = static_cast<int>(rest % gather.out[1]);
+            const int d = static_cast<int>(rest / gather.out[1]);
+            return img * cfPlane
+                   + (static_cast<long long>(d) * gather.stride[0] * gather.in[1]
+                      + static_cast<long long>(h) * gather.stride[1])
+                         * gather.in[2]
+                   + static_cast<long long>(w) * gather.stride[2];
+        };
+        if constexpr(CFX != 0)
+        {
+            const int axis[3] = {gather.in[1] * gather.in[2], gather.in[2], 1};
+            long long lo = 0, hi = 0;
+#pragma unroll
+            for(int i = 0; i < 3; ++i)
+            {
+                const int e = (gather.taps[i] - 1) * gather.step[i];
+                lo += static_cast<long long>((e < 0 ? e : 0) - gather.pad[i]) * axis[i];
+                hi += static_cast<long long>((e > 0 ? e : 0) - gather.pad[i]) * axis[i];
+            }
+            // A row reads only pixels of its own image (the rest are padding), so the run is
+            // clamped to the first row's image from below and the last row's from above; within
+            // an image a later row's pixels never start before an earlier row's.
+            const long long mLast = (m0 + BM < gather.rows ? m0 + BM : gather.rows) - 1;
+            const long long img0 = m0 / cfSpatial, imgL = mLast / cfSpatial;
+            long long first = cfPixel(m0) + lo, last = cfPixel(mLast) + hi;
+            first = first < img0 * cfPlane ? img0 * cfPlane : first;
+            first = first > (img0 + 1) * cfPlane ? (img0 + 1) * cfPlane : first;
+            last = last < imgL * cfPlane - 1 ? imgL * cfPlane - 1 : last;
+            last = last > (imgL + 1) * cfPlane - 1 ? (imgL + 1) * cfPlane - 1 : last;
+            halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, first, last, tid);
+        }
+        else
+        {
+            halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, m0 + minShift, tid);
+        }
         typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> Tiles;
         S* As = tile;
         S* Bs = tile + PLANES * APL;
@@ -2232,6 +2706,20 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
             rest /= gather.out[2];
             oh[i] = static_cast<int>(rest % gather.out[1]);
             od[i] = m < gather.rows ? static_cast<int>(rest / gather.out[1]) : -0x40000000;
+        }
+        // Channels-first: each row's LDS row at tap 0 (pads aside); a tap adds its linear offset.
+        int cfRow[FM];
+        if constexpr(CFX != 0)
+        {
+#pragma unroll
+            for(int i = 0; i < FM; ++i)
+            {
+                // Input coordinates of tap 0 (pads aside); rows past the last stay out of range.
+                cfRow[i] = static_cast<int>(cfPixel(m0 + arow[i]) - halo.base);
+                od[i] = m0 + arow[i] < gather.rows ? od[i] * gather.stride[0] : -0x40000000;
+                oh[i] *= gather.stride[1];
+                ow[i] *= gather.stride[2];
+            }
         }
         const int nT = tiles.nTaps;
         const int t1 = gather.taps[1], t2 = gather.taps[2];
@@ -2282,7 +2770,8 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                 const int d2 = qs * gather.step[2] - gather.pad[2];
                 const int shift = static_cast<int>((static_cast<long long>(d0) * gather.in[1] + d1)
                                                        * gather.in[2]
-                                                   + d2 - minShift);
+                                                   + d2 - minShift)
+                                  + halo.delta;
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
                 {
@@ -2291,7 +2780,15 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                           && static_cast<unsigned>(oh[i] + d1) < static_cast<unsigned>(gather.in[1])
                           && static_cast<unsigned>(ow[i] + d2)
                                  < static_cast<unsigned>(gather.in[2]);
-                    arow[i] = ok ? wm * WTM + i * DIM + fragRow + shift : HROWS;
+                    if constexpr(CFX != 0)
+                        arow[i] = ok ? cfRow[i]
+                                           + static_cast<int>(
+                                               (static_cast<long long>(d0) * gather.in[1] + d1)
+                                                   * gather.in[2]
+                                               + d2)
+                                     : HROWS;
+                    else
+                        arow[i] = ok ? wm * WTM + i * DIM + fragRow + shift : HROWS;
                 }
                 multiply(As, Bs);
                 if(q + 1 < qEnd)
@@ -2548,9 +3045,20 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
 #define CONV_IGEMM_FMA_DOT2 1
 #endif
 
-template <class T, int BM, int BN, int BK, int THREADS, int VEC, int DIR, int WD = 0, int PACK = 0>
+template <class T,
+          int BM,
+          int BN,
+          int BK,
+          int THREADS,
+          int VEC,
+          int DIR,
+          int WD = 0,
+          int PACK = 0,
+          int CFX = 0>
 __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
 {
+    static_assert(CFX == 0 || (WD == 0 && PACK == 0 && K1_PATCH == 0),
+                  "channels-first input: no direct filter, tap packing or patch view");
     constexpr int TX = 16, TY = THREADS / TX; // threads along n, along m
     constexpr int TM = BM / TY, TN = BN / TX;
     static_assert(TM % 4 == 0 && TN % 4 == 0, "4-runs");
@@ -2589,7 +3097,9 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
     }
 #endif
 
-    K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
+    typename K1If<CFX != 0,
+                  K1TilesCf<T, BM, BN, BK, VEC, THREADS, DIR>,
+                  K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>>::type tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
 
     float acc[TM][TN];
@@ -2688,6 +3198,66 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
 
     T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
     float* partial = a.partial + static_cast<long long>(split) * a.outElems;
+    if constexpr(CFX != 0)
+    {
+        // Channels-first output: a thread's run of 4 rows is 4 consecutive positions of each of
+        // its channels, one vector store where they are contiguous and aligned in the output,
+        // else element by element (an image boundary, a stride phase, past the last row).
+        typedef typename K1Raw<4 * sizeof(T)>::type Raw4;
+        K1CfWalk walk;
+        walk.template init<DIR>(a, gather);
+#pragma unroll
+        for(int q = 0; q < TM / 4; ++q)
+        {
+            const long long m = m0 + (q * TY + ty) * 4;
+#pragma unroll
+            for(int j = 0; j < TN; ++j)
+            {
+                const int nn = n0 + ((j / 4) * TX + tx) * 4 + j % 4;
+                if(m >= gather.rows || nn >= ncols)
+                    continue;
+                const long long o = k1OutIndexCf<DIR>(a, gather, g, phase, m, nn);
+                walk.start(m, o);
+                long long at[4];
+                T v[4];
+#pragma unroll
+                for(int e = 0; e < 4; ++e)
+                {
+                    at[e] = walk.o;
+                    walk.next();
+                    if(splits > 1)
+                        continue;
+#if defined(CONV_EPI) && CONV_EPI
+                    v[e] = K1Elem<T>::store(epi(acc[q * 4 + e][j], chans[j], at[e], true));
+#else
+                    v[e] = K1Elem<T>::store(acc[q * 4 + e][j]);
+#endif
+                }
+                const bool whole = m + 4 <= gather.rows && at[3] == o + 3;
+                if(splits > 1)
+                {
+#pragma unroll
+                    for(int e = 0; e < 4; ++e)
+                        if(m + e < gather.rows)
+                            partial[at[e]] = acc[q * 4 + e][j];
+                }
+                else if(whole && o % 4 == 0)
+                {
+                    Raw4 r;
+                    __builtin_memcpy(&r, v, sizeof(r));
+                    *reinterpret_cast<Raw4*>(out + o) = r;
+                }
+                else
+                {
+#pragma unroll
+                    for(int e = 0; e < 4; ++e)
+                        if(m + e < gather.rows)
+                            out[at[e]] = v[e];
+                }
+            }
+        }
+        return;
+    }
 #pragma unroll
     for(int i = 0; i < TM; ++i)
     {

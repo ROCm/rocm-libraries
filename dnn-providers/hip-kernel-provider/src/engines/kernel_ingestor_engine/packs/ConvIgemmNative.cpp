@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -715,6 +717,159 @@ bool flatFits(const IgemmProblem& problem, int64_t bk)
     return reduction % bk != 0;
 }
 
+bool inputChannelsFirst(const IgemmProblem& problem)
+{
+    const auto& input = problem.direction == ConvDirection::FORWARD ? problem.x : problem.y;
+    return input.needed && input.transpose;
+}
+
+namespace
+{
+
+/// Whether the activation x (@p onX) or y of @p problem is packed channels-first: staged by the
+/// transpose, or not staged (packed channels-last) with every spatial extent 1, where the two
+/// layouts coincide.
+bool packedChannelsFirst(const IgemmProblem& problem, bool onX)
+{
+    const auto& staging = onX ? problem.x : problem.y;
+    if(staging.needed)
+    {
+        return staging.transpose;
+    }
+    const auto& b = problem.base.args;
+    const auto& spatial = onX ? b.inSpatial : b.outSpatial;
+    return channelsFirst(onX ? b.xStrides : b.yStrides,
+                         {b.n, onX ? b.c : b.k, spatial[0], spatial[1], spatial[2]});
+}
+
+} // namespace
+
+bool outputPackedChannelsFirst(const IgemmProblem& problem)
+{
+    return packedChannelsFirst(problem, problem.direction != ConvDirection::FORWARD);
+}
+
+bool inputPackedChannelsFirst(const IgemmProblem& problem)
+{
+    return packedChannelsFirst(problem, problem.direction == ConvDirection::FORWARD);
+}
+
+IgemmProblem withoutInputStaging(const IgemmProblem& problem)
+{
+    IgemmProblem direct = problem;
+    (problem.direction == ConvDirection::FORWARD ? direct.x : direct.y) = Staging{};
+    layOutWorkspace(direct);
+    return direct;
+}
+
+namespace
+{
+
+/// One gather of the channels-first loaders along the width (k1Setup): the gathered row's
+/// pixels, the GEMM rows per image, the row stride, the taps' reach and the padding's magnitude.
+struct CfxGather
+{
+    long long in = 0, rows = 0, stride = 1, reach = 0, pad = 0;
+};
+
+/// The width gathers a 1-D problem's blocks run: forward one, backward data one per stride phase
+/// (k1PhaseAxis: dy at unit stride, the phase's taps a dilation-multiple apart).
+std::vector<CfxGather> cfxGathers(const IgemmProblem& problem)
+{
+    const auto& a = problem.args;
+    if(problem.direction == ConvDirection::FORWARD)
+    {
+        return {{a.wi, a.wo, a.sw, static_cast<long long>(a.fs - 1) * a.dw, a.pw}};
+    }
+    std::vector<CfxGather> gathers;
+    for(long long phi = 0; phi < a.sw; ++phi)
+    {
+        const long long first = ((phi - a.pw) % a.sw + a.sw) % a.sw;
+        const long long count = first < a.wi ? (a.wi - 1 - first) / a.sw + 1 : 0;
+        const long long tapStep = a.sw / std::gcd<long long>(a.sw, a.dw);
+        long long tapFirst = -1;
+        for(long long r = 0; r < a.fs && r < tapStep; ++r)
+        {
+            if(((r * a.dw - phi) % a.sw + a.sw) % a.sw == 0)
+            {
+                tapFirst = r;
+                break;
+            }
+        }
+        if(count < 1 || tapFirst < 0)
+        {
+            continue; // the phase's blocks read nothing
+        }
+        const long long taps = (a.fs - 1 - tapFirst) / tapStep + 1;
+        const long long o0 = (first + a.pw - tapFirst * a.dw) / a.sw;
+        gathers.push_back({a.wo, count, 1, (taps - 1) * (tapStep * a.dw / a.sw), std::abs(o0)});
+    }
+    return gathers;
+}
+
+} // namespace
+
+bool cfxFits(const IgemmProblem& problem, const CfxTile& tile)
+{
+    const auto& b = problem.base.args;
+    if(problem.largeImage || problem.phases < 1)
+    {
+        return false;
+    }
+    for(int axis = 0; axis < 2; ++axis)
+    {
+        if(b.inSpatial[axis] != 1 || b.outSpatial[axis] != 1 || b.filter[axis] != 1)
+        {
+            return false;
+        }
+    }
+    const auto& a = problem.args;
+    const long long chans
+        = problem.direction == ConvDirection::FORWARD ? static_cast<long long>(a.c) : a.k;
+    const long long eb = problem.elementBytes;
+    const long long mv = 16 / eb; // pixels per channel vector (K1HaloCf, K1TilesCf)
+    const auto gathers = cfxGathers(problem);
+    for(const auto& g : gathers)
+    {
+        long long span = g.reach + 1;
+        if(tile.halo != 0)
+        {
+            // The pixels one block's rows reach (K1HaloCf's run, clamped to the images of its
+            // first and last row): bm - 1 row steps, plus the gap at each image boundary they
+            // cross; where an image's rows reach past the next image's first pixel (a negative
+            // gap) the run is bounded by the steps, the taps and the padding instead. Plus the
+            // aligned base's vector.
+            const long long steps = tile.bm - 1;
+            const long long gap = g.in - g.rows * g.stride;
+            const long long crossings = (steps + g.rows - 1) / g.rows;
+            span = (gap >= 0 ? steps * g.stride + crossings * gap + g.reach + 1
+                             : steps * g.stride + g.reach + 1 + g.pad)
+                   + (mv - 1);
+            const long long hrows = (tile.halo * tile.bm + HALO_CAP + 2 * mv - 1) / mv * mv;
+            if(span > hrows)
+            {
+                return false;
+            }
+            // LDS: the halo rows, a zero row and the B tile, or the epilogue strips.
+            const long long ld = tile.bk + 16 / eb;
+            const long long main = (hrows + 1 + tile.bn) * ld * eb;
+            const long long cfr = std::min<long long>(tile.bm / tile.wm, 64);
+            const long long out = tile.wm * tile.wn * tile.dim * (cfr + 16 / eb) * eb;
+            if(std::max(main, out) > tile.ldsBytes)
+            {
+                return false;
+            }
+        }
+        // 32-bit byte offsets over the images a block's pixels span (from its first image).
+        const long long rowsSpan = tile.halo != 0 ? span : tile.bm * g.stride + g.reach;
+        if((rowsSpan + 2 * g.in) * chans * eb >= std::numeric_limits<int>::max())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool haloFits(const IgemmProblem& problem, int64_t bm)
 {
     const auto& a = problem.args;
@@ -965,6 +1120,7 @@ struct Tile
     int64_t fuse = 0; ///< groups run as one block-diagonal group (group fusion), 0 none
     int64_t large = 0; ///< 64-bit positions within an image (K1_LARGE): images past 2^31 - 1 px
     int64_t patch = 0; ///< patch convolutions as one GEMM (withPatchView, K1_PATCH)
+    int64_t cfx = 0; ///< 1-D channels-first activations read in place (CONV_IGEMM_CFX)
 
     int64_t blockThreads() const
     {
@@ -1032,12 +1188,24 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.fuse = kernel.getIntMetadata("fuse");
     tile.large = kernel.getIntMetadata("large");
     tile.patch = kernel.getIntMetadata("patch");
+    tile.cfx = kernel.getIntMetadata("cfx");
+    // Channels-first input: the matrix-core kernel's halo loop (halo h: h input pixels a row) with
+    // the channels-first output, or the FMA kernel without a halo; native math, plain tiles.
+    if(tile.cfx != 0
+       && (tile.cfx != 1 || tile.split || tile.info.tf32 || tile.swz != 0 || tile.dma != 0
+           || tile.pack != 0 || tile.wdirect != 0 || tile.fuse != 0 || tile.large != 0
+           || tile.patch != 0 || tile.stages != 1
+           || (tile.info.wave != 0 ? tile.cf != 1 || tile.halo < 1 || tile.halo > 2
+                                   : tile.halo != 0)))
+    {
+        return std::nullopt;
+    }
     if((tile.large != 0
         && (tile.large != 1 || tile.xcd != 0 || tile.halo != 0 || tile.wdirect != 0
             || tile.pack != 0 || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0
             || tile.split))
        || tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
-       || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
+       || (tile.xcd != 0 && tile.xcd != 1) || (tile.cfx == 0 && tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
        || (tile.wdirect != 0 && tile.wdirect != 1) || tile.pack < 0 || tile.pack > 2
        || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0))
@@ -1179,9 +1347,32 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->halo != 0 && !conv_igemm::haloFits(*problem, tile->bm))
+    if(tile->halo != 0 && tile->cfx == 0 && !conv_igemm::haloFits(*problem, tile->bm))
     {
         return false;
+    }
+    if(tile->cfx != 0)
+    {
+        // Channels-first input read in place: a packed channels-first activation and output (the
+        // FMA kernel writes it itself), a 1-D problem the channels-first loaders fit, and 32-bit
+        // buffer offsets.
+        const auto arch
+            = hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName);
+        conv_igemm::CfxTile fit;
+        fit.bm = tile->bm;
+        fit.bn = tile->bn;
+        fit.bk = tile->bk;
+        fit.wm = tile->info.wave != 0 ? tile->wm : 1;
+        fit.wn = tile->info.wave != 0 ? tile->wn : 1;
+        fit.halo = tile->halo;
+        fit.dim = tile->atom.rfind("mfma32", 0) == 0 ? 32 : 16;
+        fit.ldsBytes = arch == "gfx950" ? 160 * 1024 : 64 * 1024;
+        if(!conv_igemm::inputPackedChannelsFirst(*problem)
+           || !conv_igemm::outputPackedChannelsFirst(*problem)
+           || !conv_igemm::cfxFits(*problem, fit) || !bufferLoads(*problem))
+        {
+            return false;
+        }
     }
     if(tile->wdirect != 0
        && (*direction != ConvDirection::BACKWARD_DATA || !problem->filterKtrsc
@@ -1198,7 +1389,7 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->cf != 0 && !conv_igemm::outputChannelsFirst(*problem))
+    if(tile->cf != 0 && tile->cfx == 0 && !conv_igemm::outputChannelsFirst(*problem))
     {
         return false;
     }
@@ -1257,9 +1448,13 @@ std::optional<IgemmProblem>
     {
         problem = conv_igemm::withoutFilterStaging(*problem);
     }
-    if(problem.has_value() && tile.cf != 0)
+    if(problem.has_value() && (tile.cf != 0 || tile.cfx != 0))
     {
         problem = conv_igemm::withoutOutputStaging(*problem);
+    }
+    if(problem.has_value() && tile.cfx != 0)
+    {
+        problem = conv_igemm::withoutInputStaging(*problem);
     }
     return problem;
 }
@@ -1507,6 +1702,10 @@ public:
         options.add("K1_BUFFER", std::string(bufferLoads(*problem) ? "1" : "0"));
         options.add("K1_LARGE", std::to_string(tile->large));
         options.add("K1_PATCH", std::to_string(tile->patch));
+        if(tile->cfx != 0)
+        {
+            options.add("CONV_IGEMM_CFX", std::to_string(tile->cfx));
+        }
         const int waves = conv_igemm::occupancyTarget(tile->atom,
                                                       tile->bm,
                                                       tile->bn,

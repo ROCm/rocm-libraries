@@ -180,6 +180,42 @@ constexpr long long HALO_CAP = 64;
 /// HALO_CAP rows, and the staged rows' byte offsets within 32 bits.
 bool haloFits(const IgemmProblem& problem, int64_t bm);
 
+/// Whether @p problem's gathered activation (forward x, backward data dy) is packed
+/// channels-first, so a channels-first-input config (cfx) reads it in place of the staging
+/// transpose.
+bool inputChannelsFirst(const IgemmProblem& problem);
+
+/// Whether @p problem's output is packed channels-first: staged by the transpose
+/// (outputChannelsFirst), or packed channels-last with every spatial extent 1, where the two
+/// layouts coincide.
+bool outputPackedChannelsFirst(const IgemmProblem& problem);
+
+/// The same for @p problem's gathered input (forward x, backward data dy).
+bool inputPackedChannelsFirst(const IgemmProblem& problem);
+
+/// @p problem without the input staging, for a channels-first-input config: the remaining staged
+/// operands keep their order in the workspace.
+IgemmProblem withoutInputStaging(const IgemmProblem& problem);
+
+/// The tile fields the channels-first-input fit depends on.
+struct CfxTile
+{
+    int64_t bm = 0, bn = 0, bk = 0, wm = 1, wn = 1;
+    int64_t halo = 0; ///< 0: K1TilesCf (FMA kernel); h: K1HaloCf staging h pixels a row
+    int64_t dim = 16; ///< the atom's tile width (the epilogue strips)
+    long long ldsBytes = 0; ///< the device's LDS per workgroup
+};
+
+/**
+ * @brief Whether a channels-first-input config (cfx) serves @p problem.
+ *
+ * 1-D problems only (depth and height extents and filter 1). Along the width, in every gather the
+ * blocks run (forward, or each backward-data stride phase), a halo config's block reaches at most
+ * the pixels its rows stage, h x bm plus HALO_CAP and an aligning vector, and its LDS fits @p
+ * tile's ldsBytes; and the pixels a block reads stay within 32-bit byte offsets of its first image.
+ */
+bool cfxFits(const IgemmProblem& problem, const CfxTile& tile);
+
 /// Whether @p gcnArchName (suffix intact) deals workgroups over several XCDs, so the
 /// XCD-contiguous block order changes anything (gfx942, gfx950).
 bool hasXcds(std::string_view gcnArchName);

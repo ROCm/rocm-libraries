@@ -18,7 +18,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 
 | Engine(s) | Built for | Directions | Archs | Configs |
 |---|---|---|---|---|
-| `CONV_IGEMM_FWD/BWD` (K1) | Dense and grouped implicit GEMM, the general workhorse; compute-bound shapes; NCHW via direct channels-first epilogue (`cf`) or staging | fwd, bwd-data | gfx908-gfx950 (MFMA), gfx11/gfx12 (WMMA), FMA everywhere | 2887 (1618 fwd, 1269 bwd; 1243 of them patch configs) |
+| `CONV_IGEMM_FWD/BWD` (K1) | Dense and grouped implicit GEMM, the general workhorse; compute-bound shapes; NCHW via direct channels-first epilogue (`cf`) or staging; 1-D channels-first (N C L) read in place by the `cfx` configs (no activation staging) | fwd, bwd-data | gfx908-gfx950 (MFMA), gfx11/gfx12 (WMMA), FMA everywhere | 3227 (1832 fwd, 1395 bwd; 1243 of them patch configs, 340 `cfx`) |
 | `CONV_IGEMM_FWD/BWD_TF32` (K1) | K1's TF32 configs (three-bf16 everywhere with bf16 matrix cores, xf32 on gfx942) for fp32 graphs. Numerical note `TENSOR_CORE`. | fwd, bwd-data | MFMA, WMMA | 93 (48 fwd, 45 bwd) |
 | `CONV_IGEMM_NCHW_BWD` (K7) | NCHW bwd-data in place: strided pointwise, patchify, 1-D/vocoder ConvTranspose, dilated rows, 3-D stride 2. Weak on large compute-bound GEMMs (K1 wins there). | bwd-data | MFMA, WMMA, FMA | 1845 |
 | `CONV_IGEMM_NCHW_BWD_TF32` (K7) | K7's three-bf16 configs for fp32 graphs (RDNA, strided 3-D filters of 27+ taps). Numerical note `TENSOR_CORE`. | bwd-data | MFMA, WMMA | 84 |
@@ -79,6 +79,7 @@ Every config is a set of integer knobs, listed in each engine's `*.kdp.json` und
 | `swz` | XOR-swizzled LDS layout |
 | `xcd` | XCD-contiguous block order (gfx942/gfx950) |
 | `cf` | Write channels-first output directly instead of staging it |
+| `cfx` (K1) | Read 1-D channels-first activations in place (no staging); with `halo` h, the halo rows hold h input pixels per output row |
 | `wdirect` | bwd-data reads the packed filter in place |
 | `pack` | Taps × channels flattened in the reduction |
 | `fuse` | F small groups run as one block-diagonal group |
