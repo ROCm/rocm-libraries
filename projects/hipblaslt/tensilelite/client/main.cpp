@@ -235,7 +235,7 @@ namespace TensileLite
                 ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest; that share is rounded up so each device's D slice starts on a multiple of 256 bytes when the last device then has at most 1% less work, else it is not rounded and a hint says how to pad. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
                 ("split-align",            po::value<std::string>()->default_value("auto"), "With --split-devices, how the share of the split dimension is rounded so each device's D slice starts on a multiple of 256 bytes: auto = round up when the balance changes by at most 1%; off = always size/N (to measure the misaligned case); force = always round up, as long as the last device keeps work.")
-                ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. A shared A, B or C is the copy of the last device, whose slice is the largest; a shared D is the one of device-idx, and every device writes its slice into it.")
+                ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. A shared A, B or C is the copy of the device whose slice is the largest (the last one on a tie); a shared D is the one of device-idx, and every device writes its slice into it.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -1229,12 +1229,25 @@ int main(int argc, const char* argv[])
         // R = every device has its own copy, S = one copy that the other devices use.
         auto const placement = args["split-placement"].as<std::string>();
         auto const shared    = [&](size_t tensor) { return placement[tensor] == 'S'; };
-        // A shared D is the first device's. A shared A, B or C is the last device's: every device
-        // reads it with its own slice's size, and the last slice is the largest (it takes the
-        // remainder), so every other slice fits in the last device's buffers. The first device's
-        // would be too small for the last slice whenever the split is not even.
-        const size_t inputOwner  = devices.size() - 1;
-        const bool   sharedInput = shared(0) || shared(1) || shared(2);
+        // A shared D is the first device's. A shared A, B or C is read by every device with its
+        // own slice's size, so it is the copy of the device whose slice is the largest. The first
+        // N-1 slices take the share and the last takes the rest; the share is rounded up when
+        // that is nearly free (Tensile/SliceAlignment.hpp), so either can be the largest. On a
+        // tie the last device keeps it.
+        const bool sharedInput    = shared(0) || shared(1) || shared(2);
+        auto const sharedElements = [&](size_t d) {
+            auto const* slice = dynamic_cast<ContractionProblemGemm const*>(
+                problemFactory.sliceProblem(problem, d));
+            size_t elements = 0;
+            for(size_t t = 0; t < 3; t++)
+                if(shared(t))
+                    elements = std::max(elements, slice->tensors()[t].totalAllocatedElements());
+            return elements;
+        };
+        size_t inputOwner = devices.size() - 1;
+        for(size_t d = 0; sharedInput && d + 1 < devices.size(); d++)
+            if(sharedElements(d) > sharedElements(inputOwner))
+                inputOwner = d;
         // The other devices reach a shared tensor over peer access. An OutputPeerD kernel also
         // writes the other device's D, so every device needs access to every other one.
         if(placement.find('S') != std::string::npos || full->outputPeerD())
