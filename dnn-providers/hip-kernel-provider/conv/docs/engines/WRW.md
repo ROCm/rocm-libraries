@@ -105,6 +105,11 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - Small-C stems: 7x7 s2 c3 0.62 ms against 0.87 on gfx950, 3.47 against 14.2 on gfx1201.
   - VAE 3-channel heads (gfx1201 c128 k3 768²: 2.25 ms against 23.9).
   - Deeplab dilated rows on gfx950 / gfx942 at d12 / d24 on 128² maps (0.68-0.95x of MIOpen's time).
+  - Channels-last dilated rows run within reach of channels-first. Ratios are NHWC best engine over NCHW best engine, geomean over the corpus's fp16 layers, autotuned:
+    - deeplab 3x3 d2-d36: 0.80 on gfx950, 0.91 on MI325X, 0.83 on gfx1101;
+    - HiFi-GAN 1x3 / 1x7 / 1x11 at d3 / d5: 0.88 on gfx950, 1.16 on MI325X, 1.11 on gfx1101.
+
+    DeepLabV3's c512 d4 layer (16 x 128², channels-last) takes 34 ms on gfx1101; channels-first takes 37-41.
   - The gfx950 direct loop is at parity with `ConvHipConv` on Flux / SDXL VAE (0.96-1.06x).
 - **Weak:**
   - gfx90a VAE NHWC bf16 3x3 at 96²-384²: 1.11-1.28x behind.
@@ -112,6 +117,10 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - Deeplab 65² at dilation 36 (1.47-1.89x), and deeplab dilated on gfx906 / gfx908 (1.5-2.0x).
   - 3x3 stride 2 on mid-size outputs (about 17²-40²) that packed rows do not take, where 32/64-position chunks run half empty.
   - hifigan 1x16 stride-8 on gfx950 (4.2x).
+  - Channels-last behind its own channels-first layer:
+    - deeplab c2048 d24 on 128² maps, 1.2-1.3x on MI325X and gfx1101. The layout-1 ring costs this: on gfx1101 the same 64 x 32 x 32 tile runs 81 ms channels-last against 63 channels-first;
+    - HiFi-GAN 1x11 d5 on gfx11, 1.6-2.0x;
+    - 1x7 d3 at 32-64 channels on MI325X, 2.0-2.2x.
 
 ## Numerical precision
 - **Accumulation:** fp32. 16-bit products are exact in the atoms; fp32 runs on fp32 MFMA (CDNA) or FMA (RDNA, gfx906). Split partials stay fp32, and the reduce sums them in an order that depends only on the split count, then rounds once. The `dws` direct store rounds the fp32 accumulators once.
@@ -149,6 +158,10 @@ No code was copied.
 3. **gfx90a NHWC bf16 VAE 3x3:** a ring ping-pong `pp` knob for CDNA2, whose long MFMA phase suits it (a projection only; needs a probe). Also: d24/d36 there run at 61% of MFMA peak against asm igemm's 70%.
 4. **Strided 3x3 on small maps:** a flattened-position variant of loop 1 phases, as K4 wrw does.
 5. **inf parity in loop 5:** a select for structural zeros, A/B-checked against the compiled-out build.
+6. **Channels-last dilated rows:**
+   - the layout-1 ring's store-side transpose costs 1.2-1.3x at deeplab d24 against channels-first (same tile);
+   - small-channel 1-D rows (c32-c64, 1x7 d3 on CDNA; 1x11 d5 on gfx11) want channels-last tiles of their own;
+   - the generic tier has no gfx11 configs, so a channels-last shape no specialized class serves goes to BLAS there.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvWrwProblem.cpp` (host):
