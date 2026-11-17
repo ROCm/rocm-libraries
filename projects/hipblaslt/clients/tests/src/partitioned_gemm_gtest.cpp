@@ -660,6 +660,45 @@ TEST(pre_checkin_partitioned_gemm_ext, NoPeerAccessIsNeededOnOneDevice)
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
 }
 
+// Only gfx1250 has kernels that store a second D. On any other architecture a problem with
+// storePeerD must find no algorithm, and a plain GEMM's algorithm must be refused for it (not run
+// as a kernel that never writes the second D). This runs on one device of any other architecture.
+TEST(pre_checkin_partitioned_gemm_ext, PeerDHasNoKernelWithoutOutputPeerDSupport)
+{
+    if(isGfx1250())
+        GTEST_SKIP() << "gfx1250 has kernels that store a second D";
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+
+    // A plain problem finds an algorithm.
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
+    std::vector<hipblasLtMatmulHeuristicResult_t> plain;
+    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, plain), HIPBLAS_STATUS_SUCCESS);
+    if(plain.empty())
+        GTEST_SKIP() << "no algorithm for the test problem on this device";
+
+    // With a peer D there is none.
+    auto in       = buffers.inputs();
+    in.storePeerD = true;
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+    std::vector<hipblasLtMatmulHeuristicResult_t> withPeer;
+    EXPECT_EQ(gemm.algoGetHeuristic(1, pref, withPeer), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_TRUE(withPeer.empty());
+
+    // The plain algorithm is refused both by the support check and when the arguments are made.
+    auto                algo = plain[0].algo;
+    std::vector<size_t> workspaces;
+    EXPECT_NE(gemm.isAlgoSupported(algo, workspaces), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_NE(gemm.initialize(plain[0].algo, parts.workspaces(), true, parts.streams),
+              HIPBLAS_STATUS_SUCCESS);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Two or more devices
 // ---------------------------------------------------------------------------------------------
