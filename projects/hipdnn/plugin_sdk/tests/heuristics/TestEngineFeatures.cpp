@@ -14,6 +14,7 @@
 
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
+#include <hipdnn_plugin_sdk/heuristics/OptionalFeatures.hpp>
 
 namespace
 {
@@ -1130,6 +1131,68 @@ TEST(TestEngineFeatures, AttentionWorkIsUnknownWhenOperandContentsDecideIt)
         EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
         EXPECT_FALSE(published.contains("graph.flops"));
         EXPECT_FALSE(published.contains("graph.flops_by_type.SdpaAttributes"));
+    }
+}
+
+// RFC 0019 section 6.2: a model must read every feature a valid graph may leave unbound
+// through value_or_default or behind present, and OptionalFeatures.hpp is the list of them. So
+// each feature one valid form of attention publishes and another omits must be listed there,
+// whichever way round. Tensor ranks are equal across these forms: how many dims a tensor
+// publishes is shape, which training sees as a column absent in some rows.
+TEST(TestEngineFeatures, EveryFeatureAValidFormOmitsIsAnOptionalFeature)
+{
+    auto dropout = attention();
+    dropout.dropout_probability = 0.1F;
+    dropout.seed_tensor_uid = 5;
+    dropout.offset_tensor_uid = 6;
+    auto stated = attention();
+    stated.attn_scale_value = 0.125F;
+    stated.left_bound = 4;
+    stated.right_bound = 0;
+    stated.generate_stats = true;
+    stated.stats_tensor_uid = 5;
+    auto masked = attention();
+    masked.attn_mask_tensor_uid = 5;
+    masked.sink_token_tensor_uid = 6;
+    masked.scale_tensor_uid = 7;
+    auto ragged = attentionGraph(attention());
+    ragged.tensors[0]->ragged_offset_tensor_uid = 5;
+
+    const auto minimal = features(attentionGraph(attention()));
+    for(const auto& [name, form] :
+        {std::pair<std::string, nlohmann::json>{"dropout", features(attentionGraph(dropout))},
+         std::pair<std::string, nlohmann::json>{"stated", features(attentionGraph(stated))},
+         std::pair<std::string, nlohmann::json>{"masked", features(attentionGraph(masked))},
+         std::pair<std::string, nlohmann::json>{"paged variable-length",
+                                                features(pagedVariableLengthAttentionGraph())}})
+    {
+        SCOPED_TRACE(name);
+        std::set<std::string> differing;
+        for(const auto& [one, other] : {std::pair{&minimal, &form}, std::pair{&form, &minimal}})
+        {
+            for(const auto& item : one->items())
+            {
+                if(!other->contains(item.key()))
+                {
+                    differing.insert(item.key());
+                }
+            }
+        }
+        EXPECT_FALSE(differing.empty());
+        for(const auto& feature : differing)
+        {
+            EXPECT_NE(hipdnn_plugin_sdk::heuristics::findOptionalFeature(feature), nullptr)
+                << feature << " is absent from a valid graph but not an optional feature";
+        }
+    }
+    const auto raggedForm = features(ragged);
+    for(const auto& item : minimal.items())
+    {
+        if(!raggedForm.contains(item.key()))
+        {
+            EXPECT_NE(hipdnn_plugin_sdk::heuristics::findOptionalFeature(item.key()), nullptr)
+                << item.key() << " is absent from a ragged graph but not an optional feature";
+        }
     }
 }
 

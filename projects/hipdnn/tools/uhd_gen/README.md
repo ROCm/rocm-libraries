@@ -677,6 +677,44 @@ but "work unknown" stays absent and is never silently 0. Whether a signature is 
 a corpus is therefore the evaluator's answer over the published feature maps
 (`check_signature_evaluates`), not a check that every referenced name is published.
 
+### Optional features are read through a default
+
+Some published features are absent on perfectly valid graphs: an optional attribute the graph
+leaves unset (SDPA's `attn_scale_value`, `dropout_probability`, `left_bound`, ...), a field of
+an optional tensor it does not carry (`attn_mask`, `seq_len_q`, ...), an element of a vector
+attribute the node is too low-rank to have (`dilation[1]` of a 1-D convolution), and the work
+features where hipDNN cannot count the work. A model reading one bare cannot score such a
+graph (RFC 0019 §6.2). hipDNN lists them, from the schemas' optional fields:
+`hipdnn_uhd_features --optional-features` prints the list, and `--lint` reports the
+references of a signature that read one unguarded. A name does not say its node's type, so
+each node is taken to be any type having every operand the signature reads at it.
+
+- `train` reads every such reference through `value_or_default`, with the default
+  `uhd_gen/optional.py` holds: the API's meaning of "unset" (1.0 for the SDPA scale, 0 for the
+  dropout probability, 1/sqrt(K) for the GDN/KDA scale, ...) or -1 where unset has no number
+  (an omitted tensor's fields, unbounded bounds, unknown work). A row without the feature trains
+  on the value the runtime will read. A test fails when hipDNN gains an optional attribute
+  the table does not cover.
+- `generate`'s automatic selection keeps a column some rows leave unbound when it is one of
+  those features; any other gap (a rank some rows' tensor lacks) still leaves the column out.
+- In a `tflops` model the work features may stay bare: where the work is unknown, throughput
+  is too, and reporting nothing there is the right answer.
+- `promote` refuses a model that reads one unguarded, and `hipdnn_validate_descriptors`
+  warns about one.
+
+A model trained before this is migrated without retraining:
+
+```bash
+python -m uhd_gen rewrite-signature <tree>/.../heuristic.uhd.json ... [--dry-run]
+```
+
+It wraps each unguarded reference, restates `features_hash`, the hash `model.bin` embeds (the
+trees and every other value are unchanged, which it checks) and `tree_data.hash`, after
+proving through the evaluator that the features are identical on rows binding every
+reference and that a row lacking each wrapped one is now scorable. A ranker's model hash is
+an input to its engine's selector revision, so the engine's estimates need re-stamping after
+a ranker is rewritten.
+
 ### Reproducible generation
 
 `python -m uhd_gen generate --help` describes the combined workflow. It accepts
