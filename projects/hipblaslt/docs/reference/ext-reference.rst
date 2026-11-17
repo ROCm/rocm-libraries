@@ -115,8 +115,12 @@ PartitionedGemm
 two partitions of a DPX card, where each partition is a separate HIP device. The caller passes
 one hipBLASLt handle per partition (created with that partition's device current), and one
 stream, workspace, and event per partition when it initializes and runs. ``SplitDim`` picks the
-dimension to split (M, N, or the batch). The first ``N - 1`` partitions take ``size / N`` while the last takes
-the remainder. hipBLASLt does not allocate or copy any matrix. The caller passes one pointer per
+dimension to split (M, N, or the batch). The first ``N - 1`` partitions take ``size / N`` rounded up to a
+256-byte boundary of every matrix they cut when that changes the balance by at most 1%, and the last takes the
+rest; otherwise they take ``size / N`` and a hint is logged (``HIPBLASLT_LOG_MASK=4``). A slice that starts
+off a 256-byte boundary runs much slower, so pad the leading dimensions (and batch strides) to multiples of
+256 bytes, which is enough for N and Batch splits; for an M split also make M a multiple of
+``parts * 256 / element size``. hipBLASLt does not allocate or copy any matrix. The caller passes one pointer per
 partition for each matrix: the same pointer shares a matrix between the partitions, different
 pointers give each partition its own copy. Where the memory lives (``hipMalloc`` on one
 device, or a VMM range with pages on several devices) is up to the caller: the library gives

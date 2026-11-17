@@ -400,18 +400,21 @@ TEST(pre_checkin_partitioned_gemm_ext, PartitionCountAndSliceRule)
     EXPECT_EQ(gemm.getSlice(3, offset, size), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
-TEST(pre_checkin_partitioned_gemm_ext, MSlicesStartOn256ByteBoundaries)
+TEST(pre_checkin_partitioned_gemm_ext, MSlicesRoundTo256BytesWithinOnePercent)
 {
     SKIP_UNLESS_GFX1250();
-    // fp16: 128 elements are 256 bytes. The first slices round up and the last is smaller.
+    // fp16, lda = 128 (op T), ldc = ldd = 256: the M offset moves 2 bytes per row in C and D, so
+    // the slice is rounded up to 128 rows. It is used only when the last slice is at most 1%
+    // smaller than the others; otherwise the plain size/N split is kept.
     struct Case
     {
         size_t  parts;
         int64_t m;
         int64_t wantOffset[3], wantSize[3];
     };
-    const Case cases[]
-        = {{2, 1000, {0, 512, 0}, {512, 488, 0}}, {3, 1000, {0, 384, 768}, {384, 384, 232}}};
+    const Case cases[] = {{2, 1000, {0, 500, 0}, {500, 500, 0}}, // 512/488 is 4.7% off: plain
+                          {3, 1000, {0, 333, 666}, {333, 333, 334}},
+                          {2, 255, {0, 128, 0}, {128, 127, 0}}}; // 0.78% off: rounded
     for(auto const& c : cases)
     {
         auto              parts = onDeviceZero(c.parts);
@@ -426,7 +429,6 @@ TEST(pre_checkin_partitioned_gemm_ext, MSlicesStartOn256ByteBoundaries)
             ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(offset, c.wantOffset[i]) << c.parts << " partitions, slice " << i;
             EXPECT_EQ(size, c.wantSize[i]) << c.parts << " partitions, slice " << i;
-            EXPECT_EQ(offset * 2 % 256, 0);
         }
     }
 }

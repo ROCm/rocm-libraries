@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <numeric>
 #include <set>
 #include <sstream>
 #include <string>
@@ -502,30 +503,108 @@ namespace hipblaslt_ext
             }
         }
 
-        // Slices along the split dimension: the first N-1 take size/N, the last takes the rest.
-        const int64_t total = dim == SplitDim::M ? m : dim == SplitDim::N ? n : batch_count;
-        int64_t       base  = total / static_cast<int64_t>(parts);
-        if(base == 0)
+        // Slices along the split dimension. A slice starts `offset * step` elements into each
+        // matrix it cuts (the same offsets the loop below applies); a start that is a multiple
+        // of 256 bytes keeps a partition's accesses on whole cache lines and runs much faster.
+        // The first N-1 slices take size/N rounded up to the multiple that aligns every cut
+        // matrix, the last takes the rest, when that changes the balance by at most 1%.
+        // Otherwise they take size/N and a hint says what to pad. The split dimension is the
+        // caller's choice, so alignment never refuses a problem.
+        constexpr int64_t kAlignBytes       = 256;
+        constexpr double  kMaxAlignImbalance = 0.01;
+        const int64_t     total = dim == SplitDim::M ? m : dim == SplitDim::N ? n : batch_count;
+        const int64_t     plain = total / static_cast<int64_t>(parts);
+        if(plain == 0)
             return HIPBLAS_STATUS_INVALID_VALUE;
-        // An M slice starts `base` elements into the columns of C, D and (op N) A. Round it up
-        // to a multiple of 256 bytes of the narrowest of them, so every slice starts aligned
-        // and the last (smaller) one takes the rest. N and Batch offsets are whole columns or
-        // matrices already. Keep the plain split when rounding would leave the last slice empty.
+        // Elements a slice offset moves per unit of the split dimension, 0 for a matrix the
+        // split does not cut.
+        int64_t step[4] = {0, 0, 0, 0};
         if(dim == SplitDim::M)
         {
-            size_t narrowest = std::min(bytes[2], bytes[3]);
-            if(s.opA == HIPBLAS_OP_N)
-                narrowest = std::min(narrowest, bytes[0]);
-            const int64_t unit    = static_cast<int64_t>(256 / narrowest);
-            const int64_t aligned = (base + unit - 1) / unit * unit;
-            if(aligned * static_cast<int64_t>(parts - 1) < total)
-                base = aligned;
+            step[0] = s.opA == HIPBLAS_OP_N ? 1 : lda;
+            step[2] = 1;
+            step[3] = 1;
         }
+        else if(dim == SplitDim::N)
+        {
+            step[1] = s.opB == HIPBLAS_OP_N ? ldb : 1;
+            step[2] = ldc;
+            step[3] = ldd;
+        }
+        else
+        {
+            step[0] = strideA;
+            step[1] = strideB;
+            step[2] = strideC;
+            step[3] = strideD;
+        }
+        int64_t unit = 1;
+        for(int t = 0; t < 4; t++)
+        {
+            if(step[t] == 0)
+                continue;
+            const int64_t g = kAlignBytes
+                              / std::gcd(kAlignBytes,
+                                         std::abs(step[t]) * static_cast<int64_t>(bytes[t]));
+            unit = std::lcm(unit, g);
+        }
+        int64_t       base    = plain;
+        const int64_t aligned = (plain + unit - 1) / unit * unit;
+        const int64_t last    = total - aligned * static_cast<int64_t>(parts - 1);
+        if(last > 0 && static_cast<double>(aligned - last) <= kMaxAlignImbalance * aligned)
+            base = aligned;
         std::vector<int64_t> offset(parts), size(parts);
         for(size_t i = 0; i < parts; i++)
         {
             offset[i] = static_cast<int64_t>(i) * base;
             size[i]   = i + 1 < parts ? base : total - offset[i];
+        }
+        {
+            const char* names[4] = {"A", "B", "C", "D"};
+            const void* bases[4] = {in.a[0], in.b[0], in.c[0], in.d[0]};
+            const char* pad = dim == SplitDim::M       ? "pad M to a multiple of parts * 256 / element size and the leading dimension to a multiple of 256 bytes"
+                              : dim == SplitDim::N     ? "pad the leading dimension to a multiple of 256 bytes"
+                                                       : "pad the batch stride to a multiple of 256 bytes";
+            for(int t = 0; t < 4; t++)
+            {
+                if(step[t] == 0)
+                    continue;
+                for(size_t i = 1; i < parts; i++)
+                {
+                    const int64_t byteOffset = offset[i] * std::abs(step[t]) * static_cast<int64_t>(bytes[t]);
+                    if(byteOffset % kAlignBytes != 0)
+                    {
+                        log_hints(__func__,
+                                  "PartitionedGemm: the slice of",
+                                  names[t],
+                                  "for partition",
+                                  i,
+                                  "starts",
+                                  byteOffset,
+                                  "bytes in, not a multiple of 256, which is slow;",
+                                  pad);
+                        break;
+                    }
+                }
+                if(bases[t] != nullptr && reinterpret_cast<uintptr_t>(bases[t]) % kAlignBytes != 0)
+                    log_hints(__func__,
+                              "PartitionedGemm: the base pointer of",
+                              names[t],
+                              "is not 256-byte aligned, which slows every partition; allocate it"
+                              " on a 256-byte boundary");
+            }
+            // An M split gives every partition a run of `share` rows in each column of C and D;
+            // a run under 256 bytes shares cache lines with the neighbouring partition.
+            if(dim == SplitDim::M)
+                for(int t = 2; t < 4; t++)
+                    if(base * static_cast<int64_t>(bytes[t]) < kAlignBytes)
+                        log_hints(__func__,
+                                  "PartitionedGemm: each partition writes",
+                                  base * static_cast<int64_t>(bytes[t]),
+                                  "bytes per column of",
+                                  names[t],
+                                  ", under 256: the partitions share cache lines; consider"
+                                  " SplitDim::N");
         }
 
         const std::vector<const void*> dPointers(in.d.begin(), in.d.end());
