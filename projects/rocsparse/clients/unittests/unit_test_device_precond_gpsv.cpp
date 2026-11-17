@@ -23,16 +23,15 @@
  * ************************************************************************ */
 
 // Pentadiagonal QR. A uniform scale of the five bands and the right-hand side does
-// not change the solution, but forming |z|^2 in a complex Givens rotation overflows
-// or underflows once the entries leave the square root of the format range. These
-// solves are the order-4 witness of that failure, plus order 17 so the general
-// backsolve loop runs. The result is compared to the known solution, not to the host
-// QR, which still squares the entries.
+// not change the solution, but squaring the raw entries overflows or underflows once
+// they leave the square root of the format range. These solves are the order-4
+// witness of that failure, plus order 17 so the general backsolve loop runs. The
+// result is compared to the known solution, not to a host QR that still squares the
+// entries.
 //
 // Two paths are covered:
-//  - the public routine, which runs the Givens kernel for complex types only, and
-//  - the Givens kernel launched directly for all four types, so real types stay
-//    correct if they are ever routed through it.
+//  - the public routine: Householder QR for real types, Givens QR for complex types, and
+//  - the Givens kernel launched directly for all four types.
 
 #include "unit_test_device_precond_common.hpp"
 

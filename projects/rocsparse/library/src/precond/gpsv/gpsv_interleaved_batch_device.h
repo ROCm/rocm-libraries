@@ -116,19 +116,35 @@ namespace rocsparse
                 Bp2  = B[idp2c];
             }
 
-            T v1 = dlp1;
-            T v2 = dsp2;
+            T v1   = dlp1;
+            T v2   = dsp2;
+            T diag = d[idp0];
 
-            T v1v2sq = rocsparse::fma(v1, v1, v2 * v2);
+            // The reflector depends only on the ratios of diag, v1, and v2. Divide by
+            // the largest one before squaring: v1^2 + v2^2 overflows or underflows once
+            // the bands leave the square root of the floating-point range, and a zero
+            // squared length would skip the reflection and return a wrong solution.
+            T scale = rocsparse::max(rocsparse::abs(diag),
+                                     rocsparse::max(rocsparse::abs(v1), rocsparse::abs(v2)));
+            T sd    = diag;
+            T sv1   = v1;
+            T sv2   = v2;
+            if(scale != static_cast<T>(0))
+            {
+                sd  = diag / scale;
+                sv1 = v1 / scale;
+                sv2 = v2 / scale;
+            }
+
+            T v1v2sq = rocsparse::fma(sv1, sv1, sv2 * sv2);
 
             if(v1v2sq != static_cast<T>(0))
             {
-                T diag = d[idp0];
-                T val  = rocsparse::sqrt(rocsparse::fma(diag, diag, v1v2sq));
-                T a_ii = (rocsparse::gt(diag, static_cast<T>(0))) ? diag + val : diag - val;
+                T val  = rocsparse::sqrt(rocsparse::fma(sd, sd, v1v2sq));
+                T a_ii = (rocsparse::gt(sd, static_cast<T>(0))) ? sd + val : sd - val;
 
-                v1 = v1 / a_ii;
-                v2 = v2 / a_ii;
+                v1 = sv1 / a_ii;
+                v2 = sv2 / a_ii;
 
                 T sq   = a_ii * a_ii;
                 T beta = static_cast<T>(2) * sq / (v1v2sq + sq);
