@@ -43,6 +43,44 @@ def writeCgroup(tmp_path, selfCgroup, files):
         ("4:memory:/\n", {"memory/memory.limit_in_bytes": "9223372036854771712\n"}, None),  # v1 none
         ("0::/\n", {}, None),  # no memory controller files
         ("0::/\n", {"memory.max": "garbage\n"}, None),
+        # v2, limit on the parent (Slurm job, systemd scope), none on the leaf task
+        (
+            "0::/job/task\n",
+            {"job/memory.max": "8589934592\n", "job/task/memory.max": "max\n"},
+            8 * GIB,
+        ),
+        # v2, a child may set a larger limit than its parent; the parent's binds
+        (
+            "0::/job/task\n",
+            {"job/memory.max": "8589934592\n", "job/task/memory.max": "17179869184\n"},
+            8 * GIB,
+        ),
+        # v1/hybrid: several controllers, the memory line first and a v2 line last
+        (
+            "12:memory:/x\n4:cpu,cpuacct:/x\n0::/x\n",
+            {"memory/x/memory.limit_in_bytes": "17179869184\n"},
+            16 * GIB,
+        ),
+        # v1, the leaf reads unlimited but a hidden parent's limit shows in memory.stat
+        (
+            "4:memory:/\n",
+            {
+                "memory/memory.limit_in_bytes": "9223372036854771712\n",
+                "memory/memory.stat": "cache 0\nhierarchical_memory_limit 8589934592\n",
+            },
+            8 * GIB,
+        ),
+        # v1, memory.stat without a limit (unlimited value) leaves the leaf limit
+        (
+            "4:memory:/\n",
+            {
+                "memory/memory.limit_in_bytes": "17179869184\n",
+                "memory/memory.stat": "hierarchical_memory_limit 9223372036854771712\n",
+            },
+            16 * GIB,
+        ),
+        # v1, nested path absent: the memory controller's root
+        ("4:memory:/gone\n", {"memory/memory.limit_in_bytes": "4294967296\n"}, 4 * GIB),
     ],
 )
 def test_cgroup_memory_limit(tmp_path, selfCgroup, files, expected):
@@ -64,6 +102,7 @@ def test_cgroup_memory_limit_is_none_on_windows(monkeypatch):
 def host(monkeypatch):
     """Mocked host: affinity CPUs (loky agrees), pytest-xdist workers and cgroup memory limit."""
     monkeypatch.delenv("KUBE_CPU_REQUEST", raising=False)
+    monkeypatch.delenv("TENSILE_POOL_PROCESS_PEAK_MIB", raising=False)
     monkeypatch.delenv("PYTEST_XDIST_WORKER_COUNT", raising=False)
     monkeypatch.setitem(globalParameters, "CpuThreads", -1)
 
@@ -112,3 +151,36 @@ def test_create_library_groups_share_the_capped_budget(host):
 
     host(256, workers=4, memory=110 * GIB)
     assert Run._cpuCount() == 75
+
+
+@pytest.mark.parametrize(
+    "value, expected", [("", 300), ("512", 512), ("0", 300), ("-5", 300), ("big", 300)]
+)
+def test_pool_process_peak_override(monkeypatch, value, expected):
+    monkeypatch.setenv("TENSILE_POOL_PROCESS_PEAK_MIB", value)
+    assert P._poolProcessPeakBytes() == expected * 2**20
+
+
+def test_peak_override_changes_the_cap(host, monkeypatch):
+    host(256, workers=4, memory=110 * GIB)
+    monkeypatch.setenv("TENSILE_POOL_PROCESS_PEAK_MIB", "600")
+    assert P.poolSizeBudget() == 37
+
+
+def test_explicit_workers_override_the_environment(host):
+    host(256, workers=1, memory=110 * GIB)
+    assert P.poolSizeBudget(workers=4) == 75
+    assert P.poolSizeBudget() == 256  # one worker: every CPU, under the 300-process memory cap
+
+
+@pytest.mark.parametrize(
+    "memory, text",
+    [
+        (110 * GIB, "75 processes per worker (CPUs 256, workers 4, memory limit 110.0 GiB"),
+        (None, "128 processes per worker (CPUs 256, workers 4, memory limit none, 300 MiB"),
+    ],
+)
+def test_budget_line_names_its_inputs(host, monkeypatch, memory, text):
+    host(256, memory=memory)
+    monkeypatch.delenv("TENSILE_POOL_PROCESS_PEAK_MIB", raising=False)
+    assert text in P.describePoolSizeBudget(workers=4)

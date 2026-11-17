@@ -38,8 +38,10 @@ from .Utilities import tqdm
 # many processes per available CPU; a single process never uses more than one per CPU.
 OVERSUBSCRIPTION_FACTOR = 2
 
-# Peak memory of one pool process generating kernels (measured 250-300 MB), and the share of the
-# cgroup memory limit that the pools of all concurrent workers may use together.
+# Peak memory per kernel-generation pool process: ~270 MB in a 4-config --build-only run (13.1 GB
+# over 49 processes), ~0.3 GiB RSS on the gfx1250-strict CI host (RSS double-counts shared pages).
+# Override: TENSILE_POOL_PROCESS_PEAK_MIB. POOL_MEMORY_FRACTION: share of the cgroup memory limit
+# that all concurrent workers' pools may use.
 POOL_PROCESS_PEAK_BYTES = 300 * 2**20
 POOL_MEMORY_FRACTION = 0.8
 
@@ -93,45 +95,67 @@ def concurrentWorkerCount():
         return 1
 
 
+def _poolProcessPeakBytes():
+    """POOL_PROCESS_PEAK_BYTES, or TENSILE_POOL_PROCESS_PEAK_MIB when it is a positive integer."""
+    try:
+        mib = int(os.environ.get("TENSILE_POOL_PROCESS_PEAK_MIB", ""))
+    except ValueError:
+        return POOL_PROCESS_PEAK_BYTES
+    return mib * 2**20 if mib > 0 else POOL_PROCESS_PEAK_BYTES
+
+
 def _cgroupMemoryLimit(root="/sys/fs/cgroup", selfCgroup="/proc/self/cgroup"):
-    """Memory limit in bytes of this process's cgroup (v2 ``memory.max``, v1
-    ``memory.limit_in_bytes``); None when unlimited, unreadable or on Windows. A container sees
-    its own cgroup at ``root``, so that is the fallback when the /proc/self/cgroup path is absent."""
+    """Smallest memory limit (bytes) from this process's cgroup up to ``root``: v2 ``memory.max``,
+    v1 ``memory.limit_in_bytes`` and ``hierarchical_memory_limit``. A parent's limit binds its
+    children (Slurm, systemd scopes), even when a child sets a larger one. None if no level sets a
+    limit, nothing is readable, or on Windows. ``root``, a container's own cgroup, is checked last.
+    Inside a cgroup namespace, v2 ancestors above the container are invisible."""
     if os.name == "nt":
         return None
-    candidates = []
+    files = []  # leaf first
     try:
         with open(selfCgroup) as f:
             for line in f:
                 hierarchy, _, rest = line.rstrip("\n").partition(":")
                 controllers, _, path = rest.partition(":")
-                relative = path.lstrip("/")
                 if hierarchy == "0" and not controllers:
-                    candidates.append(os.path.join(root, relative, "memory.max"))
+                    base, name = root, "memory.max"
                 elif "memory" in controllers.split(","):
-                    candidates.append(os.path.join(root, "memory", relative, "memory.limit_in_bytes"))
+                    base, name = os.path.join(root, "memory"), "memory.limit_in_bytes"
+                else:
+                    continue
+                parts = [p for p in path.split("/") if p]
+                files += [os.path.join(base, *parts[:i], name) for i in range(len(parts), -1, -1)]
     except OSError:
         pass
-    candidates += [
+    files += [
         os.path.join(root, "memory.max"),
         os.path.join(root, "memory", "memory.limit_in_bytes"),
     ]
-    for path in candidates:
+    limits = []
+    for path in dict.fromkeys(files):
         try:
             with open(path) as f:
-                value = f.read().strip()
-        except OSError:
-            continue
-        try:
-            limit = int(value)
-        except ValueError:
-            return None  # "max": no limit
-        # cgroup v1 reports "no limit" as a value near 2**63.
-        return limit if 0 < limit < 2**62 else None
-    return None
+                limits.append(int(f.read().strip()))
+        except (OSError, ValueError):
+            pass  # absent, unreadable, or "max": no limit at this level
+        if path.endswith("memory.limit_in_bytes"):
+            # v1 hides a parent's limit outside the container's view; memory.stat's
+            # hierarchical_memory_limit still reports it.
+            try:
+                with open(os.path.join(os.path.dirname(path), "memory.stat")) as f:
+                    for line in f:
+                        key, _, value = line.partition(" ")
+                        if key == "hierarchical_memory_limit":
+                            limits.append(int(value))
+            except (OSError, ValueError):
+                pass
+    # cgroup v1 reports "no limit" as a value near 2**63.
+    limits = [limit for limit in limits if 0 < limit < 2**62]
+    return min(limits) if limits else None
 
 
-def memoryPoolSizeCap():
+def memoryPoolSizeCap(workers=None):
     """Pool size per process that keeps the pools of all concurrent workers within
     POOL_MEMORY_FRACTION of the cgroup memory limit, at POOL_PROCESS_PEAK_BYTES per pool process;
     None without a limit. The CPU budget cannot see other containers sharing the machine's CPUs,
@@ -139,17 +163,33 @@ def memoryPoolSizeCap():
     limit = _cgroupMemoryLimit()
     if limit is None:
         return None
-    perWorker = int(limit * POOL_MEMORY_FRACTION) // concurrentWorkerCount()
-    return max(1, perWorker // POOL_PROCESS_PEAK_BYTES)
+    workers = concurrentWorkerCount() if workers is None else max(1, workers)
+    perWorker = int(limit * POOL_MEMORY_FRACTION) // workers
+    return max(1, perWorker // _poolProcessPeakBytes())
 
 
-def poolSizeBudget():
+def poolSizeBudget(workers=None):
     """Pool size for one process: OVERSUBSCRIPTION_FACTOR x the available CPUs shared among the
-    concurrent workers, at most the available CPUs and the memory cap, at least 1."""
+    concurrent workers, at most the available CPUs and the memory cap, at least 1. ``workers``
+    overrides PYTEST_XDIST_WORKER_COUNT, which the pytest controller lacks."""
+    workers = concurrentWorkerCount() if workers is None else max(1, workers)
     cpus = availableCPUCount()
-    budget = max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
-    memoryCap = memoryPoolSizeCap()
+    budget = max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // workers))
+    memoryCap = memoryPoolSizeCap(workers)
     return budget if memoryCap is None else min(budget, memoryCap)
+
+
+def describePoolSizeBudget(workers=None):
+    """The pool budget and its inputs, as one log line."""
+    workers = concurrentWorkerCount() if workers is None else max(1, workers)
+    limit = _cgroupMemoryLimit()
+    memory = "none" if limit is None else "%.1f GiB" % (limit / 2**30)
+    return (
+        "TensileLite pool budget: %d processes per worker "
+        "(CPUs %d, workers %d, memory limit %s, %d MiB per process)"
+        % (poolSizeBudget(workers), availableCPUCount(), workers, memory,
+           _poolProcessPeakBytes() // 2**20)
+    )
 
 
 def CPUThreadCount(enable=True):
