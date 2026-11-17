@@ -733,8 +733,6 @@ TEST(TestEngineFeatures, RectangularCausalAttentionCountsItsActualMask)
     attention->causal_mask_bottom_right = false;
     attention->causal_mask = true;
     EXPECT_DOUBLE_EQ(features(graph).at("graph.flops").get<double>(), 2.0 * 2 * 8 * 6 * (16 + 32));
-    attention->seq_len_q_tensor_uid = 5;
-    EXPECT_FALSE(features(graph).contains("graph.flops"));
 }
 
 TEST(TestEngineFeatures, UnsupportedFusedWorkDoesNotPublishAPartialGraphRate)
@@ -1032,14 +1030,16 @@ TEST(TestEngineFeatures, UidVectorsPublishOneRolePerElement)
     EXPECT_FALSE(published.contains("graph.nodes[0].peer_stats[2].rank"));
 }
 
-TEST(TestEngineFeatures, MoeRoutingMakesWorkDataDependent)
+// Which rows each expert multiplies is the routing offsets' contents; the work counts the
+// declared rows: the output's when gathering, the token's otherwise.
+TEST(TestEngineFeatures, MoeRoutingCountsTheDeclaredRows)
 {
     GraphT graph;
     addTensor(graph, 1, {1, 32, 64});
     addTensor(graph, 2, {4, 64, 128});
     addTensor(graph, 3, {4, 1, 1});
-    addTensor(graph, 4, {1, 32, 1});
-    addTensor(graph, 5, {1, 32, 128});
+    addTensor(graph, 4, {1, 64, 1});
+    addTensor(graph, 5, {1, 64, 128});
     MoeGroupedMatmulAttributesT moe;
     moe.token_tensor_uid = 1;
     moe.weight_tensor_uid = 2;
@@ -1052,11 +1052,12 @@ TEST(TestEngineFeatures, MoeRoutingMakesWorkDataDependent)
     const auto published = features(graph);
     EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
     EXPECT_EQ(published.at("graph.nodes[0].first_token_offset.dims[0]"), 4);
-    EXPECT_EQ(published.at("graph.nodes[0].token_index.numel"), 32);
+    EXPECT_EQ(published.at("graph.nodes[0].token_index.numel"), 64);
     EXPECT_EQ(published.at("graph.nodes[0].mode"),
               static_cast<int64_t>(MoeGroupedMatmulMode::GATHER));
     EXPECT_EQ(published.at("graph.nodes[0].top_k"), 2);
-    EXPECT_FALSE(published.contains("graph.flops"));
+    // 2 * 64 gathered rows * K (64) * N (128), not the token's 32 rows.
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 1048576.0);
 }
 
 TEST(TestEngineFeatures, VariableLengthAttentionIsDataDependent)
@@ -1071,7 +1072,8 @@ TEST(TestEngineFeatures, VariableLengthAttentionIsDataDependent)
     EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
     EXPECT_EQ(published.at("graph.nodes[0].has_variable_lengths"), true);
     EXPECT_EQ(published.at("graph.nodes[0].seq_len_kv.dims[0]"), 2);
-    EXPECT_FALSE(published.contains("graph.flops"));
+    // The declared extent: the padded shapes' dense count.
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 32256.0);
 
     // An additive bias is applied to every score whatever its values.
     sdpa = attention();
@@ -1079,9 +1081,9 @@ TEST(TestEngineFeatures, VariableLengthAttentionIsDataDependent)
     EXPECT_EQ(features(attentionGraph(sdpa)).at("graph.nodes[0].data_dependent"), false);
 }
 
-// Cumulative lengths carry the same information as seq_len_*: a graph carrying either side must
-// not publish a dense count from the padded shapes, even with padding_mask unset (reachable via
-// JSON, flatbuffer or the backend API).
+// Cumulative lengths carry the same information as seq_len_*: a graph carrying either side is
+// data dependent and counts its padded shapes, even with padding_mask unset (reachable via JSON,
+// flatbuffer or the backend API).
 TEST(TestEngineFeatures, CumulativeSequenceLengthsMakeAttentionDataDependent)
 {
     using Setter = void (*)(SdpaAttributesT&);
@@ -1096,14 +1098,14 @@ TEST(TestEngineFeatures, CumulativeSequenceLengthsMakeAttentionDataDependent)
         set(sdpa);
         const auto published = features(attentionGraph(sdpa));
         EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
-        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
-        EXPECT_FALSE(published.contains("graph.flops"));
+        EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), 32256.0);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 32256.0);
     }
 }
 
-// Each operand whose contents decide the score count leaves the work unknown: a count from
-// the padded shapes would overstate it.
-TEST(TestEngineFeatures, AttentionWorkIsUnknownWhenOperandContentsDecideIt)
+// Operands whose contents decide the score count (RFC 0019 section 6.8) leave the work at the
+// declared extent, which data_dependent marks; a paged cache declares its keys per sequence.
+TEST(TestEngineFeatures, AttentionCountsTheDeclaredExtentWhenOperandContentsDecideIt)
 {
     EXPECT_TRUE(features(attentionGraph(attention())).contains("graph.flops"));
 
@@ -1127,13 +1129,22 @@ TEST(TestEngineFeatures, AttentionWorkIsUnknownWhenOperandContentsDecideIt)
         SCOPED_TRACE(name);
         const auto published = features(*graph);
         EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
-        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
-        EXPECT_FALSE(published.contains("graph.flops"));
-        EXPECT_FALSE(published.contains("graph.flops_by_type.SdpaAttributes"));
+        EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), 32256.0);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 32256.0);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.SdpaAttributes").get<double>(), 32256.0);
     }
+
+    // Two pages of K's 7 per sequence: 14 keys for each of the 3 queries.
+    auto wider = attentionGraph(pagedAttributes);
+    wider.tensors[5]->dims = {2, 1, 2, 1};
+    EXPECT_DOUBLE_EQ(features(wider).at("graph.flops").get<double>(), 2.0 * 2 * 8 * 42 * 48);
+    // A stated max_seq_len_kv is the declared keys: 5 for each of the 3 queries.
+    pagedAttributes.max_seq_len_kv = 5;
+    EXPECT_DOUBLE_EQ(features(attentionGraph(pagedAttributes)).at("graph.flops").get<double>(),
+                     2.0 * 2 * 8 * 15 * 48);
 }
 
-TEST(TestEngineFeatures, RaggedOperandMakesWorkDataDependent)
+TEST(TestEngineFeatures, RaggedOperandCountsItsDeclaredExtent)
 {
     auto graph = matmulBroadcastGraph();
     EXPECT_EQ(features(graph).at("graph.nodes[0].data_dependent"), false);
@@ -1141,9 +1152,10 @@ TEST(TestEngineFeatures, RaggedOperandMakesWorkDataDependent)
     graph.tensors[0]->ragged_offset_tensor_uid = 4;
     const auto published = features(graph);
     EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
-    // The offsets' contents, not the padded dims, decide both the work and the footprint.
-    EXPECT_FALSE(published.contains("graph.flops"));
-    EXPECT_FALSE(published.contains("graph.logical_bytes"));
+    // The padded dims, as declared: the offsets' contents are not read.
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 840.0);
+    // a (12), b (140), c (105) and the offsets (6), in half precision.
+    EXPECT_DOUBLE_EQ(published.at("graph.logical_bytes").get<double>(), 263.0 * 2.0);
 }
 
 // A one-node graph whose tensors take uids 1, 2, ... in @p shapes order.
@@ -1160,7 +1172,7 @@ GraphT single(std::vector<std::vector<int64_t>> shapes, TAttributes attributes)
     return graph;
 }
 
-TEST(TestEngineFeatures, WorkOfLaterTypesIsUnknownWhenContentsDecideIt)
+TEST(TestEngineFeatures, WorkOfLaterTypesCountsTheDeclaredExtent)
 {
     PointwiseAttributesT relu;
     relu.operation = PointwiseMode::RELU_FWD;
@@ -1170,21 +1182,22 @@ TEST(TestEngineFeatures, WorkOfLaterTypesIsUnknownWhenContentsDecideIt)
     EXPECT_DOUBLE_EQ(features(graph).at("graph.flops").get<double>(), 24.0);
     graph.tensors[0]->ragged_offset_tensor_uid = 3;
     const auto published = features(graph);
-    EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
-    EXPECT_FALSE(published.contains("graph.flops"));
-    EXPECT_FALSE(published.contains("graph.flops_by_type.PointwiseAttributes"));
+    EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), 24.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 24.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.PointwiseAttributes").get<double>(), 24.0);
 }
 
 TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
 {
     // Shipped models read these values; changing any requires bumping
-    // FEATURE_SEMANTICS_REVISION.
+    // FEATURE_SEMANTICS_REVISION. Publishing a value where none was (a band, dropout, a paged
+    // cache) does not (RFC 0019 section 6.9).
     EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 1);
     struct Case
     {
         const char* name;
         GraphT (*make)();
-        std::optional<double> flops;
+        double flops;
     };
     const std::vector<Case> cases = {
         {"matmul broadcast", matmulBroadcastGraph, 840.0},
@@ -1221,68 +1234,69 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
              return attentionGraph(sdpa);
          },
          32256.0},
-        {"diagonal band", boundedAttentionGraph, std::nullopt},
-        {"dropout", dropoutAttentionGraph, std::nullopt},
-        {"paged variable length", pagedVariableLengthAttentionGraph, std::nullopt},
+        // Rows 0-2 keep keys [0, 2], [0, 3], [0, 4]: 12 pairs.
+        {"diagonal band", boundedAttentionGraph, 18432.0},
+        // Dropout is elementwise on the scores, as softmax is.
+        {"dropout", dropoutAttentionGraph, 32256.0},
+        // One page of K's 7 keys per sequence, all 3 queries attending to each.
+        {"paged variable length", pagedVariableLengthAttentionGraph, 32256.0},
+        // Rows 4-6 of 7 reach keys 0, 0-1, 0-2: 6 pairs.
         {"causal bottom-right with more queries than keys",
          [] {
              auto sdpa = attention();
              sdpa.causal_mask_bottom_right = true;
              return single({{2, 8, 7, 16}, {2, 2, 3, 16}, {2, 2, 3, 32}, {2, 8, 7, 32}}, sdpa);
          },
-         std::nullopt},
+         9216.0},
     };
     for(const auto& [name, make, flops] : cases)
     {
         SCOPED_TRACE(name);
         const auto published = features(make());
-        if(flops)
-        {
-            EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), *flops);
-            EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), *flops);
-        }
-        else
-        {
-            EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
-            EXPECT_FALSE(published.contains("graph.flops"));
-        }
+        EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), flops);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), flops);
     }
 
-    // Each SDPA operand or flag refuses a count on its own.
-    using Refusal = void (*)(SdpaAttributesT&);
-    const std::vector<std::pair<const char*, Refusal>> refusals = {
-        {"seq_len_q", [](SdpaAttributesT& op) { op.seq_len_q_tensor_uid = 5; }},
-        {"seq_len_kv", [](SdpaAttributesT& op) { op.seq_len_kv_tensor_uid = 5; }},
-        {"cu_seq_len_q", [](SdpaAttributesT& op) { op.cu_seq_len_q_tensor_uid = 5; }},
-        {"cu_seq_len_kv", [](SdpaAttributesT& op) { op.cu_seq_len_kv_tensor_uid = 5; }},
-        {"page_table_k", [](SdpaAttributesT& op) { op.page_table_k_tensor_uid = 5; }},
-        {"page_table_v", [](SdpaAttributesT& op) { op.page_table_v_tensor_uid = 5; }},
-        {"block_mask", [](SdpaAttributesT& op) { op.block_mask_tensor_uid = 5; }},
-        {"sink_token", [](SdpaAttributesT& op) { op.sink_token_tensor_uid = 5; }},
-        {"attn_mask", [](SdpaAttributesT& op) { op.attn_mask_tensor_uid = 5; }},
-        {"padding_mask", [](SdpaAttributesT& op) { op.padding_mask = true; }},
-        {"alibi_mask", [](SdpaAttributesT& op) { op.alibi_mask = true; }},
-        {"descale_q", [](SdpaAttributesT& op) { op.descale_q_tensor_uid = 5; }},
-        {"descale_k", [](SdpaAttributesT& op) { op.descale_k_tensor_uid = 5; }},
-        {"descale_v", [](SdpaAttributesT& op) { op.descale_v_tensor_uid = 5; }},
-        {"descale_s", [](SdpaAttributesT& op) { op.descale_s_tensor_uid = 5; }},
-        {"scale_s", [](SdpaAttributesT& op) { op.scale_s_tensor_uid = 5; }},
-        {"scale_o", [](SdpaAttributesT& op) { op.scale_o_tensor_uid = 5; }},
-        {"dropout_mask", [](SdpaAttributesT& op) { op.dropout_mask_tensor_uid = 5; }},
-        {"dropout_scale", [](SdpaAttributesT& op) { op.dropout_scale_tensor_uid = 5; }},
-        {"dropout_probability", [](SdpaAttributesT& op) { op.dropout_probability = 0.1F; }},
-        {"left_bound", [](SdpaAttributesT& op) { op.left_bound = 1; }},
-        {"right_bound", [](SdpaAttributesT& op) { op.right_bound = 1; }},
+    // Each SDPA operand or flag on its own: elementwise work and operand contents leave the
+    // dense count, a bound narrows the band.
+    using Variation = void (*)(SdpaAttributesT&);
+    const std::vector<std::tuple<const char*, Variation, double>> variations = {
+        {"seq_len_q", [](SdpaAttributesT& op) { op.seq_len_q_tensor_uid = 5; }, 32256.0},
+        {"seq_len_kv", [](SdpaAttributesT& op) { op.seq_len_kv_tensor_uid = 5; }, 32256.0},
+        {"cu_seq_len_q", [](SdpaAttributesT& op) { op.cu_seq_len_q_tensor_uid = 5; }, 32256.0},
+        {"cu_seq_len_kv", [](SdpaAttributesT& op) { op.cu_seq_len_kv_tensor_uid = 5; }, 32256.0},
+        {"page_table_k", [](SdpaAttributesT& op) { op.page_table_k_tensor_uid = 5; }, 32256.0},
+        {"page_table_v", [](SdpaAttributesT& op) { op.page_table_v_tensor_uid = 5; }, 32256.0},
+        {"block_mask", [](SdpaAttributesT& op) { op.block_mask_tensor_uid = 5; }, 32256.0},
+        {"sink_token", [](SdpaAttributesT& op) { op.sink_token_tensor_uid = 5; }, 32256.0},
+        {"attn_mask", [](SdpaAttributesT& op) { op.attn_mask_tensor_uid = 5; }, 32256.0},
+        {"padding_mask", [](SdpaAttributesT& op) { op.padding_mask = true; }, 32256.0},
+        {"alibi_mask", [](SdpaAttributesT& op) { op.alibi_mask = true; }, 32256.0},
+        {"descale_q", [](SdpaAttributesT& op) { op.descale_q_tensor_uid = 5; }, 32256.0},
+        {"descale_k", [](SdpaAttributesT& op) { op.descale_k_tensor_uid = 5; }, 32256.0},
+        {"descale_v", [](SdpaAttributesT& op) { op.descale_v_tensor_uid = 5; }, 32256.0},
+        {"descale_s", [](SdpaAttributesT& op) { op.descale_s_tensor_uid = 5; }, 32256.0},
+        {"scale_s", [](SdpaAttributesT& op) { op.scale_s_tensor_uid = 5; }, 32256.0},
+        {"scale_o", [](SdpaAttributesT& op) { op.scale_o_tensor_uid = 5; }, 32256.0},
+        {"dropout_mask", [](SdpaAttributesT& op) { op.dropout_mask_tensor_uid = 5; }, 32256.0},
+        {"dropout_scale", [](SdpaAttributesT& op) { op.dropout_scale_tensor_uid = 5; }, 32256.0},
+        {"dropout_probability",
+         [](SdpaAttributesT& op) { op.dropout_probability = 0.1F; },
+         32256.0},
+        // Row i keeps keys [i, 6]: 7 + 6 + 5 pairs.
+        {"left_bound", [](SdpaAttributesT& op) { op.left_bound = 1; }, 27648.0},
+        // Row i keeps keys [0, i + 1]: 2 + 3 + 4 pairs.
+        {"right_bound", [](SdpaAttributesT& op) { op.right_bound = 1; }, 13824.0},
     };
-    for(const auto& [name, refuse] : refusals)
+    for(const auto& [name, vary, flops] : variations)
     {
         SCOPED_TRACE(name);
         auto sdpa = attention();
-        refuse(sdpa);
+        vary(sdpa);
         const auto published = features(attentionGraph(sdpa));
-        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
-        EXPECT_FALSE(published.contains("graph.flops"));
-        EXPECT_FALSE(published.contains("graph.flops_by_type.SdpaAttributes"));
+        EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), flops);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), flops);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.SdpaAttributes").get<double>(), flops);
     }
 }
 
@@ -1520,6 +1534,53 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return graph;
          },
          256.0},
+        // The token's 32 rows (not gathering): 2 * 32 * K (64) * N (128).
+        {[] {
+             MoeGroupedMatmulAttributesT moe;
+             moe.token_tensor_uid = 1;
+             moe.weight_tensor_uid = 2;
+             moe.first_token_offset_tensor_uid = 3;
+             moe.output_tensor_uid = 4;
+             return single({{1, 32, 64}, {4, 64, 128}, {4}, {1, 32, 128}}, moe);
+         },
+         524288.0},
+        // The weight gradient over the declared 32 rows: 2 * 32 * K (64) * N (128).
+        {[] {
+             MoeGroupedMatmulBwdAttributesT moe;
+             moe.doutput_tensor_uid = 1;
+             moe.token_tensor_uid = 2;
+             moe.first_token_offset_tensor_uid = 3;
+             moe.dweight_tensor_uid = 4;
+             return single({{1, 32, 128}, {1, 32, 64}, {4}, {4, 64, 128}}, moe);
+         },
+         524288.0},
+        // 8 * T (16) * HO (4) * V (6) * K (8).
+        {[] {
+             GdnAttributesT gdn;
+             gdn.q_tensor_uid = 1;
+             gdn.k_tensor_uid = 2;
+             gdn.v_tensor_uid = 3;
+             gdn.g_tensor_uid = 4;
+             gdn.beta_tensor_uid = 5;
+             gdn.cu_seqlens_tensor_uid = 6;
+             gdn.o_tensor_uid = 7;
+             return single({{16, 2, 8}, {16, 2, 8}, {16, 4, 6}, {16, 4}, {16, 4}, {3}, {16, 4, 6}},
+                           gdn);
+         },
+         24576.0},
+        {[] {
+             KdaAttributesT kda;
+             kda.q_tensor_uid = 1;
+             kda.k_tensor_uid = 2;
+             kda.v_tensor_uid = 3;
+             kda.g_tensor_uid = 4;
+             kda.beta_tensor_uid = 5;
+             kda.cu_seqlens_tensor_uid = 6;
+             kda.o_tensor_uid = 7;
+             return single(
+                 {{16, 2, 8}, {16, 2, 8}, {16, 4, 6}, {16, 4, 8}, {16, 4}, {3}, {16, 4, 6}}, kda);
+         },
+         24576.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)
@@ -1610,18 +1671,14 @@ TEST(TestEngineFeatures, LogicalBytesCountSubByteElementsFractionally)
     EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 6.0);
 }
 
-TEST(TestEngineFeatures, OverrideShapesLeaveEveryGraphAggregateUnknown)
+// Override shapes may replace the declared ones at execute time; the work is the declared
+// problem's, as for any graph (RFC 0019 section 6.8).
+TEST(TestEngineFeatures, OverrideShapesCountTheDeclaredShapes)
 {
     auto graph = convBiasReluGraph();
     graph.is_override_shape_enabled = true;
-    const auto published = features(graph);
-    EXPECT_FALSE(published.contains("graph.flops"));
-    EXPECT_FALSE(published.contains("graph.logical_bytes"));
-    EXPECT_FALSE(published.contains("graph.arithmetic_intensity"));
-    for(const auto& entry : published.items())
-    {
-        EXPECT_NE(entry.key().rfind("graph.flops_by_type.", 0), 0U) << entry.key();
-    }
+    EXPECT_EQ(features(graph), features(convBiasReluGraph()));
+    EXPECT_DOUBLE_EQ(features(graph).at("graph.flops").get<double>(), 87600.0);
 }
 
 /// Owns a packed graph and the wrapper over it, as a plugin receives one.
@@ -1726,20 +1783,6 @@ TEST(TestProblemFeatureCache, KeysOnGraphContentAndDevice)
     EXPECT_EQ(onBigger->toJson(),
               hipdnn_plugin_sdk::heuristics::problemFeatures(graph.get(), bigger).toJson());
     EXPECT_EQ(problemFeatureCache().size(), 3U);
-}
-
-/// Override shapes are not graph content (`cache_ignore`), but they change the features, so
-/// the two forms of one graph never share an entry.
-TEST(TestProblemFeatureCache, OverrideShapesAreAnotherProblem)
-{
-    problemFeatureCache().clear();
-    const PackedGraph fixed(convBiasReluGraph());
-    auto overridden = convBiasReluGraph();
-    overridden.is_override_shape_enabled = true;
-    const PackedGraph flexible(overridden);
-
-    EXPECT_EQ(sharedProblemFeatures(fixed.get(), Device{})->toJson().count("graph.flops"), 1U);
-    EXPECT_EQ(sharedProblemFeatures(flexible.get(), Device{})->toJson().count("graph.flops"), 0U);
 }
 
 /// Past CAPACITY graphs the least recently used one is rebuilt; a recently used one is not.

@@ -890,7 +890,7 @@ lives beside the policy names in the data SDK, and each entry fixes three things
 
 | Metric | Units | Better | Status |
 |---|---|---|---|
-| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown has no `tflops` label. |
+| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown (an opaque custom op, inconsistent operands) has no `tflops` label. |
 | `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput, so it never depends on a FLOP count. |
 | `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
 
@@ -1610,7 +1610,7 @@ the set.
 | string, nested table or struct, union, byte vector | nothing |
 
 Beside those, each node publishes `type` (its `NodeAttributes` member), `compute_data_type`,
-`data_dependent` (below), and `flops` when its work is known ([Section 6.8](#68-the-work-model)); SDPA
+`data_dependent` (below), and `flops` when its work can be counted ([Section 6.8](#68-the-work-model)); SDPA
 adds two derived flags no schema field carries, `has_attention_mask` and `has_variable_lengths`. Graph
 tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, dims[d], strides[d]}`.
 
@@ -1630,8 +1630,9 @@ tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, 
   `TensorAttributes.ragged_offset_tensor_uid`, which marks every node reading or writing a ragged tensor.
   An operand read densely whatever its values — an additive attention bias, a dropout seed, MoE's
   `token_index` — is not annotated. A node with an annotated operand present publishes
-  `data_dependent = true`. The generator rejects the annotation anywhere its visitor would not report
-  it, so a misplaced one cannot compile and silently mark nothing.
+  `data_dependent = true`: its work count is the declared extent, which the contents may cut short
+  ([Section 6.8](#68-the-work-model)). The generator rejects the annotation anywhere its visitor would
+  not report it, so a misplaced one cannot compile and silently mark nothing.
 
 ### 6.8 The Work Model
 
@@ -1653,13 +1654,18 @@ the trainer, and the runtime compute the same number.
    intermediates included, so a fused convolution + bias + ReLU is the convolution plus two pointwise
    nodes. If any node's work is unknown, `$graph.flops` is **absent**, never a partial sum: divided by
    the whole graph's time, a partial count reports a throughput the engine did not achieve. Each known
-   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes publishes no
-   graph-level work features, because the shapes it declares are not the ones it executes.
-4. **Content-dependent work is unknown.** A node whose `data_dependent` is true
-   ([Section 6.7](#67-per-node-operand-features)) has no count, whatever its type: its shapes bound its
-   work without determining it. Any present `work_data_dependent` operand or ragged operand tensor
-   makes it so, for Matmul, ConvolutionFwd, and SDPA as for every other type. A bound, where one is
-   worth publishing, takes its own name (`…flops_upper_bound`) and never `flops`.
+   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes counts the shapes it
+   declares, like any other: an execute-time override changes what runs, not the problem the graph was
+   built and selected for.
+4. **Content-dependent work is the declared extent.** A node whose `data_dependent` is true
+   ([Section 6.7](#67-per-node-operand-features)) counts the problem its shapes declare: padded
+   sequence lengths, a ragged tensor's padded dims, a paged cache's declared keys, every score a block
+   mask could keep, every routed row. Its operands' contents decide how much of that runs, and a
+   problem feature never reads device memory; `data_dependent` tells a model the count bounds the work
+   rather than measuring it. The convention holds the rule-1 property that matters: every engine of a
+   graph has the same numerator, so their `tflops` order is their `time` order. Refusing a count
+   instead would cost every variable-length, paged, ragged and routed graph its `tflops` label and its
+   work features.
 5. **One formula per node type**, over the operand roles of
    [Section 6.7](#67-per-node-operand-features):
 
@@ -1679,24 +1685,26 @@ the trainer, and the runtime compute the same number.
    | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
    | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
    | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
-   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` is `Sq·Sk`, or the attended pairs under a causal mask. |
+   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` sums, per query row, the keys inside its band: causal mask, `left_bound`, `right_bound` and diagonal alignment (cuDNN's band, SEM-001), `Sq·Sk` when unbounded. A paged cache's `Sk` is `max_seq_len_kv` when stated, else the page table's pages per sequence × the page size. Bias, ALiBi, softmax, dropout, sinks and FP8 scaling are elementwise on the scores and not counted. |
    | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
-   | `MoeGroupedMatmulAttributes`, `MoeGroupedMatmulBwdAttributes` | unknown | `first_token_offset` decides how many rows are computed. |
+   | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
+   | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
+   | `GdnAttributes`, `KdaAttributes` | `8·T·HO·V·K` | Four `V × K` products per token and output head (`S k`, the rank-one correction, `v kᵀ`, `S q`); decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
    | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
 
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
    shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
-   floating-point operands. So 20 of the 23 node types have a static count; whether a given graph has one
+   floating-point operands. So 24 of the 25 node types have a static count; whether a given graph has one
    is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
      tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
      types count fractionally (fp4 and int4 as 0.5 byte, fp6 as 0.75); virtual intermediates are
-     excluded, since keeping them out of memory is what fusion is for. Absent when any non-virtual
-     tensor's footprint is unknown — missing or negative dims, an unset data type, or a ragged tensor,
-     whose dims are only its padded bound. A zero-extent tensor contributes 0.
+     excluded, since keeping them out of memory is what fusion is for. A ragged tensor counts its
+     declared (padded) dims, as its work does. Absent when any non-virtual tensor's footprint is
+     unknown — missing or negative dims, or an unset data type. A zero-extent tensor contributes 0.
    - **Allocation size** — strides, alignment, rounding, and workspace, in whole bytes. What corpus
      generation's memory-safety accounting budgets; not a feature, and not derived from the footprint.
    - **Measured traffic** — what the device actually moved, re-reads and cache effects included. Never
@@ -1729,7 +1737,7 @@ feature-semantics revision they were computed under ([Section 6.9](#69-feature-s
 
 **A new node type declares its work.** Each `NodeAttributes` member either has a formula (a
 `nodeFlops` overload and a `logicalFlops` case) or is listed in `NO_COUNTING_CONVENTION` with its
-reason, as `NONE`, `CustomOpAttributes`, and the MoE grouped matmuls are. A test over every member
+reason, as `NONE` and `CustomOpAttributes` are. A test over every member
 fails for one with neither, so a new op cannot silently leave its graphs without `$graph.flops`.
 [Adding a New Operation: Work Model (FLOPs)](../AddingNewOperations.md#work-model-flops) gives the
 contributor steps.
@@ -3186,10 +3194,9 @@ Caveats:
   tensor's own size, fractional for sub-byte types — a single-dtype shortcut is wrong for quantized
   kernels.
 - **Not every op has a clean closed form.** Ragged or data-dependent work (variable-length sequences,
-  page tables, MoE routing) cannot be counted from shapes; the count is then absent rather than
-  silently wrong ([Section 6.8](#68-the-work-model)). A bound, where one is useful, is published under its
-  own name and never as the count, and a UHD that needs better can compute its own inline in the
-  signature.
+  page tables, MoE routing) is counted at its declared extent, and `data_dependent` says the count is a
+  bound ([Section 6.8](#68-the-work-model)); a UHD that needs the work actually done can compute it
+  inline in the signature from the published operands.
 - **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
   bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
   per-op template) prunes it. Auto-derivation proposes; data or a template trims.

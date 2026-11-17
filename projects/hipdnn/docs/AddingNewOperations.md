@@ -231,7 +231,7 @@ annotations drive `scripts/gen_node_operands.py`, which generates a per-node-typ
 Mark a `(cache_uid)` field `work_data_dependent` when the referenced tensor's **contents**
 change how much work the node does — valid lengths (`seq_len_*`), page tables, block masks,
 MoE `first_token_offset`, `TensorAttributes.ragged_offset_tensor_uid`. The node then
-publishes `data_dependent = true`, and no work count may be derived from its shapes. Leave it
+publishes `data_dependent = true`, and its work count is the declared extent its shapes give. Leave it
 off an operand read densely whatever its values (an additive bias, dropout seed, MoE
 `token_index`). The annotation changes neither the cache key nor `flatc`'s output.
 
@@ -260,16 +260,19 @@ one of two decisions in `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineF
   `convolutionFlops` and `attentionFlops` helpers cover the common shapes. Add the formula to the
   table in RFC 0019 §6.8.
 - **No counting convention.** Add the member to `NO_COUNTING_CONVENTION`, with a one-line
-  reason above it, as for `CustomOpAttributes` (opaque) and the MoE grouped matmuls (the routing
-  offsets decide the rows); it then needs no overload and no case. Every node of that type has
-  unknown work, so a graph containing one publishes no `graph.flops` and no
-  `graph.arithmetic_intensity`: its benchmark rows carry no `tflops` label, no `tflops` model
-  can score it, and no feature derived from FLOPs can be extracted for it. Its
-  `graph.flops_by_type.<Type>` is absent; other types' entries are not. Models of `time` are
-  unaffected, since measured time needs no work count.
+  reason above it, as for `CustomOpAttributes` (opaque: the graph does not say what it
+  computes); it then needs no overload and no case. Every node of that type has unknown work,
+  so a graph containing one publishes no `graph.flops` and no `graph.arithmetic_intensity`:
+  its benchmark rows carry no `tflops` label, no `tflops` model can score it, and no feature
+  derived from FLOPs can be extracted for it. Its `graph.flops_by_type.<Type>` is absent; other
+  types' entries are not. Models of `time` are unaffected, since measured time needs no work
+  count. Reserve this for ops whose work the graph does not describe at all.
 
-An operand marked `work_data_dependent` already makes its node's count unknown whatever the
-formula ([Operand Features](#operand-features)); `nodeFlops` need not repeat that check.
+An operand marked `work_data_dependent` does not make the count unknown: count the problem the
+graph **declares** (padded lengths, every routed row, a paged cache's declared keys), and the
+node's `data_dependent` feature tells a model that the operand's contents may cut it short
+([Operand Features](#operand-features), RFC 0019 §6.8 rule 4). Never read an operand's contents
+in `nodeFlops`.
 
 `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` in
 `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` holds one representative one-node graph per
@@ -391,7 +394,7 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 | Constants header | shared per-op test constants | generator | `test_sdk/include/hipdnn_test_sdk/constants/MatmulConstants.hpp` |
 | Backend enum string | one `EXPECT_STREQ` per new attribute and descriptor type | hand-add | `backend/tests/TestBackendEnumStringUtils.cpp` |
 | Work model | the op's declared FLOPs on a representative one-node graph, or its `NO_COUNTING_CONVENTION` entry instead; `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` fails for a member with neither | generator stub (`fragments/work_model_test_case.txt`), hand-complete | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` (`matmulBroadcastGraph`, 840 FLOPs) |
-| Operand features (if any operand is `work_data_dependent`) | the operand, present, sets `graph.nodes[i].data_dependent` and leaves the node's FLOPs absent; every type's operand publication is covered by `EveryNodeTypePublishesItsOperands` | hand-add | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` (`MoeRoutingMakesWorkDataDependent`) |
+| Operand features (if any operand is `work_data_dependent`) | the operand, present, sets `graph.nodes[i].data_dependent` while the node still counts its declared work; every type's operand publication is covered by `EveryNodeTypePublishesItsOperands` | hand-add | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` (`MoeRoutingCountsTheDeclaredRows`) |
 | Sample (optional but expected) | end-user-style usage | hand-author | `samples/<op>/` |
 
 > [!IMPORTANT]
