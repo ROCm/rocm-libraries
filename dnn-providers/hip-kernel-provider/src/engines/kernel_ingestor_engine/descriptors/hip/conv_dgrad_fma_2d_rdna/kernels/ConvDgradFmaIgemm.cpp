@@ -50,8 +50,13 @@
 #define LOAD_A (TILE_M * TILE_C / BLOCK_SIZE)
 #define LOAD_B (TILE_N * TILE_C / BLOCK_SIZE)
 
+// reg_t holds a value between its global load and its store to LDS: the value itself for fp32,
+// the 16 bits zero-extended for fp16 / bf16. Converting only at the LDS store lets the loads of
+// the next iteration stay in flight across the FMAs; converting at the load makes every
+// iteration wait for them.
 #if CONV_DTYPE == 0
 typedef float data_t;
+typedef float reg_t;
 __device__ static inline float to_float(data_t v)
 {
     return v;
@@ -61,17 +66,19 @@ __device__ static inline data_t from_float(float v)
     return v;
 }
 #elif CONV_DTYPE == 1
-typedef _Float16 data_t;
+typedef unsigned short data_t;
+typedef unsigned int reg_t;
 __device__ static inline float to_float(data_t v)
 {
-    return static_cast<float>(v);
+    return static_cast<float>(__builtin_bit_cast(_Float16, v));
 }
 __device__ static inline data_t from_float(float v)
 {
-    return static_cast<data_t>(v);
+    return __builtin_bit_cast(data_t, static_cast<_Float16>(v));
 }
 #else
 typedef unsigned short data_t;
+typedef unsigned int reg_t;
 __device__ static inline float to_float(data_t v)
 {
     return __builtin_bit_cast(float, static_cast<unsigned int>(v) << 16);
@@ -248,7 +255,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     // channels [(it % nk) * TILE_C, + TILE_C).
     const int nk = (Kg + TILE_C - 1) / TILE_C;
     const int iters = taps_v * nk;
-    float ra[LOAD_A], rb[LOAD_B];
+    reg_t ra[LOAD_A], rb[LOAD_B];
 
     auto load = [&](int it) {
         const int j = it / nk;
@@ -276,7 +283,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         for(int i = 0; i < LOAD_A; ++i)
         {
             const int k = k0 + a_col + i;
-            ra[i] = (a_ok && k < Kg) ? to_float(a_ptr[k * dy_kstride]) : 0.f;
+            ra[i] = (a_ok && k < Kg) ? static_cast<reg_t>(a_ptr[k * dy_kstride]) : reg_t(0);
         }
         for(int i = 0; i < LOAD_B; ++i)
         {
@@ -288,19 +295,19 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
 #else
                 const long long w_index = (static_cast<long long>(k) * Cg + bc) * taps + tap;
 #endif
-                rb[i] = to_float(wei_g[w_index]);
+                rb[i] = static_cast<reg_t>(wei_g[w_index]);
             }
             else
             {
-                rb[i] = 0.f;
+                rb[i] = reg_t(0);
             }
         }
     };
     auto store = [&](int buf) {
         for(int i = 0; i < LOAD_A; ++i)
-            as[buf][a_col + i][a_row] = ra[i];
+            as[buf][a_col + i][a_row] = to_float(static_cast<data_t>(ra[i]));
         for(int i = 0; i < LOAD_B; ++i)
-            bs[buf][b_col + i][b_row] = rb[i];
+            bs[buf][b_col + i][b_row] = to_float(static_cast<data_t>(rb[i]));
     };
     auto compute = [&](int buf) {
         for(int kk = 0; kk < TILE_C; ++kk)
