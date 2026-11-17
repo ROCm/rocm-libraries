@@ -283,6 +283,44 @@ TEST(HostUnitMXIntegerExact, smoke_ZeroRowsAreRefused)
         }
 }
 
+// Non-transposed A and transposed B realign a partial K block with getAlignedFloat, which
+// indexes one past the packed buffer (64 rows, 33 columns, block 32). integer_exact refuses
+// that shape before writing, for fp6 and fp8 and for both operand layouts. A valid GEMM with
+// transposed A and non-transposed B is unaffected.
+TEST(HostUnitMXIntegerExact, smoke_PartialKAlongColumnsIsRefused)
+{
+    const uint64_t rows = 64, cols = 33, stride = 64;
+    for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_8F_E4M3})
+        for(bool nonTransposedA : {true, false})
+        {
+            const bool isMatrixA  = nonTransposedA;
+            const bool isTranspose = !nonTransposedA;
+            const size_t elements = static_cast<size_t>(stride) * static_cast<size_t>(cols);
+            const size_t dataBytes
+                = type == HIP_R_6F_E2M3 ? (elements * 6 + 7) / 8 : elements;
+            std::vector<uint8_t> data(dataBytes, 0xA5);
+            std::vector<uint8_t> scale(elements / 32 + 64, 0xA5);
+            EXPECT_THROW(generateMXInput(type,
+                                         HIP_R_8U,
+                                         data.data(),
+                                         scale.data(),
+                                         rows,
+                                         cols,
+                                         stride,
+                                         isTranspose,
+                                         32,
+                                         1,
+                                         isMatrixA,
+                                         MXScaleLayout::None,
+                                         "integer_exact"),
+                         std::runtime_error)
+                << "type " << int(type) << " nonTransposedA=" << nonTransposedA;
+            EXPECT_TRUE(std::all_of(data.begin(), data.end(), [](uint8_t b) { return b == 0xA5; }));
+            EXPECT_TRUE(
+                std::all_of(scale.begin(), scale.end(), [](uint8_t b) { return b == 0xA5; }));
+        }
+}
+
 // When stride * cols is not a multiple of rows, the generator has no scales for the elements
 // past its last whole run of rows, so integer_exact refuses the shape before writing.
 TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionWithoutWholeRunsIsRefused)

@@ -58,6 +58,9 @@ constexpr int64_t integerExactMXSumBound(int64_t K)
 // before writing: the row count divides the padded-layout check. Otherwise the reference
 // covers all stride * col elements the generator writes, and stride * col must be a multiple
 // of row, or it throws before writing.
+// With K along the stored columns (non-transposed A or transposed B), K must be a multiple of
+// the scale block. A partial block makes getAlignedFloat read past the packed buffer, so
+// integer_exact throws before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,

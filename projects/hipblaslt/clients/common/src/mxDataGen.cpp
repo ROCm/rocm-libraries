@@ -425,6 +425,17 @@ std::vector<float> generateData(T                           dgen,
                 + std::to_string(sizes[0]) + " rows");
     }
 
+    // Non-K-major integer_exact (non-transposed A, transposed B) realigns through
+    // getAlignedFloat. A partial trailing K block makes that helper form a data index one
+    // past the packed buffer (rows=64, cols=33, block 32 indexes 2112 of 2112 elements).
+    // Refuse before generating or writing. The helper repair is a separate change; rand_int
+    // on the base branch has the same indexing and stays out of scope here.
+    if(integerExact && isMatrixA != isTranspose && elementsPerMXBlock > 0
+       && static_cast<size_t>(sizes[1]) % static_cast<size_t>(elementsPerMXBlock) != 0)
+        throw std::runtime_error(
+            "integer_exact MX data with K along the columns requires K to be a multiple of "
+            + std::to_string(elementsPerMXBlock) + ", got " + std::to_string(sizes[1]));
+
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
 
