@@ -1620,39 +1620,48 @@ TEST(GPU_HipdnnShimBNTuning_FP32, NonePolicyDoesNotSearch)
 
 // MIOpen's batchnorm writes the perf db only while it searches, so under DbUpdate
 // it runs as under None, and the hipDNN path serves it as None. Inference without
-// the estimates runs training, so it is covered too.
+// the estimates runs training, so it is covered too. MIOPEN_FIND_ENFORCE=DB_UPDATE
+// asks for no more than the handle, so it is served the same way; the values that
+// ask for more are declined (DbUpdatePolicyUnderFindEnforceIsDeclined).
 TEST(GPU_HipdnnShimBNTuning_FP32, DbUpdatePolicyRunsAsNone)
 {
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbUpdate);
-    const ScopedFindEnforce find_enforce("");
     const SearchLogScope search_log;
 
+    const std::pair<const char*, const char*> values[] = {{"", ""},
+                                                          {"_find_enforce_db_update", "DB_UPDATE"}};
+    for(const auto& [suffix, value] : values)
     {
-        SCOPED_TRACE("train");
-        TrainData d;
-        const auto result = TrainUnderPolicy(handle, d);
-        if(ExpectServed("dbupdate_policy_train", result))
+        SCOPED_TRACE(value);
+        const ScopedFindEnforce find_enforce(value);
+        const std::string prefix = "dbupdate_policy" + std::string(suffix);
         {
-            EXPECT_FALSE(Searched(result)) << result.logged;
-            CheckTrain(handle, d, true, false);
+            SCOPED_TRACE("train");
+            TrainData d;
+            const auto result = TrainUnderPolicy(handle, d);
+            if(ExpectServed(prefix + "_train", result))
+            {
+                EXPECT_FALSE(Searched(result)) << result.logged;
+                CheckTrain(handle, d, true, false);
+            }
         }
-    }
-    {
-        SCOPED_TRACE("bwd");
-        BwdData d;
-        const auto result = BwdUnderPolicy(handle, d);
-        if(ExpectServed("dbupdate_policy_bwd", result))
         {
-            EXPECT_FALSE(Searched(result)) << result.logged;
-            CheckBwd(handle, d);
+            SCOPED_TRACE("bwd");
+            BwdData d;
+            const auto result = BwdUnderPolicy(handle, d);
+            if(ExpectServed(prefix + "_bwd", result))
+            {
+                EXPECT_FALSE(Searched(result)) << result.logged;
+                CheckBwd(handle, d);
+            }
         }
-    }
-    {
-        SCOPED_TRACE("infer");
-        InferData d;
-        if(ExpectServed("dbupdate_policy_infer", InferUnderPolicy(handle, d, false)))
-            CheckInferWithoutEstimates(handle, d);
+        {
+            SCOPED_TRACE("infer");
+            InferData d;
+            if(ExpectServed(prefix + "_infer", InferUnderPolicy(handle, d, false)))
+                CheckInferWithoutEstimates(handle, d);
+        }
     }
 }
 
