@@ -3114,13 +3114,6 @@ class Solution(collections.abc.Mapping):
         state["MIWaveTileA"] = state["MIWaveTile"][1]
         state["MIWaveTileB"] = state["MIWaveTile"][0]
 
-    if not state["EnableMatrixInstruction"]:
-      state["MIWaveTileA"] = 1
-      state["MIWaveTileB"] = 1
-      state["MIInputPerThread"] = state["ThreadTileA"]
-      state["MIInputPerThreadA"] = state["ThreadTileA"]
-      state["MIInputPerThreadB"] = state["ThreadTileB"]
-
     if state["ProblemType"]["Sparse"] == 2 and state["DirectToVgprSparseMetadata"]:
       reject(state, printRejectionReason, "Sparse B does not supprot DirectToVgprSparseMetadata")
       return
