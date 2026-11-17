@@ -127,7 +127,7 @@ typedef struct rocke_fused_mega_fp8_levers
 rocke_fused_mega_fp8_levers_t rocke_fused_mega_fp8_levers_default(void);
 
 /* ============================================================ *
- * FusedMegaKernelSpecFp8   (Python lines 298-403)
+ * FusedMegaKernelSpecFp8
  * ============================================================ *
  *
  * One concrete fp8 fused-MoE mega-kernel configuration. Field order follows the
@@ -198,7 +198,7 @@ rocke_status_t rocke_fused_mega_fp8_spec_kernel_name(const rocke_fused_mega_kern
                                                      size_t out_cap);
 
 /* ============================================================ *
- * Grid + signature   (Python lines 411-496)
+ * Grid + signature
  * ============================================================ */
 
 /* moe_fused_mega_fp8_grid(num_m_blocks, inter, spec) ->
@@ -238,7 +238,7 @@ rocke_status_t rocke_moe_fused_mega_fp8_signature(const rocke_fused_mega_kernel_
                                                   size_t* out_count);
 
 /* ============================================================ *
- * Build entry + lower convenience   (Python lines 1554-2129)
+ * Build entry + lower convenience
  * ============================================================ */
 
 /* build_moe_fused_mega_gemm_fp8(spec, arch="gfx950", persistent=False).

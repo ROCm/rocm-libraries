@@ -28,7 +28,7 @@ STAGING STATUS (incremental implementation per BUILD_SPEC_FP8 Phase plan):
 
 * STAGE 1 (THIS FILE, current state):
     - ``FusedMegaKernelSpecFp8`` (fp8 spec / signature / grid).
-    - the gate+up fp8 GEMM via ``_emit_fp8_gateup_group_gemm`` (fp8 atom,
+    - the gate+up fp8 GEMM via ``_emit_fp8_gateup_fused_kloop`` (fp8 atom,
       fp8 operand loads, per-128-block scale dequant of BOTH accumulators).
     - SiLU(gate)*up in f32.
     - ``_emit_hidden_dyn_quant_stage``: per-(row, 128-inter-block) amax ->
@@ -506,135 +506,6 @@ def moe_fused_mega_fp8_signature(
 # ---------------------------------------------------------------------------
 
 
-def _emit_fp8_gateup_group_gemm(
-    b: IRBuilder,
-    *,
-    A: Value,
-    WGate: Value,
-    WUp: Value,
-    AScale: Value,
-    WGateScale: Value,
-    WUpScale: Value,
-    atom: MfmaAtom,
-    lane_decode,
-    m_tile_base: Value,
-    n_tile_base: Value,
-    K: Value,
-    stride_a_scale: Value,
-    stride_gate_scale: Value,
-    stride_up_scale: Value,
-    tag: str,
-) -> Tuple[Value, Value]:
-    """Gate + up fp8 GEMM, returning ``(gate_dq, up_dq)`` per-lane f32 vectors.
-
-    Group-accumulator pattern (BUILD_SPEC_FP8 Section 1.2): the outer loop walks
-    128-wide groups along the hidden contraction K (= H). Per group, 4
-    fp8_16x16x32 atoms accumulate into a FRESH ``group_acc`` (one for gate, one
-    for up), then the group is folded into the outer accumulator scaled by
-    ``a_scale * b_scale`` -- a single ``v_pk_fma_f32`` per accumulator. The
-    A read (the quantized activation) is shared across gate and up; only the
-    B-side weight scale differs.
-
-    Scale index math (BUILD_SPEC_FP8 Section 1.3), per-128 along the
-    contraction and per-128 along the output:
-
-        a_scale_off = (m_row // GROUP_K_M) * k_scale_count + kg
-        b_scale_off = kg * n_scale_count + (n_col // GROUP_K)
-
-    Here the activation amax is per-(token-block, H-block); we use the per-row
-    granularity available to the lane (``m_row``) with the H-block index ``kg``,
-    and the weight scale is per (output-128, contraction-128).
-    """
-    c_group_k = b.const_i32(GROUP_K)
-    c_atom_k = b.const_i32(atom.k)
-    atoms_per_group = GROUP_K // atom.k  # 4
-
-    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
-    n_col = b.add(n_tile_base, lane_decode.n_in_atom)
-
-    # Per-lane scale offsets vary along the K-group index ``kg`` only.
-    a_row_scale_base = b.mul(m_row, stride_a_scale)
-    n_blk = b.div(n_col, c_group_k)
-
-    zero = atom.zero_acc(b)
-    gate_zero = atom.zero_acc(b)
-    up_zero = atom.zero_acc(b)
-
-    # Outer loop over 128-wide contraction groups: num_groups = K // GROUP_K.
-    num_groups = b.div(K, c_group_k)
-    outer = b.scf_for_iter(
-        b.const_i32(0),
-        num_groups,
-        b.const_i32(1),
-        [(f"gate_outer_{tag}", gate_zero), (f"up_outer_{tag}", up_zero)],
-        iv_name=f"kg_{tag}",
-    )
-    with outer as (kg, (gate_outer, up_outer)):
-        # Per-group scales (one f32 each).
-        a_scale_off = b.add(a_row_scale_base, kg)
-        a_scale_v = b.global_load_f32(AScale, a_scale_off)
-        gate_scale_off = b.add(b.mul(kg, stride_gate_scale), n_blk)
-        up_scale_off = b.add(b.mul(kg, stride_up_scale), n_blk)
-        gate_scale_v = b.global_load_f32(WGateScale, gate_scale_off)
-        up_scale_v = b.global_load_f32(WUpScale, up_scale_off)
-        gate_ab = b.fmul(a_scale_v, gate_scale_v)
-        up_ab = b.fmul(a_scale_v, up_scale_v)
-
-        k_group_base = b.mul(kg, c_group_k)
-
-        # Fresh per-group accumulators; 4 fp8 atoms cover the 128-wide group.
-        ginner = b.scf_for_iter(
-            b.const_i32(0),
-            b.const_i32(atoms_per_group),
-            b.const_i32(1),
-            [(f"g_acc_{tag}", zero), (f"u_acc_{tag}", zero)],
-            iv_name=f"kk_{tag}",
-        )
-        with ginner as (kk, (g_acc, u_acc)):
-            k_tile_base = b.add(k_group_base, b.mul(kk, c_atom_k))
-            a_frag = _load_a_fp8(
-                b,
-                A=A,
-                atom=atom,
-                lane_decode=lane_decode,
-                m_tile_base=m_tile_base,
-                k_tile_base=k_tile_base,
-                K=K,
-            )
-            gb_frag = _load_b_fp8(
-                b,
-                B=WGate,
-                atom=atom,
-                lane_decode=lane_decode,
-                n_tile_base=n_tile_base,
-                k_tile_base=k_tile_base,
-                N=K,
-            )
-            ub_frag = _load_b_fp8(
-                b,
-                B=WUp,
-                atom=atom,
-                lane_decode=lane_decode,
-                n_tile_base=n_tile_base,
-                k_tile_base=k_tile_base,
-                N=K,
-            )
-            g_new = _emit_mfma(b, atom, a_frag, gb_frag, g_acc)
-            u_new = _emit_mfma(b, atom, a_frag, ub_frag, u_acc)
-            b.scf_yield(g_new, u_new)
-        group_gate = ginner.results[0]
-        group_up = ginner.results[1]
-
-        # Fold (post-MFMA, per-group): outer += group * (a_scale * b_scale).
-        gate_scale_vec = b.vector_splat(gate_ab, atom.c_per_lane)
-        up_scale_vec = b.vector_splat(up_ab, atom.c_per_lane)
-        gate_outer_new = b.vector_fma(group_gate, gate_scale_vec, gate_outer)
-        up_outer_new = b.vector_fma(group_up, up_scale_vec, up_outer)
-        b.scf_yield(gate_outer_new, up_outer_new)
-
-    return outer.results[0], outer.results[1]
-
-
 def _emit_fp8_gateup_fused_kloop(
     b: IRBuilder,
     *,
@@ -659,9 +530,9 @@ def _emit_fp8_gateup_fused_kloop(
     """Gate + up fp8 GEMM fused across ALL ni cells of one mi row.
 
     COMBINATION lever (gate+up SW-pipeline + wave-pair odd/even MFMA interleave).
-    The legacy ``_emit_fp8_gateup_group_gemm`` ran an INDEPENDENT K-loop per
-    (mi, ni) cell, reloading the shared A operand ``mfmas_n`` times and emitting
-    the two MFMAs (gate, up) of each cell back-to-back -- a bursty pattern that
+    An INDEPENDENT K-loop per (mi, ni) cell (the stage 1 GEMM before this
+    lever) reloads the shared A operand ``mfmas_n`` times and emits the two
+    MFMAs (gate, up) of each cell back-to-back -- a bursty pattern that
     starves the compiler of any load/MFMA overlap window. This fused emitter:
 
     * Runs ONE outer 128-group K-loop carrying ``2 * len(n_tile_bases)`` outer
