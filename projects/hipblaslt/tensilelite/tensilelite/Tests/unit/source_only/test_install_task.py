@@ -6,6 +6,7 @@ import importlib.util
 import shlex
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
