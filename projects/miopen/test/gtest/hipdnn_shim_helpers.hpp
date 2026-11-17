@@ -258,12 +258,25 @@ void CheckMatchesCpuBackwardWeights(const tensor<T>& x,
     CheckWithinTolerance(ref_dw, dw, "backward-weights result");
 }
 
+// A fact the parity comparison requires to be the same in the forwarded and the native
+// run: compare_forwarding_runs.py compares only the properties named parity_*. Key one
+// per case, because gtest keeps only the last value recorded under a key.
+inline void RecordParity(const std::string& name, const std::string& value)
+{
+    ::testing::Test::RecordProperty("parity_" + name, value);
+}
+
+// known_forwarding_divergences.txt matches a flag by its true/false text.
+inline void RecordParityFlag(const std::string& name, bool value)
+{
+    RecordParity(name, value ? "true" : "false");
+}
+
 // A served case and a declined case both pass, so this property is what lets the parity
-// comparison tell them apart. Keyed by case name because gtest keeps only the last value
-// recorded under a key.
+// comparison tell them apart.
 inline void RecordServed(const std::string& case_name, bool served)
 {
-    ::testing::Test::RecordProperty("parity_served_" + case_name, served ? "true" : "false");
+    RecordParityFlag("served_" + case_name, served);
 }
 
 // FNV-1a over the raw bytes of a test's GPU outputs. A tolerance check passes for two
@@ -307,9 +320,8 @@ private:
 // to hash, and a property present in one run alone reads as a divergence.
 inline void RecordOutputHash(const OutputHash& hash, const std::string& case_name = "")
 {
-    ::testing::Test::RecordProperty(case_name.empty() ? std::string("parity_output_hash")
-                                                      : "parity_output_hash_" + case_name,
-                                    hash.Hex());
+    RecordParity(case_name.empty() ? std::string("output_hash") : "output_hash_" + case_name,
+                 hash.Hex());
 }
 
 // For a case neither mode serves. Records the enum name, because miopenGetErrorString's text
@@ -331,14 +343,14 @@ inline void RecordStatus(const std::string& case_name, miopenStatus_t status)
     case miopenStatusGpuOperationsSkipped: name = "GpuOperationsSkipped"; break;
     case miopenStatusVersionMismatch: name = "VersionMismatch"; break;
     }
-    ::testing::Test::RecordProperty("parity_status_" + case_name, name);
+    RecordParity("status_" + case_name, name);
 }
 
 // For a case where one mode is known to return a wrong answer, so the test records the check
 // instead of failing on it.
 inline void RecordCorrect(const std::string& case_name, bool correct)
 {
-    ::testing::Test::RecordProperty("parity_correct_" + case_name, correct ? "true" : "false");
+    RecordParityFlag("correct_" + case_name, correct);
 }
 
 // Fixed for the life of the process; the parity run executes each binary once per mode.

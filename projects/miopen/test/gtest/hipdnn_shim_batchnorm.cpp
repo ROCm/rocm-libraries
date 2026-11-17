@@ -1707,8 +1707,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchAfterNoneOnSameShapeMatchesMiopen)
         if(ExpectServed("same_shape_search_train", result))
         {
             const bool searched = Searched(result);
-            ::testing::Test::RecordProperty("parity_searched_same_shape_search_train",
-                                            searched ? "true" : "false");
+            hs::RecordParityFlag("searched_same_shape_search_train", searched);
             EXPECT_FALSE(searched) << "searched after the policy changed, so ALMIOPEN-3381 "
                                       "may be fixed\n"
                                    << result.logged;
@@ -1739,12 +1738,12 @@ void ExpectFindEnforceOutcome(const std::string& case_name,
                               const FindEnforceStep& step)
 {
     const bool searched = Searched(result);
-    ::testing::Test::RecordProperty("parity_searched_" + case_name, searched ? "true" : "false");
+    hs::RecordParityFlag("searched_" + case_name, searched);
     EXPECT_EQ(searched, step.searches) << result.logged;
     if(step.removes)
     {
         const bool removed = result.logged.find("Perf Db: record removed:") != std::string::npos;
-        ::testing::Test::RecordProperty("parity_removed_" + case_name, removed ? "true" : "false");
+        hs::RecordParityFlag("removed_" + case_name, removed);
         EXPECT_EQ(removed, *step.removes) << result.logged;
     }
 }
@@ -1863,8 +1862,7 @@ void RecordKernelTime(const miopen::Handle& handle, const std::string& case_name
 {
     const float ms      = handle.GetKernelTime();
     const bool recorded = ms > 0.0f;
-    ::testing::Test::RecordProperty("parity_kernel_time_recorded_" + case_name,
-                                    recorded ? "true" : "false");
+    hs::RecordParityFlag("kernel_time_recorded_" + case_name, recorded);
     if(!hs::ForwardingEnabled())
         EXPECT_TRUE(recorded) << case_name << ": " << ms << " ms";
 }
