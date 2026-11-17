@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
@@ -20,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -98,6 +100,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
+        _initialDeviceId = _deviceId;
 
         auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
@@ -122,6 +125,63 @@ protected:
         {
             ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
         }
+        // A test that moved to another device with rebindToDevice() leaves the next test on
+        // the device it started on.
+        if(_initialDeviceId >= 0)
+        {
+            ASSERT_EQ(hipSetDevice(_initialDeviceId), hipSuccess);
+        }
+    }
+
+    /// Replaces this fixture's handle and stream with new ones on @p ordinal, and leaves
+    /// @p ordinal current so the tensors of the next verification are allocated there.
+    ///
+    /// For tests that run the same graph on a second device within one process: each
+    /// device's plan must load its own modules, never another device's from a
+    /// process-wide cache.
+    void rebindToDevice(int ordinal)
+    {
+        if(_handle != nullptr)
+        {
+            ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+            _handle = nullptr;
+        }
+        if(_stream != nullptr)
+        {
+            ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+            _stream = nullptr;
+        }
+        ASSERT_EQ(hipSetDevice(ordinal), hipSuccess);
+        _deviceId = ordinal;
+        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+    }
+
+    /// Another device whose base architecture is the current device's, or -1 when there is
+    /// none.
+    static int peerDeviceOfSameArch()
+    {
+        int current = -1;
+        int count = 0;
+        hipDeviceProp_t currentProperties{};
+        if(hipGetDevice(&current) != hipSuccess || hipGetDeviceCount(&count) != hipSuccess
+           || hipGetDeviceProperties(&currentProperties, current) != hipSuccess)
+        {
+            return -1;
+        }
+        const std::string_view arch
+            = hipdnn_plugin_sdk::stripArchFeatures(currentProperties.gcnArchName);
+        for(int ordinal = 0; ordinal < count; ++ordinal)
+        {
+            hipDeviceProp_t properties{};
+            if(ordinal != current && hipGetDeviceProperties(&properties, ordinal) == hipSuccess
+               && hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName) == arch)
+            {
+                return ordinal;
+            }
+        }
+        return -1;
     }
 
 protected:
@@ -413,6 +473,8 @@ protected:
     int _deviceId = 0;
 
 private:
+    int _initialDeviceId = -1;
+
     void executeGpuGraph(hipdnnHandle_t handle,
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)

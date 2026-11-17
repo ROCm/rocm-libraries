@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2FwdPlan: IPlan implementation that executes Flash-Attention 2 V7.
-// Holds the HipModuleGuard (loaded .co) and the parameters for kernel dispatch.
+// Holds the per-device kernel modules (loaded .co) and the parameters for kernel
+// dispatch.
 // Mirrors the asm_sdpa_engine::SdpaFwdPlan pattern.
 
 #pragma once
@@ -10,8 +11,11 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipFlash2FwdPlanBuilder.hpp" // Flash2FwdParams
-#include "HipFlash2KernelUtils.hpp" // HipModuleGuard, Flash2KernelArgs
+#include "HipFlash2KernelResolver.hpp" // Flash2Kernels
+#include "HipFlash2KernelUtils.hpp" // Flash2KernelArgs
 #include "core/Handle.hpp"
+
+#include <memory>
 
 namespace hip_flash2_engine
 {
@@ -19,15 +23,16 @@ namespace hip_flash2_engine
 /**
  * @brief Flash-Attention 2 V7 forward kernel plan.
  *
- * Holds a preloaded HipModuleGuard (the arch-specific .co file) and the
- * Flash2FwdParams extracted from the hipDNN graph at buildPlan() time.
- * execute() maps device buffers by UID, fills Flash2KernelArgs, and
- * dispatches via hipModuleLaunchKernel.
+ * Holds the selected variant's module for each device it has executed on
+ * (buildPlan() loads the build device's) and the Flash2FwdParams extracted
+ * from the hipDNN graph at buildPlan() time. execute() maps device buffers by
+ * UID, fills Flash2KernelArgs, and dispatches via hipModuleLaunchKernel on the
+ * device the handle's stream names.
  */
 class HipFlash2FwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
-    explicit HipFlash2FwdPlan(HipModuleGuard kernel, Flash2FwdParams params);
+    HipFlash2FwdPlan(std::unique_ptr<Flash2Kernels> kernels, Flash2FwdParams params);
 
     ~HipFlash2FwdPlan() override = default;
 
@@ -46,7 +51,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    HipModuleGuard _kernel;
+    std::unique_ptr<Flash2Kernels> _kernels;
     Flash2FwdParams _params;
 };
 

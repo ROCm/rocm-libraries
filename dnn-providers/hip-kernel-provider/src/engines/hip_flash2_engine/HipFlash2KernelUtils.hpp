@@ -8,6 +8,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include "device/ScopedDevice.hpp"
+
 #include <cstdlib>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <optional>
@@ -20,28 +22,28 @@ namespace hip_flash2_engine
 // =============================================================================
 // HipModuleGuard -- RAII wrapper for hipModule_t
 // =============================================================================
+//
+// Carries the ordinal of the device the module was loaded on: HIP binds a module
+// to the device current at load and binds the unload the same way, and by the
+// time a plan is destroyed the current device is whatever the application last
+// set.
 class HipModuleGuard
 {
 public:
+    static constexpr int NO_DEVICE = -1;
+
     HipModuleGuard() = default;
 
-    explicit HipModuleGuard(hipModule_t mod, hipFunction_t func = nullptr)
+    HipModuleGuard(hipModule_t mod, int deviceOrdinal, hipFunction_t func = nullptr)
         : _module(mod)
         , _function(func)
+        , _deviceOrdinal(deviceOrdinal)
     {
     }
 
     ~HipModuleGuard()
     {
-        if(_module != nullptr)
-        {
-            const hipError_t err = hipModuleUnload(_module);
-            if(err != hipSuccess)
-            {
-                HIPDNN_PLUGIN_LOG_ERROR(
-                    "HipFlash2: failed to unload kernel module: " << hipGetErrorString(err));
-            }
-        }
+        unload();
     }
 
     HipModuleGuard(const HipModuleGuard&) = delete;
@@ -50,6 +52,7 @@ public:
     HipModuleGuard(HipModuleGuard&& o) noexcept
         : _module(std::exchange(o._module, nullptr))
         , _function(std::exchange(o._function, nullptr))
+        , _deviceOrdinal(std::exchange(o._deviceOrdinal, NO_DEVICE))
     {
     }
 
@@ -57,19 +60,10 @@ public:
     {
         if(this != &o)
         {
-            if(_module != nullptr)
-            {
-                // Log unload errors on move-assignment (mirrors SdpaKernelUtils pattern)
-                const hipError_t err = hipModuleUnload(_module);
-                if(err != hipSuccess)
-                {
-                    HIPDNN_PLUGIN_LOG_ERROR(
-                        "HipFlash2: failed to unload kernel module on move-assign: "
-                        << hipGetErrorString(err));
-                }
-            }
+            unload();
             _module = std::exchange(o._module, nullptr);
             _function = std::exchange(o._function, nullptr);
+            _deviceOrdinal = std::exchange(o._deviceOrdinal, NO_DEVICE);
         }
         return *this;
     }
@@ -87,27 +81,67 @@ public:
         _function = f;
     }
 
+    /// The device the module was loaded on, or NO_DEVICE for an empty guard.
+    int deviceOrdinal() const
+    {
+        return _deviceOrdinal;
+    }
+
 private:
+    void unload() noexcept
+    {
+        if(_module == nullptr)
+        {
+            return;
+        }
+        // A refused bind is logged by ScopedDevice; the unload is still attempted, as a
+        // destructor has nowhere to report a refusal.
+        std::optional<hip_kernel_provider::device::ScopedDevice> binding;
+        if(_deviceOrdinal != NO_DEVICE)
+        {
+            binding.emplace(_deviceOrdinal);
+        }
+        const hipError_t err = hipModuleUnload(_module);
+        if(err != hipSuccess)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "HipFlash2: failed to unload kernel module: " << hipGetErrorString(err));
+        }
+        _module = nullptr;
+    }
+
     hipModule_t _module = nullptr;
     hipFunction_t _function = nullptr;
+    int _deviceOrdinal = NO_DEVICE;
 };
 
 // =============================================================================
-// loadKernelModule -- load .co and get named function
+// loadKernelModule -- load .co on a device and get named function
 // =============================================================================
-inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
-                                                      const char* funcName)
+inline std::optional<HipModuleGuard>
+    loadKernelModule(const std::string& coPath, const char* funcName, int deviceOrdinal)
 {
+    // Bound before the load: the device current at hipModuleLoad is the one the
+    // module belongs to for the rest of its life.
+    const hip_kernel_provider::device::ScopedDevice binding(deviceOrdinal);
+    if(!binding.bound())
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: cannot make device "
+                                << deviceOrdinal << " current to load '" << coPath << "'");
+        return std::nullopt;
+    }
+
     hipModule_t rawModule = nullptr;
     hipError_t err = hipModuleLoad(&rawModule, coPath.c_str());
     if(err != hipSuccess)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: failed to load .co from '"
-                                << coPath << "': " << hipGetErrorString(err));
+        HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: failed to load .co from '" << coPath << "' on device "
+                                                                       << deviceOrdinal << ": "
+                                                                       << hipGetErrorString(err));
         return std::nullopt;
     }
 
-    HipModuleGuard guard(rawModule);
+    HipModuleGuard guard(rawModule, deviceOrdinal);
 
     hipFunction_t func = nullptr;
     err = hipModuleGetFunction(&func, guard.module(), funcName);

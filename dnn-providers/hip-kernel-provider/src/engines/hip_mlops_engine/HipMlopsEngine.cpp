@@ -3,14 +3,18 @@
 
 #include "HipMlopsEngine.hpp"
 #include "core/Utils.hpp"
+#include "device/ScopedDevice.hpp"
 #include "hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
+#include <optional>
 
 namespace hip_kernel_provider
 {
@@ -145,6 +149,29 @@ void HipMlopsEngine::initializeExecutionContext(
     }
 
     executionContext.setExecutionSettings(executionSettings);
+
+    // The plan builders read device properties from the current device and compile and
+    // load their programs against it. Make that the device of the handle's stream for the
+    // build, so the plan is built for the device the handle names rather than whichever
+    // device the caller left current. A default stream token already names the current
+    // device. Best effort: if the stream's device cannot be resolved or made current, the
+    // build proceeds on the current device as before, and the plan's kernels still resolve
+    // their device from the stream at every launch.
+    std::optional<device::ScopedDevice> binding;
+    auto* const stream = handle.getStream();
+    int streamDevice = -1;
+    if(!hipdnn_plugin_sdk::isDefaultStream(stream)
+       && hipdnn_plugin_sdk::getDeviceFromStream(stream, &streamDevice) == hipSuccess
+       && streamDevice >= 0)
+    {
+        binding.emplace(streamDevice);
+        if(!binding->bound())
+        {
+            HIPDNN_PLUGIN_LOG_WARN("HipMlopsEngine: cannot make device "
+                                   << streamDevice
+                                   << " current to build a plan; building on the current device");
+        }
+    }
 
     for(const auto& planBuilder : _planBuilders)
     {

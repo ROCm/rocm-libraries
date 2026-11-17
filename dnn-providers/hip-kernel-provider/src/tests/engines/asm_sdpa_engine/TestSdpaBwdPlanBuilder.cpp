@@ -20,6 +20,7 @@
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaPinnedKernels.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
@@ -579,10 +580,7 @@ SdpaBwdPlan createBwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::
     params.accumulatorType = AccumulatorType::A32;
     params.attnScale
         = hipdnn_plugin_sdk::ScalarOperand{K_BWD_RUNTIME_SCALE_UID, scaleType, true, 0.0};
-    return {std::make_shared<HipModuleGuard>(),
-            std::make_shared<HipModuleGuard>(),
-            std::make_shared<HipModuleGuard>(),
-            params};
+    return {pinnedBwdKernels(), params};
 }
 
 // A pure runtime scale tensor's value arrives only at execute, so execute returns

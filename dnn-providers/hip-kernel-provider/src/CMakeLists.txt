@@ -13,6 +13,7 @@ add_library(
     core/Container.cpp
     core/PluginPublic.cpp
     core/Utils.cpp
+    compilation/DeviceResolvedKernel.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
     utilities/Digest.cpp

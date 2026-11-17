@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaFwdPlan.hpp"
+#include "device/LaunchDeviceOrdinal.hpp"
+#include "device/ScopedDevice.hpp"
 #include "plans/SdpaFwdArgsBuilder.hpp"
 #include "plans/SdpaFwdLaunchParams.hpp"
 #include "plans/SdpaPlanUtils.hpp"
@@ -12,8 +14,8 @@
 namespace asm_sdpa_engine
 {
 
-SdpaFwdPlan::SdpaFwdPlan(CachedModule kernel, SdpaFwdParams params)
-    : _kernel(std::move(kernel))
+SdpaFwdPlan::SdpaFwdPlan(std::unique_ptr<SdpaFwdKernels> kernels, SdpaFwdParams params)
+    : _kernels(std::move(kernels))
     , _params(std::move(params))
 {
 }
@@ -46,8 +48,24 @@ void SdpaFwdPlan::execute(const Handle& handle,
         _params.attnScale, deviceBuffers, numDeviceBuffers, "SdpaFwdPlan::execute");
     const auto launchParams = computeFwdLaunchParams(_params);
 
+    // Resolved from the handle this call was given, not the one the plan was built under:
+    // a plan may be executed under any handle, and its module must be the one loaded on
+    // the device the launch runs on.
+    const int deviceOrdinal = hip_kernel_provider::device::launchDeviceOrdinal(handle.getStream());
+    const CachedModule kernel = _kernels->forOrdinal(deviceOrdinal);
+
+    // A module has to be launched from the device it was loaded on.
+    const hip_kernel_provider::device::ScopedDevice binding(deviceOrdinal);
+    if(!binding.bound())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "SdpaFwdPlan::execute: cannot make device "
+                                                           + std::to_string(deviceOrdinal)
+                                                           + " current to launch SDPA forward");
+    }
+
     if(!launchKernel("fwd",
-                     _kernel->function(),
+                     kernel->function(),
                      &args,
                      sizeof(args),
                      launchParams.gridDimX,
