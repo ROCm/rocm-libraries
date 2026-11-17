@@ -660,7 +660,13 @@ namespace rocsparse
         {
         case rocsparse_v2_spmv_stage_analysis:
         {
-            spmv_descr->set_analyzed_stamp(mat->pattern_stamp);
+            // The CSR, CSC and BSR analysis kept by spmv_descr describes the arrays of the
+            // matrix descriptor it was computed for. Another matrix descriptor, or arrays
+            // replaced with rocsparse_*_set_pointers, need a new rocsparse_spmv_descr.
+            if(spmv_descr->has_analysis() && spmv_descr->get_analyzed_stamp() != mat->pattern_stamp)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+            }
 
             switch(format)
             {
@@ -669,6 +675,7 @@ namespace rocsparse
             case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
+                spmv_descr->set_analyzed_stamp(mat->pattern_stamp);
                 return rocsparse_status_success;
             }
 
@@ -701,6 +708,7 @@ namespace rocsparse
                                                                          &coomv_info)));
                     mat->info->set_coomv_info(coomv_info);
                 }
+                spmv_descr->set_analyzed_stamp(mat->pattern_stamp);
                 return rocsparse_status_success;
             }
 
@@ -729,6 +737,8 @@ namespace rocsparse
                                                                          &bsrmv_info)));
                     spmv_descr->set_bsrmv_info(bsrmv_info);
                 }
+
+                spmv_descr->set_analyzed_stamp(mat->pattern_stamp);
 
                 return rocsparse_status_success;
             }
@@ -760,6 +770,8 @@ namespace rocsparse
                     spmv_descr->set_csrmv_info(csrmv_info);
                 }
 
+                spmv_descr->set_analyzed_stamp(mat->pattern_stamp);
+
                 return rocsparse_status_success;
             }
 
@@ -786,6 +798,7 @@ namespace rocsparse
                                                                          &cscmv_info)));
                     spmv_descr->set_cscmv_info(cscmv_info);
                 }
+                spmv_descr->set_analyzed_stamp(mat->pattern_stamp);
                 return rocsparse_status_success;
             }
 

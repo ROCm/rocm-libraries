@@ -358,10 +358,11 @@ rocsparse_status _rocsparse_mat_info::clear_spmv_info_if_stale(hipStream_t strea
         return rocsparse_status_success;
     }
 
-    // Freeing the csrmv info synchronizes the device, which is illegal while the
-    // stream is being captured. The stale info is kept, so that a call outside
-    // the capture can still free it.
-    if(this->csrmv_info != nullptr || this->bsrmv_info != nullptr)
+    // Freeing the csrmv and bsrmv info synchronizes the device, and so can the
+    // analysis that replaces a COO info (the atomic algorithm copies to the host).
+    // Both are illegal while the stream is being captured. The stale info is kept,
+    // so that a call outside the capture can still free it.
+    if(this->csrmv_info != nullptr || this->bsrmv_info != nullptr || this->coomv_info != nullptr)
     {
         hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
         RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));

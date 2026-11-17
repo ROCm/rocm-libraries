@@ -73,37 +73,41 @@ hipsparseSpMVDescr_st::Entry::~Entry()
 
 void hipsparseSpMVDescr_st::discard_entries()
 {
-    this->m_entries_stale = true;
+    // Moving an Entry frees nothing: the rocSPARSE descriptor and the compute
+    // buffer move with it, so this is safe while the stream is being captured.
+    for(auto& entry : this->m_entries)
+    {
+        this->m_retired_entries.push_back(std::move(entry));
+    }
+    this->m_entries.clear();
 }
 
 hipsparseStatus_t hipsparseSpMVDescr_st::release_discarded_entries(hipStream_t stream)
 {
-    if(this->m_entries_stale && !this->m_entries.empty())
+    if(this->m_retired_entries.empty())
     {
-        // Destroying a rocSPARSE SpMV descriptor synchronizes the device, which
-        // is illegal while the stream is being captured. The entries stay marked
-        // stale, so that a call outside the capture can still release them.
-        hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
-        RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
-        if(capture_status != hipStreamCaptureStatusNone)
-        {
-            return HIPSPARSE_STATUS_INVALID_VALUE;
-        }
+        return HIPSPARSE_STATUS_SUCCESS;
     }
 
-    if(this->m_entries_stale)
+    // Destroying a rocSPARSE SpMV descriptor synchronizes the device, which is
+    // illegal while the stream is being captured. The retired entries are kept
+    // until a call outside the capture releases them.
+    hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+    RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
+    if(capture_status != hipStreamCaptureStatusNone)
     {
-        for(auto& entry : this->m_entries)
-        {
-            if(entry.compute_buffer != nullptr)
-            {
-                RETURN_IF_HIP_ERROR(hipFreeAsync(entry.compute_buffer, stream));
-                entry.compute_buffer = nullptr;
-            }
-        }
-        this->m_entries.clear();
-        this->m_entries_stale = false;
+        return HIPSPARSE_STATUS_SUCCESS;
     }
+
+    for(auto& entry : this->m_retired_entries)
+    {
+        if(entry.compute_buffer != nullptr)
+        {
+            RETURN_IF_HIP_ERROR(hipFreeAsync(entry.compute_buffer, stream));
+            entry.compute_buffer = nullptr;
+        }
+    }
+    this->m_retired_entries.clear();
     return HIPSPARSE_STATUS_SUCCESS;
 }
 

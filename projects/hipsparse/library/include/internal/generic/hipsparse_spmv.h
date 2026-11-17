@@ -280,9 +280,9 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \note
 *  With the rocSPARSE backend, the first \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or
 *  \p hipsparseSpMV call after \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or
-*  \ref hipsparseCooSetPointers releases the state kept for the previous arrays, which synchronizes the device.
-*  While the stream of \p handle is being captured, that call returns \ref HIPSPARSE_STATUS_INVALID_VALUE and keeps
-*  that state; make it outside the capture.
+*  \ref hipsparseCooSetPointers retires the state kept for the previous arrays, which is destroyed by the next call made
+*  outside the capture, because destroying it synchronizes the device. The retirement frees nothing, so while the stream of
+*  \p handle is being captured, that call still analyzes the new arrays and succeeds.
 *
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
