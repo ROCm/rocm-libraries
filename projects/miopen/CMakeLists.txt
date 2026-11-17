@@ -782,7 +782,8 @@ endforeach()
 
 if(DVC_MISSING_FILES)
     string(REPLACE ";" ", " __dvc_missing_files "${DVC_MISSING_FILES}")
-    message(WARNING "DVC files not pulled down, skipped: ${__dvc_missing_files}")
+    message(WARNING "Git LFS objects not fetched, so the kdb packages are skipped: "
+                    "${__dvc_missing_files}. Install Git LFS, run 'git lfs pull' and reconfigure.")
     set(MIOPEN_NO_DVC_PULLED TRUE CACHE INTERNAL "")
 else()
     set(CPACK_COMPONENTS_ALL ${COMPONENT_LST})
