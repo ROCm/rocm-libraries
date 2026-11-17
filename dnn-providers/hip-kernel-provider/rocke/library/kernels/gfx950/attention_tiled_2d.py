@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Tuple
 
-from kernels.common._fmha_common import check_head_counts, gqa_ratio
+from kernels.common._fmha_common import check_head_counts
 from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
@@ -58,15 +58,14 @@ from kernels.common.attention_mask_type import band_mask_type
 from kernels.common._attention_tiled_shared import (
     AccLayout,
     Fp8KvSyncLoader,
+    Tiled2DSpecMixin,
     TiledLaneMap,
     mfma_32x32_c_col,
     mfma_32x32_c_row,
 )
 
 from rocke.core.ir import (
-    BF16,
     CACHE_STREAM,
-    F16,
     F32,
     FP8E4M3,
     I32,
@@ -74,7 +73,6 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
-    Type,
     Value,
 )
 from rocke.helpers.attention import (
@@ -120,7 +118,7 @@ _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 
 @dataclass(frozen=True)
-class UnifiedAttention2DTiledSpec:
+class UnifiedAttention2DTiledSpec(Tiled2DSpecMixin):
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
@@ -843,14 +841,6 @@ class UnifiedAttention2DTiledSpec:
                 )
 
     @property
-    def num_queries_per_kv(self) -> int:
-        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
-
-    @property
-    def block_m(self) -> int:
-        return self.block_m_per_warp * self.num_warps
-
-    @property
     def regs_per_lane(self) -> int:
         """Number of accumulator register slots per lane per N-tile.
 
@@ -867,24 +857,6 @@ class UnifiedAttention2DTiledSpec:
         if self.use_mfma_32x32:
             return 16
         return self.block_m_per_warp // 4  # 4 for M=16, 8 for M=32
-
-    @property
-    def block_q(self) -> int:
-        return self.block_m // self.num_queries_per_kv
-
-    @property
-    def tile_size_eff(self) -> int:
-        """Effective per-iter KV-tile size in tokens."""
-        return self.tile_size if self.tile_size is not None else self.block_size
-
-    @property
-    def n_blocks_per_tile(self) -> int:
-        """How many paged-KV cache blocks one kernel iter consumes."""
-        return self.tile_size_eff // self.block_size
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def mask_type(self) -> int:
         """The band as one ``AttentionMaskType`` value

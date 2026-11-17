@@ -14,9 +14,11 @@ Mirrored by instance_attention_tiled_common_internal.h in the C++ engine.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
-from rocke.core.ir import F32, FP8E4M3, IRBuilder, Type, Value
+from kernels.common._fmha_common import gqa_ratio
+from kernels.common._spec_checks import require_bool
+from rocke.core.ir import BF16, F16, F32, FP8E4M3, IRBuilder, Type, Value
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.distribution import make_static_tile_distribution
 
@@ -25,6 +27,11 @@ __all__ = [
     "AccLayout",
     "Fp8KvSyncLoader",
     "KvLdsSwizzle",
+    "ReduceTiledSpecMixin",
+    "Tiled2DSpecMixin",
+    "Tiled3DSpecMixin",
+    "TiledDtypeIrMixin",
+    "TiledGqaMixin",
     "TiledLaneMap",
     "mfma_32x32_c_col",
     "mfma_32x32_c_row",
@@ -453,3 +460,74 @@ class KvLdsSwizzle:
             b.mul(row, b.const_i32(self.hd)),
             self.col(row, b.mod(linear_half, b.const_i32(self.hd))),
         )
+
+
+class TiledDtypeIrMixin:
+    """``dtype_ir`` of the tiled attention specs (2D, 3D segment, reduce)."""
+
+    dtype: str
+
+    @property
+    def dtype_ir(self) -> Type:
+        return F16 if self.dtype == "fp16" else BF16
+
+
+class TiledGqaMixin(TiledDtypeIrMixin):
+    """GQA geometry shared by the tiled 2D and 3D segment specs.
+
+    ``block_q`` reads ``block_m``, which each spec family defines.
+    """
+
+    num_query_heads: int
+    num_kv_heads: int
+
+    @property
+    def num_queries_per_kv(self) -> int:
+        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
+
+    @property
+    def block_q(self) -> int:
+        return self.block_m // self.num_queries_per_kv
+
+
+class Tiled2DSpecMixin(TiledGqaMixin):
+    """Derived tile geometry of the tiled 2D spec."""
+
+    block_m_per_warp: int
+    num_warps: int
+    tile_size: Optional[int]
+    block_size: int
+
+    @property
+    def block_m(self) -> int:
+        return self.block_m_per_warp * self.num_warps
+
+    @property
+    def tile_size_eff(self) -> int:
+        """Effective per-iter KV-tile size in tokens."""
+        return self.tile_size if self.tile_size is not None else self.block_size
+
+    @property
+    def n_blocks_per_tile(self) -> int:
+        """How many paged-KV cache blocks one kernel iter consumes."""
+        return self.tile_size_eff // self.block_size
+
+
+class Tiled3DSpecMixin(TiledGqaMixin):
+    """Derived tile geometry of the tiled 3D segment spec."""
+
+    @property
+    def block_m(self) -> int:
+        return 16
+
+
+class ReduceTiledSpecMixin(TiledDtypeIrMixin):
+    """Validation shared by the tiled 3D reduce specs."""
+
+    emit_lse: bool
+    num_segments: int
+
+    def __post_init__(self) -> None:
+        require_bool("emit_lse", self.emit_lse)
+        if self.num_segments < 1:
+            raise ValueError("num_segments must be >= 1")

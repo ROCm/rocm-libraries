@@ -34,24 +34,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Optional, Tuple
 
-from kernels.common._fmha_common import check_head_counts, gqa_ratio
+from kernels.common._fmha_common import check_head_counts
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._attention_tiled_shared import KvLdsSwizzle
+from kernels.common._attention_tiled_shared import (
+    KvLdsSwizzle,
+    ReduceTiledSpecMixin,
+    Tiled3DSpecMixin,
+)
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
     tiled_reduce_unsupported_reason,
 )
 
 from rocke.core.ir import (
-    BF16,
     CACHE_POLICY_NAMES,
-    F16,
     F32,
     FP8E4M3,
     I32,
@@ -60,7 +61,6 @@ from rocke.core.ir import (
     KernelDef,
     PtrType,
     TemporalHint,
-    Type,
     Value,
     cache_policy_from_name,
 )
@@ -109,7 +109,7 @@ def _mfma_16x16_c_row(b, lane, reg: int):
 
 
 @dataclass(frozen=True)
-class UnifiedAttention3DTiledSpec:
+class UnifiedAttention3DTiledSpec(Tiled3DSpecMixin):
     """Spec for the split-KV 3D segment kernel (gfx942 narrow-atom variant).
 
     Field-compatible with the gfx950 ``UnifiedAttention3DTiledSpec`` so the
@@ -241,18 +241,6 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError("use_wave_page_id_load needs paged fp16/bf16 KV")
 
     @property
-    def num_queries_per_kv(self) -> int:
-        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
-
-    @property
-    def block_m(self) -> int:
-        return 16
-
-    @property
-    def block_q(self) -> int:
-        return self.block_m // self.num_queries_per_kv
-
-    @property
     def tile_size(self) -> int:
         return (
             self.tile_size_override
@@ -269,10 +257,6 @@ class UnifiedAttention3DTiledSpec:
         """The GQA ratio the kernel bakes (the head counts are kernargs), so a
         catalog can bind it as a method like ``resolved_tile_size_override``."""
         return self.num_queries_per_kv
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -1316,7 +1300,7 @@ def build_unified_attention_3d_tiled(
 
 
 @dataclass(frozen=True)
-class UnifiedAttentionReduceTiledSpec:
+class UnifiedAttentionReduceTiledSpec(ReduceTiledSpecMixin):
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
@@ -1329,15 +1313,6 @@ class UnifiedAttentionReduceTiledSpec:
     num_segments: int
     waves_per_eu: Optional[int] = None
     emit_lse: bool = emit_lse_field()
-
-    def __post_init__(self) -> None:
-        require_bool("emit_lse", self.emit_lse)
-        if self.num_segments < 1:
-            raise ValueError("num_segments must be >= 1")
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
