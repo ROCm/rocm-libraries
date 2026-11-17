@@ -261,7 +261,7 @@ Without an Active price and with no open pairing, `pickBase` is plain ascending 
 
 The scan stops as soon as a base costs nothing, since penalties are never negative and zero is the best any base can do. That early exit is why a preference's `benefit` must never be negative.
 
-Under `quadrant=prefer` (`AllocationContext::preferProducerQuadrant`), `pickBase` first scans the 256-register VGPR bank that holds the block's hint base, lowest base first, and takes the first acceptable one without scoring; only when that bank has no room does it fall through to the whole-file search above. An operand's bank is what its `s_set_vgpr_msb` slot selects, so a block that stays in the producer's bank needs no switch the producer did not already pay for. It is a preference rather than a rule, which is why it sits here and not in `reachableAt`: a block always falls back to wherever it fits.
+A block with a planned bank (`Block::plannedBank`) has `pickBase` first scan that 256-register VGPR bank, lowest base first, and take the first acceptable base without scoring; only when that bank has no room does it fall through to the whole-file search above. Under `quadrant=prefer` (`AllocationContext::preferProducerQuadrant`) `measure()` plans every V block with a hint into the bank that holds its hint base. An operand's bank is what its `s_set_vgpr_msb` slot selects, so a block that stays in the producer's bank needs no switch the producer did not already pay for. It is a preference rather than a rule, which is why it sits here and not in `reachableAt`: a block always falls back to wherever it fits.
 
 Two things deliberately *not* priced. A hint still wins outright when it is available and hints are on: following it reproduces the producer's numbering, which the whole shadow-comparison workflow rests on. And a price where the hardware wants a veto is the wrong channel: the compacting policies run with `followHints=false`, and a price binds only policies that ask; the policy most likely to break a placement rule is the one most likely to ignore a preference.
 
@@ -320,6 +320,7 @@ When `AllocationContext::blockDumpPath` is set (the pipeline sets it under `Stin
 | `start`, `span` | the first slot any member is live, and the slots from there to the end of the last range |
 | `weight`, `freedom` | the two orderings' keys (section 5) |
 | `capped`, `pinned`, `hint` | whether a ceiling limits it, whether it may not move, and its hint base (`-1` for none) |
+| `plannedBank` | the VGPR bank `pickBase` searches first (section 6.1), `-1` for none |
 | `placed`, `base`, `evictions`, `rank` | where it went, how often it was evicted, and its position in placement order (`0` for pinned blocks) |
 | `refused` | `1` on the block the colouring stopped at |
 
