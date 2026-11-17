@@ -37,10 +37,13 @@ COMPONENTS = {
         "projects/miopen/**",
         # The hipDNN MIOpen provider carries a copy of MIOpen's rename list,
         # generated from miopen.h, and hand-written declarations of a few
-        # MIOpen entry points. MIOpen CI checks both against MIOpen. A PR
-        # touching only the provider is exactly the drift that gate exists to
-        # catch, so it has to trigger this component too.
-        "dnn-providers/miopen-provider/**",
+        # MIOpen entry points. MIOpen CI checks both against MIOpen, so a PR
+        # touching them has to trigger this component. List only the provider
+        # files those checks read (generate_wrapper_sources.py and
+        # check_public_abi.py in projects/miopen/script); add any new one.
+        "dnn-providers/miopen-provider/MiopenApi.hpp",
+        "dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp",
+        "dnn-providers/miopen-provider/.clang-format",
         ".github/workflows/component-ci-miopen.yml",
     ],
     "tensilelite_coverage": [
