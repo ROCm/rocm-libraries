@@ -1821,8 +1821,9 @@ ck_tile::index_t fmha_fwd_block_scale_size_kv(const std::string& data_type,
                                               ck_tile::index_t hdim_q,
                                               ck_tile::index_t hdim_v);
 
-// qr_tdm_sched folds paging into the base pointer, which is only valid when a
-// kN0 tile never straddles two pages. Gappy group mode runs the gappy variant
+// qr_pagedkv_tdm_sched loads each kN0 tile from a single page's view, so a tile
+// must not straddle two pages: the rows past the page would be zero-filled instead
+// of read from the next page. Gappy group mode runs the gappy variant
 // (gappy_variant), which accepts any kv_l2p_offset but is only generated
 // without a sink; everything else runs the default variant. Anything declined
 // falls back to the generic paged pipeline.
