@@ -43,8 +43,9 @@
  *        (descriptors/hip/conv_dgrad_fma_1d_rdna/): matching, scoring, dispatch, and the
  *        function that registers them.
  *
- * The engine serves a graph of exactly one 1-D conv_dgrad node that is not depthwise
- * (C / groups >= 2) on the gfx11 and gfx12 RDNA targets: rank 3, or rank 4 with a unit H axis,
+ * The engine serves a graph of exactly one 1-D conv_dgrad node with groups == 1 or at least two
+ * dx channels per group (not depthwise) on the gfx11 and gfx12 RDNA targets: rank 3, or rank 4
+ * with a unit H axis,
  * packed channels-first or channels-last, FLOAT / HALF / BFLOAT16, any stride, dilation and
  * padding. That is the backward data of a 1-D convolution and the forward of a ConvTranspose1d.
  * The problem is read in the forward view: x is dx, y is dy. No variant needs a workspace.
@@ -246,10 +247,11 @@ Geometry geometryOf(const ConvProblem& problem)
     return Geometry{true, 1, 1};
 }
 
-/// A 1-D problem that is not depthwise: at least two dx channels per group.
+/// A 1-D problem that is not depthwise: groups == 1, or at least two dx channels per group.
 bool serves(const ConvProblem& problem)
 {
-    return isOneD(problem) && problem.channelsPerGroup() >= 2 && problem.k % problem.groups == 0;
+    return isOneD(problem) && (problem.groups == 1 || problem.channelsPerGroup() >= 2)
+           && problem.k % problem.groups == 0;
 }
 
 // ---------------------------------------------------------------------------

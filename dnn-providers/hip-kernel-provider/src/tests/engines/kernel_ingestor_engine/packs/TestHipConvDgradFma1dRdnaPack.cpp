@@ -303,6 +303,12 @@ TEST(TestHipConvDgradFma1dRdnaGraphMatcher, AcceptsOneDimensionalDgrad)
     EXPECT_TRUE(matches(half));
     EXPECT_TRUE(matches(bfloat));
     EXPECT_TRUE(matches(withUnitHeight(GraphSpec{}))) << "rank 4, H == 1";
+
+    GraphSpec oneChannel;
+    oneChannel.c = 1;
+    EXPECT_TRUE(matches(oneChannel)) << "one dx channel, groups == 1";
+    oneChannel.channelsLast = true;
+    EXPECT_TRUE(matches(withUnitHeight(oneChannel))) << "one dx channel, NLC, rank 4";
 }
 
 TEST(TestHipConvDgradFma1dRdnaGraphMatcher, RefusesWhatItCannotServe)
@@ -311,6 +317,11 @@ TEST(TestHipConvDgradFma1dRdnaGraphMatcher, RefusesWhatItCannotServe)
     depthwise.groups = 64;
     depthwise.k = 64;
     EXPECT_FALSE(matches(depthwise)) << "depthwise";
+
+    GraphSpec multiplier;
+    multiplier.groups = 64;
+    multiplier.k = 128;
+    EXPECT_FALSE(matches(multiplier)) << "one dx channel per group, two dy channels";
 
     GraphSpec twoD;
     twoD.in = {14, 16};
@@ -388,7 +399,9 @@ TEST(TestHipConvDgradFma1dRdnaGeometry, PicksTheTileOfMIOpenForEveryShape)
                  {4, 2, 24, F16, 2, 4},
                  {9, 5, 512, F16, 4, 2},
                  {9, 5, 8, BF16, 4, 1},
-                 {9, 5, 9, BF16, 4, 2}};
+                 {9, 5, 9, BF16, 4, 2},
+                 {8, 4, 1, F32, 2, 1},
+                 {9, 5, 1, BF16, 4, 1}};
     for(const auto& [filter, stride, channels, dtype, q, cw] : expected)
     {
         const auto spec = shape(filter, stride, channels, dtype);

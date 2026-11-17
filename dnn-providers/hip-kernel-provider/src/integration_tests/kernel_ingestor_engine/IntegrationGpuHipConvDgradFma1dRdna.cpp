@@ -34,10 +34,10 @@
 // specialized variant (k = 16 / 8 / 4 / 9 at stride 8 / 4 / 2 / 5 in every dtype, at every
 // channel tile, the dx channel count picking the tile), dy channel counts that are not
 // multiples of the 32-channel LDS stage, padding (one where it adds a block to the grid), dx
-// positions no tap reaches, rank 4 with H == 1 and a pre-padding other than the post-padding;
-// and the generic variant: NLC, groups, dilation (also on a built shape), unbuilt shapes, a
-// stride wider than the filter, a pointwise filter. Depthwise and 2-D conv_dgrad and the
-// conv_fprop of the same problem must be declined.
+// positions no tap reaches, rank 4 with H == 1 and a pre-padding other than the post-padding, a
+// single dx channel; and the generic variant: NLC, groups, dilation (also on a built shape),
+// unbuilt shapes, a stride wider than the filter, a pointwise filter, a single dx channel.
+// Depthwise and 2-D conv_dgrad and the conv_fprop of the same problem must be declined.
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -271,6 +271,11 @@ const std::vector<ConvCase>& cases()
         {"F16K1S1",                 F16, false, 2, 64, 32, 1, {97}, {1}, {0}, {0}, {1}, {1}},
         {"Bf16NlcGroups3K5S2Dil3",  BF16, true, 1, 24, 36, 3, {180}, {5}, {4}, {4}, {2}, {3}},
         {"F32NlcH1K9S5",            F32, true, 1, 32, 16, 1, {1, 304}, {1, 9}, {0, 2}, {0, 2}, {1, 5}, {1, 1}},
+        // A single dx channel, groups == 1: specialized (fp32 and bf16 with an odd filter) and
+        // generic.
+        {"F32K8S4C1",               F32, false, 2, 1, 40, 1, {258}, {8}, {2}, {2}, {4}, {1}},
+        {"Bf16K9S5C1",              BF16, false, 1, 1, 33, 1, {304}, {9}, {2}, {2}, {5}, {1}},
+        {"F16NlcK3S2C1",            F16, true, 2, 1, 24, 1, {151}, {3}, {1}, {1}, {2}, {1}},
     };
     // clang-format on
     return s_cases;
