@@ -49,7 +49,6 @@ from .ir import (
     _SAME_TYPE_BINARY_OPS,
     _ORPHAN_YIELD_ERROR,
     _assume_range_errors,
-    _binary_arity_error,
     _COMPARE_OPS,
     param_fact_errors,
     _buffer_op_bytes,
@@ -60,6 +59,7 @@ from .ir import (
     _int_add_wrap_error,
     _int_cmp_error,
     _integer_element_op_error,
+    _operand_arity_op_error,
     _is_flag_ptr,
     _missing_attr_message,
     _operand_types_op_error,
@@ -337,16 +337,16 @@ class _Verifier:
         if error:
             self.err(error, op)
         name = op.name
-        arity_error = _binary_arity_error(op)
+        arity_error = _operand_arity_op_error(op)
         if arity_error:
             self.err(arity_error, op)
             return
+        operand_types_error = _operand_types_op_error(op)
+        if operand_types_error:
+            self.err(operand_types_error, op)
         if name in _SAME_TYPE_BINARY_OPS:
             a = op.operands[0]
             r = op.results[0]
-            operand_types_error = _operand_types_op_error(op)
-            if operand_types_error:
-                self.err(operand_types_error, op)
             if r.type != a.type:
                 self.err(
                     f"{name}: result type {r.type.name} != operand type {a.type.name}",

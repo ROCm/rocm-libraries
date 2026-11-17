@@ -17,10 +17,10 @@ of a float and a shift amount of another type when the op is built, and the
 verifier reports both and every lowering refuses both for IR written past the
 builder. The element rule is the one every bitwise op and shift shares
 (``and``, ``or``, ``xor``, ``not``, ``shl``, ``lshr``, scalar and vector), and
-the operand rule the one every same-type binary op shares (the arithmetic ones
-too), so each is pinned here for every op it governs. The C++ engine's builders,
-verifier and lowerings, with the same texts, are checked by
-test_unsigned_int_ops.cpp.
+the operand rule the one every same-type binary op (the arithmetic ones too)
+and the lane-wise FMA share, so each is pinned here for every op it governs.
+The C++ engine's builders, verifier and lowerings, with the same texts, are
+checked by test_unsigned_int_ops.cpp.
 """
 
 from __future__ import annotations
@@ -392,26 +392,114 @@ def test_vector_builders_refuse_a_scalar_first_operand(build, message):
     assert b.kernel.body.ops == []
 
 
+# A lane-wise FMA of ``vec<f32x2>`` operands but one, of another type, named by
+# its ordinal; its operand types, and the operand rule's text for it.
+_VECTOR_FMA_OTHER_OPERANDS = [
+    (VectorType(F16, 2), "second"),
+    (VectorType(F32, 4), "third"),
+]
+_VECTOR_FMA_IDS = [ordinal for _, ordinal in _VECTOR_FMA_OTHER_OPERANDS]
+
+
+def _vector_fma_operand_types(other_type, ordinal):
+    first_type = VectorType(F32, 2)
+    if ordinal == "second":
+        return (first_type, other_type, first_type)
+    return (first_type, first_type, other_type)
+
+
+def _vector_fma_operand_types_message(other_type, ordinal):
+    return (
+        f"vector.fma failed - {ordinal} operand type='{other_type.name}', "
+        "expected the first operand's type 'vec<f32x2>'"
+    )
+
+
 @pytest.mark.parametrize(
-    ("other_type", "ordinal"),
-    [(VectorType(F16, 2), "second"), (VectorType(F32, 4), "third")],
-    ids=["second", "third"],
+    ("other_type", "ordinal"), _VECTOR_FMA_OTHER_OPERANDS, ids=_VECTOR_FMA_IDS
 )
 def test_vector_fma_refuses_operands_of_more_than_one_type(other_type, ordinal):
     """The lane-wise FMA takes three vectors of one type: its builder refuses
     the first operand that differs, by its ordinal, with the operand rule's
     ``TypeError`` and text, and adds no op."""
     b = IRBuilder("vector_fma_mixed")
-    first = b.param("first", VectorType(F32, 2))
-    other = b.param("other", other_type)
-    operands = (first, other, first) if ordinal == "second" else (first, first, other)
+    operands = [
+        b.param(f"operand{index}", operand_type)
+        for index, operand_type in enumerate(
+            _vector_fma_operand_types(other_type, ordinal)
+        )
+    ]
     with pytest.raises(TypeError) as refusal:
         b.vector_fma(*operands)
-    assert str(refusal.value) == (
-        f"vector.fma failed - {ordinal} operand type='{other_type.name}', "
-        "expected the first operand's type 'vec<f32x2>'"
-    )
+    assert str(refusal.value) == _vector_fma_operand_types_message(other_type, ordinal)
     assert b.kernel.body.ops == []
+
+
+@pytest.mark.parametrize(
+    ("other_type", "ordinal"), _VECTOR_FMA_OTHER_OPERANDS, ids=_VECTOR_FMA_IDS
+)
+def test_verifier_refuses_a_vector_fma_of_more_than_one_type(other_type, ordinal):
+    """The verifier reports a lane-wise FMA written past the builder whose
+    operands differ in type with the builder's text: an f32 and an f16 vector
+    would lower to an ``llvm.fmuladd.v2f32`` of a ``<2 x half>``."""
+    kernel = _kernel_past_the_builder(
+        "vector.fma", *_vector_fma_operand_types(other_type, ordinal)
+    )
+    messages = [diagnostic.message for diagnostic in verify(kernel)]
+    assert messages == [_vector_fma_operand_types_message(other_type, ordinal)]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    ("other_type", "ordinal"), _VECTOR_FMA_OTHER_OPERANDS, ids=_VECTOR_FMA_IDS
+)
+def test_lowerings_refuse_a_vector_fma_of_more_than_one_type(
+    other_type, ordinal, engine
+):
+    """IR written past the builder reaches the lowerings without the verifier:
+    each engine's LLVM and HIP lowerings refuse a lane-wise FMA whose operands
+    differ in type with the builder's ``TypeError`` and text, instead of
+    emitting every operand at the first one's type."""
+    kernel = _kernel_past_the_builder(
+        "vector.fma", *_vector_fma_operand_types(other_type, ordinal)
+    )
+    for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
+        assert_rejects(
+            kernel,
+            "gfx942",
+            engine=engine,
+            error_type=TypeError,
+            message=_vector_fma_operand_types_message(other_type, ordinal),
+        )
+
+
+_VECTOR_FMA_ARITY_MESSAGE = (
+    "vector.fma failed - operands / results=2 / 1, expected 3 / 1"
+)
+
+
+def test_verifier_refuses_a_vector_fma_without_three_operands():
+    """The verifier reports the arity rule's text, and nothing else, for a
+    lane-wise FMA with two operands. The ctest checks the C++ verifier."""
+    kernel = _kernel_past_the_builder("vector.fma", *[VectorType(F32, 2)] * 2)
+    messages = [diagnostic.message for diagnostic in verify(kernel)]
+    assert messages == [_VECTOR_FMA_ARITY_MESSAGE]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_lowerings_refuse_a_vector_fma_without_three_operands(engine):
+    """Each engine's LLVM and HIP lowerings check a lane-wise FMA's operand
+    count before they read its third operand, and refuse two operands with the
+    arity rule's ``ValueError`` and text."""
+    kernel = _kernel_past_the_builder("vector.fma", *[VectorType(F32, 2)] * 2)
+    for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
+        assert_rejects(
+            kernel,
+            "gfx942",
+            engine=engine,
+            error_type=ValueError,
+            message=_VECTOR_FMA_ARITY_MESSAGE,
+        )
 
 
 def test_the_operand_rule_refuses_more_operands_than_it_names():

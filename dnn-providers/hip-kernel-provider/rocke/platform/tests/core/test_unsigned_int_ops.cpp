@@ -547,31 +547,87 @@ void case_vector_builders_refuse_a_scalar_first_operand()
         "vector.fma failed - first operand type='i32', expected a vector type");
 }
 
-/* The lane-wise FMA takes three vectors of one type: its builder refuses the
- * first operand that differs, by its ordinal, with the operand rule's text
- * (test_lshr.py). */
+/* The lane-wise FMA takes three vectors of one type. Its builder refuses the
+ * first operand that differs, by its ordinal, with the operand rule's text;
+ * written past the builder, the verifier reports it and the LLVM and HIP
+ * lowerings refuse it with ROCKE_ERR_TYPE and the same text, instead of
+ * emitting an llvm.fmuladd.v2f32 of a <2 x half> (test_lshr.py). */
 void case_vector_fma_refuses_operands_of_more_than_one_type()
 {
-    expect_builder_type_error(
-        [](rocke_ir_builder_t* b) {
-            rocke_value_t* first
-                = rocke_b_param(b, "first", rocke_vector_type(b, rocke_f32(), 2), nullptr);
+    const struct
+    {
+        const rocke_type_t* other_element;
+        int other_lanes;
+        int other_index;
+        const char* want;
+    } cases[] = {
+        {rocke_f16(),
+         2,
+         1,
+         "vector.fma failed - second operand type='vec<f16x2>', expected the first operand's "
+         "type 'vec<f32x2>'"},
+        {rocke_f32(),
+         4,
+         2,
+         "vector.fma failed - third operand type='vec<f32x4>', expected the first operand's "
+         "type 'vec<f32x2>'"},
+    };
+    for(const auto& c : cases)
+    {
+        const auto operands_of = [&c](rocke_ir_builder_t* builder, rocke_value_t** operands) {
+            rocke_value_t* first = rocke_b_param(
+                builder, "first", rocke_vector_type(builder, rocke_f32(), 2), nullptr);
             rocke_value_t* other
-                = rocke_b_param(b, "other", rocke_vector_type(b, rocke_f16(), 2), nullptr);
-            rocke_b_vector_fma(b, first, other, first);
-        },
-        "vector.fma failed - second operand type='vec<f16x2>', expected the first operand's "
-        "type 'vec<f32x2>'");
-    expect_builder_type_error(
-        [](rocke_ir_builder_t* b) {
-            rocke_value_t* first
-                = rocke_b_param(b, "first", rocke_vector_type(b, rocke_f32(), 2), nullptr);
-            rocke_value_t* other
-                = rocke_b_param(b, "other", rocke_vector_type(b, rocke_f32(), 4), nullptr);
-            rocke_b_vector_fma(b, first, first, other);
-        },
-        "vector.fma failed - third operand type='vec<f32x4>', expected the first operand's "
-        "type 'vec<f32x2>'");
+                = rocke_b_param(builder,
+                                "other",
+                                rocke_vector_type(builder, c.other_element, c.other_lanes),
+                                nullptr);
+            for(int index = 0; index < 3; ++index)
+                operands[index] = index == c.other_index ? other : first;
+        };
+        expect_builder_type_error(
+            [&](rocke_ir_builder_t* builder) {
+                rocke_value_t* operands[3];
+                operands_of(builder, operands);
+                rocke_b_vector_fma(builder, operands[0], operands[1], operands[2]);
+            },
+            c.want);
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_vector_fma_mixed");
+        rocke_value_t* operands[3];
+        operands_of(&b, operands);
+        rocke_i_op1(&b, ROCKE_OP_VECTOR_FMA, operands, 3, operands[0]->type, nullptr, "vfma");
+        rocke_b_ret(&b);
+        const std::string errors = verify_errors(&b);
+        EXPECT(errors == std::string(c.want) + "\n",
+               "verifier: want '" + std::string(c.want) + "', got '" + errors + "'");
+        const std::string lowered_want = both_lowerings_refuse(ROCKE_ERR_TYPE, c.want);
+        const std::string lowered = lowering_refusals(&b);
+        EXPECT(lowered == lowered_want, "want " + lowered_want + ", got " + lowered);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* A lane-wise FMA with two operands, written past the builder, is refused by
+ * the verifier, and by the LLVM and HIP lowerings with ROCKE_ERR_VALUE before
+ * they read the missing third operand, with the arity rule's text
+ * (test_lshr.py). */
+void case_vector_fma_arity_rule()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_vector_fma_two_operands");
+    const rocke_type_t* type = rocke_vector_type(&b, rocke_f32(), 2);
+    rocke_value_t* operands[2]
+        = {rocke_b_param(&b, "first", type, nullptr), rocke_b_param(&b, "second", type, nullptr)};
+    rocke_i_op1(&b, ROCKE_OP_VECTOR_FMA, operands, 2, type, nullptr, "vfma");
+    rocke_b_ret(&b);
+    const std::string want = "vector.fma failed - operands / results=2 / 1, expected 3 / 1";
+    const std::string errors = verify_errors(&b);
+    EXPECT(errors == want + "\n", "verifier: want '" + want + "', got '" + errors + "'");
+    const std::string lowered_want = both_lowerings_refuse(ROCKE_ERR_VALUE, want);
+    const std::string lowered = lowering_refusals(&b);
+    EXPECT(lowered == lowered_want, "want " + lowered_want + ", got " + lowered);
+    rocke_ir_builder_free(&b);
 }
 
 /* An i1 is a C++ bool in HIP, where ~ promotes to int (~true is -2, still
@@ -1485,6 +1541,7 @@ int main(int argc, char** argv)
     case_builder_refuses_an_operand_with_no_type();
     case_vector_builders_refuse_a_scalar_first_operand();
     case_vector_fma_refuses_operands_of_more_than_one_type();
+    case_vector_fma_arity_rule();
     case_hip_not_is_logical_on_i1();
     case_binary_arity_rule();
     case_operand_rule_refuses_more_operands_than_it_names();
