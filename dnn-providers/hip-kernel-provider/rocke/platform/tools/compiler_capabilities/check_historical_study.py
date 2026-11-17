@@ -10,24 +10,20 @@ import hashlib
 import itertools
 import json
 import re
+import sys
 from pathlib import Path
 
-if __package__:
-    from . import probe
-else:
-    import sys
+_PLATFORM = Path(__file__).resolve().parents[2]
+_PYTHON = _PLATFORM / "python"
+if _PYTHON.is_dir() and str(_PYTHON) not in sys.path:
+    sys.path.insert(0, str(_PYTHON))
 
-    _PLATFORM = Path(__file__).resolve().parents[2]
-    _PYTHON = _PLATFORM / "python"
-    if str(_PYTHON) not in sys.path:
-        sys.path.insert(0, str(_PYTHON))
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from compiler_capabilities import probe
+from rocke.compiler import corpus, evidence
 
 _ROOT = Path(__file__).resolve().parent
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _LOCAL_PATH_RE = re.compile(r"(?:/home/|/Users/|/tmp/|/root/|/opt/|[A-Za-z]:\\)")
-_HISTORICAL_PROCESSORS = ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250")
+_HISTORICAL_PROCESSORS = ("gfx950", "gfx1250")
 
 
 class StudyError(RuntimeError):
@@ -94,7 +90,7 @@ def _validate_inputs(
 ) -> None:
     if inputs.get("format") != "rocke-comgr-historical-inputs/v1":
         raise StudyError("historical input format is stale")
-    if observations.get("format") != "rocke-comgr-historical-observations/v3":
+    if observations.get("format") != "rocke-comgr-historical-observations/v4":
         raise StudyError("historical observation format is stale")
     public_sources = inputs.get("public_sources")
     if (
@@ -110,7 +106,7 @@ def _validate_inputs(
         )
     if observations.get("public_sources") != public_sources:
         raise StudyError("historical public sources differ from the input manifest")
-    for group_name, expected_count in (("weekly", 9), ("releases", 3)):
+    for group_name, expected_count in (("weekly", 9), ("releases", 2)):
         input_rows = inputs.get(group_name)
         rows = observations.get(group_name)
         if not isinstance(input_rows, list) or not isinstance(rows, list):
@@ -126,6 +122,7 @@ def _validate_inputs(
                 row["artifact"],
                 row["index_url"],
                 row["artifact_url"],
+                tuple(sorted(row["processors"])),
             )
             for row in input_rows
         ]
@@ -136,6 +133,7 @@ def _validate_inputs(
                 row["artifact"],
                 row["index_url"],
                 row["artifact_url"],
+                tuple(sorted(row["reports"])),
             )
             for row in rows
         ]
@@ -156,25 +154,25 @@ def _validate_inputs(
 
 
 def _validate_reports(observations: dict[str, object]) -> None:
-    processors = observations.get("processors")
-    if processors != list(_HISTORICAL_PROCESSORS):
-        raise StudyError("historical processor set differs from the study contract")
     probe_info = observations.get("probe")
     vectors = observations.get("vectors")
     if not isinstance(probe_info, dict) or not isinstance(vectors, dict):
         raise StudyError("historical probe or vector store is malformed")
     expected_probe = {
-        "implementation_sha256": probe._implementation_sha256(),
-        "schema_sha256": probe._schema_sha256(),
+        "protocol_sha256": {
+            processor: corpus.protocol_sha256(processor)
+            for processor in _HISTORICAL_PROCESSORS
+        },
+        "schema_sha256": evidence._schema_sha256(),
     }
-    for field, expected in expected_probe.items():
-        value = str(probe_info.get(field, ""))
-        if _SHA256_RE.fullmatch(value) is None:
-            raise StudyError(f"historical study has no {field}")
-        if value != expected:
-            raise StudyError(
-                f"historical {field} differs from the checked-in probe source"
-            )
+    if set(probe_info) != set(expected_probe):
+        raise StudyError("historical probe fields differ from the checked-in contract")
+    if probe_info["protocol_sha256"] != expected_probe["protocol_sha256"]:
+        raise StudyError(
+            "historical protocol_sha256 differs from the checked-in corpus"
+        )
+    if probe_info["schema_sha256"] != expected_probe["schema_sha256"]:
+        raise StudyError("historical schema_sha256 differs from the checked-in schema")
     for vector_id, capabilities in vectors.items():
         encoded = json.dumps(
             capabilities, sort_keys=True, separators=(",", ":")
@@ -188,8 +186,13 @@ def _validate_reports(observations: dict[str, object]) -> None:
     for row in (*observations["weekly"], *observations["releases"]):
         reports = row.get("reports")
         compiler = row.get("compiler")
-        if not isinstance(reports, dict) or sorted(reports) != sorted(processors):
-            raise StudyError(f"{row['id']} does not contain every processor report")
+        expected_processors = (
+            ("gfx950", "gfx1250") if row["kind"] == "wheel" else ("gfx950",)
+        )
+        if not isinstance(reports, dict) or set(reports) != set(expected_processors):
+            raise StudyError(
+                f"{row['id']} processor reports differ from its input scope"
+            )
         if not isinstance(compiler, dict):
             raise StudyError(f"{row['id']} compiler provenance is malformed")
         digest = compiler.get("sha256")
@@ -199,8 +202,15 @@ def _validate_reports(observations: dict[str, object]) -> None:
             "version_source"
         ):
             raise StudyError(f"{row['id']} has no compiler version source")
+        if compiler.get("dependency_identity_complete") is not True:
+            raise StudyError(f"{row['id']} has incomplete compiler dependency identity")
+        dependencies = compiler.get("dependency_sha256")
+        if not isinstance(dependencies, list) or any(
+            _SHA256_RE.fullmatch(str(value)) is None for value in dependencies
+        ):
+            raise StudyError(f"{row['id']} has malformed compiler dependency digests")
 
-        for processor in processors:
+        for processor in expected_processors:
             reference = reports[processor]
             if not isinstance(reference, dict):
                 raise StudyError(
@@ -212,15 +222,15 @@ def _validate_reports(observations: dict[str, object]) -> None:
                 raise StudyError(
                     f"{row['id']} {processor} references no capability vector"
                 )
-            expected = probe._expected_observations(processor)
+            expected = corpus.expected_observations(processor)
             if set(capabilities) != set(expected):
                 raise StudyError(f"{row['id']} {processor} capability set differs")
-            for name, corpus in expected.items():
+            for name, expected_corpus in expected.items():
                 entries = capabilities[name]
                 observed = [
                     (entry.get("family"), entry.get("candidate")) for entry in entries
                 ]
-                if observed != corpus:
+                if observed != expected_corpus:
                     raise StudyError(f"{row['id']} {processor} {name} corpus differs")
                 for entry in entries:
                     if entry.get("outcome") not in {"accepted", "rejected", "crash"}:
@@ -229,15 +239,15 @@ def _validate_reports(observations: dict[str, object]) -> None:
                         )
             effective = reference.get("effective_processor")
             allowed = {processor}
-            if generic := probe._GENERIC_PROCESSORS.get(processor):
+            if generic := corpus.GENERIC_PROCESSORS.get(processor):
                 allowed.add(generic)
             if effective not in allowed:
                 raise StudyError(
                     f"{row['id']} {processor} effective processor is invalid"
                 )
-        evidence = (compiler, reports)
-        prior = reports_by_url.setdefault(row["artifact_url"], evidence)
-        if prior != evidence:
+        artifact_evidence = (compiler, reports)
+        prior = reports_by_url.setdefault(row["artifact_url"], artifact_evidence)
+        if prior != artifact_evidence:
             raise StudyError(f"{row['id']} duplicate artifact evidence differs")
 
 

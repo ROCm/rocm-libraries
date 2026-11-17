@@ -13,25 +13,34 @@ import types
 from pathlib import Path
 
 import pytest
-
-_SOURCE_TOOLS = Path(__file__).resolve().parents[2] / "tools"
-_INSTALLED_TOOLS = Path(__file__).resolve().parent
-_TOOLS = (
-    _SOURCE_TOOLS
-    if (_SOURCE_TOOLS / "compiler_capabilities").is_dir()
-    else _INSTALLED_TOOLS
-)
-if str(_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_TOOLS))
-
-from compiler_capabilities import _comgr_worker as worker
-from compiler_capabilities import _probe_support as support
+from rocke.compiler import _support as support
+from rocke.compiler import _worker as worker
 
 
 def _completed(document: dict[str, object]) -> subprocess.CompletedProcess[bytes]:
     return subprocess.CompletedProcess(
         ["python"], 0, json.dumps(document).encode(), b""
     )
+
+
+def test_worker_enumerates_behavior_contributing_shared_libraries(
+    tmp_path: Path,
+) -> None:
+    llvm = tmp_path / "libLLVM.so.24"
+    clang = tmp_path / "libclang-cpp.so.24"
+    unrelated = tmp_path / "libz.so.1"
+    for path in (llvm, clang, unrelated):
+        path.write_bytes(path.name.encode())
+    maps = tmp_path / "maps"
+    maps.write_text(
+        "\n".join(f"0-1 r-xp 0 00:00 0 {path}" for path in (llvm, clang, unrelated)),
+        encoding="utf-8",
+    )
+
+    assert worker._loaded_compiler_dependencies(maps) == sorted(
+        (str(llvm.resolve()), str(clang.resolve()))
+    )
+    assert worker._loaded_compiler_dependencies(tmp_path / "missing") is None
 
 
 def test_raw_worker_bypasses_only_the_legacy_profile_guard(
@@ -205,6 +214,8 @@ def test_identity_hashes_the_library_that_the_loader_reports(
 ) -> None:
     library = tmp_path / "libamd_comgr.so"
     library.write_bytes(b"comgr")
+    dependency = tmp_path / "libLLVM.so"
+    dependency.write_bytes(b"llvm")
     monkeypatch.setattr(
         support,
         "_run_worker",
@@ -214,6 +225,7 @@ def test_identity_hashes_the_library_that_the_loader_reports(
             "requested_library": "alias",
             "loaded_library": str(library),
             "query_library": str(library),
+            "dependency_libraries": [str(dependency)],
         },
     )
 
@@ -221,6 +233,13 @@ def test_identity_hashes_the_library_that_the_loader_reports(
 
     assert identity["library"] == str(library.resolve())
     assert identity["sha256"] == support._sha256(library)
+    assert identity["dependencies"] == [
+        {
+            "library": str(dependency.resolve()),
+            "sha256": support._sha256(dependency),
+        }
+    ]
+    assert identity["dependency_identity_complete"] is True
     assert "loaded_library" not in identity
     assert "requested_library" not in identity
 

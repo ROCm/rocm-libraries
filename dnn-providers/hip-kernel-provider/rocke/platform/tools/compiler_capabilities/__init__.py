@@ -1,1 +1,1 @@
-"""Standalone evidence probes for rocKE's production COMGR compiler route."""
+"""Historical replay and maintenance tools for packaged compiler capabilities."""

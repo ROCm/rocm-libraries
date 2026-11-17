@@ -25,6 +25,7 @@
       "required": [
         "name",
         "implementation_sha256",
+        "protocol_sha256",
         "schema_sha256",
         "target_triple",
         "processor",
@@ -34,6 +35,7 @@
       "properties": {
         "name": {"const": "rocke-comgr-capabilities"},
         "implementation_sha256": {"$ref": "#/$defs/sha256"},
+        "protocol_sha256": {"$ref": "#/$defs/sha256"},
         "schema_sha256": {"$ref": "#/$defs/sha256"},
         "target_triple": {"const": "amdgcn-amd-amdhsa"},
         "processor": {
@@ -62,7 +64,9 @@
         "version_source",
         "query_library",
         "library",
-        "sha256"
+        "sha256",
+        "dependencies",
+        "dependency_identity_complete"
       ],
       "properties": {
         "route": {"const": "comgr"},
@@ -80,7 +84,20 @@
         "version_source": {"type": "string", "minLength": 1},
         "query_library": {"$ref": "#/$defs/nullablePath"},
         "library": {"type": "string", "minLength": 1},
-        "sha256": {"$ref": "#/$defs/sha256"}
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["library", "sha256"],
+            "properties": {
+              "library": {"type": "string", "minLength": 1},
+              "sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        },
+        "dependency_identity_complete": {"type": "boolean"}
       }
     },
     "evidence": {

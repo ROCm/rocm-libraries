@@ -10,8 +10,8 @@
 
 ## Scope
 
-This report assesses the nine selected weekly snapshots, three release
-baselines, and five processor contexts recorded in
+This report assesses nine selected weekly snapshots on gfx950/gfx1250 and two
+release baselines on gfx950, recorded in
 [`historical_observations.json`](historical_observations.json). The selected
 weekly rows retain the first broad-survey sample and both sides of every observed
 structural transition. This is compiler-compatibility evidence, not numeric or
@@ -21,7 +21,7 @@ performance qualification.
 
 The selected transition pairs contain four structural changes:
 
-- one changes accepted buffer-resource ABI candidates and named barriers; and
+- one changes accepted buffer-resource ABI candidates; and
 - three change named-barrier address-space outcomes, including crash versus
   normal rejection and parser-stage versus codegen-stage failure.
 

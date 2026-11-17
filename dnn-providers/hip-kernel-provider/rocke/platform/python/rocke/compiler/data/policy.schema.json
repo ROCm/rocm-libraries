@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rocm.docs.amd.com/schemas/rocke/compiler-policy.schema.json",
+  "title": "rocKE canonical compiler policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "target_triple",
+    "requested_processor",
+    "effective_processor",
+    "data_layout",
+    "buffer_resource_abi",
+    "fp8_packed_operand_type",
+    "named_barrier_address_space",
+    "scaled_mfma_call_abi",
+    "evidence_fingerprint",
+    "policy_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "rocke.compiler_policy/v1"},
+    "target_triple": {"const": "amdgcn-amd-amdhsa"},
+    "requested_processor": {"type": "string", "pattern": "^gfx[0-9a-z-]+$"},
+    "effective_processor": {"type": "string", "pattern": "^gfx[0-9a-z-]+$"},
+    "data_layout": {"enum": ["L0", "L1", "L2", "L3"]},
+    "buffer_resource_abi": {
+      "enum": ["p1_i32", "p1_i64", "p8_p1_i32", "p8_p1_i64"]
+    },
+    "fp8_packed_operand_type": {
+      "type": ["string", "null"],
+      "enum": ["v2i32", "i64", null]
+    },
+    "named_barrier_address_space": {
+      "type": ["integer", "null"],
+      "enum": [3, 15, null]
+    },
+    "scaled_mfma_call_abi": {
+      "type": ["string", "null"],
+      "enum": ["current_9", "legacy_11", null]
+    },
+    "evidence_fingerprint": {"$ref": "#/$defs/sha256"},
+    "policy_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

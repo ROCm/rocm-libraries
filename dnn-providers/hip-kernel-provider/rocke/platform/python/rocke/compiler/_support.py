@@ -15,12 +15,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
+from .._python_subprocess import rocke_python_command, rocke_subprocess_env
 
 _TARGET_TRIPLE = "amdgcn-amd-amdhsa"
 _DEFAULT_PROCESSOR = "gfx950"
 _DEFAULT_TIMEOUT_SECONDS = 60
-_WORKER = Path(__file__).with_name("_comgr_worker.py")
+_WORKER_MODULE = "rocke.compiler._worker"
 _FATAL_PROCESS_MARKERS = (
     "LLVM ERROR:",
     "PLEASE submit a bug report",
@@ -143,7 +143,7 @@ def _run_worker(
     payload = json.dumps(header, sort_keys=True).encode() + b"\n" + body.encode()
     try:
         completed = subprocess.run(
-            rocke_python_command(_WORKER),
+            rocke_python_command("-m", _WORKER_MODULE),
             input=payload,
             capture_output=True,
             check=False,
@@ -191,8 +191,25 @@ def identify_comgr(
     path = Path(raw_path)
     if not path.is_file():
         raise ProbeError(f"loaded COMGR path is not a file: {raw_path!r}")
+    raw_dependencies = identity.pop("dependency_libraries", None)
+    if raw_dependencies is not None and (
+        not isinstance(raw_dependencies, list)
+        or not all(isinstance(item, str) for item in raw_dependencies)
+    ):
+        raise ProbeError("loaded COMGR reported malformed dependency libraries")
+    dependencies = []
+    for raw_dependency in raw_dependencies or []:
+        dependency = Path(raw_dependency)
+        if not dependency.is_file():
+            raise ProbeError(
+                f"loaded COMGR dependency is not a file: {raw_dependency!r}"
+            )
+        resolved = dependency.resolve()
+        dependencies.append({"library": str(resolved), "sha256": _sha256(resolved)})
     identity["library"] = str(path.resolve())
     identity["sha256"] = _sha256(path.resolve())
+    identity["dependencies"] = dependencies
+    identity["dependency_identity_complete"] = raw_dependencies is not None
     identity.pop("loaded_library", None)
     identity.pop("requested_library", None)
     return identity

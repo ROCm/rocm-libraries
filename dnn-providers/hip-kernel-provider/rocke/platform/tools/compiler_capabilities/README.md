@@ -25,9 +25,11 @@ The compiler contract that matters is therefore the behavior of the selected
 COMGR library. A nearby `clang` or `opt` executable is not evidence about that
 library and is not required by this probe.
 
-The probe asks COMGR focused behavioral questions instead of mapping its
-embedded LLVM major to one broad emission profile. It records evidence only;
-rocKE lowering does not consume the report in this change.
+The installed `rocke.compiler` package asks COMGR focused behavioral questions
+instead of mapping its embedded LLVM major to one broad emission profile. It
+then resolves the evidence into a canonical `CompilerPolicy` manifest. rocKE
+lowering does not consume that policy in this change; moving each lowering
+choice is a separately qualified migration.
 
 ## One compiler route
 
@@ -119,20 +121,35 @@ measurements because timings are scheduling diagnostics, not capabilities.
 
 ## Run the probe
 
-From `platform/`, using normal rocKE COMGR discovery:
+An installed wheel exposes the command directly:
 
 ```bash
-PYTHONPATH=python python tools/compiler_capabilities/probe.py \
+rocke-compiler-capabilities --processor gfx950 --validate
+```
+
+Kernel-authoring code queries the same installed API:
+
+```python
+from rocke.compiler import query_compiler_policy
+
+policy, cache_hit = query_compiler_policy(processor="gfx950")
+```
+
+From a source checkout, invoke the same packaged module directly:
+
+```bash
+PYTHONPATH=python python -m rocke.compiler.cli \
   --processor gfx950 \
   --validate
 ```
 
-Pin a particular library when comparing compiler artifacts:
+Pin a particular library and write both evidence and canonical policy:
 
 ```bash
-PYTHONPATH=python python tools/compiler_capabilities/probe.py \
+PYTHONPATH=python python -m rocke.compiler.cli \
   --comgr-lib <path-to-libamd_comgr> \
   --processor gfx942 \
+  --policy-output compiler-policy.json \
   --refresh \
   --validate
 ```
@@ -143,45 +160,49 @@ Useful controls:
   worker bound;
 - `--timeout` sets the per-candidate process bound;
 - `--cache-dir` changes the exact-evidence cache;
+- `--policy-output` writes the canonical policy manifest and digest;
 - `--refresh` ignores a matching cache; and
 - `--quiet` writes only the JSON artifact.
 
 No LLVM executables, GPU, Torch, or `jsonschema` package are required to produce
 a report. `--validate` additionally requests full JSON Schema validation and
-therefore requires `jsonschema`; report construction always runs the
-checkout-local dependency-free completeness validator.
+therefore requires `jsonschema`; report construction always runs the packaged
+dependency-free completeness validator.
 
 ## Report semantics
 
 The report separates:
 
-- `probe`: implementation/schema digests and target context;
+- `probe`: semantic protocol, implementation, schema, and target context;
 - `compiler`: the loaded COMGR path, binary digest, and embedded LLVM version
   evidence; and
 - `capabilities`: ordered candidate observations from the full COMGR route.
 
 The embedded LLVM version is provenance, not a capability and not a selection
-key. Cache identity includes the COMGR digest, complete compiler evidence,
-requested processor, target triple, probe implementation, and schema. The
-report separately records the effective concrete or generic processor used for
-behavior observations.
+key. Cache identity includes the COMGR digest, mapped shared LLVM dependency
+digests, complete compiler evidence, requested processor, target triple, probe
+implementation, and schema. Cache reuse is disabled when the host cannot
+enumerate behavior-contributing dependencies. The report separately records the
+effective concrete or generic processor used for behavior observations.
 
-`accepted` does not select a rocKE policy. Several forms may compile. A later
-resolver must choose among accepted forms, preserve unknown states, and qualify
-the selected complete kernels through byte identity, generated-code/resource
-checks, and numeric testing.
+`accepted` alone is not a policy. Several historical forms may compile.
+`rocke.compiler.policy.resolve_policy` applies one explicit preference order and
+serializes the independent choices with a digest. Optional intrinsic families
+remain `null` when unsupported; a lowerer that needs one must reject rather than
+infer a fallback from an LLVM version. Selected complete kernels still require
+byte identity, generated-code/resource checks, and numeric testing.
 
 ## Historical validation
 
-The probe is replayed across nine selected weekly snapshots at the observed
-transition endpoints, three public release baselines, and five processor
-contexts. The initial broad survey showed that 37 of 42 adjacent weekly pairs
-had no structural change; unchanged intermediate weeks are therefore not a
+The probe is replayed across nine selected weekly transition endpoints on
+gfx950 and gfx1250, plus public 7.0.0 and 7.2.0 release baselines on gfx950.
+The initial broad survey showed that 37 of 42 adjacent weekly pairs had no
+structural change; unchanged intermediate weeks and processor copies are not a
 permanent replay obligation.
-[`replay_historical.py`](replay_historical.py) uses HTTP range requests to
-extract only COMGR and its required shared libraries from SDK wheels, downloads
-only the smaller COMGR package for release baselines, reuses duplicate artifacts,
-and checkpoints each completed row. The sanitized
+
+Normal replay is offline and uses a persistent content-addressed artifact cache.
+`--fetch-missing` is the explicit maintenance action that acquires absent public
+artifacts; tests and ordinary replay never access the network. The sanitized
 machine evidence lives in
 [`historical_observations.json`](historical_observations.json), with analysis in
 [`historical_study.md`](historical_study.md) and
@@ -204,28 +225,26 @@ structural emission choices, offline replay identities, and golden/cache
 partitioning. This probe supersedes only its authority to infer production
 compiler behavior.
 
-A later vertical integration should:
+The installed package now owns steps 1 and 2: query the exact COMGR library and
+serialize a normalized policy. The remaining vertical integration must:
 
-1. resolve capabilities against the exact COMGR library that will compile;
-2. convert evidence through an explicit selection policy into a normalized
-   emission policy;
-3. provide byte-identical policy data to the Python and C++ lowerers;
-4. retain flavor modes temporarily for offline replay and fallback; and
+1. provide the same canonical policy bytes to the Python and C++ lowerers;
+2. include the policy digest in every compiled-kernel identity;
+3. use explicit policy fixtures for offline replay;
+4. retain flavor modes only while their consumers migrate; and
 5. remove ranked or umbrella flavor checks one independent capability at a
    time.
 
-The report must not be imported directly as policy: compiler acceptance is
-raw evidence, while choosing and qualifying an emitted form is a rocKE decision.
+Raw reports must not be imported directly by lowering. Compiler acceptance is
+evidence; the canonical policy is the only selection boundary.
 
 ## Scope
 
-This change does not:
+This change installs evidence collection and deterministic policy resolution in
+the rocKE wheel. It does not:
 
-- wire the probe into CI;
-- modify TheRock configuration;
-- change Python or C++ lowering;
-- select an emitted ABI;
-- remove LLVM flavors;
+- wire capability-driven lowering into Python or C++;
+- remove LLVM flavors before their consumers migrate;
 - claim compiler qualification; or
 - replace complete-module, byte-identity, ISA/resource, numeric, or performance
   qualification.

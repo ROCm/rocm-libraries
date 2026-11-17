@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from pathlib import Path
 
 
 def _disable_core_dumps() -> None:
@@ -25,8 +26,29 @@ def _disable_core_dumps() -> None:
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
+def _loaded_compiler_dependencies(
+    maps: Path = Path("/proc/self/maps"),
+) -> list[str] | None:
+    """Mapped shared LLVM libraries, or ``None`` when they cannot be enumerated."""
+    if not maps.is_file():
+        return None
+    try:
+        lines = maps.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    dependencies = set()
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 6 or not fields[5].startswith("/"):
+            continue
+        path = Path(fields[5])
+        if path.name.startswith(("libLLVM", "libclang-cpp")) and path.is_file():
+            dependencies.add(str(path.resolve()))
+    return sorted(dependencies)
+
+
 def _identity() -> dict[str, object]:
-    from rocke.runtime import comgr
+    from ..runtime import comgr
 
     info = comgr.loaded_compiler_info()
     if info is None:
@@ -37,11 +59,12 @@ def _identity() -> dict[str, object]:
         "requested_library": info.requested_comgr,
         "loaded_library": info.comgr_path,
         "query_library": info.query_library_path,
+        "dependency_libraries": _loaded_compiler_dependencies(),
     }
 
 
 def _probe(header: dict[str, object], ir_text: str) -> dict[str, object]:
-    from rocke.runtime import comgr
+    from ..runtime import comgr
 
     options = header.get("options", ["-O3"])
     if not isinstance(options, list) or not all(isinstance(x, str) for x in options):

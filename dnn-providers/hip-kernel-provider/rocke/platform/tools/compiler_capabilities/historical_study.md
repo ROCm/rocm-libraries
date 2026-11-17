@@ -11,11 +11,12 @@
 
 ## Measured scope
 
-This study replays the production COMGR LLVM-IR-to-HSACO route across nine
-selected weekly snapshots and public 7.0.0, 7.1.0, and 7.2.0 release packages.
-The weekly set contains the first sampled artifact plus both sides of every
-structural transition found by the initial 43-week survey. Every snapshot is
-probed for gfx942, gfx950, gfx1151, gfx1201, and gfx1250.
+This study records the production COMGR LLVM-IR-to-HSACO route across nine
+selected weekly snapshots and public 7.0.0 and 7.2.0 release packages. The
+weekly set contains the first sampled artifact plus both sides of every
+structural transition found by the initial 43-week survey. Weekly artifacts use
+gfx950 for common contracts and gfx1250 for the named-barrier generation;
+release baselines use gfx950.
 
 The machine-readable evidence is
 [`historical_observations.json`](historical_observations.json). The immutable
@@ -27,7 +28,8 @@ are not retained as a permanent replay obligation.
 
 For each unique artifact, the replay tool:
 
-1. fetches only COMGR and its shared-library dependencies;
+1. reads COMGR and its shared-library dependencies from a persistent local
+   content-addressed cache;
 2. hashes and queries the extracted COMGR library;
 3. runs the complete 15–16-candidate corpus in isolated workers;
 4. requires every accepted candidate to reach executable HSACO creation;
@@ -49,10 +51,10 @@ Four selected adjacent transition pairs change the structural COMGR vector:
 
 | Boundary | Changed cells | Capability families |
 | --- | ---: | --- |
-| W34 → W35 | 11 | buffer-resource ABI; named-barrier pointer ABI |
-| W40 → W41 | 10 | named-barrier pointer ABI |
-| W43 → W44 | 3 | named-barrier pointer ABI |
-| W45 → W46 | 10 | named-barrier pointer ABI |
+| W34 → W35 | 4 | buffer-resource ABI |
+| W40 → W41 | 4 | named-barrier pointer ABI |
+| W43 → W44 | 1 | named-barrier pointer ABI |
+| W45 → W46 | 4 | named-barrier pointer ABI |
 
 The cells are processor-specific. A transition can change normal rejection to a
 compiler crash, move failure between parser and codegen stages, or exchange
@@ -68,12 +70,10 @@ count width; later rocKE policy must choose and qualify one form.
 | Release package | Embedded LLVM evidence | Purpose |
 | --- | --- | --- |
 | 7.0.0 | 20.0.0 | legacy profile baseline |
-| 7.1.0 | 20.0.0 | second legacy release baseline |
 | 7.2.0 | 22.0.0 | indexed-address-space-8 transition baseline |
 
-The release rows use public COMGR packages directly and retain the same processor
-coverage as the weekly sample. They are endpoints and are not inserted into the
-weekly transition table.
+The release rows use cached public COMGR packages on gfx950. They are endpoints
+and are not inserted into the weekly transition table.
 
 ## Interpretation
 
@@ -96,10 +96,17 @@ supported compiler window or no active production consumer needs it.
 From `platform/`:
 
 ```bash
+# Offline by default; fails if a selected artifact is absent locally.
 PYTHONPATH=python python tools/compiler_capabilities/replay_historical.py
+
+# Explicit acquisition is a separate maintenance action.
+PYTHONPATH=python python tools/compiler_capabilities/replay_historical.py \
+  --fetch-missing
+
 python tools/compiler_capabilities/check_historical_study.py
 ```
 
 The replay checkpoints after every selected row and resumes a compatible partial
-output. The checker validates public provenance, exact corpus closure, source
-digests, absence of local paths, and every published transition row.
+output. The checker validates public provenance, exact corpus closure, semantic
+protocol and schema digests, absence of local paths, and every published
+transition row. Ordinary tests only run the checker and never access the network.

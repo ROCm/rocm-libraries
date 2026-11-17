@@ -274,6 +274,8 @@
     }
   },
   "compiler": {
+    "dependencies": [],
+    "dependency_identity_complete": true,
     "library": "libamd_comgr.so.3",
     "llvm_version": [
       23,
@@ -287,11 +289,12 @@
   },
   "probe": {
     "effective_processor": "gfx950",
-    "fingerprint": "4d8961158784726aa26f45ef574995e92d9cd9756e96a2cf818c67ee37cfff42",
-    "implementation_sha256": "9ea8b7d9aa2f205e617dd19be536b98ecc5f0f2a00db9d9f6bcd9eb4f893dd49",
+    "fingerprint": "72f09bf135624f05b4366e36fe217fb711850b471fb626fae45984187935f3f9",
+    "implementation_sha256": "76e1d53e1436bac742087e72a7371697c9e26e6f06fb3706ea587ee7475ec3b4",
     "name": "rocke-comgr-capabilities",
     "processor": "gfx950",
-    "schema_sha256": "21c99cbac8781c3a2fffcb30792c29e8c7aa9dd627068c4a7f5c95909ef8cb99",
+    "protocol_sha256": "5dc387c0b1364ea54984981698b386fcad049bdf4f90dfed4461ae91b04d1291",
+    "schema_sha256": "2fa604845aa8f5e0edc7ac95f2889e3b2cd0203684e675da353d752e0f60140b",
     "target_triple": "amdgcn-amd-amdhsa"
   }
 }

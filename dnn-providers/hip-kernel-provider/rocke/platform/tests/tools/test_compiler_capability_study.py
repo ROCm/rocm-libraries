@@ -25,6 +25,7 @@ if str(_TOOLS) not in sys.path:
 
 from compiler_capabilities import check_historical_study as study
 from compiler_capabilities import replay_historical as replay
+from rocke.compiler import evidence
 
 
 def _paths() -> tuple[Path, Path, Path, Path]:
@@ -46,11 +47,18 @@ def test_published_comgr_study_matches_machine_evidence() -> None:
     study.check(*_paths())
 
 
+def test_example_report_matches_the_installed_capability_contract() -> None:
+    example = json.loads(
+        (_CAPABILITIES / "example.capabilities.json").read_text(encoding="utf-8")
+    )
+    evidence.validate_report_structure(example)
+
+
 @pytest.mark.parametrize(
     ("section", "field", "message"),
     [
         ("compiler", "sha256", "COMGR digest"),
-        ("probe", "implementation_sha256", "implementation_sha256"),
+        ("probe", "protocol_sha256", "protocol_sha256"),
         ("probe", "schema_sha256", "schema_sha256"),
     ],
 )
@@ -68,7 +76,7 @@ def test_checker_rejects_missing_provenance_digest(
         study.check(inputs, changed, published, churn)
 
 
-@pytest.mark.parametrize("field", ["implementation_sha256", "schema_sha256"])
+@pytest.mark.parametrize("field", ["protocol_sha256", "schema_sha256"])
 def test_checker_rejects_probe_source_digest_drift(tmp_path: Path, field: str) -> None:
     inputs, observations_path, published, churn = _paths()
     observations = json.loads(observations_path.read_text())
@@ -134,7 +142,7 @@ def test_checker_rejects_stale_published_boundaries(tmp_path: Path) -> None:
     inputs, observations, published, churn = _paths()
     changed = tmp_path / "historical_study.md"
     changed.write_text(
-        published.read_text().replace("| W34 → W35 | 11 |", "| W34 → W35 | 10 |"),
+        published.read_text().replace("| W34 → W35 | 4 |", "| W34 → W35 | 3 |"),
         encoding="utf-8",
     )
     with pytest.raises(study.StudyError, match="published structural boundaries"):
@@ -155,6 +163,50 @@ def test_compiler_member_selection_requires_comgr_and_llvm_dependencies() -> Non
         replay._compiler_members(names[1:])
 
 
+def test_replay_is_offline_unless_acquisition_is_explicit(tmp_path: Path) -> None:
+    row = {
+        "id": "W01",
+        "kind": "wheel",
+        "artifact_url": "https://example.com/compiler.whl",
+    }
+    with pytest.raises(replay.support.ProbeError, match="--fetch-missing"):
+        replay._cached_comgr(
+            row,
+            tmp_path / "artifacts",
+            fetch_missing=False,
+            block_bytes=1024,
+        )
+
+
+def test_explicit_acquisition_populates_persistent_artifact_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = {
+        "id": "W01",
+        "kind": "wheel",
+        "artifact_url": "https://example.com/compiler.whl",
+    }
+    extracts = 0
+
+    def extract(url: str, destination: Path, *, block_bytes: int) -> Path:
+        nonlocal extracts
+        del url, block_bytes
+        extracts += 1
+        library = destination / "pkg" / "lib" / "libamd_comgr.so.3"
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"comgr")
+        return library
+
+    monkeypatch.setattr(replay, "_extract_wheel_comgr", extract)
+    cache = tmp_path / "artifacts"
+    acquired = replay._cached_comgr(row, cache, fetch_missing=True, block_bytes=1024)
+    reused = replay._cached_comgr(row, cache, fetch_missing=False, block_bytes=1024)
+
+    assert acquired == reused
+    assert acquired.read_bytes() == b"comgr"
+    assert extracts == 1
+
+
 def test_replay_reuses_duplicate_artifact_and_checkpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -169,6 +221,7 @@ def test_replay_reuses_duplicate_artifact_and_checkpoints(
                 "artifact": "compiler.whl",
                 "index_url": "https://example.com/",
                 "artifact_url": url,
+                "processors": ["gfx950"],
             }
             for identifier in ("W01", "W02")
         ],
@@ -182,7 +235,7 @@ def test_replay_reuses_duplicate_artifact_and_checkpoints(
     extracts = 0
     probes = 0
 
-    def extract(*args: object, **kwargs: object) -> Path:
+    def cached(*args: object, **kwargs: object) -> Path:
         nonlocal extracts
         extracts += 1
         return tmp_path / "libamd_comgr.so.3"
@@ -194,16 +247,18 @@ def test_replay_reuses_duplicate_artifact_and_checkpoints(
         processor = str(kwargs["processor"])
         report["probe"]["processor"] = processor
         report["probe"]["effective_processor"] = processor
-        report["probe"]["implementation_sha256"] = replay.probe._implementation_sha256()
-        report["probe"]["schema_sha256"] = replay.probe._schema_sha256()
+        report["probe"]["protocol_sha256"] = replay.corpus.protocol_sha256(processor)
+        report["probe"]["schema_sha256"] = replay.evidence._schema_sha256()
         return report, False
 
-    monkeypatch.setattr(replay, "_extract_wheel_comgr", extract)
-    monkeypatch.setattr(replay.probe, "load_or_probe", probe_once)
+    monkeypatch.setattr(replay, "_cached_comgr", cached)
+    monkeypatch.setattr(replay.evidence, "load_or_probe", probe_once)
     document = replay.replay(
         inputs_path,
         output,
-        processors=("gfx950",),
+        processors=None,
+        artifact_cache_dir=tmp_path / "artifacts",
+        fetch_missing=False,
         jobs=1,
         timeout=1,
         block_bytes=1024,
@@ -217,7 +272,9 @@ def test_replay_reuses_duplicate_artifact_and_checkpoints(
     resumed = replay.replay(
         inputs_path,
         output,
-        processors=("gfx950",),
+        processors=None,
+        artifact_cache_dir=tmp_path / "artifacts",
+        fetch_missing=False,
         jobs=1,
         timeout=1,
         block_bytes=1024,

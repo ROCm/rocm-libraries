@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Replay the COMGR capability probe across public historical wheel snapshots.
+"""Replay COMGR evidence from a persistent local artifact cache.
 
-The ROCm SDK wheels are large because they contain the full compiler toolchain.
-This tool uses HTTP range requests and extracts only COMGR plus its shared-library
-dependencies. Each unique wheel is downloaded/probed once; duplicate weekly
-selections reuse that evidence. Results are checkpointed after every row.
+Normal replay is offline and never downloads. ``--fetch-missing`` is an explicit
+maintenance action that acquires absent public artifacts into the content-addressed
+cache before probing them. Results are checkpointed after every selected row.
 """
 
 from __future__ import annotations
@@ -17,28 +16,22 @@ import hashlib
 import io
 import json
 import lzma
+import sys
 import tarfile
 import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
 
-if __package__:
-    from . import _probe_support as support
-    from . import probe
-else:
-    import sys
+_PLATFORM = Path(__file__).resolve().parents[2]
+_PYTHON = _PLATFORM / "python"
+if _PYTHON.is_dir() and str(_PYTHON) not in sys.path:
+    sys.path.insert(0, str(_PYTHON))
 
-    _PLATFORM = Path(__file__).resolve().parents[2]
-    _PYTHON = _PLATFORM / "python"
-    if str(_PYTHON) not in sys.path:
-        sys.path.insert(0, str(_PYTHON))
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from compiler_capabilities import _probe_support as support
-    from compiler_capabilities import probe
+from rocke.compiler import _support as support
+from rocke.compiler import corpus, evidence
 
-_FORMAT = "rocke-comgr-historical-observations/v3"
-_DEFAULT_PROCESSORS = ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250")
+_FORMAT = "rocke-comgr-historical-observations/v4"
 
 
 class _HttpRangeReader(io.RawIOBase):
@@ -231,6 +224,58 @@ def _extract_deb_comgr(url: str, destination: Path) -> Path:
     return matches[0]
 
 
+def _cached_comgr(
+    row: dict[str, object],
+    cache_dir: Path,
+    *,
+    fetch_missing: bool,
+    block_bytes: int,
+) -> Path:
+    """Return a cached COMGR path, acquiring it only when explicitly allowed."""
+    url = str(row["artifact_url"])
+    key = hashlib.sha256(url.encode()).hexdigest()
+    entry = cache_dir / key
+    metadata_path = entry / "artifact.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        relative = metadata["comgr"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError):
+        metadata = None
+    if metadata is not None and metadata.get("artifact_url") == url:
+        comgr = entry / relative
+        if comgr.is_file():
+            return comgr
+    if not fetch_missing:
+        raise support.ProbeError(
+            "historical artifact is not cached - "
+            f"id={row['id']}, cache={entry}; rerun acquisition with --fetch-missing"
+        )
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".{key}-", dir=cache_dir) as temporary:
+        root = Path(temporary)
+        if row["kind"] == "wheel":
+            comgr = _extract_wheel_comgr(url, root, block_bytes=block_bytes)
+        else:
+            comgr = _extract_deb_comgr(url, root)
+        relative = comgr.relative_to(root)
+        (root / "artifact.json").write_text(
+            json.dumps(
+                {"artifact_url": url, "comgr": str(relative)},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if entry.exists():
+            raise support.ProbeError(
+                f"historical artifact cache entry is incomplete: {entry}"
+            )
+        root.replace(entry)
+    return entry / relative
+
+
 def _compact_report(report: dict[str, object]) -> dict[str, object]:
     """Keep auditable behavior while excluding local paths and diagnostics."""
     compiler = report["compiler"]
@@ -249,7 +294,7 @@ def _compact_report(report: dict[str, object]) -> dict[str, object]:
         compact_capabilities[name] = observations
     return {
         "probe": {
-            "implementation_sha256": report["probe"]["implementation_sha256"],
+            "protocol_sha256": report["probe"]["protocol_sha256"],
             "schema_sha256": report["probe"]["schema_sha256"],
             "processor": report["probe"]["processor"],
             "effective_processor": report["probe"]["effective_processor"],
@@ -258,6 +303,10 @@ def _compact_report(report: dict[str, object]) -> dict[str, object]:
             "sha256": compiler["sha256"],
             "llvm_version": compiler["llvm_version"],
             "version_source": compiler["version_source"],
+            "dependency_sha256": [
+                dependency["sha256"] for dependency in compiler["dependencies"]
+            ],
+            "dependency_identity_complete": compiler["dependency_identity_complete"],
         },
         "capabilities": compact_capabilities,
     }
@@ -277,19 +326,14 @@ def _intern_reports(
                 "one historical artifact reported different COMGR identities"
             )
         probe_info = report["probe"]
-        root_probe = output.get("probe")
-        if not root_probe:
-            root_probe = {
-                "implementation_sha256": probe_info["implementation_sha256"],
-                "schema_sha256": probe_info["schema_sha256"],
-            }
-            output["probe"] = root_probe
+        root_probe = output["probe"]
+        expected_protocol = root_probe["protocol_sha256"].get(processor)
         if (
-            root_probe["implementation_sha256"] != probe_info["implementation_sha256"]
+            expected_protocol != probe_info["protocol_sha256"]
             or root_probe["schema_sha256"] != probe_info["schema_sha256"]
         ):
             raise support.ProbeError(
-                "historical reports were produced by different probe/schema sources"
+                "historical report differs from the selected protocol/schema"
             )
         capabilities = json.loads(json.dumps(report["capabilities"]))
         encoded = json.dumps(
@@ -330,6 +374,19 @@ def _load_inputs(path: Path) -> dict[str, object]:
                 raise support.ProbeError(
                     f"historical row {row.get('id')} has unknown artifact kind"
                 )
+            processors = row.get("processors")
+            if (
+                not isinstance(processors, list)
+                or not processors
+                or not all(
+                    isinstance(processor, str) and processor.startswith("gfx")
+                    for processor in processors
+                )
+                or len(processors) != len(set(processors))
+            ):
+                raise support.ProbeError(
+                    f"historical row {row.get('id')} has invalid processors"
+                )
     return document
 
 
@@ -341,43 +398,55 @@ def replay(
     inputs_path: Path,
     output_path: Path,
     *,
-    processors: tuple[str, ...],
+    processors: tuple[str, ...] | None,
+    artifact_cache_dir: Path,
+    fetch_missing: bool,
     jobs: int,
     timeout: int,
     block_bytes: int,
 ) -> dict[str, object]:
-    """Replay every selected snapshot, checkpointing each completed row."""
+    """Replay selected local artifacts, checkpointing each completed row."""
     inputs = _load_inputs(inputs_path)
+    selected_processors = sorted(
+        set(processors or ())
+        or {
+            processor
+            for group_name in ("weekly", "releases")
+            for row in inputs.get(group_name, [])
+            for processor in row["processors"]
+        }
+    )
+    expected_probe = {
+        "protocol_sha256": {
+            processor: corpus.protocol_sha256(processor)
+            for processor in selected_processors
+        },
+        "schema_sha256": evidence._schema_sha256(),
+    }
     output: dict[str, object] = {
         "format": _FORMAT,
         "public_sources": inputs.get("public_sources", []),
-        "processors": list(processors),
-        "probe": {},
+        "probe": expected_probe,
         "vectors": {},
         "weekly": [],
         "releases": [],
     }
     if output_path.exists():
         prior = json.loads(output_path.read_text(encoding="utf-8"))
-        if prior.get("format") != _FORMAT or prior.get("processors") != list(
-            processors
-        ):
+        if prior.get("format") != _FORMAT or prior.get("probe") != expected_probe:
             raise support.ProbeError(
-                "existing historical output has incompatible format or processors"
+                "existing historical output has incompatible protocol or schema"
             )
-        expected_probe = {
-            "implementation_sha256": probe._implementation_sha256(),
-            "schema_sha256": probe._schema_sha256(),
-        }
-        if prior.get("probe") == expected_probe:
-            output = prior
-            output.setdefault("releases", [])
-            for row in output["weekly"]:
-                row.setdefault("kind", "wheel")
+        output = prior
+        output.setdefault("releases", [])
+
     all_output_rows = [*output["weekly"], *output["releases"]]
     completed = {(row["kind"], row["id"]): row for row in all_output_rows}
-    by_url = {
-        row["artifact_url"]: (row["compiler"], row["reports"])
+    by_artifact_and_processors = {
+        (row["artifact_url"], tuple(row["reports"])): (
+            row["compiler"],
+            row["reports"],
+        )
         for row in all_output_rows
     }
 
@@ -387,30 +456,31 @@ def replay(
             kind = source_row["kind"]
             if (kind, identifier) in completed:
                 continue
-            url = source_row["artifact_url"]
-            interned = by_url.get(url)
+            row_processors = tuple(processors or source_row["processors"])
+            cache_key = (source_row["artifact_url"], row_processors)
+            interned = by_artifact_and_processors.get(cache_key)
             if interned is None:
-                with tempfile.TemporaryDirectory(prefix="rocke-comgr-study-") as tmp:
-                    root = Path(tmp)
-                    if kind == "wheel":
-                        comgr_lib = _extract_wheel_comgr(
-                            url, root, block_bytes=block_bytes
-                        )
-                    else:
-                        comgr_lib = _extract_deb_comgr(url, root)
-                    raw_reports = {}
-                    for processor in processors:
-                        report, _ = probe.load_or_probe(
+                comgr_lib = _cached_comgr(
+                    source_row,
+                    artifact_cache_dir,
+                    fetch_missing=fetch_missing,
+                    block_bytes=block_bytes,
+                )
+                raw_reports = {}
+                with tempfile.TemporaryDirectory(prefix="rocke-comgr-probe-") as tmp:
+                    cache_root = Path(tmp)
+                    for processor in row_processors:
+                        report, _ = evidence.load_or_probe(
                             comgr_lib=comgr_lib,
                             processor=processor,
-                            cache_dir=root / "cache" / processor,
+                            cache_dir=cache_root / processor,
                             refresh=True,
                             jobs=jobs,
                             timeout=timeout,
                         )
                         raw_reports[processor] = _compact_report(report)
                 compiler, reports = _intern_reports(output, raw_reports)
-                by_url[url] = (compiler, reports)
+                by_artifact_and_processors[cache_key] = (compiler, reports)
             else:
                 compiler, reports = interned
             row = {
@@ -418,7 +488,7 @@ def replay(
                 "kind": kind,
                 "artifact": source_row["artifact"],
                 "index_url": source_row["index_url"],
-                "artifact_url": url,
+                "artifact_url": source_row["artifact_url"],
                 "compiler": compiler,
                 "reports": reports,
             }
@@ -437,7 +507,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--output", type=Path, default=here / "historical_observations.json"
     )
     parser.add_argument(
-        "--processors", default=",".join(_DEFAULT_PROCESSORS), help="comma-separated"
+        "--processors",
+        default="",
+        help="optional comma-separated override; default: each input row's processors",
+    )
+    parser.add_argument(
+        "--artifact-cache-dir",
+        type=Path,
+        default=evidence.default_cache_dir().parent / "historical_artifacts",
+    )
+    parser.add_argument(
+        "--fetch-missing",
+        action="store_true",
+        help="explicitly acquire public artifacts absent from the local cache",
     )
     parser.add_argument("--jobs", type=int, default=0)
     parser.add_argument("--timeout", type=int, default=60)
@@ -450,12 +532,12 @@ def main(argv: list[str] | None = None) -> int:
     processors = tuple(
         part.strip() for part in args.processors.split(",") if part.strip()
     )
-    if not processors:
-        raise SystemExit("--processors must name at least one target")
     replay(
         args.inputs,
         args.output,
-        processors=processors,
+        processors=processors or None,
+        artifact_cache_dir=args.artifact_cache_dir,
+        fetch_missing=args.fetch_missing,
         jobs=args.jobs,
         timeout=args.timeout,
         block_bytes=args.download_block_mib << 20,

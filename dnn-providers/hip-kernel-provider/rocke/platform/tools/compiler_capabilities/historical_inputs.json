@@ -11,21 +11,20 @@
       "artifact_url": "https://repo.radeon.com/rocm/apt/7.0/pool/main/c/comgr/comgr_3.0.0.70000-38~24.04_amd64.deb",
       "id": "7.0.0",
       "index_url": "https://repo.radeon.com/rocm/apt/7.0/pool/main/c/comgr/",
-      "kind": "deb"
-    },
-    {
-      "artifact": "comgr_3.0.0.70100-20~24.04_amd64.deb",
-      "artifact_url": "https://repo.radeon.com/rocm/apt/7.1/pool/main/c/comgr/comgr_3.0.0.70100-20~24.04_amd64.deb",
-      "id": "7.1.0",
-      "index_url": "https://repo.radeon.com/rocm/apt/7.1/pool/main/c/comgr/",
-      "kind": "deb"
+      "kind": "deb",
+      "processors": [
+        "gfx950"
+      ]
     },
     {
       "artifact": "comgr_3.0.0.70200-43~24.04_amd64.deb",
       "artifact_url": "https://repo.radeon.com/rocm/apt/7.2/pool/main/c/comgr/comgr_3.0.0.70200-43~24.04_amd64.deb",
       "id": "7.2.0",
       "index_url": "https://repo.radeon.com/rocm/apt/7.2/pool/main/c/comgr/",
-      "kind": "deb"
+      "kind": "deb",
+      "processors": [
+        "gfx950"
+      ]
     }
   ],
   "weekly": [
@@ -34,63 +33,99 @@
       "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260214-py3-none-linux_x86_64.whl",
       "id": "W06",
       "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.1.0a20260819",
       "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260819-py3-none-linux_x86_64.whl",
       "id": "W34",
       "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.1.0a20260829",
       "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260829-py3-none-linux_x86_64.whl",
       "id": "W35",
       "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.2.0a20261001",
       "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261001-py3-none-linux_x86_64.whl",
       "id": "W40",
       "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.2.0a20261008",
       "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261008-py3-none-linux_x86_64.whl",
       "id": "W41",
       "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.2.0a20261022",
       "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261022-py3-none-linux_x86_64.whl",
       "id": "W43",
       "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.3.0a20261029",
       "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261029-py3-none-linux_x86_64.whl",
       "id": "W44",
       "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.3.0a20261105",
       "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261105-py3-none-linux_x86_64.whl",
       "id": "W45",
       "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     },
     {
       "artifact": "10.3.0a20261112",
       "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261112-py3-none-linux_x86_64.whl",
       "id": "W46",
       "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
-      "kind": "wheel"
+      "kind": "wheel",
+      "processors": [
+        "gfx950",
+        "gfx1250"
+      ]
     }
   ]
 }

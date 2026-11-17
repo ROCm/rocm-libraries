@@ -266,16 +266,17 @@ normalized emission policy
 Python lowerer            C++ lowerer
 ```
 
-Migrate one independent decision at a time:
+The installed `rocke.compiler` package now owns exact COMGR identity, raw
+evidence, preference/unknown behavior, and canonical policy serialization.
+Migrate one lowering decision at a time:
 
 1. choose a capability whose candidate corpus is complete;
-2. prove the report belongs to the COMGR library that will compile;
-3. define preference, fallback, and unknown behavior;
-4. serialize/generate one normalized policy for both engines;
-5. retain flavor inference as a visible temporary fallback;
-6. update Python and C++ together;
-7. run byte identity and the relevant compiler/numeric qualification; and
-8. remove the corresponding flavor branch only after fallback coverage is no
+2. pass the canonical manifest to both lowerers;
+3. bind its digest into compiled-kernel identity;
+4. retain flavor inference as a visible temporary fallback;
+5. update Python and C++ together;
+6. run byte identity and the relevant compiler/numeric qualification; and
+7. remove the corresponding flavor branch only after fallback coverage is no
    longer required.
 
 The first suitable vertical slice is a structural ABI with a small candidate
@@ -285,10 +286,10 @@ text.
 
 ## Deferred qualification
 
-This research change produces evidence but does not alter lowering, wire a CI
-gate, or claim that an accepted compiler is qualified. Production integration
-must also establish how a report is generated or retrieved for the exact loaded
-library in Python-free provider paths.
+This change installs evidence collection and policy resolution but does not
+alter lowering, wire a CI gate, or claim that an accepted compiler is qualified.
+Python-free provider paths still need a native way to receive the same canonical
+manifest before flavor inference can be removed there.
 
 The strong conclusion supported by this design is narrow: direct COMGR probing
 is a sounder basis for production compatibility decisions than reported-major
