@@ -1860,9 +1860,9 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
-        // Uniform summation order can keep mapping 1 only when the kernel can
-        // apply row-uniform staggering. Persistent kernels also require the
-        // per-tile iteration capability; otherwise disable staggering.
+        // Uniform summation order runs only with StaggerU off: mapping,
+        // stagger and stride shift are all forced to 0 (this includes
+        // StaggerUMapping=1, which previously was allowed).
         //
         // The placement of this clamp is load-bearing. It must sit AFTER the
         // TENSILE_FIXED_STAGGERU* overrides directly above, or an env override
@@ -1871,15 +1871,9 @@ namespace TensileLite
         // this mode's zeros for concurrent callers who did not request it.
         if(problem.getParams().uniformSummationOrder() != 0)
         {
-            const bool rowUniformStaggerCapable
-                = internalArgsSupport.staggerU
-                  && (!sizeMapping.isPersistent() || internalArgsSupport.perTileExtraIters);
-            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
-            {
-                defaultStaggerUMapping     = 0;
-                defaultStaggerU            = 0;
-                defaultStaggerUStrideShift = 0;
-            }
+            defaultStaggerUMapping     = 0;
+            defaultStaggerU            = 0;
+            defaultStaggerUStrideShift = 0;
         }
 
         // Mapping should be in this range: [0, 1, 2, 3, 4]
@@ -7081,14 +7075,14 @@ namespace TensileLite
                               + " with GSU=" + std::to_string(gsu) + " is not row-uniform");
 
         // Recomputes exactly what generateSingleCall() packs. The clamp in
-        // calculateAutoStaggerU() permits nonzero staggering only with mapping
-        // 1 and the required kernel capabilities. Check the resolved result too.
+        // calculateAutoStaggerU() forces StaggerU off under uniform summation
+        // order. Check the resolved result too.
         const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, launch.grid));
         const auto   resolvedStaggerUParams
             = calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM);
         const size_t resolvedStaggerUMapping = std::get<0>(resolvedStaggerUParams);
         const size_t resolvedStaggerU        = std::get<1>(resolvedStaggerUParams);
-        if(resolvedStaggerU != 0 && resolvedStaggerUMapping != 1)
+        if(resolvedStaggerU != 0)
             return refuse("ResolvedStaggerU",
                           "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
                               + " with mapping " + std::to_string(resolvedStaggerUMapping));
