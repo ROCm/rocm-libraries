@@ -75,6 +75,13 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
+        // Reject a mismatch before any write of buffer_size, nnz, ell_cols, or the
+        // sparse arrays. The buffer-size, analysis, and compute paths all pass here.
+        ROCSPARSE_CHECKARG(2,
+                           mat_B,
+                           (mat_B->rows != mat_A->rows || mat_B->cols != mat_A->cols),
+                           rocsparse_status_invalid_size);
+
         if(temp_buffer == nullptr)
         {
             ROCSPARSE_CHECKARG_POINTER(4, buffer_size);
@@ -387,6 +394,12 @@ try
 
     ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+
+    // Same check as dense_to_sparse_template, before that function reads or writes.
+    ROCSPARSE_CHECKARG(2,
+                       mat_B,
+                       (mat_B->rows != mat_A->rows || mat_B->cols != mat_A->cols),
+                       rocsparse_status_invalid_size);
 
     rocsparse::dense_to_sparse_t f;
     if(mat_B->format == rocsparse_format_csc)
