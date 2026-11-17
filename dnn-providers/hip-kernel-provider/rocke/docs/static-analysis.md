@@ -65,11 +65,9 @@ For all of rocke, call the wrapper with no paths, from the repository root:
 python dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/static_analysis_checks.py pyright
 ```
 
-This gives one report. On a shared host it took pyright 1.5 to 2.5 minutes and
-vulture 15 to 20 seconds. Radon had not finished after 13 minutes: one 1.2 MB test
-file, `library/tests/test_attention_bwd_refusals.py`, takes it more than two
-minutes by itself (the other large files take about a second), so give radon the
-files you changed. Do not use `pre-commit run --all-files` for it: pre-commit
+This gives one report. Pyright and radon take minutes on all of rocke (radon is
+slowest on a few very large test files), so give radon the files you changed.
+Do not use `pre-commit run --all-files` for it: pre-commit
 splits a long file list into several runs to stay under the operating system's
 command-line limit, each printing its own partial report, and vulture rescans all
 of rocke every time.

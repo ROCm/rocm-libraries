@@ -442,6 +442,8 @@ repos:
       # a hook whose program is absent, before the wrapper could skip anything, so
       # the entry is a small bash snippet. It runs the first of `python`, `python3`
       # that works and is Python 3.10+, and skips (exit 0) when there is none. It
+      # exits 0 after the wrapper too, so a wrapper that cannot even start (a
+      # sparse checkout without tools/static_analysis/) stays advisory as well. It
       # needs bash on PATH, as the pre-push script that pre-commit installs does.
       # CI does not run these pre-push hooks.
       # Enable locally with:
@@ -457,7 +459,8 @@ repos:
           bash -c '
           for py in python python3; do
             if "$py" -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>&1; then
-              exec "$py" dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/static_analysis_checks.py "$@"
+              "$py" dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/static_analysis_checks.py "$@"
+              exit 0
             fi
           done
           echo "rocKE advisory ($1): no Python 3.10+ on PATH; skipped."

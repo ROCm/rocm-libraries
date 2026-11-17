@@ -128,9 +128,8 @@ def run_pyright(files: list[Path]) -> None:
     # rocke/ is an import root (`library.kernels...`). While the config sat in rocke/
     # pyright had it on its import path without being told; with the config in
     # tools/static_analysis/ it does not, and the same code is then analysed with
-    # different module names (~150 of ~30,000 reports change today). PYTHONPATH
-    # is how a Python tool is told, and it reaches the interpreter pyright asks for
-    # its search paths.
+    # different module names (some reports change). PYTHONPATH is how a Python tool
+    # is told, and it reaches the interpreter pyright asks for its search paths.
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         [str(ROCKE), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]

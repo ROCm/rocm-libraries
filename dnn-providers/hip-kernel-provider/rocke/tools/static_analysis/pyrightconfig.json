@@ -6,8 +6,10 @@
 // rootdir when tools/run_checks.py runs pytest from rocke/.
 //
 // pyright reads every path below relative to THIS directory (tools/static_analysis),
-// so rocke/ itself is "../..". Run it through the wrapper, or point pyright here:
-//   pyright --project tools/static_analysis/pyrightconfig.json
+// so rocke/ itself is "../..". Run it through the wrapper, not pyright directly: the
+// wrapper gives pyright the tracked files and puts rocke/ on PYTHONPATH (an import
+// root this file cannot name), and a bare `pyright --project` run checks only this
+// directory and resolves imports differently.
 //
 // No `include` or `exclude` here on purpose: the wrapper lists the tracked files
 // with `git ls-files` and gives that list to pyright on stdin, which replaces

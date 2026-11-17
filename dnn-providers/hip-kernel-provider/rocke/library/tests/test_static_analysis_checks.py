@@ -580,14 +580,48 @@ def test_hook_runs_a_usable_python_or_skips_but_never_fails(
     skip_note = f"rocKE advisory ({tool}): no Python 3.10+ on PATH; skipped."
     if ran:
         assert f"[advisory, non-blocking] {tool} on" in out
-        # `exec` hands the hook over to the wrapper. Without it the snippet runs on
-        # after the wrapper: it would try the next python, then claim it skipped.
+        # The snippet ends once the wrapper has run. Without that it runs on: it
+        # would try the next python, then claim it skipped.
         assert out.count("[advisory, non-blocking]") == 1, out
         assert skip_note not in out, out
     else:
         assert skip_note in out
         assert "[advisory, non-blocking]" not in out
         assert "not found" not in out  # the probe's own errors stay hidden
+
+
+@pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
+def test_hook_whose_wrapper_is_missing_never_fails(adv, require_git, tmp_path, tool):
+    # A sparse checkout can hold a changed rocke file without tools/static_analysis/.
+    # Python then cannot open the wrapper and exits non-zero; the hook must not.
+    if os.name == "nt":
+        pytest.skip("builds a PATH of symlinks")
+    repo, hook = _hook_repo(tmp_path, tool)
+    rocke = repo / "dnn-providers" / "hip-kernel-provider" / "rocke"
+    (rocke / "library").mkdir()
+    (rocke / "library" / "kernel.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "rm", "-r", "-q", "-f", "--", str(rocke / "tools" / "static_analysis"))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for needed in ("bash", "git"):
+        (bin_dir / needed).symlink_to(shutil.which(needed))
+    python3 = bin_dir / "python3"
+    python3.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    python3.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": str(bin_dir),
+        "PRE_COMMIT_HOME": str(tmp_path / "cold-cache"),
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+    }
+    env.pop("VIRTUAL_ENV", None)
+    returncode, out = _run_hook(repo, hook, env)
+    assert returncode == 0, out
+    assert (
+        "can't open file" in out
+    ), out  # the hook really did run, on a missing wrapper
 
 
 @pytest.mark.parametrize(
