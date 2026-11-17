@@ -11,8 +11,9 @@
  * (which compares the two engines byte for byte only where the pybind engine
  * is built): the kernels are built with the C builders and lowered by the C++
  * engine, and each case pins the segment offset and the claim the Python test
- * pins for the same kernel. A vector store also claims a width: the builder
- * and the verifier refuse a stored value without that many lanes. The f32
+ * pins for the same kernel. A vector store also claims a width: the builder,
+ * the verifier and the LLVM and HIP lowerings refuse a stored value without
+ * that many lanes. The f32
  * epilogue store refuses a value that does not hold f32, and smem_store_f16 a
  * value that does not hold f16.
  */
@@ -20,7 +21,9 @@
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/strbuf.h"
 #include "rocke/verify.h"
 #include <cstdint>
 #include <cstdio>
@@ -536,9 +539,35 @@ bool builder_refuses(rocke_ir_builder_t* builder,
     return refused && builder->kernel->body->num_ops == ops_before;
 }
 
+/* Parse the serialized kernel `text` into a fresh builder and lower it to HIP
+ * for gfx942: the status, and the HIP source or the refusal message. A parse
+ * failure is reported as such. */
+Lowering lower_serialized_to_hip(const std::string& text)
+{
+    Lowering lowering{ROCKE_ERR_VALUE, "", "the kernel did not parse"};
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "parsed_for_hip") != ROCKE_OK)
+        return lowering;
+    rocke_kernel_def_t* kernel = NULL;
+    if(rocke_ir_parse(text.c_str(), &b, &kernel) == ROCKE_OK)
+    {
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 0);
+        rocke_lower_hip_opts_t opts{};
+        opts.arch = kArch;
+        lowering.status = rocke_lower_kernel_to_hip(&b, kernel, &opts, &out);
+        lowering.text = lowering.status == ROCKE_OK ? rocke_strbuf_cstr(&out) : "";
+        const char* error = rocke_ir_builder_error(&b);
+        lowering.error = error ? error : "";
+        rocke_strbuf_free(&out);
+    }
+    rocke_ir_builder_free(&b);
+    return lowering;
+}
+
 /* True when the serialized kernel `text` parses, the verifier reports exactly
- * `message` for it, and the LLVM lowering refuses it with `status` and the
- * same text, emitting nothing. */
+ * `message` for it, and the LLVM and HIP lowerings refuse it with `status` and
+ * the same text, emitting nothing. */
 bool serialized_kernel_is_refused(const std::string& text,
                                   rocke_status_t status,
                                   const char* message)
@@ -558,8 +587,10 @@ bool serialized_kernel_is_refused(const std::string& text,
     const bool reported = verified && num_diags == 1 && std::strcmp(diags[0].message, message) == 0;
     rocke_diags_free(diags, num_diags);
     const Lowering lowering = lower_and_free(&b);
+    const Lowering hip = lower_serialized_to_hip(text);
     return reported && lowering.status == status && lowering.text.empty()
-           && lowering.error == message;
+           && lowering.error == message && hip.status == status && hip.text.empty()
+           && hip.error == message;
 }
 
 /* The lowerings store the value as an n-element vector, so smem_store_vN
@@ -637,7 +668,7 @@ int test_a_one_lane_vector_is_a_one_element_store()
 }
 
 /* Serialized IR reaches the verifier and the lowerings without passing the
- * builder: the verifier reports, and the LLVM lowering refuses with
+ * builder: the verifier reports, and the LLVM and HIP lowerings refuse with
  * ROCKE_ERR_VALUE, a tile.smem_store_vN whose value does not have `vec` lanes
  * (a scalar has one). Mirrors
  * test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused. */
@@ -785,7 +816,7 @@ int test_an_f16_store_of_a_value_not_holding_f16_is_refused()
 }
 
 /* Serialized IR reaches the verifier and the lowerings without passing the
- * builder: the verifier reports, and the LLVM lowering refuses, an f32
+ * builder: the verifier reports, and the LLVM and HIP lowerings refuse, an f32
  * epilogue store whose value does not hold f32 (ROCKE_ERR_TYPE) or does not
  * have `vec` lanes (ROCKE_ERR_VALUE). Mirrors
  * test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused. */
