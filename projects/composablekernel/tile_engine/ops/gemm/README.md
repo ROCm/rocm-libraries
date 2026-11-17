@@ -796,9 +796,9 @@ Op-local settings and search configs, under `batched_gemm/`:
 
 | File | Contents |
 |---|---|
-| `search/search_settings_gfx950.json`, `search/search_settings_gfx1250.json` | `tpe`, `shared` seed 0, 100 trials per problem, 8 per round, 1200 builds, `build_timeout_s` 300: every kernel gets the batched build's own limit, 300 s per codegen, compile and link step, so a search times a build out exactly when a full batched run does (without it, a round of native kernels would get the search's 180 s, set from gfx950 fp16 GEMM compile times, see "Build timeout"). No warm start: there is no heuristic model for batched GEMM; an earlier run's `winners.json` can serve as `warm_start.pairs_file`. |
+| `search/search_settings_gfx950.json`, `search/search_settings_gfx1250.json` | `tpe`, `shared` seed 0, 100 trials per problem, 8 per round, 1200 builds, `build_timeout_s` 300: every kernel gets the batched build's own limit, 300 s per codegen, compile and link step, so a search times a build out exactly when a full batched run does (without it, a round of native kernels would get the search's 180 s, set from gfx950 fp16 GEMM compile times, see "Build timeout"). gfx1250 also `warm_start.cover` `"pipeline"`, so each pipeline (the TDM ones included) is tried on every problem first. No heuristic warm start: there is no model for batched GEMM; an earlier run's `winners.json` can serve as `warm_start.pairs_file`. |
 | `configs/search_config_gfx950.json` | Every value of `default_config.json`, plus 32-wide tiles, `tile_k` 32, the `64x4` warp tile and padding: a problem whose M, N or K no tile divides has candidates only with padding. |
-| `configs/search_config_gfx1250.json` | Every value of `default_config_gfx1250.json` (its six pipelines, `comp_tdm` and `comp_tdm_v2` included, and the `tdm` epilogue), plus 32-wide tiles and `tile_k` 32. |
+| `configs/search_config_gfx1250.json` | Every value of `default_config_gfx1250.json` (its seven pipelines, `comp_tdm`, `comp_tdm_v2` and `comp_tdm_pc` included, and the `tdm` epilogue), plus 32-wide tiles and `tile_k` 32. |
 | `configs/narrow_m_config_gfx950.json`, `configs/narrow_n_config_gfx950.json` | An M or N block of 16 or 32 (`default_config.json` starts at 64), `tile_k` 32/64/128, the 16x16x32 warp tile, padding false and true: candidates for problems with a small M or N. |
 | `configs/narrow_1w2w_m_config_gfx950.json`, `configs/narrow_1w2w_n_config_gfx950.json` | The narrow blocks with 1- and 2-wave maps (1x1x1, 1x2x1, 2x1x1), the other side 16..256 (`_m`) or 64..256 (`_n`). The config's `extra_wave_maps` key adds the maps for that config only; the Tile Engine table allows 1x4x1, 2x2x1 and 4x1x1 on gfx950. |
 | `configs/narrow_w32_m_config_gfx950.json`, `configs/narrow_w32_n_config_gfx950.json` | A 32-wide M or N block with the 32x32x16 warp tile, one wave on the 32-wide side (`extra_wave_maps`), the other side 32..256 (`_m`) or 64..256 (`_n`), `tile_k` 32..256. |
@@ -826,7 +826,10 @@ python batched_gemm_full_benchmark.py $RUN --pairs runs/batched-search-001/winne
 
 On gfx1250 pass a gfx1250 config (`default_config_gfx1250.json` or
 `search_config_gfx1250.json`) and `search_settings_gfx1250.json`: the driver's
-default config is the gfx950 CI one.
+default config is the gfx950 CI one. Both configs list `comp_tdm_pc`, which can
+hang with the ROCm 10.2 compiler (see the gfx1250 section above); the batched
+driver has no `--pipelines`, so on that toolchain pass a copy of the config
+without `comp_tdm_pc`.
 
 ### Multi-GPU parallelism
 

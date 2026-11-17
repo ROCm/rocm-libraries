@@ -171,7 +171,7 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     assert calls and all(
         len(c["names"]) == 1 and c["verify"] and c["batch_size"] == 1
         and c["extra"] == {"check_identity": True, "search_host_data": True,
-                           "host_cache": cache} for c in calls)
+                           "host_cache": cache, "arch": "gfx950"} for c in calls)
     assert not Path(cache["dir"]).exists()
     _assert_worker(calls)
     assert len(set(built)) == len(built) <= 12
@@ -480,6 +480,9 @@ def test_shipped_search_settings_and_configs(arch, default):
     # pipelines too), plus smaller tiles and padding for misaligned problems.
     settings = AS.SearchSettings.from_json(SETTINGS / f"search_settings_{arch}.json")
     assert (settings.strategy, settings.seed_policy) == ("tpe", "shared")
+    # gfx1250: each pipeline (the TDM ones included) first on every problem.
+    cover = settings.warm_start and settings.warm_start.cover
+    assert cover == ("pipeline" if arch == "gfx1250" else None)
     search = json.loads((CONFIGS / f"search_config_{arch}.json").read_text())
     base = json.loads((CONFIGS / default).read_text())
     for part in ("tile_config", "trait_config"):
@@ -490,5 +493,42 @@ def test_shipped_search_settings_and_configs(arch, default):
     assert {32} < _values(search["tile_config"]["tile_m"])
     assert all(_values(traits[f"pad_{d}"]) == {False, True} for d in "mnk")
     if arch == "gfx1250":
-        assert {"comp_tdm", "comp_tdm_v2"} <= _values(traits["pipeline"])
+        assert {"comp_tdm", "comp_tdm_v2", "comp_tdm_pc"} <= _values(traits["pipeline"])
         assert "tdm" in _values(traits["epilogue"])
+
+
+# ------------------------------------------------------ with warm_start.cover
+
+
+def _pipelines(monkeypatch, capsys, tmp_path, config, fixed):
+    """--list-pairs of ``config``: ({kernel: pipeline}, {problem: [kernels]})."""
+    path = tmp_path / "list.json"
+    rc, _, built, _ = _main(monkeypatch, capsys, tmp_path, config, "--list-pairs",
+                            str(path), fixed=fixed)
+    assert rc == 0 and not built
+    data = json.loads(path.read_text())
+    return {k: v["pipeline"] for k, v in data["kernels"].items()}, data["pairs"]
+
+
+def test_warm_cover_tries_each_pipeline_of_a_batched_problem_first(monkeypatch, capsys,
+                                                                   tmp_path):
+    # The shipped gfx1250 batched settings (fewer trials) on the gfx1250 CI
+    # config: warm_start.cover tries each pipeline a problem pairs with, the
+    # TDM ones included, before the strategy's own picks; the workers get the
+    # run's arch.
+    fixed = {"arch": "gfx1250", "dtype": "bf16", "layout": "rcr"}
+    config = str(CONFIGS / "default_ci_config_gfx1250.json")
+    pipe, pairs = _pipelines(monkeypatch, capsys, tmp_path, config, fixed)
+    settings = json.loads((SETTINGS / "search_settings_gfx1250.json").read_text())
+    settings.update(trials_per_problem=8, new_builds_per_run=40, batch_per_problem=8,
+                    confirm={"finalists": 2, "fresh_calls": 1})
+    rc, cap, _, calls, out = _search(monkeypatch, capsys, tmp_path, config, fixed=fixed,
+                                     **settings)
+    assert rc == 0, cap.out
+    run = cli._read(out, "run.json")
+    assert calls and all(c["extra"]["arch"] == "gfx1250" for c in calls)
+    for key, prob in zip(KEYS, PROBLEMS):
+        want = {pipe[n] for n in pairs[key]}
+        assert {"comp_tdm", "comp_tdm_v2"} <= want <= set(run["problems"][key]["warm_cover"])
+        first = [pipe[c["names"][0]] for c in calls if c["prob"] == prob][:len(want)]
+        assert set(first) == want
