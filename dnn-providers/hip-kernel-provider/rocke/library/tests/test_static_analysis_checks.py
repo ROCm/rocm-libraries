@@ -485,7 +485,11 @@ def _scratch_wrapper(repo):
 
 
 def _run_hook(repo, hook, env):
-    """Run the hook the way ``git push`` would; returns ``(exit code, output)``."""
+    """Run the hook by hand, as the guide says; returns ``(exit code, output)``.
+
+    No ``--hook-stage``: the hooks name no stage, and that option's ``pre-push``
+    value exists only in pre-commit 3.2.0 and newer.
+    """
     env = {k: v for k, v in env.items() if k != "SKIP"}  # pre-commit's skip list
     proc = subprocess.run(
         [
@@ -494,8 +498,6 @@ def _run_hook(repo, hook, env):
             "pre_commit",
             "run",
             hook["id"],
-            "--hook-stage",
-            "pre-push",
             "--all-files",
             "-c",
             str(_HOOK_CONFIG_REL),
@@ -509,18 +511,21 @@ def _run_hook(repo, hook, env):
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def test_local_hook_config_has_only_local_pre_push_hooks():
-    # pre-commit reads this file only when it is named with -c, so it may use the
-    # pre-push stage; it must stay free of downloads (no remote repository) and of
-    # anything that would run at another stage.
+def test_local_hook_config_has_only_local_hooks_and_names_no_stage():
+    # Opted-in contributors may run any pre-commit version. One older than 3.2.0
+    # calls the pre-push stage `push` and rejects a file naming `pre-push`, which
+    # fails every push; `push` makes newer versions warn on every run. So the file
+    # names no stage (it is installed only as the pre-push hook), and it stays free
+    # of downloads (no remote repository).
     if not _HOOK_CONFIG.is_file():
         pytest.skip("the rocKE-local hook config is not part of this layout")
     config = _load_yaml(_HOOK_CONFIG)
     assert [r["repo"] for r in config["repos"]] == ["local"]
+    assert "default_stages" not in config
     hooks = {h["id"]: h for r in config["repos"] for h in r["hooks"]}
     assert set(hooks) == {"rocke-pyright", "rocke-radon", "rocke-vulture"}
     for hook in hooks.values():
-        assert hook["stages"] == ["pre-push"], hook["id"]
+        assert "stages" not in hook, hook["id"]
         assert hook["language"] == "system", hook["id"]
         assert not hook.get("additional_dependencies"), hook["id"]
 

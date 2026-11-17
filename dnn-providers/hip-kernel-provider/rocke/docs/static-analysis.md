@@ -28,9 +28,10 @@ pre-commit install --hook-type pre-push --allow-missing-config -c "$cfg"
 
 Things to know before you do:
 
-- This config needs pre-commit 3.2.0 or newer: older versions call the stage
-  `push` and reject the file with "Expected one of ... but got: 'pre-push'" (fix:
-  `pip install -U pre-commit`). The repository's own config does not need it.
+- Any pre-commit version reads this config. The hooks name no stage: a version
+  older than 3.2.0 calls the pre-push stage `push` and would reject `pre-push`.
+  Install the file only as the pre-push hook, as above; installed as a commit hook
+  the hooks would run at every commit.
 - Only these three hooks run at push time, because `-c` points the installed hook
   at this config; the repo's other hooks (black, bandit and so on) do not run, and
   there is nothing to download. `--allow-missing-config` lets a push through, with
@@ -63,7 +64,7 @@ Run them by hand. For chosen files, go through pre-commit (with `cfg` set as
 above):
 
 ```bash
-pre-commit run rocke-radon --hook-stage pre-push -c "$cfg" --files <paths>
+pre-commit run rocke-radon -c "$cfg" --files <paths>
 ```
 
 For all of rocke, call the wrapper with no paths, from the repository root:
@@ -82,7 +83,7 @@ of rocke every time.
 To see all three reports for a whole branch without installing the pre-push hook:
 
 ```bash
-pre-commit run --hook-stage pre-push -c "$cfg" --from-ref origin/develop --to-ref HEAD
+pre-commit run -c "$cfg" --from-ref origin/develop --to-ref HEAD
 ```
 
 | Setting | Where |

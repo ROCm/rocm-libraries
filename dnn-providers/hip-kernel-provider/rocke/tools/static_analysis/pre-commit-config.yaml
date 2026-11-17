@@ -7,13 +7,18 @@
 # keeps working with the pre-commit versions it already supports.
 #
 # Enable once per clone, from the repository root:
-#   pre-commit install --hook-type pre-push -c dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
+#   pre-commit install --hook-type pre-push --allow-missing-config -c dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
 # At push time only the three hooks below run; the repo's other hooks (black,
 # bandit, ...) do not. They are system hooks, so there is nothing to download.
-# Needs pre-commit 3.2.0 or newer: older versions call the stage `push` and reject
-# this file with "Expected one of ... but got: 'pre-push'" (fix: pip install -U
-# pre-commit). The legacy spelling `push` would work everywhere, but 3.2.0 and
-# newer warn about it for every hook on every run.
+# --allow-missing-config lets a push through from a checkout without this file
+# (another branch, a sparse checkout) instead of failing on it.
+#
+# The hooks name no stage on purpose, so every pre-commit version reads this file.
+# `stages: [pre-push]` would make pre-commit older than 3.2.0 (which calls that
+# stage `push`) reject the file and fail every push, and `stages: [push]` would
+# make newer versions warn on every run. The price: install this file ONLY as the
+# pre-push hook, as above; installed as a commit hook the hooks would run at every
+# commit.
 #
 # NON-BLOCKING: the wrapper always exits 0, and `verbose` prints its report.
 # Missing tools are advisory, and so is a missing Python: pre-commit itself fails
@@ -45,7 +50,6 @@ repos:
         args: [pyright]
         language: system
         files: &rocke_py '^dnn-providers/hip-kernel-provider/rocke/.*\.py$'
-        stages: [pre-push]
         require_serial: true
         verbose: true
       - id: rocke-radon
@@ -54,7 +58,6 @@ repos:
         args: [radon]
         language: system
         files: *rocke_py
-        stages: [pre-push]
         require_serial: true
         verbose: true
       - id: rocke-vulture
@@ -63,6 +66,5 @@ repos:
         args: [vulture]
         language: system
         files: *rocke_py
-        stages: [pre-push]
         require_serial: true
         verbose: true
