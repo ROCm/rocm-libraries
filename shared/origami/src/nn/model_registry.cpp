@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace origami::nn {
@@ -24,6 +25,12 @@ std::mutex g_mutex;
 // shared_ptr so a ranking call that obtained a payload keeps it alive across unload_model.
 std::vector<std::shared_ptr<const twrec::detail::LoadedModel>> g_models;
 std::unordered_map<std::string, model_handle_t> g_path_to_handle;
+// Index lookups by (weights dir, backend, logic stem). A miss is stored as invalid_handle, so a
+// logic file with no model is not re-read from disk for every library that asks. Entries live
+// for the process: weights are expected to be in place before the first lookup.
+std::unordered_map<std::string, model_handle_t> g_index_lookup;
+// Manifests that failed to load, so a bad file referenced by several stems is parsed once.
+std::unordered_set<std::string> g_failed_manifests;
 std::unordered_map<model_handle_t, model_info_t> g_infos;
 model_handle_t g_default_tilewright = invalid_handle;
 model_handle_t g_default_es         = invalid_handle;
@@ -95,10 +102,15 @@ model_handle_t load_tilewright_manifest(const std::string& path) {
     std::lock_guard<std::mutex> lock(g_mutex);
     const auto it = g_path_to_handle.find(path);
     if (it != g_path_to_handle.end()) return it->second;
+    if (g_failed_manifests.count(path) != 0) return invalid_handle;
   }
 
   auto model = std::make_unique<twrec::detail::LoadedModel>();
-  if (!twrec::load_twrec_yaml(path, model.get())) return invalid_handle;
+  if (!twrec::load_twrec_yaml(path, model.get())) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_failed_manifests.insert(path);
+    return invalid_handle;
+  }
 
   std::lock_guard<std::mutex> lock(g_mutex);
   const auto it = g_path_to_handle.find(path);
@@ -113,15 +125,10 @@ model_handle_t load_tilewright_manifest(const std::string& path) {
   return handle;
 }
 
-model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
-                                          backend_id_t backend,
-                                          const std::string& hint_dir) {
-  const std::string dir = resolve_weights_dir(hint_dir);
-  if (dir.empty()) return invalid_handle;
-
-  const char* backend_str = backend_name(backend);
-  if (backend_str == nullptr) return invalid_handle;
-
+model_handle_t find_in_origami_nn_index(const std::string& dir,
+                                        const std::string& logic_stem,
+                                        backend_id_t backend,
+                                        const char* backend_str) {
   std::ifstream idx(dir + "/" + kOrigamiNnIndex);
   if (!idx) return invalid_handle;
 
@@ -145,6 +152,30 @@ model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
   }
 
   return invalid_handle;
+}
+
+model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
+                                          backend_id_t backend,
+                                          const std::string& hint_dir) {
+  const std::string dir = resolve_weights_dir(hint_dir);
+  if (dir.empty()) return invalid_handle;
+
+  const char* backend_str = backend_name(backend);
+  if (backend_str == nullptr) return invalid_handle;
+
+  const std::string key = dir + '\n' + backend_str + '\n' + logic_stem;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto it = g_index_lookup.find(key);
+    if (it != g_index_lookup.end()) return it->second;
+  }
+
+  // Not under the lock: loading a manifest takes it.
+  const model_handle_t handle = find_in_origami_nn_index(dir, logic_stem, backend, backend_str);
+
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_index_lookup[key] = handle;
+  return handle;
 }
 
 }  // namespace
@@ -173,6 +204,14 @@ void unload_model(model_handle_t handle) {
   for (auto it = g_path_to_handle.begin(); it != g_path_to_handle.end();) {
     if (it->second == handle) {
       it = g_path_to_handle.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  // Forget lookups that resolved to this handle so the next one reloads. Cached misses stay.
+  for (auto it = g_index_lookup.begin(); it != g_index_lookup.end();) {
+    if (it->second == handle) {
+      it = g_index_lookup.erase(it);
     } else {
       ++it;
     }
