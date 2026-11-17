@@ -368,6 +368,10 @@ std::vector<DeviceCase> deviceCases()
         {"OneD1x7Nhwc", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1}, true)},
         {"OneD1x3Dilation5", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5})},
         {"OneD1x3Dilation3", conv(32, 64, {150}, {3}, {3}, {3}, {1}, {3})},
+        // HiFi-GAN's dilated 1-D rows channels-last (their own specialized configs).
+        {"OneD1x3Dilation5Nhwc", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5}, true)},
+        {"OneD1x7Dilation3Nhwc", conv(32, 48, {130}, {7}, {9}, {9}, {1}, {3}, true)},
+        {"OneD1x11Dilation5Nhwc", conv(16, 32, {170}, {11}, {25}, {25}, {1}, {5}, true, 1, 3)},
         {"Dilation6", conv(16, 24, {20, 26}, {3, 3}, {6, 6}, {6, 6}, {1, 1}, {6, 6})},
         {"OneD1x4", conv(32, 48, {90}, {4}, {0}, {0}, {1}, {1})},
         {"OneD1x4Stride2", conv(16, 32, {90}, {4}, {1}, {1}, {2}, {1})},
@@ -1242,23 +1246,50 @@ TEST(TestConvWrwCatalog, EveryGenericSpecKeyParses)
     EXPECT_GT(keys, 0);
 }
 
-TEST(TestConvWrwCatalog, DeeplabDilationsHaveSpecializedConfigsInBothLayouts)
+TEST(TestConvWrwCatalog, DilatedRowsHaveSpecializedConfigsInBothLayouts)
 {
-    // A dilated 3x3 the specialized tier misses in one layout falls to the generic tier, which
-    // declines ASPP-class dilations and has no gfx11 configs, and then to the BLAS path (30x
-    // slower on gfx1100 for channels-last fp16 deeplab). Every matrix-core arch serves every
-    // deeplab / SSD dilation in both layouts with a specialized config.
+    // A dilated filter row the specialized tier misses in one layout falls to the generic tier,
+    // which declines ASPP-class dilations and has no gfx11 configs, and then to the BLAS path
+    // (30x slower on gfx1100 for channels-last fp16 deeplab). Every matrix-core arch serves every
+    // deeplab / SSD 3x3 dilation and HiFi-GAN's dilated 1-D rows in both layouts with a
+    // specialized config.
     static constexpr std::array<const char*, 6> ARCHS{
         "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201"};
+    // (filter width, dilation): 3x3 deeplab / SSD rows (positive width), 1 x S rows (negative).
+    static constexpr std::array<std::pair<int64_t, int64_t>, 11> ROWS{{{3, 4},
+                                                                       {3, 6},
+                                                                       {3, 12},
+                                                                       {3, 24},
+                                                                       {3, 36},
+                                                                       {-3, 3},
+                                                                       {-3, 5},
+                                                                       {-7, 3},
+                                                                       {-7, 5},
+                                                                       {-11, 3},
+                                                                       {-11, 5}}};
     const auto& kernels = catalog();
     for(const auto dataType : {DataType::HALF, DataType::BFLOAT16})
     {
         for(const bool channelsLast : {false, true})
         {
-            for(const int64_t d : {4, 6, 12, 24, 36})
+            for(const auto& [width, d] : ROWS)
             {
-                auto shape = conv(
-                    64, 64, {40, 40}, {3, 3}, {d, d}, {d, d}, {1, 1}, {d, d}, channelsLast, 1, 2);
+                const int64_t taps = width < 0 ? -width : width;
+                const int64_t pad = (taps - 1) * d / 2;
+                auto shape
+                    = width < 0
+                          ? conv(64, 64, {200}, {taps}, {pad}, {pad}, {1}, {d}, channelsLast, 1, 2)
+                          : conv(64,
+                                 64,
+                                 {40, 40},
+                                 {3, 3},
+                                 {d, d},
+                                 {d, d},
+                                 {1, 1},
+                                 {d, d},
+                                 channelsLast,
+                                 1,
+                                 2);
                 shape.dataType = dataType;
                 const GraphFixture fixture(
                     buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)));
@@ -1266,8 +1297,8 @@ TEST(TestConvWrwCatalog, DeeplabDilationsHaveSpecializedConfigsInBothLayouts)
                 ASSERT_TRUE(problem.has_value());
                 for(const char* arch : ARCHS)
                 {
-                    SCOPED_TRACE(std::string(arch) + (channelsLast ? " nhwc" : " nchw") + " d"
-                                 + std::to_string(d) + " "
+                    SCOPED_TRACE(std::string(arch) + (channelsLast ? " nhwc" : " nchw") + " width "
+                                 + std::to_string(width) + " d" + std::to_string(d) + " "
                                  + (dataType == DataType::HALF ? "fp16" : "bf16"));
                     auto device = testDeviceProperties();
                     device.gcnArchName = arch;

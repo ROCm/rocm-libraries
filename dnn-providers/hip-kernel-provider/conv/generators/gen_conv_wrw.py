@@ -615,16 +615,18 @@ FILTERS = [
     ("3x3d2", 3, 1, 2, 3, 1, [0, 1], [0], None),
     ("1x1", 1, 1, 1, 1, 1, [0, 1], [0, 1], None),
     ("1x3", 3, 1, 1, 1, 1, [0, -1], [0, 1], None),
-    ("1x3d5", 3, 1, 5, 1, 1, [0, -1], [0, 1], [CF]),
+    # HiFi-GAN's dilated 1-D rows, in both layouts (channels-last otherwise falls to the
+    # generic tier, or to BLAS on gfx11).
+    ("1x3d5", 3, 1, 5, 1, 1, [0, -1], [0, 1], None),
     # HiFi-GAN's dilation-3 1x3 (the d5 row's tiles).
-    ("1x3d3", 3, 1, 3, 1, 1, [0, -1], [0, 1], [CF]),
+    ("1x3d3", 3, 1, 3, 1, 1, [0, -1], [0, 1], None),
     ("1x4", 4, 1, 1, 1, 1, [0, -1], [0], None),
     ("1x7", 7, 1, 1, 1, 1, [-1], [0], None),
-    ("1x7d3", 7, 1, 3, 1, 1, [-1], [0], [CF]),
-    ("1x7d5", 7, 1, 5, 1, 1, [-1], [0], [CF]),
+    ("1x7d3", 7, 1, 3, 1, 1, [-1], [0], None),
+    ("1x7d5", 7, 1, 5, 1, 1, [-1], [0], None),
     ("1x11", 11, 1, 1, 1, 1, [-1], [0], None),
-    ("1x11d3", 11, 1, 3, 1, 1, [-1], [0], [CF]),
-    ("1x11d5", 11, 1, 5, 1, 1, [-1], [0], [CF]),
+    ("1x11d3", 11, 1, 3, 1, 1, [-1], [0], None),
+    ("1x11d5", 11, 1, 5, 1, 1, [-1], [0], None),
     # Dilated 3x3 rows in both layouts: without channels-last configs a channels-last deeplab
     # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+)
     # or has no gfx11 config, and it falls to the BLAS path (30x on gfx1100).

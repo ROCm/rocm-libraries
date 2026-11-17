@@ -19,7 +19,7 @@ SPDX-License-Identifier:  MIT
   - NCHW 1x1 fp16 on gfx942 / gfx90a, where MIOpen rounds per image;
   - hifigan 1x16 stride-8 on gfx950.
 - **Precision:** fp32 accumulation. Split partials are fp32 and summed in a fixed order; dW is rounded once. Deterministic, no atomics, no numerical note (`CONV_WRW_TF32` reports `TENSOR_CORE`).
-- **Instances:** 6,101 configs, 668 of them three-bf16, in per-dtype, per-arch-group packs (`cdna`, `cdnapk`, `gfx950`, `direct`, `rdna11`, `rdna12`, `fma`, `fmardna`, `fma906`/`fma906b`, `generic`, `genericfma`, `x3*`). Two tiers: specialized (geometry compile-time) and generic (`loop 8`, runtime geometry).
+- **Instances:** 6,649 configs, 716 of them three-bf16, in per-dtype, per-arch-group packs (`cdna`, `cdnapk`, `gfx950`, `direct`, `rdna11`, `rdna12`, `fma`, `fmardna`, `fma906`/`fma906b`, `generic`, `genericfma`, `x3*`). Two tiers: specialized (geometry compile-time) and generic (`loop 8`, runtime geometry).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K3 is our fastest engine: 1.67x gfx950, 1.43x gfx942, 1.33x gfx90a, 1.79x gfx908, 4.50x gfx1201, 17.95x gfx1100. MIOpen ran in search mode.
 
 ## Why it exists
@@ -74,7 +74,7 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
   - gfx942 and gfx950: unit stride, ≥ 9 taps, ≥ 128 input and ≥ 64 output channels a group;
   - gfx11 and gfx12: stems (≤ 4 input channels), or ≥ 256 channels with ≥ 9 taps;
   - never on gfx90a.
-- **Catalog.** Families × filters: atoms per dtype × tiles × loops × layouts, crossed with a measured FILTERS list. That list covers 3x3 (dilations 2, 4, 6, 12, 24 and 36 in both layouts, on the ring and the output rows), 1x1, 1-D 1x3-1x11 at dilations 1/3/5, stride-2 and 1x16 stride-8 rows, 7x1/3x1/5x5, packed rows, 32-channel-group rings and 5x5x5. Extra tiles cover measured winners a family's list lacks.
+- **Catalog.** Families × filters: atoms per dtype × tiles × loops × layouts, crossed with a measured FILTERS list. That list covers 3x3 (dilations 2, 4, 6, 12, 24 and 36 in both layouts, on the ring and the output rows), 1x1, 1-D 1x3-1x11 at dilations 1/3/5 (in both layouts), stride-2 and 1x16 stride-8 rows, 7x1/3x1/5x5, packed rows, 32-channel-group rings and 5x5x5. Extra tiles cover measured winners a family's list lacks.
   - Catalog breadth: neighbouring geometries of the top configs (halved or doubled blocks, 32/64 positions, `bpu`), found by a sweep around the shipped winners. They measured +10% on gfx950 and +17% on gfx1201 on a 12-shape set.
   - Wide pointwise tiles: 256x128 on gfx950, and RDNA ring tiles for long reductions.
   - `bpu` 1/2/4/8 variants exist so autotune can override the split model.
@@ -118,7 +118,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 - **Tolerance:** the device suite grades against hipDNN's CPU reference accumulated in fp64. The tolerance is 2e-6 x reduction length + 2 storage-eps x (|ref| + 1e-3); three-bf16 uses 3e-5 x reduction length.
 - **inf/NaN:** infinities in x propagate as in the reference, and a test pins it for exact fp32 and the three-bf16 split. Known open parity item: the gfx950 direct loop (5) can turn inf x structural zero into NaN.
 - **Determinism:** no atomics anywhere. The device suite relaunches each config over a re-filled workspace and compares bits.
-- **Reduced precision:** the three-bf16 form drops lo x lo, about 2^-16 of each product. Only `CONV_WRW_TF32` lists it (668 configs; 5433 exact in `CONV_WRW`), reporting `TENSOR_CORE`, by which a caller excludes it (`deselect_numeric_notes`). MIOpen's `GemmWrw1x1_stride1` rounds dW to fp16 after every image. K3 does not; that form is the BLAS reduced-precision-reduction engines', which report `REDUCED_PRECISION_REDUCTION`.
+- **Reduced precision:** the three-bf16 form drops lo x lo, about 2^-16 of each product. Only `CONV_WRW_TF32` lists it (716 configs; 5933 exact in `CONV_WRW`), reporting `TENSOR_CORE`, by which a caller excludes it (`deselect_numeric_notes`). MIOpen's `GemmWrw1x1_stride1` rounds dW to fp16 after every image. K3 does not; that form is the BLAS reduced-precision-reduction engines', which report `REDUCED_PRECISION_REDUCTION`.
 
 ## Comparison with MIOpen
 - **CK `ConvHipImplicitGemm{,3D}GroupWrwXdlops`:** M = K, N = C·taps via descriptor im2col, NHWC only. NCHW goes through 3-5 full-tensor transposes. Split-K uses fp32 or packed 16-bit atomics; deterministic mode forces split 1. K3 wins where CK transposes or runs one split, and loses on some large NHWC bf16 3x3 on gfx90a.
@@ -158,10 +158,10 @@ No code was copied.
   - **Arithmetic and planning:** LDS and load-pass arithmetic against the kernels'; ring track trimming; the split planner and `bpu`; reduce layouts and reflection; the reduce choice (quad, tile, row) and its tiles; the one-split direct store.
   - **TF32:** three-bf16 admitted only for fp32 graphs and only on paying classes.
 - `TestGpuConvWrw.cpp` (device), fp32/fp16/bf16 against an fp64-accumulated reference:
-  - every admitted config on NCHW and NHWC, 1-D/2-D/3-D, groups, stride 2, dilations 2/3/12, and channels-last 3x3 at dilations 4, 6, 24 (three images) and 36 (65^2);
+  - every admitted config on NCHW and NHWC, 1-D/2-D/3-D, groups, stride 2, dilations 2/3/12, channels-last 3x3 at dilations 4, 6, 24 (three images) and 36 (65^2), and channels-last 1x3 d5, 1x7 d3 and 1x11 d5;
   - padding below, at and past the filter; odd channels and partial tiles; both dW layouts; true convolution;
   - three-bf16 against exact fp32, and infinities;
   - the determinism relaunch, and dW equal bit for bit to the fixed-order sum of the workspace's partials (every reduce);
   - knob uniqueness, generic spec keys, and atom ids and LDS fits per arch;
-  - a specialized config for every deeplab / SSD dilation (4-36) in both layouts on every matrix-core arch (`DeeplabDilationsHaveSpecializedConfigsInBothLayouts`): a dilated 3x3 the specialized tier misses falls past the generic tier (ASPP decline, no gfx11 configs) to the BLAS path.
+  - a specialized config for every deeplab / SSD 3x3 dilation (4-36) and HiFi-GAN dilated 1-D row (1x3, 1x7, 1x11 at d3 / d5) in both layouts on every matrix-core arch (`DilatedRowsHaveSpecializedConfigsInBothLayouts`): a dilated row the specialized tier misses falls to the generic tier (ASPP decline, no gfx11 configs) or to the BLAS path.
 - `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (`CONV_WRW` none, `CONV_WRW_TF32` `TENSOR_CORE`; both deterministic) and that only `CONV_WRW_TF32` lists three-bf16 configs.
