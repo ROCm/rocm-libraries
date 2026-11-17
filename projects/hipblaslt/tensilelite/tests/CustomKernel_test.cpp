@@ -682,6 +682,12 @@ TEST(CustomKernelTest, A2AGemmRejectsAMisalignedA2ABuf)
 
 namespace
 {
+    std::vector<CustomArgDefinition> splitArgs()
+    {
+        return {{CustomArgType::address, CustomArgSemantic::AddressWorkspace},
+                {CustomArgType::uint32, CustomArgSemantic::SKSplitFactor}};
+    }
+
     void configurePostKernels(ContractionSolution& solution)
     {
         solution.sizeMapping.tileProcessingStrategy            = TileProcessingStrategy::StreamK;
@@ -698,6 +704,7 @@ namespace
 
         CustomPostKernel post;
         post.name    = "probe_streamKReduce";
+        post.args    = splitArgs();
         post.threads = TensileLite::dim3(256, 1, 1);
 
         solution.customKernel.postKernels = {post};
@@ -711,6 +718,7 @@ TEST(CustomKernelTest, PostKernelsValidate)
     {
         ContractionSolution solution;
         configurePostKernels(solution);
+        solution.customKernel.args = splitArgs();
         EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
     }
 
@@ -770,10 +778,21 @@ TEST(CustomKernelTest, PostKernelsValidate)
         {[](Solution& s) { s.problemType.groupedGemm = true; },
          "Post kernels do not support grouped GEMM"},
         {[](Solution& s) {
-             s.customKernel.postKernels[0].args
-                 = {{CustomArgType::uint32, CustomArgSemantic::PersistentGrid}};
+             s.customKernel.postKernels[0].args.push_back(
+                 {CustomArgType::uint32, CustomArgSemantic::PersistentGrid});
          },
          "PersistentGrid requires persistent loop argument layout 1"},
+        {[](Solution& s) { s.customKernel.args.pop_back(); },
+         "requires main kernel args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) { s.customKernel.args.erase(s.customKernel.args.begin()); },
+         "requires main kernel args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) { s.customKernel.postKernels[0].args.pop_back(); },
+         "requires streamKReduce args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) {
+             auto& args = s.customKernel.postKernels[0].args;
+             args.erase(args.begin());
+         },
+         "requires streamKReduce args SKSplitFactor and AddressWorkspace"},
         {[](Solution& s) {
              s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
          },
@@ -785,6 +804,7 @@ TEST(CustomKernelTest, PostKernelsValidate)
     {
         ContractionSolution solution;
         configurePostKernels(solution);
+        solution.customKernel.args = splitArgs();
         invalid[i].first(solution);
         try
         {
