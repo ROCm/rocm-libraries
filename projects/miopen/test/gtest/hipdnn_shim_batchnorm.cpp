@@ -1837,6 +1837,78 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
 }
 
 // ---------------------------------------------------------------------------
+// Profiling
+
+// Used only by KernelTimeOnCallerHandle.
+const BN2DTestCase& ProfilingCase()
+{
+    static const BN2DTestCase profiling_case{
+        3, 5, 7, 19, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    return profiling_case;
+}
+
+// Records whether the call left a kernel time on the handle, which MIOpen does for
+// every call it serves while profiling is on. The caller resets the time first, so
+// one left by an earlier call does not count.
+void RecordKernelTime(const miopen::Handle& handle, const std::string& case_name)
+{
+    const float ms      = handle.GetKernelTime();
+    const bool recorded = ms > 0.0f;
+    ::testing::Test::RecordProperty("parity_kernel_time_recorded_" + case_name,
+                                    recorded ? "true" : "false");
+    if(!hs::ForwardingEnabled())
+        EXPECT_TRUE(recorded) << case_name << ": " << ms << " ms";
+}
+
+// With profiling on, MIOpen times the kernels it launches on the handle, and
+// miopenGetKernelTime returns their time. The provider launches a forwarded call's
+// kernels on its own MIOpen handle, so nothing is timed on the caller's handle and
+// the time stays 0 (ALMIOPEN-3382). The test records the outcome in both modes and
+// expects a time only in the disabled one. Once ALMIOPEN-3382 is fixed, the enabled
+// run records a time too, and its line in known_forwarding_divergences.txt no
+// longer matches.
+TEST(GPU_HipdnnShimBNProfiling_FP32, KernelTimeOnCallerHandle)
+{
+    const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
+    auto&& handle = miopen::deref(owned_handle.handle);
+    handle.EnableProfiling(true);
+
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        handle.ResetKernelTime();
+        const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, ProfilingCase());
+        if(ExpectServed("profiling_train", result))
+        {
+            RecordKernelTime(handle, "profiling_train");
+            CheckTrain(handle, d, true, false);
+        }
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        handle.ResetKernelTime();
+        const auto result = BwdUnderPolicy(handle, d, miopenBNSpatial, ProfilingCase());
+        if(ExpectServed("profiling_bwd", result))
+        {
+            RecordKernelTime(handle, "profiling_bwd");
+            CheckBwd(handle, d);
+        }
+    }
+    {
+        SCOPED_TRACE("infer");
+        InferData d;
+        handle.ResetKernelTime();
+        const auto result = InferUnderPolicy(handle, d, true, ProfilingCase());
+        if(ExpectServed("profiling_infer", result))
+        {
+            RecordKernelTime(handle, "profiling_infer");
+            CheckInfer(handle, d);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Gaps: MIOpen serves these, the hipDNN path declines them
 
 // The hipDNN path declines a batchnorm gap with UnsupportedOp. RecordGapOutcome also
