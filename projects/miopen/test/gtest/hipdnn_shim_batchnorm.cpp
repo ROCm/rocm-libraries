@@ -2292,6 +2292,13 @@ struct RawProblem
     float zero = 0.0f;
 };
 
+// A bn_mode that MIOpen does not know, as a C caller can pass. miopenBatchNormMode_t
+// has no fixed underlying type, so its only values are 0 and 1, and C++ has no
+// defined way to make another one. This cast is formally undefined, like the
+// invalid-enum casts in smoke_tuning_policy.cpp and conv_api_find_mode.cpp. It is
+// kept in one place, outside any constant expression, where compilers reject it.
+miopenBatchNormMode_t UnknownBnMode() { return static_cast<miopenBatchNormMode_t>(2); }
+
 } // namespace
 
 // MIOpen fails these after its parameter checks, with UnknownError for a rank
@@ -2325,7 +2332,7 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
     {
         SCOPED_TRACE("unknown mode train");
         RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
-        p.mode            = static_cast<miopenBatchNormMode_t>(2);
+        p.mode            = UnknownBnMode();
         const auto result = hs::CaptureCall([&] { return p.Train(handle); });
         hs::ExpectStatusParity(
             "no_solver_unknown_mode_train", result, miopenStatusInvalidValue, unknown_mode);
@@ -2333,7 +2340,7 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
     {
         SCOPED_TRACE("unknown mode infer");
         RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
-        p.mode            = static_cast<miopenBatchNormMode_t>(2);
+        p.mode            = UnknownBnMode();
         const auto result = hs::CaptureCall([&] { return p.Infer(handle); });
         hs::ExpectStatusParity(
             "no_solver_unknown_mode_infer", result, miopenStatusInvalidValue, unknown_mode);
@@ -2341,7 +2348,7 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
     {
         SCOPED_TRACE("unknown mode bwd");
         RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
-        p.mode            = static_cast<miopenBatchNormMode_t>(2);
+        p.mode            = UnknownBnMode();
         const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
         hs::ExpectStatusParity(
             "no_solver_unknown_mode_bwd", result, miopenStatusInvalidValue, unknown_mode);
