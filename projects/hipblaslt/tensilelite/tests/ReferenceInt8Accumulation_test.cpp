@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -138,6 +139,52 @@ INSTANTIATE_TEST_SUITE_P(
         const bool  tryFastPath = std::get<1>(info.param);
         return std::string(test.name) + (tryFastPath ? "TryFastPath" : "SlowPath");
     });
+
+class ReferenceInt8MX : public ::testing::TestWithParam<std::tuple<bool, bool>>
+{
+};
+
+TEST_P(ReferenceInt8MX, RejectsMXScalesBeforeWritingOutput)
+{
+    const auto [scaleA, tryFastPath] = GetParam();
+    constexpr size_t    k            = 32;
+    std::vector<int8_t> a(k, 1);
+    std::vector<int8_t> b(k, 1);
+    auto                problem = makeProblem(k, true);
+    if(scaleA)
+        problem.setMXScaleA(rocisa::DataType::E8, k, {}, /*padScaleTensor=*/false);
+    else
+        problem.setMXScaleB(rocisa::DataType::E8, k, {}, /*padScaleTensor=*/false);
+
+    auto const&       scaleTensor = scaleA ? problem.mxsa() : problem.mxsb();
+    std::vector<E8>   scales(scaleTensor.totalAllocatedElements(), E8(0.125f));
+    int32_t           c = 0;
+    int32_t           d = -1;
+    ContractionInputs inputs(a.data(), b.data(), &c, &d, 1.0f, 0.0f);
+    if(scaleA)
+        inputs.mxsa = scales.data();
+    else
+        inputs.mxsb = scales.data();
+
+    try
+    {
+        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+        ADD_FAILURE() << "Expected MX-scaled Int8 to be rejected";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_STREQ(error.what(), "Int8 CPU reference does not support MX scales");
+    }
+    EXPECT_EQ(d, -1);
+}
+
+INSTANTIATE_TEST_SUITE_P(CPUReference,
+                         ReferenceInt8MX,
+                         ::testing::Combine(::testing::Bool(), ::testing::Bool()),
+                         [](const ::testing::TestParamInfo<ReferenceInt8MX::ParamType>& info) {
+                             return std::string(std::get<0>(info.param) ? "ScaleA" : "ScaleB")
+                                    + (std::get<1>(info.param) ? "TryFastPath" : "SlowPath");
+                         });
 
 template <typename Tuple>
 class ReferenceInt8Output : public ::testing::Test

@@ -1855,6 +1855,12 @@ namespace TensileLite
             using MacT       = std::conditional_t<isInt8Float, uint32_t, Accumulator>;
             using MacMathOpT = std::conditional_t<isInt8Float, uint32_t, MathOpAccum>;
             using SignedMacT = std::conditional_t<isInt8Float, int32_t, MacT>;
+            if constexpr(isInt8Float)
+            {
+                // The integer MAC would truncate a fractional MX scale to zero.
+                if(problem.mxBlockA() || problem.mxBlockB())
+                    throw std::runtime_error("Int8 CPU reference does not support MX scales");
+            }
 
             Accumulator* ws                   = nullptr;
             size_t       validationStrideGemm = 1;
