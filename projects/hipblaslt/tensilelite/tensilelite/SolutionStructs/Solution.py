@@ -2923,8 +2923,8 @@ class Solution(collections.abc.Mapping):
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
         # HalfPLR + PAP is decided in the HalfPLR block (HalfPLR forces
-        # SuppressNoLoadLoop after this guard). Accepted only for
-        # StreamK==3 and StreamKForceDPOnly==1.
+        # SuppressNoLoadLoop after this guard). Accepted for static
+        # DataParallel and static StreamK.
         if not isPersistent(state):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent requires a persistent TileProcessingStrategy")
         if not state["BufferLoad"]:
