@@ -93,6 +93,42 @@ def additive_bias_row(
     return b.add(base, q_off)
 
 
+# The bias floor and the live-row threshold of the gfx950 and gfx942 dense kernels: one
+# copy, so the two kernels cannot drift apart on what a floored or a dead row means.
+#
+# Bias-on, natural-log (bias) units: a finite bias is raised to this floor before the
+# log2 conversion (which overflows fp32 for finfo.min), so a finite biased score stays
+# near or above -2**97 * log2e (about -2.3e29), strictly above the kernel's mask
+# sentinel: a key at the floor still gets P = 0 next to any real key, and a row of floor
+# keys (HF's finfo.min padding) normalises over them like PyTorch, because masked keys at
+# the sentinel get P = 0 next to it. A bias of -inf is NOT raised: its score is -inf,
+# below the sentinel, and its key gets P = 0 (exp2(-inf) = 0). The running max seeds at
+# the sentinel, so it is never -inf. NaN passes through too, and its row is NaN, as in
+# the reference.
+BIAS_FLOOR = -(2.0**97)
+# Bias-on, log2 (score) units, a separate choice from BIAS_FLOOR: it only has to sit
+# between a kernel's mask sentinel and the floor's score (about -2.3e29). A row whose
+# running max is at or below it has no live key (every key it saw is -inf or masked at
+# the sentinel), so it stores O = 0 and, with LSE, LSE = -inf: the hipDNN reference's
+# answer for a row whose every score is -inf. A finite bias is never that: a row of
+# finfo.min keys is live and gets the uniform softmax over its visible keys.
+BIAS_LIVE_ROW_MIN = -(2.0**98)
+
+
+def check_bias_constants(mask_sentinel: float, log2e: float) -> None:
+    """Raise ``ValueError`` unless ``mask_sentinel < BIAS_LIVE_ROW_MIN < BIAS_FLOOR *
+    log2e``: a masked score cannot read as live, and a floored bias cannot read as dead.
+    Each kernel calls this with its own sentinel at import. Not an ``assert``:
+    ``python -O`` strips asserts, and a violation is a silent wrong answer (the bias-on
+    epilogue would misclassify rows)."""
+    if not mask_sentinel < BIAS_LIVE_ROW_MIN < BIAS_FLOOR * log2e:
+        raise ValueError(
+            "bias constants must satisfy _MASK_SENTINEL < _BIAS_LIVE_ROW_MIN < "
+            f"_BIAS_FLOOR * log2e, got {mask_sentinel}, {BIAS_LIVE_ROW_MIN}, "
+            f"{BIAS_FLOOR * log2e}"
+        )
+
+
 @dataclass(frozen=True)
 class BiasFloor:
     """Constants of the floored bias path: ``score + max(bias, floor) * log2 e``

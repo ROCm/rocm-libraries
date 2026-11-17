@@ -247,12 +247,15 @@ from kernels.common.attention_dense_kv_split import (
     segment_tile_range,
 )
 from kernels.common._attention_additive_bias import (
+    BIAS_FLOOR,
+    BIAS_LIVE_ROW_MIN,
     add_additive_bias_at,
     add_additive_bias_x4_at,
     additive_bias_elem_ptr,
     additive_bias_launch_values,
     additive_bias_row,
     append_additive_bias_signature,
+    check_bias_constants,
     declare_additive_bias_params,
     make_bias_floor,
     validate_dense_additive_bias,
@@ -307,31 +310,12 @@ _SCHED_BARRIER_MASK_MAX = 0x7FF
 # units. The builder reads it from here, so the bias constants below are checked
 # against the value the kernel really uses.
 _MASK_SENTINEL = -1e30
-# Bias-on, natural-log (bias) units: a finite bias is raised to this floor before the
-# log2 conversion (which overflows fp32 for finfo.min), so a finite biased score stays
-# near or above -2**97 * log2e (about -2.3e29), strictly above _MASK_SENTINEL: a key at
-# the floor still gets P = 0 next to any real key, and a row of floor keys (HF's
-# finfo.min padding) normalises over them like PyTorch, because masked keys at the
-# sentinel get P = 0 next to it. A bias of -inf is NOT raised: its score is -inf, below
-# the sentinel, and its key gets P = 0 (exp2(-inf) = 0). The max seeds at the sentinel,
-# so it is never -inf. NaN passes through too, and its row is NaN, as in the reference.
-# The same floor, and the same results, as the gfx950 dense kernel.
-_BIAS_FLOOR = -(2.0**97)
-# Bias-on, log2 (score) units, a separate choice from _BIAS_FLOOR: it only has to sit
-# between the sentinel and the floor's score (-1e30 < -2**98 < -2.3e29). A row whose
-# running max is at or below it has no live key (every key it saw is -inf or masked at
-# the sentinel), so it stores O = 0 and, with LSE, LSE = -inf: the hipDNN reference's
-# answer for a row whose every score is -inf. A finite bias is never that: a row of
-# finfo.min keys is live and gets the uniform softmax over its visible keys.
-_BIAS_LIVE_ROW_MIN = -(2.0**98)
-# Not an `assert`: `python -O` strips asserts, and a violation is a silent wrong
-# answer (the bias-on epilogue would misclassify rows).
-if not _MASK_SENTINEL < _BIAS_LIVE_ROW_MIN < _BIAS_FLOOR * LOG2E:
-    raise ValueError(
-        "bias constants must satisfy _MASK_SENTINEL < _BIAS_LIVE_ROW_MIN < "
-        f"_BIAS_FLOOR * log2e, got {_MASK_SENTINEL}, {_BIAS_LIVE_ROW_MIN}, "
-        f"{_BIAS_FLOOR * LOG2E}"
-    )
+# The bias floor and the live-row threshold are shared with the gfx950 dense kernel
+# (see _attention_additive_bias); here they sit between -1e30 and about -2.3e29 in log2
+# units. The order is checked against the sentinel this kernel really uses.
+_BIAS_FLOOR = BIAS_FLOOR
+_BIAS_LIVE_ROW_MIN = BIAS_LIVE_ROW_MIN
+check_bias_constants(_MASK_SENTINEL, LOG2E)
 
 
 @dataclass(frozen=True)

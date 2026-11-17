@@ -281,38 +281,59 @@ def _constants_block():
 
 
 def _exec_constants(block):
+    """Run the constants block with the shared module's current values, so a test can
+    perturb the shared constants (``monkeypatch``) or the block's own text."""
+    import kernels.common._attention_additive_bias as shared
     from kernels.gfx950.attention_dense import LOG2E
 
-    ns = {"LOG2E": LOG2E}
+    ns = {
+        "LOG2E": LOG2E,
+        "BIAS_FLOOR": shared.BIAS_FLOOR,
+        "BIAS_LIVE_ROW_MIN": shared.BIAS_LIVE_ROW_MIN,
+        "check_bias_constants": shared.check_bias_constants,
+    }
     exec(compile(block, "<constants>", "exec"), ns)
     return ns
 
 
-def test_the_bias_constants_keep_their_order():
+def test_the_bias_constants_keep_their_order(monkeypatch):
     """The mask sentinel is below the live-row threshold, which is below the floor's
     score: a masked score cannot read as live, and a floored bias (finfo.min padding)
-    cannot read as dead. The module raises (not asserts: ``python -O`` would strip it)
-    when a constant breaks the order."""
+    cannot read as dead. The floor and the threshold live once, in the shared bias
+    helper; this kernel checks them against its own sentinel at import, and the module
+    raises (not asserts: ``python -O`` would strip it) when the order breaks."""
+    import kernels.common._attention_additive_bias as shared
     import kernels.gfx950.attention_dense as dense
 
+    assert shared.BIAS_FLOOR == -(2.0**97) and shared.BIAS_LIVE_ROW_MIN == -(2.0**98)
+    assert (dense._BIAS_FLOOR, dense._BIAS_LIVE_ROW_MIN) == (
+        shared.BIAS_FLOOR,
+        shared.BIAS_LIVE_ROW_MIN,
+    )
     assert (
         dense._MASK_SENTINEL
         < dense._BIAS_LIVE_ROW_MIN
         < dense._BIAS_FLOOR * dense.LOG2E
     )
     block = _constants_block()
+    assert "check_bias_constants(_MASK_SENTINEL, LOG2E)" in block
     assert _exec_constants(block)["_BIAS_LIVE_ROW_MIN"] == dense._BIAS_LIVE_ROW_MIN
-    for old, new in (
-        # A threshold above the floor's score.
-        ("_BIAS_LIVE_ROW_MIN = -(2.0**98)", "_BIAS_LIVE_ROW_MIN = -(2.0**97)"),
-        # A sentinel above the threshold.
-        ("_MASK_SENTINEL = -(2.0**99)", "_MASK_SENTINEL = -(2.0**97)"),
+    # A sentinel above the threshold, in this kernel's own block.
+    assert "_MASK_SENTINEL = -(2.0**99)" in block
+    with pytest.raises(ValueError, match="bias constants must satisfy"):
+        _exec_constants(
+            block.replace("_MASK_SENTINEL = -(2.0**99)", "_MASK_SENTINEL = -(2.0**97)")
+        )
+    for name, value in (
+        # The threshold above the floor's score.
+        ("BIAS_LIVE_ROW_MIN", -(2.0**97)),
         # A floor below the threshold's score would let a floored key read as masked.
-        ("_BIAS_FLOOR = -(2.0**97)", "_BIAS_FLOOR = -(2.0**99)"),
+        ("BIAS_FLOOR", -(2.0**99)),
     ):
-        assert old in block, old
-        with pytest.raises(ValueError, match="bias constants must satisfy"):
-            _exec_constants(block.replace(old, new))
+        with monkeypatch.context() as patch:
+            patch.setattr(shared, name, value)
+            with pytest.raises(ValueError, match="bias constants must satisfy"):
+                _exec_constants(block)
 
 
 def test_a_bias_request_for_fp8_kv_is_refused_by_the_grid_candidate():
