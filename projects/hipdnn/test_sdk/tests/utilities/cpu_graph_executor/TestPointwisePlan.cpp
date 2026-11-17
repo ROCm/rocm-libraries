@@ -3,6 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <optional>
+
 #include "PointwiseGraphUtils.hpp"
 #include "hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -299,7 +302,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -335,7 +339,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -368,7 +373,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGelu)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -401,7 +407,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGeluApproxTanh)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -434,7 +441,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnarySwish)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -925,4 +933,231 @@ TEST(TestPointwisePlanBuilder, RejectsParameterizedTernary)
 
     EXPECT_THROW(planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0)),
                  std::runtime_error);
+}
+
+namespace
+{
+
+// ADD of a float first operand and a half or bfloat16 second one, one element, through the CPU
+// reference with the node computing in `computeType`. The output is float.
+template <typename Narrow>
+void runAddOfFloatAndNarrow(
+    DataType narrowType, DataType computeType, float first, float second, float& result)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    DataType::FLOAT,
+                                    narrowType,
+                                    computeType,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1 = static_cast<Tensor<Narrow>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    input0->setHostValue(first, 0, 0, 0, 0);
+    input0->markHostModified();
+    input1->setHostValue(static_cast<Narrow>(second), 0, 0, 0, 0);
+    input1->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    output->markDeviceModified();
+    result = output->getHostValue(0, 0, 0, 0);
+}
+
+// One float element through a unary node that computes in float, stored as float.
+void runUnaryOnFloat(hipdnn_frontend::PointwiseMode mode,
+                     float value,
+                     std::optional<float> swishBeta,
+                     float& result)
+{
+    auto [graph, tensorBundle, variantPack] = buildPointwiseUnaryGraph({1, 1, 1, 1},
+                                                                       {1, 1, 1, 1},
+                                                                       DataType::FLOAT,
+                                                                       DataType::FLOAT,
+                                                                       DataType::FLOAT,
+                                                                       mode,
+                                                                       0,
+                                                                       TensorLayout::NCHW,
+                                                                       std::nullopt,
+                                                                       std::nullopt,
+                                                                       std::nullopt,
+                                                                       swishBeta);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* output
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    input->setHostValue(value, 0, 0, 0, 0);
+    input->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    output->markDeviceModified();
+    result = output->getHostValue(0, 0, 0, 0);
+}
+
+} // namespace
+
+// A node that computes in bfloat16 converts its operands to bfloat16 before it adds: a float
+// that bfloat16 cannot hold (1 + 2^-9) reads as 1, where arithmetic in double would keep it.
+TEST(TestPointwisePlanCompute, AddConvertsItsOperandsToTheComputeTypeOfBfloat16)
+{
+    const float first = 1.0f + std::ldexp(1.0f, -9);
+
+    float rounded = 0.0f;
+    runAddOfFloatAndNarrow<bfloat16>(DataType::BFLOAT16, DataType::BFLOAT16, first, 0.0f, rounded);
+    EXPECT_EQ(rounded, 1.0f);
+
+    float exact = 0.0f;
+    runAddOfFloatAndNarrow<bfloat16>(DataType::BFLOAT16, DataType::FLOAT, first, 0.0f, exact);
+    EXPECT_EQ(exact, first);
+}
+
+// The same for half, whose spacing at 1 is 2^-10: 1 + 2^-12 reads as 1.
+TEST(TestPointwisePlanCompute, AddConvertsItsOperandsToTheComputeTypeOfHalf)
+{
+    const float first = 1.0f + std::ldexp(1.0f, -12);
+
+    float rounded = 0.0f;
+    runAddOfFloatAndNarrow<half>(DataType::HALF, DataType::HALF, first, 0.0f, rounded);
+    EXPECT_EQ(rounded, 1.0f);
+
+    float exact = 0.0f;
+    runAddOfFloatAndNarrow<half>(DataType::HALF, DataType::FLOAT, first, 0.0f, exact);
+    EXPECT_EQ(exact, first);
+}
+
+// The sum is rounded in the compute type before it is stored: 1 + 2^-9, both operands exact in
+// bfloat16 (and 1 + 2^-12 in half), is one half step above 1 or less, and the output, a float
+// that could hold it, gets 1.
+TEST(TestPointwisePlanCompute, AddRoundsItsResultToTheComputeType)
+{
+    float bfloat16Sum = 0.0f;
+    runAddOfFloatAndNarrow<bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, 1.0f, std::ldexp(1.0f, -9), bfloat16Sum);
+    EXPECT_EQ(bfloat16Sum, 1.0f);
+
+    float halfSum = 0.0f;
+    runAddOfFloatAndNarrow<half>(
+        DataType::HALF, DataType::HALF, 1.0f, std::ldexp(1.0f, -12), halfSum);
+    EXPECT_EQ(halfSum, 1.0f);
+
+    float floatSum = 0.0f;
+    runAddOfFloatAndNarrow<half>(
+        DataType::HALF, DataType::FLOAT, 1.0f, std::ldexp(1.0f, -12), floatSum);
+    EXPECT_EQ(floatSum, 1.0f + std::ldexp(1.0f, -12));
+}
+
+// The parameters of a parameterized binary node are converted to the compute type as well. In
+// bfloat16 the lower clip 0.1 is 0.10009765625, the x below is that value, so x does not exceed
+// the clip, and the gradient is the slope (bfloat16 0.2). In double or float x exceeds 0.1.
+TEST(TestPointwisePlanCompute, ParameterizedReluBwdConvertsItsClipsToTheComputeType)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    DataType::BFLOAT16,
+                                    DataType::BFLOAT16,
+                                    DataType::BFLOAT16,
+                                    DataType::BFLOAT16,
+                                    hipdnn_frontend::PointwiseMode::RELU_BWD,
+                                    0,
+                                    TensorLayout::NCHW,
+                                    0.1f,
+                                    0.5f,
+                                    0.2f);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* dyTensor
+        = static_cast<Tensor<bfloat16>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* xTensor = static_cast<Tensor<bfloat16>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* outputTensor
+        = static_cast<Tensor<bfloat16>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    dyTensor->setHostValue(static_cast<bfloat16>(1.0f), 0, 0, 0, 0);
+    dyTensor->markHostModified();
+    xTensor->setHostValue(static_cast<bfloat16>(0.10009765625f), 0, 0, 0, 0);
+    xTensor->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    outputTensor->markDeviceModified();
+    EXPECT_EQ(outputTensor->getHostValue(0, 0, 0, 0), static_cast<bfloat16>(0.2f));
+}
+
+// A node that computes in float carries out the operation in float, not in double: the first
+// float x below for which a float sigmoid and a double one rounded to float differ is graded
+// against the float result, for the plain and the parameterized unary paths.
+TEST(TestPointwisePlanCompute, UnaryFloatNodeComputesInFloat)
+{
+    float sigmoidInput = 0.0f;
+    float sigmoidExpected = 0.0f;
+    bool found = false;
+    for(int i = 1; i <= 4000 && !found; ++i)
+    {
+        const float x = static_cast<float>(i) * 0.01f;
+        const float inFloat = 1.0f / (1.0f + std::exp(-x));
+        const auto inDouble = static_cast<float>(1.0 / (1.0 + std::exp(-static_cast<double>(x))));
+        if(inFloat != inDouble)
+        {
+            sigmoidInput = x;
+            sigmoidExpected = inFloat;
+            found = true;
+        }
+    }
+    ASSERT_TRUE(found);
+
+    float sigmoid = 0.0f;
+    runUnaryOnFloat(
+        hipdnn_frontend::PointwiseMode::SIGMOID_FWD, sigmoidInput, std::nullopt, sigmoid);
+    EXPECT_EQ(sigmoid, sigmoidExpected);
+
+    constexpr float BETA = 0.5f;
+    float swishInput = 0.0f;
+    float swishExpected = 0.0f;
+    found = false;
+    for(int i = 1; i <= 4000 && !found; ++i)
+    {
+        const float x = static_cast<float>(i) * 0.01f;
+        const float inFloat = x / (1.0f + std::exp(-BETA * x));
+        const auto inDouble = static_cast<float>(
+            static_cast<double>(x)
+            / (1.0 + std::exp(-static_cast<double>(BETA) * static_cast<double>(x))));
+        if(inFloat != inDouble)
+        {
+            swishInput = x;
+            swishExpected = inFloat;
+            found = true;
+        }
+    }
+    ASSERT_TRUE(found);
+
+    float swish = 0.0f;
+    runUnaryOnFloat(hipdnn_frontend::PointwiseMode::SWISH_FWD, swishInput, BETA, swish);
+    EXPECT_EQ(swish, swishExpected);
 }

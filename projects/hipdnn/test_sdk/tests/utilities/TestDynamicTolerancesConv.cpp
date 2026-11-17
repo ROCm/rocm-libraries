@@ -1184,23 +1184,6 @@ DotProblem makeCancellingProblem(uint64_t k, unsigned seed)
     return p;
 }
 
-// Float partial sums over `block` consecutive products, each rounded to half before they are
-// summed in float: the half-precision intermediates some half kernels keep.
-float blockedHalfDot(const DotProblem& p, uint64_t block)
-{
-    float total = 0.0f;
-    for(uint64_t begin = 0; begin < p.x.size(); begin += block)
-    {
-        float partial = 0.0f;
-        for(uint64_t i = begin; i < std::min<uint64_t>(begin + block, p.x.size()); ++i)
-        {
-            partial += p.x[i] * p.w[i];
-        }
-        total += static_cast<float>(static_cast<half>(partial));
-    }
-    return total;
-}
-
 // Float accumulation in index order, as the CPU reference does.
 float sequentialDot(const DotProblem& p, uint64_t skip = UINT64_MAX)
 {
@@ -1382,26 +1365,25 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, NearZeroOutputsNeedTheSummationOrder
     }
 }
 
-// Half kernels that keep partial sums in half differ from the float reference by about
-// 0.3 * eps * sigma near zero. The lambda term allows that for half; without it (lambda 0, as
-// bfloat16 has) the same implementation fails.
-TEST(TestConvFpropOutputToleranceFp16, HalfPrecisionPartialSumsPass)
+// lambda is the allowance for half outputs of solvers that keep intermediates in half: MIOpen's
+// Winograd solvers (up to 8.09 * eps * sigma near zero, the largest measured) and
+// ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC (5.21), tracked by ALMIOPEN-3243. No solver
+// accumulates the products in a half running sum (the allowance does not cover one at long K).
+// Near zero the band is that allowance: 8.1 * eps * sigma, the measured maximum, passes, and
+// 12.5 * eps * sigma, above lambda = 12, fails. K = 144 and mean squares 1/3 give sigma = 4.
+TEST(TestConvFpropOutputToleranceFp16, AllowanceCoversTheLargestMeasuredWinogradError)
 {
-    // K/2 is not a multiple of the block, so the blocks of the cancelling half do not mirror
-    // those of the first and their rounding errors do not cancel.
-    const uint64_t k = 65528;
-    for(unsigned seed = 0; seed < 8; ++seed)
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto tol = calculateConvFpropOutputTolerance<half>(s);
+    const double epsSigma = std::ldexp(1.0, -10) * 4.0;
+    for(const double sign : {1.0, -1.0})
     {
-        const auto p = makeCancellingProblem<half>(k, seed);
-        const auto tol = calculateConvFpropOutputTolerance<half>(scaleOf(p));
-        const auto ref = static_cast<double>(sequentialDot(p));
-        const auto blocked = static_cast<double>(blockedHalfDot(p, 8));
-        EXPECT_TRUE(withinTolerance<half>(blocked, ref, tol)) << "seed=" << seed;
-
-        // Check on the test itself: the half partial sums really are beyond what float
-        // accumulation order explains, which is all that bfloat16's tolerance holds.
-        const auto floatOnly = calculateConvFpropOutputTolerance<bfloat16>(scaleOf(p));
-        EXPECT_GT(std::abs(blocked - ref), floatOnly.atol) << "seed=" << seed;
+        EXPECT_TRUE(withinTolerance<half>(sign * 8.1 * epsSigma, 0.0, tol));
+        EXPECT_TRUE(withinTolerance<half>(sign * 11.9 * epsSigma, 0.0, tol));
+        EXPECT_FALSE(withinTolerance<half>(sign * 12.5 * epsSigma, 0.0, tol));
     }
 }
 
@@ -1912,7 +1894,7 @@ constexpr Allowances calibratedAllowances()
     constexpr bool IS_WRW = Case::DIRECTION == ConvDirection::WRW;
     if constexpr(std::is_same_v<T, float>)
     {
-        return {32.0, 4.0};
+        return {13.0, 4.0};
     }
     else if constexpr(std::is_same_v<T, half>)
     {
@@ -1920,7 +1902,7 @@ constexpr Allowances calibratedAllowances()
     }
     else
     {
-        return {IS_WRW ? 24.0 : 6.0, 1.0};
+        return {IS_WRW ? 21.0 : 6.0, 1.0};
     }
 }
 
@@ -2046,7 +2028,7 @@ class ConvBackwardSingleTermToleranceFixture : public ::testing::Test
 {
 };
 
-// Every backward case but bfloat16 wrw: its lambda of 24, which MIOpen's split reductions need,
+// Every backward case but bfloat16 wrw: its lambda of 21, which MIOpen's split-K reductions need,
 // is about 2 at this scale and hides a single product of up to 1 (tolerances.md, limits).
 using ConvBackwardSingleTermCases = ::testing::Types<OutputCase<ConvDirection::DGRAD, float>,
                                                      OutputCase<ConvDirection::DGRAD, half>,
@@ -2081,33 +2063,48 @@ TYPED_TEST(ConvBackwardSingleTermToleranceFixture, MissingTermFails)
 }
 
 template <typename Case>
-class ConvBackwardHalfOutputToleranceFixture : public ::testing::Test
+class ConvBackwardLowPrecisionToleranceFixture : public ::testing::Test
 {
 };
 
-using ConvBackwardHalfOutputCases = ::testing::Types<OutputCase<ConvDirection::DGRAD, half>,
-                                                     OutputCase<ConvDirection::WRW, half>>;
-TYPED_TEST_SUITE(ConvBackwardHalfOutputToleranceFixture, ConvBackwardHalfOutputCases, );
+using ConvBackwardLowPrecisionCases = ::testing::Types<OutputCase<ConvDirection::DGRAD, half>,
+                                                       OutputCase<ConvDirection::DGRAD, bfloat16>,
+                                                       OutputCase<ConvDirection::WRW, half>,
+                                                       OutputCase<ConvDirection::WRW, bfloat16>>;
+TYPED_TEST_SUITE(ConvBackwardLowPrecisionToleranceFixture, ConvBackwardLowPrecisionCases, );
 
-// Half kernels that keep partial sums in half pass; the summation-order term alone, all that
-// float accumulation explains, would not hold them.
-TYPED_TEST(ConvBackwardHalfOutputToleranceFixture, HalfPrecisionPartialSumsPass)
+// The largest lambda each 16-bit backward case was measured to need near zero, in eps * sigma
+// (tolerances.md, "Which backward solvers need lambda"), with the solvers that set it: Winograd
+// for backward data half, CK grouped backward data with split-K for bfloat16, and the split-K
+// backward-weights kernels that add partial results in the output type for both wrw types.
+template <typename Case>
+constexpr double measuredLambda()
 {
-    const uint64_t k = 65528;
-    for(unsigned seed = 0; seed < 8; ++seed)
+    using T = typename Case::OutputType;
+    if constexpr(Case::DIRECTION == ConvDirection::DGRAD)
     {
-        const auto p = makeCancellingProblem<half>(k, seed);
-        const auto s = statisticsOf(p);
-        const auto tol = TypeParam::tolerance(s);
-        const auto ref = static_cast<double>(sequentialDot(p));
-        const auto blocked = static_cast<double>(blockedHalfDot(p, 8));
-        EXPECT_TRUE(withinTolerance<half>(blocked, ref, tol)) << "seed=" << seed;
+        return std::is_same_v<T, half> ? 7.71 : 2.33;
+    }
+    else
+    {
+        return std::is_same_v<T, half> ? 21.62 : 11.53;
+    }
+}
 
-        const double sigma
-            = std::sqrt(static_cast<double>(k) * s.firstMeanSquare * s.secondMeanSquare);
-        const double summationOnly
-            = std::sqrt(static_cast<double>(k)) * std::ldexp(1.0, -24) * sigma;
-        EXPECT_GT(std::abs(blocked - ref), summationOnly) << "seed=" << seed;
+// lambda is the allowance for intermediates kept in the output type. Near zero the band is that
+// allowance: the largest measured error passes, an error just below lambda * eps * sigma passes,
+// and one half an eps * sigma above it fails. K = 144 and mean squares 1/3 give sigma = 4.
+TYPED_TEST(ConvBackwardLowPrecisionToleranceFixture, AllowanceCoversTheLargestMeasuredError)
+{
+    using T = typename TypeParam::OutputType;
+    const auto tol = TypeParam::tolerance(UNIFORM_144);
+    const auto lambda = calibratedAllowances<TypeParam>().lambda;
+    const double epsSigma = static_cast<double>(std::numeric_limits<T>::epsilon()) * 4.0;
+    for(const double sign : {1.0, -1.0})
+    {
+        EXPECT_TRUE(withinTolerance<T>(sign * measuredLambda<TypeParam>() * epsSigma, 0.0, tol));
+        EXPECT_TRUE(withinTolerance<T>(sign * (lambda - 0.1) * epsSigma, 0.0, tol));
+        EXPECT_FALSE(withinTolerance<T>(sign * (lambda + 0.5) * epsSigma, 0.0, tol));
     }
 }
 
