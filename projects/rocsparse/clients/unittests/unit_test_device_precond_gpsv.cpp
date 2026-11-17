@@ -236,11 +236,11 @@ namespace
     }
 }
 
-class GpsvInterleavedBatch : public HandleTest
+class PrecondPentadiagonal : public HandleTest
 {
 };
 
-TEST_F(GpsvInterleavedBatch, order3_does_not_write_before_x)
+TEST_F(PrecondPentadiagonal, order3_does_not_write_before_x)
 {
     const rocsparse_gpsv_interleaved_alg algs[]
         = {rocsparse_gpsv_interleaved_alg_default, rocsparse_gpsv_interleaved_alg_qr};
