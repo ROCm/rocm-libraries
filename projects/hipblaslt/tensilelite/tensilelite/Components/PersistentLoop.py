@@ -36,7 +36,8 @@ class PersistentKernelState:
         if scales and not self.papTdmSupportsShadowAddressPair(kernel, tPA["MX"], tPB["MX"]):
             return None
         streamK = isStreamK(kernel)
-        if streamK and getattr(self.states, "papNextTileVgpr", -1) < 0:
+        # Packed identity omits PersistentPhantomTile, which StreamK cluster mapping rewrites.
+        if streamK and (persistentSpatialCluster(kernel) or getattr(self.states, "papNextTileVgpr", -1) < 0):
             return None
         if streamK:
             # The packed path borrows only temporary scalars. Keep its complete

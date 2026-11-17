@@ -10355,7 +10355,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Leave sixteen scratch registers after the payload and Serial, matching
       # the conservative local-address scratch margin.
       if (self.papTdmSupportsShadowAddressPair(kernel, tensorParametersA, tensorParametersB)
-          and isStreamK(kernel) and kernel["NoTailLoop"] and not kernel["HalfPLR"]
+          and isStreamK(kernel) and not isStreamKSpatialCluster(kernel)
+          and kernel["NoTailLoop"] and not kernel["HalfPLR"]
           and max(vgprIdx, self.states.c.numVgprValu) + 18 <= self.states.regCaps["MaxVgpr"]):
         vgprIdx = max(vgprIdx, self.states.c.numVgprValu)
         self.states.papNextTileVgpr = vgprIdx
