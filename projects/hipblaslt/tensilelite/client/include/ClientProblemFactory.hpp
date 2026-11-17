@@ -85,7 +85,7 @@ namespace TensileLite
         private:
             void createProblems(std::vector<ContractionProblemGemm>& rv);
 
-            size_t splitShare(size_t total, size_t step, rocisa::DataType dType) const;
+            size_t splitShare(ContractionProblemGemm const& full) const;
 
             std::vector<std::shared_ptr<ContractionProblem>> m_problems;
 

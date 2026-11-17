@@ -47,6 +47,7 @@ namespace TensileLite::SliceAlignment
         const char* name;
         size_t      partition;
         int64_t     byteOffset;
+        int64_t     step; // |step| of the matrix: 1 = contiguous along the split dimension
     };
 
     struct Result
@@ -114,7 +115,7 @@ namespace TensileLite::SliceAlignment
                 int64_t startBits = static_cast<int64_t>(i) * r.share * stepBits;
                 if(startBits % alignBits != 0)
                 {
-                    r.misaligned.push_back({m.name, i, startBits / 8});
+                    r.misaligned.push_back({m.name, i, startBits / 8, absv(m.step)});
                     break;
                 }
             }
@@ -124,6 +125,7 @@ namespace TensileLite::SliceAlignment
 
     inline std::vector<std::string> hints(Result const& r, Dim dim, size_t parts)
     {
+        const char* dimName = dim == Dim::M ? "M" : dim == Dim::N ? "N" : "the batch count";
         std::vector<std::string> out;
         for(auto const& m : r.misaligned)
         {
@@ -131,22 +133,18 @@ namespace TensileLite::SliceAlignment
                             + std::to_string(m.partition) + " starts "
                             + std::to_string(m.byteOffset) + " bytes in, not a multiple of "
                             + std::to_string(kAlignBytes) + ", which is slow: ";
-            switch(dim)
-            {
-            case Dim::M:
-                s += "pad M to a multiple of " + std::to_string(parts * r.granularity)
-                     + " and the leading dimension to a multiple of "
-                     + std::to_string(kAlignBytes) + " bytes, or split N";
-                break;
-            case Dim::N:
-                s += "pad the leading dimension to a multiple of " + std::to_string(kAlignBytes)
-                     + " bytes";
-                break;
-            case Dim::Batch:
-                s += "pad the batch stride to a multiple of " + std::to_string(kAlignBytes)
-                     + " bytes";
-                break;
-            }
+            // A slice starts partition * share * step elements in. With step 1 only the share
+            // moves the start; otherwise padding the step (a leading dimension or the batch
+            // stride) to 256 bytes aligns every slice whatever the share.
+            if(m.step == 1)
+                s += std::string("pad ") + dimName + " to a multiple of "
+                     + std::to_string(parts * r.granularity);
+            else
+                s += std::string("pad the ")
+                     + (dim == Dim::Batch ? "batch stride" : "leading dimension") + " of "
+                     + m.name + " to a multiple of " + std::to_string(kAlignBytes) + " bytes";
+            if(dim == Dim::M)
+                s += ", or split N";
             out.push_back(std::move(s));
         }
         return out;
