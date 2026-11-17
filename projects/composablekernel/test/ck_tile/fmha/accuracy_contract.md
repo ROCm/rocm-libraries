@@ -105,10 +105,12 @@ term and no LSE: `Compare` also refuses an FP8 contract on a sequence with a fin
 on an output with LSE.
 
 Per key the converted P' is either `P (1 + d)` with `abs(d) <= u_P = 2^-4` (round to nearest even
-in the normal range) or `P - e` with `0 <= e <= min(P, loss)` once `kPScale * P` is below e4m3's
+in the normal range) or `P + e` with `abs(e) <= min(P, loss)` once `kPScale * P` is below e4m3's
 smallest normal `2^-6`, that is `P < t0 = 2^-6 / kPScale` (`2^-14` for `kPScale = 256`). `loss` is
 half a subnormal step (`2^-10 / kPScale = 2^-18`) when the convert keeps e4m3 subnormals and `t0`
-when it flushes them. With `L` the exact normalizer:
+when it flushes them. Round to nearest even rounds some subnormal keys up (`e > 0`); the
+numerator below needs only `abs(e)`, and the denominator's lower bound only the downward errors.
+With `L` the exact normalizer:
 
 ```text
 O - r = sum_k (P'_k - P_k) (V_k - r) / sum_k P'_k

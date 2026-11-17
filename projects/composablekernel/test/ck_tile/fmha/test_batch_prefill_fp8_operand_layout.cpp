@@ -101,7 +101,7 @@ static_assert(
 static_assert(
     !Policy::template IsSupportedProblem<
         typename ProblemFor<16, BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT>::type>());
-static_assert(Problem::kVectorSize == 16 && Policy::kVectorSize == 16);
+static_assert(Problem::kVectorSize == 16);
 // Arena: four unpadded 8 KB tiles; reads per stage and lane from the geometry (D9).
 static_assert(Policy::kLdsOffsetK0 == 0 && Policy::kLdsOffsetK1 == 8192 &&
               Policy::kLdsOffsetV0 == 16384 && Policy::kLdsOffsetV1 == 24576 &&

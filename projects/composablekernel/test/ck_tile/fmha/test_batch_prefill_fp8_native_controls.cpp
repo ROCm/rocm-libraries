@@ -3,8 +3,8 @@
 
 // The gfx1250 operations that form and consume the FP8 page tile's quantized P, on e4m3
 // subnormals (accuracy_contract.md, "FP8 P": QuantizedP::keeps_subnormals):
-//  - the P cast, fp32x8_to_fp8x8(v, 1 / 256), which stores 256 * P in e4m3
-//    (BlockFmhaPipelineQRKSVSTdmSchedFp8::MakePForGemm1);
+//  - the P cast, fp32x8_to_fp8x8<fp8_rounding_mode::standard>(v, 1 / 256), which stores 256 * P
+//    in e4m3 (the FP8 page tile's MakePForGemm1);
 //  - the dequant of the quantized row sum, __builtin_amdgcn_cvt_scale_pk8_f32_fp8 with the literal
 //    unit scale (the forward pipeline's Dequantize on gfx1250), and CK's fp8x8_to_fp32x8(q, 1),
 //    which the other gfx125 targets take;
@@ -12,8 +12,9 @@
 // Compiled with the page-tile gtests' flags (-fgpu-flush-denormals-to-zero). The P cast must round
 // to nearest even. A subnormal P that the cast keeps must also reach O (the WMMA) and the row sum
 // (the dequant); otherwise the numerator and the denominator of O see different P and the
-// contract's model does not apply. The test reports whether the cast keeps subnormals: that is the
-// contract's keeps_subnormals.
+// contract's model does not apply. The FP8 gtests model kept subnormals (QuantizedPModel in
+// test_batch_prefill_page_tile.cpp, the contract's keeps_subnormals), so the test requires the
+// cast to keep them.
 
 #include <array>
 #include <cstdint>
@@ -138,7 +139,7 @@ struct NativeProbe
                     constexpr float kP = kCastCases[kFirst + decltype(e)::value].scaled / kPScale;
                     p[e()]             = kP;
                 });
-                const fp8x8_t q = fp32x8_to_fp8x8(p, 1.0f / kPScale);
+                const fp8x8_t q = fp32x8_to_fp8x8<fp8_rounding_mode::standard>(p, 1.0f / kPScale);
                 static_for<0, 8, 1>{}(
                     [&](auto e) { results->cast[kFirst + e()] = bit_cast<std::uint8_t>(q[e()]); });
             });
@@ -261,7 +262,9 @@ TEST_F(Fp8NativeControls, QuantizedPSubnormalsAndRounding)
 
     EXPECT_TRUE(cast_normal) << "the P cast does not round to nearest even on normal values";
     EXPECT_TRUE(wmma_normal) << "the FP8 WMMA does not sum 128 normal products exactly";
-    EXPECT_NE(cast, Mode::Neither);
+    EXPECT_EQ(cast, Mode::Kept)
+        << "the FP8 gtests' QuantizedPModel (test_batch_prefill_page_tile.cpp) models kept "
+           "subnormals";
     EXPECT_NE(dequant, Mode::Neither);
     EXPECT_NE(wmma, Mode::Neither);
     EXPECT_EQ(dequant_ck, dequant)

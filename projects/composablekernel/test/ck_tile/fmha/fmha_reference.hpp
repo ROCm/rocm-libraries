@@ -300,8 +300,9 @@ inline double ComponentLimit(const ReferenceRow& row,
     if(contract.quantized_p)
     {
         // O = sum_k P'[k] V[k] / sum_k P'[k] with P' = P (1 + d) (normal keys, abs(d) <= u_P) or
-        // P' = P - e (keys below the subnormal threshold, 0 <= e <= min(P, loss)):
-        // O - r = sum_k (P' - P)(V - r) / sum_k P', and sum_k P' >= L (1 - u_P - subnormal_mass).
+        // P' = P + e (keys below the subnormal threshold, abs(e) <= min(P, loss): round to nearest
+        // even rounds some up): O - r = sum_k (P' - P)(V - r) / sum_k P', and, since only the
+        // downward errors lower it, sum_k P' >= L (1 - u_P - subnormal_mass).
         const double u_p         = contract.quantized_p->UnitRoundoff();
         const double denominator = 1 - u_p - row.subnormal_mass;
         if(!(denominator > 0.5))
