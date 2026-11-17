@@ -109,9 +109,11 @@ def _isSerialFenceTile(kernel) -> bool:
 def serialStoreFenceWaitStates(kernel, weaveGroups) -> int:
     """Wait states between a paired ``buffer_store_dwordx4`` and the next pair's
     convert into the same pack quad. One everywhere develop already uses permlane16;
-    two where only the store cacheline align put the serial store on it (see
-    plsinStorePermlane16Active)."""
-    if _isSerialFenceTile(kernel) and weaveGroups is None and storeCachelineAlignEnabled(kernel):
+    two where only the store cacheline align put the serial store on it. Gated on
+    ``plsinStorePermlane16Active`` (ISA (9,5,0)) so the widened fence stays on the
+    gfx950 cacheline align path -- off gfx950 the serial store keeps ds_bpermute and never needs it."""
+    if (_isSerialFenceTile(kernel) and weaveGroups is None and storeCachelineAlignEnabled(kernel)
+            and plsinStorePermlane16Active(kernel, weaveGroups)):
         return 2
     return 1
 
