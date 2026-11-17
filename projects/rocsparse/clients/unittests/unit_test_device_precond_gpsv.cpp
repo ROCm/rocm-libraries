@@ -75,15 +75,15 @@ namespace
         s.want.resize(m);
         for(int32_t j = 0; j < m; ++j)
         {
-            s.ds[j] = (!zero.ds && j >= 2) ? make_value<T>(-0.2 * scale, 0.1 * scale)
-                                           : make_value<T>(0.0);
-            s.dl[j] = (!zero.dl && j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale)
-                                           : make_value<T>(0.0);
-            s.d[j]  = make_value<T>(4.0 * scale, 0.3 * scale);
-            s.du[j] = (!zero.du && j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale)
-                                              : make_value<T>(0.0);
-            s.dw[j] = (!zero.dw && j < m - 2) ? make_value<T>(0.3 * scale, 0.15 * scale)
-                                              : make_value<T>(0.0);
+            s.ds[j]   = (!zero.ds && j >= 2) ? make_value<T>(-0.2 * scale, 0.1 * scale)
+                                             : make_value<T>(0.0);
+            s.dl[j]   = (!zero.dl && j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale)
+                                             : make_value<T>(0.0);
+            s.d[j]    = make_value<T>(4.0 * scale, 0.3 * scale);
+            s.du[j]   = (!zero.du && j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale)
+                                                : make_value<T>(0.0);
+            s.dw[j]   = (!zero.dw && j < m - 2) ? make_value<T>(0.3 * scale, 0.15 * scale)
+                                                : make_value<T>(0.0);
             s.want[j] = make_value<T>(static_cast<double>(j + 1) / 7.0,
                                       0.2 * static_cast<double>(j + 1) / 7.0);
         }
