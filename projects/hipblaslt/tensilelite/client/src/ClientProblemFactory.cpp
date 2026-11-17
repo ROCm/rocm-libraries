@@ -29,6 +29,7 @@
 
 #include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/SliceAlignment.hpp>
 
 #include "TimingInstrumentation.hpp"
 
@@ -231,6 +232,10 @@ namespace TensileLite
             if(m_sliceCount > 1)
             {
                 m_splitN   = args["split-dim"].as<std::string>() == "N";
+                if(args.count("split-align")
+                   && !SliceAlignment::parseMode(args["split-align"].as<std::string>(),
+                                                 m_splitAlign))
+                    throw std::runtime_error("--split-align must be auto, off or force");
                 auto mFree = std::find_if(m_freeIndices.begin(),
                                           m_freeIndices.end(),
                                           [&](auto const& f) { return f.isA != m_splitN; });
@@ -429,45 +434,30 @@ namespace TensileLite
         }
 
         // Rows of the split dimension each of the first sliceCount-1 devices takes. Plain is
-        // total / sliceCount. It is rounded up so that a device's D slice starts on 256 bytes
-        // (step = D's stride along the split dimension, in elements) when that moves at most
-        // SplitMaxImbalance of the work to the last device; otherwise the plain share is kept.
+        // total / sliceCount, rounded up so that a device's D slice starts on 256 bytes
+        // (step = D's stride along the split dimension, in elements) as --split-align says; see
+        // Tensile/SliceAlignment.hpp.
         size_t ClientProblemFactory::splitShare(size_t           total,
                                                 size_t           step,
                                                 rocisa::DataType dType) const
         {
-            size_t plain = total / m_sliceCount;
-            if(plain == 0)
+            // 256 bytes = 2048 bits; elementSize is a float and fractional for fp4 and fp6.
+            int64_t bits = std::llround(DataTypeInfo::Get(dType).elementSize * 8.0f);
+            auto    r    = SliceAlignment::split(static_cast<int64_t>(total),
+                                              m_sliceCount,
+                                              {{"D", static_cast<int64_t>(step), bits}},
+                                              m_splitAlign);
+            if(r.share == 0)
                 throw std::runtime_error(concatenate("--split-devices=",
                                                      m_sliceCount,
                                                      " is larger than ",
                                                      m_splitN ? "N=" : "M=",
                                                      total));
-            // 256 bytes = 2048 bits; elementSize is a float and fractional for fp4 and fp6.
-            size_t bits = static_cast<size_t>(
-                std::llround(DataTypeInfo::Get(dType).elementSize * 8.0f));
-            size_t g       = 2048 / std::gcd<size_t>(2048, step * bits);
-            size_t aligned = (plain + g - 1) / g * g;
-            size_t share   = plain;
-            if(aligned * (m_sliceCount - 1) < total) // the last device keeps work
-            {
-                size_t last = total - aligned * (m_sliceCount - 1);
-                if((static_cast<double>(aligned) - static_cast<double>(last)) / static_cast<double>(aligned)
-                   <= SplitMaxImbalance)
-                    share = aligned;
-            }
-            if(m_sliceIdx == 0 && (share * step * bits) % 2048 != 0)
-            {
-                size_t padTo = m_sliceCount * g;
-                std::cout << "--split-devices: device 1's D slice starts " << share * step * bits / 8
-                          << " bytes into D (not a multiple of 256): ";
-                if(m_splitN)
-                    std::cout << "pad the D leading dimension to a multiple of 256 bytes";
-                else
-                    std::cout << "pad M to a multiple of " << padTo << " or use --split-dim N";
-                std::cout << std::endl;
-            }
-            return share;
+            if(m_sliceIdx == 0)
+                for(auto const& line : SliceAlignment::hints(
+                        r, m_splitN ? SliceAlignment::Dim::N : SliceAlignment::Dim::M, m_sliceCount))
+                    std::cout << "--split-devices: " << line << std::endl;
+            return static_cast<size_t>(r.share);
         }
 
         size_t ClientProblemFactory::numSlices() const
