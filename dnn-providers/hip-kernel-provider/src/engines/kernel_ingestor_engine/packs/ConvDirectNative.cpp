@@ -532,9 +532,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
            || (config.un != 1 && config.un != 2 && config.un != 4)
            || (config.un > 1 && config.kd != 1) || (config.cf != 0 && config.cf != 1)
            || (config.cf == 1
-               && (config.kd != 1 || config.un != 1 || config.split != 0 || config.pp != 0
-                   || config.epi != 0 || math != 0
-                   || conv_igemm::atomElement(config.atom) == "f32")))
+               && (config.un != 1 || config.split != 0 || config.pp != 0 || config.epi != 0
+                   || math != 0 || conv_igemm::atomElement(config.atom) == "f32")))
         {
             return std::nullopt;
         }

@@ -2043,3 +2043,451 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
         zero();
     }
 }
+
+// Channels-first rows, 3-D (KD > 1): k2ConvRowsCf's tile, one output plane per tile, its chunks
+// walking the depth taps whose input plane lies in the image (as k2ConvRows3d), each tap's halo
+// DMA'd from its input plane of every channel and transposed as in 2-D.
+template <class T,
+          class Atom,
+          int R,
+          int S,
+          int PW,
+          int FN,
+          int WP,
+          int WQ,
+          int WK,
+          int BC,
+          class TO,
+          int KD>
+__device__ __attribute__((always_inline)) void k2ConvRowsCf3d(const K2Args& a CONV_EPI_FN_PARAM)
+{
+    constexpr int WAVE = 64;
+    constexpr int DIM = 16;
+    constexpr int KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int BP = WP * PW, BQ = WQ * DIM, BN = WK * FN * DIM;
+    constexpr int NW = WP * WQ * WK;
+    constexpr int HH = BP + R - 1, HW = BQ + S - 1;
+    constexpr int GE = 8; // 16-bit elements per granule
+    constexpr int G = BC / GE;
+    constexpr int ROWG = HW * G;
+    constexpr int NG = HH * ROWG; // channels-last granules
+    constexpr int RUNS = (7 + BQ + S - 1 + 7) / 8; // raw runs per channel row
+    constexpr int XW = RUNS * 8;
+    constexpr int NSLOT = HH * BC * RUNS; // raw 16-byte slots
+    constexpr int KK = BC / KA;
+    constexpr int NQ = S * KK;
+    constexpr int NR = PW + R - 1;
+    constexpr int FB = KPL * static_cast<int>(sizeof(T));
+    constexpr int FRAG = WAVE * FB;
+    static_assert(sizeof(T) == 2 && BC % KA == 0 && (G & (G - 1)) == 0 && G <= 8, "chunk");
+    static_assert(XW % 16 == 0, "whole 16-column transpose blocks");
+    constexpr int NI = (NSLOT + WAVE - 1) / WAVE;
+    constexpr int IPW = (NI + NW - 1) / NW;
+    constexpr int DSTEPS = NQ > 1 ? NQ - 1 : 1;
+    constexpr int DPS = (IPW + DSTEPS - 1) / DSTEPS;
+    constexpr int NT = HH * G * (XW / 16); // transpose tasks, one per 16-lane group
+    constexpr int NTW = (NT + 4 * NW - 1) / (4 * NW); // per wave
+    typedef typename K1Raw<16>::type Raw16;
+    typedef typename K1Raw<FB>::type RawF;
+    typedef typename Atom::frag Frag;
+
+    __shared__ Raw16 raw[NI * WAVE];
+    __shared__ Raw16 nh[NG];
+
+    const int tid = threadIdx.x;
+    const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
+    const int wq = wave % WQ, wp = (wave / WQ) % WP, wk = wave / (WQ * WP);
+    auto olane = [&]() __attribute__((always_inline))
+    {
+        unsigned l = static_cast<unsigned>(tid);
+        asm volatile("" : "+v"(l));
+        return static_cast<int>(l & (WAVE - 1));
+    };
+
+    // Tile walk as k2ConvRows (UN 1, no split).
+    const int kBlocks = (a.k + BN - 1) / BN;
+    long long total = static_cast<long long>(a.tilesW) * a.tilesH * a.n * kBlocks;
+    if constexpr(KD > 1)
+        total *= a.dout;
+    const int gsz = static_cast<int>(gridDim.x);
+    const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
+    const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
+    auto cum = [&](int x) { return x * (gsz / K1_XCDS) + (x < gsz % K1_XCDS ? x : gsz % K1_XCDS); };
+    const int bpx = cum(xcd + 1) - cum(xcd);
+    const int tEnd = static_cast<int>(total * cum(xcd + 1) / gsz);
+    const int tFirst = static_cast<int>(total * cum(xcd) / gsz) + local;
+
+    // 3-D (KD > 1): a tile is also one output plane od, its chunks the depth taps whose input
+    // plane is in the image, [t0, t0 + nv / nCh), times the channel chunks (as k2ConvRows3d).
+    const int nCh = (a.c + BC - 1) / BC;
+    struct Tile2
+    {
+        int kb, oh0, ow0, img;
+    };
+    struct Tile3 : Tile2
+    {
+        int od, t0, nv;
+    };
+    typedef typename K1If<(KD > 1), Tile3, Tile2>::type Tile;
+    auto decode = [&](int t) __attribute__((always_inline))
+    {
+        Tile c;
+        c.kb = t % kBlocks;
+        t /= kBlocks;
+        const int tq = t % a.tilesW;
+        t /= a.tilesW;
+        const int tp = t % a.tilesH;
+        if constexpr(KD > 1)
+        {
+            t /= a.tilesH;
+            c.od = t % a.dout;
+            c.img = t / a.dout;
+            const int lo = a.pd - c.od, hi = a.di + a.pd - c.od;
+            const int t0 = lo > 0 ? lo : 0, t1 = hi < KD ? hi : KD;
+            c.t0 = t1 > t0 ? t0 : 0;
+            c.nv = (t1 > t0 ? t1 - t0 : 1) * nCh;
+        }
+        else
+        {
+            c.img = t / a.tilesH;
+        }
+        c.oh0 = tp * BP;
+        c.ow0 = tq * BQ;
+        return c;
+    };
+    const int xoff = (GE - a.pw % GE) % GE;
+    const long long plane = static_cast<long long>(a.hi) * a.wi;
+    const int dI = KD > 1 ? a.di : 1; // input planes
+    const int dO = KD > 1 ? a.dout : 1; // output planes
+    const long long imgBytes = plane * dI * a.c * static_cast<long long>(sizeof(T));
+    const unsigned planeBytes = static_cast<unsigned>(plane) * static_cast<unsigned>(sizeof(T));
+    // A channel's bytes (its input planes); chunk v's channel chunk and input plane.
+    const unsigned chanBytes = planeBytes * static_cast<unsigned>(dI);
+    auto chunkOf = [&](const Tile& tc, int v, int& cc, int& pl) __attribute__((always_inline))
+    {
+        if constexpr(KD > 1)
+        {
+            const int tap = v / nCh;
+            cc = v - tap * nCh;
+            pl = tc.od - a.pd + tc.t0 + tap;
+        }
+        else
+        {
+            cc = v;
+            pl = 0;
+        }
+    };
+
+    // This wave's DMA issue slots [i0, i1) of chunk cc of tile tc. Raw slot u = (h BC + c) RUNS +
+    // xr: run xr of channel row c of halo row h.
+    auto dma = [&](const Tile& tc, int v, int i0, int i1) __attribute__((always_inline))
+    {
+        int cc, pl;
+        chunkOf(tc, v, cc, pl);
+        const bool pok = KD > 1 ? static_cast<unsigned>(pl) < static_cast<unsigned>(a.di) : true;
+        const unsigned plOff = KD > 1 && pok ? static_cast<unsigned>(pl) * planeBytes : 0u;
+        const __amdgpu_buffer_rsrc_t xr
+            = k1Rsrc(static_cast<const T*>(a.x) + tc.img * plane * dI * a.c, imgBytes);
+        const int ln = olane();
+        const int xal = tc.ow0 - a.pw - xoff;
+        int wv = wave;
+        asm volatile("" : "+s"(wv)); // per-call scalar decode, not hoisted
+#pragma unroll
+        for(int it = 0; it < IPW; ++it)
+        {
+            if(it < i0 || it >= i1)
+                continue;
+            const int i = it * NW + wv; // wave-uniform
+            if(i >= NI)
+                continue;
+            const int u = i * WAVE + ln;
+            const int xrun = u % RUNS;
+            const int c = (u / RUNS) % BC;
+            const int h = u / (RUNS * BC);
+            const int ih = tc.oh0 - a.ph + h;
+            const int iw = xal + GE * xrun;
+            const bool ok = u < NSLOT && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                            && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
+                            && cc * BC + c < a.c && pok;
+            const unsigned off = ok ? static_cast<unsigned>(cc * BC + c) * chanBytes + plOff
+                                          + (static_cast<unsigned>(ih) * static_cast<unsigned>(a.wi)
+                                             + static_cast<unsigned>(iw))
+                                                * static_cast<unsigned>(sizeof(T))
+                                    : K1_OUT_OF_RANGE;
+#if K2R_DMA16
+            __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                xr, (__attribute__((address_space(3))) void*)(raw + i * WAVE), 16, off, 0, 0, 0);
+#else
+            (void)off;
+            // Sub-instruction j fills slots 16 j .. 16 j + 15 of the 64: lane l slot
+            // i WAVE + 16 j + l / 4, dword l % 4.
+#pragma unroll
+            for(int j = 0; j < K2R_DMA_SUB; ++j)
+            {
+                const int uj = i * WAVE + j * (WAVE / K2R_DMA_SUB) + ln / K2R_DMA_SUB;
+                const int xrj = uj % RUNS;
+                const int cj = (uj / RUNS) % BC;
+                const int hj = uj / (RUNS * BC);
+                const int ihj = tc.oh0 - a.ph + hj;
+                const int iwj = xal + GE * xrj;
+                const bool okj = uj < NSLOT
+                                 && static_cast<unsigned>(ihj) < static_cast<unsigned>(a.hi)
+                                 && static_cast<unsigned>(iwj) < static_cast<unsigned>(a.wi)
+                                 && cc * BC + cj < a.c && pok;
+                const unsigned offj
+                    = okj ? static_cast<unsigned>(cc * BC + cj) * chanBytes + plOff
+                                + (static_cast<unsigned>(ihj) * static_cast<unsigned>(a.wi)
+                                   + static_cast<unsigned>(iwj))
+                                      * static_cast<unsigned>(sizeof(T))
+                                + static_cast<unsigned>(ln % K2R_DMA_SUB) * 4u
+                          : K1_OUT_OF_RANGE;
+                __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                    xr,
+                    (__attribute__((address_space(3))) void*)(raw + i * WAVE
+                                                              + j * (WAVE / K2R_DMA_SUB)),
+                    4,
+                    offj,
+                    0,
+                    0,
+                    0);
+            }
+#endif
+        }
+    };
+
+    // Raw [h][c][x'] to the channels-last stage: task (h, granule g, 16-column block xb); lane j of
+    // the group gets channels 8 g .. 8 g + 7 of column x' = 16 xb + j, written to stage column
+    // x = x' - x_off when that is in the halo.
+#if !K2R_DMA16
+    // Gather form (gfx950 runs it too when built with K2R_DMA16 0, for testing): task (h, granule g, halo column x), lanes over x first; the lane reads the 8
+    // channels 8 g .. 8 g + 7 of raw column x + x_off and writes them as granule g of column x.
+    auto transpose = [&]() __attribute__((always_inline))
+    {
+        constexpr int NT2 = HH * G * HW;
+        constexpr int NTW2 = (NT2 + NW * WAVE - 1) / (NW * WAVE);
+        typedef unsigned u4 __attribute__((ext_vector_type(4)));
+        const int ln = olane();
+        const unsigned short* rb = reinterpret_cast<const unsigned short*>(raw);
+#pragma unroll
+        for(int it = 0; it < NTW2; ++it)
+        {
+            const int task = (it * NW + wave) * WAVE + ln;
+            if(NT2 % (NW * WAVE) != 0 && task >= NT2)
+                continue;
+            const int x = task % HW;
+            const int g = (task / HW) % G;
+            const int h = task / (HW * G);
+            const unsigned short* p = rb + (h * BC + g * GE) * XW + x + xoff;
+            u4 v;
+#pragma unroll
+            for(int e = 0; e < 4; ++e)
+                v[e] = static_cast<unsigned>(p[(2 * e) * XW])
+                       | (static_cast<unsigned>(p[(2 * e + 1) * XW]) << 16);
+            nh[h * ROWG + x * G + (g + x) % G] = __builtin_bit_cast(Raw16, v);
+        }
+    };
+#else
+    auto transpose = [&]() __attribute__((always_inline))
+    {
+        const int ln = olane();
+        const int s16 = ln % 16, grp = ln / 16;
+        typedef short s4 __attribute__((ext_vector_type(4)));
+        typedef __attribute__((address_space(3))) s4 lds_s4;
+        const short* rb = reinterpret_cast<const short*>(raw);
+#pragma unroll
+        for(int it = 0; it < NTW; ++it)
+        {
+            const int task = (it * NW + wave) * 4 + grp;
+            if(task >= NT)
+                continue;
+            const int xb = task % (XW / 16);
+            const int g = (task / (XW / 16)) % G;
+            const int h = task / ((XW / 16) * G);
+            const short* p = rb + (h * BC + g * GE + s16 / 4) * XW + xb * 16 + 4 * (s16 % 4);
+#if defined(__gfx950__)
+            const s4 lo = __builtin_amdgcn_ds_read_tr16_b64_v4i16((lds_s4*)(p));
+            const s4 hi = __builtin_amdgcn_ds_read_tr16_b64_v4i16((lds_s4*)(p + 4 * XW));
+#else
+            __builtin_trap();
+            const s4 lo{}, hi{};
+#endif
+            const int x = xb * 16 + s16 - xoff;
+            if(static_cast<unsigned>(x) < static_cast<unsigned>(HW))
+                nh[h * ROWG + x * G + (g + x) % G] = __builtin_bit_cast(
+                    Raw16, __builtin_shufflevector(lo, hi, 0, 1, 2, 3, 4, 5, 6, 7));
+        }
+    };
+#endif
+
+    const __amdgpu_buffer_rsrc_t wr = k1Rsrc(
+        a.w, static_cast<long long>(a.ca) * a.kpad * KA * KD * R * S * static_cast<int>(sizeof(T)));
+    auto loadW
+        = [&](Frag(&w)[FN], int r, int nb, int cc, int qq, int tap) __attribute__((always_inline))
+    {
+        const unsigned wl = static_cast<unsigned>(olane() * FB);
+        const int so = ((((nb / (FN * DIM)) * a.ca + cc * KK + qq % KK) * S + qq / KK) * (KD * R)
+                        + (KD > 1 ? tap * R : 0) + r)
+                       * FN * FRAG;
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            w[j] = __builtin_bit_cast(Frag, k2rBufferLoad<RawF>(wr, wl + j * FRAG, so));
+    };
+
+    typename Atom::acc acc[PW][FN];
+
+    // One chunk from the channels-last stage; the DMA of chunk dmaCc of dmaTile goes out in its
+    // steps when pf, and (after the barrier that ends the chunk) its transpose.
+    auto chunk = [&](int nb, int cc, int tap, const Tile& dmaTile, int dmaCc, bool pf)
+        __attribute__((always_inline))
+    {
+        k2StaticFor<0, NQ>([&](auto Q) __attribute__((always_inline)) {
+            constexpr int q = decltype(Q)::value;
+            constexpr int s = q / KK, kk = (q % KK) * KA;
+            Frag wfr[R][FN];
+#pragma unroll
+            for(int r = 0; r < R; ++r)
+                loadW(wfr[r], r, nb, cc, q, tap);
+            if constexpr(q < DSTEPS)
+            {
+                if(pf)
+                    dma(dmaTile, dmaCc, q * DPS, (q + 1) * DPS);
+            }
+            Frag xin[NR];
+            {
+                const int l = olane();
+                const int x = wq * DIM + l % DIM + s;
+                const int ch = kk + Atom::template kBase<KPL>(l);
+                const int slot = x * G + ((ch / GE + x) % G);
+                const T* base = reinterpret_cast<const T*>(nh) + slot * GE + ch % GE;
+#pragma unroll
+                for(int rr = 0; rr < NR; ++rr)
+                    xin[rr] = __builtin_bit_cast(
+                        Frag, *reinterpret_cast<const RawF*>(base + (wp * PW + rr) * ROWG * GE));
+            }
+            if constexpr(q == NQ - 1)
+                __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
+            __builtin_amdgcn_sched_barrier(0);
+#pragma unroll
+            for(int r = 0; r < R; ++r)
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+#pragma unroll
+                    for(int p = 0; p < PW; ++p)
+                        acc[p][j] = Atom::mma(wfr[r][j], xin[p + r], acc[p][j]);
+            __builtin_amdgcn_sched_barrier(0);
+        });
+        k2rBarrier();
+        if(pf)
+        {
+            transpose();
+            k2rBarrier();
+        }
+    };
+
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue, applied to the tile's accumulators in place before its store (a staged
+    // store's LDS transpose then copies rounded values bitwise). The lane holds channels
+    // nb + j * DIM + (l / DIM) * 4 + i.
+    auto epilogue = [&](int nb) __attribute__((always_inline))
+    {
+        const int l = olane();
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+#pragma unroll
+            for(int i = 0; i < 4; ++i)
+            {
+                const int n = nb + j * DIM + (l / DIM) * 4 + i;
+                const ConvEpiGen::Chan ch = epi.chan(n, n < a.k);
+#pragma unroll
+                for(int p = 0; p < PW; ++p)
+                    acc[p][j][i] = epi(acc[p][j][i], ch, 0, true);
+            }
+    };
+#endif
+
+    // Channels-first epilogue: the lane holds channels n .. n + 3 of column ow for each row p.
+    auto store = [&](const Tile& tc, int nb) __attribute__((always_inline))
+    {
+#if defined(CONV_EPI) && CONV_EPI
+        epilogue(nb);
+#endif
+        TO* y = static_cast<TO*>(a.y);
+        const int l = olane();
+        const int ow = tc.ow0 + wq * DIM + l % DIM;
+        const long long oplane = static_cast<long long>(a.ho) * a.wo;
+#pragma unroll
+        for(int p = 0; p < PW; ++p)
+        {
+            const int oh = tc.oh0 + wp * PW + p;
+            if(oh >= a.ho || ow >= a.wo)
+                continue;
+            TO* yp = y + static_cast<long long>(tc.img) * a.k * dO * oplane
+                     + static_cast<long long>(oh) * a.wo + ow;
+            if constexpr(KD > 1)
+                yp += static_cast<long long>(tc.od) * oplane;
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+            {
+                const int n = nb + j * DIM + (l / DIM) * 4;
+                typedef TO v4 __attribute__((ext_vector_type(4)));
+                const v4 o = k2rPack4<TO>(acc[p][j]);
+#pragma unroll
+                for(int i = 0; i < 4; ++i)
+                    if(n + i < a.k)
+                        yp[(n + i) * dO * oplane] = o[i];
+            }
+        }
+    };
+
+    if(tFirst >= tEnd)
+        return;
+    Tile tc = decode(tFirst);
+    int t = tFirst, cc = 0;
+    int nb = tc.kb * BN + wk * FN * DIM;
+    auto zero = [&]() __attribute__((always_inline))
+    {
+#pragma unroll
+        for(int p = 0; p < PW; ++p)
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+                acc[p][j] = typename Atom::acc{};
+    };
+    zero();
+    dma(tc, 0, 0, IPW);
+    __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
+    k2rBarrier();
+    transpose();
+    k2rBarrier();
+    for(;;)
+    {
+        bool last = cc + 1 >= nCh;
+        if constexpr(KD > 1)
+            last = cc + 1 >= tc.nv;
+        const bool hasNext = t + bpx < tEnd;
+        // The chunk to prefetch: the next of this tile, or the first of the next tile.
+        Tile dt = tc;
+        if(last && hasNext)
+            dt = decode(t + bpx);
+        int wcc = cc, tap = 0; // chunk cc's channel chunk and depth tap (3-D)
+        if constexpr(KD > 1)
+        {
+            const int tv = cc / nCh;
+            wcc = cc - tv * nCh;
+            tap = tc.t0 + tv;
+        }
+        chunk(nb, wcc, tap, dt, last ? 0 : cc + 1, !last || hasNext);
+        if(!last)
+        {
+            ++cc;
+            continue;
+        }
+        store(tc, nb);
+        if(!hasNext)
+            break;
+        t += bpx;
+        tc = dt;
+        cc = 0;
+        nb = tc.kb * BN + wk * FN * DIM;
+        zero();
+    }
+}
