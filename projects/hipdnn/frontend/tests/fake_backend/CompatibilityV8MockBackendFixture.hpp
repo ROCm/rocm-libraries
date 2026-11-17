@@ -254,6 +254,38 @@ protected:
         _behaviorNotes[engineId] = std::move(notes);
     }
 
+    // An engine with no installed notes reports {NONDETERMINISTIC}, as the backend does for
+    // an engine that declares none; installed notes, even an empty list, are the engine's claim.
+    void installNumericalNotes(std::int64_t engineId,
+                               std::vector<hipdnnBackendNumericalNote_t> notes)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _numericalNotes[engineId] = std::move(notes);
+    }
+
+    // Every ENGINE_NUMERICAL_NOTE query fails with `status`.
+    void failNumericalNoteQueries(hipdnnStatus_t status)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _numericalNotesFailure = status;
+    }
+
+    // The count query (requested == 0) answers `count` whatever the installed notes hold, so a
+    // later read of the installed notes disagrees with it.
+    void reportNumericalNoteCount(std::int64_t count)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _numericalNotesReportedCount = count;
+    }
+
+    // Only the ENGINE_NUMERICAL_NOTE reads that fetch notes fail with `status`; the count
+    // query still succeeds.
+    void failNumericalNoteReads(hipdnnStatus_t status)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _numericalNotesReadFailure = status;
+    }
+
     void installEngineName(std::int64_t engineId, std::string name)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -909,6 +941,40 @@ private:
                                count,
                                elements);
         }
+        case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
+        {
+            if(_numericalNotesFailure)
+            {
+                return *_numericalNotesFailure;
+            }
+            const bool isCountQuery = requested == 0 || elements == nullptr;
+            if(_numericalNotesReadFailure && !isCountQuery)
+            {
+                return *_numericalNotesReadFailure;
+            }
+            if(_numericalNotesReportedCount && isCountQuery)
+            {
+                if(count != nullptr)
+                {
+                    *count = *_numericalNotesReportedCount;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            }
+            const auto engine = _engineIds.find(descriptor);
+            if(engine == _engineIds.end())
+            {
+                return HIPDNN_STATUS_SUCCESS;
+            }
+            const auto notes = _numericalNotes.find(engine->second);
+            return answerArray(
+                notes == _numericalNotes.end()
+                    ? std::vector<
+                          hipdnnBackendNumericalNote_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC}
+                    : notes->second,
+                requested,
+                count,
+                elements);
+        }
         case HIPDNN_ATTR_ENGINE_NAME_EXT:
         {
             const auto engine = _engineIds.find(descriptor);
@@ -1077,6 +1143,10 @@ private:
     std::unordered_map<std::int64_t, std::vector<MockKnob>> _engineKnobs;
     std::unordered_map<hipdnnBackendDescriptor_t, MockKnob> _knobInfos;
     std::unordered_map<std::int64_t, std::vector<hipdnnBackendBehaviorNote_t>> _behaviorNotes;
+    std::unordered_map<std::int64_t, std::vector<hipdnnBackendNumericalNote_t>> _numericalNotes;
+    std::optional<hipdnnStatus_t> _numericalNotesFailure;
+    std::optional<hipdnnStatus_t> _numericalNotesReadFailure;
+    std::optional<std::int64_t> _numericalNotesReportedCount;
     std::unordered_map<std::int64_t, std::string> _engineNames;
     std::unordered_map<hipdnnBackendDescriptor_t, std::int64_t> _planIds;
     std::vector<std::uint8_t> _serializedPlan;

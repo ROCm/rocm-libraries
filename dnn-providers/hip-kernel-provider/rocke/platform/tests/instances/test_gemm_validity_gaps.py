@@ -344,7 +344,7 @@ class TestFp8IsGfx1250Only(unittest.TestCase):
                         self.assertFalse(ok)
                         self.assertEqual(
                             why,
-                            f"fp8/bf8 A/B GEMM is supported only on gfx1250 (got {arch})",
+                            f"fp8/bf8 A/B GEMM is not supported on {arch} (supported on: gfx1250)",
                         )
 
     def test_the_gate_is_the_only_reason(self):

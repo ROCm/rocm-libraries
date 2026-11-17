@@ -108,7 +108,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *testset1_small_matrix_size_range
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_bench_2_small_matrix_size
     category: bench
@@ -122,7 +123,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *testset2_small_matrix_size_range
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_bench_substitution_left_size
     category: bench
@@ -136,7 +138,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *left_substitution_range
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_bench_substitution_right_size
     category: bench
@@ -150,7 +153,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *right_substitution_range
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_bench_1_matrix_size
     category: bench
@@ -164,7 +168,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *testset1_matrix_size_range
-    iters: 5
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_bench_2_matrix_size
     category: bench
@@ -178,7 +183,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *testset2_matrix_size_range
-    iters: 5
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_substitution_small
     category: bench
@@ -189,7 +195,7 @@ Tests:
     diag: [N]
     matrix_size: *small_sub_sizes
     alpha: 1
-    iters: 50
+    iters: 100
     cold_iters: 20
 
   - name: trsm_substitution_large
@@ -201,6 +207,6 @@ Tests:
     diag: [N]
     matrix_size: *large_sub_sizes
     alpha: 1
-    iters: 50
+    iters: 100
     cold_iters: 20
 ...
