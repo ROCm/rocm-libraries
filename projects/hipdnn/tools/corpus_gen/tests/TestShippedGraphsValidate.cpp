@@ -126,3 +126,48 @@ TEST(TestShippedGraphsValidate, EveryDeclarationBuildsGraphsTheFrontendValidates
     }
     EXPECT_GT(operations, 0) << "no shipped declaration was found";
 }
+
+TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
+{
+    // The sweep above reaches a form only by chance; this builds each declared one, over a GQA
+    // causal shape, with and without the training forward's statistics.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation
+                           + ".opmeta.json");
+        ASSERT_TRUE(file.good()) << operation;
+        const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+        ASSERT_TRUE(parsed.ok()) << operation;
+        const auto& metadata = *parsed.metadata;
+        const auto* form = metadata.find("form");
+        ASSERT_NE(form, nullptr) << operation;
+        ASSERT_FALSE(form->values.empty()) << operation;
+
+        for(const auto& value : form->values)
+        {
+            for(const bool stats : {true, false})
+            {
+                const ProblemPoint point{{"batch", int64_t{2}},
+                                         {"heads", int64_t{4}},
+                                         {"heads_kv", int64_t{2}},
+                                         {"seqlen_q", int64_t{16}},
+                                         {"seqlen_k", int64_t{32}},
+                                         {"head_dim", int64_t{64}},
+                                         {"is_causal", true},
+                                         {"alignment", std::string("top_left")},
+                                         {"generate_stats", stats},
+                                         {"dtype", std::string("fp16")},
+                                         {"form", value}};
+                const auto built = buildGraphFor(metadata, point);
+                ASSERT_TRUE(built.ok()) << operation << " " << value << ": " << built.error;
+                hipdnn_frontend::graph::Graph graph;
+                const auto restored = graph.deserialize(built.bytes);
+                ASSERT_TRUE(restored.is_good())
+                    << operation << " " << value << ": deserialize: " << restored.get_message();
+                const auto valid = graph.validate();
+                EXPECT_TRUE(valid.is_good()) << operation << " " << value << " (stats " << stats
+                                             << "): validate: " << valid.get_message();
+            }
+        }
+    }
+}

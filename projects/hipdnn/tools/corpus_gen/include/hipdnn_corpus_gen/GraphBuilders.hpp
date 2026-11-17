@@ -38,6 +38,16 @@ struct TensorSpec
     /// Set for a pass-by-value scalar such as a norm's epsilon; the frontend refuses one given
     /// as an ordinary tensor.
     std::optional<float> scalarValue;
+
+    /// With @ref scalarValue: the scalar is a runtime parameter the caller may override at
+    /// execute time, @ref scalarValue being its default, rather than a compile-time constant.
+    bool runtimePassByValue = false;
+
+    /// Packed (ragged) storage: the uid of the INT32 offset tensor giving each batch's first
+    /// token, and the elements per token (element offset = stored offset * multiplier). The
+    /// offset tensor is the builder's to write, as a graph tensor of its own.
+    std::optional<int64_t> raggedOffsetUid;
+    int64_t raggedOffsetMultiplier = 1;
 };
 
 /// The graph's three declared dtypes, kept separate as in the schema.
@@ -60,18 +70,20 @@ namespace detail
 inline flatbuffers::Offset<fb::TensorAttributes> addTensor(flatbuffers::FlatBufferBuilder& builder,
                                                            const TensorSpec& tensor)
 {
+    // Only what a tensor sets reaches the buffer, so a tensor that sets none of the optional
+    // fields serializes as it did before they existed.
+    auto valueType = fb::TensorValue::NONE;
+    flatbuffers::Offset<void> value = 0;
     if(tensor.scalarValue.has_value())
     {
-        const fb::Float32Value value(*tensor.scalarValue);
-        return fb::CreateTensorAttributesDirect(builder,
-                                                tensor.uid,
-                                                tensor.name.c_str(),
-                                                tensor.dataType,
-                                                &tensor.strides,
-                                                &tensor.dims,
-                                                tensor.isVirtual,
-                                                fb::TensorValue::Float32Value,
-                                                builder.CreateStruct(value).Union());
+        const fb::Float32Value scalar(*tensor.scalarValue);
+        valueType = fb::TensorValue::Float32Value;
+        value = builder.CreateStruct(scalar).Union();
+    }
+    flatbuffers::Optional<int64_t> raggedOffsetUid = flatbuffers::nullopt;
+    if(tensor.raggedOffsetUid.has_value())
+    {
+        raggedOffsetUid = *tensor.raggedOffsetUid;
     }
     return fb::CreateTensorAttributesDirect(builder,
                                             tensor.uid,
@@ -79,7 +91,13 @@ inline flatbuffers::Offset<fb::TensorAttributes> addTensor(flatbuffers::FlatBuff
                                             tensor.dataType,
                                             &tensor.strides,
                                             &tensor.dims,
-                                            tensor.isVirtual);
+                                            tensor.isVirtual,
+                                            valueType,
+                                            value,
+                                            tensor.runtimePassByValue,
+                                            raggedOffsetUid,
+                                            /*alignment=*/16,
+                                            tensor.raggedOffsetMultiplier);
 }
 
 inline GraphBytes finish(flatbuffers::FlatBufferBuilder& builder,
@@ -691,17 +709,105 @@ struct SdpaOptions
     fb::DiagonalAlignment diagonalAlignment = fb::DiagonalAlignment::TOP_LEFT;
 };
 
+/// The optional input tensors an attention graph may bind, both directions. Each is unset in the
+/// schema by default; one set here is written as a graph tensor and named by its uid. A set
+/// tensor and the option that goes with it are one decision -- the scale tensor with a zero
+/// `SdpaOptions::attnScale` (the frontend refuses both), the seed and offset with a non-zero
+/// `dropoutProbability`, the sequence lengths with `paddingMask` -- which the caller makes.
+struct SdpaOperands
+{
+    /// The Attn_scale tensor.
+    std::optional<TensorSpec> scale;
+
+    /// The additive bias (attn_mask_tensor_uid).
+    std::optional<TensorSpec> bias;
+
+    /// Per-batch valid lengths, INT32 [B, 1, 1, 1].
+    std::optional<TensorSpec> seqLenQ;
+    std::optional<TensorSpec> seqLenKv;
+
+    /// Dropout's Philox seed and offset.
+    std::optional<TensorSpec> seed;
+    std::optional<TensorSpec> dropoutOffset;
+};
+
+/// The forward's operands: those both directions take, and the two only it has.
+struct SdpaForwardOperands : SdpaOperands
+{
+    /// The attention-sink logits.
+    std::optional<TensorSpec> sink;
+
+    /// The offset tensors that q, k, v, o or stats name as their ragged offsets, written as
+    /// graph tensors of their own.
+    std::vector<TensorSpec> raggedOffsets;
+};
+
+namespace detail
+{
+
+/// Writes @p operands' tensors after those the builder wrote, in declaration order.
+inline void addSdpaOperandTensors(flatbuffers::FlatBufferBuilder& builder,
+                                  std::vector<flatbuffers::Offset<fb::TensorAttributes>>& tensors,
+                                  const SdpaOperands& operands)
+{
+    for(const auto* operand : {&operands.scale,
+                               &operands.bias,
+                               &operands.seqLenQ,
+                               &operands.seqLenKv,
+                               &operands.seed,
+                               &operands.dropoutOffset})
+    {
+        if(operand->has_value())
+        {
+            tensors.push_back(addTensor(builder, **operand));
+        }
+    }
+}
+
+/// Names @p operands' tensors in a forward or backward node's attributes.
+template <typename AttributesBuilder>
+void bindSdpaOperands(AttributesBuilder& attributes, const SdpaOperands& operands)
+{
+    if(operands.scale.has_value())
+    {
+        attributes.add_scale_tensor_uid(operands.scale->uid);
+    }
+    if(operands.bias.has_value())
+    {
+        attributes.add_attn_mask_tensor_uid(operands.bias->uid);
+    }
+    if(operands.seqLenQ.has_value())
+    {
+        attributes.add_seq_len_q_tensor_uid(operands.seqLenQ->uid);
+    }
+    if(operands.seqLenKv.has_value())
+    {
+        attributes.add_seq_len_kv_tensor_uid(operands.seqLenKv->uid);
+    }
+    if(operands.seed.has_value())
+    {
+        attributes.add_seed_tensor_uid(operands.seed->uid);
+    }
+    if(operands.dropoutOffset.has_value())
+    {
+        attributes.add_offset_tensor_uid(operands.dropoutOffset->uid);
+    }
+}
+
+} // namespace detail
+
 /// @brief Scaled dot-product attention, forward.
 ///
-/// The schema's other optional tensor uids (paged KV, dropout, descale, sinks) stay null.
-/// Stats are generated only when `generateStats` is set and @p stats is given.
+/// The schema's other optional tensor uids (paged KV, descale, block mask) stay null; @p operands
+/// binds the rest. Stats are generated only when `generateStats` is set and @p stats is given.
 inline GraphBytes sdpaForward(const TensorSpec& q,
                               const TensorSpec& k,
                               const TensorSpec& v,
                               const TensorSpec& o,
                               const SdpaOptions& options,
                               const GraphTypes& types,
-                              const std::optional<TensorSpec>& stats = std::nullopt)
+                              const std::optional<TensorSpec>& stats = std::nullopt,
+                              const SdpaForwardOperands& operands = {})
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, q),
@@ -713,12 +819,26 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     {
         tensors.push_back(detail::addTensor(builder, *stats));
     }
+    detail::addSdpaOperandTensors(builder, tensors, operands);
+    if(operands.sink.has_value())
+    {
+        tensors.push_back(detail::addTensor(builder, *operands.sink));
+    }
+    for(const auto& offsets : operands.raggedOffsets)
+    {
+        tensors.push_back(detail::addTensor(builder, offsets));
+    }
 
     fb::SdpaAttributesBuilder attributes(builder);
     attributes.add_q_tensor_uid(q.uid);
     attributes.add_k_tensor_uid(k.uid);
     attributes.add_v_tensor_uid(v.uid);
     attributes.add_o_tensor_uid(o.uid);
+    detail::bindSdpaOperands(attributes, operands);
+    if(operands.sink.has_value())
+    {
+        attributes.add_sink_token_tensor_uid(operands.sink->uid);
+    }
     // Causality is written as bounds (right 0, left unbounded) plus diagonal_alignment. The
     // deprecated causal_mask flag stays false: providers read it as top-left regardless of the
     // alignment (SdpaPlanUtils::getMaskType).
@@ -761,6 +881,8 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
 
 /// @brief Scaled dot-product attention, backward. Stats from the forward pass are required,
 ///        not optional: the backward pass reads them rather than recomputing the softmax.
+///
+/// The backward schema has no sink and no ragged offsets, so @p operands is the shared set.
 inline GraphBytes sdpaBackward(const TensorSpec& q,
                                const TensorSpec& k,
                                const TensorSpec& v,
@@ -771,7 +893,8 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
                                const TensorSpec& dk,
                                const TensorSpec& dv,
                                const SdpaOptions& options,
-                               const GraphTypes& types)
+                               const GraphTypes& types,
+                               const SdpaOperands& operands = {})
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
@@ -784,6 +907,7 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
         detail::addTensor(builder, dq),
         detail::addTensor(builder, dk),
         detail::addTensor(builder, dv)};
+    detail::addSdpaOperandTensors(builder, tensors, operands);
 
     fb::SdpaBackwardAttributesBuilder attributes(builder);
     attributes.add_q_tensor_uid(q.uid);
@@ -795,6 +919,7 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
     attributes.add_dq_tensor_uid(dq.uid);
     attributes.add_dk_tensor_uid(dk.uid);
     attributes.add_dv_tensor_uid(dv.uid);
+    detail::bindSdpaOperands(attributes, operands);
     // Same encoding as sdpaForward: causality as bounds plus diagonal_alignment.
     const bool causal = options.causalMask && options.rightBound < 0;
     attributes.add_causal_mask(false);
