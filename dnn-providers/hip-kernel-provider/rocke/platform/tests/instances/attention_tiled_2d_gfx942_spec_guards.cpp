@@ -20,7 +20,9 @@
  *      exact text, the knob list untruncated and in Python's order;
  *   6. one message per band shape, HBM-direct + use_i64_kv_addr rejected,
  *      and use_k_hbm_direct refused (ROCKE_ERR_NOTIMPL) while V from HBM builds;
- *   7. a block_size of zero or below is rejected before anything divides by it.
+ *   7. a block_size of zero or below is rejected before anything divides by it;
+ *   8. V from HBM with the fast paged-KV descriptor is refused with Python's
+ *      text instead of reaching a descriptor the fast path never builds.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -296,6 +298,21 @@ static void test_2d_reject_messages(void)
     spec.block_size = -16;
     expect_2d_validate_message(
         "2d/block_size_negative", &spec, "block_size must be positive, got -16");
+
+    /* V from HBM addresses the cache through the paged-KV descriptor, which
+     * the fast descriptor path does not build. */
+    spec = spec_2d(64, 32, 64, 8, "bf16");
+    spec.has_tile_size = true;
+    spec.tile_size = 64;
+    spec.num_warps = 4;
+    spec.use_fast_paged_kv_desc = true;
+    spec.use_v_hbm_direct = true;
+    expect_2d_validate_message(
+        "2d/fast_paged_kv_desc_v_hbm_direct",
+        &spec,
+        "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with use_k_hbm_direct=False, "
+        "use_v_hbm_direct=True, expected both False: the direct K and V reads address the cache "
+        "through the paged-KV descriptor, which the fast descriptor path does not build");
 }
 
 /* ----------------------------------------------------------------- supports */

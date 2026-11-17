@@ -18,9 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green, with one exception: §5 (additive bias) covers a
-Python-engine-only feature that *is* reachable from a valid config — see that
-section for why the gate stays green anyway. They fall into three kinds:
+gate is fully green, with two exceptions: §5 (additive bias) and §5b (gfx942 K
+from HBM) cover Python-engine-only features that *are* reachable from a valid
+config — see those sections for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -224,6 +224,25 @@ the provider can express.
 | Selectors / spec builder | The score-bias exclusion (`_has_score_bias`) in the fast-path gates, and the gfx950-only spec-builder threading of the flag. | Same; needs the struct field first. |
 | Kernel emission | The four trailing params (`additive_bias_ptr`, `additive_bias_batch_stride`, `additive_bias_head_stride`, `additive_bias_sq_stride`), the masked load and add on the 2D 16x16, 2D transposed 32x32 and 3D score paths, and the `addb` name token. | A port of `_attention_additive_bias.py` and its three call sites. |
 | Parity coverage | Bias-on cases in `rocke_ir_parity_harness.py` `cases()` and representative-IR goldens. | Needs the emission port above. |
+
+---
+
+## 5b. gfx942 tiled 2D — K read straight from HBM (Python engine only)
+
+**Subsystem:** `instances/gfx942/attention_tiled_2d.cpp` (`rocke_attention_tiled_2d_spec_validate`)
+
+Python's gfx942 tiled-2D spec accepts `use_k_hbm_direct`; the C++ validator
+refuses it with `ROCKE_ERR_NOTIMPL` ("use_k_hbm_direct is not ported to the C++
+engine yet"), and the C++ engine has no K-from-HBM loader. Python's version stages
+Q through the one-element K LDS stub it allocates for this mode, so porting it
+as-is would copy that bug. No selector sets the flag; only the tuning sweep or a
+hand-built spec reaches it, and no parity config uses it. Unblocked by a port that
+stages Q correctly in both engines (the Q-staging fix plus the C++ K-from-HBM
+loader), which then removes this refusal.
+
+Related: the C++ validator also refuses `use_fast_paged_kv_desc` together with
+`use_k_hbm_direct` or `use_v_hbm_direct`, with the text Python's validator gains
+in the same fix; until then Python fails later, while building the kernel.
 
 ---
 

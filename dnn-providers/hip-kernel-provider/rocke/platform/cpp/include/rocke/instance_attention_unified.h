@@ -113,8 +113,10 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
                                              size_t reason_cap);
 
 /* supports_native_unified_attention_tiled(problem, arch) -- the tiled 2D path.
- * Not ported yet, so rejected after Python's checks: gfx1250, and additive
- * bias off gfx942. */
+ * Admits what Python admits on gfx942 and gfx950, except two cases the C++
+ * builders cannot build yet, rejected with a "not ported to C++" reason after
+ * Python's own checks pass: any gfx1250 problem, and a gfx950 problem with
+ * use_additive_bias (Python allows additive bias on gfx950 only). */
 bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_problem_t* p,
                                                const char* arch,
                                                char* reason,

@@ -205,10 +205,14 @@ class TestCombo2dRouting(unittest.TestCase):
     def test_alibi_combo_gets_fast_paged_kv(self):
         s = _spec(_combo_prob(use_alibi=True))
         self.assertTrue(s["use_fast_paged_kv_desc"])
+        self.assertFalse(s["use_transposed_mask_once"])
+        self.assertFalse(s["use_transposed_mask_limit"])
 
     def test_softcap_combo_gets_fast_paged_kv(self):
         s = _spec(_combo_prob(softcap=50.0))
         self.assertTrue(s["use_fast_paged_kv_desc"])
+        self.assertFalse(s["use_transposed_mask_once"])
+        self.assertFalse(s["use_transposed_mask_limit"])
 
     def test_combo_no_sw_gets_fast_paged_kv(self):
         s = _spec(_combo_prob())

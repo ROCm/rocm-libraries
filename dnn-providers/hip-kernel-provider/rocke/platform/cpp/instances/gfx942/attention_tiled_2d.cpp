@@ -699,6 +699,18 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                              "HD=64 BS=32 T=64 num_warps=4");
         return false;
     }
+    if(s->use_fast_paged_kv_desc && (s->use_k_hbm_direct || s->use_v_hbm_direct))
+    {
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
+                             "use_k_hbm_direct=%s, use_v_hbm_direct=%s, expected both False: "
+                             "the direct K and V reads address the cache through the paged-KV "
+                             "descriptor, which the fast descriptor path does not build",
+                             s->use_k_hbm_direct ? "True" : "False",
+                             s->use_v_hbm_direct ? "True" : "False");
+        return false;
+    }
 
     /* use_agpr_alloc_zero detailed pairing guard (mirrors Python
      * attention_tiled_2d.py line 765). On gfx942 the R4_s1mask_hlpv family is
