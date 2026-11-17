@@ -241,12 +241,15 @@ namespace
     }
 
     template <typename T>
+    constexpr bool is_complex
+        = std::is_same_v<T, rocsparse_float_complex> || std::is_same_v<T, rocsparse_double_complex>;
+
+    // Value re + i * im; the imaginary part is dropped for a real type.
+    template <typename T>
     T cvalue(double re, double im)
     {
-        if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-            return rocsparse_float_complex(static_cast<float>(re), static_cast<float>(im));
-        else if constexpr(std::is_same_v<T, rocsparse_double_complex>)
-            return rocsparse_double_complex(re, im);
+        if constexpr(is_complex<T>)
+            return T(re, im);
         else
             return static_cast<T>(re);
     }
@@ -254,9 +257,7 @@ namespace
     template <typename T>
     std::complex<double> to_cd(T v)
     {
-        if constexpr(std::is_same_v<
-                         T,
-                         rocsparse_float_complex> || std::is_same_v<T, rocsparse_double_complex>)
+        if constexpr(is_complex<T>)
             return std::complex<double>(std::real(v), std::imag(v));
         else
             return std::complex<double>(v, 0.0);
