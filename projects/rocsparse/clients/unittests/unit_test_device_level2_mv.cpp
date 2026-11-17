@@ -1063,7 +1063,7 @@ namespace
                                                    dim,
                                                    rocsparse_direction_row,
                                                    2,
-                                                   1,
+                                                   2,
                                                    idx->ptr,
                                                    val->ptr,
                                                    it,

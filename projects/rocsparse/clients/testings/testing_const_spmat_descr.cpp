@@ -832,7 +832,7 @@ void testing_const_spmat_descr(const Arguments& arg)
     int64_t              block_dim = arg.block_dim;
     rocsparse_index_base base      = arg.baseA;
 
-    int64_t col_width = n;
+    int64_t col_width = ((n + block_dim - 1) / block_dim) * block_dim;
     int64_t mb        = (m + block_dim - 1) / block_dim;
     int64_t nb        = (col_width + block_dim - 1) / block_dim;
 
