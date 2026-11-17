@@ -52,7 +52,8 @@
  * the fp32 FMA ring wherever widths are whole vectors, and the fp32 FMA output rows for any
  * stride and any width, and gfx950's direct loop on 16-bit channels-last unit-stride cases):
  * channels-first and channels-last, 1-D, 2-D and 3-D,
- * groups, stride 2, dilation (2, 3 along the width, 12 for the deeplab rows), padding below, at
+ * groups, stride 2, dilation (2, 3 along the width, 4 to 36 for the deeplab rows in both layouts),
+ * padding below, at
  * and past the filter, odd channel counts and partial tiles, both dw layouts under either
  * activation layout, and true convolution. Each compiled config's static LDS is checked against
  * the host's arithmetic (ldsBytesOf) once.
@@ -367,6 +368,10 @@ std::vector<DeviceCase> deviceCases()
         {"OneD1x7Nhwc", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1}, true)},
         {"OneD1x3Dilation5", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5})},
         {"OneD1x3Dilation3", conv(32, 64, {150}, {3}, {3}, {3}, {1}, {3})},
+        // HiFi-GAN's dilated 1-D rows channels-last (their own specialized configs).
+        {"OneD1x3Dilation5Nhwc", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5}, true)},
+        {"OneD1x7Dilation3Nhwc", conv(32, 48, {130}, {7}, {9}, {9}, {1}, {3}, true)},
+        {"OneD1x11Dilation5Nhwc", conv(16, 32, {170}, {11}, {25}, {25}, {1}, {5}, true, 1, 3)},
         {"Dilation6", conv(16, 24, {20, 26}, {3, 3}, {6, 6}, {6, 6}, {1, 1}, {6, 6})},
         {"OneD1x4", conv(32, 48, {90}, {4}, {0}, {0}, {1}, {1})},
         {"OneD1x4Stride2", conv(16, 32, {90}, {4}, {1}, {1}, {2}, {1})},
@@ -381,6 +386,16 @@ std::vector<DeviceCase> deviceCases()
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, false, 1, 1)},
         {"Deeplab3x3Dilation12Nhwc",
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, true, 1, 1)},
+        // Channels-last deeplab and SSD dilations on their own specialized configs (none
+        // falls to the BLAS path): d4 with partial channel tiles, d6, d24 over three images
+        // (ring tracks of two lengths) and d36 on a 65 x 65 map.
+        {"Deeplab3x3Dilation4Nhwc",
+         conv(24, 40, {21, 26}, {3, 3}, {4, 4}, {4, 4}, {1, 1}, {4, 4}, true, 1, 2)},
+        {"Dilation6Nhwc", conv(16, 24, {20, 26}, {3, 3}, {6, 6}, {6, 6}, {1, 1}, {6, 6}, true)},
+        {"Deeplab3x3Dilation24ThreeImagesNhwc",
+         conv(24, 40, {41, 45}, {3, 3}, {24, 24}, {24, 24}, {1, 1}, {24, 24}, true, 1, 3)},
+        {"Deeplab65Dilation36Nhwc",
+         conv(16, 24, {65, 65}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, true, 1, 1)},
         // Ring tracks of two lengths (ringTrackOf): dilation 24 on 41 rows (classes below 17
         // one step longer) over three images, so splits start in long and short tracks and in
         // a later image; and dilation 36 on a 65 x 65 map (2 dy rows below class 29, else 1)
@@ -526,7 +541,7 @@ std::vector<DeviceCase> deviceCases()
                      false,
                      true});
     // The generic loop (runtime filter, strides, dilation): channels-last 16-bit widths no
-    // specialized config has (5x5, 1x9, 1x5x5, dilation 4), and strided x (padded rows: no
+    // specialized config has (5x5, 1x9, 1x5x5, 3x3 dilation 3), and strided x (padded rows: no
     // packed layout) in either form.
     const auto generic
         = [&](const std::string& name, const ConvShape& shape, std::vector<int64_t> xStrides = {}) {
@@ -542,8 +557,8 @@ std::vector<DeviceCase> deviceCases()
     generic(
         "Generic1x5x5ThreeDNhwcGrouped",
         conv(32, 32, {3, 9, 11}, {1, 5, 5}, {0, 2, 2}, {0, 2, 2}, {1, 1, 1}, {1, 1, 1}, true, 2));
-    generic("GenericDilation4Nhwc",
-            conv(16, 16, {40, 40}, {3, 3}, {4, 4}, {4, 4}, {1, 1}, {4, 4}, true, 1, 1));
+    generic("GenericDilation3Nhwc",
+            conv(16, 16, {40, 40}, {3, 3}, {3, 3}, {3, 3}, {1, 1}, {3, 3}, true, 1, 1));
     generic("Generic7x7Stride2Nhwc",
             conv(24, 24, {19, 23}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1}, true));
     // 24 channels of 10 x 12, rows 16 apart (channels-first elements).
@@ -1229,6 +1244,78 @@ TEST(TestConvWrwCatalog, EveryGenericSpecKeyParses)
         }
     }
     EXPECT_GT(keys, 0);
+}
+
+TEST(TestConvWrwCatalog, DilatedRowsHaveSpecializedConfigsInBothLayouts)
+{
+    // A dilated filter row the specialized tier misses in one layout falls to the generic tier,
+    // which declines ASPP-class dilations and has no gfx11 configs, and then to the BLAS path
+    // (30x slower on gfx1100 for channels-last fp16 deeplab). Every matrix-core arch serves every
+    // deeplab / SSD 3x3 dilation and HiFi-GAN's dilated 1-D rows in both layouts with a
+    // specialized config.
+    static constexpr std::array<const char*, 6> ARCHS{
+        "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201"};
+    // (filter width, dilation): 3x3 deeplab / SSD rows (positive width), 1 x S rows (negative).
+    static constexpr std::array<std::pair<int64_t, int64_t>, 11> ROWS{{{3, 4},
+                                                                       {3, 6},
+                                                                       {3, 12},
+                                                                       {3, 24},
+                                                                       {3, 36},
+                                                                       {-3, 3},
+                                                                       {-3, 5},
+                                                                       {-7, 3},
+                                                                       {-7, 5},
+                                                                       {-11, 3},
+                                                                       {-11, 5}}};
+    const auto& kernels = catalog();
+    for(const auto dataType : {DataType::HALF, DataType::BFLOAT16})
+    {
+        for(const bool channelsLast : {false, true})
+        {
+            for(const auto& [width, d] : ROWS)
+            {
+                const int64_t taps = width < 0 ? -width : width;
+                const int64_t pad = (taps - 1) * d / 2;
+                auto shape
+                    = width < 0
+                          ? conv(64, 64, {200}, {taps}, {pad}, {pad}, {1}, {d}, channelsLast, 1, 2)
+                          : conv(64,
+                                 64,
+                                 {40, 40},
+                                 {3, 3},
+                                 {d, d},
+                                 {d, d},
+                                 {1, 1},
+                                 {d, d},
+                                 channelsLast,
+                                 1,
+                                 2);
+                shape.dataType = dataType;
+                const GraphFixture fixture(
+                    buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)));
+                const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+                ASSERT_TRUE(problem.has_value());
+                for(const char* arch : ARCHS)
+                {
+                    SCOPED_TRACE(std::string(arch) + (channelsLast ? " nhwc" : " nchw") + " width "
+                                 + std::to_string(width) + " d" + std::to_string(d) + " "
+                                 + (dataType == DataType::HALF ? "fp16" : "bf16"));
+                    auto device = testDeviceProperties();
+                    device.gcnArchName = arch;
+                    device.warpSize = std::string(arch).rfind("gfx1", 0) == 0 ? 32 : 64;
+                    device.multiProcessorCount = 64;
+                    const bool served = std::any_of(
+                        kernels.begin(), kernels.end(), [&](const auto& kernel) {
+                            const auto config = configOf(kernel);
+                            return config.loop != conv_wrw::LOOP_GENERIC && config.math == 0
+                                   && config.atom != "fma"
+                                   && conv_wrw::wrwLaunchFor(*problem, config, device).has_value();
+                        });
+                    EXPECT_TRUE(served);
+                }
+            }
+        }
+    }
 }
 
 TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures)

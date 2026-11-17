@@ -50,6 +50,20 @@ RocblasGemmPlan::RocblasGemmPlan(const std::vector<GemmCall>& calls, const std::
     }
 }
 
+void requireTunedRocblasKernels(const std::vector<GemmCall>& calls, const std::string& gcnArchName)
+{
+    const std::string arch
+        = gcnArchName.empty() ? rocblas_backend::currentGcnArchName() : gcnArchName;
+    if(std::any_of(calls.begin(), calls.end(), [&arch](const GemmCall& call) {
+           return rocblasFp32OutputIsUntuned(call, arch);
+       }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "rocBLAS has only untuned kernels for a 16-bit GEMM into fp32 on " + arch);
+    }
+}
+
 size_t RocblasGemmPlan::getWorkspaceSize(const HipdnnEnginePluginHandle& /*handle*/) const
 {
     return 0;

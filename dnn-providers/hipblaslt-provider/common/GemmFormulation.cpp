@@ -263,6 +263,14 @@ bool rocblasRoundsReductionChunks(const GemmCall& call)
     return call.k > chunk;
 }
 
+bool rocblasFp32OutputIsUntuned(const GemmCall& call, std::string_view gcnArchName)
+{
+    const auto arch = gcnArchName.substr(0, gcnArchName.find(':'));
+    return arch.rfind("gfx11", 0) == 0 && call.a.dataType != data_objects::DataType::FLOAT
+           && call.d.dataType == data_objects::DataType::FLOAT && !call.transposeA
+           && call.transposeB;
+}
+
 bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArchName)
 {
     if(call.a.dataType != data_objects::DataType::BFLOAT16 || call.k == 0

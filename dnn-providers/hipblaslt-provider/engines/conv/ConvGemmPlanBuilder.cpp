@@ -261,30 +261,30 @@ void ConvGemmPlanBuilder::buildPlan(
         candidates.push_back({"default", planFor(handle, *calls)});
         // Staged channels-last: one GEMM over every image of a channels-first y, where the
         // other layouts batch a small per-image GEMM (1x1 stride 2: 25 x 25 outputs an image).
+        // Image slices: a 16-bit backward weights over the cap summed through an fp32
+        // accumulator instead of blocks of w's columns (the default), where the backend runs
+        // its fp32-output GEMMs well.
         for(const auto& [layout, name] :
             {std::pair{ColumnLayout::CHANNELS_FIRST, "channels_first"},
              std::pair{ColumnLayout::CHANNELS_LAST, "channels_last"},
-             std::pair{ColumnLayout::STAGED_CHANNELS_LAST, "staged_channels_last"}})
+             std::pair{ColumnLayout::STAGED_CHANNELS_LAST, "staged_channels_last"},
+             std::pair{ColumnLayout::IMAGE_SLICES, "image_slices"}})
         {
             auto other = callsFor(opGraph, layout);
             if(other.has_value()
                && std::find(seen.begin(), seen.end(), signature(*other)) == seen.end())
             {
                 seen.push_back(signature(*other));
-                if(other->epilogueForm == EpilogueForm::NONE)
-                {
-                    candidates.push_back({name, planFor(handle, std::move(*other))});
-                    continue;
-                }
-                // A fused layout the backend cannot run is not a candidate.
+                // A layout the backend cannot run (a fused fp32-output GEMM it has no algorithm
+                // for, a GEMM it declines) is not a candidate.
                 try
                 {
                     candidates.push_back({name, planFor(handle, std::move(*other))});
                 }
                 catch(const std::exception& e)
                 {
-                    HIPDNN_PLUGIN_LOG_INFO("Fused explicit-GEMM candidate "
-                                           << name << " skipped: " << e.what());
+                    HIPDNN_PLUGIN_LOG_INFO("Explicit-GEMM candidate " << name
+                                                                      << " skipped: " << e.what());
                 }
             }
         }
@@ -295,17 +295,42 @@ void ConvGemmPlanBuilder::buildPlan(
            && std::find(seen.begin(), seen.end(), signature(*split)) == seen.end())
         {
             seen.push_back(signature(*split));
-            candidates.push_back({"split_reduction", planFor(handle, std::move(*split))});
+            try
+            {
+                candidates.push_back({"split_reduction", planFor(handle, std::move(*split))});
+            }
+            catch(const std::exception& e)
+            {
+                HIPDNN_PLUGIN_LOG_INFO(
+                    "Explicit-GEMM candidate split_reduction skipped: " << e.what());
+            }
         }
         // Backward weights under the larger cap: fewer image slices, each an accumulating GEMM
         // (and, for 16-bit w, an fp32 accumulator), against the default cap's smaller column
-        // matrices. Neither wins everywhere: the same 7x7 fp32 stem runs 4x faster wide on gfx906
-        // and 12% slower on MI325X.
-        auto wide = callsFor(opGraph, ColumnLayout::FOLLOW_Y, false, true);
-        if(wide.has_value() && std::find(seen.begin(), seen.end(), signature(*wide)) == seen.end())
+        // matrices; for a 16-bit w over the cap, fewer blocks of w's columns, and fewer image
+        // slices too. Neither wins everywhere: the same 7x7 fp32 stem runs 4x faster wide on
+        // gfx906 and 12% slower on MI325X; wide image slices run DeepLab's channels-last ASPP
+        // layers 7-9% faster than column blocks on MI325X, and 4-6x slower on gfx11.
+        for(const auto& [layout, name] :
+            {std::pair{ColumnLayout::FOLLOW_Y, "wide_backward_weights"},
+             std::pair{ColumnLayout::IMAGE_SLICES, "wide_image_slices"}})
         {
+            auto wide = callsFor(opGraph, layout, false, true);
+            if(!wide.has_value()
+               || std::find(seen.begin(), seen.end(), signature(*wide)) != seen.end())
+            {
+                continue;
+            }
             seen.push_back(signature(*wide));
-            candidates.push_back({"wide_backward_weights", planFor(handle, std::move(*wide))});
+            try
+            {
+                candidates.push_back({name, planFor(handle, std::move(*wide))});
+            }
+            catch(const std::exception& e)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("Explicit-GEMM candidate " << name
+                                                                  << " skipped: " << e.what());
+            }
         }
         if(candidates.size() > 1)
         {

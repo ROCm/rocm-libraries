@@ -159,6 +159,8 @@ HipblasltContainer::HipblasltContainer()
     const auto rocblasGemm = [](bool deterministic) -> ConvGemmPlanBuilder::PlanFactory {
         return [deterministic](const HipdnnEnginePluginHandle& /*handle*/,
                                const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
+            // A GEMM rocBLAS has only untuned kernels for runs 25-180x behind: declined.
+            requireTunedRocblasKernels(calls);
             auto plan = std::make_unique<RocblasGemmPlan>(calls);
             if(deterministic)
             {

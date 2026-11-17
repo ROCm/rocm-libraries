@@ -54,4 +54,11 @@ private:
     bool _bitwiseReproducible = false;
 };
 
+/// Throws when rocBLAS on @p gcnArchName (by default the current device's) has only untuned
+/// kernels for one of @p calls (rocblasFp32OutputIsUntuned: a 16-bit GEMM into fp32 on gfx11,
+/// 25-180x behind): the explicit-GEMM convolution engines decline such a plan, so neither their
+/// default nor autotune runs it.
+void requireTunedRocblasKernels(const std::vector<GemmCall>& calls,
+                                const std::string& gcnArchName = {});
+
 } // namespace hipblaslt_plugin

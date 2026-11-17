@@ -56,6 +56,13 @@ ConvGemmShape padded3x3()
     return shape;
 }
 
+ConvGemmShape padded3x3WithType(conv_data_objects::DataType dataType)
+{
+    ConvGemmShape shape = padded3x3();
+    shape.dataType = dataType;
+    return shape;
+}
+
 template <typename Args>
 const Args* stepArgs(const RepackStep& step)
 {
@@ -737,10 +744,13 @@ TEST(TestConvRepackFormulation, SlicedBackwardWeightsAccumulates)
         }
     }
 
-    // bf16 sums into an fp32 accumulator in the workspace, rounded into w by a final stage.
+    // bf16 sliced by images (the image-slices candidate) sums into an fp32 accumulator in the
+    // workspace, rounded into w by a final stage.
     auto shape = oversized(64);
     shape.dataType = conv_data_objects::DataType::BFLOAT16;
-    const auto bf16 = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto bf16 = convGemmCalls(parse(shape, ConvDirection::BACKWARD_WEIGHTS),
+                                    MAX_REPACK_WORKSPACE_BYTES,
+                                    ColumnLayout::IMAGE_SLICES);
     ASSERT_TRUE(bf16.has_value());
     ASSERT_GT(bf16->stages.size(), 2u);
     const auto& round = bf16->stages.back();
@@ -758,6 +768,171 @@ TEST(TestConvRepackFormulation, SlicedBackwardWeightsAccumulates)
             EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::FLOAT);
         }
     }
+}
+
+/// Checks that @p calls is a column-block plan for @p problem: every GEMM covers every image and
+/// writes its block of the 16-bit w once, the blocks tile w's columns exactly, and the only
+/// workspace is one column matrix within @p cap.
+void expectColumnBlocks(const ConvProblem& problem, const ConvGemmPlanCalls& calls, size_t cap)
+{
+    ASSERT_GT(calls.stages.size(), 1u);
+    ASSERT_EQ(calls.workspace.size(), 1u);
+    EXPECT_LE(calls.workspaceBytes, cap);
+    int64_t columns = problem.c;
+    for(const auto extent : problem.filter)
+    {
+        columns *= extent;
+    }
+    int64_t positions = problem.n;
+    for(const auto extent : problem.output)
+    {
+        positions *= extent;
+    }
+    // w's (k, column) elements each written by exactly one GEMM.
+    std::vector<int> written(static_cast<size_t>(problem.k * columns), 0);
+    for(const auto& stage : calls.stages)
+    {
+        ASSERT_EQ(stage.before.size(), 1u);
+        ASSERT_NE(stepArgs<Im2ColArgs>(stage.before[0]), nullptr);
+        EXPECT_TRUE(stage.after.empty());
+        for(const auto& call : stage.calls)
+        {
+            EXPECT_FALSE(call.accumulate);
+            EXPECT_EQ(call.d.uid, CONV_W_UID);
+            EXPECT_EQ(call.d.dataType, problem.dataType);
+            EXPECT_EQ(call.k, positions);
+            EXPECT_EQ(call.batchCount, 1);
+            // d is (column, k) column-major for these plans, or (k, column): mark either way
+            // through w's packed (k, column) offsets.
+            for(int64_t i = 0; i < call.m; ++i)
+            {
+                for(int64_t j = 0; j < call.n; ++j)
+                {
+                    const int64_t offset = call.d.offset + i + j * call.d.leadingDimension;
+                    ASSERT_GE(offset, 0);
+                    ASSERT_LT(offset, problem.k * columns);
+                    ++written[static_cast<size_t>(offset)];
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(std::all_of(written.begin(), written.end(), [](int n) { return n == 1; }));
+}
+
+TEST(TestConvRepackFormulation, SixteenBitBackwardWeightsOverTheCapRunsColumnBlocks)
+{
+    // The image-sliced plan would sum through an fp32 accumulator (16-bit into fp32 GEMMs,
+    // 5-180x slower on gfx11). Blocks of w's columns write the 16-bit w directly instead: both
+    // filter layouts, dilation, stride and asymmetric padding, true convolution, and filters
+    // whose single tap or single filter row already exceeds the cap.
+    for(const auto dataType :
+        {conv_data_objects::DataType::HALF, conv_data_objects::DataType::BFLOAT16})
+    {
+        for(const bool krsc : {true, false})
+        {
+            for(const auto mode : {conv_data_objects::ConvMode::CROSS_CORRELATION,
+                                   conv_data_objects::ConvMode::CONVOLUTION})
+            {
+                ConvGemmShape shape = channelsLast(padded3x3());
+                shape.wChannelsLast = krsc;
+                shape.n = 3;
+                shape.c = 24;
+                shape.k = 16;
+                shape.input = {11, 13};
+                shape.prePadding = {4, 3};
+                shape.postPadding = {2, 4};
+                shape.dilation = {4, 3};
+                shape.stride = {1, 2};
+                shape.dataType = dataType;
+                shape.mode = mode;
+                const auto problem = parse(shape, ConvDirection::BACKWARD_WEIGHTS);
+                const auto whole = im2colGemmCalls(problem);
+                ASSERT_TRUE(whole.has_value());
+                const size_t columnBytes = whole->workspaceBytes;
+                // Caps: just short of every column, a third, one tap's or channel's worth.
+                for(const size_t cap : {columnBytes - 1,
+                                        columnBytes / 3,
+                                        columnBytes / 9,
+                                        columnBytes / 24,
+                                        columnBytes / 200})
+                {
+                    SCOPED_TRACE(std::to_string(cap) + (krsc ? " krsc" : " kcrs"));
+                    const auto calls = convGemmCalls(problem, cap);
+                    ASSERT_TRUE(calls.has_value());
+                    expectColumnBlocks(problem, *calls, cap);
+                }
+            }
+        }
+    }
+}
+
+TEST(TestConvRepackFormulation, DeeplabChannelsLastBackwardWeightsHasNoFp32OutputGemm)
+{
+    // DeepLabV3's c512 k512 3x3 dilation-4 fp16 layer on 16 channels-last 128^2 images: 2.4 GB
+    // of column matrix. Sliced by images, every GEMM wrote an fp32 accumulator, 30x behind
+    // MIOpen on gfx1100; every GEMM of the default plan writes the fp16 w, and the
+    // c2048 k256 dilation-24 layer splits to single taps (1 GiB each).
+    for(const auto& [c, k, d] : {std::tuple<int64_t, int64_t, int64_t>{512, 512, 4},
+                                 std::tuple<int64_t, int64_t, int64_t>{2048, 256, 24}})
+    {
+        ConvGemmShape shape = channelsLast(padded3x3());
+        shape.n = 16;
+        shape.c = c;
+        shape.k = k;
+        shape.input = {128, 128};
+        shape.prePadding = shape.postPadding = shape.dilation = {d, d};
+        shape.dataType = conv_data_objects::DataType::HALF;
+        const auto problem = parse(shape, ConvDirection::BACKWARD_WEIGHTS);
+        const auto calls = convGemmCalls(problem);
+        ASSERT_TRUE(calls.has_value());
+        EXPECT_LE(calls->workspaceBytes, MAX_REPACK_WORKSPACE_BYTES);
+        for(const auto& stage : calls->stages)
+        {
+            for(const auto& call : stage.calls)
+            {
+                EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::HALF);
+                EXPECT_EQ(call.d.uid, CONV_W_UID);
+                EXPECT_FALSE(call.accumulate);
+            }
+        }
+        EXPECT_EQ(calls->stages.size(), c == 512 ? 3u : 9u);
+    }
+}
+
+TEST(TestConvRepackFormulation, ColumnBlocksLeaveWhatTheyDoNotServe)
+{
+    // fp32 (w is its own accumulator), groups, a column matrix that fits, and channels-first y
+    // over several images (not read in place) keep the image-sliced plan.
+    ConvGemmShape shape = channelsLast(padded3x3());
+    shape.n = 4;
+    const auto fits = convGemmCalls(parse(shape, ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(fits.has_value());
+    EXPECT_EQ(fits->stages.size(), 1u);
+    const auto sliced = [&](const ConvGemmShape& variant) {
+        const auto problem = parse(variant, ConvDirection::BACKWARD_WEIGHTS);
+        const auto whole = im2colGemmCalls(problem);
+        EXPECT_TRUE(whole.has_value());
+        const auto calls
+            = convGemmCalls(problem, whole.has_value() ? whole->workspaceBytes - 1 : 0);
+        EXPECT_TRUE(calls.has_value());
+        bool accumulates = false;
+        for(const auto& stage : calls.value_or(ConvGemmPlanCalls{}).stages)
+        {
+            for(const auto& call : stage.calls)
+            {
+                accumulates = accumulates || call.accumulate;
+            }
+        }
+        return accumulates;
+    };
+    EXPECT_TRUE(sliced(shape)); // fp32
+    shape.dataType = conv_data_objects::DataType::HALF;
+    EXPECT_FALSE(sliced(shape)); // column blocks
+    auto grouped = shape;
+    grouped.groups = 2;
+    grouped.k = 8;
+    EXPECT_TRUE(sliced(grouped));
+    EXPECT_TRUE(sliced(padded3x3WithType(conv_data_objects::DataType::HALF)));
 }
 
 TEST(TestConvRepackFormulation, UnslicedPlansWriteTheirOutputOnce)
@@ -809,7 +984,8 @@ TEST(TestConvRepackFormulation, BandsAnImageOverTheCap)
 {
     // One image of 512 * 512 rows x 512 * 9 columns is 2.4 GB of bf16 column matrix (4.8 GB of
     // fp32 for backward data): it runs in bands of rows along its height. Strided and dilated so
-    // backward data's bands read overlapping output rows.
+    // backward data's bands read overlapping output rows. (Backward weights by image slices: its
+    // default runs blocks of w's columns.)
     ConvGemmShape shape = oversized(2);
     shape.input = {512, 512};
     shape.stride = {2, 1};
@@ -818,7 +994,8 @@ TEST(TestConvRepackFormulation, BandsAnImageOverTheCap)
     shape.dataType = conv_data_objects::DataType::BFLOAT16;
     for(const auto direction : ALL_DIRECTIONS)
     {
-        const auto calls = plan(shape, direction);
+        const auto calls = convGemmCalls(
+            parse(shape, direction), MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::IMAGE_SLICES);
         ASSERT_TRUE(calls.has_value()) << static_cast<int>(direction);
         EXPECT_LE(calls->workspaceBytes, MAX_REPACK_WORKSPACE_BYTES);
         const auto problem = parse(shape, direction);
@@ -937,12 +1114,22 @@ TEST(TestConvRepackFormulation, LongNarrowBackwardWeightsSumsInFp32)
 TEST(TestConvRepackFormulation, DeclinesWhenOneRowExceedsTheCap)
 {
     // One output row of 2^20 positions x 512 * 9 columns is 9.7 GB of bf16 column matrix.
+    // Backward weights runs blocks of w's columns instead (one tap's channel ranges); image
+    // slices and the other directions decline.
     ConvGemmShape shape = oversized(1);
     shape.input = {4, 1 << 20};
     shape.dataType = conv_data_objects::DataType::BFLOAT16;
     for(const auto direction : ALL_DIRECTIONS)
     {
-        EXPECT_FALSE(plan(shape, direction).has_value());
+        const auto problem = parse(shape, direction);
+        EXPECT_FALSE(convGemmCalls(problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::IMAGE_SLICES)
+                         .has_value());
+        const auto calls = plan(shape, direction);
+        EXPECT_EQ(calls.has_value(), direction == ConvDirection::BACKWARD_WEIGHTS);
+        if(calls.has_value())
+        {
+            expectColumnBlocks(problem, *calls, MAX_REPACK_WORKSPACE_BYTES);
+        }
     }
 }
 

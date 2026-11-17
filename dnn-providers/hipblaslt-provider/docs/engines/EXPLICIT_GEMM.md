@@ -14,7 +14,7 @@
   - Every multi-GEMM sum goes through fp32 partials in a fixed order.
   - rocBLAS calls that would round partials to 16 bits are declined.
   - The default engines report `NONDETERMINISTIC` (the libraries may split a reduction across workgroups); their `*_DETERMINISTIC` siblings do not (see Numerical precision).
-- **Workspace:** the repack workspace is held to 1 GiB; above that the plan slices by images, then by bands of rows. hipBLASLt gets up to 128 MiB more. rocBLAS uses its handle's own scratch.
+- **Workspace:** the repack workspace is held to 1 GiB. Above that, a 16-bit channels-last wrw runs blocks of w's columns over every image; everything else slices by images, then by bands of rows. hipBLASLt gets up to 128 MiB more. rocBLAS uses its handle's own scratch.
 - **Large tensors:** every size is 64-bit on the host. A call is split until each piece fits the libraries' 32-bit arguments: per image when the batch stride passes 2^31, and in chunks when n or k passes 2^30.
 - **Siblings:**
   - `*_TF32`: permits TF32 on fp32 GEMMs. On rocBLAS this is xf32, gfx942 only. On hipBLASLt it is FAST_TF32: native on gfx942, bf16x3 on gfx950, fp32 fallback elsewhere. Reports `TENSOR_CORE`.
@@ -44,9 +44,14 @@
    - **bwd-data:** the GEMM writes fp32 columns, and col2im sums them into dx with one rounding. A filter whose taps never overlap (stride ≥ dilated extent, a single tap included) keeps its columns in dx's type and uses a copying col2im.
    - **y not readable:** if the GEMM cannot read y as given (channels-first wrw over several images), y is staged channels-last.
    - **Over the cap:** when the column matrix exceeds the cap, the plan runs a slice of images at a time. If one image alone exceeds it, the plan runs bands of rows along the outermost spatial axis; bwd-data bands dx rows. A plan is declined if a single row's column matrix exceeds the cap.
+   - **16-bit wrw over the cap** (`columnBlockWeights`): blocks of w's columns instead of image slices. Each block's column matrix over every image fits the cap, and one GEMM over every image writes that block of w once, in w's type. Blocks follow the filter's column order:
+     - K C R S: ranges of input channels with all their taps;
+     - K R S C: ranges of filter rows (outermost axis first), then single taps, then channel ranges of one tap.
+
+     The block's padding is shifted so its taps read the same input positions, in both convolution modes. Image slices would sum through an fp32 accumulator, so every GEMM would be a 16-bit-into-fp32 one, which gfx11 runs far behind its 16-bit-output GEMMs (see Backends). fp32 (w is its own accumulator), grouped convolutions, and a channels-first y over several images keep image slices; image slices stay a benchmarking candidate.
 4. **Reduction rewrites** (`batchReductionChains`, `sumLongReductionsInFp32`).
    - **Small wrw output, long reduction:** a chain of accumulating GEMMs, or one GEMM with a long k, becomes batched GEMMs over groups × images × k-chunks into fp32 partials. A cast then sums them in order and rounds once. Chains whose outputs have up to 2^20 elements are rewritten. A long k is also cut into chunks when the output has at most 2^16 elements.
-   - **16-bit wrw output:** sliced or banded wrw, and any wrw GEMM that rocBLAS would k-chunk, accumulate in an fp32 copy of w that is rounded into w once.
+   - **16-bit wrw output:** image-sliced or banded wrw, and any wrw GEMM that rocBLAS would k-chunk, accumulate in an fp32 copy of w that is rounded into w once. Column blocks write w directly: each block's GEMM finishes its reduction.
    - **Split-reduction candidate:** the benchmarking builder may also cut the reduction into enough fp32 partials to fill about 512 output tiles of 128x128.
 5. **Library limits** (`fitLibraryLimits`). A batch stride beyond 2^31 elements becomes one call per matrix. n beyond 2^30 becomes column chunks. k beyond 2^30 becomes accumulating chunks, which is allowed only into fp32 d.
 
@@ -83,13 +88,17 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   - *Copies:* an LDS 32x32 tiled transpose for channels-first to channels-last.
   - *Cast:* a wide reduction with a fixed tree over many partials.
   - Every sum has one owning thread, so no kernel uses atomics.
-- **Benchmarking:** when `global.benchmarking` is on and a plan has a choice, `BenchmarkedPlan` times each distinct candidate on the first execute and keeps the fastest. Each candidate gets a warm-up, then the best of a few runs. The candidates are the default, channels-first, channels-last, staged channels-last and split reduction. Without benchmarking, the default plan runs.
+- **Benchmarking:** when `global.benchmarking` is on and a plan has a choice, `BenchmarkedPlan` times each distinct candidate on the first execute and keeps the fastest. Each candidate gets a warm-up, then the best of a few runs. The candidates are the default, channels-first, channels-last, staged channels-last, image slices (a 16-bit wrw over the cap through an fp32 accumulator), split reduction, and the wider wrw cap with column blocks and with image slices. A candidate the backend declines is skipped. Without benchmarking, the default plan runs.
 - **Backends:**
   - **hipBLASLt** takes the heuristic's top algorithm per call, with up to 128 MiB of workspace. If hipBLASLt finds no algorithm, the engine is not applicable.
   - **rocBLAS** runs `rocblas_gemm_strided_batched_ex`.
   - **rocBLAS precision declines:** the rocBLAS plan throws, which makes the engine not applicable, when rocBLAS would round more than once.
     - *k-chunking:* `rocblasRoundsReductionChunks`. A non-fp32 d whose reduction walks more than 2^31 bytes of a's leading dimension gets split by rocBLAS itself, with partials kept in d's type. Splitting m, n or the batch cannot help, so the call is declined and hipBLASLt serves it.
     - *bf16 GEMV:* `rocblasGemvRoundsBf16Products`. On gfx906/908/90a, gfx10 and gfx11, bf16 GEMV-shaped calls (K/G = 1 grouped) go to `gemvtsm`, which rounds every product to bf16.
+  - **rocBLAS untuned path** (`requireTunedRocblasKernels`, `rocblasFp32OutputIsUntuned`): on gfx11, rocBLAS ships tuned Tensile libraries for 16-bit inputs with a 16-bit output, but only fallback libraries for an fp32 output. The conv engines decline a 16-bit GEMM into fp32 with a not transposed and b transposed. Measured on gfx1101, fp16 and bf16:
+    - that form runs at 0.2-1 TFLOP/s, 25-180x behind the 16-bit-output GEMM of the same shape (4608 x 512 x 114688: 2.2 s against 15 ms);
+    - the other forms run 3-7x behind and are served.
+  - **hipBLASLt on gfx11** has only small-tile kernels for 16-bit into fp32. The not-transposed forms run at 4-6 TFLOP/s on gfx1101, against 23-36 TFLOP/s into 16 bits; both a and b transposed runs at 30. Nothing is declined: column blocks keep 16-bit wrw off that path, and autotune times the rest.
 - **Applicability gates** (`parseConvProblem`, a field-by-field copy of the hip-kernel-provider naive rules):
   - one node and no override shapes;
   - compute type in cuDNN's set; mode set;
@@ -110,6 +119,10 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   - *NCHW 1x1 fp16 wrw:* MIOpen accumulates per image into the fp16 dw. That trades precision for speed and is offered here only as the RPR sibling.
   - *1x1 stride-2 fwd/bwd:* about 1.5x on gfx942 fp32 (indicative: not measured with the staged channels-last plan).
   - *Tiny shapes:* our extra launches cost time.
+  - *16-bit channels-last wrw over the cap on gfx11:* column blocks keep it off the fp32-output path. Measured on gfx1101 (autotuned, iters 20, MIOpen in search mode on the same node):
+    - DeepLabV3 c512 k512 3x3 d4 (16 x 128²): rocBLAS 8.3 s -> 51.9 ms and hipBLASLt 399 -> 89 ms, against MIOpen's 51.1;
+    - c2048 k256 d24 / d36: rocBLAS 13.1 s -> 173-181 ms and hipBLASLt 315-319 -> 196-212 ms, against MIOpen's 114-125. Single-tap blocks there pay an im2col per tap and a 256-wide GEMM per block; CONV_WRW serves these layers at 68-90 ms.
+    - On MI325X the image-sliced candidates keep the BLAS engines at their earlier times.
   - *Some long 1-D and small-channel 16-bit wrw against `GemmWrwUniversal`:* HiFi-GAN 1x16 NCHW fp16 and EfficientNetV2 c24 NHWC fp16 run about 4x slower on MI325X. The cause is not diagnosed.
 - **OOTB ranking.** hipDNN's candidate enumeration is alphabetical, so the BLAS engines rank ahead of every `hipkernel:CONV_*` engine without autotune. That is a naming accident, not a measured choice. Measured without autotune on a set of gfx950 ConvTranspose graphs, this ranking runs at 0.36-0.40x of MIOpen. It is a heuristics issue, not an engine one.
 
@@ -166,6 +179,11 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   - hipBLASLt long-k split on gfx11 runs as narrow partials.
 
   The correctness runs show no index overflow.
+- **Column blocks on gfx11:** a block's GEMM writes 16-bit w straight from its fp32 accumulation over every image. Measured on gfx1101 against an fp64 sum (random operands in [-1, 1], 262,144-term reductions, 600 sampled outputs):
+  - fp16 output deviates by at most 4.7-7.3 fp16 ulps on both libraries;
+  - hipBLASLt's fp32-output GEMM of the same operands (the image-sliced plan's kind) deviates by 5-6, so the 16-bit output adds no measurable error. The deviation is the matrix-core accumulation's, not a split's;
+  - bf16 stays under 1 ulp;
+  - rocBLAS's untuned fp32-output kernels (declined) are closer, at 0.04 ulp.
 
 ## Comparison with MIOpen
 - **Same family:** MIOpen's GEMM solvers are the same family.
@@ -203,15 +221,18 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
 3. **Templated summing col2im on 16-bit columns.** This would keep 16-bit-output GEMMs for overlapping taps. On RDNA3, the libraries' 16-bit-output GEMMs run 4-5x faster than fp32-output ones on a vocoder upsampler.
 4. **Further RPR forms** (rocBLAS 16-bit k-chunks, hipBLASLt fp16 split-K) are measurement-led.
 5. **Calibrate the 1 GiB repack cap** against measured workloads.
+6. **Single-tap column blocks** (c2048-class 16-bit channels-last wrw, 1.4-1.6x behind MIOpen on gfx1101): batch a block's taps into one strided-batched GEMM, or read a single tap's columns as a shifted view of x where its window needs no padding instead of copying them.
+7. **gfx11 fp32-output GEMMs elsewhere:** 16-bit backward data with overlapping taps writes fp32 columns (hipBLASLt 4-6 TFLOP/s on gfx1101; rocBLAS declined there). A summing col2im over 16-bit columns (item 3) would move it to the 16-bit-output kernels.
 
 ## Tests
 `tests/engines/conv/`:
 - **Plan structure and gates:** `TestConvGemmFormulation` covers the direct rows and their layout and group rules, plus cuDNN's compute-type set.
-- **Repack formulation:** `TestConvRepackFormulation` covers im2col and col2im, column layout, staging, slicing and banding under a lowered cap, fp32 sums for long and narrow reductions, split reductions, aligned and disjoint workspace, and the decline cases.
+- **Repack formulation:** `TestConvRepackFormulation` covers im2col and col2im, column layout, staging, slicing and banding under a lowered cap, fp32 sums for long and narrow reductions, split reductions, aligned and disjoint workspace, and the decline cases. For 16-bit wrw over the cap, it checks that column blocks write every element of w exactly once with 16-bit GEMM outputs: both filter layouts and modes, dilation and stride, caps down to one column. It also checks that the DeepLab ASPP layers (c512 d4, c2048 d24, 16 x 128^2) plan no fp32-output GEMM, and which cases keep image slices.
 - **Launch selection:** `TestConvRepackLaunch` covers the vectorized, LDS-tile, disjoint and generic paths, including offsets past 32 bits.
 - **Repack kernels on device:** `TestGpuRepackKernels` checks the specialized kernels bit for bit against the generic ones and against the host, and checks the fixed-tree cast.
 - **Device correctness:** `TestGpuConvGemm` runs both backends in fp32, fp16 and bf16 against a CPU reference, with sliced, banded, benchmarked, split, staged, TF32, RPR and deterministic (`TestGpuConvGemmDeterministic`, six executes each) variants.
-  - `TestConvGemmRocblasLimits` pins both rocBLAS declines.
+  - `TestConvGemmRocblasLimits` pins both rocBLAS precision declines; `TestMatmulProblem.RocblasUntunedFp32OutputIsGfx11SixteenBitNt` pins the untuned-path decline per arch, type and transpose form.
+  - The sliced cases run column blocks for 16-bit channels-last wrw, a channels-last strided, dilated and asymmetric case among them. `ImageSlicesFp16` and `ImageSlicesBfp16` run the image-sliced candidate.
   - `TestGpuConvGemmLarge` is opt-in (`HIPBLASLT_PROVIDER_LARGE_TESTS=1`). It covers more than 4 GiB, n past 2^30, a batch stride past 2^31 and an image over the cap, checking sampled outputs against a double sum.
 - **RPR siblings:** `TestConvReducedPrecision` covers registration and one decline per gate.
 - **Fusion:** `TestConvEpilogueFormulation` covers which chains map to a hipBLASLt epilogue and which form each plan takes; `TestGpuConvEpilogue` runs every form on both backends in fp32, fp16 and bf16 against the CPU convolution followed by the chain in double, with NaN and infinity operands and values on the clip bounds, and counts hipBLASLt's solutions with and without a native epilogue.
