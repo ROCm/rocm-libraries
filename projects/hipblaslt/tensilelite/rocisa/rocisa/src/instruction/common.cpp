@@ -2008,13 +2008,15 @@ void common_inst(nb::module_ m_common)
                       const InstructionInput&,
                       const std::shared_ptr<rocisa::Container>&,
                       std::optional<rocisa::SDWAModifiers>,
-                      const std::string&>(),
+                      const std::string&,
+                      std::optional<rocisa::DPPModifiers>>(),
              nb::arg("dst"),
              nb::arg("src0"),
              nb::arg("src1"),
              nb::arg("src2")    = std::make_shared<rocisa::VCC>(),
              nb::arg("sdwa")    = std::nullopt,
-             nb::arg("comment") = "")
+             nb::arg("comment") = "",
+             nb::arg("dpp")     = std::nullopt)
         .def("__deepcopy__", [](const rocisa::VCndMaskB32& self, nb::dict&) {
             return new rocisa::VCndMaskB32(self);
         });
