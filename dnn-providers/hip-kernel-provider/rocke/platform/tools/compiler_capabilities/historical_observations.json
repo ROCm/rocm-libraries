@@ -1,0 +1,2310 @@
+{
+  "format": "rocke-compiler-capability-study",
+  "processor": "gfx942",
+  "public_sources": [
+    "https://github.com/ROCm/TheRock/blob/main/docs/packaging/legacy_per_family_releases.md",
+    "https://github.com/ROCm/TheRock/blob/main/docs/packaging/legacy_multi_arch_releases.md",
+    "https://github.com/ROCm/TheRock/blob/main/RELEASES.md"
+  ],
+  "weekly": [
+    {
+      "id": "W06",
+      "artifact": "7.12.0a20260214",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "3123662d3ea2c4ab3de1ebadce54bb18822d40d1",
+        "patched_revision": "9a6ac45c97a1e511db838c5b46257324d2de1780",
+        "executable_sha256": "bfccbaaf96244e50b4ca51086504bacbb5372ce109194c5c2508b3abe7ab8189",
+        "version_text": "AMD clang version 22.0.0git (https://github.com/ROCm/llvm-project.git 3123662d3ea2c4ab3de1ebadce54bb18822d40d1+PATCHED:9a6ac45c97a1e511db838c5b46257324d2de1780)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "3fa0981c20103e32a6c9f2fb446c4738a1b81f0fd362ecc14be58b4528ad834f",
+        "version_text": "AMD LLVM version 22.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "410eeafad1f8dde8253fe61e9e3737e1c5c1395277461c339133dee31b5c20c6",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "22",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260214-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W07",
+      "artifact": "7.12.0a20260218",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "2de9eb6063dd56b109cf139a75550b7b06808273",
+        "patched_revision": "9a6ac45c97a1e511db838c5b46257324d2de1780",
+        "executable_sha256": "bfccbaaf96244e50b4ca51086504bacbb5372ce109194c5c2508b3abe7ab8189",
+        "version_text": "AMD clang version 22.0.0git (https://github.com/ROCm/llvm-project.git 2de9eb6063dd56b109cf139a75550b7b06808273+PATCHED:9a6ac45c97a1e511db838c5b46257324d2de1780)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "3fa0981c20103e32a6c9f2fb446c4738a1b81f0fd362ecc14be58b4528ad834f",
+        "version_text": "AMD LLVM version 22.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "89ca4fac72623a83bb43c99e7bb4647e2040e82b099dfa4265eabecbbbc90b4a",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "22",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260218-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W08",
+      "artifact": "7.12.0a20260218",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "2de9eb6063dd56b109cf139a75550b7b06808273",
+        "patched_revision": "9a6ac45c97a1e511db838c5b46257324d2de1780",
+        "executable_sha256": "bfccbaaf96244e50b4ca51086504bacbb5372ce109194c5c2508b3abe7ab8189",
+        "version_text": "AMD clang version 22.0.0git (https://github.com/ROCm/llvm-project.git 2de9eb6063dd56b109cf139a75550b7b06808273+PATCHED:9a6ac45c97a1e511db838c5b46257324d2de1780)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "3fa0981c20103e32a6c9f2fb446c4738a1b81f0fd362ecc14be58b4528ad834f",
+        "version_text": "AMD LLVM version 22.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "89ca4fac72623a83bb43c99e7bb4647e2040e82b099dfa4265eabecbbbc90b4a",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "22",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260218-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W09",
+      "artifact": "7.12.0a20260228",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "c849bc16b0e49951d313756f20b73c2b28d321d7",
+        "patched_revision": "9a6ac45c97a1e511db838c5b46257324d2de1780",
+        "executable_sha256": "bfccbaaf96244e50b4ca51086504bacbb5372ce109194c5c2508b3abe7ab8189",
+        "version_text": "AMD clang version 22.0.0git (https://github.com/ROCm/llvm-project.git c849bc16b0e49951d313756f20b73c2b28d321d7+PATCHED:9a6ac45c97a1e511db838c5b46257324d2de1780)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "c376a6c0267d715c70c98c017adb177b10583082535cfa41c2e36b693f0a345f",
+        "version_text": "AMD LLVM version 22.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "4b216a1c82f2d6b15cc48cfe6e726874d76b2e79d841575aeb4fd7a9aaffee51",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "22",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260228-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W10",
+      "artifact": "7.12.0a20260304",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "c849bc16b0e49951d313756f20b73c2b28d321d7",
+        "patched_revision": "9a6ac45c97a1e511db838c5b46257324d2de1780",
+        "executable_sha256": "bfccbaaf96244e50b4ca51086504bacbb5372ce109194c5c2508b3abe7ab8189",
+        "version_text": "AMD clang version 22.0.0git (https://github.com/ROCm/llvm-project.git c849bc16b0e49951d313756f20b73c2b28d321d7+PATCHED:9a6ac45c97a1e511db838c5b46257324d2de1780)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "c376a6c0267d715c70c98c017adb177b10583082535cfa41c2e36b693f0a345f",
+        "version_text": "AMD LLVM version 22.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "e58cc5c1b0f54292677b380910a08fa71020121dffa36378aa13f48ee218237c",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "22",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.12.0a20260304-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W11",
+      "artifact": "7.13.0a20260312",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "c849bc16b0e49951d313756f20b73c2b28d321d7",
+        "patched_revision": "5b9824aedda5ea67046cca705708161af9e7ae54",
+        "executable_sha256": "bfccbaaf96244e50b4ca51086504bacbb5372ce109194c5c2508b3abe7ab8189",
+        "version_text": "AMD clang version 22.0.0git (https://github.com/ROCm/llvm-project.git c849bc16b0e49951d313756f20b73c2b28d321d7+PATCHED:5b9824aedda5ea67046cca705708161af9e7ae54)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "c376a6c0267d715c70c98c017adb177b10583082535cfa41c2e36b693f0a345f",
+        "version_text": "AMD LLVM version 22.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "c94061078d76e3a296ceb48dc20de9ed9af00d5c4dd261ba307a0925d29c004a",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "22",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260312-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W12",
+      "artifact": "7.13.0a20260319",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "91093752427717d188761db02e8590b77bf5ac58",
+        "patched_revision": "7c7364567bdf37224e441d84ffc68e2e16b3c3c0",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 91093752427717d188761db02e8590b77bf5ac58+PATCHED:7c7364567bdf37224e441d84ffc68e2e16b3c3c0)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "c9e7b7e59d51eb9ee7d8fc96c7115a5b13216bfdad239e104e7707845b6c3f9d",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "d3b6441d5d5d00ec4d6ad57cf1a871defd869b1f2ce7683f90792a36634c1291",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260319-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W13",
+      "artifact": "7.13.0a20260326",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "926d90666f4263a21ce691701a6fd3858fc32372",
+        "patched_revision": "c8517a28daa773724f74ed6a73aed8d99ef2fb7d",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 926d90666f4263a21ce691701a6fd3858fc32372+PATCHED:c8517a28daa773724f74ed6a73aed8d99ef2fb7d)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "c9e7b7e59d51eb9ee7d8fc96c7115a5b13216bfdad239e104e7707845b6c3f9d",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "b0962b12250f07bd42d9274dabda1a7d829403f39789ea76cd3fd3bd8292751b",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260326-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W14",
+      "artifact": "7.13.0a20260402",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "bc4a1dd0d146915ace4692d810f537a45a66ef90",
+        "patched_revision": "2506c552d8428e2cc1778bef048b20f818e06bb3",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git bc4a1dd0d146915ace4692d810f537a45a66ef90+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "e3616823fa9571d7888950606f2a91181fc2c1b5ec25d73de0d29a90770a09af",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "569e23c2d8c87ee0f4b7cc5002280bb5f46c5957a514d2d7b04c602ad27721f2",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260402-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W15",
+      "artifact": "7.13.0a20260409",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "c90f6c1192b74fa0f990b29ad71081c91a953a26",
+        "patched_revision": "2506c552d8428e2cc1778bef048b20f818e06bb3",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git c90f6c1192b74fa0f990b29ad71081c91a953a26+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "e3616823fa9571d7888950606f2a91181fc2c1b5ec25d73de0d29a90770a09af",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "a29f5285a88c3e573526bc9e5cfb269720ac622d0bdd4fc9119d6bb702fecb26",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260409-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W16",
+      "artifact": "7.13.0a20260416",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "43215c73116c407735c85a180d174f718798c328",
+        "patched_revision": "2506c552d8428e2cc1778bef048b20f818e06bb3",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 43215c73116c407735c85a180d174f718798c328+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "4f0218970fb010dcd26b1c1117abf6a263f7f71ac576de27e6132de07b9b0586",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "90911e773d4a4ac48db473cada845934f0eb6947377fbea8e7a0f853695bf2a1",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260416-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W17",
+      "artifact": "7.13.0a20260423",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "43215c73116c407735c85a180d174f718798c328",
+        "patched_revision": "2506c552d8428e2cc1778bef048b20f818e06bb3",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 43215c73116c407735c85a180d174f718798c328+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "464d7ef07652b24aa1857bde054d920a3339077e49a3863c850dacb63af941de",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "f4f606fe68807d9bbba8fa3763da55112a9fde5e80d806786dd7ac3f66b19ca6",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260423-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W18",
+      "artifact": "7.13.0a20260430",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "43215c73116c407735c85a180d174f718798c328",
+        "patched_revision": "2506c552d8428e2cc1778bef048b20f818e06bb3",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 43215c73116c407735c85a180d174f718798c328+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "464d7ef07652b24aa1857bde054d920a3339077e49a3863c850dacb63af941de",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "24aac9aa9b184829c4d8f75a25484016098ced4e442f96c86324cf68c052bdf6",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260430-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W19",
+      "artifact": "7.13.0a20260507",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "43215c73116c407735c85a180d174f718798c328",
+        "patched_revision": "2506c552d8428e2cc1778bef048b20f818e06bb3",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 43215c73116c407735c85a180d174f718798c328+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "464d7ef07652b24aa1857bde054d920a3339077e49a3863c850dacb63af941de",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "5d886cc66adc436bdf407f96b2235febc7c9a687a65343acca32b115db5c0ffc",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260507-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W20",
+      "artifact": "7.13.0a20260514",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "43215c73116c407735c85a180d174f718798c328",
+        "patched_revision": "2506c552d8428e2cc1778bef048b20f818e06bb3",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 43215c73116c407735c85a180d174f718798c328+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "464d7ef07652b24aa1857bde054d920a3339077e49a3863c850dacb63af941de",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "f64821b3e2cc38a4faa50068b4002288c4436cd6b7be4360962f703ed7e79fe0",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.13.0a20260514-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W21",
+      "artifact": "7.14.0a20260521",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "5c9bfa94a37c59923dee3c55942566db7904b659",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 5c9bfa94a37c59923dee3c55942566db7904b659+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "1f647a40b172528ec1e5b755955111d2cebc41bb7410e9d3eb878970c89a1626",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "747ae4e06eba95ff6b7c6e86f5182eff2640035f2a06db94a1d4f0ce0ba609c4",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260521-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W22",
+      "artifact": "7.14.0a20260528",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "5c9bfa94a37c59923dee3c55942566db7904b659",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 5c9bfa94a37c59923dee3c55942566db7904b659+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "1f647a40b172528ec1e5b755955111d2cebc41bb7410e9d3eb878970c89a1626",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "87dd6e162457d475d043c549eb96489fed704e167e698b243e0f010f1f9abd09",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260528-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W23",
+      "artifact": "7.14.0a20260604",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "5c9bfa94a37c59923dee3c55942566db7904b659",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 5c9bfa94a37c59923dee3c55942566db7904b659+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "1f647a40b172528ec1e5b755955111d2cebc41bb7410e9d3eb878970c89a1626",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "25a7cdeba46c9c4316f97a8469baae69f95958abf3a56bcc83d48656ffc6871f",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260604-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W24",
+      "artifact": "7.14.0a20260610",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "5c9bfa94a37c59923dee3c55942566db7904b659",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 5c9bfa94a37c59923dee3c55942566db7904b659+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "1f647a40b172528ec1e5b755955111d2cebc41bb7410e9d3eb878970c89a1626",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "09de71fe7aa48b8ebdd844591e1cfb7b5d239c3c2810c38290b30a0fc8be75ad",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+      "artifact_url": "https://rocm.nightlies.amd.com/v2/gfx1151/rocm_sdk_core-7.14.0a20260610-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W25",
+      "artifact": "7.14.0a20260619",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "2abe93d58c833c804914bed3ffcebb3a6a01e237",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "b4c9f0e776eb96bc890ace06da4790d122ec67284de3685cfc9e89dd58f7b704",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 2abe93d58c833c804914bed3ffcebb3a6a01e237+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "75ede97ee5a80767d952e1b111080497db9b31193c45697a217a04410a105ce9",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "f75bc5e2cd6938e39f96fa519f485e179a331e54671e8217d999b6491c5e042f",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.14.0a20260619-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W26",
+      "artifact": "7.15.0a20260626",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "46fcb339fb61119b337f973c7ca9e710a319fdd0",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 46fcb339fb61119b337f973c7ca9e710a319fdd0+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "75ede97ee5a80767d952e1b111080497db9b31193c45697a217a04410a105ce9",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "44c9906d60024063fe986d6e0702947e1afbfd1a00bcc88083963f931a5a7364",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260626-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W26-1",
+      "artifact": "7.15.0a20260628",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "46fcb339fb61119b337f973c7ca9e710a319fdd0",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 46fcb339fb61119b337f973c7ca9e710a319fdd0+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "75ede97ee5a80767d952e1b111080497db9b31193c45697a217a04410a105ce9",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "dc09cc9707cfa79562632591c55aff8cd31a0539ef8f5eb4b10f7821d13a1842",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260628-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W27",
+      "artifact": "7.15.0a20260702",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "aa451e1fe6a793394d6733051b1778633063ae96",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git aa451e1fe6a793394d6733051b1778633063ae96+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "75ede97ee5a80767d952e1b111080497db9b31193c45697a217a04410a105ce9",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "fca05b4b20319b07d9dd5fa7e0724f40ab581ef10d9a2ca3394cff60004a6065",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260702-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W28",
+      "artifact": "7.15.0a20260709",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "aa451e1fe6a793394d6733051b1778633063ae96",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git aa451e1fe6a793394d6733051b1778633063ae96+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "75ede97ee5a80767d952e1b111080497db9b31193c45697a217a04410a105ce9",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "93f8409973daa0b2ab37951c1750a0e41d21db1d41ded82e7e94c385edcd3bb6",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260709-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W29a",
+      "artifact": "7.15.0a20260715",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "97bdf8bea997bd159e11716de4b5bfa784610267",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 97bdf8bea997bd159e11716de4b5bfa784610267)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "d3d957de04582afbd0029776a928f89c9cb1178a0b97dbfb3a95bb84785d5a9e",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "ad8da9629d189b38e46b82da8983af84ab56e44a5b369aa2d2cdb1cd2af1cb9c",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260715-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W29b",
+      "artifact": "7.15.0a20260716",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "0039c22329e6789bb1256208e64423158e0d2d5b",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 0039c22329e6789bb1256208e64423158e0d2d5b)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "d3d957de04582afbd0029776a928f89c9cb1178a0b97dbfb3a95bb84785d5a9e",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "197704ac227c3e4b486291ee949481615aedb241d71a125b9551e2c1ab12209c",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260716-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W30",
+      "artifact": "7.15.0a20260723",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "9f1cce5a0012c110733e6b42725617e43d9f4ba4",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 9f1cce5a0012c110733e6b42725617e43d9f4ba4)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "d3d957de04582afbd0029776a928f89c9cb1178a0b97dbfb3a95bb84785d5a9e",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "3fe5adeb6de0e0afea5f75a882f385e59f9c1fa40886636a7330d7fd78d3d861",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-7.15.0a20260723-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W31",
+      "artifact": "10.0.0a20260730",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "4a4173e7f4657998bc5c7ab16b2f77f38001425a",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 4a4173e7f4657998bc5c7ab16b2f77f38001425a)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "d3d957de04582afbd0029776a928f89c9cb1178a0b97dbfb3a95bb84785d5a9e",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "570dc717e15ffc74ae9e01299f1c0ed7f540d7b5149cfd85fb758d1d7416365d",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.0.0a20260730-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W32",
+      "artifact": "10.1.0a20260805",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "998a696feca902c689c53383e48d29494f9edba7",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 998a696feca902c689c53383e48d29494f9edba7)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "d3d957de04582afbd0029776a928f89c9cb1178a0b97dbfb3a95bb84785d5a9e",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "7787aebe8d3ed5830aad2eb9926e549151a6c246b821c8c9f2a5e9a1adf099f2",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260805-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W33",
+      "artifact": "10.1.0a20260813",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "a01cdbd92d1f931738a4897502747a68ae36eccf",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git a01cdbd92d1f931738a4897502747a68ae36eccf)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "d3d957de04582afbd0029776a928f89c9cb1178a0b97dbfb3a95bb84785d5a9e",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "7dae5366de3d4d8c31847b155d37423f9b33df62f84915a6abe78dbfdecac047",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260813-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W34",
+      "artifact": "10.1.0a20260819",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "0bace1908348b840e6aa1b4b6e12151dae208158",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 0bace1908348b840e6aa1b4b6e12151dae208158)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "7b999bde4620e810d57d1562f22f154c8c1ad24ec909a7ffe150924a656ccf8a",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "fe0f424f118a9299c7b52eace452ea014c86fa1a273551215d7d8b5e05091b63",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://rocm.nightlies.amd.com/whl-multi-arch/",
+      "artifact_url": "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260819-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W35",
+      "artifact": "10.1.0a20260829",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "2aec646c60f9347e7fab6a27964f220615732ef4",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 2aec646c60f9347e7fab6a27964f220615732ef4)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "f7f4de65836bef19cbddad7af50467982f4b84994683d30932f15e9703ad3a81",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "aa86ca3102fa81aaa44d51cd5a5962770cf433abad174285ad71df61d1fe453f",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260829-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W36",
+      "artifact": "10.1.0a20260902",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "32fb4582f0be6df5437ee1cdb9a38724215ede80",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 32fb4582f0be6df5437ee1cdb9a38724215ede80)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "f7f4de65836bef19cbddad7af50467982f4b84994683d30932f15e9703ad3a81",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "4e1306e6e2b4f233a8f8e2ad36794278b2a53629ac6e0f9a7369bebd4b099cc9",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260902-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W37",
+      "artifact": "10.1.0a20260909",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "d6f6cb691863e9258034ab48c1dfce21689d5606",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git d6f6cb691863e9258034ab48c1dfce21689d5606)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "f7f4de65836bef19cbddad7af50467982f4b84994683d30932f15e9703ad3a81",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "fe144dbbe9ae64b7ef55908a30021fb25b009e509ced878eeddffdb1603d1431",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0a20260909-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W38",
+      "artifact": "10.2.0a20260915",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "bc1e171b6a5333d498ad60fa4894549aa112db93",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git bc1e171b6a5333d498ad60fa4894549aa112db93)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "66b7006aa590ca2a67223e4af9543fa3c77fb983e80cae60c0002fb9fecc8e87",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "e42d989007c63ea5384e93172a4199269e476a4303d676026ae93f5310389398",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20260915-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W39",
+      "artifact": "10.2.0a20260922",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "528402e03c23ae6cdddd4a7d3269df3f9636142b",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 528402e03c23ae6cdddd4a7d3269df3f9636142b)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "eb195d5bfbc399d1ddaa864355fd2edafdf15c123b2e272472f86b710cb7c7c8",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "efe6f4dc2984fd9805a8689eca935564c4e2817e7e503e1ed1d88370dec85be4",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20260922-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W40",
+      "artifact": "10.2.0a20261001",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "4f43f4746ede4cc49ab4129f473dbd54e0d9db4f",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 4f43f4746ede4cc49ab4129f473dbd54e0d9db4f)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "eb195d5bfbc399d1ddaa864355fd2edafdf15c123b2e272472f86b710cb7c7c8",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "6d692b05cfa00ca4c81191947bdd60b4666c80b48fff053d303edd6d57933eaf",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261001-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W41",
+      "artifact": "10.2.0a20261008",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "7667f52dd687899256a3285ab0bce3c53bc73394",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 7667f52dd687899256a3285ab0bce3c53bc73394)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "840c80e59316d7214434f486e3c2c7f9b559cf3eead3a609c4855ef8d0519bd5",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "fc929ca793fae1e4bfd50d12a3074a44e820b6bd241654691ac0ed145af2bc94",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L3",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "Y",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOOA",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "15",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261008-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W42",
+      "artifact": "10.2.0a20261014",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "bdc35841c97ff51400273b91d7bc05c96e19c2d9",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git bdc35841c97ff51400273b91d7bc05c96e19c2d9)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "8e774055d92b86e8599ffd3afaa107fa76bb35d0d5b71811c9f2fd7125c8ddd6",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "eb2ecd72fababf4ff57cf148df60223f5ab8b757a4c9aa205af8a255232c9007",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L3",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "Y",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOOA",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "15",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261014-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W43",
+      "artifact": "10.2.0a20261022",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "2792f8ceeb5aa6e188c1ce2b735923b2406a8e59",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 2792f8ceeb5aa6e188c1ce2b735923b2406a8e59)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "8e774055d92b86e8599ffd3afaa107fa76bb35d0d5b71811c9f2fd7125c8ddd6",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "4cd37580cd5f1169f0a90cb9abed7aed41f06de808e4938eb1e7db69ace710d8",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L3",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "Y",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOOA",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "15",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.2.0a20261022-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W44",
+      "artifact": "10.3.0a20261029",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "4208a88993d31a4311127ddae671ec6a6b1000c6",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 4208a88993d31a4311127ddae671ec6a6b1000c6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "515ad18e3ba13f70d87ea609ee976a41e91906d38334bb28e1433501fb20f582",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "771a1ae95d98de58c0fcb5669634662cfa3844a26773e26f30263484cde71d2d",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L3",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "Y",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOOA",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "15",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261029-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W45",
+      "artifact": "10.3.0a20261105",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "36c1564ff815158e4fdff0880ba90b5d628aa045",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 36c1564ff815158e4fdff0880ba90b5d628aa045)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "515ad18e3ba13f70d87ea609ee976a41e91906d38334bb28e1433501fb20f582",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "4e1ffa5ac44c10bd2b9ab5d79accb79a8af5854113daa34de981b85bc91290da",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L3",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "Y",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOOA",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "15",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261105-py3-none-linux_x86_64.whl"
+    },
+    {
+      "id": "W46",
+      "artifact": "10.3.0a20261112",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "caa9e462a14a001d6cd7cce37ba42f7459f96692",
+        "patched_revision": null,
+        "executable_sha256": "fa579cfb7c2e69485d457ebcff88f11175bc4aab1a6e8a5d34be79a8a53ebf84",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git caa9e462a14a001d6cd7cce37ba42f7459f96692)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "2fba98e75a38b5a31ff8ce21de27e27927b69184a8b689ff565d976fbe0e9b14",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "866dfb77e9e6fd96a9081b4024fa453c668557c89e5f14c41846451802e0c2f6",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L3",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "Y",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T1",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOOA",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "15",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "index_url": "https://nightly.repo.amd.com/rocm/whl-next/",
+      "artifact_url": "https://nightly.repo.amd.com/rocm/whl-next/rocm-sdk-core/rocm_sdk_core-10.3.0a20261112-py3-none-linux_x86_64.whl"
+    }
+  ],
+  "releases": [
+    {
+      "id": "7.0.2",
+      "artifact": "7.0.2",
+      "compiler": {
+        "repository": "https://github.com/RadeonOpenCompute/llvm-project",
+        "source_revision": "0dda3adf56766e0aac0d03173ced3759e1ffecbc",
+        "patched_revision": null,
+        "executable_sha256": "61db11841ebd3ad29dd78763055105d075c32adfa0b2dc98e5eb61078b699824",
+        "version_text": "AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.0.2 25385 0dda3adf56766e0aac0d03173ced3759e1ffecbc)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "5d974fbbf530f2612b9f88f54a001975842d624c421500a9ec1ad199a45afa58",
+        "version_text": "AMD LLVM version 20.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "ba260c09038e6ed7b85f047c54ad5def0ce48c8dd2a2ef3303e53dff04f8d1d9",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "20",
+        "Complete data layout": "L0",
+        "ELF mangling field": "N",
+        "Address-space-8 field count": "2",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "B",
+        "Indexed `p8.p1` / i64 candidate": "R",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "AOOO",
+        "Buffer-resource accepted ABIs": "B32",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "S-I",
+        "Function attributes 1/2/A": "12A"
+      },
+      "public_locator": "https://rocm.docs.amd.com/en/latest/release/versions.html"
+    },
+    {
+      "id": "7.1.1",
+      "artifact": "7.1.1",
+      "compiler": {
+        "repository": "https://github.com/RadeonOpenCompute/llvm-project",
+        "source_revision": "27682a16360e33e37c4f3cc6adf9a620733f8fe1",
+        "patched_revision": null,
+        "executable_sha256": "07e66a71e168821b918fc3f3b51a2b52f4adee0049aa5ff0f1c3ca62480207d7",
+        "version_text": "AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.1.1 25444 27682a16360e33e37c4f3cc6adf9a620733f8fe1)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "f7aaca188d849913775a3b37bd22d495aaf46798a0babfa3fa48f3831217187a",
+        "version_text": "AMD LLVM version 20.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "e566f3a45b84cdc6e18cc465d5288e2aa254af962f490f438f4fa4af53c7efbb",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "20",
+        "Complete data layout": "L0",
+        "ELF mangling field": "N",
+        "Address-space-8 field count": "2",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "B",
+        "Indexed `p8.p1` / i64 candidate": "R",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "AOOO",
+        "Buffer-resource accepted ABIs": "B32",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "S-I",
+        "Function attributes 1/2/A": "12A"
+      },
+      "public_locator": "https://rocm.docs.amd.com/en/latest/release/versions.html"
+    },
+    {
+      "id": "7.2.4",
+      "artifact": "7.2.4",
+      "compiler": {
+        "repository": "https://github.com/RadeonOpenCompute/llvm-project",
+        "source_revision": "f58b06dce1f9c15707c5f808fd002e18c2accf7e",
+        "patched_revision": null,
+        "executable_sha256": "beaae27cf876812ec1d32f8731317ba837175536a847590f5e51c409c2831b48",
+        "version_text": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.4 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "237f2a253d2be2e9c7ea371ee7c9f8143a7cce233e9c54198a1ed0255d322f7a",
+        "version_text": "AMD LLVM version 22.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "08a3d081501752145333cebd76748d4be47e8ba36ca0051b076687e8c2411646",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "22",
+        "Complete data layout": "L1",
+        "ELF mangling field": "N",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F0",
+        "Layout policy L0/L1/L2/L3": "OAOO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "H",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0+1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "public_locator": "https://rocm.docs.amd.com/en/latest/release/versions.html"
+    },
+    {
+      "id": "7.14.0",
+      "artifact": "rocm714",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "46fcb339fb61119b337f973c7ca9e710a319fdd0",
+        "patched_revision": "440716f8b87be9d8e20ed910e10e5b6d14d57cf6",
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 46fcb339fb61119b337f973c7ca9e710a319fdd0+PATCHED:440716f8b87be9d8e20ed910e10e5b6d14d57cf6)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "75ede97ee5a80767d952e1b111080497db9b31193c45697a217a04410a105ce9",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "e9089a92403236d26614fc8e2d7a1f2abf66a1f0b6f57d4129a65adeb4d18b31",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F1",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "public_locator": "https://rocm.docs.amd.com/en/latest/release/versions.html"
+    },
+    {
+      "id": "10.0.0",
+      "artifact": "rocm100",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "8f497e0992fb7513f7f78a6f6b6f1056c375e961",
+        "patched_revision": null,
+        "executable_sha256": "d9cf832a06dbebdd74a2a9baad7499db8c72c166a188f0eaff5dd9f0a2d1f2fd",
+        "version_text": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 8f497e0992fb7513f7f78a6f6b6f1056c375e961)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "d3d957de04582afbd0029776a928f89c9cb1178a0b97dbfb3a95bb84785d5a9e",
+        "version_text": "AMD LLVM version 23.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "b4069fdbc57b00604520ad839c38268ed78734ef0110911d03def4477c1abf6f",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "23",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "R",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "public_locator": "https://rocm.docs.amd.com/en/latest/release/versions.html"
+    },
+    {
+      "id": "10.1.0",
+      "artifact": "rocm101",
+      "compiler": {
+        "repository": "https://github.com/ROCm/llvm-project",
+        "source_revision": "d6f6cb691863e9258034ab48c1dfce21689d5606",
+        "patched_revision": null,
+        "executable_sha256": "d493c9aa4a5a989c036a96973043144e2fc827224d1b499ecc039d759bb85052",
+        "version_text": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git d6f6cb691863e9258034ab48c1dfce21689d5606)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix"
+      },
+      "opt": {
+        "sha256": "670dac956791506816462062f20cde5063dfb1c62fc8107d1676ddfd63dd9204",
+        "version_text": "AMD LLVM version 24.0.0git\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: znver5"
+      },
+      "probe": {
+        "fingerprint": "5efa97df8fb1d2009e5719ef151db5b4fd8b3d8f587155c66658971785be5c4d",
+        "implementation_sha256": "a76f4c5ebd026642a59dc301f492102e24c77c985d5e037c3d11ef12b1227295",
+        "name": "rocke-compiler-capabilities",
+        "processor": "gfx942",
+        "schema_sha256": "e9615c18cbacf3b0fa767de12807b3742c82007a0688806e7ff9890867506a89",
+        "target_triple": "amdgcn-amd-amdhsa"
+      },
+      "features": {
+        "Reported LLVM major": "24",
+        "Complete data layout": "L2",
+        "ELF mangling field": "Y",
+        "Address-space-8 field count": "4",
+        "Pointer address spaces 10\u201315": "N",
+        "Legacy `p1` / i32 candidate": "I",
+        "Indexed `p8.p1` / i64 candidate": "I",
+        "Canonical target triple": "T0",
+        "Kernel calling convention": "K",
+        "Module flags": "F2",
+        "Layout policy L0/L1/L2/L3": "OOAO",
+        "Buffer-resource accepted ABIs": "I32+I64",
+        "FP8/BF8 packed operand": "I",
+        "Named-barrier pointer AS": "3",
+        "Scaled-MFMA call ABI": "9",
+        "FP16 builtin source ABI": "F",
+        "Generic processor name": "G",
+        "Optimization-level codegen": "0-1+2+3+",
+        "Compiler options S/V/I": "SVI",
+        "Function attributes 1/2/A": "12A"
+      },
+      "public_locator": "https://rocm.docs.amd.com/en/latest/release/versions.html"
+    }
+  ]
+}
