@@ -54,6 +54,9 @@ from the standard library plus the packages above.
 │   ├── component_ci.py                 ← per-component CI trigger flags
 │   ├── check_wheel_freshness.py        ← fail CI if nightly wheels are stale
 │   │
+│   ├── # gfx1250 hardware CI
+│   ├── gpu_cpu_slice.py                ← run a command on one GPU's share of the host CPUs
+│   │
 │   ├── # PR automation
 │   ├── pr_category_label.py            ← add/remove category labels from changed paths
 │   ├── apply-labels.py                 ← apply labels to a PR via GitHub API
@@ -67,6 +70,7 @@ from the standard library plus the packages above.
 │   │
 │   └── tests/
 │       ├── fixtures/                   ← .patch files for commit-message tests
+│       ├── test_gpu_cpu_slice.py
 │       ├── test_pr_detect_changed_subtrees.py
 │       └── test_pr_merge_sync_patches.py
 │
@@ -89,6 +93,7 @@ from the standard library plus the packages above.
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |
 | `pr-import.yml` / `multiple_pr_import.yml` | `import_subrepo_prs.py` |
 | `merge-submodules.yml` | `merge-submodules.py` |
+| `gfx1250_hipblaslt_tensilelite_test.yml` | `gpu_cpu_slice.py`, `blas_nightly_report.py` |
 
 ---
 
