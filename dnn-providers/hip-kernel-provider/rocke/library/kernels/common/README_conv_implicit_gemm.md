@@ -297,7 +297,7 @@ absolute `k_out`. With `groups == 1` the group terms vanish (`cpg == C`,
 
 ### RDNA4 forward knobs (gfx1200 / gfx1201)
 
-- The RDNA4 AOT grid adds a tile_k 128 axis after the base geometries (forward only); other arches are unchanged.
+- The RDNA4 AOT grid adds a tile_k 128 axis after the base geometries (forward and wgrad, not dgrad); other arches are unchanged.
 
 ---
 

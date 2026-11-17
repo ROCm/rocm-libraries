@@ -312,7 +312,7 @@ Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the 
 
 The gfx12 RDNA targets (gfx1201, gfx1200 and gfx12-generic: wave32, WMMA 16x16x16) carry these forward implicit-GEMM additions. Every knob is off by default (byte-identical IR and kernel name), refused by `is_valid_spec` outside its scope, mirrored in the C++ engine, and pinned by the `conv_implicit_gemm` parity pair (`tests/parity/conv_implicit_gemm_emit`).
 
-- **tile_k 128 grid axis.** The AOT grid (`kernels/conv/aot_jobs.py`) walks `CACHE_RDNA4_EXTRA_TILE_K = (128,)` after the base geometry product for the RDNA4 targets, in the forward direction only (dgrad and wgrad keep their base grids until their tile_k 128 kernels are GPU-verified). Every other arch keeps its geometry lists and chunk order.
+- **tile_k 128 grid axis.** The AOT grid (`kernels/conv/aot_jobs.py`) walks `CACHE_RDNA4_EXTRA_TILE_K = (128,)` after the base geometry product for the RDNA4 targets, in the forward and wgrad directions (dgrad keeps its base grid until its tile_k 128 kernels are GPU-verified). Every other arch keeps its geometry lists and chunk order.
 
 ### Step-By-Step Trace (one workgroup)
 

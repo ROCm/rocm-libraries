@@ -166,16 +166,18 @@ CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
 CACHE_TILE_K: Tuple[int, ...] = (16, 32, 64)
 # ---- RDNA4 deep-K tiles ------------------------------------------------------
 # The gfx12 RDNA targets (gfx1200 / gfx1201 and their generic target) also
-# build the forward geometries above at tile_k 128: few-wave tiles over a deep
+# build the forward and wgrad geometries above at tile_k 128: few-wave tiles over a deep
 # reduction (small grids, wide channels) halve their K-loop barriers there and
 # lead those rows. Appended after the base product (see :func:`_geometries`),
 # so the geometry order and the enumeration chunks of every other target are
 # unchanged.
 CACHE_RDNA4_ARCHS: Tuple[str, ...] = ("gfx1200", "gfx1201", "gfx12-generic")
 CACHE_RDNA4_EXTRA_TILE_K: Tuple[int, ...] = (128,)
-# Only the forward direction walks that axis: its tile_k 128 kernels are
-# GPU-verified (the listed rows); dgrad's are not, so the axis stays off there.
-CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS: Tuple[str, ...] = ("fwd",)
+# Forward and wgrad walk that axis: forward's tile_k 128 kernels are the
+# GPU-verified listed rows, and the wgrad register-transpose / two-stage / x_run
+# kernels (the RDNA4 wgrad rows below) live on it and were verified on gfx1201.
+# dgrad's tile_k 128 kernels are not verified, so the axis stays off there.
+CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS: Tuple[str, ...] = ("fwd", "wgrad")
 CACHE_WARP_MN: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
 
@@ -848,7 +850,7 @@ def _geometries(
     extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
     base grid. The RDNA4 targets (:data:`CACHE_RDNA4_ARCHS`) walk the same
     grid again at :data:`CACHE_RDNA4_EXTRA_TILE_K` after it, for the
-    directions in :data:`CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS` (forward only).
+    directions in :data:`CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS` (not dgrad).
     It must be threaded through wherever a geometry list is built for a
     direction, or the chunk bounds stop matching the list the worker walks.
     """
