@@ -93,6 +93,21 @@ namespace
         return a;
     }
 
+    // Two nonzeros in the first row, so that row reaches the wavefront that
+    // holds the last nonzero. One nonzero in that row leaves the scan blocked.
+    Pattern scattered_gap_first_row_reaches_tail()
+    {
+        Pattern a;
+        a.n = 2;
+        a.add(std::vector<int64_t>{0, 1});
+        for(int i = 0; i < 20000; ++i)
+        {
+            a.add(0);
+        }
+        a.add(std::vector<int64_t>{0});
+        return a;
+    }
+
     // The same gap in a square lower-triangular matrix, so it can be symmetric.
     Pattern scattered_gap_lower()
     {
@@ -669,6 +684,11 @@ class CsrmvDefaultDispatch : public HandleTest
 TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_for_internal_empty_gap)
 {
     expect_nnzsplit(run_f32(handle, scattered_gap(), Options{}));
+}
+
+TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_when_first_row_reaches_the_tail)
+{
+    expect_nnzsplit(run_f32(handle, scattered_gap_first_row_reaches_tail(), Options{}));
 }
 
 TEST_F(CsrmvDefaultDispatch, explicit_adaptive_is_not_replaced)

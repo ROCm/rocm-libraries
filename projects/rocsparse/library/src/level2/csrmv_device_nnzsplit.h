@@ -130,8 +130,8 @@ namespace rocsparse
         {
             for(uint32_t i = 0; i < NNZ_PER_THREAD; ++i)
             {
-                values[i] = (offset + i < nnz) ? static_cast<T1>(
-                                rocsparse::conj_val(nontemporal_load(csr_val + offset + i), conj))
+                values[i] = (offset + i < nnz) ? static_cast<T1>(rocsparse::conj_val(
+                                                     nontemporal_load(csr_val + offset + i), conj))
                                                : static_cast<T1>(0);
             }
         }
@@ -257,8 +257,9 @@ namespace rocsparse
 
         // The search returns row 0 for a position past the last nonzero. That
         // row can follow other rows, which the segmented reduction does not
-        // allow, so mark those positions with -1, the kernel's existing "no row"
-        // marker.
+        // allow, so mark those positions with -1. csrmv_nnzsplit_device treats
+        // -1 as "no row": the scan predicate checks current_row == -1, and each
+        // atomic add is skipped unless the row is >= 0.
         for(uint32_t local_nnz_index = 0; local_nnz_index < NNZ_PER_THREAD; ++local_nnz_index)
         {
             if(w_offset + static_cast<I>(lid + local_nnz_index * WFSIZE) >= nnz)

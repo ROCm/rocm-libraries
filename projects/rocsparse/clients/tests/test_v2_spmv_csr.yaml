@@ -97,21 +97,6 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   spmv_alg: [rocsparse_spmv_alg_csr_nnzsplit]
 
-# The same with every index and value type, and with empty dimensions.
-- name: v2_spmv_csr
-  category: pre_checkin
-  function: v2_spmv_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-  M: [0, 1, 2, 3, 5, 33]
-  N: [0, 2, 3, 4, 40]
-  alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_nnzsplit]
-
 - name: v2_spmv_csr
   category: quick
   function: v2_spmv_csr
@@ -154,6 +139,22 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
+
+# nnz-split on matrices that fit in one block, and on empty dimensions
+# [AISPARSE-1099].
+- name: v2_spmv_csr
+  category: pre_checkin
+  function: v2_spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [0, 1, 2, 3, 5, 33]
+  N: [0, 2, 3, 4, 40]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_nnzsplit]
 
 - name: v2_spmv_csr
   category: nightly

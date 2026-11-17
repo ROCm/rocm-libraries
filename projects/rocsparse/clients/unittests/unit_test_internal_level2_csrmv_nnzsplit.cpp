@@ -29,7 +29,8 @@
 // and without starting block ids) with rocsparse_spmv_alg_csr_nnzsplit and
 // compares y with a host reference. All data are small integers, so the
 // reference is exact in every tested precision. When beta is zero y is filled
-// with NaN beforehand, so a read of y shows up in the result.
+// with a poison value beforehand, so a read of y shows up in the result.
+// Floating-point types get a NaN; integral types get the bit pattern 0x5a5a5a5a.
 //
 // The nnz-per-thread granularity is chosen from the matrix (see
 // nnzsplit_nnz_per_thread): 1 for small or sparse matrices, 8 when the longest
@@ -39,6 +40,7 @@
 //
 #include "unit_test_device_level2_common.hpp"
 
+#include "csrmv_device_nnzsplit.h"
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_spmat_descr.hpp"
 
@@ -172,7 +174,7 @@ namespace
     }
 
     template <typename T>
-    T nan_fill()
+    T poison()
     {
         if constexpr(std::is_integral<T>{})
         {
@@ -187,9 +189,6 @@ namespace
     // ---- reporting --------------------------------------------------------
 
     int g_reports = 0;
-
-    // Threads per block of the nnz-split kernels on the current device.
-    uint32_t g_block = 0;
 
     void report(const std::string& message)
     {
@@ -243,6 +242,15 @@ namespace
     {
         const int64_t   ylen = (o.op == rocsparse_operation_none) ? a.m : a.n;
         std::vector<cd> y(static_cast<size_t>(ylen), cd(0.0, 0.0));
+        // std::complex multiplies 0 * NaN into the imaginary part. A real
+        // product stays real, including when the real part is NaN.
+        const auto mul = [](cd lhs, cd rhs) {
+            if(lhs.imag() == 0.0 && rhs.imag() == 0.0)
+            {
+                return cd(lhs.real() * rhs.real(), 0.0);
+            }
+            return lhs * rhs;
+        };
         if(beta != cd(0.0, 0.0))
         {
             for(int64_t i = 0; i < ylen; ++i)
@@ -261,21 +269,22 @@ namespace
                 {
                 case rocsparse_operation_none:
                 {
-                    y[static_cast<size_t>(r)] += alpha * v * x[static_cast<size_t>(c)];
+                    y[static_cast<size_t>(r)] += mul(mul(alpha, v), x[static_cast<size_t>(c)]);
                     if(o.symmetric && r != c)
                     {
-                        y[static_cast<size_t>(c)] += alpha * v * x[static_cast<size_t>(r)];
+                        y[static_cast<size_t>(c)] += mul(mul(alpha, v), x[static_cast<size_t>(r)]);
                     }
                     break;
                 }
                 case rocsparse_operation_transpose:
                 {
-                    y[static_cast<size_t>(c)] += alpha * v * x[static_cast<size_t>(r)];
+                    y[static_cast<size_t>(c)] += mul(mul(alpha, v), x[static_cast<size_t>(r)]);
                     break;
                 }
                 case rocsparse_operation_conjugate_transpose:
                 {
-                    y[static_cast<size_t>(c)] += alpha * std::conj(v) * x[static_cast<size_t>(r)];
+                    y[static_cast<size_t>(c)]
+                        += mul(mul(alpha, std::conj(v)), x[static_cast<size_t>(r)]);
                     break;
                 }
                 }
@@ -296,8 +305,11 @@ namespace
         size_t bad = 0;
         for(size_t i = 0; i < y.size(); ++i)
         {
-            const cd got = to_cd(y[i]);
-            if(!(got == ref[i]))
+            const cd   got = to_cd(y[i]);
+            const auto same
+                = [](double a, double b) { return a == b || (std::isnan(a) && std::isnan(b)); };
+            // A NaN in x can belong in y. NaN compares unequal to itself.
+            if(!(same(got.real(), ref[i].real()) && same(got.imag(), ref[i].imag())))
             {
                 if(bad++ < 3)
                 {
@@ -377,7 +389,7 @@ namespace
 
         // y is not read when beta is zero.
         const std::vector<Y> y_init
-            = (o.beta == 0.0) ? std::vector<Y>(static_cast<size_t>(ylen), nan_fill<Y>()) : h_y0;
+            = (o.beta == 0.0) ? std::vector<Y>(static_cast<size_t>(ylen), poison<Y>()) : h_y0;
 
         device_vector<I> d_ptr{h_ptr};
         device_vector<J> d_ind{h_ind};
@@ -638,53 +650,31 @@ namespace
         return run<int32_t, int32_t, double, double, double, double>(handle, a, o, what);
     }
 
-    // Checks the layout recorded by a v1 analysis. v1 never uses starting
-    // block ids.
-    void expect_npt(const Out& out, uint32_t npt, const std::string& what)
-    {
-        if(!out.ran)
-        {
-            report(what + ": the case did not run");
-            return;
-        }
-        if(out.npt != npt)
-        {
-            report(what + ": the analysis selected " + std::to_string(out.npt)
-                   + " nnz per thread, the case is meant for " + std::to_string(npt));
-        }
-        if(out.block != g_block)
-        {
-            report(what + ": the analysis recorded a block of " + std::to_string(out.block)
-                   + " threads, expected " + std::to_string(g_block));
-        }
-        if(out.use_ids_recorded)
-        {
-            report(what + ": the v1 analysis recorded starting block ids");
-        }
-    }
-
     // ---- shapes -----------------------------------------------------------
 
     using Named = std::pair<std::string, Csr>;
+
+    // Row 0 is not empty, and its nonzeros share the last wavefront with the
+    // last nonzero. y = 2 A x + 3 y0 = [65, 62, 9], not [127, 62, 9].
+    Csr make_issue()
+    {
+        Csr a;
+        a.m   = 3;
+        a.n   = 2;
+        a.ptr = {0, 2, 3, 3};
+        a.ind = {0, 1, 1};
+        a.val = {cd(2, 0), cd(3, 0), cd(4, 0)};
+        a.x   = {cd(5, 0), cd(7, 0)};
+        a.y0  = {cd(1, 0), cd(2, 0), cd(3, 0)};
+        return a;
+    }
 
     // Shapes that stay at one nnz per thread. B is the number of nonzeros in a
     // block at that granularity and W the wavefront size.
     std::vector<Named> small_shapes(int64_t B, int64_t W)
     {
         std::vector<Named> s;
-
-        // The reproducer of the issue.
-        {
-            Csr a;
-            a.m   = 3;
-            a.n   = 2;
-            a.ptr = {0, 2, 3, 3};
-            a.ind = {0, 1, 1};
-            a.val = {cd(2, 0), cd(3, 0), cd(4, 0)};
-            a.x   = {cd(5, 0), cd(7, 0)};
-            a.y0  = {cd(1, 0), cd(2, 0), cd(3, 0)};
-            s.emplace_back("issue", a);
-        }
+        s.emplace_back("first_row_reaches_tail", make_issue());
 
         for(int64_t len : {int64_t(1), int64_t(2), W - 1, W, W + 1, B - 1, B, B + 1, 3 * B + 5})
         {
@@ -899,8 +889,7 @@ namespace
             ASSERT_EQ(hipGetDevice(&device), hipSuccess);
             ASSERT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
             // The block holds four wavefronts.
-            block   = 4u * static_cast<uint32_t>(prop.warpSize);
-            g_block = block;
+            block = 4u * static_cast<uint32_t>(prop.warpSize);
         }
 
         int64_t wavefront() const
@@ -922,6 +911,31 @@ namespace
             return saturation * static_cast<int64_t>(block) * 4;
         }
 
+        // Checks the layout recorded by a v1 analysis. v1 never uses starting
+        // block ids.
+        void expect_npt(const Out& out, uint32_t npt, const std::string& what)
+        {
+            if(!out.ran)
+            {
+                report(what + ": the case did not run");
+                return;
+            }
+            if(out.npt != npt)
+            {
+                report(what + ": the analysis selected " + std::to_string(out.npt)
+                       + " nnz per thread, the case is meant for " + std::to_string(npt));
+            }
+            if(out.block != block)
+            {
+                report(what + ": the analysis recorded a block of " + std::to_string(out.block)
+                       + " threads, expected " + std::to_string(block));
+            }
+            if(out.use_ids_recorded)
+            {
+                report(what + ": the v1 analysis recorded starting block ids");
+            }
+        }
+
         // Runs v1, v2 and v2 with starting block ids on host scalars.
         template <typename F>
         void each_mode(F&& f)
@@ -935,12 +949,81 @@ namespace
             }
         }
     };
+
+    template <uint32_t WFSIZE, uint32_t NPT>
+    __global__ void
+        k_coalesced_rows(int32_t* out, int32_t nnz, const int32_t* row_ptr, int32_t nrows)
+    {
+        constexpr uint32_t BLOCK = WFSIZE * 4;
+        int32_t            rows[NPT];
+        rocsparse::get_coalesced_row_indices<BLOCK, WFSIZE, NPT>(
+            rows, int32_t(0), nrows, int32_t(0), nnz, row_ptr, rocsparse_index_base_zero);
+
+        const uint32_t lid  = threadIdx.x & (WFSIZE - 1);
+        const uint32_t wid  = threadIdx.x / WFSIZE;
+        const int32_t  base = static_cast<int32_t>(wid * (WFSIZE * NPT));
+        for(uint32_t i = 0; i < NPT; ++i)
+        {
+            out[base + static_cast<int32_t>(lid + i * WFSIZE)] = rows[i];
+        }
+    }
+
+    // One block of four wavefronts. Both wavefront widths are instantiated; the
+    // launch uses the device's width.
+    template <uint32_t NPT>
+    void launch_coalesced_rows(int32_t* out, int32_t nnz, const int32_t* row_ptr, int32_t nrows)
+    {
+        const int ws = rocsparse_ut::device_warp_size();
+        if(ws == 64)
+        {
+            ASSERT_EQ(rocsparse_ut::launch_single_block(
+                          k_coalesced_rows<64, NPT>, 64u * 4, out, nnz, row_ptr, nrows),
+                      hipSuccess);
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_ut::launch_single_block(
+                          k_coalesced_rows<32, NPT>, 32u * 4, out, nnz, row_ptr, nrows),
+                      hipSuccess);
+        }
+    }
+
+    template <uint32_t NPT>
+    void check_coalesced_rows(int32_t nnz, const std::vector<int32_t>& row_ptr)
+    {
+        const int32_t ws = rocsparse_ut::device_warp_size();
+        ASSERT_TRUE(ws == 32 || ws == 64);
+        const int32_t                        slots = 4 * ws * static_cast<int32_t>(NPT);
+        rocsparse_ut::device_vector<int32_t> d_ptr{row_ptr};
+        rocsparse_ut::device_vector<int32_t> d_out(static_cast<size_t>(slots));
+        launch_coalesced_rows<NPT>(
+            d_out.ptr, nnz, d_ptr.ptr, static_cast<int32_t>(row_ptr.size() - 1));
+        const std::vector<int32_t> got = rocsparse_ut::to_host(d_out);
+        ASSERT_EQ(got.size(), static_cast<size_t>(slots));
+        size_t bad = 0;
+        for(int32_t pos = 0; pos < slots; ++pos)
+        {
+            int32_t expect = -1;
+            if(pos < nnz)
+            {
+                const auto it = std::upper_bound(row_ptr.begin(), row_ptr.end(), pos);
+                expect        = static_cast<int32_t>(it - row_ptr.begin()) - 1;
+            }
+            if(got[static_cast<size_t>(pos)] != expect && bad++ < 4)
+            {
+                ADD_FAILURE() << "npt " << NPT << " nnz " << nnz << " position " << pos
+                              << " is row " << got[static_cast<size_t>(pos)] << ", expected "
+                              << expect;
+            }
+        }
+        EXPECT_EQ(bad, 0u);
+    }
 }
 
-// The reproducer of the issue: y = 2 A x + 3 y0 = [65, 62, 9], not [127, 62, 9].
-TEST_F(CsrmvNnzsplit, issue_15869)
+// Regression test for AISPARSE-1099 (GitHub #15869).
+TEST_F(CsrmvNnzsplit, first_row_reaching_last_wavefront)
 {
-    const Csr a = small_shapes(block, wavefront())[0].second;
+    const Csr a = make_issue();
     ASSERT_EQ(a.nnz(), 3);
 
     Opt o;
@@ -954,9 +1037,9 @@ TEST_F(CsrmvNnzsplit, issue_15869)
     expect_npt(out, 1, "issue v1");
 }
 
-TEST_F(CsrmvNnzsplit, issue_15869_every_configuration)
+TEST_F(CsrmvNnzsplit, first_row_reaching_last_wavefront_every_configuration)
 {
-    const Csr a = small_shapes(block, wavefront())[0].second;
+    const Csr a = make_issue();
     for(bool device : {false, true})
     {
         for(rocsparse_index_base base : {rocsparse_index_base_zero, rocsparse_index_base_one})
@@ -987,7 +1070,9 @@ TEST_F(CsrmvNnzsplit, matches_default_algorithm)
         const Out got  = run_f32(handle, shape.second, ns, shape.first + " nnzsplit");
         const Out want = run_f32(handle, shape.second, def, shape.first + " default");
         ASSERT_TRUE(got.ran && want.ran) << shape.first;
-        // The default algorithm can select nnz-split itself.
+        // None of these shapes is a poor adaptive fit, so the default stays
+        // adaptive (npt stays 0). The empty-gap cases in CsrmvDefaultDispatch
+        // are what send the default algorithm through nnz-split.
         if(want.npt == 0)
         {
             ++compared;
@@ -1029,7 +1114,7 @@ TEST_F(CsrmvNnzsplit, small_shapes_scalars)
     std::vector<Named> shapes;
     for(const Named& shape : small_shapes(block, wavefront()))
     {
-        if(shape.first == "issue" || shape.first == "first_row_long"
+        if(shape.first == "first_row_reaches_tail" || shape.first == "first_row_long"
            || shape.first == "first_row_empty" || shape.first == "last_row_empty"
            || shape.first == single_row || shape.first == "irregular"
            || shape.first == "all_rows_empty" || shape.first == "single_column_dense")
@@ -1082,7 +1167,10 @@ TEST_F(CsrmvNnzsplit, small_shapes_index_types_and_bases)
 }
 
 // The first block holds the head of the matrix; move the row boundary through
-// the first two blocks, one nonzero at a time.
+// the first two blocks, one nonzero at a time. These splits do not reproduce
+// the first-row bug: row 0 is empty, ends before the last nonzero, or has
+// enough nonzeros after it to block the scan. first_row_reaches_last_window
+// covers that layout.
 TEST_F(CsrmvNnzsplit, boundary_sweep_one_nnz_per_thread)
 {
     const int64_t B = block;
@@ -1116,8 +1204,28 @@ TEST_F(CsrmvNnzsplit, boundary_sweep_one_nnz_per_thread)
     }
 }
 
+// Row 0 shares the last wavefront with the last nonzero. head is the length
+// of row 0 and tail is the number of nonzeros after it, still inside that
+// wavefront.
+TEST_F(CsrmvNnzsplit, first_row_reaches_last_window)
+{
+    const int64_t W = wavefront();
+    for(int64_t head = 1; head < W; ++head)
+    {
+        for(int64_t tail = 1; tail <= W - head; ++tail)
+        {
+            const std::string what
+                = "head_" + std::to_string(head) + "_tail_" + std::to_string(tail);
+            Opt o;
+            expect_npt(run_f32(handle, make(W, {head, tail}), o, what), 1, what);
+        }
+    }
+}
+
 // A wavefront covers wavefront() nonzeros at a time; sweep the row boundary
-// across the wavefront and block edges of the 8 nnz per thread layout.
+// across the wavefront and block edges of the 8 nnz per thread layout. As in
+// the one-per-thread sweep, row 0 does not share the last wavefront with the
+// last nonzero, so this does not reproduce the first-row bug.
 TEST_F(CsrmvNnzsplit, boundary_sweep_eight_nnz_per_thread)
 {
     const int64_t B = 8 * static_cast<int64_t>(block);
@@ -1323,7 +1431,11 @@ TEST_F(CsrmvNnzsplit, density_selected_granularities)
         each_mode([&](Opt o, const std::string& mode) {                                          \
             const std::string what                                                               \
                 = std::string(#A "," #X "," #Y "," #T " ") + shape.first + " " + mode;           \
-            run<int32_t, int32_t, A, X, Y, T>(handle, shape.second, o, what);                    \
+            const Out out = run<int32_t, int32_t, A, X, Y, T>(handle, shape.second, o, what);    \
+            if(!o.v2)                                                                            \
+            {                                                                                    \
+                expect_npt(out, expected_npt, what);                                             \
+            }                                                                                    \
             o.device = true;                                                                     \
             o.beta   = 0.0;                                                                      \
             run<int64_t, int64_t, A, X, Y, T>(handle, shape.second, o, what + " device beta=0"); \
@@ -1335,13 +1447,15 @@ TEST_F(CsrmvNnzsplit, value_types_one_nnz_per_thread)
     std::vector<Named> shapes;
     for(const Named& shape : small_shapes(block, wavefront()))
     {
-        if(shape.first == "issue" || shape.first == "first_row_long" || shape.first == "irregular"
-           || shape.first == "first_row_empty" || shape.first == "rows_cross_block_boundary_by_one")
+        if(shape.first == "first_row_reaches_tail" || shape.first == "first_row_long"
+           || shape.first == "irregular" || shape.first == "first_row_empty"
+           || shape.first == "rows_cross_block_boundary_by_one")
         {
             shapes.push_back(shape);
         }
     }
     ASSERT_EQ(shapes.size(), 5u);
+    const uint32_t expected_npt = 1;
     NNZSPLIT_FOR_EACH_TYPE_SET(NNZSPLIT_TYPE_TEST_BODY)
 }
 
@@ -1352,6 +1466,16 @@ TEST_F(CsrmvNnzsplit, value_types_eight_nnz_per_thread)
     shapes.emplace_back("skew_first", skewed(n, {200}, 700, {}));
     shapes.emplace_back("skew_last", skewed(n, {}, 700, {200}));
     shapes.emplace_back("skew_first_row_empty", skewed(n, {0, 200}, 700, {}));
+    // Smallest shape whose long first row shares the last wavefront with the
+    // last nonzero, so the 8-per-thread fix is exercised in every type.
+    {
+        const int64_t        head = 9 * wavefront() + wavefront() / 2;
+        std::vector<int64_t> lens{head};
+        lens.insert(lens.end(), 100, 0);
+        lens.push_back(1);
+        shapes.emplace_back("skew_head_reaches_tail", make(n, lens));
+    }
+    const uint32_t expected_npt = 8;
     NNZSPLIT_FOR_EACH_TYPE_SET(NNZSPLIT_TYPE_TEST_BODY)
 }
 
@@ -1390,11 +1514,12 @@ TEST_F(CsrmvNnzsplit, transposed_operations)
     shapes.emplace_back("rect_wide", make(300, {100, 100, 100}));
     shapes.emplace_back("first_row_empty", make(8, {0, 3, 5, 2}));
     shapes.emplace_back("last_row_empty", make(8, {3, 4, 0}));
-    shapes.emplace_back("first_row_long", make(3 * block + 7, {3 * block + 7, 4, 5, 0, 6}));
+    shapes.emplace_back("first_row_spans_three_blocks",
+                        make(3 * block + 7, {3 * block + 7, 4, 5, 0, 6}));
     shapes.emplace_back("last_row_long", make(3 * block + 7, {4, 5, 0, 3 * block + 7}));
     shapes.emplace_back("single_row", make(40, {40}));
     shapes.emplace_back("single_column", make(1, std::vector<int64_t>(300, 1)));
-    shapes.emplace_back("issue", small_shapes(block, wavefront())[0].second);
+    shapes.emplace_back("first_row_reaches_tail", make_issue());
     for(const Named& shape : skewed_shapes(8 * block, wavefront()))
     {
         shapes.push_back(shape);
@@ -1474,11 +1599,10 @@ TEST_F(CsrmvNnzsplit, symmetric_matrices)
         });
     }
 
-    // Locks in the current behavior: neither row 0 nor column 0 holds a
-    // nonzero, so a NaN in x[0] must not reach y. These cases cannot fail
-    // when the removed skip_diag guard is absent. Padding is row 0 and
-    // column 0, so the diagonal skip already drops it, and the transposed
-    // guard zeroes its value as well.
+    // Neither row 0 nor column 0 holds a nonzero, so a NaN in x[0] must not
+    // reach y. In the transposed pass a position past the last nonzero has
+    // row 0 and column 0, so the diagonal skip drops it even without the x
+    // guard. unused_x_entry_does_not_reach_y covers that guard.
     std::vector<Named> unused;
     unused.emplace_back("row_and_column_0_unused", make_lower({0, 1, 2, 2}));
     unused.emplace_back("skew_row_and_column_0_unused", [&] {
@@ -1636,4 +1760,63 @@ TEST_F(CsrmvNnzsplit, degenerate_sizes)
             });
         }
     }
+}
+
+// Row 0 uses column 1, and row 1 uses column 0, so x[0] is read and there is
+// no (0, 0) entry. A^T x is [3, NaN, 9]. A position past the last nonzero must
+// not turn y[0] into NaN.
+TEST_F(CsrmvNnzsplit, transposed_nan_in_x0_stays_off_y0)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    Csr          a;
+    a.m   = 3;
+    a.n   = 3;
+    a.ptr = {0, 1, 3, 4};
+    a.ind = {1, 0, 2, 2};
+    a.val = {cd(2, 0), cd(3, 0), cd(1, 0), cd(4, 0)};
+    a.x   = {cd(nan, 0), cd(1, 0), cd(2, 0)};
+
+    for(rocsparse_operation op :
+        {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose})
+    {
+        each_mode([&](Opt o, const std::string& mode) {
+            o.op    = op;
+            o.alpha = 1.0;
+            o.beta  = 0.0;
+            run_f32(handle, a, o, mode + (op == rocsparse_operation_transpose ? " T" : " H"));
+        });
+    }
+}
+
+// get_coalesced_row_indices at 4 nonzeros per thread is not reachable from the
+// public API on a multi-CU device. Call it directly, on a block that ends
+// part-way through a wavefront.
+TEST_F(CsrmvNnzsplit, coalesced_row_indices_mark_positions_past_nnz)
+{
+    const auto run_npt = [](auto npt) {
+        constexpr uint32_t NPT = decltype(npt)::value;
+        const int32_t      ws  = rocsparse_ut::device_warp_size();
+        ASSERT_TRUE(ws == 32 || ws == 64);
+        const int32_t mid
+            = ws * static_cast<int32_t>(NPT) + (ws * static_cast<int32_t>(NPT)) / 2 + 3;
+        for(int32_t nnz : {int32_t(3), mid})
+        {
+            std::vector<int32_t> row_ptr{0};
+            const int32_t        head = std::max<int32_t>(nnz - 5, 1);
+            const int32_t        rest = nnz - head;
+            row_ptr.push_back(head);
+            for(int32_t k = 0; k < rest; ++k)
+            {
+                row_ptr.push_back(row_ptr.back() + 1);
+            }
+            if(rest == 0)
+            {
+                row_ptr.back() = nnz;
+            }
+            check_coalesced_rows<NPT>(nnz, row_ptr);
+        }
+    };
+    run_npt(std::integral_constant<uint32_t, 1>{});
+    run_npt(std::integral_constant<uint32_t, 4>{});
+    run_npt(std::integral_constant<uint32_t, 8>{});
 }
