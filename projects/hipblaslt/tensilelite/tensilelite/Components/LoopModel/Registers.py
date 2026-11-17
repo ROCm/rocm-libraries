@@ -52,20 +52,40 @@ def _role(name: str) -> str:
   return name[:1]
 
 
-def calculate(kernel):
-  """Calculate the concrete per-operand PLR, CLR, VG and VA values."""
-  if not kernel.get("UseLoopModel"):
-    return
+_REGISTER_PARAMS = ("PrefetchLocalRead", "ClusterLocalRead", "VgprGroup", "VgprAlloc")
 
-  def value(name, default=-1):
-    result = kernel.get(name, default)
-    if result is None:
-      return int(default)
-    try:
-      return int(result)
-    except (TypeError, ValueError):
-      return int(default)
 
+class RegisterShape(NamedTuple):
+  """One operand's register facts under the kernel's loop order, before any value is chosen.
+
+  Everything here follows from the nest alone; PLR, CLR, VG and VA are then bounded by it:
+  VG divides ``unit``, PLR is at most ``capBase * VG``, a CLR=0 ring is sized against
+  ``positions`` and a CLR=1 ring holds ``residentTiles // unit * VG`` buffers.
+  """
+  side: str           #: "A" or "B"
+  unit: int           #: the prefetch unit in tiles, after the factor axes divide it
+  splitUnit: int      #: how many units the undivided inner role holds
+  capBase: int        #: the read-ahead cap at VG=1
+  reloads: bool       #: an all-inner operand, which re-reads its whole set every trip
+  positions: int      #: the ring positions a CLR=0 ring is sized against
+  foldFloor: int      #: the smallest CLR=0 ring a read folded across the broadcast axis allows
+  residentTiles: int  #: the tiles a CLR=1 operand keeps resident
+  unitModes: tuple = ()   #: the (axis, extent) pairs the prefetch unit spans
+  varying: tuple = ()     #: the (axis, extent) pairs the operand varies over, in loop order
+
+
+def _value(kernel, name, default=-1):
+  result = kernel.get(name, default)
+  if result is None:
+    return int(default)
+  try:
+    return int(result)
+  except (TypeError, ValueError):
+    return int(default)
+
+
+def registerShapes(kernel):
+  """``{side: RegisterShape}`` for A and B under the kernel's ``LoopOrder``."""
   shape = Order.axes(kernel)
   axes = shape["axes"]
   extents = dict(axes)
@@ -84,9 +104,8 @@ def calculate(kernel):
        if name not in all_regions),
       _role(walked[0][0]),
   )
-  requested_plr = max(0, value("PrefetchLocalRead", 0))
-  scalar_clr = max(0, value("ClusterLocalRead", 0))
-  values = {}
+  read_instances = kernel.get("ReadInstances") or {}
+  shapes = {}
 
   for side in ("A", "B"):
     roles = _READ_AXES[side]
@@ -112,17 +131,6 @@ def calculate(kernel):
     )
     split_unit = max(1, original_tiles // max(1, unit))
 
-    vg_name, va_name = "VgprGroup" + side, "VgprAlloc" + side
-    explicit_vg = value(vg_name) != -1
-    explicit_va = value(va_name) != -1
-    if explicit_vg or explicit_va:
-      kernel["SuppressNoLoadLoop"] = True
-    vg = max(1, value(vg_name, 1))
-    if unit % vg:
-      raise RuntimeError(
-          "VgprGroup%s=%d does not divide %s's %d-tile prefetch unit"
-          % (side, vg, side, unit))
-
     role_extents = {
         role: _geometry.product(
             extent for name, extent in role_modes
@@ -138,9 +146,121 @@ def calculate(kernel):
     # A factor axis is not in `role_modes`, so the role extents do not see it -- but it divides
     # the unit, and a smaller unit is more of them to run ahead over. The cap carries it, as the
     # unit and the rotation already do.
-    cap = max(1, role_extents[cap_role] * split_unit * vg)
+    cap_base = role_extents[cap_role] * split_unit
+
+    rotation = varying if reloads else tuple(
+        item for item in varying
+        if _role(item[0]) != outer_role
+    )
+    summation = tuple(
+        item for item in varying
+        if _role(item[0]) == "K"
+    )
+    enumerator = tuple(
+        item for item in varying
+        if _role(item[0]) == outer_role
+    )
+    unpacked = _geometry.product(
+        extent for name, extent in unit_modes
+        if name not in {mode for mode, _extent in rotation}
+    )
+    level = next(
+        (name for name, _extent in walked if name not in all_regions),
+        None,
+    )
+    reduction_ring = tuple(
+        item for item in rotation
+        if _role(item[0]) == "K"
+    ) if level and level.startswith("K") and unpacked > 1 else ()
+    ring = reduction_ring or (summation if reloads else enumerator)
+    rotation_regions = regions & {name for name, _extent in rotation}
+    positions = max(
+        1,
+        _geometry.product(
+            extent for name, extent in ring
+            if name not in rotation_regions
+        ),
+    )
+
+    folded = int(read_instances.get(side, 1) or 1) > 1
+    broadcast_role = "N" if side == "A" else "M"
+    positions_by_name = {
+        name: index for index, (name, _extent) in enumerate(walked)
+    }
+    ring_at = [positions_by_name[name] for name, _extent in ring]
+    unit_at = [positions_by_name[name] for name, _extent in unit_modes]
+    folded_across_broadcast = folded and ring_at and unit_at and any(
+        min(ring_at) < index < max(unit_at)
+        for index, (name, _extent) in enumerate(walked)
+        if _role(name) == broadcast_role
+    )
+
+    shapes[side] = RegisterShape(
+        side=side,
+        unit=unit,
+        splitUnit=split_unit,
+        capBase=cap_base,
+        reloads=reloads,
+        positions=positions,
+        foldFloor=positions if folded_across_broadcast else 1,
+        residentTiles=_geometry.product(extent for _name, extent in varying),
+        unitModes=tuple(unit_modes),
+        varying=tuple(varying),
+    )
+  return shapes
+
+
+def calculate(kernel):
+  """Calculate the concrete per-operand PLR, CLR, VG and VA values."""
+  derive(kernel)
+
+
+def derive(kernel, choice=None):
+  """Resolve the per-operand PLR, CLR, VG and VA values.
+
+  ``choice`` is ``{side: {param: value}}`` over ``PrefetchLocalRead``, ``ClusterLocalRead``,
+  ``VgprGroup`` and ``VgprAlloc``.  A chosen value is validated like a stated one but counts as
+  DERIVED: it does not suppress the no-load loop, steer the CLR default or mark the ring as
+  explicitly sized.  Anything not chosen is resolved from the kernel as before.
+  """
+  if not kernel.get("UseLoopModel"):
+    return
+
+  choice = choice or {}
+  for side, chosen in choice.items():
+    unknown = set(chosen) - set(_REGISTER_PARAMS)
+    if side not in _READ_AXES or unknown:
+      raise ValueError("register choice %r names %s" % (side, sorted(unknown) or "no operand"))
+
+  shapes = registerShapes(kernel)
+  requested_plr = max(0, _value(kernel, "PrefetchLocalRead", 0))
+  scalar_clr = max(0, _value(kernel, "ClusterLocalRead", 0))
+  values = {}
+
+  for side in ("A", "B"):
+    shape = shapes[side]
+    chosen = choice.get(side, {})
+
+    def resolved(param):
+      if param in chosen:
+        return int(chosen[param]), False
+      stated = _value(kernel, param + side)
+      return stated, stated != -1
+
+    va_name = "VgprAlloc" + side
+    vg, explicit_vg = resolved("VgprGroup")
+    va, explicit_va = resolved("VgprAlloc")
+    if explicit_vg or explicit_va:
+      kernel["SuppressNoLoadLoop"] = True
+    vg = max(1, vg)
+    if shape.unit % vg:
+      raise RuntimeError(
+          "VgprGroup%s=%d does not divide %s's %d-tile prefetch unit"
+          % (side, vg, side, shape.unit))
+
+    cap = max(1, shape.capBase * vg)
     plr_name = "PrefetchLocalRead" + side
-    plr = value(plr_name)
+    plr, _explicit_plr = resolved("PrefetchLocalRead")
     if plr == -1:
       plr = min(requested_plr, cap)
     elif plr > cap:
@@ -148,82 +268,30 @@ def calculate(kernel):
           "%s=%d exceeds %d, the most %s can run ahead"
           % (plr_name, plr, cap, side))
 
-    clr_name = "ClusterLocalRead" + side
-    clr = value(clr_name)
+    clr, _explicit_clr = resolved("ClusterLocalRead")
     auto_clr = clr == -1
     if auto_clr:
       clr = 0 if explicit_vg or explicit_va else scalar_clr
-    if reloads and auto_clr and not (explicit_vg or explicit_va):
+    if shape.reloads and auto_clr and not (explicit_vg or explicit_va):
       clr = 1
 
-    va = value(va_name)
     if va == -1:
-      rotation = varying if reloads else tuple(
-          item for item in varying
-          if _role(item[0]) != outer_role
-      )
-      summation = tuple(
-          item for item in varying
-          if _role(item[0]) == "K"
-      )
-      enumerator = tuple(
-          item for item in varying
-          if _role(item[0]) == outer_role
-      )
-      unpacked = _geometry.product(
-          extent for name, extent in unit_modes
-          if name not in {mode for mode, _extent in rotation}
-      )
-      level = next(
-          (name for name, _extent in walked if name not in all_regions),
-          None,
-      )
-      reduction_ring = tuple(
-          item for item in rotation
-          if _role(item[0]) == "K"
-      ) if level and level.startswith("K") and unpacked > 1 else ()
-      ring = reduction_ring or (summation if reloads else enumerator)
-      rotation_regions = regions & {name for name, _extent in rotation}
-      positions = max(
-          1,
-          _geometry.product(
-              extent for name, extent in ring
-              if name not in rotation_regions
-          ),
-      )
       if clr == 0:
-        if split_unit > 1 or vg > 1:
+        if shape.splitUnit > 1 or vg > 1:
           va = plr + 1
         else:
-          read_instances = kernel.get("ReadInstances") or {}
-          folded = int(read_instances.get(side, 1) or 1) > 1
-          broadcast_role = "N" if side == "A" else "M"
-          positions_by_name = {
-              name: index for index, (name, _extent) in enumerate(walked)
-          }
-          ring_at = [positions_by_name[name] for name, _extent in ring]
-          unit_at = [positions_by_name[name] for name, _extent in unit_modes]
-          folded_across_broadcast = folded and ring_at and unit_at and any(
-              min(ring_at) < index < max(unit_at)
-              for index, (name, _extent) in enumerate(walked)
-              if _role(name) == broadcast_role
-          )
-          floor = positions if folded_across_broadcast else 1
-          want = max(plr + 1, floor)
+          want = max(plr + 1, shape.foldFloor)
           va = next(
-              (width for width in range(want, positions + 1)
-               if positions % width == 0),
-              positions,
+              (width for width in range(want, shape.positions + 1)
+               if shape.positions % width == 0),
+              shape.positions,
           )
       else:
-        resident_tiles = _geometry.product(
-            extent for _name, extent in varying
-        )
-        if resident_tiles % unit:
+        if shape.residentTiles % shape.unit:
           raise RuntimeError(
               "%s's %d resident tiles do not divide into %d-tile "
-              "prefetch units" % (side, resident_tiles, unit))
-        va = max(1, resident_tiles // unit * vg)
+              "prefetch units" % (side, shape.residentTiles, shape.unit))
+        va = max(1, shape.residentTiles // shape.unit * vg)
     if va < 1:
       raise RuntimeError("%s=%d must be positive" % (va_name, va))
 
@@ -253,13 +321,28 @@ def operandValuPuVaVg(writer, kernel, tc, bpe) -> ValuAlloc:
   """
   side = _parentSide(kernel, tc)
   from .Theta import loopModelTheta
-  theta, _depths = loopModelTheta(writer, kernel)
+  theta, S = loopModelTheta(writer, kernel)
+  packing = False
+  if kernel.get("DirectToVgpr" + tc, kernel.get("DirectToVgpr" + side, False)):
+    packing = ((writer.states.packDTVA or writer.states.convDTVA) if side == "A"
+               else (writer.states.packDTVB or writer.states.convDTVB))
+  return operandValu(theta, S, kernel, tc, bpe, writer.states.bpr, packing)
+
+
+def operandValu(theta, S, kernel, tc, bpe, bpr=4, dtvPacking=False) -> ValuAlloc:
+  """`operandValuPuVaVg` from θ and its S, with no writer.
+
+  `dtvPacking` is the writer's packDTV/convDTV for the operand's side; it only matters for a
+  DirectToVgpr operand.
+  """
+  side = _parentSide(kernel, tc)
+  _depths = S
   pu = _geometry.prefetch_unit_tiles(theta, theta.op(str(tc)))
   vg = max(1, int(kernel["VgprGroup" + side]))
   iptName = "MIInputPerThread" + (tc if bpe is None else side)
   ipt = kernel[iptName]
-  puRegs = (int(pu * ipt // writer.states.bpr) if bpe is None
-            else int(pu * ipt * bpe // writer.states.bpr))
+  puRegs = (int(pu * ipt // bpr) if bpe is None
+            else int(pu * ipt * bpe // bpr))
   if puRegs % vg:
     raise RuntimeError(
         "VgprGroup%s=%d does not divide %s's %d-register prefetch unit" % (side, vg, tc, puRegs))
@@ -285,9 +368,7 @@ def operandValuPuVaVg(writer, kernel, tc, bpe) -> ValuAlloc:
         "VgprAlloc%s must be calculated before register allocation" % side)
 
   direct = kernel.get("DirectToVgpr" + tc, kernel.get("DirectToVgpr" + side, False))
-  packing = ((writer.states.packDTVA or writer.states.convDTVA) if side == "A"
-             else (writer.states.packDTVB or writer.states.convDTVB))
-  if direct and not packing:
+  if direct and not dtvPacking:
     return ValuAlloc(0, va, pu, puRegs, vg, packed)
   return ValuAlloc(perBuffer, va, pu, puRegs, vg, packed)
 

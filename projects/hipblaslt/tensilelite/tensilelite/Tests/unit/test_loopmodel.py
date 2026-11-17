@@ -3280,8 +3280,17 @@ def test_ulm1_set_table_uses_each_operands_rotation_width():
 
 
 def _valu_alloc(kernel, tc, bpe):
-    from tensilelite.Components.LoopModel import Order, Registers
     from tensilelite.Components.LoopModel.Registers import operandValuPuVaVg
+
+    kernel, theta, depths = _valu_inputs(kernel)
+    writer = SimpleNamespace(states=SimpleNamespace(
+        bpr=4, packDTVA=False, convDTVA=False, packDTVB=False, convDTVB=False))
+    writer._loopModelThetaCache = (id(kernel), (theta, depths))
+    return operandValuPuVaVg(writer, kernel, tc, bpe)
+
+
+def _valu_inputs(kernel):
+    from tensilelite.Components.LoopModel import Order, Registers
 
     kernel = dict(kernel)
     kernel.setdefault("UseLoopModel", True)
@@ -3320,10 +3329,7 @@ def _valu_alloc(kernel, tc, bpe):
     )
     from tensilelite.LoopModel.schedule import BufferDepths
     depths = BufferDepths(theta, include_shared=False)
-    writer = SimpleNamespace(states=SimpleNamespace(
-        bpr=4, packDTVA=False, convDTVA=False, packDTVB=False, convDTVB=False))
-    writer._loopModelThetaCache = (id(kernel), (theta, depths))
-    return operandValuPuVaVg(writer, kernel, tc, bpe)
+    return kernel, theta, depths
 
 
 def _valu_size(kernel, tc, bpe):
@@ -3365,6 +3371,154 @@ def test_nmk_va8_is_one_prefetch_unit_times_va():
 
     assert (per, va) == (32, 8)
     assert per * va == 2 * 8 // 1 * 16
+
+
+def test_operand_valu_needs_no_writer():
+    from tensilelite.Components.LoopModel.Registers import operandValu
+
+    kernel, theta, depths = _valu_inputs(_nmk_kernel())
+    for tc in ("A", "B"):
+        assert operandValu(theta, depths, kernel, tc, 1) == _valu_alloc(_nmk_kernel(), tc, 1)
+    direct = dict(kernel, DirectToVgprA=True)
+    assert operandValu(theta, depths, direct, "A", 1).perBuffer == 0
+    assert operandValu(theta, depths, direct, "A", 1, dtvPacking=True).perBuffer > 0
+
+
+class _ScaleType:
+    def numBytes(self):
+        return 1
+
+
+def _tile_span_mx_kernel():
+    # MI K 128 / MXBlock 32 = 4-element scale tiles.  MIWaveTile 4 / VectorWidthMXSA 2 = 2
+    # vectors, and MatrixInstM 16 == WavefrontSize / 2, so gfx1250 InMemorySwizzle pairs them.
+    return {
+        "ProblemType": {"MXBlockA": 32, "DataTypeMXSA": _ScaleType()},
+        "MatrixInstK": 128, "MatrixInstM": 16, "WavefrontSize": 32,
+        "LocalReadVectorWidthMXS": 4, "VectorWidthA": 4, "VectorWidthMXSA": 2,
+        "MIWaveTile": [4, 4], "ISA": (12, 5, 0), "MXScaleFormat": "InMemorySwizzle",
+    }
+
+
+def test_loop_model_target_needs_no_writer():
+    from tensilelite.Components.LoopModel.Theta import loopModelTarget, loopModelTargetFor
+
+    caps = {"HasWMMA_V3": True}
+    assert loopModelTargetFor(_tile_span_mx_kernel(), caps) == {
+        "ReadVectorElems": {"MXSA": 4},
+        "ReadInstances": {"MXSA": 2},
+        "ReadAgentGroup": {"MXSA": 2},
+    }
+    unpaired = loopModelTargetFor(_tile_span_mx_kernel(), caps, tileSpanInfo=None)
+    assert unpaired["ReadInstances"] == {"MXSA": 1}
+    assert unpaired["ReadAgentGroup"] == {"MXSA": 0}
+    assert loopModelTarget(SimpleNamespace(), _tile_span_mx_kernel()) == unpaired
+
+
+def _local_read_prefetch_state(numBytes=2, **overrides):
+    dataType = SimpleNamespace(numBytes=lambda: numBytes, is8bitFloat=lambda: False)
+    state = {
+        "EnableMatrixInstruction": True, "PrefetchLocalRead": 1, "ClusterLocalRead": 1,
+        "LoopIters": 4, "MatrixInstK": 16, "UseF32XEmulation": False,
+        "ProblemType": {"Sparse": 0, "DataType": dataType,
+                        "MacDataTypeA": dataType, "MacDataTypeB": dataType},
+        "LocalReadVectorWidthA": 8, "MIInputPerThreadA": 8,
+        "LocalReadVectorWidthB": 8, "MIInputPerThreadB": 8,
+    }
+    state.update(overrides)
+    return state
+
+
+def test_local_read_prefetch_rejections_are_callable_without_a_solution():
+    from tensilelite.SolutionStructs.Validators.LocalReadPrefetch import (
+        localReadPrefetchRejections)
+
+    assert list(localReadPrefetchRejections(_local_read_prefetch_state(), False)) == []
+    assert list(localReadPrefetchRejections(
+        _local_read_prefetch_state(PrefetchLocalRead=0, LocalReadVectorWidthA=4), False)) == []
+
+    (reason, stop), = localReadPrefetchRejections(
+        _local_read_prefetch_state(numBytes=1, PrefetchLocalRead=2, ClusterLocalRead=0), False)
+    assert stop and "does not support LoopIters>=4" in reason
+
+    # A too narrow stops before B is judged; under WMMA V3 the width rule does not apply.
+    (reason, stop), = localReadPrefetchRejections(
+        _local_read_prefetch_state(LocalReadVectorWidthA=4, LocalReadVectorWidthB=4), False)
+    assert stop and reason.startswith("LocalReadVectorWidthA 4 is less than MIInputA")
+    assert list(localReadPrefetchRejections(
+        _local_read_prefetch_state(LocalReadVectorWidthA=4), True)) == []
+
+    # The LoopIters rules carry on to B.
+    reasons = [stop for _reason, stop in localReadPrefetchRejections(
+        _local_read_prefetch_state(LoopIters=3, LocalReadVectorWidthA=16,
+                                   LocalReadVectorWidthB=16), False)]
+    assert reasons == [False, False]
+
+
+def _split_state(**overrides):
+    state = {"MIWaveTile": [4, 4], "VectorWidthA": 1, "VectorWidthB": 1,
+             "MatrixInstruction": [16, 16, 128, 1, 1, 4, 4, 1, 1], "MIWaveGroup": [1, 1],
+             "DepthU": 256, "MatrixInstK": 128, "LDSSegmentInterleave": 0, "TDMFuse": 0,
+             "ProblemType": {"Sparse": 0, "MXBlockA": 0, "MXBlockB": 0}}
+    state.update(overrides)
+    return state
+
+
+def test_tdm_split_rules_are_callable_without_a_solution():
+    from tensilelite.SolutionStructs.Validators import TDMSplit as rules
+
+    assert rules.tdmSplitRejection(_split_state()) is None
+    assert rules.tdmSplitRejection(_split_state(TDMSplitA=1, TDMSplitB=2)) is None
+
+    odd = rules.waveTileSplitRejection(_split_state(TDMSplitA=1, MIWaveTile=[3, 4]))
+    assert odd.startswith("UseLoopModel requires TDMSplit must factorize MIWaveTileA exactly")
+
+    slab = rules.duSplitQuantumRejection(_split_state(TDMSplitB=2, DepthU=128))
+    assert slab.startswith("TDMSplitB=2 (DU split by 2) leaves 64 unroll elements")
+    assert rules.segmentInterleaveSplitRejection(
+        _split_state(TDMSplitA=2, LDSSegmentInterleave=1)).startswith(
+            "LDSSegmentInterleave=1 with a DU split (TDMSplitA=2/TDMSplitB=0)")
+
+    # The combined ask answers with Solution's first rejection.
+    both = _split_state(TDMSplitA=1, MIWaveTile=[3, 4], TDMSplitB=2, DepthU=128)
+    assert rules.tdmSplitRejection(both) == rules.waveTileSplitRejection(both)
+
+
+def _tdm_split_state(**overrides):
+    state = {
+        "ProblemType": {"Sparse": 0, "MXBlockA": 0, "MXBlockB": 0},
+        "MIWaveTile": [4, 4], "MIWaveGroup": [1, 1],
+        "MatrixInstruction": [16, 16, 128, 1, 1, 4, 4, 1, 1],
+        "LDSSegmentInterleave": 0, "DepthU": 256, "MatrixInstK": 128, "TDMFuse": 0,
+    }
+    state.update(overrides)
+    return state
+
+
+def test_tdm_split_rejections_are_callable_without_a_solution():
+    from tensilelite.SolutionStructs.Validators.TDMSplit import tdmSplitRejection
+
+    assert tdmSplitRejection(_tdm_split_state()) is None
+    assert tdmSplitRejection(_tdm_split_state(TDMSplitA=1, TDMSplitB=2)) is None
+    assert tdmSplitRejection(_tdm_split_state(TDMSplitA=1, MIWaveTile=[3, 4])) == (
+        "UseLoopModel requires TDMSplit must factorize MIWaveTileA exactly: "
+        "extent 3 is not divisible by split 2")
+    assert tdmSplitRejection(_tdm_split_state(TDMSplitB=2, DepthU=128)).startswith(
+        "TDMSplitB=2 (DU split by 2) leaves 64 unroll elements per storage region")
+    assert tdmSplitRejection(_tdm_split_state(TDMSplitB=2, LDSSegmentInterleave=1)).startswith(
+        "LDSSegmentInterleave=1 with a DU split (TDMSplitA=0/TDMSplitB=2)")
+
+
+def test_a_fused_group_may_pair_a_split_member_with_an_unsplit_one(monkeypatch):
+    from tensilelite.SolutionStructs.Validators import TDMSplit as validator
+
+    monkeypatch.setattr(validator, "tdmFusedGroups", lambda state: (("A", "B"),))
+    assert validator.fusedRegionRejection(_tdm_split_state(TDMSplitA=1)) is None
+    assert validator.fusedRegionRejection(_tdm_split_state(TDMSplitA=1, TDMSplitB=2)) is None
+    monkeypatch.setattr(validator.TDMSplit, "split_of",
+                        lambda state, tc: ({"A": 2, "B": 4}[tc], None))
+    assert "DIFFERENT REGION COUNTS (A=2, B=4)" in validator.fusedRegionRejection(
+        _tdm_split_state(TDMFuse=1))
 
 
 def test_nmk_b_clr0_uses_stated_va_not_the_outer_loop():
@@ -3724,6 +3878,76 @@ def test_register_owner_calculates_all_eight_operand_parameters():
         )
         for side in ("A", "B")
     )
+
+
+def _all_auto_register_kernel():
+    kernel = _f8_split_register_kernel()
+    kernel.update({
+        base + side: -1
+        for base in ("PrefetchLocalRead", "ClusterLocalRead", "VgprGroup", "VgprAlloc")
+        for side in ("A", "B")
+    })
+    return kernel
+
+
+def test_a_chosen_register_value_is_derived_not_stated():
+    from tensilelite.Components.LoopModel import Order, Registers
+
+    stated = _all_auto_register_kernel()
+    stated["VgprAllocA"] = 3
+    Order.calculate(stated)
+    Registers.calculate(stated)
+
+    chosen = _all_auto_register_kernel()
+    Order.calculate(chosen)
+    Registers.derive(chosen, {"A": {"VgprAlloc": 3}})
+
+    assert stated["VgprAllocA"] == chosen["VgprAllocA"] == 3
+    assert stated["SuppressNoLoadLoop"] is True and stated["VgprAllocExplicitA"] is True
+    assert not chosen.get("SuppressNoLoadLoop") and chosen["VgprAllocExplicitA"] is False
+    # A stated VA steers the CLR default to 0; a chosen one leaves the default alone.
+    assert stated["ClusterLocalReadA"] == 0
+    assert chosen["ClusterLocalReadA"] == _calculated_clr_a(_all_auto_register_kernel())
+
+
+def _calculated_clr_a(kernel):
+    from tensilelite.Components.LoopModel import Order, Registers
+
+    Order.calculate(kernel)
+    Registers.calculate(kernel)
+    return kernel["ClusterLocalReadA"]
+
+
+def test_a_chosen_register_value_is_validated_like_a_stated_one():
+    from tensilelite.Components.LoopModel import Order, Registers
+
+    kernel = _all_auto_register_kernel()
+    Order.calculate(kernel)
+    cap = Registers.registerShapes(kernel)["A"].capBase
+    with pytest.raises(RuntimeError, match="PrefetchLocalReadA=%d exceeds %d" % (cap + 1, cap)):
+        Registers.derive(kernel, {"A": {"PrefetchLocalRead": cap + 1}})
+    with pytest.raises(ValueError, match="names"):
+        Registers.derive(kernel, {"A": {"LoopOrder": 1}})
+
+
+def test_register_shapes_bound_the_derived_values():
+    from tensilelite.Components.LoopModel import Order, Registers
+
+    kernel = _all_auto_register_kernel()
+    Order.calculate(kernel)
+    shapes = Registers.registerShapes(kernel)
+    for side, clr in (("A", 0), ("B", 1)):
+        shape = shapes[side]
+        derived = dict(kernel)
+        Registers.derive(derived, {side: {"ClusterLocalRead": clr,
+                                          "PrefetchLocalRead": shape.capBase}})
+        vg = derived["VgprGroup" + side]
+        assert shape.unit % vg == 0
+        assert derived["PrefetchLocalRead" + side] == shape.capBase * 1
+        if clr:
+            assert derived["VgprAlloc" + side] == shape.residentTiles // shape.unit * vg
+        else:
+            assert derived["VgprAlloc" + side] >= derived["PrefetchLocalRead" + side] + 1
 
 
 def test_adapter_rejects_calculated_ring_smaller_than_required_depth():

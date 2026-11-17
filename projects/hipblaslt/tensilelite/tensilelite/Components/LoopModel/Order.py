@@ -51,7 +51,8 @@ def factors(kernel) -> dict:
 def loopOrder(inner, outer, extra) -> str:
   """Lower WIO/WOO plus the three WmmaFactor extents to one LoopOrder word."""
   try:
-    inner_index = int(inner) - 1
+    # -1 leaves the inner order to LoopModelAutoSelect; without it the order is KMN.
+    inner_index = 0 if int(inner) == -1 else int(inner) - 1
   except (TypeError, ValueError):
     raise ValueError("WmmaInnerOrder=%r must be 1..6" % inner)
   if not 0 <= inner_index < len(_INNER):

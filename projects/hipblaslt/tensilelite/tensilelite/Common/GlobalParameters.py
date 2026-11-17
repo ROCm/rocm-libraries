@@ -697,6 +697,7 @@ defaultBenchmarkCommonParameters = [
     {"ReuseAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
     {"UseLoopModel": [False]},
+    {"LoopModelAutoSelect": [0]},
     {"WmmaInnerOrder": [1]},
     {"WmmaOuterOrder": [-1]},
     {"WmmaFactorM": [-1]},

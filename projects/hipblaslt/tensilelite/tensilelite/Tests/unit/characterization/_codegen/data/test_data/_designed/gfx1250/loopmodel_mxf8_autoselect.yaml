@@ -1,0 +1,126 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The hand-tuned MX-F8 TN LoopModel kernel at MatrixInstruction [16,16,128,1,1,8,10,2,2]: loop
+# order KKNMNM (WmmaInnerOrder 2, WmmaOuterOrder 3, WmmaFactorM/N 2), A at PLR 2 / VA 3 and B at
+# PLR 1 / VA 2.  Its operand rings, MX scales and accumulators take exactly the 1024 VGPRs, so it
+# pins LoopModelAutoSelect's register count, its ring liveness and its search on a real kernel.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - NumElementsPerBatchStore: [16]
+        - GroupLoadStore: [True]
+        - InterleaveAlpha: [2]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [True]
+
+        - ClusterDim: [[4,4]]
+        - PrefetchGL2: [4]
+        - PrefetchGL2SAddr: [True]
+
+        - ClusterAIDMapping: [-2]
+
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 10,  2, 2]
+        - HalfPLR: [0]
+        - UseLoopModel: [True]
+        - ScheduleIterAlg: [4]
+
+        - TDMSplitA: [0]
+        - TDMSplitB: [0]
+        - TDMFuse: [1]
+
+        # Finer control
+        - VgprGroupA: [1]
+        - VgprGroupB: [1]
+        - WmmaFactorM: [2]
+        - WmmaFactorN: [2]
+
+        # Scheduling
+        - WmmaInnerOrder: [2] # KKNMNM
+        - WmmaOuterOrder: [3]
+        - PrefetchLocalReadA: [2]
+        - PrefetchLocalReadB: [1]
+
+        # Resource
+        - VgprAllocA: [3]
+        - VgprAllocB: [2]
+
+        - LDSSegmentInterleave: [1]
+        - LDSSegmentBRotate: [0]
+        - ClusterLocalReadA: [0]
+        - ClusterLocalReadB: [0]
+        - VectorWidthA: [8]
+        - VectorWidthB: [1]
+        - StinkyTofuRegisterAllocation: [3]
+
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [4096, 4096, 1, 65536]
+          - Exact: [4096, 5120, 1, 65536]

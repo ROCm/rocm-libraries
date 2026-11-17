@@ -5,6 +5,7 @@
 from contextlib import contextmanager
 
 from ...Component import Component
+from ...Components.LocalRead import LocalReadMFMA
 from ...LoopModel.adapter import kernel_to_params, params_to_theta
 from ...LoopModel.schedule import build_S
 
@@ -52,13 +53,28 @@ def loopModelTheta(writer, kernel):
   if cache is not None and cache[0] == key:
     return cache[1]
   with namingSolution(writer, kernel):
-    theta = params_to_theta(kernel_to_params(kernel, target=loopModelTarget(writer, kernel)))
-    S, _floor = build_S(theta)
+    theta, S = _thetaFromTarget(kernel, loopModelTarget(writer, kernel))
   writer._loopModelThetaCache = (key, (theta, S))
   return theta, S
 
 
-def mxScaleBlockWidth(writer, kernel, tc, lrvw):
+def buildTheta(kernel, asmCaps):
+  """`(theta, S)` for a Solution state, with no writer and no cache.
+
+  The state must already carry what Solution derives before the writer runs -- `LoopOrder` and
+  every per-operand PLR/CLR/VG/VA -- so this is what a caller that only asks, the LoopModel
+  parameter search, builds θ from.  Each call builds a fresh θ: the model mutates it.
+  """
+  return _thetaFromTarget(kernel, loopModelTargetFor(kernel, asmCaps))
+
+
+def _thetaFromTarget(kernel, target):
+  theta = params_to_theta(kernel_to_params(kernel, target=target))
+  S, _floor = build_S(theta)
+  return theta, S
+
+
+def mxScaleBlockWidth(asmCaps, kernel, tc, lrvw):
   """VGPRs one `ds_read` of `tc` writes, or None when the shape is not covered.
 
   The authority is the `localReadInstruction` that `initLocalReadMemoryInstruction` selects, and
@@ -78,7 +94,7 @@ def mxScaleBlockWidth(writer, kernel, tc, lrvw):
     # Only E8M0 maps directly to a representable block width. A wider element
     # would require the real pool lookup.
     return None
-  caps = getattr(writer.states, "asmCaps", {}) or {}
+  caps = asmCaps or {}
   if kernel.get("UnrollMajorLDS%s" % tc):
     width = lrvw * bpeDS / 4.0
     if caps.get("HasWMMA_V3") and kernel.get("MXScaleFormat") == "InMemorySwizzle":
@@ -90,13 +106,13 @@ def mxScaleBlockWidth(writer, kernel, tc, lrvw):
   return min(width, 4.0)                            # the pool's widest LocalRead is b128
 
 
-def mxScaleTilesPerRead(writer, kernel, tc, lrvw, mxUnit) -> int:
+def mxScaleTilesPerRead(asmCaps, kernel, tc, lrvw, mxUnit) -> int:
   """Scale TILES one `ds_read` of `tc` covers -- `blockWidth * 4 // mxUnit`.
 
   A shape not covered returns 1, supplying no map, and `leaves.emitLdsReadTile` keeps its own
   coverage.
   """
-  blockWidth = mxScaleBlockWidth(writer, kernel, tc, lrvw)
+  blockWidth = mxScaleBlockWidth(asmCaps, kernel, tc, lrvw)
   if mxUnit <= 0 or blockWidth is None:
     return 1
   return max(1, int(blockWidth * 4) // mxUnit)
@@ -113,6 +129,19 @@ def loopModelTarget(writer, kernel):
   Every input is read at the FIRST θ build, `loopModelRegBuffers` from `_initKernel`, so it comes
   from the Solution or from pure geometry rather than from later `writer.states` fields.
   """
+  if not hasattr(writer, "states"):
+    return loopModelTargetFor(kernel, {}, tileSpanInfo=None)
+  return loopModelTargetFor(
+      kernel, getattr(writer.states, "asmCaps", {}) or {},
+      tileSpanInfo=lambda *args: Component.LocalRead.find(writer).getMxsTileSpanInfo(*args))
+
+
+def loopModelTargetFor(kernel, asmCaps, tileSpanInfo=LocalReadMFMA.getMxsTileSpanInfo):
+  """`loopModelTarget` from the Solution state and the ISA's asmCaps alone.
+
+  UseLoopModel requires matrix instructions, so the writer's LocalRead component is always
+  `LocalReadMFMA`; its TileSpan gate is static.  `tileSpanInfo=None` supplies no TileSpan.
+  """
   elems, instances, agentGroup = {}, {}, {}
   pt = kernel["ProblemType"]
   for tc, tile01, mx in (("MXSA", 0, "MXBlockA"), ("MXSB", 1, "MXBlockB")):
@@ -124,11 +153,10 @@ def loopModelTarget(writer, kernel):
       continue
     # Use the instruction width rather than lrvw. An InMemorySwizzle read is
     # VectorWidth times wider.
-    blockWidth = mxScaleBlockWidth(writer, kernel, tc, lrvw)
+    blockWidth = mxScaleBlockWidth(asmCaps, kernel, tc, lrvw)
     elems[tc] = int(blockWidth * 4) if blockWidth is not None else lrvw
-    tiles = mxScaleTilesPerRead(writer, kernel, tc, lrvw, mxUnit)
-    span = Component.LocalRead.find(writer).getMxsTileSpanInfo(
-        kernel, tc, tile01, writer.states.asmCaps) if hasattr(writer, "states") else None
+    tiles = mxScaleTilesPerRead(asmCaps, kernel, tc, lrvw, mxUnit)
+    span = tileSpanInfo(kernel, tc, tile01, asmCaps) if tileSpanInfo else None
     # TileSpan partitions the half-wave: one ds_load holds blocks 2g and
     # 2g+1, so the carrier group spans two sub-agents.
     if span:

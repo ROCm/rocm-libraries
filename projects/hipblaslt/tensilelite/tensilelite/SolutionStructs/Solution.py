@@ -95,6 +95,9 @@ from ..Components.CustomSchedule import hasCustomSchedule
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
+from .Validators.LocalReadPrefetch import localReadPrefetchRejections
+from .Validators.TDMSplit import duSplitQuantumRejection, fusedRegionRejection, \
+                                 segmentInterleaveSplitRejection, waveTileSplitRejection
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
@@ -1167,6 +1170,11 @@ class Solution(collections.abc.Mapping):
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
 
+    # -1 leaves a split to LoopModelAutoSelect, which states it before deriving; alone it is 0.
+    for _side in ("A", "B"):
+      if int(state.get("TDMSplit" + _side, 0) or 0) == -1:
+        state["TDMSplit" + _side] = 0
+
     # Read, do not consume: the scalar stays in the state so an equal 0/1 pair keeps spelling
     # itself the way every kernel always has. It is normalized against the pair below.
     if state.get("TDMSplit", 0):
@@ -1181,7 +1189,7 @@ class Solution(collections.abc.Mapping):
 
     # The traversal order is only meaningful on the LoopModel path.  Naming a non-default one off
     # that path is a no-op that would spawn redundant, mis-deduped baseline kernels, so reject it.
-    if (int(state.get("WmmaInnerOrder", 1) or 1) != 1
+    if (int(state.get("WmmaInnerOrder", 1) or 1) not in (-1, 1)
         or int(state.get("WmmaOuterOrder", 0) or 0) != 0) \
         and not state.get("UseLoopModel", False):
       reject(state, printRejectionReason,
@@ -1282,31 +1290,10 @@ class Solution(collections.abc.Mapping):
           state.get("StreamK", 0) != 0):
         return _ulm_reject(state, "")
 
-      # TDMSplit factors either the operand's free axis or its shared-K axis.
-      _split = TDMSplit.split_factors(state)
-      if _split is not None:
-        _aMT, _bMT, _aDU, _bDU = _split
-        for _tc, _wt, _n in (("A", state["MIWaveTile"][0], _aMT), ("B", state["MIWaveTile"][1], _bMT)):
-          try:
-            TDMSplit.factor_axis(_wt, _n, "MIWaveTile%s" % _tc)
-          except ValueError as exc:
-            reject(state, printRejectionReason, "UseLoopModel requires %s" % exc)
-            return
-
-          # Wave placement is a separate physical fact.  It controls which region aliases a read
-          # across waves, but never changes the split or inner axis extents.
-          _vw = state.get("VectorWidth%s" % _tc) or 1
-          try:
-            _span = max(1, min(_n, int(TDMSplit.wave_region_span(state, _tc)) or _n))
-          except Exception:
-            _span = _n
-          _per = _wt // _span if _span else _wt
-          if _n > 1 and (_wt % _span or _vw > _per):
-            reject(state, printRejectionReason,
-                   "UseLoopModel: VectorWidth%s=%d does not fit the physical TDMSplit wave span "
-                   "(MIWaveTile=%d / wave-region-span=%d = %d tile(s))"
-                   % (_tc, _vw, _wt, _span, _per))
-            return
+      _splitReason = waveTileSplitRejection(state)
+      if _splitReason is not None:
+        reject(state, printRejectionReason, _splitReason)
+        return
 
     # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
     # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
@@ -2668,6 +2655,18 @@ class Solution(collections.abc.Mapping):
                  "a pair. Put MX scales on both tensors or on neither, or use %s=0"
                  % (_oneSidedMXHead(state), key, state[key], key))
           return
+    if dcpAutoSkip is None and int(state.get("LoopModelAutoSelect", 0) or 0):
+      from ..Components.LoopModel.Auto.derive import autoSelect
+
+      def _derive(target, printReason):
+        Solution.assignDerivedParameters(target, splitGSU, printReason, printIndexAssignmentInfo,
+                                         isaInfoMap, rocmVersion)
+
+      _autoReason = autoSelect(state, _derive, isaInfoMap[tuple(state["ISA"])].asmCaps,
+                               printRejectionReason)
+      if _autoReason:
+        reject(state, printRejectionReason, _autoReason)
+      return
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
@@ -6489,41 +6488,11 @@ class Solution(collections.abc.Mapping):
                % ("+".join(_ldsTr), "+".join(_ldsTr)))
         return
 
-    if tdmFusedGroups(state):
-      _regions = {"A": TDMSplit.split_of(state, "A")[0], "B": TDMSplit.split_of(state, "B")[0]}
-      _mxBoth = bool(state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"])
-      if _mxBoth:
-        _regions["MXSA"] = 1        # scales are never split — `TDMSplitA/B` name the data only
-        _regions["MXSB"] = 1
-      for _g in tdmFusedGroups(state):
-        _counts = {_m: _regions[_m] for _m in _g if _m in _regions}
-        # An unsplit member rides region 0 and is nulled for the rest of the walk, so {1, R} is
-        # supported; two different splits in one group still are not.
-        if len({_c for _c in _counts.values() if _c > 1}) > 1:
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d groups %s into ONE cooperative tensor_load, but its members have "
-                 "DIFFERENT REGION COUNTS (%s) under TDMSplitA=%s/TDMSplitB=%s.  A fused movement "
-                 "walks one region sequence, so two members split DIFFERENT ways cannot pair "
-                 "by index (an unsplit member is fine -- it rides region 0).  Give the split "
-                 "members the same number of regions -- the two AXES may differ, TDMSplitA=1 with "
-                 "TDMSplitB=2 is two regions each and is allowed."
-                 % (state["TDMFuse"], "+".join(_g),
-                    ", ".join("%s=%d" % kv for kv in sorted(_counts.items())),
-                    state.get("TDMSplitA"), state.get("TDMSplitB")))
-          return
-
-    _quantumSplit = TDMSplit.split_factors(state)
-    if _quantumSplit is not None and (_quantumSplit[2] > 1 or _quantumSplit[3] > 1):
-      _mik = state["MatrixInstK"]
-      for _tc, _n in (("A", _quantumSplit[2]), ("B", _quantumSplit[3])):
-        if _n > 1 and (_mik <= 0 or (state["DepthU"] // _n) % _mik != 0):
-          reject(state, printRejectionReason,
-                 "TDMSplit%s=2 (DU split by %d) leaves %d unroll elements per storage region, "
-                 "which is not a multiple of MatrixInstK=%d.  A region is a separately packed LDS "
-                 "block, so a K slab straddling the boundary would need a per-lane region term "
-                 "that neither read path derives."
-                 % (_tc, _n, state["DepthU"] // _n, _mik))
-          return
+    for _splitRule in (fusedRegionRejection, duSplitQuantumRejection):
+      _splitReason = _splitRule(state)
+      if _splitReason is not None:
+        reject(state, printRejectionReason, _splitReason)
+        return
 
     # TailloopInNll optimization check
     if state["TailloopInNll"]:
@@ -7607,15 +7576,9 @@ class Solution(collections.abc.Mapping):
     # AFTER both resolution points, so the final value is the one tested.  LDSSI's components
     # partition the FREE axis, so it can only express a free-axis split; a DU split's regions are
     # K-ranges inside a component and the segment stride is not their step.
-    _segSplit = TDMSplit.split_factors(state)
-    if state["LDSSegmentInterleave"] == 1 and _segSplit is not None \
-       and (_segSplit[2] > 1 or _segSplit[3] > 1):
-      reject(state, printRejectionReason,
-             "LDSSegmentInterleave=1 with a DU split (TDMSplitA=%d/TDMSplitB=%d) is not supported: "
-             "the interleave lays components out along the FREE axis, so its port/component "
-             "placement cannot express a reduction-axis partition and `tdmSplitLdsBoundary` would "
-             "return the component jump where the region step is the packed half-tile."
-             % (state.get("TDMSplitA", 0), state.get("TDMSplitB", 0)))
+    _splitReason = segmentInterleaveSplitRejection(state)
+    if _splitReason is not None:
+      reject(state, printRejectionReason, _splitReason)
       return
 
     if state["1LDSBuffer"]:
@@ -8082,51 +8045,10 @@ class Solution(collections.abc.Mapping):
         if state["LoopIters"] % (state["PrefetchLocalRead"]+1) != 0:
           reject(state, "dot2 kernel does not support LoopIters(%u) %% (PLR+1)(%u) != 0" % (state["LoopIters"], state["PrefetchLocalRead"]+1))
 
-    if (state["EnableMatrixInstruction"] and not state["ClusterLocalRead"] and state["PrefetchLocalRead"] == 2
-        and state["LoopIters"] >= 4 and state["ProblemType"]["MacDataTypeA"].numBytes() < 4
-        and state["ProblemType"]["MacDataTypeB"].numBytes() < 4):
-      reject(state, printRejectionReason, "PrefetchLocalRead=2 with ClusterLocalRead=0 and numByte<4 does not support LoopIters>=4")
-      return
-
-    # reject iterations are not enough to use wider local read
-    if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
-      # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
-      wlrMultiple = state["LocalReadVectorWidthA"]//state["MIInputPerThreadA"]
-      # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeA"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
-        if wlrMultiple == 0:
-          reject(state, printRejectionReason, "LocalReadVectorWidthA %u is less than MIInputA" % (state["LocalReadVectorWidthA"]))
-          return
-      # for example, if the original ds_read is b32...
-      #   1. if LoopIters = 5 (b32 x 5 times), WLR-Multiple = 2 (b64), then we can fit the WLR
-      #   2. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 4 (b128), this is not allowed
-      #   3. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 2 (b64), this is allowed
-      if wlrMultiple and state["LoopIters"] % wlrMultiple != 0:
-        reject(state, printRejectionReason, "LocalReadVectorWidthA %u cannot be distributed evenly, LoopIters %u should be divisible by WLR-Multiple %u" \
-          % (state["LocalReadVectorWidthA"], state["LoopIters"], wlrMultiple))
-
-      if state["LoopIters"] - (state["PrefetchLocalRead"] * wlrMultiple) < 0 :
-        reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthA %u, not enough LoopIters to prefetch %ux%u iterations, " \
-          % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthA"], state["PrefetchLocalRead"] , wlrMultiple) )
-
-      # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
-      wlrMultiple = state["LocalReadVectorWidthB"]//state["MIInputPerThreadB"]
-      # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeB"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
-        if wlrMultiple == 0:
-          reject(state, printRejectionReason, "LocalReadVectorWidthB %u is less than MIInputB" % (state["LocalReadVectorWidthB"]))
-          return
-      # for example, if the original ds_read is b32...
-      #   1. if LoopIters = 5 (b32 x 5 times), WLR-Multiple = 2 (b64), then we can fit the WLR
-      #   2. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 4 (b128), this is not allowed
-      #   3. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 2 (b64), this is allowed
-      if wlrMultiple and state["LoopIters"] % wlrMultiple != 0:
-        reject(state, printRejectionReason, "LocalReadVectorWidthB %u cannot be distributed evenly, LoopIters %u should be divisible by WLR-Multiple %u" \
-          % (state["LocalReadVectorWidthB"], state["LoopIters"], wlrMultiple))
-
-      if state["LoopIters"] - (state["PrefetchLocalRead"] * wlrMultiple) < 0 :
-        reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
-          % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
+    for reason, stop in localReadPrefetchRejections(state, isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+      reject(state, printRejectionReason, reason)
+      if stop:
+        return
 
     if state["PrefetchGL2"] == 0:
       state["PrefetchGL2Inc64Bit"] = False
@@ -8421,7 +8343,8 @@ class Solution(collections.abc.Mapping):
     # its own path. Settling it here leaves no -1 for a later reader -- or a name -- to carry.
     for _perOperand in ("PrefetchLocalRead", "ClusterLocalRead"):
       for _side in ("A", "B"):
-        if int(state.get(_perOperand + _side, -1) or -1) == -1:
+        _stated = state.get(_perOperand + _side)
+        if _stated is None or int(_stated) == -1:
           state[_perOperand + _side] = state[_perOperand]
 
     # The bool spells only an equal 0/1 pair; any other pair has no scalar form and is named
