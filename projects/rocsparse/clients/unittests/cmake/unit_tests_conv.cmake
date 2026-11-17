@@ -24,6 +24,10 @@
 # Unit tests for the conv area (conversion, pruning, sorting, sparse-matrix descriptors).
 # Included from clients/unittests/CMakeLists.txt.
 
+target_sources(rocsparse-unit-test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/unit_test_bsr_dims.cpp
+)
+
 list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_conv_internal.cpp
   unit_test_device_conv_extract.cpp
