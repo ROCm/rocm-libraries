@@ -240,7 +240,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     endif()
     if(HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDescriptorShards.cpp)
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDescriptorShards.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvCompileCensus.cpp)
     endif()
 endif()
 
