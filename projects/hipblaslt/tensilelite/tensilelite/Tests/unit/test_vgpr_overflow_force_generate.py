@@ -221,7 +221,8 @@ class TestForceGenerateKernel:
         return SimpleNamespace(
             _initKernel=lambda kernel, tPA, tPB: None,
             _registerKernelArgs=lambda kernel: None,
-            states=SimpleNamespace(kernelName="test_kernel", archCaps={}),
+            states=SimpleNamespace(kernelName="test_kernel",
+                                   archCaps={"HasVALUReadSGPRHazard": 0}),
             kernelArgDefs=[],
             stringIdx=0,
             kernelBody=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),

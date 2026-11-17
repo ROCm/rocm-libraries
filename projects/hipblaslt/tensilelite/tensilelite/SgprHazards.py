@@ -18,6 +18,9 @@ pending VALU writes. Control flow comes from labels and branches; indirect jumps
 (``s_setpc_b64``, ``s_swappc_b64``) flush every pending write first, and a label whose address
 is taken, or that has no known predecessor, is entered with every pair tracked and an SALU write
 pending on every SGPR (a call's return address is written just before the callee reads it).
+
+A missed SGPR operand would silently drop waits, so the parser fails closed: an operand,
+instruction or directive it cannot classify raises SgprHazardError.
 """
 
 import re
@@ -33,13 +36,22 @@ VCC_HI = 107
 DS_NOP_CULL = 4  # wave32
 ALL_PAIRS = (1 << 64) - 1
 
+
+class SgprHazardError(RuntimeError):
+    """The kernel holds something the analysis cannot model, so no safe set of waits is known."""
+
+
 _SMEM_PREFIXES = ("s_load_", "s_buffer_load_", "s_store_", "s_buffer_store_", "s_atomic",
                   "s_buffer_atomic", "s_scratch_", "s_dcache_", "s_prefetch_", "s_buffer_prefetch",
                   "s_atc_probe", "s_memtime", "s_memrealtime")
 _VMEM_PREFIXES = ("buffer_", "tbuffer_", "image_")
+# Instruction families with no SGPR hazard semantics (LLVM's pass only looks at SALU and VALU).
+_OTHER_PREFIXES = ("ds_", "global_", "flat_", "scratch_", "exp", "tensor_")
 _COND_BRANCH = re.compile(r"^s_cbranch_\w+$")
 _SGPR = re.compile(r"^s(\d+)$")
 _SGPR_INDEXED = re.compile(r"^s\[([^\]]+)\]$")  # s[3:4], s[sgprSrdA:sgprSrdA+3], s[sgprAlpha]
+# Anything an SGPR operand could be spelled with; seen anywhere it did not parse, it is an error.
+_SGPR_LIKE = re.compile(r"(?<![\w.$])(?:s\[|s\d|vcc)")
 _SET = re.compile(r"^\s*\.set\s+([A-Za-z_.$][\w.$]*)\s*,\s*(.+?)\s*$")
 _EXPR_OK = re.compile(r"^[\d\s+\-*()x<>a-fA-F]*$")
 _IDENT = re.compile(r"[A-Za-z_.$][\w.$]*")
@@ -47,15 +59,24 @@ _LABEL_DEF = re.compile(r"^\s*([A-Za-z_.$][\w.$]*):(?!\S)")
 _OBJDUMP_LABEL = re.compile(r"^([0-9a-fA-F]+) <([^>]+)>:\s*$")
 _OBJDUMP_ADDR = re.compile(r"//\s*([0-9A-Fa-f]{12}):\s*([0-9A-Fa-f]{8})?")
 _DEPCTR_FIELD = re.compile(r"depctr_(\w+)\((\d+)\)")
+# Directives that would make the text something other than one straight-line program per block.
+_UNSUPPORTED_DIRECTIVES = re.compile(r"^\.(if\w*|else\w*|endif|rept|irp\w*|endr|byte|short|word|"
+                                     r"long|quad|int|[248]byte|inst\w*)$")
 
 # SALU mnemonics whose first operand is a source, not a destination.
 _SALU_NO_DST = re.compile(r"^s_(cmp\w*|cmpk\w*|bitcmp\w*|setreg_b32|setpc_b64|rfe_b64|cbranch\w*|"
                           r"branch|nop|wait\w*|barrier\w*|delay_alu|setprio|sleep\w*|endpgm\w*|"
-                          r"trap|sendmsg\w*|ttrace\w*|icache_inv|set_inst_prefetch_distance|clause|"
-                          r"setreg_imm32_b32|singleuse_vdst|version|code_end|setkill|setvskip|"
-                          r"round_mode|denorm_mode|incperflevel|decperflevel|wakeup\w*|alloc_vgpr)$")
+                          r"trap|sendmsg|sendmsghalt|ttrace\w*|icache_inv|set_inst_prefetch_distance|"
+                          r"clause|setreg_imm32_b32|singleuse_vdst|version|code_end|setkill|"
+                          r"setvskip|round_mode|denorm_mode|incperflevel|decperflevel|wakeup\w*|"
+                          r"alloc_vgpr|set_vgpr_msb)$")
+# SALU mnemonics whose first operand is a destination.
+_SALU_DST = re.compile(r"^s_(mov|cmov|add|sub|mul|and|or|xor|nand|nor|xnor|lshl|lshr|ashr|bfe|bfm|"
+                       r"not|wqm|brev|bcnt|ff0|ff1|flbit|ctz|clz|cls|sext|bitset|abs|min|max|"
+                       r"cselect|getpc|swappc|getreg|quadmask|pack|cvt|ceil|floor|trunc|rndne|fmac|"
+                       r"fmamk|fmaak|get_barrier_state|sendmsg_rtn)\w*$")
 # SALU mnemonics that also read their destination.
-_SALU_DST_READ = re.compile(r"^s_(cmov\w*|cmovk\w*|addk\w*|mulk\w*|bitset[01]\w*|swappc_b64)$")
+_SALU_DST_READ = re.compile(r"^s_(cmov\w*|addk\w*|mulk\w*|bitset[01]\w*|fmac\w*)$")
 # VALU mnemonics with an SGPR (or VCC) carry/condition output as their second operand.
 _VALU_SDST2 = re.compile(r"^v_(add_co|sub_co|subrev_co|addc_co|subb_co|subbrev_co|div_scale|"
                          r"mad_u64_u32|mad_i64_i32|mad_co_u64_u32|mad_co_i64_i32)")
@@ -65,7 +86,7 @@ _VALU_SDST1 = re.compile(r"^v_(readfirstlane|readlane|cmp_|cmp_class|s_)")
 
 @dataclass
 class Op:
-    """One parsed assembly line."""
+    """One instruction or label of the assembly text."""
 
     line: int
     kind: str  # "label", "salu", "valu", "clear", "waitalu", "dsnop", "other"
@@ -81,13 +102,15 @@ class Op:
     refs: Tuple[str, ...] = ()  # identifiers in operands of non-branch instructions
     addr: Optional[int] = None  # objdump address
     targetAddr: Optional[int] = None  # objdump branch target (labels at one address print one name)
+    col: int = 0  # where the instruction starts on its line, after a label on the same line
     raw: str = ""
 
 
 def _stripComment(text: str) -> str:
-    text = text.split("//", 1)[0]
-    text = re.sub(r"/\*.*?\*/", "", text)
-    return text.split(";", 1)[0] if text.lstrip().startswith(("s_", "v_")) else text
+    text = re.sub(r"/\*.*?\*/", "", text).split("//", 1)[0]
+    if "/*" in text:
+        raise SgprHazardError(f"multi-line comment is not supported: {text.strip()!r}")
+    return text if text.lstrip().startswith(".") else text.split(";", 1)[0]
 
 
 def _splitOperands(text: str) -> List[str]:
@@ -105,6 +128,19 @@ def _splitOperands(text: str) -> List[str]:
     if "".join(cur).strip():
         ops.append("".join(cur).strip())
     return ops
+
+
+def _firstToken(text: str) -> Tuple[str, str]:
+    """Split an operand into its first whitespace-separated token and the modifiers after it."""
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch.isspace() and depth == 0:
+            return text[:i], text[i:]
+    return text, ""
 
 
 def evalExpr(expr: str, symbols: Dict[str, Optional[int]]) -> Optional[int]:
@@ -131,8 +167,8 @@ def evalExpr(expr: str, symbols: Dict[str, Optional[int]]) -> Optional[int]:
         return None
 
 
-def _sgprOperand(token: str, symbols: Dict[str, Optional[int]]) -> Optional[Tuple[int, int]]:
-    t = token.strip()
+def _parseSgpr(token: str, symbols: Dict[str, Optional[int]]) -> Optional[Tuple[int, int]]:
+    t = token
     for prefix in ("neg(", "abs(", "sext("):
         if t.startswith(prefix) and t.endswith(")"):
             t = t[len(prefix):-1]
@@ -150,12 +186,20 @@ def _sgprOperand(token: str, symbols: Dict[str, Optional[int]]) -> Optional[Tupl
         first = evalExpr(lo, symbols)
         last = evalExpr(hi, symbols) if hi else first
         if first is None or last is None:
-            raise ValueError(f"cannot resolve SGPR operand {token!r}")
+            raise SgprHazardError(f"cannot resolve SGPR operand {token!r}")
         return (first, last - first + 1)
     return None
 
 
-def _waitClears(mnemonic: str, operands: str) -> int:
+def _sgprOperand(operand: str, symbols: Dict[str, Optional[int]]) -> Optional[Tuple[int, int]]:
+    token, rest = _firstToken(operand.strip())
+    reg = _parseSgpr(token, symbols)
+    if _SGPR_LIKE.search(rest) or (reg is None and _SGPR_LIKE.search(token)):
+        raise SgprHazardError(f"unrecognized SGPR operand {operand!r}")
+    return reg
+
+
+def _waitClears(operands: str) -> int:
     clears = 0
     fields = dict((k, int(v)) for k, v in _DEPCTR_FIELD.findall(operands))
     if fields:
@@ -167,48 +211,26 @@ def _waitClears(mnemonic: str, operands: str) -> int:
             clears |= WA_VCC
         return clears
     m = re.match(r"\s*(0x[0-9a-fA-F]+|\d+)\s*$", operands)
-    if m:
-        imm = int(m.group(1), 0)
-        if (imm & 1) == 0:
-            clears |= WA_SALU
-        if ((imm >> 9) & 7) == 0:
-            clears |= WA_VALU
-        if ((imm >> 1) & 1) == 0:
-            clears |= WA_VCC
+    if not m:
+        raise SgprHazardError(f"unrecognized s_wait_alu operand {operands.strip()!r}")
+    imm = int(m.group(1), 0)
+    if (imm & 1) == 0:
+        clears |= WA_SALU
+    if ((imm >> 9) & 7) == 0:
+        clears |= WA_VALU
+    if ((imm >> 1) & 1) == 0:
+        clears |= WA_VCC
     return clears
 
 
-def parseLine(lineNo: int, raw: str, symbols: Optional[Dict[str, Optional[int]]] = None) -> Optional[Op]:
-    """Parse one line of TensileLite or llvm-objdump assembly; None for blank/comment/directive.
-
-    *symbols* holds the .set values in effect at this line, for operands such as s[sgprSrdA+2].
-    """
-    symbols = symbols if symbols is not None else {}
-    m = _OBJDUMP_LABEL.match(raw)
-    if m:
-        return Op(lineNo, "label", label=m.group(2), addr=int(m.group(1), 16))
-    addr = encoding = None
-    am = _OBJDUMP_ADDR.search(raw)
-    if am:
-        addr = int(am.group(1), 16)
-        encoding = int(am.group(2), 16) if am.group(2) else None
-    text = _stripComment(raw).strip()
-    if not text or text.startswith("."):
-        return None
-    m = _LABEL_DEF.match(text)
-    if m:
-        rest = text[m.end():].strip()
-        if not rest:
-            return Op(lineNo, "label", label=m.group(1))
-        text = rest
+def _parseInstruction(lineNo: int, text: str, symbols: Dict[str, Optional[int]],
+                      addr: Optional[int] = None, encoding: Optional[int] = None) -> Op:
     if "::" in text and text.startswith("v_dual_"):
-        halves = [h.strip() for h in text.split("::")]
-        ops = [parseLine(lineNo, h, symbols) for h in halves]
-        merged = Op(lineNo, "valu", mnemonic=halves[0].split()[0], addr=addr)
-        for o in ops:
-            if o is not None:
-                merged.uses += o.uses
-                merged.defs += o.defs
+        halves = [_parseInstruction(lineNo, h.strip(), symbols) for h in text.split("::")]
+        merged = Op(lineNo, "valu", mnemonic=halves[0].mnemonic, addr=addr)
+        for h in halves:
+            merged.uses += h.uses
+            merged.defs += h.defs
         return merged
     parts = text.split(None, 1)
     mnemonic = parts[0].lower()
@@ -223,14 +245,15 @@ def parseLine(lineNo: int, raw: str, symbols: Optional[Dict[str, Optional[int]]]
         return op
     if mnemonic in ("s_wait_alu", "s_waitcnt_depctr"):
         op.kind = "waitalu"
-        op.waitClears = _waitClears(mnemonic, operandText)
+        op.waitClears = _waitClears(operandText)
+        return op
+    if mnemonic.startswith(_OTHER_PREFIXES):
         return op
     if not (mnemonic.startswith("s_") or mnemonic.startswith("v_")):
-        return op  # ds_*, global_*, flat_*, scratch_*, macros: no SGPR hazard semantics
+        raise SgprHazardError(f"unknown instruction {text!r}")
 
     operands = _splitOperands(operandText)
-    isBranch = mnemonic == "s_branch" or bool(_COND_BRANCH.match(mnemonic))
-    if isBranch:
+    if mnemonic == "s_branch" or _COND_BRANCH.match(mnemonic):
         op.kind = "salu"
         if operands:
             op.target = operands[0]
@@ -244,31 +267,38 @@ def parseLine(lineNo: int, raw: str, symbols: Optional[Dict[str, Optional[int]]]
 
     op.refs = tuple(t for o in operands for t in _IDENT.findall(o))
     regs = [_sgprOperand(o, symbols) for o in operands]
+    hasSgpr = any(r is not None for r in regs)
 
     if mnemonic.startswith("s_"):
         op.kind = "salu"
+        if mnemonic.startswith("s_movrel"):
+            raise SgprHazardError(f"M0-relative SGPR access is not supported: {text!r}")
         if mnemonic in ("s_setpc_b64", "s_rfe_b64"):
             op.setpc, op.uncond = True, True
         elif mnemonic in ("s_swappc_b64", "s_call_b64"):
             op.setpc, op.call = True, True
         elif mnemonic.startswith("s_endpgm"):
             op.uncond = True
-        hasDst = not _SALU_NO_DST.match(mnemonic) and mnemonic != "s_call_b64"
+        if _SALU_NO_DST.match(mnemonic):
+            hasDst = False
+        elif _SALU_DST.match(mnemonic) or mnemonic == "s_call_b64":
+            hasDst = True
+        elif hasSgpr:
+            raise SgprHazardError(f"unknown SALU instruction {mnemonic!r} with SGPR operands")
+        else:
+            hasDst = False
         for i, r in enumerate(regs):
             if r is None:
                 continue
             if i == 0 and hasDst:
                 op.defs.append(r)
-                if _SALU_DST_READ.match(mnemonic) and mnemonic != "s_swappc_b64":
+                if _SALU_DST_READ.match(mnemonic):
                     op.uses.append(r)
             else:
                 op.uses.append(r)
-        if mnemonic == "s_call_b64" and regs and regs[0] is not None:
-            op.defs.append(regs[0])
         return op
 
     op.kind = "valu"
-    nDst = 0
     if mnemonic.startswith("v_cmpx"):
         nDst = 0
     elif _VALU_SDST1.match(mnemonic):
@@ -278,6 +308,8 @@ def parseLine(lineNo: int, raw: str, symbols: Optional[Dict[str, Optional[int]]]
             nDst = 0
     else:
         nDst = 1  # VGPR destination
+        if regs and regs[0] is not None:
+            raise SgprHazardError(f"unknown VALU instruction {mnemonic!r} writing an SGPR")
         if _VALU_SDST2.match(mnemonic) and len(regs) > 1 and regs[1] is not None:
             op.defs.append(regs[1])
             nDst = 2
@@ -288,9 +320,43 @@ def parseLine(lineNo: int, raw: str, symbols: Optional[Dict[str, Optional[int]]]
             op.defs.append(r)
         else:
             op.uses.append(r)
-    if mnemonic.startswith("v_div_fmas"):
+    if mnemonic.startswith("v_div_fmas") or mnemonic == "v_dual_cndmask_b32":
         op.uses.append((VCC_LO, 1))
     return op
+
+
+def parseLine(lineNo: int, raw: str, symbols: Optional[Dict[str, Optional[int]]] = None,
+              objdump: bool = False) -> List[Op]:
+    """The label and instruction on one line of TensileLite (or, with *objdump*, llvm-objdump) text.
+
+    *symbols* holds the .set values in effect at this line, for operands such as s[sgprSrdA+2].
+    """
+    symbols = symbols if symbols is not None else {}
+    if objdump:
+        m = _OBJDUMP_LABEL.match(raw)
+        if m:
+            return [Op(lineNo, "label", label=m.group(2), addr=int(m.group(1), 16))]
+        am = _OBJDUMP_ADDR.search(raw)
+        if not am:
+            return []
+        encoding = int(am.group(2), 16) if am.group(2) else None
+        return [_parseInstruction(lineNo, _stripComment(raw).strip(), symbols,
+                                  int(am.group(1), 16), encoding)]
+    text = _stripComment(raw).strip()
+    if not text or text.startswith("."):
+        return []
+    ops = []
+    m = _LABEL_DEF.match(text)
+    if m:
+        ops.append(Op(lineNo, "label", label=m.group(1)))
+        text = text[m.end():].strip()
+        if not text:
+            return ops
+    op = _parseInstruction(lineNo, text, symbols)
+    if ops:
+        colon = raw.index(":", raw.index(ops[0].label) + len(ops[0].label)) + 1
+        op.col = colon + len(raw[colon:]) - len(raw[colon:].lstrip())
+    return ops + [op]
 
 
 @dataclass
@@ -418,30 +484,45 @@ def _objdumpIndirectTargets(ops: List[Op]) -> set:
     return targets
 
 
-def analyze(lines: List[str]) -> Tuple[List[Op], Dict[int, int]]:
-    """Return the parsed ops and {op index: WA_* waits needed before that op}."""
+def _parse(lines: List[str]) -> List[Op]:
+    objdump = any(_OBJDUMP_ADDR.search(l) for l in lines[:200]) or \
+        any(_OBJDUMP_LABEL.match(l) for l in lines[:200])
     ops: List[Op] = []
     symbols: Dict[str, Optional[int]] = {}
-    inMacro = False
+    macros = set()
+    block = None  # .macro, .amdhsa_kernel or .amdgpu_metadata body being skipped
+    ends = {".macro": ".endm", ".amdhsa_kernel": ".end_amdhsa_kernel",
+            ".amdgpu_metadata": ".end_amdgpu_metadata"}
     for i, raw in enumerate(lines):
         directive = raw.strip().split(None, 1)[0] if raw.strip() else ""
-        if directive == ".macro":
-            inMacro = True
-        elif directive == ".endm":
-            inMacro = False
+        if block is not None:
+            if directive == ends[block]:
+                block = None
             continue
-        if inMacro:
+        if directive in ends:
+            block = directive
+            if directive == ".macro":
+                macros.add(raw.split()[1].split(",")[0])
             continue
-        if directive == ".set":
-            m = _SET.match(_stripComment(raw))
-            if m:
-                symbols[m.group(1)] = evalExpr(m.group(2), symbols)
+        if not objdump and directive.startswith("."):
+            if directive == ".set":
+                m = _SET.match(_stripComment(raw))
+                if m:
+                    symbols[m.group(1)] = evalExpr(m.group(2), symbols)
+            elif _UNSUPPORTED_DIRECTIVES.match(directive):
+                raise SgprHazardError(f"directive {directive} is not supported in kernel code")
             continue
-        op = parseLine(i, raw, symbols)
-        if op is not None:
+        if directive in macros:
+            raise SgprHazardError(f"macro invocation {directive} is not supported")
+        for op in parseLine(i, raw, symbols, objdump):
             op.raw = raw
             ops.append(op)
+    return ops
 
+
+def analyze(lines: List[str]) -> Tuple[List[Op], Dict[int, int]]:
+    """Return the parsed ops and {op index: WA_* waits needed before that op}."""
+    ops = _parse(lines)
     labels = {op.label: i for i, op in enumerate(ops) if op.kind == "label"}
     addressTaken = {name for op in ops if op.kind in ("salu", "valu") and op.target is None
                     for name in op.refs if name in labels}
@@ -516,34 +597,62 @@ def analyze(lines: List[str]) -> Tuple[List[Op], Dict[int, int]]:
     return ops, waits
 
 
+_FIELDS = ((WA_VALU, "va_sdst"), (WA_VCC, "va_vcc"), (WA_SALU, "sa_sdst"))
+
+
 def waitText(w: int) -> str:
-    fields = []
-    if w & WA_VALU:
-        fields.append("depctr_va_sdst(0)")
-    if w & WA_VCC:
-        fields.append("depctr_va_vcc(0)")
-    if w & WA_SALU:
-        fields.append("depctr_sa_sdst(0)")
-    return "s_wait_alu " + " ".join(fields)
+    return "s_wait_alu " + " ".join(f"depctr_{name}(0)" for bit, name in _FIELDS if w & bit)
+
+
+def _mergeWait(raw: str, w: int) -> str:
+    code, sep, comment = raw.partition("//")
+    code = code.rstrip()
+    for bit, name in _FIELDS:
+        if w & bit:
+            field_ = re.compile(rf"depctr_{name}\(\d+\)")
+            code = field_.sub(f"depctr_{name}(0)", code) if field_.search(code) else \
+                f"{code} depctr_{name}(0)"
+    return f"{code} {sep}{comment}" if sep else code
 
 
 def insertSgprHazardWaits(asm: str) -> Tuple[str, int]:
     """Insert the s_wait_alu instructions gfx1200/gfx1201 need for SGPR read hazards.
 
-    Returns the new assembly and the number of waits added.
+    A wait goes in front of an s_delay_alu that precedes its instruction, so the delay hint keeps
+    its target, and folds into an s_wait_alu right before it. Returns the new assembly and the
+    number of hazard sites covered.
     """
     lines = asm.split("\n")
     ops, waits = analyze(lines)
     if not waits:
         return asm, 0
-    before: Dict[int, int] = {}
+    inserts: Dict[int, int] = {}  # op index -> waits to put in front of it
+    merges: Dict[int, int] = {}  # index of an existing s_wait_alu -> fields to add to it
     for i, w in waits.items():
-        before[ops[i].line] = before.get(ops[i].line, 0) | w
+        j = i
+        if j > 0 and ops[j - 1].mnemonic == "s_delay_alu":
+            j -= 1
+        if j > 0 and ops[j - 1].mnemonic == "s_getpc_b64":
+            # s_add_i32 sY, label, 4 after s_getpc_b64 assumes it is the instruction at the PC.
+            raise SgprHazardError(f"a wait would split the s_getpc_b64 sequence at {ops[j].raw!r}")
+        if j > 0 and ops[j - 1].kind == "waitalu" and _DEPCTR_FIELD.search(ops[j - 1].raw):
+            merges[j - 1] = merges.get(j - 1, 0) | w
+        else:
+            inserts[j] = inserts.get(j, 0) | w
+    byLine = {ops[j].line: (ops[j].col, w) for j, w in inserts.items()}
+    mergeLines = {ops[j].line: w for j, w in merges.items()}
     out = []
     for n, raw in enumerate(lines):
-        w = before.get(n)
-        if w:
-            indent = raw[:len(raw) - len(raw.lstrip())]
-            out.append(f"{indent}{waitText(w)} // SGPR read hazard")
+        if n in mergeLines:
+            raw = _mergeWait(raw, mergeLines[n])
+        if n not in byLine:
+            out.append(raw)
+            continue
+        col, w = byLine[n]
+        indent = raw[:len(raw) - len(raw.lstrip())]
+        if col:
+            out.append(raw[:col].rstrip())
+            raw = indent + raw[col:]
+        out.append(f"{indent}{waitText(w)} // SGPR read hazard")
         out.append(raw)
-    return "\n".join(out), len(before)
+    return "\n".join(out), len(waits)

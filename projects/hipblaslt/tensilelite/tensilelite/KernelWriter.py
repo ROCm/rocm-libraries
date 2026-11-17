@@ -12800,9 +12800,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       (error, kb) = self.kernelBodySubtile(kernel, tensorParametersA, tensorParametersB)
 
     kb = str(kb)
-    if self.states.archCaps.get("HasVALUReadSGPRHazard", 0):
-      kb, numWaits = insertSgprHazardWaits(kb)
-      print2(f"  {numWaits} s_wait_alu added for gfx12 SGPR read hazards")
+    if self.states.archCaps["HasVALUReadSGPRHazard"]:
+      kb, numHazards = insertSgprHazardWaits(kb)
+      print2(f"  {numHazards} gfx12 SGPR read hazards covered with s_wait_alu")
     fileString += kb
 
     if isPersistentDataParallel(kernel) or isStreamKSpatialCluster(kernel):
