@@ -4277,10 +4277,10 @@ namespace
         }
         /**
          * Whether candidates are timed with HIP events rather than the host clock.
-         * Not on Windows: HIP's PAL backend writes later launches' end times into an
-         * event record's timestamp and derives elapsed time from the host clock
-         * (ROCm/rocm-systems#13190), so an event pair there doesn't time the batch it
-         * brackets.
+         * Not on Windows until the minimum supported runtime has ROCm/rocm-systems#13190.
+         * Without it, HIP's PAL backend writes later launches' end times into an event
+         * record's timestamp and derives elapsed time from the host clock, so an event
+         * pair does not time the batch it brackets.
          */
         static constexpr bool gpuTimer()
         {
@@ -5428,7 +5428,7 @@ namespace
         // launches, then one timed batch of hot launches with the instruction cache
         // flushed after each and the flush's per-device cost taken back out, the
         // lowest time winning. Tune mode times on HIP events, or on the host clock
-        // between stream synchronizations where events can't time a batch.
+        // between stream synchronizations where events cannot time a batch.
         hipblaslt_bench::TimingConfig timing;
         timing.iters         = TuningPolicy::hotIterations();
         timing.use_gpu_timer = TuningPolicy::gpuTimer();
