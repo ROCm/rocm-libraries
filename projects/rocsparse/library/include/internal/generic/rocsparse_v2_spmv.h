@@ -101,7 +101,7 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  with different \f$x\f$ and \f$y\f$ vectors. A \p rocsparse_spmv_descr can be analyzed only once. If it holds an analysis of the arrays of a CSR, CSC or BSR
 *  sparse matrix descriptor, the computation stage returns \ref rocsparse_status_invalid_value after these arrays are replaced with \ref rocsparse_csr_set_pointers,
 *  \ref rocsparse_csc_set_pointers or \ref rocsparse_bsr_set_pointers, also when the same pointers are passed after their contents changed, and when it is called
-*  with another sparse matrix descriptor than the one that was analyzed. Create and analyze a new \p rocsparse_spmv_descr in these cases.
+*  with a sparse matrix descriptor other than the analyzed one. Create and analyze a new \p rocsparse_spmv_descr in these cases.
 *
 *  \note The stage \ref rocsparse_v2_spmv_stage_analysis is mandatory. An error will be returned if that stage was not executed before the stage \ref rocsparse_v2_spmv_stage_compute.
 *

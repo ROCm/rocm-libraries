@@ -1205,6 +1205,9 @@ namespace
 
     // An analyzed rocsparse_spmv_descr refuses to compute with another matrix
     // descriptor, even one over the same arrays, and still computes with its own.
+    // The adaptive, LRB and nnz-split compute stages already refuse a matrix
+    // descriptor other than the analyzed one, so this guards the documented
+    // contract rather than the set_pointers check.
     template <typename T>
     void v2_another_descriptor(rocsparse_handle handle, fmt f, const config& c)
     {
