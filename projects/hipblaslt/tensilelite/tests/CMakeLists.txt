@@ -783,6 +783,14 @@ foreach(COMBO
     list(GET COMBO 5 SCALEAB_ALPHA)
     set(I8_ARGS ${F32_SIZES} --type i8 --typeCD ${TYPE_CD} --typeAlpha ${TYPE_ALPHA} --validate)
 
+    # Integer ScaleAB has no fractional alpha; retain the smaller
+    # output-range case while large-K reduction coverage runs separately.
+    set(I8_SCALE_ARGS ${I8_ARGS})
+    if("${TYPE_ALPHA}" STREQUAL "i32")
+        set(I8_SCALE_ARGS ${F16_SIZES} --type i8 --typeCD ${TYPE_CD}
+            --typeAlpha ${TYPE_ALPHA} --validate)
+    endif()
+
     foreach(TRANS NN TN NT TT)
         get_trans_flags(${TRANS} TFLAGS)
         add_cpu_gemm_test(slow_${NAME}_${TRANS}
@@ -804,7 +812,7 @@ foreach(COMBO
     )
     foreach(MODE Scalar Vector)
         add_cpu_gemm_test(slow_${NAME}_ScaleAB_${MODE}
-            ARGS ${I8_ARGS} --alpha ${SCALEAB_ALPHA} --useScaleAB ${MODE}
+            ARGS ${I8_SCALE_ARGS} --alpha ${SCALEAB_ALPHA} --useScaleAB ${MODE}
         )
     endforeach()
     add_cpu_gemm_test(slow_${NAME}_Batched
