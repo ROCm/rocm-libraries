@@ -1,0 +1,38 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact,classes=v,report,apply,quadrant=plan,pinReg=v2:255+v257:1023 --InsertVgprMsbPass --remarks --vgpr-msb-mode=msb16 --print-output 2>&1
+#
+# quadrant=plan, end to end.
+#
+# The loop stores v1 and then v256 through the address in v0, so its two
+# stores need different bank words: the producer's colouring costs two
+# switches an iteration. Holding every other register leaves exactly v0, v1
+# and v256 free, two in bank 0 and one in bank 1.
+#
+# Packing from the bottom keeps the address in bank 0 with one of the data
+# values, and the stores still differ. The plan prices the loop first and puts
+# the address alone in bank 1 and both data values in bank 0, where the two
+# stores need one word. The report says so before anything is written -- all
+# three planned blocks landed in their banks -- and the pass, running on the
+# applied registers, emits one switch in the loop.
+#
+# CHECK: msb[loop=2->1] plan[3/3]
+# CHECK-LABEL: ^loop:
+# CHECK-NEXT: "st.s_set_vgpr_msb"(1)
+# CHECK-NEXT: "st.ds_store_b32"(v256, v0)
+# CHECK-NEXT: "st.ds_store_b32"(v256, v1)
+# CHECK-NEXT: "st.s_cbranch_scc1"
+
+st.func @allocation_bank_plan() {
+^entry:
+  v0 = "st.v_mov_b32"(0)
+  v1 = "st.v_mov_b32"(0)
+  v256 = "st.v_mov_b32"(0)
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.ds_store_b32"(v0, v1) { mod.ds = { offset = 0, gds = false } }
+  "st.ds_store_b32"(v0, v256) { mod.ds = { offset = 4, gds = false } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"()
+}

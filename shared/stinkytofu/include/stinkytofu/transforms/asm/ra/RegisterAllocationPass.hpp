@@ -93,7 +93,14 @@ struct RegisterAllocationOptions {
     /// and searches the whole file only when that bank has no room. Values that
     /// stay in their producer's bank need no s_set_vgpr_msb switch the producer
     /// did not already pay for, at the cost of a less compact colouring.
-    enum class Quadrant { Any, Prefer };
+    ///
+    /// Plan chooses that bank instead. Before placement, each block used in a
+    /// loop gets the bank that costs fewest predicted s_set_vgpr_msb, within what
+    /// each bank can hold, and is placed there when it fits. Only the compacting
+    /// allocators plan, and only on a target that selects banks this way;
+    /// elsewhere it is Any. A planned colouring that is refused gives way to one
+    /// made without the plan.
+    enum class Quadrant { Any, Prefer, Plan };
     Quadrant quadrant = Quadrant::Any;
 
     bool applyToOperands = false;  // false = shadow

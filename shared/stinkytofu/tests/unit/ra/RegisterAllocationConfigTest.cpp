@@ -101,6 +101,12 @@ TEST(RegisterAllocationConfigTest, EveryKeyReachesTheOptions) {
     EXPECT_TRUE(parsed("rules=all").options.rules.activateAll);
 }
 
+TEST(RegisterAllocationConfigTest, TheQuadrantCanBePlanned) {
+    EXPECT_EQ(parsed("quadrant=plan").options.quadrant, Quadrant::Plan);
+    EXPECT_EQ(canonical("3,quadrant=plan"), "3,quadrant=plan");
+    EXPECT_EQ(canonical("3,quadrant=prefer"), "3,quadrant=prefer");
+}
+
 TEST(RegisterAllocationConfigTest, BlanksAndEmptyWordsAreIgnored) {
     const RegisterAllocationConfig config = parsed(" apply , classes = vs ,");
     EXPECT_EQ(config.mode, Mode::Apply);
@@ -115,7 +121,7 @@ TEST(RegisterAllocationConfigTest, AnUnknownWordIsAnErrorThatNamesIt) {
 TEST(RegisterAllocationConfigTest, ABadValueSaysWhatTheKeyTakes) {
     EXPECT_NE(errorOf("unbankable=freeze").find("hold, allocate or auto"), std::string::npos);
     EXPECT_NE(errorOf("classes=x").find("s, v or vs"), std::string::npos);
-    EXPECT_NE(errorOf("quadrant=strict").find("any or prefer"), std::string::npos);
+    EXPECT_NE(errorOf("quadrant=strict").find("any, prefer or plan"), std::string::npos);
     EXPECT_NE(errorOf("mode=7").find("0..3"), std::string::npos);
     EXPECT_NE(errorOf("pinReg=x3").find("'x3'"), std::string::npos);
     EXPECT_NE(errorOf("regionEnd=").find("label"), std::string::npos);

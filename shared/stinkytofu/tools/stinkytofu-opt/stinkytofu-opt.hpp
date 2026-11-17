@@ -209,8 +209,10 @@ const std::vector<PassInfo> availablePasses = {
     //                       a ceiling, before the free blocks; hold keeps the
     //                       register the producer chose; auto (default) tries
     //                       allocate and falls back to hold
-    //   quadrant=any|prefer — prefer searches the VGPR bank the producer used
-    //                       for each block before the rest of the file
+    //   quadrant=any|prefer|plan — prefer searches the VGPR bank the producer
+    //                       used for each block before the rest of the file;
+    //                       plan chooses that bank for each block used in a
+    //                       loop, to cut predicted s_set_vgpr_msb
     //   report            — emit the shadow comparison (peak, highest, regionPeak)
     //   emitRegisterMap   — after apply, insert a producer→allocated TEXTBLOCK
     //   emitSymbolBreadcrumbs — after apply, append "// s18 was sgprTmp" comments

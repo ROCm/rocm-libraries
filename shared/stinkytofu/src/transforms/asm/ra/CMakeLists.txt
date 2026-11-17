@@ -17,6 +17,7 @@ target_sources(stinkytofu_objs PRIVATE
     VgprMsbPrediction.cpp
     VgprMsbStreamModel.cpp
     allocators/LegacyIdentityAllocator.cpp
+    allocators/BankPlanner.cpp
     allocators/GreedyAllocator.cpp
     allocators/FreedomOrderedGreedyAllocator.cpp
     allocators/OrderedGreedyAllocators.cpp

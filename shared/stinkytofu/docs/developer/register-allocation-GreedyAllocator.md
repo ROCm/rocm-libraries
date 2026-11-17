@@ -27,7 +27,7 @@ A policy never sees a rule and never sees an architecture. It queries `context.r
 
 A function with no SSA values returns an empty `AllocationResult`, not an error.
 
-## 2. Five phases
+## 2. Six phases
 
 ```mermaid
 flowchart TD
@@ -37,10 +37,15 @@ flowchart TD
     Fold -->|yes, hints on| Measure
     Fold -->|no| FoldPairs["2 - foldPairs<br/>merge blocks a preference wants on one register"]
     FoldPairs --> Measure["3 - measure<br/>weight, freedom, hint base, pin reason"]
-    Measure --> Place["4 - place<br/>policy order, with eviction"]
+    Measure --> Plan["4 - planBanks<br/>quadrant=plan only: a VGPR bank per block used in a loop"]
+    Plan --> Place["5 - place<br/>pinned, capped, planned, then policy order, with eviction"]
+    Place -->|"no register, and a plan was made"| Replan["rerun without the plan"]
     Place -->|"no register, and something was folded"| Retry["retry with folding off"]
     Place -->|"no register, nothing folded"| Fail
-    Place --> Emit["5 - assign<br/>base + offset per member"]
+    Replan --> Emit
+    Replan -->|"no register, and something was folded"| Retry
+    Replan -->|"no register, nothing folded"| Fail
+    Place --> Emit["6 - assign<br/>base + offset per member"]
     Retry --> Emit
     Retry -->|still no register| Fail
     Emit --> Result["AllocationResult"]
@@ -53,6 +58,8 @@ Two things about that diagram are worth saying out loud.
 **Folding only happens with hints off.** Hint-following exists to reproduce the producer's numbering. Folding two blocks the producer kept apart leaves them with no hint they agree on, so the run would stop reproducing anything, which is the one thing it is for.
 
 **A fold never decides whether a kernel colours.** Folding asks placement for one long run of registers where two shorter runs would have done. If that is what refused the colouring, the whole run is retried with folding off. A soft rule may make a colouring better; it may not make it impossible. When the retry refuses too, its refusal is the one returned, with the folded attempt's own appended on a `with folding:` line, so a fold that ran and also failed does not read like no fold at all.
+
+**Neither does a bank plan.** Under `quadrant=plan` the context carries a cost for each choice of VGPR banks (`AllocationContext::bankCost`), and a compacting run gives each block used in a loop a bank before it places anything (section 6.1). Those blocks are placed right after the capped ones, most register-time first, so each finds room in its bank before the queue fills it. A plan sees neither alignment nor fragmentation, so placing by it can refuse where placing without it would not. The run then starts over without the plan, folding retry included, and the planned attempt's refusal goes to `AllocationContext::planOutcome` for the report, or onto a `with the bank plan:` line when the rerun refuses too. A hint-following run never plans, for the reason it never folds.
 
 ## 3. It places blocks, not values
 
@@ -262,6 +269,13 @@ Without an Active price and with no open pairing, `pickBase` is plain ascending 
 The scan stops as soon as a base costs nothing, since penalties are never negative and zero is the best any base can do. That early exit is why a preference's `benefit` must never be negative.
 
 A block with a planned bank (`Block::plannedBank`) has `pickBase` first scan that 256-register VGPR bank, lowest base first, and take the first acceptable base without scoring; only when that bank has no room does it fall through to the whole-file search above. Under `quadrant=prefer` (`AllocationContext::preferProducerQuadrant`) `measure()` plans every V block with a hint into the bank that holds its hint base. An operand's bank is what its `s_set_vgpr_msb` slot selects, so a block that stays in the producer's bank needs no switch the producer did not already pay for. It is a preference rather than a rule, which is why it sits here and not in `reachableAt`: a block always falls back to wherever it fits.
+
+Under `quadrant=plan`, `planBanks` (`allocators/BankPlanner.hpp`) chooses the bank instead, between `measure()` and `place()`:
+
+- **What it plans.** Every unpinned, uncapped V block no wider than a bank with a member the cost model weights as used in a loop. Pinned blocks stay in the banks their hints imply and capped blocks under their ceiling; every other block is undecided, which the model prices as `kUnknownBank`.
+- **What a bank can hold.** Its free registers, allocatable and not held, against the live width of its planned and fixed members at every slot, kept per bank in a segment tree. A plan therefore never asks a bank for more registers than it has at once, but alignment and fragmentation are left to placement, which falls back to the whole file.
+- **How it chooses.** Two starting points: each block in the producer's bank, largest first; and each block, in the order blocks become live, in the bank that costs least next to those already given one. The one that leaves fewer blocks without a bank and then costs less is kept. Deterministic hill climbing follows: a block moves to a cheaper bank with room, or swaps with a block of its width when the cheaper bank is full.
+- **What it costs against.** `AllocationContext::bankCost`, a `BankCostModel`. The engine never learns why one bank costs more than another, so no policy names an encoding or a chip.
 
 Two things deliberately *not* priced. A hint still wins outright when it is available and hints are on: following it reproduces the producer's numbering, which the whole shadow-comparison workflow rests on. And a price where the hardware wants a veto is the wrong channel: the compacting policies run with `followHints=false`, and a price binds only policies that ask; the policy most likely to break a placement rule is the one most likely to ignore a preference.
 
