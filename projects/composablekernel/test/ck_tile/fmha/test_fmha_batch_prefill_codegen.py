@@ -33,11 +33,12 @@ _TAIL_SET = {(128, 64, 64, m) for m in ("s_no", "s_mask")}
 _QS = (64, 129, 512, 2048, 2051, 2179, 8192)
 _HQS = (1, 4, 8, 32, 64)
 _KVS = (1024, 4096, 16384, 32768)
-# One query head on both sides of each grid threshold of the dispatch (128, 256, 512 and 576 M128
-# workgroups on 256 CUs), WG = ceil(q / 128); the last query tile full, of 64 rows or of one row.
+# One query head on both sides of each grid threshold of the dispatch (128, 256, 384, 512 and 576
+# M128 workgroups on 256 CUs), WG = ceil(q / 128); the last query tile full, of 64 rows or of one
+# row.
 _EDGE_QS = tuple(
     q
-    for wg in (128, 129, 256, 257, 512, 513, 576, 577)
+    for wg in (128, 129, 256, 257, 384, 385, 512, 513, 576, 577)
     for q in (128 * wg, 128 * wg - 64, 128 * wg - 127)
 )
 _SPLIT = "a.num_splits == 2 && a.o_acc_ptr != nullptr && a.lse_acc_ptr != nullptr"
@@ -51,6 +52,16 @@ def _split_targs(trait: str):
     return int(m.group(1) or 1), int(m.group(2) or 0)
 
 
+def _unsplit(page, dim, wg):
+    """Unsplit arm on a 256-CU gfx1250: M64 while the M128 grid has at most one workgroup per CU,
+    for D64 with 64-token pages up to one and a half; M128 beyond."""
+    return (
+        "m64"
+        if wg <= 256 or (dim == 64 and page == 64 and 2 * wg <= 3 * 256)
+        else "m128"
+    )
+
+
 def _pick(page, dim, dense, wg, kv, q):
     """Route of the measured configuration on a 256-CU gfx1250 (B = 1): KV-split M128 /
     KV-split M64 / query tail / M64 / M128. Whether to split is the caller's part of it."""
@@ -62,7 +73,7 @@ def _pick(page, dim, dense, wg, kv, q):
     if dense and kv >= 4096:
         if wg <= 128 or (dim == 64 and kv >= 16384 and (wg <= 256 or 512 < wg <= 576)):
             return "split_m64"
-    return "m64" if wg <= 256 else "m128"
+    return _unsplit(page, dim, wg)
 
 
 def _pick_split(page, dim, dense, wg, q, batch=1):
@@ -81,12 +92,15 @@ def _pick_split(page, dim, dense, wg, q, batch=1):
     return "split_m64" if m64 else "split_m128"
 
 
-def _holds(constraint, wg, q, num_splits, mask="no_mask", window_size_left=-1, batch=1):
-    """Value of a rendered dispatch constraint for a problem of `batch` sequences on a 256-CU
-    device whose caller asks for num_splits and passes the workspace; mask: the problem's
-    mask_enum value."""
+def _holds(
+    constraint, wg, q, num_splits, mask="no_mask", window_size_left=-1, batch=1, *, page
+):
+    """Value of a rendered dispatch constraint for a problem of `batch` sequences with `page`-token
+    pages on a 256-CU device whose caller asks for num_splits and passes the workspace; mask: the
+    problem's mask_enum value."""
     e, bottom_right = constraint, str(mask == "mask_bottom_right")
     for cpp, value in (
+        ("t.page_size", str(page)),
         ("a.o_acc_ptr != nullptr", "True"),
         ("a.lse_acc_ptr != nullptr", "True"),
         ("a.num_splits", str(num_splits)),
@@ -279,9 +293,12 @@ class BatchPrefillCodegenTest(unittest.TestCase):
             # A masked split takes bottom-right masks without a left window only.
             if k.F_pipeline.F_mask != "s_no":
                 shape = (200, 25600, 2)  # WG, Q, num_splits
+                page = k.F_page_size
                 for mask, left in (("mask_top_left", -1), ("mask_bottom_right", 64)):
-                    self.assertFalse(_holds(constraint, *shape, mask, left))
-                self.assertTrue(_holds(constraint, *shape, "mask_bottom_right"))
+                    self.assertFalse(_holds(constraint, *shape, mask, left, page=page))
+                self.assertTrue(
+                    _holds(constraint, *shape, "mask_bottom_right", page=page)
+                )
         # Query tail: the M128 instance on the full tiles, the KV split of the rest.
         tails = [k for k in kernels if k.F_tile.F_query_tail_rows != 0]
         self.assertEqual(
@@ -334,7 +351,14 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                         t
                         for t in arms
                         if _holds(
-                            str(t.constraint), wg, q, num_splits, problem, left, batch
+                            str(t.constraint),
+                            wg,
+                            q,
+                            num_splits,
+                            problem,
+                            left,
+                            batch,
+                            page=page,
                         )
                     ),
                     None,
@@ -364,7 +388,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                         _pick_split(page, dim, mask == "s_no", wg, q, batch),
                         (q, hq, batch),
                     )
-                unsplit = "m64" if wg <= 256 else "m128"
+                unsplit = _unsplit(page, dim, wg)
                 self.assertEqual(route(wg, q, 1), unsplit, (q, hq))
                 # Masks outside the split's domain (top-left, a bottom-right window with a left
                 # size, generic windows) match no split arm and take the unsplit arms.
