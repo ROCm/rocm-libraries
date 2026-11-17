@@ -1122,9 +1122,11 @@ namespace hipblaslt_ext
     /*! \ingroup types_module
      *  \brief hipBLASLt extension that runs one GEMM as slices on several devices.
      *
+     *  \warning This is a beta API. It may change in a future release.
+     *
      *  \details A device that is partitioned (for example DPX) shows up as several HIP
      * devices. A PartitionedGemm takes the full problem, gives each partition a slice of it
-     * (see SplitDim), and launches the slices on one stream per partition. It owns one
+     * (see  \ref hipblaslt_ext::SplitDim), and launches the slices on one stream per partition. It owns one
      * Gemm per partition and does not allocate memory or copy data.
      *
      *  Handle, stream, workspace, pointer and event number ``i`` all belong to partition
@@ -1134,10 +1136,10 @@ namespace hipblaslt_ext
      * partitions are then just run one after another or concurrently on one device, with no
      * speed benefit.
      *
-     *  Calls follow the order of Gemm: setProblem, algoGetHeuristic (or isAlgoSupported),
-     * initialize, then run. Call setProblem again to change a pointer.
+     *  Calls follow the order of Gemm: setProblem, algoGetHeuristic (or #isAlgoSupported),
+     * #initialize, then #run. Call setProblem again to change a pointer.
      *
-     *  The first version supports plain GEMM: no epilogue, no scale or aux inputs and no MX
+     *  The current implementation supports plain GEMM: no epilogue, no scale or aux inputs, and no MX
      * types. Device user arguments are declared but not supported yet.
      */
     class PartitionedGemm

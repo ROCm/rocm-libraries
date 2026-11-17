@@ -7,11 +7,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Extension API `hipblaslt_ext::PartitionedGemm` that runs one GEMM as slices on the devices of
-  a partitioned GPU (for example DPX), with one handle, stream and workspace per partition,
+  a partitioned GPU (for example, a device in DPX mode), with one handle, stream, and workspace per partition,
   `SplitDim::M`, `SplitDim::N` or `SplitDim::Batch`, and one pointer per partition for each
   matrix (the same pointer shares a matrix, different pointers replicate it). hipBLASLt
   allocates and copies nothing.
-  Plain GEMM only; the device user arguments overloads return `HIPBLAS_STATUS_NOT_SUPPORTED`.
+  Only plain GEMM is supported; the device user arguments overloads return `HIPBLAS_STATUS_NOT_SUPPORTED`.
+  This is a beta API: it may change in a future release.
   Added `hipblaslt-bench --partitions N --split_dim M|N|B` (which runs `testing_matmul` through
   `PartitionedGemm` with the same data, reference and verification), the `partitioned_gemm_ext`
   tests in `hipblaslt-test` and `samples/31_hipblaslt_gemm_partitioned_ext`.
