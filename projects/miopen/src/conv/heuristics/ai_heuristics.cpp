@@ -690,8 +690,10 @@ static bool HasLegacyTunaNetSupport(const std::string& device)
  */
 static bool HasNDTunaNetSupport(const std::string& device)
 {
-    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures
-    return (device == "gfx942" || device == "gfx950");
+    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures.
+    // Normalize first so a runtime sub-target (e.g. "gfx1250-strict") still matches.
+    const std::string arch = common::NormalizeArch(device);
+    return (arch == "gfx942" || arch == "gfx950" || arch == "gfx1250");
 }
 
 bool HasBundledTunaNetModels(const std::string& device)
@@ -1162,7 +1164,22 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
     {
         if(common::IsTunaNetCategoricalFeature(feature_name))
             continue;
-        features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
+        if(feature_name == "num_cu")
+        {
+            // Combined multi-arch models add num_cu as a raw numeric input (metadata gpu.num_cu).
+            features.push_back(static_cast<float>(num_cu));
+        }
+        else if(feature_name == "arch")
+        {
+            // Combined gfx950+gfx1250 models add a binary arch input (gfx950=0, gfx1250=1). Each
+            // per-arch model file serves a single device, so emit that device's arch bit.
+            const bool is_gfx1250 = metadata.GetModelPrefix().find("gfx1250") != std::string::npos;
+            features.push_back(is_gfx1250 ? 1.0f : 0.0f);
+        }
+        else
+        {
+            features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
+        }
     }
 
     const auto gemm_dir = problem.GetDirection() == conv::Direction::Forward
@@ -1203,7 +1220,10 @@ public:
     MetadataND metadata;
 
     explicit TunaNetNDModel(const std::string& device, const int& dim)
-        : device_name(device), metadata(MetadataND(device, dim))
+        // Normalize the arch so a runtime sub-target (e.g. "gfx1250-strict") loads the
+        // "gfx1250_*" model/metadata files and matches the per-arch gates below.
+        : device_name(common::NormalizeArch(device)),
+          metadata(MetadataND(common::NormalizeArch(device), dim))
     {
         MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << " dim: " << dim);
     }
@@ -1290,7 +1310,7 @@ protected:
 
         std::vector<float> features = {};
         if((problem.Is2d() || problem.Is3d()) &&
-           (device_name == "gfx950" || device_name == "gfx942"))
+           (device_name == "gfx950" || device_name == "gfx942" || device_name == "gfx1250"))
         {
             features = ExtractTunaNetNDFeatures(problem, isFwd, metadata);
         }

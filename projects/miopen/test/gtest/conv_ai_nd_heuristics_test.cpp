@@ -87,7 +87,7 @@ protected:
         device_name = handle.GetDeviceName();
 
         // Check if device is in the list of devices that support ND models
-        if(device_name != "gfx942" && device_name != "gfx950")
+        if(device_name != "gfx942" && device_name != "gfx950" && device_name != "gfx1250")
         {
             GTEST_SKIP() << "Device " << device_name << " not in supported list for " << spatial_dim
                          << "D TunaNet models";
@@ -485,6 +485,9 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGolden)
 {
     if(spatial_dim != 2)
         GTEST_SKIP() << "Engineered input features are 2D-only";
+    if(device_name == "gfx1250")
+        GTEST_SKIP() << "gfx1250 uses retrained pooled TunaNet metadata (num_cu/arch inputs); "
+                        "the gfx942/gfx950 golden contract does not apply";
 
     immed_mode::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());

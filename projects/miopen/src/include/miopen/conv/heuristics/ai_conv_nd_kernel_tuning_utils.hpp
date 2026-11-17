@@ -241,7 +241,9 @@ RunParameterPredictionModel(
     std::vector<std::vector<std::string>> heuristic_kernels;
     FillHeuristicKernels(valid_kernels, heuristic_indexes, heuristic_kernels);
     // Prepare features and split_k values
-    const std::string& arch = ctx.GetStream().GetDeviceName();
+    // Normalize so a runtime sub-target (e.g. "gfx1250-strict") matches the gates and the
+    // per-arch candidate-selection model files (keyed on "gfx1250").
+    const std::string arch = miopen::ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
 
     // Use AI model to select best candidate
     try
@@ -291,11 +293,9 @@ RunParameterPredictionModel(
     }
     catch(const std::exception& ex)
     {
-        // Catch std::exception, not just miopen::Exception: a model fdeep cannot load/run
-        // (e.g. one exported in an incompatible format) throws a non-miopen exception, and at
-        // runtime that must degrade to the non-AI heuristic rather than fail the convolution.
-        // (Broken bundled models are caught loudly by the dedicated model-load gtest, so this
-        // graceful fallback does not hide them in CI.)
+        // Catch std::exception (not just miopen::Exception): a model that fails to load/run must
+        // degrade to the non-AI heuristic, not fail the convolution. Broken bundled models are
+        // caught by the dedicated model-load gtest, so this fallback doesn't hide them in CI.
         MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
         return {false, miopen::ai::tuning::candidate_selection::CandidateSelectionResult{}};
     }
@@ -406,21 +406,23 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      CKValidatorCreatorFunc&& ck_val_creator = nullptr,
                      bool use_tf32                           = false)
 {
-    const std::string& arch = ctx.GetStream().GetDeviceName();
+    // Normalize so a runtime sub-target (e.g. "gfx1250-strict") matches the gates and the
+    // per-arch candidate-selection model files (keyed on "gfx1250").
+    const std::string arch = miopen::ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
 
     MIOPEN_LOG_I2(solver_cfg.solver_name << ": RunAIHeuristics on " << arch
                                          << " (use_tf32=" << std::boolalpha << use_tf32 << ")");
 
     // Only applicable for supported architectures
-    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch != "gfx1250")
     {
         MIOPEN_LOG_I2(solver_cfg.solver_name
                       << ": Unsupported architecture, skipping AI heuristics");
         return false;
     }
 
-    // Candidate Selection heuristics for gfx942/gfx950
-    if(arch == "gfx942" || arch == "gfx950")
+    // Candidate Selection heuristics for gfx942/gfx950/gfx1250
+    if(arch == "gfx942" || arch == "gfx950" || arch == "gfx1250")
     {
         MIOPEN_LOG_I2(solver_cfg.solver_name << ": Candidate Selection heuristics for " << arch);
         std::string solver_name = solver_cfg.GetSolverNameForArch(arch);
