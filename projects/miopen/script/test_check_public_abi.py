@@ -879,9 +879,7 @@ def run_check_wrapper(
 ):
     """Run `check-wrapper` through main() against stand-ins for the two libraries."""
     baseline = tmp_path / "public_symbols.baseline"
-    baseline.write_text("miopenFoo\nmiopenBar\nmiopenExcluded\n")
-    excluded = tmp_path / "excluded_symbols.txt"
-    excluded.write_text("miopenExcluded\n")
+    baseline.write_text("miopenFoo\nmiopenBar\nmiopenHidden\n")
     listed = tmp_path / "wrapper_only_symbols.txt"
     listed.write_text("".join(sym + "\n" for sym in wrapper_only))
     libs = {"libMIOpen.so": wrapper, "libMIOpen_private.so": private}
@@ -892,8 +890,6 @@ def run_check_wrapper(
             "libMIOpen.so",
             "--baseline",
             str(baseline),
-            "--excluded",
-            str(excluded),
             "--wrapper-only",
             str(listed),
             "--private-lib",
@@ -904,11 +900,13 @@ def run_check_wrapper(
 
 
 def good_wrapper(**overrides):
-    return wrapper_elf(**{"symbols": ("miopenFoo", "miopenBar"), **overrides})
+    return wrapper_elf(
+        **{"symbols": ("miopenFoo", "miopenBar", "miopenHidden"), **overrides}
+    )
 
 
 def good_private(**overrides):
-    symbols = ("miopenFoo_impl", "miopenBar_impl", "miopenExcluded")
+    symbols = ("miopenFoo_impl", "miopenBar_impl", "miopenHidden_impl")
     return private_elf(**{"symbols": symbols, **overrides})
 
 
@@ -925,10 +923,26 @@ def test_check_wrapper_fails_on_a_coversion_mismatch(tmp_path, monkeypatch, caps
 
 def test_check_wrapper_fails_on_a_missing_stub(tmp_path, monkeypatch, capsys):
     private = good_private(
-        symbols=("miopenFoo_impl", "miopenBar_impl", "miopenBaz_impl", "miopenExcluded")
+        symbols=(
+            "miopenFoo_impl",
+            "miopenBar_impl",
+            "miopenBaz_impl",
+            "miopenHidden_impl",
+        )
     )
     assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 1
     assert "wrapper public-abi symbol check: FAIL" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_when_the_wrapper_drops_a_baseline_symbol_outside_miopen_h(
+    tmp_path, monkeypatch, capsys
+):
+    """A symbol only the private library exports is invisible to a bare -lMIOpen link."""
+    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar"))
+    assert run_check_wrapper(tmp_path, monkeypatch, wrapper, good_private()) == 1
+    out = capsys.readouterr().out
+    assert "missing from build: miopenHidden" in out
+    assert "wrapper public-abi symbol check: FAIL" in out
 
 
 def run_with_needed_baseline(tmp_path, monkeypatch, listed):
@@ -981,7 +995,7 @@ def test_check_wrapper_fails_on_a_hipdnn_backend_dependency(
 
 def test_check_wrapper_that_cannot_run_exits_2(tmp_path, monkeypatch, capsys):
     # A private library with no renamed symbols makes the superset check raise.
-    private = good_private(symbols=("miopenExcluded",))
+    private = good_private(symbols=("miopenHidden",))
     assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 2
     assert "not a flag-on private library" in capsys.readouterr().err
 
@@ -995,7 +1009,7 @@ def test_check_wrapper_that_cannot_run_exits_2(tmp_path, monkeypatch, capsys):
 
 
 def wrapper_dll(
-    symbols=("miopenFoo", "miopenBar"),
+    symbols=("miopenFoo", "miopenBar", "miopenHidden"),
     soname="MIOpen.dll",
     needed=("MIOpen_private.dll", "KERNEL32.dll"),
     file_version="3.5.1.0",
@@ -1006,7 +1020,7 @@ def wrapper_dll(
 
 
 def private_dll(
-    symbols=("miopenFoo_impl", "miopenBar_impl", "miopenExcluded"),
+    symbols=("miopenFoo_impl", "miopenBar_impl", "miopenHidden_impl"),
     soname="MIOpen_private.dll",
     file_version="3.5.1.0",
 ):
@@ -1562,7 +1576,7 @@ ACCESSOR = "miopenGetLastForwardedError"
 def test_check_wrapper_passes_an_exported_wrapper_only_symbol(
     tmp_path, monkeypatch, capsys
 ):
-    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", ACCESSOR))
+    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", "miopenHidden", ACCESSOR))
     result = run_check_wrapper(
         tmp_path, monkeypatch, wrapper, good_private(), wrapper_only=(ACCESSOR,)
     )
@@ -1603,7 +1617,7 @@ def test_check_wrapper_fails_a_wrapper_only_symbol_in_the_baseline(
 def run_with_public_header(tmp_path, monkeypatch, header_text):
     header = tmp_path / "miopen.h"
     header.write_text(header_text)
-    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", ACCESSOR))
+    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", "miopenHidden", ACCESSOR))
     return run_check_wrapper(
         tmp_path,
         monkeypatch,

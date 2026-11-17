@@ -170,6 +170,14 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # behind a public wrapper that exports only the C API.
     target_link_libraries(${lib_name} PRIVATE ${_MIOPEN_IMPL_TARGET})
 
+    # The plugins call miopenConvolutionABBackwardWeightsGetWorkSpaceSize through
+    # inline code in implicitgemm_ck_util_common.hpp. With the split on, the
+    # private library exports it only as _impl, so these sources need the same
+    # rename as the private library.
+    if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+        miopen_apply_private_rename(${lib_name})
+    endif()
+
     # Embed a Windows VERSIONINFO resource; see miopen_embed_version_resource() in
     # src/CMakeLists.txt, defined before this subdirectory is added and so visible here.
     miopen_embed_version_resource(${lib_name} "MIOpen CK Grouped-Conv Plugin (${arch_base})" ${lib_name})

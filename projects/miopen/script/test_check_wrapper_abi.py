@@ -76,8 +76,6 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 str(self.tree / "fake_abi_check.py"),
                 "--baseline",
                 os.devnull,
-                "--excluded",
-                os.devnull,
                 "--wrapper-only",
                 os.devnull,
                 *extra,
@@ -109,10 +107,8 @@ class WrapperAbiCheckTest(unittest.TestCase):
 
     def test_symbol_lists_are_forwarded_to_the_abi_check(self):
         baseline = self.tree / "baseline.txt"
-        excluded = self.tree / "excluded.txt"
         wrapper_only = self.tree / "wrapper_only.txt"
         baseline.touch()
-        excluded.touch()
         wrapper_only.touch()
         result = subprocess.run(
             [
@@ -124,8 +120,6 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 str(self.tree / "fake_abi_check.py"),
                 "--baseline",
                 str(baseline),
-                "--excluded",
-                str(excluded),
                 "--wrapper-only",
                 str(wrapper_only),
             ],
@@ -136,7 +130,6 @@ class WrapperAbiCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
         self.assertEqual(argv[argv.index("--baseline") + 1], str(baseline))
-        self.assertEqual(argv[argv.index("--excluded") + 1], str(excluded))
         self.assertEqual(argv[argv.index("--wrapper-only") + 1], str(wrapper_only))
 
     def test_needed_baseline_is_not_passed_unless_asked_for(self):
@@ -210,8 +203,6 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 str(self.tree / "fake_abi_check.py"),
                 "--baseline",
                 os.devnull,
-                "--excluded",
-                os.devnull,
                 "--wrapper-only",
                 os.devnull,
             ],
@@ -244,8 +235,6 @@ class WindowsLayoutTest(unittest.TestCase):
             "--abi-check",
             str(self.scripts / "fake_abi_check.py"),
             "--baseline",
-            os.devnull,
-            "--excluded",
             os.devnull,
             "--wrapper-only",
             os.devnull,

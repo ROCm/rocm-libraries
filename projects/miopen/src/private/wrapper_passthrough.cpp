@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // GENERATED FILE. Do not edit.
-// Source: projects/miopen/include/miopen/miopen.h
+// Source: projects/miopen/include/miopen/miopen.h and
+//         projects/miopen/src/include/miopen/miopen_internal.h
 // Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
 //
 // Pass-through stubs for the public wrapper of the MIOpen public/private split,
@@ -31,6 +32,9 @@
 #endif
 
 #include <miopen/miopen.h>
+// Also declares, with MIOPEN_EXPORT, the entry points that miopen.h does not;
+// without that declaration hidden visibility would leave their stubs unexported.
+#include <miopen/miopen_internal.h>
 
 #include "hipdnn_graph.hpp"
 #include "miopen_impl.h"
@@ -4035,4 +4039,77 @@ extern "C" miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle, miopenTun
 {
     MIOPEN_WRAPPER_DISPATCH(miopenGetTuningPolicy);
     return miopenGetTuningPolicy_impl(handle, value);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t alpha_beta_case,
+                                                   const miopenTensorDescriptor_t inputTensorDesc,
+                                                   const miopenTensorDescriptor_t outputTensorDesc,
+                                                   const miopenTensorDescriptor_t weightsTensorDesc,
+                                                   const miopenConvolutionDescriptor_t convDesc,
+                                                   size_t* buffer_size)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionABBackwardWeightsGetWorkSpaceSize);
+    return miopenConvolutionABBackwardWeightsGetWorkSpaceSize_impl(alpha_beta_case,
+                                                                   inputTensorDesc,
+                                                                   outputTensorDesc,
+                                                                   weightsTensorDesc,
+                                                                   convDesc,
+                                                                   buffer_size);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              miopenTensorDescriptor_t wDesc,
+                                              miopenTensorDescriptor_t xDesc,
+                                              miopenConvolutionDescriptor_t convDesc,
+                                              miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionForwardGetWorkSpaceSizeRange);
+    return miopenConvolutionForwardGetWorkSpaceSizeRange_impl(
+        handle, wDesc, xDesc, convDesc, yDesc, minWorkspaceSize, maxWorkspaceSize);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   miopenTensorDescriptor_t dyDesc,
+                                                   miopenTensorDescriptor_t wDesc,
+                                                   miopenConvolutionDescriptor_t convDesc,
+                                                   miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionBackwardDataGetWorkSpaceSizeRange);
+    return miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl(
+        handle, dyDesc, wDesc, convDesc, dxDesc, minWorkspaceSize, maxWorkspaceSize);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      miopenTensorDescriptor_t dyDesc,
+                                                      miopenTensorDescriptor_t xDesc,
+                                                      miopenConvolutionDescriptor_t convDesc,
+                                                      miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange);
+    return miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl(
+        handle, dyDesc, xDesc, convDesc, dwDesc, minWorkspaceSize, maxWorkspaceSize);
+}
+
+extern "C" miopenStatus_t miopenHiddenSetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc,
+                                                             int findMode)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenHiddenSetConvolutionFindMode);
+    return miopenHiddenSetConvolutionFindMode_impl(convDesc, findMode);
+}
+
+extern "C" miopenStatus_t miopenHiddenGetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc,
+                                                             int* findMode)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenHiddenGetConvolutionFindMode);
+    return miopenHiddenGetConvolutionFindMode_impl(convDesc, findMode);
 }

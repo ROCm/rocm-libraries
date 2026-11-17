@@ -74,7 +74,7 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
-- **`wrapper_abi_check` and `forwarding_failure_modes` get the same split.** They need no GPU,
+- **`wrapper_abi_check`, `wrapper_bare_link_check` and `forwarding_failure_modes` get the same split.** They need no GPU,
   but on an architecture that `test_categories.yaml` declares, the runner selects
   `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only tier labels does not match. Each
   therefore also has one entry per `ex_gpu_*` label, such as
@@ -127,6 +127,17 @@ imported and `hipdnn_backend.dll` must not), and their version resources, which 
 the same file version because a DLL name carries none. It loads neither library, so it needs
 no GPU and is registered whenever the flag is on. The packaged copy leaves out
 `--public-header`, which compares two source files that the build-tree entry already checks.
+
+`wrapper_bare_link_check` (`script/check_bare_link.py`) links a program that takes the address
+of every symbol in `public_symbols.baseline` against `-L<lib dir> -lMIOpen` alone, the way a
+pkg-config user or a configure-time `check_library_exists(MIOpen <symbol> ...)` probe does,
+and fails if any is unresolved. `wrapper_abi_check` says the wrapper exports a symbol; this
+says a consumer that does not name `libMIOpen_private` can use it. It never runs the program.
+The build-tree entry names the CMake C++ compiler. The packaged entry names none, so the
+script looks for `$CXX`, `c++`, `clang++` or `g++`, and skips (exit 77, which ctest reports as
+skipped) if there is none. It skips on Windows too, where an import library already fails the
+link for a symbol the DLL does not export. `test_check_bare_link` builds two small libraries
+shaped like a wrapper build and covers the check itself.
 
 `test_forwarding_parity_scripts` tests the harness scripts themselves. It needs no GPU or
 build output, so it carries only the tier labels. The component CI runs it in its

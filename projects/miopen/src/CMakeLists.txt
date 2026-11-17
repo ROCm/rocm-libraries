@@ -956,7 +956,7 @@ endif()
 miopen_embed_version_resource(${_MIOPEN_IMPL_TARGET} "MIOpen Library" "${_MIOPEN_IMPL_TARGET}")
 
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-    # Rename the private library's public C entry points to their _impl form by
+    # Rename the private library's C entry points to their _impl form by
     # force-including the redefinition header into every private source. The
     # header is pure preprocessor #defines and is guarded by
     # MIOPEN_BUILDING_PRIVATE, so the MIOpen source tree stays untouched. The
@@ -964,15 +964,22 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # path containing a space nor the generated .S sources added under
     # MIOPEN_INCBIN can be handed a C++ header. clang-cl takes /FI and ignores
     # -include with only a warning, which would leave the _impl names unrenamed.
-    target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOPEN_BUILDING_PRIVATE)
-    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        set(_miopen_force_include "/FI")
-    else()
-        set(_miopen_force_include "-include")
-    endif()
-    target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:${_miopen_force_include} \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
-    unset(_miopen_force_include)
+    #
+    # Code built against the private library's internals that calls a renamed
+    # entry point needs the same rename, or it would reference a plain name that
+    # only the public wrapper defines. The CK grouped-convolution plugins
+    # (src/ck_impl) do, through implicitgemm_ck_util_common.hpp.
+    function(miopen_apply_private_rename TARGET)
+        target_compile_definitions(${TARGET} PRIVATE MIOPEN_BUILDING_PRIVATE)
+        if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+            set(_miopen_force_include "/FI")
+        else()
+            set(_miopen_force_include "-include")
+        endif()
+        target_compile_options(${TARGET} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:SHELL:${_miopen_force_include} \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
+    endfunction()
+    miopen_apply_private_rename(${_MIOPEN_IMPL_TARGET})
 
     # Public wrapper library. src/private/wrapper_passthrough.cpp (generated from
     # <miopen/miopen.h> by script/generate_wrapper_sources.py) and

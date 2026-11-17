@@ -35,9 +35,6 @@ def main(argv=None, windows=ON_WINDOWS):
     parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
     parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")
     parser.add_argument(
-        "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
-    )
-    parser.add_argument(
         "--wrapper-only", default=SCRIPT_DIR / "wrapper_only_symbols.txt"
     )
     parser.add_argument(
@@ -51,7 +48,7 @@ def main(argv=None, windows=ON_WINDOWS):
         "--public-header",
         help="path to include/miopen/miopen.h; only meaningful from a build tree, "
         "since an installed tree has no include directory. Enables the check that "
-        "no excluded or wrapper-only symbol is declared there",
+        "no wrapper-only symbol is declared there",
     )
     args = parser.parse_args(argv)
 
@@ -75,8 +72,6 @@ def main(argv=None, windows=ON_WINDOWS):
         wrapper_lib,
         "--baseline",
         args.baseline,
-        "--excluded",
-        args.excluded,
         "--wrapper-only",
         args.wrapper_only,
         "--private-lib",

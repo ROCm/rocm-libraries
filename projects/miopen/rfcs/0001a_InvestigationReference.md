@@ -549,7 +549,7 @@ How many `miopen*` symbols each library exports, and what form (`nm -D --defined
 | `libMIOpen.so.1` (wrapper) | 263 | 0 | 263 |
 | `libMIOpen_private.so.1` | 4 † | 263 | 267 |
 
-† The 4 non-renamed survivors in `libMIOpen_private.so.1` are: `miopenConvolutionABBackwardWeightsGetWorkSpaceSize`, `miopenHiddenGetConvolutionFindMode`, `miopenHiddenSetConvolutionFindMode`, `miopen_sqlite3_memvfs_init`. They are not in the rename header and are unrelated to the wrapper hop.
+† The 4 non-renamed survivors in `libMIOpen_private.so.1` are: `miopenConvolutionABBackwardWeightsGetWorkSpaceSize`, `miopenHiddenGetConvolutionFindMode`, `miopenHiddenSetConvolutionFindMode`, `miopen_sqlite3_memvfs_init`. They are not in the rename header and are unrelated to the wrapper hop. This is the prototype's state: the production build now also renames and re-exports the first three, and the three `miopenConvolution*GetWorkSpaceSizeRange` functions, so a bare `-lMIOpen` link resolves them (RFC 0001 §4.2). `miopen_sqlite3_memvfs_init` is not a `miopen[A-Z]` C API entry point and is not in the symbol baseline.
 
 Undefined `miopen*` symbols in each synthetic plugin (`nm -D --undefined-only`):
 

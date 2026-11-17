@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Generate the MIOpen wrapper's derived files from include/miopen/miopen.h.
+"""Generate the MIOpen wrapper's derived files from MIOpen's declared entry points.
 
-include/miopen/miopen.h is the only file where a public entry point is written
-by hand. Everything below copies its list of entry points, so one run of this
-script writes all of them:
+Two headers declare every C entry point that libMIOpen.so exports.
+include/miopen/miopen.h is the public contract.
+src/include/miopen/miopen_internal.h declares the
+exported entry points that are not part of that contract (experimental APIs and
+the "Hidden" shims MIGraphX uses). The flag-off library exports both sets, so the
+wrapper has to as well, or a consumer that links a bare -lMIOpen loses them. An
+entry point is written by hand in exactly one of the two headers. Everything below
+copies their lists of entry points, so one run of this script writes all of them:
 
   src/private/miopen_private_rename.h   #define miopenFoo miopenFoo_impl
   src/private/miopen_impl.h             extern "C" <ret> miopenFoo_impl(<params>);
@@ -76,6 +81,7 @@ from check_public_abi import (
 STATUS_TYPE = "miopenStatus_t"
 
 PUBLIC_HEADER_RELPATH = "include/miopen/miopen.h"
+INTERNAL_HEADER_RELPATH = "src/include/miopen/miopen_internal.h"
 WRAPPER_ONLY_HEADER_RELPATH = "include_wrapper/miopen/hipdnn_forwarding.h"
 WRAPPER_RELPATH = "src/private/wrapper.cpp"
 RENAME_RELPATH = "src/private/miopen_private_rename.h"
@@ -119,7 +125,8 @@ PROVIDER_COPYRIGHT = """\
 BANNER = f"""\
 //
 // GENERATED FILE. Do not edit.
-// Source: projects/miopen/include/miopen/miopen.h
+// Source: projects/miopen/include/miopen/miopen.h and
+//         projects/miopen/src/include/miopen/miopen_internal.h
 // Regenerate: {GENERATOR_COMMAND}
 //
 """
@@ -150,8 +157,8 @@ IMPL_EXPLANATION = """\
 // through the _impl getters (hipdnn_conv.cpp, hipdnn_graph.cpp). The _impl names
 // have C linkage, so a signature that differed from the definition would link
 // cleanly and corrupt arguments at run time. Each declaration is generated from
-// the miopen.h declaration the definition is compiled from, so the two cannot
-// differ.
+// the miopen.h or miopen_internal.h declaration the definition is compiled from,
+// so the two cannot differ.
 //
 // This header is not installed, and the hipDNN provider does not use it; it
 // force-includes its own copy of the rename list instead.
@@ -186,6 +193,9 @@ PASSTHROUGH_GUARDS = """\
 #endif
 
 #include <miopen/miopen.h>
+// Also declares, with MIOPEN_EXPORT, the entry points that miopen.h does not;
+// without that declaration hidden visibility would leave their stubs unexported.
+#include <miopen/miopen_internal.h>
 
 #include "hipdnn_graph.hpp"
 #include "miopen_impl.h"
@@ -211,14 +221,12 @@ PROVIDER_EXPLANATION = """\
 //
 // It is generated from the same list as the library's own
 // src/private/miopen_private_rename.h, so the two cannot differ: it renames
-// exactly the entry points declared in <miopen/miopen.h>. It holds only
-// #defines, so it is safe to force-include everywhere.
-//
-// The three miopenConvolution*GetWorkSpaceSizeRange entry points are deliberately
-// not renamed. They are exported with MIOPEN_EXPORT from src/convolution_api.cpp
-// but never declared in <miopen/miopen.h>, so the split leaves them on
-// libMIOpen_private.so under their original names. The provider declares them in
-// MiopenApi.hpp and binds them directly.
+// every entry point declared in <miopen/miopen.h> or in the library's
+// src/include/miopen/miopen_internal.h, which includes the three
+// miopenConvolution*GetWorkSpaceSizeRange entry points that the provider
+// declares itself in MiopenApi.hpp. Those declarations are renamed with the rest
+// and bind the private library's _impl symbols. It holds only #defines, so it is
+// safe to force-include everywhere.
 """
 
 
@@ -239,11 +247,30 @@ def wrapper_only_names(source: str | None, entries: list[EntryPoint]) -> set[str
     both = sorted(names & {e.name for e in entries})
     if both:
         raise AbiError(
-            "declared in both miopen.h and hipdnn_forwarding.h: "
+            "declared in both an entry-point header (miopen.h or miopen_internal.h)"
+            " and hipdnn_forwarding.h: "
             + ", ".join(both)
-            + ". A function both builds export belongs in miopen.h alone"
+            + ". A function both builds export belongs in the entry-point header alone"
         )
     return names
+
+
+def merge_entry_points(
+    public: list[EntryPoint], internal: list[EntryPoint]
+) -> list[EntryPoint]:
+    """miopen.h's entry points followed by miopen_internal.h's.
+
+    A name in both headers would get two generated stubs, so it is refused.
+    """
+    first = {entry.name: entry for entry in public}
+    both = sorted(first.keys() & {entry.name for entry in internal})
+    if both:
+        raise AbiError(
+            "declared in both miopen.h and miopen_internal.h: "
+            + ", ".join(both)
+            + ". An entry point belongs in one of the two headers"
+        )
+    return public + internal
 
 
 def hand_written_stubs(
@@ -276,8 +303,8 @@ def hand_written_stubs(
     unknown = sorted(set(protos) - declared)
     if unknown:
         raise AbiError(
-            "wrapper.cpp defines entry points that neither miopen.h nor"
-            " hipdnn_forwarding.h declares: " + ", ".join(unknown)
+            "wrapper.cpp defines entry points that none of miopen.h, miopen_internal.h"
+            " and hipdnn_forwarding.h declares: " + ", ".join(unknown)
         )
     mismatched = []
     for entry in entries:
@@ -287,13 +314,13 @@ def hand_written_stubs(
         if protos[entry.name] != expected:
             mismatched.append(
                 f"  {entry.name}\n"
-                f"      miopen.h:{entry.line}: {render_signature(expected)}\n"
+                f"      {entry.source}:{entry.line}: {render_signature(expected)}\n"
                 f"      wrapper.cpp: {render_signature(protos[entry.name])}"
             )
     if mismatched:
         raise AbiError(
-            "hand-written stubs in wrapper.cpp do not match miopen.h. The generator"
-            " does not write these, so edit each stub to match:\n"
+            "hand-written stubs in wrapper.cpp do not match their declarations. The"
+            " generator does not write these, so edit each stub to match:\n"
             + "\n".join(mismatched)
         )
     return set(protos)
@@ -303,7 +330,7 @@ def check_dispatchable(entries: list[EntryPoint], hand_written: set[str]) -> Non
     for entry in entries:
         if entry.ret != STATUS_TYPE and entry.name not in hand_written:
             raise AbiError(
-                f"miopen.h:{entry.line}: {entry.name} returns {entry.ret!r}, but a"
+                f"{entry.source}:{entry.line}: {entry.name} returns {entry.ret!r}, but a"
                 f" generated stub's MIOPEN_WRAPPER_DISPATCH only works for {STATUS_TYPE}."
                 f" Write its stub by hand in {WRAPPER_RELPATH}"
             )
@@ -357,7 +384,8 @@ def render_impl_header(entries: list[EntryPoint]) -> str:
         + '    "miopen_impl.h declares the _impl entry points for callers of the private'
         + ' library, not for the private library itself"\n'
         + "#endif\n\n"
-        + "#include <miopen/miopen.h>\n\n"
+        + "#include <miopen/miopen.h>\n"
+        + "#include <miopen/miopen_internal.h>\n\n"
         + "".join(render_impl_declaration(e) for e in entries)
     )
 
@@ -577,12 +605,14 @@ def run(args: argparse.Namespace) -> int:
         )
 
     public_source = read(f"{miopen_rel}/{PUBLIC_HEADER_RELPATH}")
+    internal_source = read(f"{miopen_rel}/{INTERNAL_HEADER_RELPATH}")
     wrapper_source = read(f"{miopen_rel}/{WRAPPER_RELPATH}")
-    if public_source is None or wrapper_source is None:
+    if public_source is None or internal_source is None or wrapper_source is None:
         missing = [
             rel
             for rel, source in (
                 (f"{miopen_rel}/{PUBLIC_HEADER_RELPATH}", public_source),
+                (f"{miopen_rel}/{INTERNAL_HEADER_RELPATH}", internal_source),
                 (f"{miopen_rel}/{WRAPPER_RELPATH}", wrapper_source),
             )
             if source is None
@@ -592,7 +622,10 @@ def run(args: argparse.Namespace) -> int:
             print(f"  {rel}: {reasons.get(rel, 'unreadable')}")
         return 0
 
-    entries = parse_public_header(public_source)
+    entries = merge_entry_points(
+        parse_public_header(public_source),
+        parse_public_header(internal_source, "miopen_internal.h"),
+    )
     wrapper_only = wrapper_only_names(
         read(f"{miopen_rel}/{WRAPPER_ONLY_HEADER_RELPATH}", optional=True), entries
     )
@@ -674,7 +707,8 @@ def run(args: argparse.Namespace) -> int:
         if note:
             print(f"\n{note}")
         print(
-            "\nThese files are generated from include/miopen/miopen.h and the stubs"
+            "\nThese files are generated from include/miopen/miopen.h,"
+            " src/include/miopen/miopen_internal.h and the stubs"
             " in src/private/wrapper.cpp. Do not edit them by hand. Regenerate and"
             f" commit the result:\n  {GENERATOR_COMMAND}\nor, without installing the"
             f" pinned clang-format yourself:\n  {REGENERATE_HOOK_COMMAND}"
