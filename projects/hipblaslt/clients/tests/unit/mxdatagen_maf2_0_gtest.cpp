@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -35,19 +36,24 @@ namespace
 
     struct Generated
     {
+        std::vector<uint8_t> data;
         std::vector<uint8_t> scales; // every scale byte written
         std::vector<float>   ref;
     };
 
     // A transposed A (K x M stored, K along the rows) of K = 256, M = 64.
-    Generated generate(hipDataType dataType, hipDataType scaleType, int block, char const* method)
+    Generated generate(hipDataType dataType,
+                       hipDataType scaleType,
+                       int         block,
+                       char const* method,
+                       uint32_t    seedIndex = 0)
     {
         constexpr uint64_t   rows = 256, cols = 64, count = rows * cols;
         const bool           fp4 = dataType == static_cast<hipDataType>(HIP_R_4F_E2M1);
         std::vector<uint8_t> data(fp4 ? count / 2 : count);
         std::vector<uint8_t> scale(count, kUnwritten);
         Generated            g;
-        g.ref = generateMXInput(dataType,
+        g.ref  = generateMXInput(dataType,
                                 scaleType,
                                 data.data(),
                                 scale.data(),
@@ -63,7 +69,8 @@ namespace
                                 -1.0f,
                                 1.0f,
                                 "",
-                                /*seedIndex=*/0);
+                                seedIndex);
+        g.data = std::move(data);
         for(uint8_t s : scale)
             if(s != kUnwritten)
                 g.scales.push_back(s);
@@ -124,6 +131,43 @@ namespace
             EXPECT_NEAR(std::sqrt(sumSq / g.scales.size() - mean * mean), 0.08, 0.015);
             EXPECT_GE(distinct.size(), 8u);
         }
+    }
+
+    // maf2_0 salts its seed with seedIndex = abc + 3 * batch: the same index repeats the data and
+    // scales exactly, while A of batch 0 (0), B of batch 0 (1) and A of batch 1 (3) all differ.
+    TEST(HostUnitMXDataGenMaf2_0, smoke_seed_index_selects_the_stream)
+    {
+        for(auto const* method : {"maf2_0", "maf2_0_unit_scale"})
+        {
+            SCOPED_TRACE(method);
+            auto run = [&](uint32_t seedIndex) {
+                return generate(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 32, method, seedIndex);
+            };
+            const auto a0 = run(0), again = run(0), b0 = run(1), a1 = run(3);
+            EXPECT_EQ(a0.data, again.data);
+            EXPECT_EQ(a0.scales, again.scales);
+            EXPECT_NE(a0.data, b0.data);
+            EXPECT_NE(a0.data, a1.data);
+            EXPECT_NE(b0.data, a1.data);
+        }
+        // Binomial scales differ too; unit scales are all 1.0 by design.
+        auto scales = [](uint32_t seedIndex) {
+            return generate(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 32, "maf2_0", seedIndex).scales;
+        };
+        EXPECT_NE(scales(0), scales(1));
+        EXPECT_NE(scales(0), scales(3));
+    }
+
+    // testing_matmul passes mxSeedIndex: abc + 3 * batch, and batch 0's index for every batch of
+    // a broadcast (stride 0) matrix, so all its batches regenerate the same data.
+    TEST(HostUnitMXDataGenMaf2_0, smoke_seed_index_of_each_matrix)
+    {
+        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/true, 0, 4096), 0u);
+        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/false, 0, 4096), 1u);
+        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/true, 2, 4096), 6u);
+        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/false, 2, 4096), 7u);
+        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/true, 2, 0), 0u);
+        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/false, 2, 0), 1u);
     }
 
     // maf2_0_unit_scale (the MXFP8 and FP4 X=1 rows): every block scale is 1.0 and the data is
