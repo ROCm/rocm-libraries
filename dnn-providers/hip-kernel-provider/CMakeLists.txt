@@ -80,6 +80,11 @@ option(HIPKERNELPROVIDER_ENABLE_CONV
 # targets with the ROCm clang (minutes, no GPU). Run with `ctest -L conv_generic_compile`.
 option(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST
        "Register the conv RDNA generic-target compile check (CTest label conv_generic_compile)" OFF)
+# Off by default: compiles every conv config the compile census reaches, on every catalog
+# architecture, with the ROCm clang and checks the long-branch return hazard (an hour or more on
+# 60 cores, no GPU). Run with `ctest -L conv_code_gate`.
+option(HIPKERNELPROVIDER_CONV_CODE_GATE_TEST
+       "Register the conv code-size gate (CTest label conv_code_gate)" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 

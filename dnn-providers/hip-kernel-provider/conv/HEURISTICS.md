@@ -18,7 +18,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 
 | Engine(s) | Built for | Directions | Archs | Configs |
 |---|---|---|---|---|
-| `CONV_IGEMM_FWD/BWD` (K1) | Dense and grouped implicit GEMM, the general workhorse; compute-bound shapes; NCHW via direct channels-first epilogue (`cf`) or staging | fwd, bwd-data | gfx908-gfx950 (MFMA), gfx11/gfx12 (WMMA), FMA everywhere | 2887 (1618 fwd, 1269 bwd; 1243 of them patch configs) |
+| `CONV_IGEMM_FWD/BWD` (K1) | Dense and grouped implicit GEMM, the general workhorse; compute-bound shapes; NCHW via direct channels-first epilogue (`cf`) or staging; 1-D channels-first (N C L) read in place by the `cfx` configs (no activation staging) | fwd, bwd-data | gfx908-gfx950 (MFMA), gfx11/gfx12 (WMMA), FMA everywhere | 3227 (1832 fwd, 1395 bwd; 1243 of them patch configs, 340 `cfx`) |
 | `CONV_IGEMM_FWD/BWD_TF32` (K1) | K1's TF32 configs (three-bf16 everywhere with bf16 matrix cores, xf32 on gfx942) for fp32 graphs. Numerical note `TENSOR_CORE`. | fwd, bwd-data | MFMA, WMMA | 93 (48 fwd, 45 bwd) |
 | `CONV_IGEMM_NCHW_BWD` (K7) | NCHW bwd-data in place: strided pointwise, patchify, 1-D/vocoder ConvTranspose, dilated rows, 3-D stride 2. Weak on large compute-bound GEMMs (K1 wins there). | bwd-data | MFMA, WMMA, FMA | 1845 |
 | `CONV_IGEMM_NCHW_BWD_TF32` (K7) | K7's three-bf16 configs for fp32 graphs (RDNA, strided 3-D filters of 27+ taps). Numerical note `TENSOR_CORE`. | bwd-data | MFMA, WMMA | 84 |
@@ -35,7 +35,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_GROUP_FWD/BWD_TF32` (K4) | K4's three-bf16 configs for fp32 wide-group graphs (17-64 channels a group). Numerical note `TENSOR_CORE`. | fwd, bwd-data | MFMA, WMMA (not gfx908) | 264 (144 fwd, 120 bwd) |
 | `CONV_GROUP_WRW` (K4) | Backward weights for small groups (2 ≤ C/g ≤ 16): the same block-diagonal 16x16 MMA, dy positions of a th x tw tile flattened into the atom's k-steps (any plane width), x and dy read in place; deterministic split reduce. Groups of 24 and 32 (`nbi` 2, MFMA only) as dense per-group block products. K3 (`CONV_WRW`) is its implicit-GEMM alternative; groups past 32 channels stay with K3. | wrw (any stride on rows and columns per config: s1, s2; any depth stride) | MFMA, WMMA; fp32 also by FMA (all archs, the only fp32 path on RDNA) | 3132 |
 | `CONV_GROUP_VALU_FWD/BWD` | Grouped forward and backward data on vector ALU, the forward counterpart of `CONV_GROUP_VALU_WRW`: a wave owns `kb` output channels of a group, lanes along the output row, the filter as wave-uniform scalar loads. Groups of 2 to 16 channels where a per-group GEMM is mostly empty (ResNeXt / ResNeXt3D, small RegNet and StyleGAN2 groups) and 3-D grouped layers; wide groups (C/g ≥ 56) stay with Winograd. 3x3 and 3x3x3, any stride (backward data reads dy upsampled); NCHW and NHWC. | fwd, bwd-data | `valu` pack gfx906, gfx908 (180 fwd, 168 bwd); `mma` pack gfx90a-gfx950, gfx11, gfx12 (30 fwd, 30 bwd) | 408 |
-| `CONV_GROUP_VALU_WRW` | Backward weights on vector ALU (MIOpen's `ConvAsmBwdWrW3x3` design in HIP, generalized): groups of 4 to 56 channels where a per-group GEMM is mostly empty, few-channel dense and pointwise layers, and most wrw on gfx906. 3x3 stride 1/2 and 5x5 (3-D: a tile per depth tap, any depth filter); NCHW and NHWC. | wrw | `valu` pack gfx906, gfx908 (254); `mma` pack gfx90a-gfx950, gfx11, gfx12 (173) | 427 |
+| `CONV_GROUP_VALU_WRW` | Backward weights on vector ALU (MIOpen's `ConvAsmBwdWrW3x3` design in HIP, generalized): groups of 4 to 56 channels where a per-group GEMM is mostly empty, few-channel dense and pointwise layers, and most wrw on gfx906. 3x3 stride 1/2 and 5x5 (3-D: a tile per depth tap, any depth filter); NCHW and NHWC. | wrw | `valu` pack gfx906, gfx908 (293); `mma` pack gfx90a-gfx950, gfx11, gfx12 (212) | 505 |
 | `CONV_STEM_BWD` | Bwd-data for stems with C ≤ 4 (7x7 s2, 3x3 s2, patchify) | bwd-data | MFMA, WMMA, FMA | 1187 |
 | `CONV_SMALLC_FWD` | Forward stems with C ≤ 4 | fwd | MFMA, WMMA, FMA | 782 |
 | `CONV_SMALLC_BWD` | Stride-1 bwd-data with K ≤ 4 (3x3 and 3x3x3 heads), the forward kernels run over dy | bwd-data | MFMA, WMMA, FMA | 195 |
@@ -79,6 +79,7 @@ Every config is a set of integer knobs, listed in each engine's `*.kdp.json` und
 | `swz` | XOR-swizzled LDS layout |
 | `xcd` | XCD-contiguous block order (gfx942/gfx950) |
 | `cf` | Write channels-first output directly instead of staging it |
+| `cfx` (K1) | Read 1-D channels-first activations in place (no staging); with `halo` h, the halo rows hold h input pixels per output row |
 | `wdirect` | bwd-data reads the packed filter in place |
 | `pack` | Taps × channels flattened in the reduction |
 | `fuse` | F small groups run as one block-diagonal group |

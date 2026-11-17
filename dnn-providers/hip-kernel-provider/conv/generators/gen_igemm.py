@@ -37,6 +37,7 @@ FIELDS = [
     "fuse",
     "large",
     "patch",
+    "cfx",
 ]
 # Every field that tells two configs of one graph apart is a knob (the candidate enumeration
 # identifies a config by its knob tuple).
@@ -72,6 +73,7 @@ def C(
     fuse=0,
     large=0,
     patch=0,
+    cfx=0,
 ):
     return dict(
         atom=atom,
@@ -94,6 +96,7 @@ def C(
         fuse=fuse,
         large=large,
         patch=patch,
+        cfx=cfx,
     )
 
 
@@ -248,6 +251,46 @@ def withPatch(cfgs, tag):
         if tuple(sorted(c.items())) not in seen:
             seen.add(tuple(sorted(c.items())))
             out.append(c)
+    return out
+
+
+# cfx 1: 1-D graphs whose activations are packed channels-first (N C L, PyTorch's only conv1d
+# layout) read in place: no staging transpose of the input, the output written channels-first.
+# Matrix-core configs run the channels-first halo loop (K1HaloCf), halo h staging up to h input
+# pixels per output row (h 1: stride 1; h 2: forward stride 2, row tiles of at most 128; backward
+# data gathers dy at stride 1 in every stride phase); twins of the
+# plain channels-first-output configs without swizzled tiles, DMA, tap packing, direct filter,
+# group fusion, large images or patch view. The FMA kernel reads in place without a halo
+# (K1TilesCf) and writes the output channels-first itself: twins of every FMA config.
+def withCfx(cfgs, tag):
+    out = list(cfgs)
+    seen = {tuple(sorted(c.items())) for c in out}
+
+    def add(c):
+        key = tuple(sorted(c.items()))
+        if key not in seen:
+            seen.add(key)
+            out.append(c)
+
+    for c in cfgs:
+        if (
+            c["math"] != "native"
+            or c["atom"].endswith("_xf32")
+            or c["swz"]
+            or c["dma"]
+            or c["pack"]
+            or c["wdirect"]
+            or c["fuse"]
+            or c["large"]
+            or c["patch"]
+        ):
+            continue
+        if c["atom"] == "fma":
+            add(dict(c, cfx=1))
+        elif c["cf"]:
+            add(dict(c, cfx=1, halo=1))
+            if c["bm"] <= 128 and tag == "fwd":
+                add(dict(c, cfx=1, halo=2))
     return out
 
 
@@ -573,18 +616,25 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     for dtype, cfgs in CATALOG.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         # The direct filter is a backward-data loader: forward has no use for it.
-        cfgs = withPatch(
-            withLarge(
-                withCf(
-                    withSwz(
-                        withFlat(
-                            withFuse(
-                                [c for c in cfgs if tag == "bwd" or not c["wdirect"]],
-                                tag,
+        cfgs = withCfx(
+            withPatch(
+                withLarge(
+                    withCf(
+                        withSwz(
+                            withFlat(
+                                withFuse(
+                                    [
+                                        c
+                                        for c in cfgs
+                                        if tag == "bwd" or not c["wdirect"]
+                                    ],
+                                    tag,
+                                )
                             )
                         )
                     )
-                )
+                ),
+                tag,
             ),
             tag,
         )
@@ -592,7 +642,9 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             name = f"conv_igemm.{tag}.{dt}.{c['atom']}.{c['math']}.{c['bm']}x{c['bn']}x{c['bk']}" f".w{c['wm']}x{c['wn']}.t{c['threads']}.v{c['vec']}.s{c['stages']}" + (
                 ".xcd" if c["xcd"] else ""
             ) + (
-                ".halo" if c["halo"] else ""
+                (".halo" if c["halo"] == 1 else f".halo{c['halo']}")
+                if c["halo"]
+                else ""
             ) + (
                 ".wd" if c["wdirect"] else ""
             ) + (
@@ -613,6 +665,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 ".patch" if c["patch"] == 1 else ""
             ) + (
                 ".patchtile" if c["patch"] == 2 else ""
+            ) + (
+                ".cfx" if c["cfx"] else ""
             )
             kernels.append(
                 {

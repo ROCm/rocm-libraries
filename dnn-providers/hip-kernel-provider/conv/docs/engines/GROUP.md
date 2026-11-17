@@ -103,6 +103,8 @@ known per accumulator column, so the per-channel operands load once per column. 
 channels-first outputs keep their bitwise transpose. Backward data and backward weights decline
 fused graphs. With no epilogue the kernels compile to the same code as without fusion support.
 
+**Known cost.** A fused graph this engine wins takes longer than the bare convolution's best time by, geomean with a bias first: MI325X (channels-last) relu 1.06x, gelu 1.26x, silu 1.17x; gfx950 (both layouts) relu 1.07x, gelu 1.20x, silu 1.11x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.33x on MI325X and 1.44x on gfx950 (usage-weighted; the conv README's fusion table).
+
 ## Strengths and weaknesses
 - **Best-engine counts.** On the full 9,471-shape internal corpus (autotuned, our engines only), K4 is the best non-MIOpen engine on:
 

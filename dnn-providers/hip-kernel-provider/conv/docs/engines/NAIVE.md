@@ -79,6 +79,8 @@ accumulator, with the output channel in scope. It claims a fused graph exactly w
 the graph's convolution alone: the workload gate and every other gate read the convolution, so
 fusion never widens the engine's coverage. Backward data and backward weights take no epilogue.
 
+**Known cost.** A fused graph this engine wins takes longer than the bare convolution's best time by, geomean with a bias first: MI325X (channels-last) relu 1.10x, gelu 1.09x, silu 1.08x; gfx950 (both layouts) relu 1.09x, gelu 1.10x, silu 1.10x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.52x on MI325X and 1.54x on gfx950 (usage-weighted; the conv README's fusion table).
+
 ## Strengths and weaknesses
 
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X.

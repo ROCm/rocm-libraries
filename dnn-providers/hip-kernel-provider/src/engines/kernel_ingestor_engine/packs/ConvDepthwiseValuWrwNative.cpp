@@ -561,10 +561,10 @@ class PreparedConvDepthwiseValuWrw : public IngestorPreparedDispatch
 public:
     PreparedConvDepthwiseValuWrw(IngestorKernelCode partial,
                                  IngestorKernelCode fold,
-                                 const WrwProblem& problem)
+                                 WrwProblem problem)
         : _partial(std::move(partial))
         , _fold(std::move(fold))
-        , _problem(problem)
+        , _problem(std::move(problem))
     {
     }
 

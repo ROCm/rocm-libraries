@@ -55,7 +55,7 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
 
 | Form | Where the chain runs | When |
 |---|---|---|
-| Native | hipBLASLt's own GEMM epilogue: `BIAS` or `SIGMOID` | hipBLASLt engines; every GEMM writing y has y's channels as its rows (channels-last 1x1, point output and im2col), one group, no accumulation; a per-channel bias (fp32 or y's type) alone, or sigmoid alone |
+| Native | hipBLASLt's own GEMM epilogue: `BIAS` | hipBLASLt engines; every GEMM writing y has y's channels as its rows (channels-last 1x1, point output and im2col), one group, no accumulation; a per-channel bias (fp32 or y's type) alone |
 | Fused pass | The plan's existing last pass: the GEMMs write the channels-last staging in fp32, and the copy into y becomes the epilogue's cast | y is staged channels-last (the `STAGED_CHANNELS_LAST` layout candidate for a channels-first y) |
 | Extra pass | Every GEMM (and any fp32 partials sum) writes an fp32 copy of y in the workspace; one cast applies the chain and rounds into y | everything else: rocBLAS, channels-first rows, groups, patterns hipBLASLt has no epilogue for |
 
@@ -64,14 +64,15 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   - one cast/epilogue pass reads that fp32 result and writes y.
 
   On MI325X (bias + relu, channels-last), the GEMM grows 1.0-2.8x by kernel time; output-bound GEMMs grow the most. Both are the price of rounding once and of giving every engine the same result for the same graph. Autotune weighs fused explicit GEMM against the other conv engines, which fuse in their kernels.
-- **Native form.** It covers only a bias alone and sigmoid alone. hipBLASLt's relu, clamp, swish and GELU epilogues change NaN and infinity results: its relu and clamp turn NaN into a bound, and its swish and tanh GELU give NaN for -inf where the chain gives 0.
+  Where an explicit-GEMM engine wins the fused graph, it takes 1.35-1.42x the bare convolution's best time with an activation (1.01-1.12x for a bias alone), geomean on MI325X (channels-last) and gfx950 (both layouts). Against the bare convolution plus the chain as a separate one-pass kernel it is faster by 1.10x (MI325X) and 1.02x (gfx950), usage-weighted, and slower on 1x1 and patchify layers where the BLAS GEMM wins the bare convolution by a wide margin (down to 0.84x on MI325X, 0.65x on gfx950): the fp32 output and the pass cost more there than a separate pass over the 16-bit output.
+- **Native form.** It covers only a bias alone. Activations run in the pass with the hip-kernel-provider convolution engines' functions and accuracy rule (`kernels/ConvRepackActivations.h`: the few-ulp form for an fp32 output, the faster form for a 16-bit output): hipBLASLt's activation epilogues have their own accuracy, and change NaN and infinity results (its relu and clamp turn NaN into a bound, its swish and tanh GELU give NaN for -inf where the chain gives 0).
 - **The pass.** The epilogue cast (`StridedCastEpilogue*`) runs the chain as a run-time menu of steps.
   - On a dense y, it walks memory flat: four elements a thread, one 16-byte load of the fp32 result and one store of the four outputs. The channel is carried along by additions in 32-bit integers.
   - Otherwise it orders its axes so the axis along which y is densest is innermost, and reads the channel off its index walk.
 - **Values at execution.** Operand pointers and pass-by-value scalars are bound at execution, so a plan serves the graph's values whatever they are.
 - **Workspace.** The extra pass adds y's size in fp32 to the workspace, above the repack cap.
 - **Runnable layout.** A fused plan runs on the first column layout whose GEMMs the backend can run. The default comes first, then staged channels-last, channels-last and channels-first.
-- **Deterministic hipBLASLt declines.** The deterministic hipBLASLt engines give the library no workspace, so they decline a fused graph when no layout's fp32-output GEMM has a workspace-free algorithm. This happens for some small-n, long-k channels-first fp16 layers. The deterministic rocBLAS engine serves those graphs.
+- **Shorter reductions.** The deterministic hipBLASLt engines give the library no workspace, and for some small-n, long-k fp16 layers no layout's fp32-output GEMM has a workspace-free algorithm. The plan then cuts each such GEMM's reduction into 2, 4, 8 or 16 consecutive parts, each after the first adding to the fp32 result in order (`splitFp32OutputReductions`): the same sum, rounded once by the epilogue pass, and still deterministic. A fused graph is declined only if none of those runs.
 - **Backward directions.** Backward data and backward weights with pointwise nodes are declined.
 
 ## Implementation design

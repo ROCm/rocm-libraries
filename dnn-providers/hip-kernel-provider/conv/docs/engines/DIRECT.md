@@ -125,6 +125,8 @@ The weight format, the three-bf16 input split and the staging copies take no epi
 data does not fuse. With no pointwise node the compile options, and so the code, are those of
 the unfused engine.
 
+**Known cost.** A fused graph this engine wins takes longer than the bare convolution's best time by, geomean with a bias first: MI325X (channels-last) relu 1.02x, gelu 1.06x, silu 1.04x; gfx950 (both layouts) relu 1.02x, gelu 1.09x, silu 1.05x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.06x on MI325X and 1.08x on gfx950 (usage-weighted; the conv README's fusion table).
+
 ## Strengths and weaknesses
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts shapes faster or slower by more than 5%.
 
@@ -151,7 +153,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - gfx90a/gfx942 384-channel 3x3x3 forward against CK (1.09-1.16x);
   - gfx908 bf16, which runs on the half-rate 16x16x8 atom: `rows` reaches 60-66 TFLOP/s (65-72% of the atom's peak) against CK's 72-78%, so CK keeps most large bf16 layers. gfx908 fp32 is mixed.
   - On gfx942, the 16-bit `rows` tiles (no ping-pong) take most 2-D 3x3 layers from the halo tile in a kernel-only sweep, but for only about 7% of the weighted time. 3x3x3 `rows` tiles measure slower there and do not ship.
-- **Coverage gaps:** no 1-D, no generic tier for other filter sizes, and images past 2 GiB are declined. `CONV_IGEMM` is the floor for all of these.
+- **Coverage gaps:** no 1-D, no generic tier for other filter sizes, and images past 2 GiB are declined. `CONV_IGEMM` is the floor for all of these; it reads 1-D channels-first (N C L) graphs in place on its `cfx` configs.
 
 ## Numerical precision
 - Every config accumulates in fp32. 16-bit products are exact in the atoms, and fp32 runs exact on the fp32 MFMA atoms (CDNA) or FMA (everywhere). The output is rounded once to its type. Split-C writes fp32 partials and rounds once in an in-order reduce.

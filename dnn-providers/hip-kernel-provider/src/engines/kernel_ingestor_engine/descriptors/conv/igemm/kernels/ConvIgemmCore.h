@@ -2209,17 +2209,21 @@ struct K1Halo
     }
 };
 
-/// The halo A tile of a problem whose gathered tensor is packed channels-first (CFX 1): the same
-/// linear pixel run as K1Halo, read in place (a channel's pixels of one image are contiguous). LDS row 0 is pixel base, firstPixel rounded
-/// down to a whole vector of MV pixels (delta rows before firstPixel), so a channel's MV pixels
-/// are one aligned vector load wherever the image's pixel count is a multiple of MV. A unit is KV
-/// channels of MV pixels, stored transposed (one LDS row per pixel, as K1TilesCf). Only the rows
-/// the block's taps reach are loaded: rows (BM + the taps' reach + delta).
+/// The halo A tile of a problem whose gathered tensor is packed channels-first (CFX 1), read in
+/// place. The caller gives the linear (image, d, h, w) pixels its rows' taps reach, first to last
+/// (any stride, padding or output extent); a channel's pixels of one image are contiguous, so
+/// the run is loaded channel by channel. LDS row 0 is pixel base, the first pixel rounded down to
+/// a whole vector of MV pixels, so a channel's MV pixels are one aligned vector load wherever the
+/// image's pixel count is a multiple of MV. A unit is KV channels of MV pixels, stored transposed
+/// (one LDS row per pixel, as K1TilesCf). The launcher checks the run fits HR rows.
 template <class T, int HR, int BK, int THREADS>
 struct K1HaloCf
 {
     static constexpr int MV = 16 / static_cast<int>(sizeof(T));
-    static constexpr int KV = sizeof(T) == 2 ? 4 : 2; // 8-byte LDS stores
+#ifndef K1_CF_HKV
+#define K1_CF_HKV 4
+#endif
+    static constexpr int KV = sizeof(T) == 2 ? K1_CF_HKV : K1_CF_HKV / 2;
     static constexpr int KG = BK / KV;
     static constexpr int UNITS = HR / MV * KG;
     static constexpr int PASSES = (UNITS + THREADS - 1) / THREADS;
@@ -2234,30 +2238,24 @@ struct K1HaloCf
     __amdgpu_buffer_rsrc_t rsrc;
     int delta;
     int chans, cgroup, chanOffset, lin, need;
-    int uImg[PASSES], uPos[PASSES], uRg[PASSES], uKg[PASSES];
+    long long base; // linear pixel of LDS row 0
+    int uOff[PASSES], uPos[PASSES], uMask[PASSES], uRg[PASSES], uKg[PASSES];
     bool uVec[PASSES], uLive[PASSES];
-    long long uP0[PASSES];
     long long pixels;
     RawM r[PASSES][KV];
 
     __device__ void
-        init(const void* src, const K1Gather& g, long long firstPixel, int rows, int tid)
+        init(const void* src, const K1Gather& g, long long firstPixel, long long lastPixel, int tid)
     {
         chans = g.chans;
         cgroup = g.cgroup;
         chanOffset = static_cast<int>(g.chanOffset);
         lin = g.in[0] * g.in[1] * g.in[2]; // pixels per channel
-        pixels = g.rows;
-        const long long base
-            = firstPixel >= 0 ? firstPixel / MV * MV : -((-firstPixel + MV - 1) / MV) * MV;
+        const long long images = g.rows / (static_cast<long long>(g.out[0]) * g.out[1] * g.out[2]);
+        pixels = images * lin;
+        base = firstPixel >= 0 ? firstPixel / MV * MV : -((-firstPixel + MV - 1) / MV) * MV;
         delta = static_cast<int>(firstPixel - base);
-        // The taps' reach in linear pixels (k1HaloFits's shift range).
-        const int axis[3] = {g.in[1] * g.in[2], g.in[2], 1};
-        int reach = 0;
-#pragma unroll
-        for(int i = 0; i < 3; ++i)
-            reach += (g.taps[i] - 1) * (g.step[i] < 0 ? -g.step[i] : g.step[i]) * axis[i];
-        need = rows + reach + delta;
+        need = static_cast<int>(lastPixel - base + 1);
         // The buffer starts at the image of the first real pixel.
         const long long img0 = base > 0 ? base / lin : 0;
         const long long imageElems = static_cast<long long>(chans) * lin;
@@ -2271,50 +2269,63 @@ struct K1HaloCf
             uRg[p] = u / KG;
             uLive[p] = u < UNITS && uRg[p] * MV < need;
             const long long p0 = base + uRg[p] * MV;
-            uP0[p] = p0;
             // Floor division: pixels before the first have image -1.
             const long long img = p0 >= 0 ? p0 / lin : -((-p0 + lin - 1) / lin);
-            uImg[p] = static_cast<int>(img - img0);
             uPos[p] = static_cast<int>(p0 - img * lin);
+            uOff[p] = static_cast<int>(((img - img0) * chans + chanOffset) * lin + uPos[p]);
+            uMask[p] = 0;
+#pragma unroll
+            for(int i = 0; i < MV; ++i)
+                uMask[p] |= (p0 + i >= 0 && p0 + i < pixels ? 1 : 0) << i;
             uVec[p] = p0 >= 0 && uPos[p] + MV <= lin && p0 + MV <= pixels;
         }
     }
 
     __device__ void load(int c0)
     {
+        // Element offset of channel c's unit pixels: uOff + c lin, plus (chans - 1) lin at each
+        // image boundary the unit crosses (the next image's same channel).
+        const int jump = (chans - 1) * lin;
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
+        {
+            const int cb = c0 + uKg[p] * KV;
+            if(uVec[p])
+            {
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const bool cOk = uLive[p] & (cb + j < cgroup);
+                    const int off = (uOff[p] + (cb + j) * lin) * static_cast<int>(sizeof(T));
+                    r[p][j] = k1BufferLoad<RawM>(
+                        rsrc, cOk ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+                }
+                continue;
+            }
 #pragma unroll
             for(int j = 0; j < KV; ++j)
             {
-                const int c = c0 + uKg[p] * KV + j;
-                const bool cOk = uLive[p] & (c < cgroup);
-                if(uVec[p])
-                {
-                    const int off = ((uImg[p] * chans + chanOffset + c) * lin + uPos[p])
-                                    * static_cast<int>(sizeof(T));
-                    r[p][j] = k1BufferLoad<RawM>(
-                        rsrc, cOk ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
-                    continue;
-                }
+                const bool cOk = uLive[p] & (cb + j < cgroup);
                 ElemsM e;
-                int img = uImg[p], pos = uPos[p];
+                int o = uOff[p] + (cb + j) * lin, pos = uPos[p];
 #pragma unroll
                 for(int i = 0; i < MV; ++i)
                 {
-                    const bool ok = cOk & (uP0[p] + i >= 0) & (uP0[p] + i < pixels);
-                    const int off = ((img * chans + chanOffset + c) * lin + pos)
-                                    * static_cast<int>(sizeof(T));
-                    e.v[i] = k1BufferLoad<One>(rsrc,
-                                               ok ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+                    const bool ok = cOk & (((uMask[p] >> i) & 1) != 0);
+                    e.v[i] = k1BufferLoad<One>(
+                        rsrc,
+                        ok ? static_cast<unsigned>(o * static_cast<int>(sizeof(T)))
+                           : K1_OUT_OF_RANGE);
+                    ++o;
                     if(++pos == lin)
                     {
                         pos = 0;
-                        ++img;
+                        o += jump;
                     }
                 }
                 r[p][j] = __builtin_bit_cast(RawM, e);
             }
+        }
     }
 
     /// Row-major As[row][k] (ld per row); S is T (no three-bf16 form).
@@ -2445,7 +2456,7 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     constexpr int HRPP = THREADS / (BK / VEC);
     // Channels-first halo rows: up to a vector of pixels more, for its aligned base.
     constexpr int CFMV = 16 / static_cast<int>(sizeof(T));
-    constexpr int HROWS = CFX != 0 ? (BM + K1_HALO_CAP + 2 * CFMV - 1) / CFMV * CFMV
+    constexpr int HROWS = CFX != 0 ? (HALO * BM + K1_HALO_CAP + 2 * CFMV - 1) / CFMV * CFMV
                                    : (BM + K1_HALO_CAP + HRPP - 1) / HRPP * HRPP;
     constexpr int AROWS = HALO ? HROWS + 1 : BM;
     constexpr int APL = AROWS * LD; // A plane stride, in S
@@ -2712,10 +2723,50 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         typename K1If<CFX != 0,
                       K1HaloCf<T, HROWS, BK, THREADS>,
                       K1Halo<T, HROWS, BK, VEC, THREADS>>::type halo;
+        // Channels-first: the linear input pixel of row m's tap 0 (pads aside), and the tap
+        // offsets' range, give the run of pixels the block reads.
+        const K1Pos cfSpatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
+        const int cfPlane = gather.in[0] * gather.in[1] * gather.in[2];
+        auto cfPixel = [&](long long m) {
+            const long long img = m / cfSpatial;
+            K1Pos rest = static_cast<K1Pos>(m - img * cfSpatial);
+            const int w = static_cast<int>(rest % gather.out[2]);
+            rest /= gather.out[2];
+            const int h = static_cast<int>(rest % gather.out[1]);
+            const int d = static_cast<int>(rest / gather.out[1]);
+            return img * cfPlane
+                   + (static_cast<long long>(d) * gather.stride[0] * gather.in[1]
+                      + static_cast<long long>(h) * gather.stride[1])
+                         * gather.in[2]
+                   + static_cast<long long>(w) * gather.stride[2];
+        };
         if constexpr(CFX != 0)
-            halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, m0 + minShift, BM, tid);
+        {
+            const int axis[3] = {gather.in[1] * gather.in[2], gather.in[2], 1};
+            long long lo = 0, hi = 0;
+#pragma unroll
+            for(int i = 0; i < 3; ++i)
+            {
+                const int e = (gather.taps[i] - 1) * gather.step[i];
+                lo += static_cast<long long>((e < 0 ? e : 0) - gather.pad[i]) * axis[i];
+                hi += static_cast<long long>((e > 0 ? e : 0) - gather.pad[i]) * axis[i];
+            }
+            // A row reads only pixels of its own image (the rest are padding), so the run is
+            // clamped to the first row's image from below and the last row's from above; within
+            // an image a later row's pixels never start before an earlier row's.
+            const long long mLast = (m0 + BM < gather.rows ? m0 + BM : gather.rows) - 1;
+            const long long img0 = m0 / cfSpatial, imgL = mLast / cfSpatial;
+            long long first = cfPixel(m0) + lo, last = cfPixel(mLast) + hi;
+            first = first < img0 * cfPlane ? img0 * cfPlane : first;
+            first = first > (img0 + 1) * cfPlane ? (img0 + 1) * cfPlane : first;
+            last = last < imgL * cfPlane - 1 ? imgL * cfPlane - 1 : last;
+            last = last > (imgL + 1) * cfPlane - 1 ? (imgL + 1) * cfPlane - 1 : last;
+            halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, first, last, tid);
+        }
         else
+        {
             halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, m0 + minShift, tid);
+        }
         typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> Tiles;
         S* As = tile;
         S* Bs = tile + PLANES * APL;
@@ -2735,6 +2786,20 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
             rest /= gather.out[2];
             oh[i] = static_cast<int>(rest % gather.out[1]);
             od[i] = m < gather.rows ? static_cast<int>(rest / gather.out[1]) : -0x40000000;
+        }
+        // Channels-first: each row's LDS row at tap 0 (pads aside); a tap adds its linear offset.
+        int cfRow[FM];
+        if constexpr(CFX != 0)
+        {
+#pragma unroll
+            for(int i = 0; i < FM; ++i)
+            {
+                // Input coordinates of tap 0 (pads aside); rows past the last stay out of range.
+                cfRow[i] = static_cast<int>(cfPixel(m0 + arow[i]) - halo.base);
+                od[i] = m0 + arow[i] < gather.rows ? od[i] * gather.stride[0] : -0x40000000;
+                oh[i] *= gather.stride[1];
+                ow[i] *= gather.stride[2];
+            }
         }
         const int nT = tiles.nTaps;
         const int t1 = gather.taps[1], t2 = gather.taps[2];
@@ -2795,7 +2860,15 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                           && static_cast<unsigned>(oh[i] + d1) < static_cast<unsigned>(gather.in[1])
                           && static_cast<unsigned>(ow[i] + d2)
                                  < static_cast<unsigned>(gather.in[2]);
-                    arow[i] = ok ? wm * WTM + i * DIM + fragRow + shift : HROWS;
+                    if constexpr(CFX != 0)
+                        arow[i] = ok ? cfRow[i]
+                                           + static_cast<int>(
+                                               (static_cast<long long>(d0) * gather.in[1] + d1)
+                                                   * gather.in[2]
+                                               + d2)
+                                     : HROWS;
+                    else
+                        arow[i] = ok ? wm * WTM + i * DIM + fragRow + shift : HROWS;
                 }
                 multiply(As, Bs);
                 if(q + 1 < qEnd)

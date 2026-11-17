@@ -5,13 +5,17 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -468,6 +472,27 @@ enum class Math
     THREE_BF16,
 };
 
+/// Waits for a config's launch. A kernel that never ends would hold this and every later test
+/// until the run's timeout, so the process stops at once with the config named (the scoped trace).
+void finishOrStop(hipStream_t stream)
+{
+    constexpr auto LIMIT = std::chrono::seconds(60);
+    const auto deadline = std::chrono::steady_clock::now() + LIMIT;
+    hipError_t status = hipStreamQuery(stream);
+    while(status == hipErrorNotReady)
+    {
+        if(std::chrono::steady_clock::now() > deadline)
+        {
+            ADD_FAILURE() << "the launch did not finish within " << LIMIT.count() << " s";
+            std::fflush(stdout);
+            std::_Exit(EXIT_FAILURE);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        status = hipStreamQuery(stream);
+    }
+    ASSERT_EQ(status, hipSuccess);
+}
+
 /// Runs every admitted config of the case against the CPU reference. @p units, when positive,
 /// replaces the device's dispatch units in the planners (1: backward weights at one split, where
 /// the kernel writes dw itself); @p directRuns counts the configs that ran without workspace;
@@ -615,7 +640,11 @@ void runCase(ConvShape shape,
         const Handle handle;
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
-        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        finishOrStop(handle.getStream());
+        if(::testing::Test::HasFatalFailure())
+        {
+            return;
+        }
         // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
         EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
             [&] {
@@ -839,6 +868,54 @@ TEST_P(TestGpuConvGroupRowsInfinities, Float)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGroupRowsInfinities,
                          ::testing::Combine(::testing::ValuesIn(rowsInfinityCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// The row-streaming configs over 3-D (ResNeXt3D's 3x3x3 filter): 27 taps make the kernel too
+/// large to inline on its own, and every config must still finish and match. Groups of 8 and 16
+/// channels over 256, so configs of 4, 8 and 16 channel blocks a workgroup all serve, both layouts.
+class TestGpuConvGroupRows3d
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+std::vector<DeviceCase> rows3dCases()
+{
+    std::vector<DeviceCase> cases;
+    for(const int64_t cg : {8, 16})
+    {
+        for(const bool channelsLast : {true, false})
+        {
+            auto shape = dense(256, 256, {3, 5, 14}, {3, 3, 3}, {1, 1, 1}, channelsLast);
+            shape.n = 1;
+            shape.groups = 256 / cg;
+            cases.push_back(
+                {(channelsLast ? "NdhwcGroups" : "NcdhwGroups") + std::to_string(cg), shape});
+        }
+    }
+    return cases;
+}
+
+TEST_P(TestGpuConvGroupRows3d, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(std::get<0>(GetParam()).shape,
+                  std::get<1>(GetParam()),
+                  Math::NATIVE,
+                  false,
+                  0,
+                  nullptr,
+                  true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupRows3d,
+                         ::testing::Combine(::testing::ValuesIn(rows3dCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {
