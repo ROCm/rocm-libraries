@@ -256,6 +256,70 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
 
 
 @requires_cmake
+@pytest.mark.skipif(
+    not (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file(),
+    reason="needs the rocKE library test lists",
+)
+@pytest.mark.parametrize(
+    ("before", "after", "reported"),
+    [
+        pytest.param(
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest ",
+            "rocke_library_conv_fwd_aot_packaging_pytest",
+            id="python-m-pytest",
+        ),
+        pytest.param(
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest pytest ",
+            "rocke_library_conv_fwd_aot_packaging_pytest",
+            id="pytest-program",
+        ),
+        pytest.param(
+            "add_test(rocke_library_counted_structural_gate python -m pytest ",
+            "add_test(rocke_library_counted_structural_gate ${_ROCKE_INSTALLED_PYTEST} ",
+            "rocke_library_counted_structural_gate (an explicit gate must not load",
+            id="gate-with-plugin",
+        ),
+    ],
+)
+def test_configure_stops_on_an_installed_pytest_entry_that_breaks_the_shard_rule(
+    tmp_path, before, after, reported
+):
+    """platform/CMakeLists.txt stops the configure when an installed pytest entry
+    does not start with ${_ROCKE_INSTALLED_PYTEST}, so that the entry would run
+    whole on every CI shard, or when an explicit gate loads the shard plugin.
+    The check runs in the build job's configure; CI does not run this file."""
+    rocke = tmp_path / "rocke"
+    skip = shutil.ignore_patterns("__pycache__", ".pytest_cache")
+    shutil.copytree(PLATFORM, rocke / "platform", ignore=skip)
+    shutil.copytree(PLATFORM.parent / "library", rocke / "library", ignore=skip)
+    lists = rocke / "library" / "tests" / "ctest_lists.cmake"
+    text = lists.read_text()
+    assert text.count(before) == 1, before
+    lists.write_text(text.replace(before, after))
+
+    configured = subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(rocke / "platform"),
+            "-B",
+            str(tmp_path / "build"),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert configured.returncode != 0, configured.stdout
+    message = " ".join(configured.stderr.split())
+    assert "must start its command with ${_ROCKE_INSTALLED_PYTEST}" in message
+    assert reported in message
+
+
+@requires_cmake
 @pytest.mark.parametrize(
     "provider_subdir",
     ["", "hip_kernel_provider"],
@@ -612,9 +676,11 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     the parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
     rocke_tiling_visualization_pytest in the comprehensive tier only, which
     pull-request and push CI (quick and standard) do not select.
-    rocke_ctest_shard_pytest and rocke_library_gdn_pytest run in the standard,
+    rocke_ctest_shard_pytest, rocke_library_gdn_pytest and
+    rocke_library_conv_fwd_aot_packaging_pytest run in the standard,
     comprehensive and full tiers and not in the quick tier. Another category
-    keeps rocke_library_gdn_pytest in the ffm-quick tier."""
+    keeps rocke_library_gdn_pytest and
+    rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctests(ctest_dir)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
@@ -635,6 +701,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             "rocke_library_gpu_pytest",
             "rocke_ctest_shard_pytest",
             "rocke_library_gdn_pytest",
+            "rocke_library_conv_fwd_aot_packaging_pytest",
         ],
         tmp_path,
     )
@@ -646,7 +713,12 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert library_gpu_labels
     assert labels.get("rocke_tiling_gpu_pytest") == library_gpu_labels
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
-    for name in ["rocke_ctest_shard_pytest", "rocke_library_gdn_pytest"]:
+    standard_entries = [
+        "rocke_ctest_shard_pytest",
+        "rocke_library_gdn_pytest",
+        "rocke_library_conv_fwd_aot_packaging_pytest",
+    ]
+    for name in standard_entries:
         standard_labels = labels.get(name, set())
         assert {"standard", "comprehensive", "full"} <= standard_labels, (
             name,
@@ -654,6 +726,11 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         )
         assert "quick" not in standard_labels, (name, standard_labels)
     assert "ffm-quick" not in labels.get("rocke_ctest_shard_pytest", set())
+    for name in [
+        "rocke_library_gdn_pytest",
+        "rocke_library_conv_fwd_aot_packaging_pytest",
+    ]:
+        assert "ffm-quick" in labels.get(name, set()), name
 
 
 # (exported target, installed header, extern "C" symbol it declares). The
