@@ -7870,12 +7870,12 @@ namespace TensileLite
         };
         // Which fallback (if any) turned the initially-selected grid into the
         // final launch grid. Reported alongside selectedGrid vs grid().
-        // Ordered latest-clamp-wins, i.e. the reverse of the order they are applied:
-        // the workspace-DP fallback runs last (in computeStreamKDecisions, after
-        // getPersistentGridImpl returns); inside getPersistentGridImpl the ForceDPOnly cluster
-        // multicast clamp runs after the tree-bounds fallback, which in turn runs
-        // after the persistentFixedGrid override. So the first matching branch below names
-        // the clamp that actually produced grid().
+        // Ordered latest-clamp-wins for the non-cluster path: the workspace-DP
+        // fallback runs last (in computeStreamKDecisions, after getPersistentGridImpl
+        // returns), and the tree-bounds fallback runs after the persistentFixedGrid
+        // override. clusterDPMulticast is set only by spatial-cluster StreamK when its
+        // cluster-sized physical grid differs from selectedGrid; that sizing runs
+        // before the path's own tree-bounds and workspace fallbacks.
         const char* gridChangedBy = "none";
         if(d.workspaceDPFallbackFired)
             gridChangedBy = "workspaceDP";
@@ -7983,9 +7983,9 @@ namespace TensileLite
         field(11, "selected", std::to_string(d.selectedGrid));
         field(11, "final", std::to_string(d.grid()));
         field(11, "changedBy", gridChangedBy);
-        // preFallback is only interesting when a clamp inside getPersistentGridImpl
-        // (tree-bounds fixup, or the ForceDPOnly cluster multicast) already moved
-        // the grid away from what was selected, before the workspace-DP fallback.
+        // preFallback is only interesting when the tree-bounds fixup inside
+        // getPersistentGridImpl, or spatial-cluster grid sizing, already moved the
+        // grid away from what was selected, before the workspace-DP fallback.
         if(d.skGridPreFallback != d.selectedGrid)
             field(11, "preFallback", std::to_string(d.skGridPreFallback));
 

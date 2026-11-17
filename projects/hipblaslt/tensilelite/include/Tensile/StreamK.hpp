@@ -302,12 +302,13 @@ namespace TensileLite
             // available: problem.getNumTiles(sizeMapping, 1), the same call solve() makes.
             size_t tiles = 0;
             // available: getSKGridImpl out-param -- grid selected by its config/CU/override
-            // logic BEFORE the "reset to tiles" clamps (tree-fixup bounds / ForceDPOnly
-            // cluster multicast / workspace-DP).
+            // logic BEFORE the "reset to tiles" clamps (tree-fixup bounds / workspace-DP)
+            // and, for spatial-cluster StreamK, before the cluster grid sizing.
             size_t selectedGrid = 0;
-            // available: getSKGridImpl return -- AFTER the tree-fixup-bounds fallback and
-            // the ForceDPOnly cluster-multicast clamp, but BEFORE the workspace-DP
-            // fallback in computeStreamKDecisions(). Diagnostic intermediate.
+            // available: getSKGridImpl return -- AFTER the tree-fixup-bounds fallback, but
+            // BEFORE the workspace-DP fallback in computeStreamKDecisions(). Spatial-cluster
+            // StreamK reports its cluster-sized grid before either fallback. Diagnostic
+            // intermediate.
             size_t skGridPreFallback = 0;
 
             // StreamK-specific kernel arguments
@@ -425,9 +426,11 @@ namespace TensileLite
             bool workspaceDPFallbackFired = false;
             // available: getSKGridImpl out-param (24-bit tree-fixup bounds -> grid=tiles).
             bool treeBoundsFallbackFired = false;
-            // DataParallel cluster prefetch clamp: PrefetchAcrossPersistent uses one
-            // cluster per padded tile block so prefetch cannot overwrite a peer's LDS.
-            // Ordinary persistent clusters keep the selected grid in whole clusters.
+            // Spatial-cluster StreamK only, copied from
+            // PersistentLaunchSettings::clusterGridClamp: the cluster schedule's physical
+            // grid (whole clusters, padded boundary blocks, launch and residency limits)
+            // differs from selectedGrid. getPersistentGridImpl() leaves it false, including
+            // when it rounds a DataParallel cluster grid to whole clusters.
             bool clusterDPGridClamped = false;
             // available: getSKGridImpl out-param (AMDGPU persistentFixedGrid override applied).
             bool fixedGridUsed = false;
