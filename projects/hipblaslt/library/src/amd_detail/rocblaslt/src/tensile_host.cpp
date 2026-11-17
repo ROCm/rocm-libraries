@@ -729,6 +729,20 @@ namespace
         }
     }
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    TensileLite::FusedA2A toTensileFusedA2A(RocblasltFusedEpilogueInfo::Mode mode)
+    {
+        switch(mode)
+        {
+        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+            return TensileLite::FusedA2A::GemmA2A;
+        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+            break;
+        }
+        return TensileLite::FusedA2A::Disabled;
+    }
+#endif
+
     /// Shared scale-mode mapping for problem construction and updates.
     inline void setTensileScaleAB(const RocblasltContractionProblem&   prob,
                                   TensileLite::ContractionProblemGemm& tensileProblem)
@@ -2431,10 +2445,9 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }
@@ -2781,12 +2794,17 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
+        }
+        else
+        {
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::Disabled);
+            tensileProblem.setFusedA2AExtent(0);
+            tensileProblem.setWorld(1);
         }
 #endif
 
@@ -3093,8 +3111,7 @@ namespace
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         // Device-side fused-A2A operands.
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
             inputs.fusedA2ACounter = prob.Synchronizer;
             inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
@@ -4133,6 +4150,13 @@ void initTensileGemmData(rocblaslt_handle       handle,
 
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Do not use rocRoller for a fused all-to-all
+    RocblasltFusedEpilogueInfo fusedInfo;
+    if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
+        return false;
+#endif
+
     // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
     bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
     bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
@@ -5008,7 +5032,7 @@ namespace
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo info;
-        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info) && info.hasA2APrefix;
+        return rocblaslt_resolve_fused_a2a(prob, info);
 #else
         static_cast<void>(prob);
         return false;
