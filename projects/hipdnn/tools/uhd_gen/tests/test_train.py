@@ -112,6 +112,44 @@ def test_an_unslotted_model_stays_uhd_1_0(tmp_path, evaluator):
     assert _trained_version(output) == "1.0"
 
 
+def test_train_reads_an_optional_attribute_through_its_default(tmp_path, evaluator):
+    """RFC 0019 §6.2: rows whose graph left the SDPA scale unset train on the 1.0 the runtime
+    reads, and the signature and hash the model records are the wrapped ones."""
+    from uhd_gen.features import compute_features_hash
+
+    scale = "graph.nodes[0].attn_scale_value"
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text(encoding="utf-8"))
+    for index, row in enumerate(rows):
+        if index % 2:
+            row["features"][scale] = 0.125
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert (
+        _l1_train(
+            corpus,
+            output,
+            "--features",
+            "graph.flops",
+            "graph.nodes[0].x.dims[0]",
+            scale,
+            "--feature-evaluator",
+            evaluator,
+        )
+        == 0
+    )
+
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    assert descriptor["features_signature"] == [
+        "$graph.flops",
+        "$graph.nodes[0].x.dims[0]",
+        {"value_or_default": ["$" + scale, 1.0]},
+    ]
+    assert descriptor["features_hash"] == compute_features_hash(
+        descriptor["features_signature"], None, evaluator
+    )
+
+
 def test_a_model_trained_against_every_slots_kmd_is_uhd_1_1(tmp_path, evaluator):
     """A slotted engine's L1 model records `kmds`, which only UHD 1.1 may carry; the
     snapshot is replayed with `--provenance`, so no GPU or descriptor tree is needed."""

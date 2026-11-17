@@ -1272,6 +1272,25 @@ class TestQueryCsv:
             "plain",
         ]
 
+    def test_a_shape_with_sinks_is_written_as_the_sink_form(self, tmp_path):
+        """The corpus tool builds a sink-bound graph from `q.form=sink`; a sinkless shape
+        stays `plain`. Rows are told apart by their seqlen_q."""
+        rc, log, lines = self._mine(
+            tmp_path,
+            "batch,heads_q,heads_kv,seqlen_q,seqlen_kv,head_dim,dtype,mask,sinks\n"
+            "1,32,8,2048,2048,128,bf16,causal,true\n"
+            "1,32,8,4096,4096,128,bf16,causal,false\n",
+        )
+        assert rc == 0, log
+        header = lines[0].split(",")
+        form_by_seqlen = {
+            row.split(",")[header.index("q.seqlen_q")]: row.split(",")[
+                header.index("q.form")
+            ]
+            for row in lines[1:]
+        }
+        assert form_by_seqlen == {"2048": "sink", "4096": "plain"}
+
     def test_a_tabular_row_is_written_top_left(self, tmp_path):
         """Tabular sources cannot say bottom-right; the column is still written."""
         rc, log, lines = self._mine(

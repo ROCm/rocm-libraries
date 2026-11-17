@@ -382,6 +382,9 @@ endif()
         # copy of ROOT in HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR, and the copy is what the tool
         # validates. HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES, when set, is passed to the
         # tool as --feature-samples.
+        # HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED, when set, is the exact
+        # `unguarded_optional_features` of the first model check (the space-separated references
+        # the model reads bare), or `none` when that field must be absent.
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake" [[
 if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
    OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_ROOT
@@ -486,6 +489,26 @@ if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC)
             "no diagnostic contains '${HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC}'")
     endif()
 endif()
+
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED)
+    string(JSON unguardedFeatures ERROR_VARIABLE unguardedError
+           GET "${toolStdout}" model_checks 0 unguarded_optional_features)
+    if(HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED STREQUAL "none")
+        if(NOT unguardedError)
+            message(FATAL_ERROR
+                "model_checks[0] lists unguarded_optional_features '${unguardedFeatures}'; "
+                "expected none")
+        endif()
+    elseif(unguardedError)
+        message(FATAL_ERROR
+            "model_checks[0] has no unguarded_optional_features; expected "
+            "'${HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED}'")
+    elseif(NOT unguardedFeatures STREQUAL HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED)
+        message(FATAL_ERROR
+            "model_checks[0] lists unguarded_optional_features '${unguardedFeatures}'; "
+            "expected '${HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED}'")
+    endif()
+endif()
 ]])
         # cmake-format: on
 
@@ -531,6 +554,8 @@ endif()
             roleFixture
             "l2_static_order:0:sort_kernel_catalog=true"
             "l2_dynamic_features:0:sort_kernel_catalog=true"
+            "l2_unguarded_optional:0:sort_kernel_catalog=true"
+            "l2_guarded_optional:0:sort_kernel_catalog=true"
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
             "slotted_valid:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
@@ -565,6 +590,12 @@ endif()
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES=${fixtureRoot}/feature_samples.json"
                 )
                 set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+            elseif(fixtureName STREQUAL "l2_unguarded_optional")
+                set(fixtureCaseArgs
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=$graph.nodes[0].attn_scale_value"
+                )
+            elseif(fixtureName STREQUAL "l2_guarded_optional")
+                set(fixtureCaseArgs "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=none")
             endif()
             add_test(
                 NAME hipdnn_validate_descriptors_${fixtureName}

@@ -105,6 +105,14 @@ GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `
   `feature_extraction_skipped` set). `model_checks`: `sort_kernel_catalog` succeeds. With
   a sample covering the engine, extraction runs for each candidate kernel, and a sample
   leaving `$graph.batch` unbound fails the run.
+- `l2_unguarded_optional/`: the `sort_kernel_catalog` UHD is a `native` scorer whose signature
+  reads `$kernel.block_size` and `$graph.nodes[0].attn_scale_value` bare, an optional operand a
+  valid SDPA graph may omit. Expected: exit 0 -- the unguarded read is a warning, not a failure.
+  `model_checks`: `sort_kernel_catalog` succeeds and lists `$graph.nodes[0].attn_scale_value`
+  under `unguarded_optional_features`.
+- `l2_guarded_optional/`: `l2_unguarded_optional/` with the read wrapped in
+  `value_or_default(..., 1.0)`. Expected: exit 0, `model_checks`: `sort_kernel_catalog` succeeds
+  with no `unguarded_optional_features` field.
 - `l1_static_order/`: `predict_engine` binds a calibrated `time` UHD whose adapter is
   `static_order`. Expected: non-zero exit -- an L1 estimate needs a `tree_data`, `native`
   or `custom_library` model, so the runtime refuses it. `model_checks`:

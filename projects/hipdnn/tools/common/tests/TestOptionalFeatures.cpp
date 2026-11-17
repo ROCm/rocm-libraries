@@ -97,6 +97,37 @@ TEST(TestOptionalFeatures, AConditionGuardsOnlyTheArmsItProvesBound)
               std::vector<std::string>{SCALE});
 }
 
+TEST(TestOptionalFeatures, AnAndOrOrConditionProvesItsOperandsByPolarity)
+{
+    const nlohmann::json bothPresent
+        = {{"and", {{{"present", {SCALE}}}, {{"present", {MASK_DIM}}}}}};
+    const nlohmann::json eitherPresent
+        = {{"or", {{{"present", {SCALE}}}, {{"present", {MASK_DIM}}}}}};
+    const nlohmann::json eitherAbsent
+        = {{"or", {{{"not_present", {SCALE}}}, {{"not_present", {MASK_DIM}}}}}};
+    const nlohmann::json sum = {{"+", {SCALE, MASK_DIM}}};
+
+    // `and` of presence proves every operand bound when true.
+    EXPECT_TRUE(unguarded({{{"if", {bothPresent, sum, 0}}}}).empty());
+    // ...but proves nothing when false: the else arm reads unbound values.
+    EXPECT_EQ(unguarded({{{"if", {bothPresent, 0, SCALE}}}}), std::vector<std::string>{SCALE});
+
+    // `or` of presence proves nothing when true (either may be the absent one).
+    EXPECT_EQ(unguarded({{{"if", {eitherPresent, SCALE, 0}}}}), std::vector<std::string>{SCALE});
+    // ...and proves nothing when false either: false means both absent, not both bound.
+    EXPECT_EQ(unguarded({{{"if", {eitherPresent, 0, SCALE}}}}), std::vector<std::string>{SCALE});
+
+    // `or` of absence is false only when every operand is bound, which the else arm then reads.
+    EXPECT_TRUE(unguarded({{{"if", {eitherAbsent, 0, sum}}}}).empty());
+    // ...and proves nothing when true.
+    EXPECT_EQ(unguarded({{{"if", {eitherAbsent, SCALE, 0}}}}), std::vector<std::string>{SCALE});
+
+    // A presence proof inside an `and` condition guards the rest of that condition and the arm.
+    const nlohmann::json guardedCompare = {{"and", {{{"present", {SCALE}}}, {{">", {SCALE, 0}}}}}};
+    EXPECT_TRUE(unguarded({{{"if", {guardedCompare, SCALE, 0}}}}).empty());
+    EXPECT_EQ(unguarded({{{"if", {guardedCompare, 0, SCALE}}}}), std::vector<std::string>{SCALE});
+}
+
 TEST(TestOptionalFeatures, OneProvenFieldOfAnOperandProvesItsOtherFields)
 {
     const std::string rank = "$graph.nodes[0].attn_mask.rank";

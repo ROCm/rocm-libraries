@@ -297,6 +297,55 @@ TEST(TestPoolAssembly, AQuotaThePoolsCannotFillSaysHowShortItIs)
     EXPECT_EQ(selected.front().regime, "rare");
 }
 
+TEST(TestPoolAssembly, OneEntryFillsBothItsRegimesQuotaAndItsFormsQuota)
+{
+    // The pick for whichever quota is served first also counts for the other, so the corpus
+    // holds one graph, not one per quota. The regime names sort before and after the form key,
+    // so both orders in which the quotas are served are covered.
+    for(const char* regime : {"alpha", "zulu"})
+    {
+        auto carrier = entryAt("sweep", 1, regime);
+        carrier.forms = {"form:padded"};
+        const auto sameRegime = entryAt("sweep", 2, regime);
+        auto sameForm = entryAt("sweep", 3, "other");
+        sameForm.forms = {"form:padded"};
+
+        std::map<std::string, int64_t> allocation;
+        std::map<std::string, RegimeQuotaOutcome> outcome;
+        const auto selected = select({{"sweep", {carrier, sameRegime, sameForm}}},
+                                     0,
+                                     defaultShares(),
+                                     allocation,
+                                     {{regime, 1}, {"form:padded", 1}},
+                                     outcome);
+
+        ASSERT_EQ(selected.size(), 1u) << regime;
+        EXPECT_EQ(selected.front().origin, carrier.origin) << regime;
+        EXPECT_EQ(outcome.at(regime).taken, 1) << regime;
+        EXPECT_EQ(outcome.at("form:padded").taken, 1) << regime;
+    }
+}
+
+TEST(TestPoolAssembly, AFormQuotaNoEntryCarriesIsReportedShortRatherThanFailing)
+{
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+    auto padded = entryAt("sweep", 1, "r");
+    padded.forms = {"form:padded"};
+
+    const auto selected = select({{"sweep", {padded, entryAt("sweep", 2, "r")}}},
+                                 0,
+                                 defaultShares(),
+                                 allocation,
+                                 {{"form:padded", 1}, {"form:sink", 1}},
+                                 outcome);
+
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(outcome.at("form:padded").taken, 1);
+    EXPECT_EQ(outcome.at("form:sink").asked, 1);
+    EXPECT_EQ(outcome.at("form:sink").taken, 0);
+}
+
 TEST(TestPoolAssembly, AQuotaTakesARecordedShapeBeforeASample)
 {
     // A recorded model shape takes precedence, as elsewhere.

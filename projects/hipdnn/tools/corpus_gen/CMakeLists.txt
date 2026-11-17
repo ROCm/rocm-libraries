@@ -73,8 +73,9 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
                 # With quotas and no --count, the corpus is the quotas alone.
                 "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3|0|3"
-                # One form axis of eight labels: one graph under each, and nothing else.
-                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--form-floor,1|0|8"
+                # One form axis of eight labels: one graph under each, and nothing else. Each
+                # label is a value of the manifest's own `form` column and a reported quota.
+                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1"
@@ -86,11 +87,16 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             list(GET _fields 1 _args)
             list(GET _fields 2 _exit)
             list(GET _fields 3 _graphs)
+            list(LENGTH _fields _field_count)
+            set(_forms "")
+            if(_field_count GREATER 4)
+                list(GET _fields 4 _forms)
+            endif()
             set(_test hipdnn_corpus_gen_cli_run_${_name})
             add_test(NAME ${_test}
                 COMMAND ${CMAKE_COMMAND} "-DTOOL=$<TARGET_FILE:hipdnn_corpus_gen_tool>"
                         "-DCLI_ARGS=${_args}" "-DEXPECTED_EXIT=${_exit}"
-                        "-DEXPECTED_GRAPHS=${_graphs}"
+                        "-DEXPECTED_GRAPHS=${_graphs}" "-DEXPECTED_FORMS=${_forms}"
                         "-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${_test}"
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CorpusGenRun.cmake")
             set_tests_properties(${_test} PROPERTIES TIMEOUT 120)
