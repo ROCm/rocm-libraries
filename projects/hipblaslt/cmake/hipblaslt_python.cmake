@@ -116,8 +116,8 @@ function(hipblaslt_configure_tensilelite_python asan_options)
 
     # Code generation runs the built wheel: unpack it into the build tree. The
     # build Python's site-packages are never modified.
-    set(_canonical_wheel
-        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-release-wheels/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
+    set(_wheel_manifest
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-release-wheels/.published")
     set(HIPBLASLT_TENSILELITE_WHEEL_ROOT "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel")
     set(_unpack_stamp "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel.stamp")
     add_custom_command(
@@ -125,10 +125,10 @@ function(hipblaslt_configure_tensilelite_python asan_options)
         COMMAND "${Python3_EXECUTABLE}"
             "${hipblaslt_SOURCE_DIR}/tensilelite/scripts/install_release_wheels.py"
             --destination "${HIPBLASLT_TENSILELITE_WHEEL_ROOT}"
-            "${_canonical_wheel}"
+            --manifest "${_wheel_manifest}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_unpack_stamp}"
         DEPENDS
-            "${_canonical_wheel}"
+            "${_wheel_manifest}"
             "${hipblaslt_SOURCE_DIR}/tensilelite/scripts/install_release_wheels.py"
         COMMENT "Unpacking the TensileLite wheel for device generation"
         VERBATIM
