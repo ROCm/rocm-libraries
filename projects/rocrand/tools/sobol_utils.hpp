@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,15 +33,18 @@ namespace filesystem = experimental::filesystem;
 
 #include <fstream>
 #include <iostream>
-
+#include <random>
 #include <stdint.h>
+#include <type_traits>
 
 namespace rocrand_tools
 {
 
-inline constexpr uint32_t SOBOL_DIM = 20000;
-inline constexpr uint32_t SOBOL32_N = SOBOL_DIM * 32;
-inline constexpr uint32_t SOBOL64_N = SOBOL_DIM * 64;
+inline constexpr uint32_t SOBOL_DIM        = 20000;
+inline constexpr uint32_t SOBOL32_N        = SOBOL_DIM * 32;
+inline constexpr uint32_t SOBOL64_N        = SOBOL_DIM * 64;
+inline constexpr uint32_t SOBOL32_LMS_SEED = std::mt19937::default_seed + 32u;
+inline constexpr uint32_t SOBOL64_LMS_SEED = std::mt19937::default_seed + 64u;
 
 struct sobol_set
 {
@@ -105,21 +108,62 @@ void init_direction_vectors(struct rocrand_tools::sobol_set* inputs,
     }
 }
 
-template<typename DirectionVectorType>
-void write_matrix_with_offset(std::ofstream&             binary_out,
-                              const DirectionVectorType* directions,
-                              int32_t                    n,
-                              uint32_t                   offset)
+/// Generates a uniform random number reproducible across standard libraries
+template<class DirectionVectorType, class Engine>
+DirectionVectorType next_uint(Engine& gen)
 {
-    for(int k = 0; k < n; k++)
+    static_assert(std::is_same_v<DirectionVectorType, uint32_t>
+                  || std::is_same_v<DirectionVectorType, uint64_t>);
+    if constexpr(std::is_same_v<DirectionVectorType, uint32_t>)
     {
-        const DirectionVectorType direction = directions[k] + offset;
-        binary_out.write(reinterpret_cast<const char*>(&direction), sizeof(direction));
-        if(!binary_out)
-        {
-            std::cerr << "Error: write failed at element " << k << std::endl;
-            return;
-        }
+        return gen();
+    }
+    else
+    {
+        return (static_cast<uint64_t>(gen()) << 32) | static_cast<uint64_t>(gen());
+    }
+}
+
+/// Draws a uniformly random unit lower-triangular matrix over GF(2), in column form.
+/// Column k has zeros in rows < k, a one in row k, and uniform random bits in rows > k.
+template<typename DirectionVectorType, typename Engine>
+void random_unit_lower_triangular(DirectionVectorType* cols, Engine& gen)
+{
+    constexpr int bits = sizeof(DirectionVectorType) * 8;
+    for(int k = 0; k < bits; k++)
+    {
+        const DirectionVectorType diagonal = DirectionVectorType{1} << (bits - 1 - k);
+        cols[k] = diagonal | (next_uint<DirectionVectorType>(gen) & (diagonal - 1));
+    }
+}
+
+/// Multiplies a direction vector by a matrix given in column form, over GF(2).
+template<typename DirectionVectorType>
+DirectionVectorType apply_matrix(const DirectionVectorType* cols, DirectionVectorType v)
+{
+    constexpr int       bits = sizeof(DirectionVectorType) * 8;
+    DirectionVectorType out  = 0;
+    for(int k = 0; k < bits; k++)
+    {
+        if((v >> (bits - 1 - k)) & 1)
+            out ^= cols[k];
+    }
+    return out;
+}
+
+/// Matousek linear matrix scramble: applies an independent random unit
+/// lower-triangular matrix to each dimension's direction vectors, in place.
+template<typename DirectionVectorType, typename Engine>
+void linear_matrix_scramble(DirectionVectorType* directions, uint32_t dim, Engine& gen)
+{
+    constexpr int       bits = sizeof(DirectionVectorType) * 8;
+    DirectionVectorType cols[bits];
+    for(uint32_t d = 0; d < dim; d++)
+    {
+        random_unit_lower_triangular(cols, gen);
+        DirectionVectorType* v = directions + static_cast<size_t>(d) * bits;
+        for(int j = 0; j < bits; j++)
+            v[j] = apply_matrix(cols, v[j]);
     }
 }
 

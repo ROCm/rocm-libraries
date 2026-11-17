@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -80,7 +80,16 @@ int main(int argc, char const* argv[])
         << "#endif // SCRAMBLED_SOBOL_DIM\n"
         << "#define SCRAMBLED_SOBOL32_N " << rocrand_tools::SOBOL32_N << "\n"
         << "\n"
-        << "extern \"C\" ROCRANDAPI const unsigned int " << symbol << "[SCRAMBLED_SOBOL32_N];\n"
+        << "namespace rocrand_device\n"
+        << "{\n"
+        << "namespace detail\n"
+        << "{\n"
+        << "\n"
+        << "extern \"C\" ROCRANDAPI const unsigned int\n    " << symbol
+        << "[SCRAMBLED_SOBOL32_N];\n"
+        << "\n"
+        << "} // end namespace detail\n"
+        << "} // end namespace rocrand_device\n"
         << "\n"
         << "#endif // ROCRAND_SCRAMBLED_SOBOL32_PRECOMPUTED_H_\n";
 
@@ -93,9 +102,18 @@ int main(int argc, char const* argv[])
         return -1;
     }
 
-    rocrand_tools::write_matrix_with_offset(binary_out,
-                                            directions_32.data(),
-                                            rocrand_tools::SOBOL32_N,
-                                            640000);
+    // To avoid a correlation between the two halves of the scramble, do not use
+    // default-seeded std::mt19937 because scrambled_sobol32_constants_generator already uses it
+    std::mt19937 gen(rocrand_tools::SOBOL32_LMS_SEED);
+    rocrand_tools::linear_matrix_scramble(directions_32.data(), rocrand_tools::SOBOL_DIM, gen);
+
+    binary_out.write(reinterpret_cast<const char*>(directions_32.data()),
+                     rocrand_tools::SOBOL32_N * sizeof(directions_32[0]));
+    if(!binary_out)
+    {
+        std::cerr << "Error: could not write binary file: " << binary_path << std::endl;
+        return -1;
+    }
+
     return 0;
 }
