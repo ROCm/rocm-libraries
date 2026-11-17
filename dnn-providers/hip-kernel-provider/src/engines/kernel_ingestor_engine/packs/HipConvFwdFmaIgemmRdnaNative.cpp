@@ -215,8 +215,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 }
 
 /// The kernel of the graph's family, dtype and layout, with the channel tile fmaTileN picks.
-/// A wrong dtype or layout would return wrong numbers; a wrong tile is only slower, but one
-/// tile per graph leaves exactly one candidate.
+/// Any other would return wrong numbers: the grid is sized for that tile, so a kernel built for
+/// another one leaves output channels unwritten or writes into the next group's.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
