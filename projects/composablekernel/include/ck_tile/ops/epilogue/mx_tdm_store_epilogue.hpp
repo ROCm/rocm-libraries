@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <type_traits>
-
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
@@ -14,33 +12,28 @@
 namespace ck_tile {
 
 /**
- * @brief TdmEpilogue for MxGemmPipelineAgBgCrCompTDMScheduled, the alternative to
- *        MxDirectStoreEpilogue: E = acc staged in LDS (kTileM * kTileN * sizeof(E) bytes) and
- *        stored by TDM. FP8 saturates as MxDirectStoreEpilogue. The pipeline's
- *        MxTdmScheduledGemmTraits should take StoreWidth 1: TDM stores have no vector width.
+ * @brief TdmEpilogue for MxGemmPipelineAgBgCrCompTDMScheduled: E = acc staged in LDS
+ *        (kTileM * kTileN * sizeof(E) bytes) and stored by TDM. E is row-major and there are no
+ *        Ds tensors. FP8 saturates in cast_tile_pk: finite values clamp to the type's max.
  */
 template <typename Pipeline_,
           typename Pipeline = remove_cvref_t<Pipeline_>,
           typename Shape    = typename Pipeline::BlockGemmShape>
-using MxTdmStoreEpilogue =
-    TdmEpilogue<CShuffleEpilogueProblem<typename Pipeline::ADataType,
-                                        typename Pipeline::BDataType,
-                                        tuple<>,
-                                        float,
-                                        typename Pipeline::ODataType,
-                                        tuple<>,
-                                        tensor_layout::gemm::RowMajor,
-                                        element_wise::PassThrough,
-                                        Shape::kM,
-                                        Shape::kN,
-                                        Shape::BlockWarps::at(number<0>{}),
-                                        Shape::BlockWarps::at(number<1>{}),
-                                        Shape::WarpTile::at(number<0>{}),
-                                        Shape::WarpTile::at(number<1>{}),
-                                        Shape::WarpTile::at(number<2>{}),
-                                        /*isCTransposed=*/false>,
-                std::conditional_t<std::is_same_v<typename Pipeline::ODataType, fp8_t>,
-                                   element_wise::SaturateFp8E4M3,
-                                   element_wise::PassThrough>>;
+using MxTdmStoreEpilogue = TdmEpilogue<CShuffleEpilogueProblem<typename Pipeline::ADataType,
+                                                               typename Pipeline::BDataType,
+                                                               tuple<>,
+                                                               float,
+                                                               typename Pipeline::ODataType,
+                                                               tuple<>,
+                                                               tensor_layout::gemm::RowMajor,
+                                                               element_wise::PassThrough,
+                                                               Shape::kM,
+                                                               Shape::kN,
+                                                               Shape::BlockWarps::at(number<0>{}),
+                                                               Shape::BlockWarps::at(number<1>{}),
+                                                               Shape::WarpTile::at(number<0>{}),
+                                                               Shape::WarpTile::at(number<1>{}),
+                                                               Shape::WarpTile::at(number<2>{}),
+                                                               /*isCTransposed=*/false>>;
 
 } // namespace ck_tile
