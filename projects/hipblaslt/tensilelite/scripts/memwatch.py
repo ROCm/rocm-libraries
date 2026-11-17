@@ -103,7 +103,7 @@ def read_file(path: str):
 
 
 def proc_table():
-    """Return {pid: (ppid, starttime, session)} for all processes.
+    """Return {pid: (ppid, starttime, session, state)} for all processes.
 
     starttime (clock ticks since boot, /proc/<pid>/stat field 22) tells a
     reused pid apart from the process that held it before; session is the
@@ -118,11 +118,16 @@ def proc_table():
         if not data:
             continue
         # comm may contain spaces/parens; the fields after ')' start at field 3,
-        # so ppid is index 1, session index 3 and starttime index 19.
+        # so state is index 0, ppid index 1, session index 3, starttime index 19.
         rpar = data.rfind(b")")
         fields = data[rpar + 2 :].split()
         try:
-            table[int(entry)] = (int(fields[1]), int(fields[19]), int(fields[3]))
+            table[int(entry)] = (
+                int(fields[1]),
+                int(fields[19]),
+                int(fields[3]),
+                fields[0].decode(),
+            )
         except (IndexError, ValueError):
             continue
     return table
@@ -445,11 +450,153 @@ class OutputPump(threading.Thread):
                     self.sampler.set_phase(phase)
                 if self.log:
                     self.log.write(line)
+                    self.log.flush()
                 if self.echo:
                     sys.stdout.write(line)
             except Exception as e:  # noqa: BLE001 - any output failure ends the run
                 self.error = e
                 self.on_error()
+
+
+class RunResult:
+    def __init__(self, sampler, proc, elapsed, error):
+        self.sampler = sampler
+        self.proc = proc
+        self.elapsed = elapsed
+        self.error = error
+
+
+def live_members(root: int):
+    """Pids in the command's tree that are still alive (not zombies), root excluded."""
+    table = proc_table()
+    return [
+        pid
+        for pid in tree_members(root, table)
+        if pid != root
+        and pid in table
+        and (len(table[pid]) < 4 or table[pid][3] != "Z")
+    ]
+
+
+def _signal_group(pgid: int, sig) -> None:
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        pass
+
+
+def _terminate_group(pgid: int, root_alive, timeout: float = 5.0) -> None:
+    """SIGTERM the group, wait up to ``timeout``, then SIGKILL and wait again.
+
+    ``root_alive()`` reports whether the root still runs; once it is gone the
+    wait is on the other members of the tree.
+    """
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        _signal_group(pgid, sig)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not root_alive() and not live_members(pgid):
+                return
+            time.sleep(0.1)
+
+
+def run_command(cmd, interval, csv_path, log_path, echo, grace):
+    """Run ``cmd`` under the sampler and see it, and everything it started, to the end.
+
+    The command leads its own session, so one process group covers every
+    descendant. The sequence is:
+
+    1. open the log (an unusable destination means nothing is launched);
+    2. start the command, the sampler and the output pump;
+    3. wait for the root, forwarding SIGINT/SIGTERM/SIGHUP to the group; if
+       the pump fails to write the log or stdout, terminate the group with a
+       bounded SIGTERM-then-SIGKILL;
+    4. once the root is gone, give the processes still alive in its session
+       ``grace`` seconds (they are not part of a build that finished
+       normally), then terminate them the same way;
+    5. close the log; a flush or close failure counts as an output error.
+
+    Raises OSError if the log cannot be opened or the command cannot start.
+    """
+    log = open(log_path, "w") if log_path else None
+    try:
+        # Unbuffered child stdout so phase markers arrive when they are
+        # printed, not when a pipe buffer happens to fill.
+        env = dict(os.environ, PYTHONUNBUFFERED="1")
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            bufsize=1,
+            env=env,
+            start_new_session=True,
+        )
+    except OSError:
+        if log:
+            log.close()
+        raise
+    pgid = proc.pid
+    sampler = Sampler(proc.pid, interval, csv_path)
+    sampler.start()
+    t0 = time.monotonic()
+    error = None
+    try:
+        pump = OutputPump(
+            proc.stdout,
+            sampler,
+            log,
+            echo=echo,
+            on_error=lambda: _signal_group(pgid, signal.SIGTERM),
+        )
+        pump.start()
+
+        def forward(sig, _frame):
+            _signal_group(pgid, sig)
+
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, forward)
+
+        # Wait for the root itself, not for end-of-file on the pipe, and keep
+        # an eye on the pump: a failed write must end the command even if it
+        # ignores the first SIGTERM.
+        while True:
+            try:
+                proc.wait(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if pump.error is not None:
+                    _terminate_group(pgid, lambda: proc.poll() is None)
+                    proc.wait()
+                    break
+        elapsed = time.monotonic() - t0
+
+        # Survivors are judged by what is alive in the session, not by who
+        # still holds the pipe: a worker that redirected its output would
+        # otherwise slip past.
+        deadline = time.monotonic() + grace
+        while live_members(pgid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if live_members(pgid):
+            print(
+                f"memwatch: command exited but processes of its group are still "
+                f"running after {grace:g}s; terminating them",
+                file=sys.stderr,
+            )
+            _terminate_group(pgid, lambda: False)
+        pump.join(5)
+        error = pump.error
+    finally:
+        sampler.stop_event.set()
+        sampler.join()
+        if log:
+            try:
+                log.close()
+            except OSError as e:
+                if error is None:
+                    error = e
+    return RunResult(sampler, proc, elapsed, error)
 
 
 def main(argv=None):
@@ -471,8 +618,8 @@ def main(argv=None):
         "--grace",
         type=float,
         default=10.0,
-        help="seconds to wait for the command's remaining processes after it exits "
-        "before terminating them (default 10)",
+        help="seconds to wait for processes the command leaves running after it "
+        "exits before terminating them (default 10)",
     )
     ap.add_argument(
         "cmd", nargs=argparse.REMAINDER, help="command to run (prefix with --)"
@@ -484,77 +631,16 @@ def main(argv=None):
     if not cmd:
         ap.error("no command given")
 
-    # Unbuffered child stdout so phase markers arrive when they are printed,
-    # not when a pipe buffer happens to fill.
-    env = dict(os.environ, PYTHONUNBUFFERED="1")
-    # The child leads its own session and process group so that a signal to
-    # memwatch, or the cleanup below, reaches every descendant: signalling
-    # only the child would leave its workers and assemblers alive, holding
-    # stdout open.
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        errors="replace",
-        bufsize=1,
-        env=env,
-        start_new_session=True,
-    )
-    sampler = Sampler(proc.pid, args.interval, args.csv)
-    sampler.start()
-    t0 = time.monotonic()
-
-    def signal_group(sig):
-        try:
-            os.killpg(proc.pid, sig)
-        except ProcessLookupError:
-            pass
-
-    def forward(sig, _frame):
-        signal_group(sig)
-
-    signal.signal(signal.SIGINT, forward)
-    signal.signal(signal.SIGTERM, forward)
-
-    log = None
-    pump = None
     try:
-        log = open(args.log, "w") if args.log else None
-        pump = OutputPump(
-            proc.stdout,
-            sampler,
-            log,
-            echo=not args.quiet,
-            on_error=lambda: signal_group(signal.SIGTERM),
+        run = run_command(
+            cmd, args.interval, args.csv, args.log, not args.quiet, args.grace
         )
-        pump.start()
-        # Wait for the root itself, not for end-of-file: a worker that the
-        # root left behind can hold the pipe open indefinitely.
-        proc.wait()
-        pump.join(args.grace)
-        if pump.is_alive():
-            # Survivors of the root are not part of a build that finished
-            # normally; terminate them so the run, and the summary, can end.
-            print(
-                f"memwatch: command exited but processes of its group are still "
-                f"running after {args.grace:g}s; terminating them",
-                file=sys.stderr,
-            )
-            signal_group(signal.SIGTERM)
-            pump.join(5)
-            if pump.is_alive():
-                signal_group(signal.SIGKILL)
-                pump.join(5)
-        elapsed = time.monotonic() - t0
-    finally:
-        sampler.stop_event.set()
-        sampler.join()
-        if log:
-            try:
-                log.close()
-            except OSError:
-                pass
+    except OSError as e:
+        # Nothing was started: the log destination was unusable or the
+        # command could not be executed.
+        print(f"memwatch: error: {e}", file=sys.stderr)
+        return 1
+    sampler, proc, elapsed = run.sampler, run.proc, run.elapsed
 
     summary = sampler.summary(elapsed, proc.returncode, cmd)
     with open(args.out, "w") as f:
@@ -593,9 +679,9 @@ def main(argv=None):
             f"  {ph[:50]:50s} rss {v['rss_sum_GiB']:8.3f} GiB  pss {v['pss_sum_GiB']:8.3f} GiB"
         )
     print(f"summary written to {args.out}")
-    if pump.error is not None:
+    if run.error is not None:
         print(
-            f"memwatch: error: could not handle the command's output ({pump.error}); "
+            f"memwatch: error: could not handle the command's output ({run.error}); "
             "the command was terminated",
             file=sys.stderr,
         )

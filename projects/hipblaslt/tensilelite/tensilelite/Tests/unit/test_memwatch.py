@@ -430,3 +430,115 @@ def test_root_death_with_a_surviving_worker_ends_the_run(tmp_path):
     assert "still running" in proc.stderr
     assert json.loads(out.read_text())["returncode"] == -9
     assert _is_gone(int(marker.read_text())), "the surviving worker was not terminated"
+
+
+def _memwatch(tmp_path, *extra):
+    out = tmp_path / "summary.json"
+    return [
+        sys.executable,
+        str(MEMWATCH),
+        "--interval",
+        "0.05",
+        "--out",
+        str(out),
+        "--quiet",
+        *extra,
+        "--",
+    ], out
+
+
+def test_a_term_resistant_child_is_killed_when_output_fails(tmp_path):
+    marker = tmp_path / "pid"
+    child = (
+        "import os, signal, time, pathlib\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "print('x' * 70000, flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    argv, out = _memwatch(tmp_path, "--log", "/dev/full")
+    t0 = time.monotonic()
+    proc = subprocess.run(
+        [*argv, sys.executable, "-c", child], capture_output=True, text=True, timeout=90
+    )
+    assert time.monotonic() - t0 < 30, "no bounded escalation to SIGKILL"
+    assert (
+        proc.returncode != 0 and "could not handle the command's output" in proc.stderr
+    ), proc.stderr
+    assert (
+        json.loads(out.read_text())["returncode"] == -9
+    )  # SIGTERM was ignored; SIGKILL ended it
+    assert _is_gone(int(marker.read_text()))
+
+
+def test_a_survivor_that_closed_its_output_is_still_terminated(tmp_path):
+    marker = tmp_path / "pid"
+    child = (
+        "import subprocess, pathlib\n"
+        "p = subprocess.Popen(['sleep', '30'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
+    )
+    argv, out = _memwatch(tmp_path, "--grace", "1")
+    t0 = time.monotonic()
+    proc = subprocess.run(
+        [*argv, sys.executable, "-c", child], capture_output=True, text=True, timeout=60
+    )
+    assert time.monotonic() - t0 < 20
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "still running" in proc.stderr
+    assert _is_gone(
+        int(marker.read_text())
+    ), "a worker without the pipe survived the grace period"
+
+
+def test_an_unusable_log_path_starts_nothing(tmp_path):
+    marker = tmp_path / "pid"
+    child = f"import os, time, pathlib; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(30)"
+    argv, out = _memwatch(
+        tmp_path, "--log", str(tmp_path / "no" / "such" / "dir" / "x.log")
+    )
+    proc = subprocess.run(
+        [*argv, sys.executable, "-c", child], capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 1
+    assert "memwatch: error:" in proc.stderr and "x.log" in proc.stderr, proc.stderr
+    time.sleep(0.5)
+    assert (
+        not marker.exists()
+    ), "the command was launched although the log could not be opened"
+
+
+def test_sighup_to_memwatch_reaches_the_command(tmp_path):
+    marker = tmp_path / "started"
+    child = (
+        "import subprocess, time, pathlib\n"
+        "p = subprocess.Popen(['sleep', '30'])\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
+        "time.sleep(30)\n"
+    )
+    argv, out = _memwatch(tmp_path)
+    proc = subprocess.Popen(
+        [*argv, sys.executable, "-c", child],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    deadline = time.monotonic() + 20
+    while not marker.exists() or not marker.read_text():
+        assert time.monotonic() < deadline, "child never started"
+        time.sleep(0.05)
+    os.kill(proc.pid, signal.SIGHUP)
+    output, _ = proc.communicate(timeout=30)
+    assert proc.returncode == 129, output  # the command died of the forwarded SIGHUP
+    assert json.loads(out.read_text())["returncode"] == -1
+    assert _is_gone(int(marker.read_text()))
+
+
+def test_a_log_that_fails_on_a_short_line_is_an_error(tmp_path):
+    argv, out = _memwatch(tmp_path, "--log", "/dev/full")
+    proc = subprocess.run(
+        [*argv, "sh", "-c", "echo hello"], capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "could not handle the command's output" in proc.stderr
+    assert out.exists()
