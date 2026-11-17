@@ -27,6 +27,8 @@ Tests:
     N: *generic_l1_perf_sizes
     incx: 1
     incy: 1
+    iters: 100
+    cold_iters: 20
 
   - name: dot_bench_report
     category: bench
@@ -35,6 +37,8 @@ Tests:
     N: *generic_l1_perf_sizes
     incx: 1
     incy: 1
+    iters: 100
+    cold_iters: 20
 
   - name: gemv_square_bench_report
     category: bench
@@ -46,6 +50,8 @@ Tests:
     alpha: 1
     beta: 1
     transA: T
+    iters: 100
+    cold_iters: 20
 
   - name: trmv_bench_report
     category: bench
@@ -59,6 +65,8 @@ Tests:
     transA: T
     uplo: L
     diag: U
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_bench_report
     category: bench
@@ -70,6 +78,8 @@ Tests:
     side: R
     uplo: L
     diag: U
+    iters: 100
+    cold_iters: 20
 
   - name: gemm_bench_report
     category: bench
@@ -80,4 +90,6 @@ Tests:
     beta: 1
     transA: N
     transB: T
+    iters: 100
+    cold_iters: 20
 ...

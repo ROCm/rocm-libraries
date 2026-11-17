@@ -32,12 +32,16 @@ if(ROCBLAS_ENABLE_TENSILE)
   target_compile_definitions(
     rocblas-interface
     INTERFACE BUILD_WITH_TENSILE ROCBLAS_TENSILE_SEPARATE_ARCH=1
-              ROCBLAS_TENSILE_LAZY_LOAD=1)
+              ROCBLAS_TENSILE_LAZY_LOAD=1
+              "ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS=${ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS}")
 endif()
 
 if(ROCBLAS_ENABLE_HIPBLASLT)
   target_link_libraries(rocblas-interface INTERFACE roc::hipblaslt)
   target_compile_definitions(rocblas-interface INTERFACE BUILD_WITH_HIPBLASLT)
+  if(NOT ROCBLAS_ENABLE_TENSILE)
+    target_compile_definitions(rocblas-interface INTERFACE BUILD_WITH_HIPBLASLT_ONLY)
+  endif()
 endif()
 
 target_compile_features(rocblas-interface INTERFACE cxx_std_17)
@@ -46,8 +50,12 @@ target_link_libraries(rocblas-interface INTERFACE hip::host hip::device)
 
 add_library(rocblas-helper OBJECT)
 
-target_link_libraries(rocblas-helper PRIVATE roc::tensile-host rocblas-interface hip::host
-                                             hip::device)
+if(ROCBLAS_ENABLE_TENSILE)
+  target_link_libraries(rocblas-helper PRIVATE roc::tensile-host rocblas-interface hip::host
+                                               hip::device)
+else()
+  target_link_libraries(rocblas-helper PRIVATE rocblas-interface hip::host hip::device)
+endif()
 target_compile_features(rocblas-helper PRIVATE cxx_std_17)
 
 if(ROCBLAS_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
@@ -101,7 +109,11 @@ if(ROCBLAS_ENABLE_MARKER)
   target_link_libraries(rocblas PRIVATE ${ROCTX64_LIBRARY})
 endif()
 
-target_link_libraries(rocblas PRIVATE rocblas-helper roc::tensile-host rocblas-interface rocblas64)
+if(ROCBLAS_ENABLE_TENSILE)
+  target_link_libraries(rocblas PRIVATE rocblas-helper roc::tensile-host rocblas-interface rocblas64)
+else()
+  target_link_libraries(rocblas PRIVATE rocblas-helper rocblas-interface rocblas64)
+endif()
 
 if(ROCBLAS_ENABLE_FORTRAN)
   add_library(rocblas-fortran-module OBJECT)

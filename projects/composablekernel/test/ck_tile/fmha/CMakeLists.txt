@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # Keep in sync with example/ck_tile/01_fmha/CMakeLists.txt
-if(NOT SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx12")
+if(NOT SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
     return()
 endif()
 
@@ -297,6 +297,16 @@ add_test(
 )
 set_tests_properties(${FMHA_BWD_CODEGEN_PY_TEST}
     PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+
+# Generated FMHA sources must default to the same bf16 rounding as the CMake targets,
+# so builds that only run generate.py do not truncate. No GPU required.
+add_test(
+    NAME test_ck_tile_fmha_bf16_rounding_codegen
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_bf16_rounding_codegen.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(test_ck_tile_fmha_bf16_rounding_codegen PROPERTIES
+    LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS")
 
 # Codegen and compiled host-dispatch regression tests require no GPU.
 add_test(

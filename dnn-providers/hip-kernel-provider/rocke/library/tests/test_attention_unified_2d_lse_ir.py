@@ -10,6 +10,7 @@ import pytest
 
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import eliminate_dead_pure_ops
+from rocke.helpers.tiling.lds_conflict import NumBuilder
 
 _BASE = dict(
     head_size=128,
@@ -133,8 +134,9 @@ def _strip_lse(kernel):
     find_guards(kernel.body, ())
     stores = _drop_ops(kernel.body, is_lse_store)
     _drop_dead(kernel, guards)
-    assert kernel.name.endswith("_lse"), kernel.name
-    kernel.name = kernel.name.removesuffix("_lse")
+    suffix = re.search(r"_lse(hm)?$", kernel.name)
+    assert suffix, kernel.name
+    kernel.name = kernel.name[: suffix.start()]
     return stores
 
 
@@ -339,3 +341,157 @@ def test_gfx942_production_specs_use_branches_the_numeric_gate_covers(fields, br
     )
     problem = au.UnifiedAttentionProblem(**{**base, **fields})
     assert _gfx942_branch_of(au._tiled_spec_from_problem(problem, "gfx942")) == branch
+
+
+# ---------------------------------------------------------------------------
+# gfx950 head-major LSE layout (lse_layout="head_major")
+# ---------------------------------------------------------------------------
+
+_GFX950_BRANCHES = ("transposed32", "mfma32", "striped16")
+
+
+def _offsets(layout, q_lens, heads):
+    """Evaluates the index arithmetic ``unified_lse_offset`` emits on ints, via
+    ``NumBuilder`` (its ``add``/``mul``/``const_i32`` cover what this needs)."""
+    from kernels.common._lse_store import unified_lse_offset
+
+    b, out, start = NumBuilder(0), {}, 0
+    for seq, q_len in enumerate(q_lens):
+        for pos in range(q_len):
+            for head in range(heads):
+                out[(seq, pos, head)] = unified_lse_offset(
+                    b,
+                    layout,
+                    cu_q_start=start,
+                    q_len=q_len,
+                    pos=pos,
+                    head=head,
+                    num_heads=heads,
+                )
+        start += q_len
+    return out
+
+
+@pytest.mark.parametrize("q_lens", [[4, 4, 4], [3, 1, 7], [5]])
+def test_lse_offsets_are_a_bijection_onto_the_packed_buffer(q_lens):
+    """Both layouts write every element of the total_q * Hq buffer exactly once,
+    and never write past another sequence's block."""
+    heads = 3
+    for layout in ("token_major", "head_major"):
+        offsets = _offsets(layout, q_lens, heads)
+        assert sorted(offsets.values()) == list(range(sum(q_lens) * heads)), layout
+        start = 0
+        for seq, q_len in enumerate(q_lens):
+            mine = {o for (s, _, _), o in offsets.items() if s == seq}
+            assert mine == set(range(start * heads, (start + q_len) * heads)), layout
+            start += q_len
+
+
+def test_head_major_offsets_are_the_bhs1_stats_layout():
+    """Equal-length sequences: head_major is [B, Hq, S, 1] with strides
+    [Hq*S, S, 1] (the SDPA stats tensor); token_major is [B*S, Hq, 1]."""
+    batch, seq_len, heads = 2, 5, 3
+    head_major = _offsets("head_major", [seq_len] * batch, heads)
+    token_major = _offsets("token_major", [seq_len] * batch, heads)
+    for (b, s, h), off in head_major.items():
+        assert off == (b * heads + h) * seq_len + s
+        assert token_major[(b, s, h)] == (b * seq_len + s) * heads + h
+
+
+def test_lse_offset_rejects_an_unknown_layout():
+    from kernels.common._lse_store import unified_lse_offset
+
+    with pytest.raises(ValueError, match="lse layout must be one of"):
+        unified_lse_offset(
+            NumBuilder(0), "bshd", cu_q_start=0, q_len=1, pos=0, head=0, num_heads=1
+        )
+
+
+@pytest.mark.parametrize("bad", ["HEAD_MAJOR", "bhsd", None])
+def test_gfx950_spec_rejects_an_unknown_lse_layout(bad):
+    with pytest.raises(ValueError, match="lse_layout must be one of"):
+        _spec("gfx950", "striped16", emit_lse=True, lse_layout=bad)
+
+
+def test_gfx950_head_major_requires_emit_lse():
+    """An LSE-off spec with a layout would be a second name for one kernel."""
+    with pytest.raises(ValueError, match="requires emit_lse"):
+        _spec("gfx950", "striped16", lse_layout="head_major")
+
+
+@pytest.mark.parametrize("branch", _GFX950_BRANCHES)
+def test_gfx950_head_major_name_is_off_name_plus_lsehm(branch):
+    off = _spec("gfx950", branch)
+    token = _spec("gfx950", branch, emit_lse=True, lse_layout="token_major")
+    head = _spec("gfx950", branch, emit_lse=True, lse_layout="head_major")
+    assert token.kernel_name() == off.kernel_name() + "_lse"
+    assert head.kernel_name() == off.kernel_name() + "_lsehm"
+
+
+@pytest.mark.parametrize("branch", _GFX950_BRANCHES)
+def test_gfx950_explicit_token_major_lowers_to_the_default_lse_ir(branch):
+    """lse_layout's default is the layout every LSE-on kernel had before it."""
+    default = _lower(_spec("gfx950", branch, emit_lse=True), "gfx950")
+    token = _lower(
+        _spec("gfx950", branch, emit_lse=True, lse_layout="token_major"), "gfx950"
+    )
+    assert token == default
+
+
+@pytest.mark.parametrize("branch", _GFX950_BRANCHES)
+def test_gfx950_head_major_minus_lse_output_is_lse_off_ir(branch):
+    """Head-major changes only the LSE store index, never O."""
+    off = _build(_spec("gfx950", branch), "gfx950")
+    on = _build(
+        _spec("gfx950", branch, emit_lse=True, lse_layout="head_major"), "gfx950"
+    )
+    assert _strip_lse(on) == _EXPECTED_LSE_STORES["gfx950"][branch]
+    _drop_dead(off)
+    for kernel in (off, on):
+        _canonical_names(kernel)
+    assert lower_kernel_to_llvm(on, arch="gfx950") == lower_kernel_to_llvm(
+        off, arch="gfx950"
+    )
+
+
+@pytest.mark.parametrize("branch", _GFX950_BRANCHES)
+def test_gfx950_head_major_ir_differs_from_token_major(branch):
+    token = _lower(_spec("gfx950", branch, emit_lse=True), "gfx950")
+    head = _lower(
+        _spec("gfx950", branch, emit_lse=True, lse_layout="head_major"), "gfx950"
+    )
+    assert head != token
+    assert _lse_store_count(head) == _lse_store_count(token)
+
+
+def test_tuning_cache_key_leaves_out_the_default_lse_layout():
+    """A token-major spec keys as before lse_layout existed; head-major rekeys."""
+    from dataclasses import replace
+
+    from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
+    from dispatch.attention.unified_rules import canonicalize_tuning_spec
+    from kernels.common import attention_unified as au
+
+    problem = au.UnifiedAttentionProblem(
+        total_q=256,
+        num_seqs=1,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_size=16,
+        max_seqlen_q=256,
+        max_seqlen_k=256,
+        dtype="bf16",
+        emit_lse=True,
+    )
+    variant = next(
+        v
+        for v in GFX950_TUNING_VARIANTS
+        if v.spec_id == "gfx950_u2d_narrow_nw1_mw16_t1xb_llvm"
+    )
+    spec, why = canonicalize_tuning_spec(problem, variant, {})
+    assert spec is not None, why
+    names = [name for name, _ in spec.cache_key()[4]]
+    assert "emit_lse" in names and "lse_layout" not in names
+    head = replace(spec, kernel_spec=replace(spec.kernel_spec, lse_layout="head_major"))
+    assert ("lse_layout", repr("head_major")) in head.cache_key()[4]

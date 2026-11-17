@@ -1,0 +1,11 @@
+kernel,dtype,tile,cls,dropout,knobs
+prep,f16,*,*,*,vec_tail=1
+prep,bf16,*,*,*,vec_tail=1
+prep,fp32,*,*,*,vec_tail=1
+dkdv,bf16,*,*,*,rne=1
+dq,bf16,*,*,*,rne=1
+dkdv,fp32,192,plain,*,block_q=32
+dkdv,f16,48,causal,1,block_q=32
+dkdv,bf16,48,causal,1,block_q=32
+dkdv,bf16,128,plain,1,num_waves=8
+dkdv,bf16,160,plain,1,block_q=64
