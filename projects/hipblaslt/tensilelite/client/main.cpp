@@ -979,6 +979,10 @@ int main(int argc, const char* argv[])
         // read zeros: the combination is not supported.
         if(splitM > 1 && args["c-equal-d"].as<bool>())
             throw std::runtime_error("--split-devices does not support --c-equal-d");
+        // Each device's D is replaced by an exact-size full output, which has none of the
+        // padding (and no maxElements metadata) that the bounds check puts around D.
+        if(splitM > 1 && args["bounds-check"].as<BoundsCheckMode>() != BoundsCheckMode::Disable)
+            throw std::runtime_error("--split-devices does not support --bounds-check");
         if(splitM > 1 && args["best-solution"].as<bool>())
             throw std::runtime_error(
                 "--split-devices needs the all-solutions run (not --best-solution): a "
