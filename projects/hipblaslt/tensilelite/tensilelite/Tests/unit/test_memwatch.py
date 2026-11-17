@@ -508,7 +508,15 @@ def test_an_unusable_log_path_starts_nothing(tmp_path):
     ), "the command was launched although the log could not be opened"
 
 
-def test_sighup_to_memwatch_reaches_the_command(tmp_path):
+def _hup_default():
+    signal.signal(signal.SIGHUP, signal.SIG_DFL)
+
+
+def _hup_ignored():
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+
+def _start_memwatch_with_sleeping_grandchild(tmp_path, preexec):
     marker = tmp_path / "started"
     child = (
         "import subprocess, time, pathlib\n"
@@ -522,16 +530,39 @@ def test_sighup_to_memwatch_reaches_the_command(tmp_path):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        preexec_fn=preexec,  # the runner's own SIGHUP disposition must not leak in
     )
     deadline = time.monotonic() + 20
     while not marker.exists() or not marker.read_text():
         assert time.monotonic() < deadline, "child never started"
         time.sleep(0.05)
+    return proc, out, int(marker.read_text())
+
+
+def test_sighup_to_memwatch_reaches_the_command(tmp_path):
+    proc, out, grandchild = _start_memwatch_with_sleeping_grandchild(
+        tmp_path, _hup_default
+    )
     os.kill(proc.pid, signal.SIGHUP)
     output, _ = proc.communicate(timeout=30)
     assert proc.returncode == 129, output  # the command died of the forwarded SIGHUP
     assert json.loads(out.read_text())["returncode"] == -1
-    assert _is_gone(int(marker.read_text()))
+    assert _is_gone(grandchild)
+
+
+def test_an_inherited_sighup_ignore_is_respected(tmp_path):
+    # Under nohup or a CI agent SIGHUP arrives ignored; memwatch and the
+    # command both keep ignoring it, and SIGTERM still cleans up.
+    proc, out, grandchild = _start_memwatch_with_sleeping_grandchild(
+        tmp_path, _hup_ignored
+    )
+    os.kill(proc.pid, signal.SIGHUP)
+    time.sleep(1.0)
+    assert proc.poll() is None, "SIGHUP was not ignored"
+    os.kill(proc.pid, signal.SIGTERM)
+    output, _ = proc.communicate(timeout=30)
+    assert proc.returncode == 143, output
+    assert _is_gone(grandchild)
 
 
 def test_a_log_that_fails_on_a_short_line_is_an_error(tmp_path):
@@ -546,11 +577,11 @@ def test_a_log_that_fails_on_a_short_line_is_an_error(tmp_path):
 
 def test_a_survivor_in_its_own_process_group_is_still_terminated(tmp_path):
     marker = tmp_path / "pid"
-    # The worker leaves the root's process group (process_group=0 makes it a
-    # group leader) but stays in the session, and holds no pipe.
+    # The worker leaves the root's process group (setpgrp makes it a group
+    # leader) but stays in the session, and holds no pipe.
     child = (
-        "import subprocess, pathlib\n"
-        "p = subprocess.Popen(['sleep', '60'], process_group=0, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "import os, subprocess, pathlib\n"
+        "p = subprocess.Popen(['sleep', '60'], preexec_fn=os.setpgrp, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
         f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
     )
     argv, out = _memwatch(tmp_path, "--grace", "0.1")

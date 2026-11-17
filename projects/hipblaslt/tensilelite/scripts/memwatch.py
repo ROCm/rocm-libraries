@@ -528,9 +528,11 @@ def run_command(cmd, interval, csv_path, log_path, echo, grace):
 
     1. open the log (an unusable destination means nothing is launched);
     2. start the command, the sampler and the output pump;
-    3. wait for the root, forwarding SIGINT/SIGTERM/SIGHUP to the group; if
-       the pump fails to write the log or stdout, terminate the group with a
-       bounded SIGTERM-then-SIGKILL;
+    3. wait for the root, forwarding SIGINT/SIGTERM/SIGHUP to the group
+       (a signal memwatch inherited as ignored, as SIGHUP under nohup, stays
+       ignored by memwatch and the command alike); if the pump fails to write
+       the log or stdout, terminate the group with a bounded
+       SIGTERM-then-SIGKILL;
     4. once the root is gone, give the processes still alive in its session
        ``grace`` seconds (they are not part of a build that finished
        normally), then terminate them the same way, each signalled directly
@@ -578,8 +580,13 @@ def run_command(cmd, interval, csv_path, log_path, echo, grace):
         def forward(sig, _frame):
             _signal_group(pgid, sig)
 
+        # A signal that reached memwatch already ignored (SIGHUP under nohup
+        # or a CI agent) stays ignored: the command inherited that disposition
+        # across exec, so forwarding it would do nothing, and the caller asked
+        # for it to be ignored. The others are forwarded to the whole group.
         for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            signal.signal(sig, forward)
+            if signal.getsignal(sig) != signal.SIG_IGN:
+                signal.signal(sig, forward)
 
         # Wait for the root itself, not for end-of-file on the pipe, and keep
         # an eye on the pump: a failed write must end the command even if it
