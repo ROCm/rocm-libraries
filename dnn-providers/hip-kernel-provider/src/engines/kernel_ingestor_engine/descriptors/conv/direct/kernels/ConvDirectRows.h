@@ -1645,8 +1645,9 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a CONV
 // Channels-first rows (CF 1): packed N C H W input and output, read and written in place.
 // Raw stage [h][c][x']: 16-byte LDS DMA of runs of 8 columns of one channel row, from the 8-aligned
 // column x_al = ow0 - pw - x_off (x_off = (-pw) mod 8, tiles start at multiples of 16) over
-// XW = RUNS * 8 columns. Image widths are a multiple of 8, so a run lies wholly inside or wholly
-// outside its row (outside runs, rows outside the image and channels past c read as zero).
+// XW = RUNS * 8 columns. With 16-byte DMA image widths are a multiple of 8, so a run lies wholly
+// inside or wholly outside its row; with dword DMA they are even and each dword is checked
+// (outside runs and dwords, rows outside the image and channels past c read as zero).
 // After a chunk's DMA lands, the block transposes the raw stage into the channels-last stage of
 // k2ConvRows: a 16-lane group takes 8 channels x 16 columns of one halo row, two
 // ds_read_b64_tr_b16 give lane j the 8 channels of column 16 xb + j, written as one granule.
@@ -1795,9 +1796,12 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
                 const int hj = uj / (RUNS * BC);
                 const int ihj = tc.oh0 - a.ph + hj;
                 const int iwj = xal + GE * xrj;
+                // Per dword: with an even width (no 16-byte run alignment), a run may cross the
+                // row's end; each dword (2 columns) lies wholly inside or outside the row.
+                const int iwd = iwj + (ln % K2R_DMA_SUB) * (4 / static_cast<int>(sizeof(T)));
                 const bool okj = uj < NSLOT
                                  && static_cast<unsigned>(ihj) < static_cast<unsigned>(a.hi)
-                                 && static_cast<unsigned>(iwj) < static_cast<unsigned>(a.wi)
+                                 && static_cast<unsigned>(iwd) < static_cast<unsigned>(a.wi)
                                  && cc * BC + cj < a.c;
                 const unsigned offj
                     = okj ? static_cast<unsigned>(cc * BC + cj) * planeBytes
@@ -2230,9 +2234,12 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf3d(const K2Args& a CO
                 const int hj = uj / (RUNS * BC);
                 const int ihj = tc.oh0 - a.ph + hj;
                 const int iwj = xal + GE * xrj;
+                // Per dword: with an even width (no 16-byte run alignment), a run may cross the
+                // row's end; each dword (2 columns) lies wholly inside or outside the row.
+                const int iwd = iwj + (ln % K2R_DMA_SUB) * (4 / static_cast<int>(sizeof(T)));
                 const bool okj = uj < NSLOT
                                  && static_cast<unsigned>(ihj) < static_cast<unsigned>(a.hi)
-                                 && static_cast<unsigned>(iwj) < static_cast<unsigned>(a.wi)
+                                 && static_cast<unsigned>(iwd) < static_cast<unsigned>(a.wi)
                                  && cc * BC + cj < a.c && pok;
                 const unsigned offj
                     = okj ? static_cast<unsigned>(cc * BC + cj) * chanBytes + plOff

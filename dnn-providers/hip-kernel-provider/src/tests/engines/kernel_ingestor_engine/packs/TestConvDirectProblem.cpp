@@ -789,14 +789,19 @@ TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivati
     auto last = cfShape();
     last.channelsLast = true;
     EXPECT_FALSE(admits(f, "gfx950", last));
-    // Input rows must be whole 16-byte runs: width 6 is 12 bytes.
+    // Input rows must be whole 16-byte runs: width 6 is 12 bytes; the dword form (cf 2) takes it.
     EXPECT_FALSE(admits(f, "gfx950", baseShape()));
+    auto dword = f;
+    dword.cf = 2;
+    EXPECT_TRUE(admits(dword, "gfx950", baseShape()));
     // gfx942 (dword DMA, gather transpose) within its 64 KiB of LDS.
     auto other = f;
     other.atom = "mfma16_f16";
     other.archs = "gfx942";
     other.bc = 32;
     EXPECT_TRUE(admits(other, "gfx942", cfShape()));
+    // Dword DMA takes even widths: width 6 is 12 bytes.
+    EXPECT_TRUE(admits(other, "gfx942", baseShape()));
     other.bc = 64;
     EXPECT_FALSE(admits(other, "gfx942", cfShape())) << "raw and channels-last stages past 64 KiB";
     other.bc = 32;
@@ -941,7 +946,7 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
          }},
         {"epi", [](ConfigFields& f) { f.epi = 2; }},
         {"un", [](ConfigFields& f) { f.un = 3; }},
-        {"cf", [](ConfigFields& f) { f.cf = 2; }},
+        {"cf", [](ConfigFields& f) { f.cf = 3; }},
         {"un 0", [](ConfigFields& f) { f.un = 0; }},
         {"kd (no 2x3x3 filter)", [](ConfigFields& f) { f.kd = 2; }},
         {"ring", [](ConfigFields& f) { f.ring = 1; }},

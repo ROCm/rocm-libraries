@@ -530,8 +530,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
            || config.wn != 0 || config.bm != config.wp * config.pw
            || config.bn != config.wk * config.fn * 16
            || (config.un != 1 && config.un != 2 && config.un != 4)
-           || (config.un > 1 && config.kd != 1) || (config.cf != 0 && config.cf != 1)
-           || (config.cf == 1
+           || (config.un > 1 && config.kd != 1) || config.cf < 0 || config.cf > 2
+           || (config.cf != 0
                && (config.un != 1 || config.split != 0 || config.pp != 0 || config.epi != 0
                    || math != 0 || conv_igemm::atomElement(config.atom) == "f32")))
         {
@@ -693,10 +693,11 @@ std::optional<Plan>
             return std::nullopt;
         }
         // Channels-first: both activations packed channels-first (the graph layout the staged
-        // configs transpose), and input rows of whole 16-byte runs.
+        // configs transpose), and input rows of whole dwords (16-byte runs where the DMA is
+        // 16 bytes: admitted() checks the device).
         if(config.cf != 0
            && (!problem.in.needed || !problem.in.transpose || !problem.out.needed
-               || !problem.out.transpose || (a.wi * operandBytes) % 16 != 0))
+               || !problem.out.transpose || (a.wi * operandBytes) % 4 != 0))
         {
             return std::nullopt;
         }
@@ -981,6 +982,17 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
+    // Channels-first rows (cf 1) fetch whole 16-byte runs where the LDS DMA is 16 bytes (gfx950);
+    // cf 2 takes the dword form there too.
+    const int64_t operandBytes = config->math ? 2 : problem->elementBytes;
+    if(config->rows && config->cf == 1
+       && hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName)
+                  .rfind("gfx95", 0)
+              == 0
+       && (problem->args.wi * operandBytes) % 16 != 0)
+    {
+        return std::nullopt;
+    }
     return Admitted{*problem, *config, *plan};
 }
 
@@ -1164,7 +1176,12 @@ public:
             options.add("CONV_DIRECT_SPLIT", std::to_string(config.split));
             options.add("CONV_DIRECT_PP", std::to_string(config.pp));
             options.add("CONV_DIRECT_EPI", std::to_string(config.epi));
-            options.add("CONV_DIRECT_CF", std::to_string(config.cf));
+            options.add("CONV_DIRECT_CF", std::to_string(config.cf != 0 ? 1 : 0));
+            if(config.cf == 2)
+            {
+                // The dword-DMA, gather-transpose form on any MFMA part (even widths).
+                options.add("K2R_DMA16", std::string("0"));
+            }
         }
         else
         {

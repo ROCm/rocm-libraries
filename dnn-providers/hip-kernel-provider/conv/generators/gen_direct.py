@@ -145,7 +145,8 @@ def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0,
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
     (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images. cf 1
-    (2-D, 16-bit): packed channels-first activations read and written in place.
+    (16-bit): packed channels-first activations read and written in place; cf 2 is the
+    dword-DMA form (even input widths) on any MFMA part.
     """
     return dict(
         kind="rows",
@@ -280,6 +281,8 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, epi=0, cf=1),
             RW(f"mfma16_{e}", F33, 5, 4, 4, 1, 2, 16, 8, epi=0, cf=1),
             RW(f"mfma16_{e}", F33, 4, 4, 2, 1, 2, 32, 8, epi=0, cf=1),
+            RW(f"mfma16_{e}", F333, 8, 4, 1, 2, 4, 16, 8, epi=0, cf=1),
+            RW(f"mfma16_{e}", F333, 8, 4, 2, 2, 2, 16, 8, epi=0, cf=1),
         ],
     )
     # gfx950: the rows kernel (LDS DMA), then the halo-tile configs
@@ -336,6 +339,15 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 32, 8, epi=0, cf=1),
             RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1),
             RW(f"mfma16x32_{e}", F33, 5, 4, 4, 1, 2, 64, 8, epi=0, cf=1),
+            # 3x3x3 in place (input widths of whole 16-byte runs), and the dword-DMA form for
+            # even widths (video VAE inputs padded by two columns), 2-D and 3-D.
+            RW(f"mfma16x32_{e}", F333, 8, 4, 1, 2, 4, 64, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F333, 8, 2, 2, 3, 2, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F333, 8, 4, 1, 2, 4, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F333, 8, 2, 2, 3, 2, 32, 8, epi=0, cf=2),
+            RW(f"mfma16x32_{e}", F333, 8, 4, 1, 2, 4, 32, 8, epi=0, cf=2),
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 64, 8, epi=0, cf=2),
+            RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=2),
         ],
     )
     add(
@@ -761,7 +773,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     f".pp{c['pp']}.epi{c['epi']}"
                     + (f".u{c['un']}" if c["un"] > 1 else "")
                     + (".split" if c["split"] else "")
-                    + (".cf" if c["cf"] else "")
+                    + {0: "", 1: ".cf", 2: ".cfd"}[c["cf"]]
                 )
             else:
                 name = (
