@@ -90,7 +90,8 @@ The cache fingerprint includes:
 - loaded COMGR path and executable digest;
 - embedded LLVM version evidence and its query source;
 - query-library provenance;
-- target triple and processor;
+- target triple and requested processor (the report also records the effective
+  concrete or generic processor selected by direct COMGR preflight);
 - probe, worker, and support implementation digest; and
 - schema digest.
 

@@ -607,11 +607,12 @@
     "version_source": "LLVMGetVersion"
   },
   "probe": {
+    "effective_processor": "gfx950",
     "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
-    "implementation_sha256": "183fc94ebdca5fc4531abe09a3860ecb7bc5d852230ae1506322812470aa3b92",
+    "implementation_sha256": "831f11e38fc6808afbc52ff11025cc2a4be710e6c7158070825bc28c09c9c11d",
     "name": "rocke-comgr-capabilities",
     "processor": "gfx950",
-    "schema_sha256": "0f6bd45340c8cc936f83bedbb4290e1cac75338a7fe255270e8e69fe649127d2",
+    "schema_sha256": "21c99cbac8781c3a2fffcb30792c29e8c7aa9dd627068c4a7f5c95909ef8cb99",
     "target_triple": "amdgcn-amd-amdhsa"
   }
 }

@@ -94,6 +94,9 @@ The shortest reliable wall-time strategy is independent concurrent workers:
 - every candidate is independently attributable;
 - an abort loses only that candidate;
 - COMGR loads and compiles in parallel up to the process's available CPU set;
+- requested-processor probing is speculative: the common path runs every
+  candidate in the first parallel wave, while a compiler that accepts only the
+  catalogued generic name triggers one behavior-only replay with that ISA;
 - `--jobs` allows a site to cap concurrency when compiler memory, rather than
   CPU, is the limiting resource; and
 - exact report caching avoids all candidate compiles on a repeated toolchain.
@@ -150,7 +153,9 @@ The report separates:
 
 The embedded LLVM version is provenance, not a capability and not a selection
 key. Cache identity includes the COMGR digest, complete compiler evidence,
-processor, target triple, probe implementation, and schema.
+requested processor, target triple, probe implementation, and schema. The
+report separately records the effective concrete or generic processor used for
+behavior observations.
 
 `accepted` does not select a rocKE policy. Several forms may compile. A later
 resolver must choose among accepted forms, preserve unknown states, and qualify

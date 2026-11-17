@@ -472,6 +472,46 @@ def load_or_probe(
         jobs=jobs,
         timeout=timeout,
     )
+
+    # The common path speculatively probes every behavior with the requested
+    # processor in one concurrent wave. If only its catalogued generic fallback
+    # works, rerun the behavior requests with that ISA. This costs no serial
+    # preflight on current compilers and asks no irrelevant duplicate questions
+    # unless fallback is actually needed.
+    effective_processor = processor
+    requested_key = _request_key(_CAPABILITY_PROCESSOR_NAMES, processor, "requested")
+    generic = _GENERIC_PROCESSORS.get(processor)
+    generic_key = (
+        _request_key(_CAPABILITY_PROCESSOR_NAMES, generic, "generic")
+        if generic
+        else None
+    )
+    if (
+        results[requested_key].outcome != "accepted"
+        and generic_key is not None
+        and results[generic_key].outcome == "accepted"
+    ):
+        effective_processor = generic
+        fallback_isa = f"{_TARGET_TRIPLE}--{generic}"
+        fallback_requests = [
+            support.ProbeRequest(
+                request.key,
+                request.ir_text,
+                fallback_isa,
+                request.options,
+            )
+            for request in requests
+            if metadata[request.key][0] != _CAPABILITY_PROCESSOR_NAMES
+        ]
+        results.update(
+            run(
+                fallback_requests,
+                comgr_lib=pinned_comgr,
+                jobs=jobs,
+                timeout=timeout,
+            )
+        )
+
     report = {
         "probe": {
             "name": "rocke-comgr-capabilities",
@@ -479,6 +519,7 @@ def load_or_probe(
             "schema_sha256": schema,
             "target_triple": _TARGET_TRIPLE,
             "processor": processor,
+            "effective_processor": effective_processor,
             "fingerprint": fingerprint,
         },
         "compiler": {"route": "comgr", **identity},
@@ -531,8 +572,11 @@ def _validate_report_completeness(report: dict[str, object]) -> None:
     if not isinstance(capabilities, dict) or not isinstance(probe, dict):
         raise support.ProbeError("report must contain probe and capabilities objects")
     processor = probe.get("processor")
+    effective_processor = probe.get("effective_processor")
     if not isinstance(processor, str):
         raise support.ProbeError("report probe.processor must be a string")
+    if not isinstance(effective_processor, str) or not effective_processor:
+        raise support.ProbeError("report probe.effective_processor must be a string")
     expected = _expected_observations(processor)
     if set(capabilities) != set(expected):
         raise support.ProbeError("report capability set differs from the COMGR corpus")

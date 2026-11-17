@@ -194,6 +194,43 @@ def test_identity_result_pins_every_candidate_worker(tmp_path: Path) -> None:
     assert seen["comgr_lib"] == Path("/test/libamd_comgr.so")
 
 
+def test_generic_processor_fallback_reprobes_behaviors_with_effective_isa(
+    tmp_path: Path,
+) -> None:
+    calls: list[list[support.ProbeRequest]] = []
+
+    def run(
+        requests: list[support.ProbeRequest], **_: object
+    ) -> dict[str, support.ProbeResult]:
+        calls.append(requests)
+        results = _accept_all(requests)
+        if len(calls) == 1:
+            requested = next(
+                request
+                for request in requests
+                if request.key.endswith("\0gfx950\0requested")
+            )
+            results[requested.key] = support.ProbeResult(
+                requested.key, "rejected", "unknown processor"
+            )
+        return results
+
+    report, _ = P.load_or_probe(
+        comgr_lib=None,
+        processor="gfx950",
+        cache_dir=tmp_path,
+        identify=_identity,
+        run=run,
+    )
+
+    assert report["probe"]["effective_processor"] == "gfx9-4-generic"
+    assert len(calls) == 2
+    assert all(
+        request.isa == "amdgcn-amd-amdhsa--gfx9-4-generic" for request in calls[1]
+    )
+    assert all(P._CAPABILITY_PROCESSOR_NAMES not in request.key for request in calls[1])
+
+
 def test_cache_fingerprint_covers_comgr_probe_schema_and_context(
     tmp_path: Path,
 ) -> None:

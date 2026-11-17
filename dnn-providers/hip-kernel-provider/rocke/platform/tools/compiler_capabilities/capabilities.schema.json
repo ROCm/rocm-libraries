@@ -28,6 +28,7 @@
         "schema_sha256",
         "target_triple",
         "processor",
+        "effective_processor",
         "fingerprint"
       ],
       "properties": {
@@ -36,6 +37,10 @@
         "schema_sha256": {"$ref": "#/$defs/sha256"},
         "target_triple": {"const": "amdgcn-amd-amdhsa"},
         "processor": {
+          "type": "string",
+          "pattern": "^gfx[0-9a-z-]+$"
+        },
+        "effective_processor": {
           "type": "string",
           "pattern": "^gfx[0-9a-z-]+$"
         },
