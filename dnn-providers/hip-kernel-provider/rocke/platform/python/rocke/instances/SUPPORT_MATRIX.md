@@ -25,6 +25,7 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 | `reduce2d` | ✅ | ✅ | ✅ |
 | `rmsnorm2d` | ✅ | ✅ | ✅ |
 | `layernorm2d` | ✅ | ✅ | ✅ |
+| `batchnorm2d` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_bf16` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_rdquant` | ✅ | ✅ | ✅ |
 | `smoothquant` | ✅ | ✅ | ✅ |
@@ -267,6 +268,15 @@ parity runs on the matching device and is not implied by the ✅ here.
   `log2(wave_size)` shuffle stages, so a `wave_size=64` build issues a
   lane-mask-32 shuffle that is invalid on wave32 hardware and silently
   corrupts the result.
+- **`batchnorm2d`** is a new family (own dispatch family, NCHW layout, one CTA
+  per channel — see `platform/dsl_docs/instances/batchnorm2d.md`). Its Python/C++
+  byte-identity parity (`batchnorm2d_emit.py`/`.c`) is GREEN at all 4 LLVM
+  flavors and its dispatch tests pass, but it is **not yet** in the
+  GPU-numeric "Verified PASS" list above: the differential test case was
+  added to `differential/numeric.py`, but no GPU-enabled Python environment
+  (numpy/torch) was available to actually execute it at implementation time.
+  Treat `batchnorm2d` as implemented and structurally verified, GPU-numeric
+  verification pending.
 - **`add_rmsnorm2d_rdquant` on gfx1151 (RDNA):** only `out_dtype="i8"` is
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA

@@ -390,6 +390,81 @@ Pass 2:
 
 RMSNorm removes the mean and beta path from LayerNorm, so it has less arithmetic and less metadata.
 
+## BatchNorm2D
+
+File:
+
+```text
+instances/batchnorm2d.py
+```
+
+Main symbols:
+
+- `BatchNorm2DSpec`
+- `build_batchnorm2d`
+- `batchnorm2d_grid`
+- `batchnorm2d_signature`
+
+Contract:
+
+```text
+X: [N, C, H, W]   (NCHW)
+gamma: [C]
+beta: [C]
+Y: [N, C, H, W]
+running_mean: [C]  (f32, read in inference, read-modify-write in training)
+running_var:  [C]  (f32, read in inference, read-modify-write in training)
+optional mean: [C]      (training only)
+optional invstd: [C]    (training only)
+```
+
+Own dispatch family (`dispatch/families/batchnorm.py`), not a third `kind` in
+`dispatch/families/norm.py`: LayerNorm2D/RMSNorm2D reduce *within one row*
+(one CTA per row, grid `(rows, 1, 1)`). BatchNorm2D reduces *across* `N*H*W`
+*per channel* — one CTA per channel, grid `(C, 1, 1)`. Grafting that onto
+`norm.py` would mean diverging its row-shaped `dims()`/`_grid()` for one kind,
+which is sharing the file, not the abstraction.
+
+**Layout: NCHW, not NHWC** (conv/pooling's convention elsewhere in this repo).
+With one CTA per channel sweeping all of that channel's `N*H*W` elements,
+NCHW puts each `(n, c)` slice's `H*W` elements contiguously in memory —
+exactly what the row-sweep helper wants for coalesced vector-wide loads. In
+NHWC those elements are strided by `C`, which would force scalar/gather loads
+for a single-channel CTA. This is a deliberate deviation, called out here so
+it isn't mistaken for an oversight.
+
+Algorithm (`training=True`):
+
+```text
+Pass 1 (N-loop of per-sample row sweeps):
+1. For each n in range(N): sweep the (n, c) row's H*W elements into the
+   SAME per-thread sum / sumsq accumulators every other n also feeds.
+2. block_lds_reduce (Welford merge) across the workgroup once, after the
+   N-loop, with count = N*H*W / block_size:
+   mean = sum / (N*H*W)
+   variance = Welford-combined M2 / (N*H*W)
+   inv_std = rsqrt(variance + epsilon)
+3. Update running stats (EMA): running = (1 - momentum) * running + momentum * batch_stat
+4. Optionally store mean and invstd.
+
+Pass 2 (N-loop of per-sample row writes):
+5. For each n in range(N): y = (x - mean) * inv_std * gamma + beta
+6. Pack to output dtype, store Y.
+```
+
+`training=False` (inference) skips the reduction entirely: no LDS, no sync —
+`mean`/`inv_std` are read directly from `running_mean`/`running_var`, and the
+kernel degenerates to the elementwise pass-2 affine transform only. Gamma and
+Beta are per-channel scalars (constant for the whole CTA in both modes), so
+they're loaded once per kernel invocation rather than once per swept chunk
+(contrast LayerNorm2D's per-column Gamma/Beta, which vary along the row).
+
+No new reduction or sweep helper was needed: there is no cross-CTA reduction
+primitive in this codebase (every existing block reduction is intra-CTA), so
+"one CTA owns all of a channel's data" sidesteps ever needing one — the
+per-sample sweep is just the existing row-sweep helper, called once per `n`
+into shared accumulators.
+
 ## Transpose2D
 
 File:

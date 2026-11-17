@@ -45,6 +45,14 @@ of a constraint that silently never matches.
 
 from __future__ import annotations
 
+from .batchnorm import (
+    BATCHNORM_REGISTRY,
+    BatchNormRequest,
+    dispatch_batchnorm,
+    dispatch_batchnorm_all,
+    batchnorm_sweep_space,
+    registered_batchnorm_combos,
+)
 from .moe import (
     MOE_REGISTRY,
     MoeRequest,
@@ -75,4 +83,10 @@ __all__ = [
     "dispatch_norm_all",
     "norm_sweep_space",
     "registered_norm_combos",
+    "BATCHNORM_REGISTRY",
+    "BatchNormRequest",
+    "dispatch_batchnorm",
+    "dispatch_batchnorm_all",
+    "batchnorm_sweep_space",
+    "registered_batchnorm_combos",
 ]
