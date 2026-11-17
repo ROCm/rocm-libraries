@@ -83,6 +83,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
   return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
   workspace is reported.
+* [BatchNorm] Fixed spatial `miopenBatchNormBackwardActivation` with an activation other than
+  PASTHRU, RELU, CLIPPEDRELU or CLAMP, which ran the per-activation kernel, wrote `dscale` and
+  `dbias` past their per-channel buffers, ignored the activation and returned success. It now
+  returns `miopenStatusNotImplemented`.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
