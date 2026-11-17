@@ -408,8 +408,10 @@ public:
                 = ((count * sizeof(T) - 1) / sizeof(const Z*) + 1) * sizeof(const Z*);
             device_array_size = gamma_size + count * sizeof(const Z*);
 
-            // Allocate device memory
+            // Allocate device memory. The flag is set before the copies so a later failure
+            // still frees this buffer from clear().
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&gamma_device_array, device_array_size));
+            device_arrays_allocated = true;
 
             // Setup pointers
             z_array = static_cast<char*>(gamma_device_array) + gamma_size;
@@ -421,7 +423,6 @@ public:
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
                 handle, static_cast<rocsparse_int>(count), gamma_vec, z_vecs, gamma_ptr, z_ptr));
 
-            device_arrays_allocated = true;
             return rocsparse_status_success;
         }
     } extras;

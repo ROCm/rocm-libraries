@@ -37,6 +37,79 @@
 
 namespace rocsparse
 {
+    // The other workgroups add into this row with atomic_add. The zero has to be published in
+    // that same atomic domain: a plain store stays invisible to those atomics, and a NaN left in
+    // y survives. 16-bit outputs are updated by a 32-bit compare-and-swap, so the zero uses that
+    // compare-and-swap too. On targets whose L2 is not coherent across XCDs, the store is drained
+    // before the caller releases the other workgroups.
+    template <typename T>
+    ROCSPARSE_DEVICE_ILF void csrmv_publish_row_zero(T* y, int64_t row, int64_t)
+    {
+        rocsparse::atomic_store(
+            y + row, static_cast<T>(0), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
+        {
+            rocsparse::wait_store_completion();
+        }
+    }
+
+    ROCSPARSE_DEVICE_ILF void
+        csrmv_publish_packed16_zero(unsigned short* base, int64_t row, int64_t size)
+    {
+        if(row < 0 || row >= size)
+        {
+            return;
+        }
+
+        // Match atomic_add_by_CAS: index from the 4-byte aligned address at or below base.
+        const int64_t shift = (reinterpret_cast<uintptr_t>(base) >> 1) & 1;
+        base -= shift;
+        row += shift;
+        size += shift;
+
+        unsigned short* addr      = base + row;
+        const int       is_second = static_cast<int>(row & 1);
+
+        // The unpaired last element has no neighbouring half inside the allocation, so it cannot
+        // share a 32-bit compare-and-swap. One lane publishes it.
+        if((size & 1) && row == size - 1)
+        {
+            *addr = 0;
+            if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
+            {
+                rocsparse::wait_store_completion();
+            }
+            return;
+        }
+
+        unsigned int* word
+            = reinterpret_cast<unsigned int*>(reinterpret_cast<uintptr_t>(addr) & ~uintptr_t(3));
+        unsigned int old = *word;
+        unsigned int assumed;
+        do
+        {
+            assumed                = old;
+            const unsigned int neu = is_second ? (assumed & 0xffffu) : (assumed & 0xffff0000u);
+            old                    = atomicCAS(word, assumed, neu);
+        } while(assumed != old);
+
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
+        {
+            rocsparse::wait_store_completion();
+        }
+    }
+
+    ROCSPARSE_DEVICE_ILF void csrmv_publish_row_zero(_Float16* y, int64_t row, int64_t size)
+    {
+        csrmv_publish_packed16_zero(reinterpret_cast<unsigned short*>(y), row, size);
+    }
+
+    ROCSPARSE_DEVICE_ILF void
+        csrmv_publish_row_zero(rocsparse_bfloat16* y, int64_t row, int64_t size)
+    {
+        csrmv_publish_packed16_zero(reinterpret_cast<unsigned short*>(y), row, size);
+    }
+
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               typename I,
@@ -588,7 +661,8 @@ namespace rocsparse
                 }
                 else
                 {
-                    y[row] = static_cast<Y>(0);
+                    rocsparse::csrmv_publish_row_zero(
+                        y, static_cast<int64_t>(row), static_cast<int64_t>(m));
                 }
                 // Add contributions from all extra vectors
                 for(rocsparse_int i = 0; i < num_extra; ++i)
@@ -601,11 +675,11 @@ namespace rocsparse
                     }
                 }
 
-                // The other workgroups read y through atomics. With beta = 0 the zero above is a
-                // plain store, so release it at agent scope: that writes it back from L2 to memory
-                // before the flag is flipped. The waiters take a matching agent-scope acquire.
-                // Otherwise the atomics on y and the flag are the only communication, and workgroup
-                // scope only keeps the compiler from reordering them.
+                // The zero above is an atomic store in the same domain as the waiters' atomic adds.
+                // This fence publishes it, and the read of y when beta is not 0, before the flag
+                // flips. The waiters take a matching acquire before their atomic updates of y.
+                // When beta is not 0 the atomics on y and the flag are the only communication, and
+                // workgroup scope only keeps the compiler from reordering them.
 #if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
@@ -655,8 +729,8 @@ namespace rocsparse
                     while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
                         ;
 
-                    // With beta = 0 the first workgroup published a plain store to y, so take an
-                    // agent-scope acquire before the atomics on y.
+                    // With beta = 0 the first workgroup published y with an atomic store. Take an
+                    // agent-scope acquire, matching its release, before the atomics on y.
                     if(beta == static_cast<T>(0))
                     {
                         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
@@ -1332,14 +1406,15 @@ namespace rocsparse
                 }
                 else
                 {
-                    y[row] = static_cast<Y>(0);
+                    rocsparse::csrmv_publish_row_zero(
+                        y, static_cast<int64_t>(row), static_cast<int64_t>(m));
                 }
 
-                // The other workgroups read y through atomics. With beta = 0 the zero above is a
-                // plain store, so release it at agent scope: that writes it back from L2 to memory
-                // before the flag is flipped. The waiters take a matching agent-scope acquire.
-                // Otherwise the atomics on y and the flag are the only communication, and workgroup
-                // scope only keeps the compiler from reordering them.
+                // The zero above is an atomic store in the same domain as the waiters' atomic adds.
+                // This fence publishes it, and the read of y when beta is not 0, before the flag
+                // flips. The waiters take a matching acquire before their atomic updates of y.
+                // When beta is not 0 the atomics on y and the flag are the only communication, and
+                // workgroup scope only keeps the compiler from reordering them.
 #if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
@@ -1385,8 +1460,8 @@ namespace rocsparse
                     while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
                         ;
 
-                    // With beta = 0 the first workgroup published a plain store to y, so take an
-                    // agent-scope acquire before the atomics on y.
+                    // With beta = 0 the first workgroup published y with an atomic store. Take an
+                    // agent-scope acquire, matching its release, before the atomics on y.
                     if(beta == static_cast<T>(0))
                     {
                         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
