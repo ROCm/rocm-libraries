@@ -1168,10 +1168,28 @@ std::size_t Handle::GetMaxMemoryAllocSize() const
         auto status = hip_mem_get_info_wrapper(&free, &total);
         if(status != hipSuccess)
             MIOPEN_THROW_HIP_STATUS(status, "Failed getting available memory");
-        m_MaxMemoryAllocSizeCached = floor(total * 0.85);
+        m_MaxMemoryAllocSizeCached = floor(total * UsableMemoryFraction);
     }
 
     return m_MaxMemoryAllocSizeCached;
+}
+
+// hipMemGetInfo is read directly: hip_mem_get_info_wrapper substitutes a fixed 16 GiB when the
+// call fails, which is no measure of free memory. A failure reports 0, so a budget taken from it
+// admits nothing.
+std::size_t Handle::GetAvailableMemory() const
+{
+    this->impl->set_ctx();
+    std::size_t free  = 0;
+    std::size_t total = 0;
+    const auto status = hipMemGetInfo(&free, &total);
+    if(status != hipSuccess)
+    {
+        MIOPEN_LOG_I2("hipMemGetInfo failed (" << hipGetErrorString(status)
+                                               << "), reporting no free memory");
+        return 0;
+    }
+    return free;
 }
 
 bool Handle::CooperativeLaunchSupported() const
