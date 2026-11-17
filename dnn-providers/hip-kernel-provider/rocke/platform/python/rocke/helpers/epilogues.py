@@ -700,8 +700,9 @@ class CShuffleEpilogue:
         *,
         accs: Sequence[Value],
         dw_ptr: Value,
-        wg_N: Value,
+        wg_N: Optional[Value] = None,
         bounds: Optional[Tuple[Value, Value]] = None,
+        addr_fn=None,
     ) -> None:
         """Split-K variant: cshuffle scatter + barrier, then atomic-adds into dW.
 
@@ -723,6 +724,10 @@ class CShuffleEpilogue:
         ``dw_ptr``  — pointer to the dW global buffer (not a buffer-resource).
         ``wg_N``    — i32 SSA value: wgrad GEMM-N (row stride of dW in elements).
         ``bounds``  — (M, N) i32 pair for OOB guard; same contract as :meth:`store`.
+        ``addr_fn`` — optional ``(b, m, n) -> (element_offset, valid)`` for an
+        output that is not a flat ``m * wg_N + n`` matrix (dgrad's dX); ``valid``
+        (or None) is folded into the guard. A pair's partner is ``offset + 1``,
+        so ``n`` must be contiguous in memory over the store vector.
 
         The caller must zero-initialise dW before launch (atomic-adds only,
         no unconditional store).
@@ -866,6 +871,18 @@ class CShuffleEpilogue:
         c_tile_n_div_vec = b.const_i32(grid.tile_n // sv)
 
         M_bound, N_bound = bounds if bounds is not None else (None, None)
+        if addr_fn is None and wg_N is None:
+            raise ValueError("CShuffleEpilogue.atomic_store: pass wg_N or addr_fn")
+
+        def _addr(m: Value, n: Value) -> Tuple[Value, Optional[Value]]:
+            if addr_fn is None:
+                return b.add(b.mul(m, wg_N), n), None
+            return addr_fn(b, m, n)
+
+        def _and(x: Optional[Value], y: Optional[Value]) -> Optional[Value]:
+            if x is None:
+                return y
+            return x if y is None else b.land(x, y)
 
         for e in range(vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
@@ -881,6 +898,9 @@ class CShuffleEpilogue:
                     n_val = b.add(b.add(grid.block_n_off, col), b.const_i32(s))
                     m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
                     n_ok = b.cmp_lt(n_val, N_bound) if N_bound is not None else None
+                    if addr_fn is not None:
+                        c_off, a_ok = _addr(m_val, n_val)
+                        m_ok = _and(m_ok, a_ok)
                     if m_ok is not None or n_ok is not None:
                         ok = (
                             b.land(m_ok, n_ok)
@@ -893,7 +913,8 @@ class CShuffleEpilogue:
                                 b.smem_load_vN(c_smem, row, c_smem_col, dtype=F32, n=1),
                                 0,
                             )
-                            c_off = b.add(b.mul(m_val, wg_N), n_val)
+                            if addr_fn is None:
+                                c_off = b.add(b.mul(m_val, wg_N), n_val)
                             b.global_atomic_add(dw_ptr, c_off, v_f32)
                     else:
                         c_smem_col = b.add(col, b.const_i32(s))
@@ -901,7 +922,8 @@ class CShuffleEpilogue:
                             b.smem_load_vN(c_smem, row, c_smem_col, dtype=F32, n=1),
                             0,
                         )
-                        c_off = b.add(b.mul(m_val, wg_N), n_val)
+                        if addr_fn is None:
+                            c_off = b.add(b.mul(m_val, wg_N), n_val)
                         b.global_atomic_add(dw_ptr, c_off, v_f32)
             else:
                 # Paired pk_atomic for bf16/fp16: sv/2 pairs per thread.
@@ -921,7 +943,11 @@ class CShuffleEpilogue:
 
                     smem_col_e = b.add(col, b.const_i32(2 * p))
                     smem_col_o = b.add(col, b.const_i32(2 * p + 1))
-                    c_off_even = b.add(b.mul(m_val, wg_N), n_even)
+                    if addr_fn is None:
+                        c_off_even = b.add(b.mul(m_val, wg_N), n_even)
+                    else:
+                        c_off_even, a_ok = _addr(m_val, n_even)
+                        ok = _and(ok, a_ok)
 
                     def _emit_pair(
                         _cs=c_smem,

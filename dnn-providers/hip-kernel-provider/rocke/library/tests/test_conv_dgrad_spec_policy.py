@@ -191,6 +191,80 @@ def _with(spec, pipeline):
     return replace(spec, pipeline=pipeline)
 
 
+def _op_names(ops):
+    """Every op name under ``ops``, depth first."""
+    out = []
+    for op in ops:
+        out.append(op.name)
+        for r in getattr(op, "regions", ()) or ():
+            out.extend(_op_names(r.ops))
+    return out
+
+
+class TestSplitKCshuffle(unittest.TestCase):
+    """Split-K with the cshuffle epilogue stages the tile in LDS and atomic-adds
+    it into dX in packed pairs, through the tilde address function."""
+
+    def _sk_spec(self, dtype="fp16", **kw):
+        base = dict(
+            tile_m=32,
+            tile_n=128,
+            warp_m=2,
+            warp_n=4,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=2,
+            split_k=4,
+        )
+        base.update(kw)
+        return _spec(problem=_problem(K=128, sH=2, sW=2), dtype=dtype, **base)
+
+    def test_packed_atomics_from_the_staged_tile(self):
+        for dtype, op in (
+            ("fp16", "memref.global_atomic_add_pk_f16"),
+            ("bf16", "memref.global_atomic_add_pk_bf16"),
+        ):
+            with self.subTest(dtype=dtype):
+                spec = self._sk_spec(dtype)
+                self.assertEqual(is_valid_dgrad_spec(spec, _ARCH), (True, "ok"))
+                kernel = build_implicit_gemm_conv_dgrad(spec, arch=_ARCH)
+                names = _op_names(kernel.body.ops)
+                # 32 x 128 outputs in pairs over 512 lanes: 4 pairs per lane.
+                self.assertEqual(names.count(op), 4)
+                self.assertNotIn("tile.buffer_store_vN", names)
+                self.assertEqual(_smem_bytes(kernel, spec)[1], 32 * 128 * 2)
+
+    def test_width_8_issues_four_pairs_per_row_run(self):
+        spec = self._sk_spec(tile_m=64, tile_n=64, vector_size_c=8)
+        names = _op_names(build_implicit_gemm_conv_dgrad(spec, arch=_ARCH).body.ops)
+        # 64 x 64 outputs, 8-wide runs over 512 lanes: one run of 4 pairs each.
+        self.assertEqual(names.count("memref.global_atomic_add_pk_f16"), 4)
+
+    def test_odd_store_width_is_rejected(self):
+        ok, why = is_valid_dgrad_spec(self._sk_spec(vector_size_c=1), _ARCH)
+        self.assertFalse(ok)
+        self.assertIn("needs an even dX store width", why)
+        # An fp32 dX takes scalar atomics: any width is fine.
+        fp32 = self._sk_spec(
+            data=ConvDataSpec(
+                dtype_a="fp32", dtype_b="fp32", dtype_d="fp32", mma_dtype="tf32"
+            ),
+            vector_size_a=4,
+            vector_size_b=4,
+            vector_size_c=1,
+        )
+        self.assertNotIn("even dX store width", is_valid_dgrad_spec(fp32, _ARCH)[1])
+
+    def test_default_epilogue_keeps_the_atomic_epilogue(self):
+        spec = self._sk_spec(epilogue="default", vector_size_c=None)
+        kernel = build_implicit_gemm_conv_dgrad(spec, arch=_ARCH)
+        # No LDS staging of the output tile.
+        self.assertEqual(_smem_bytes(kernel, spec)[1], 0)
+
+
 class TestKernelName(unittest.TestCase):
     def test_lds_k_pad_reaches_the_name(self):
         self.assertNotIn("_kp", _spec(lds_k_outer=False).kernel_name())

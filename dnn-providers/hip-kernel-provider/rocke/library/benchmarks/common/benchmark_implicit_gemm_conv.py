@@ -6519,7 +6519,7 @@ def _cached_bind(
     stream = resolve_stream(cfg.stream)
     if (
         zero_dw
-        and direction == "wgrad"
+        and direction in ("wgrad", "dgrad")
         and ident.split_k > 1
         and not ident.two_stage
         and ident.streamk == "off"

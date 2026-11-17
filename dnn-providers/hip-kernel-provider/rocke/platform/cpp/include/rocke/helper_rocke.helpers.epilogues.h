@@ -231,6 +231,24 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                                           rocke_value_t* bounds_m, /* NULL => no bounds */
                                           rocke_value_t* bounds_n);
 
+/* CShuffleEpilogue.atomic_store(b, accs, dw_ptr, wg_N=None, bounds=None, addr_fn=...).
+ * As rocke_cshuffle_epilogue_atomic_store, with an optional addr_fn for an
+ * output that is not a flat m * wg_N + n matrix (dgrad's dX). addr_fn (NULL =>
+ * m * wg_N + n) returns the element offset; its validity (NULL => none) is
+ * and-ed into the guard. A pair's partner is offset + 1, so n must be
+ * contiguous in memory over the store vector. wg_N may be NULL when addr_fn is
+ * set; both NULL is an error. */
+void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
+                                               const rocke_cshuffle_epilogue_t* epi,
+                                               rocke_value_t* const* accs,
+                                               int num_accs,
+                                               rocke_value_t* dw_ptr,
+                                               rocke_value_t* wg_N, /* NULL with addr_fn */
+                                               rocke_epilogue_addr_fn addr_fn,
+                                               void* addr_user,
+                                               rocke_value_t* bounds_m, /* NULL => no bounds */
+                                               rocke_value_t* bounds_n);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
