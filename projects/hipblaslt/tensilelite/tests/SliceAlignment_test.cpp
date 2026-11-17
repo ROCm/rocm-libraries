@@ -115,3 +115,26 @@ TEST(SliceAlignment, HintNamesTheMatrixAndOffset)
     EXPECT_NE(h[0].find("multiple of 256"), std::string::npos);
     EXPECT_TRUE(hints(split(4096, 2, {fp16D}, Mode::Auto), Dim::M, 2).empty());
 }
+
+TEST(SliceAlignment, HintForAContiguousMatrixPadsTheSplitDimension)
+{
+    // N split with a transposed fp16 B: B's step along N is 1, so only the share moves the start
+    // of its slice and padding ldb does not help. The hint must ask for N to be padded.
+    auto r = split(1000, 2, {{"B", 1, 16}, {"D", 4096, 16}}, Mode::Auto);
+    auto h = hints(r, Dim::N, 2);
+    ASSERT_EQ(h.size(), 1u);
+    EXPECT_NE(h[0].find("slice of B"), std::string::npos);
+    EXPECT_NE(h[0].find("pad N to a multiple of 256"), std::string::npos);
+    EXPECT_EQ(h[0].find("leading dimension"), std::string::npos);
+}
+
+TEST(SliceAlignment, HintForAStridedMatrixPadsItsLeadingDimension)
+{
+    // N split with a non-transposed fp16 B and ldb = 100 (200 bytes): padding ldb to 256 bytes
+    // aligns every slice whatever the share.
+    auto r = split(1000, 2, {{"B", 100, 16}}, Mode::Off);
+    auto h = hints(r, Dim::N, 2);
+    ASSERT_EQ(h.size(), 1u);
+    EXPECT_NE(h[0].find("pad the leading dimension of B to a multiple of 256 bytes"),
+              std::string::npos);
+}
