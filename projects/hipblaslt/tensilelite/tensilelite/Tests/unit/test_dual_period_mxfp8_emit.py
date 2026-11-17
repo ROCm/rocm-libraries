@@ -279,6 +279,37 @@ def test_uniform_epoch_bodies_keep_one_vmem_wait_and_three_barriers(uniform_src)
     assert _body_sync(uniform_src) == [(3, 1), (3, 1)]
 
 
+def _partial_lgkm_waits(src):
+    """(count, lgkm ops in flight at most) of each main-loop lgkmcnt(N > 0).
+
+    In flight is bounded only after an lgkmcnt(0) in the same body; it is
+    None before one or after a label or branch."""
+    waits, bound = [], None
+    for ln in _mainloop_lines(src)[1:-1]:
+        if "MAINLOOP_C" in ln and "start" in ln:
+            bound = None
+        code = ln.split("//")[0].strip()
+        if not code or code.startswith("/*"):
+            continue
+        count = re.match(r"s_waitcnt lgkmcnt\((\d+)\)", code)
+        if count and int(count.group(1)) == 0:
+            bound = 0
+        elif count:
+            waits.append((int(count.group(1)), bound))
+            bound = None if bound is None else min(bound, int(count.group(1)))
+        elif code.endswith(":") or "branch" in code:
+            bound = None
+        elif code.startswith(("ds_", "s_load", "s_buffer_load")) and bound is not None:
+            bound += 1
+    return waits
+
+
+def test_partial_lgkm_waits_each_retire_a_read(any_src):
+    waits = _partial_lgkm_waits(any_src)
+    assert waits
+    assert [(n, bound) for n, bound in waits if bound is not None and bound <= n] == []
+
+
 def test_uniform_epoch_barriers_have_no_valu_behind_them(uniform_src):
     for gap in _mfma_gaps(_mainloop_lines(uniform_src)):
         if "s_barrier" in gap:

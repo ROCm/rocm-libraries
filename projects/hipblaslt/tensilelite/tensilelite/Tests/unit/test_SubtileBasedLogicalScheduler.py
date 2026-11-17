@@ -6421,6 +6421,117 @@ class TestPartitionZeroIssueOrder:
         assert both.dscnt == -1
         assert both.vlcnt == 4
 
+    @staticmethod
+    def _read(comment):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+                          comment=comment)
+
+    def test_exit_region_drops_a_wait_that_retires_nothing(self):
+        from types import SimpleNamespace
+        from rocisa.code import Label, Module
+        from rocisa.instruction import SWaitCnt
+
+        self._gfx950()
+        main = Module("MAINLOOP_C0")
+        main.add(SWaitCnt(dscnt=0, comment="main-drain"))
+        main.add(SWaitCnt(dscnt=0, comment="main-dominated"))
+        exitC0 = Module("NGLL_C0")
+        exitC0.add(Label("ExitC0", ""))
+        exitC0.add(SWaitCnt(dscnt=0, comment="at-entry"))
+        exitC0.add(self._read("A MT=n tile=4 K=0 read=0"))
+        exitC0.add(SWaitCnt(dscnt=0, comment="retires-read"))
+        exitC0.add(SWaitCnt(dscnt=0, comment="retires-nothing"))
+        both = SWaitCnt(dscnt=0, vlcnt=2, comment="lgkm-and-vm")
+        exitC0.add(both)
+        outer = Module()
+        outer.add(main)
+        outer.add(exitC0)
+        scheduler = SimpleNamespace(
+            config=SimpleNamespace(uniformPgrEpoch=True, dualPeriodScale=True),
+            _regionLabels={"MAINLOOP_C0", "NGLL_C0"})
+
+        LogicalScheduler._dropExitDominatedLgkmWaits(scheduler, outer)
+
+        assert [inst.comment for inst in main.flatitems()] == [
+            "main-drain", "main-dominated"]
+        assert [getattr(inst, "comment", "") for inst in exitC0.flatitems()][1:] == [
+            "at-entry", "A MT=n tile=4 K=0 read=0", "retires-read", "lgkm-and-vm"]
+        assert both.dscnt == -1 and both.vlcnt == 2
+
+    def test_dominated_wait_at_a_join_stays(self):
+        from rocisa.code import Label, Module
+        from rocisa.instruction import SCBranchSCC1, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            dropDominatedLgkmWaits)
+
+        self._gfx950()
+        join = Label("Join", "")
+        region = Module("NLL_C0")
+        region.add(self._read("A MT=n tile=4 K=0 read=0"))
+        region.add(SCBranchSCC1(labelName=join.getLabelName(), comment="read-in-flight"))
+        region.add(SWaitCnt(dscnt=0, comment="fallthrough-drain"))
+        region.add(SWaitCnt(dscnt=0, comment="dominated"))
+        region.add(join)
+        region.add(SWaitCnt(dscnt=0, comment="at-join"))
+        region.add(SCBranchSCC1(labelName=join.getLabelName(), comment="branch"))
+        region.add(SWaitCnt(dscnt=0, comment="after-branch"))
+
+        dropDominatedLgkmWaits(region)
+
+        assert [getattr(inst, "comment", "") for inst in region.flatitems()
+                if isinstance(inst, SWaitCnt)] == [
+            "fallthrough-drain", "at-join", "after-branch"]
+
+    def test_relaxed_fence_that_retires_nothing_is_dropped(self):
+        from rocisa.code import Label, Module
+        from rocisa.container import mgpr, sgpr, vgpr, MUBUFModifiers
+        from rocisa.instruction import BufferLoadB128, SAddU32, SWaitCnt
+        from tensilelite.Components.Subtile import InstructionScheduler
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            clearPartitionZeroOverwriteMarks, dropRelaxedFencesThatRetireNothing)
+
+        self._gfx950()
+
+        def fence(count, comment):
+            wait = SWaitCnt(dscnt=count, comment=comment)
+            InstructionScheduler._relaxedFenceIds.add(id(wait))
+            return wait
+
+        body = Module("MAINLOOP_C0")
+        body.add(fence(1, "at-entry"))
+        body.add(SWaitCnt(dscnt=0, comment="drain"))
+        body.add(self._read("A MT=n+1 tile=0 K=0 read=0"))
+        body.add(self._read("A MT=n+1 tile=0 K=0 read=1"))
+        body.add(fence(2, "retires-nothing"))
+        body.add(self._read("A MT=n+1 tile=1 K=0 read=0"))
+        body.add(self._read("A MT=n+1 tile=1 K=0 read=1"))
+        body.add(self._read("A MT=n+1 tile=2 K=0 read=0"))
+        body.add(fence(2, "real"))
+        body.add(SWaitCnt(dscnt=0, comment="drain-again"))
+        body.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrB"), src1=0,
+                         comment="m0"))
+        body.add(fence(4, "m0-wait-state"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdB", 4), soffset=0,
+            mubuf=MUBUFModifiers(offen=True, lds=True), comment="load"))
+        body.add(Label("Join", ""))
+        body.add(fence(4, "after-label"))
+        unmarked = SWaitCnt(dscnt=0, comment="drain-unmarked")
+        body.add(unmarked)
+        body.add(SWaitCnt(dscnt=3, comment="not-relaxed"))
+
+        try:
+            dropRelaxedFencesThatRetireNothing([body])
+        finally:
+            clearPartitionZeroOverwriteMarks()
+
+        assert [inst.comment for inst in body.flatitems()
+                if isinstance(inst, SWaitCnt)] == [
+            "at-entry", "drain", "real", "drain-again", "m0-wait-state",
+            "after-label", "drain-unmarked", "not-relaxed"]
+
 
 class TestUniformEpochBodyPasses:
     """Post-passes of a uniform-epoch dual-period body, on hand-built bodies."""

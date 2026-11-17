@@ -1191,11 +1191,14 @@ _isMfma = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
 # Instruction objects cannot carry a Python attribute, so the prefix pin
 # records ids here. emitMainAndExitLoops clears the set around each kernel.
 _p0OverwriteReadIds = set()
+# Waits _relaxCrossedFences turned into lgkmcnt(N), by id for the same reason.
+_relaxedFenceIds = set()
 
 
 def clearPartitionZeroOverwriteMarks():
-    """Drop overwrite-read marks left by the previous kernel."""
+    """Drop overwrite-read and relaxed-fence marks left by the previous kernel."""
     _p0OverwriteReadIds.clear()
+    _relaxedFenceIds.clear()
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
 _isBufferStore = lambda x: isinstance(x, GlobalWriteInstruction)
 _isWaitCnt = lambda x: isinstance(x, SWaitCnt)
@@ -2645,14 +2648,31 @@ def _incrementsLgkm(inst) -> bool:
     return isinstance(inst, (LocalReadInstruction, LocalWriteInstruction, SMemLoadInstruction))
 
 
+def _mayIncrementLgkm(inst) -> bool:
+    """Whether inst may count against lgkmcnt, including raw text the scheduler cannot read."""
+    if isinstance(inst, TextBlock):
+        return not _isComment(inst)
+    return _incrementsLgkm(inst) or type(inst).__name__.startswith(
+        ("DS", "SMem", "SLoad", "SBufferLoad", "SStore", "SAtomic", "SSendMsg"))
+
+
+def _isControlFlow(inst) -> bool:
+    name = type(inst).__name__
+    return (isinstance(inst, Label) or "Branch" in name
+            or name.startswith(("SSetPC", "SSwapPC", "SCall")))
+
+
 def dropDominatedLgkmWaits(module):
     """Remove an lgkmcnt(0) that follows another with no new LDS or scalar load.
 
     A count of 0 drains every outstanding ds_read and s_load. The next
     full drain is redundant until one of those issues again. A wait that
-    also carries vmcnt keeps that half.
+    also carries vmcnt keeps that half. Nothing is known at the start of
+    module, at a label (another path may join there) or after a branch.
+    A wait that is the m0 wait state of an LDS-DMA load stays.
     """
     state = {"zero": False}
+    spacers = _m0WaitStateIds(module)
 
     def walk(container) -> None:
         kept = []
@@ -2662,7 +2682,7 @@ def dropDominatedLgkmWaits(module):
                 kept.append(inst)
                 continue
             if _isFullLgkmDrain(inst):
-                if getattr(inst, "waitAll", False):
+                if getattr(inst, "waitAll", False) or id(inst) in spacers:
                     state["zero"] = True
                     kept.append(inst)
                     continue
@@ -2677,13 +2697,20 @@ def dropDominatedLgkmWaits(module):
                 continue
             if _isWaitCnt(inst) and (inst.dscnt > 0 or inst.kmcnt > 0):
                 state["zero"] = False
-            elif _incrementsLgkm(inst):
+            elif _mayIncrementLgkm(inst) or _isControlFlow(inst):
                 state["zero"] = False
             kept.append(inst)
         container.setItems(kept)
 
     walk(module)
     return module
+
+
+def _m0WaitStateIds(module):
+    """ids of each lone instruction between an m0 write and the LDS-DMA load reading it."""
+    code = [inst for _c, inst in _bodyLeaves(module) if not _isComment(inst)]
+    return {id(middle) for writer, middle, load in zip(code, code[1:], code[2:])
+            if _isM0Update(writer) and _isDirectToLdsLoad(load)}
 
 
 def _bodyLeaves(module):
@@ -4738,6 +4765,9 @@ def _relaxCrossedFences(sequence, cellOf, fenceCell):
     in order, so it waits with lgkmcnt(N), N the LDS ops of this or later
     cells issued after the last one of an earlier cell. A scalar load
     among those keeps the full drain: it may return out of order.
+    Later passes still add reads to the body, so whether such a fence
+    retires anything is decided on the final order
+    (dropRelaxedFencesThatRetireNothing).
     """
     issued = []
     for mid, inst in sequence:
@@ -4750,12 +4780,45 @@ def _relaxCrossedFences(sequence, cellOf, fenceCell):
             if tail and not any(isinstance(op, SMemLoadInstruction) for _, op in tail):
                 count = min(len(tail), _MAX_LGKM_COUNT)
                 inst.dscnt = count
+                _relaxedFenceIds.add(id(inst))
                 issued = issued[-count:]
                 continue
         if _isFullLgkmDrain(inst):
             issued = []
         elif _incrementsLgkm(inst):
             issued.append((cell, inst))
+
+
+def dropRelaxedFencesThatRetireNothing(bodies):
+    """Remove a relaxed fence lgkmcnt(N) when N covers every op in flight.
+
+    In flight is bounded only after a full drain in the same body: at
+    most the lgkm ops issued since, or N' after a later lgkmcnt(N').
+    Body entry, a label, a branch or raw text leaves it unbounded. A
+    wait that also carries vmcnt keeps that half; one that is the m0
+    wait state of an LDS-DMA load stays.
+    """
+    for body in bodies:
+        bound = None
+        spacers = _m0WaitStateIds(body)
+        for container, inst in _bodyLeaves(body):
+            if id(inst) in _relaxedFenceIds and _isWaitCnt(inst) and (
+                    bound is not None and inst.kmcnt < 0
+                    and 0 < inst.dscnt and bound <= inst.dscnt):
+                if inst.vlcnt >= 0 or inst.vscnt >= 0 or id(inst) in spacers:
+                    inst.dscnt = -1
+                else:
+                    container.removeItem(inst)
+                continue
+            if _isFullLgkmDrain(inst):
+                bound = 0
+            elif _isWaitCnt(inst) and _lgkmCount(inst) is not None:
+                if bound is not None:
+                    bound = min(bound, _lgkmCount(inst))
+            elif _isControlFlow(inst):
+                bound = None
+            elif _mayIncrementLgkm(inst) and bound is not None:
+                bound += 1
 
 
 def _scheduleHalfDisjointHalf(

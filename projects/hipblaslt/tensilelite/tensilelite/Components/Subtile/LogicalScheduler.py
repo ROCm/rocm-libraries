@@ -7755,10 +7755,55 @@ class LogicalScheduler:
                                        comment="skip other exit paths"))
 
         module.add(endLabel)
-        clearPartitionZeroOverwriteMarks()
         self._spaceRegionM0Writes(writer, module, mainloop)
+        if self.halfDisjoint:
+            from .InstructionScheduler import dropRelaxedFencesThatRetireNothing
+            dropRelaxedFencesThatRetireNothing(self._mainLoopBodies(mainloop))
+        clearPartitionZeroOverwriteMarks()
+        self._dropExitDominatedLgkmWaits(module)
 
         return module
+
+    def _mainLoopBodies(self, mainloop):
+        """The MAINLOOP_C* region modules of mainloop, in emit order."""
+        from .InstructionScheduler import _isCodeModule
+        bodies = []
+
+        def walk(container):
+            for item in container.items():
+                if not _isCodeModule(item):
+                    continue
+                if (getattr(item, "name", "").startswith("MAINLOOP_C")
+                        and item.name in self._regionLabels):
+                    bodies.append(item)
+                else:
+                    walk(item)
+
+        walk(mainloop)
+        return bodies
+
+    def _dropExitDominatedLgkmWaits(self, module):
+        """Run dropDominatedLgkmWaits on every exit and tail region of module.
+
+        The main-loop bodies run it in _emitLoop. Each region starts with
+        nothing proven, so a wait right after a region's entry label stays.
+        """
+        from .InstructionScheduler import _isCodeModule, dropDominatedLgkmWaits
+        if not (self.config.uniformPgrEpoch and self.config.dualPeriodScale):
+            return
+
+        def walk(container):
+            for item in container.items():
+                if not _isCodeModule(item):
+                    continue
+                name = getattr(item, "name", None)
+                if name in self._regionLabels:
+                    if not name.startswith(("MAINLOOP", "PRELOOP")):
+                        dropDominatedLgkmWaits(item)
+                else:
+                    walk(item)
+
+        walk(module)
 
     def _spaceRegionM0Writes(self, writer, module, mainloop=None):
         """Space the m0 writes of every region in module from their loads.
@@ -7842,6 +7887,7 @@ class LogicalScheduler:
         for inst in self._emitter.emit_mask_k_done():
             module.add(inst)
         self._spaceRegionM0Writes(writer, module)
+        self._dropExitDominatedLgkmWaits(module)
         return module
 
     # ── VGPR tile allocation ──────────────────────────────
