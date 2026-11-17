@@ -1822,6 +1822,26 @@ class ResourceLimits:
     sgprs: int
 
 
+@dataclass(frozen=True)
+class GemmCapabilities:
+    """What the universal GEMM admits on an arch (``arch_specs.json`` "gemm").
+
+    Unlike the hardware facts beside it, a flag here records that the GEMM
+    path has been built and verified on the arch, so an arch whose hardware
+    could run a feature still leaves it off until that has happened.
+    """
+
+    # WMMA warp-tile atoms (m, n, k) of the WMMA path; empty on MFMA targets.
+    wmma_atoms: Tuple[Tuple[int, int, int], ...] = ()
+    # fp8/bf8 A and B with a 16-bit C.
+    fp8_ab: bool = False
+    # The cshuffle epilogue on the WMMA path.
+    wmma_cshuffle: bool = False
+    # The cshuffle C tile reuses the A/B LDS, so the budget is max(AB, C)
+    # rather than AB + C.
+    cshuffle_lds_aliased: bool = False
+
+
 def _prefer_native(ops: List[MmaOp]) -> List[MmaOp]:
     """Drop emulated atoms that a native atom of the same shape already covers.
 
@@ -2049,6 +2069,7 @@ class ArchTarget:
     requires_shader_end_padding: bool = False
     virtual_address_bits: int = 48
     wgp_cache_lds_shared: bool = False
+    gemm: GemmCapabilities = GemmCapabilities()
 
     # --- identity ---------------------------------------------------------
     @property
@@ -2510,6 +2531,16 @@ def _build_target(gfx: str) -> ArchTarget:
         requires_shader_end_padding=row.get("requires_shader_end_padding", False),
         virtual_address_bits=row.get("virtual_address_bits", 48),
         wgp_cache_lds_shared=row.get("wgp_cache_lds_shared", False),
+        gemm=_gemm_capabilities(row.get("gemm", {})),
+    )
+
+
+def _gemm_capabilities(row: dict) -> GemmCapabilities:
+    return GemmCapabilities(
+        wmma_atoms=tuple(tuple(atom) for atom in row.get("wmma_atoms", ())),
+        fp8_ab=row.get("fp8_ab", False),
+        wmma_cshuffle=row.get("wmma_cshuffle", False),
+        cshuffle_lds_aliased=row.get("cshuffle_lds_aliased", False),
     )
 
 
