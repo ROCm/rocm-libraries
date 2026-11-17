@@ -23,6 +23,7 @@
 ################################################################################
 
 from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .CustomKernels import magicSizeSemantic
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from .ir import SBitcmp1B32
@@ -12627,12 +12628,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # -- Packed-batch magic divisors -------------------------------------------
     for i, _ in enumerate(kernel["PackedC0IdxChars"][:-1]):
       idx = kernel["PackedC0IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
+      _reg("uint32", magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]), idx)
+      _reg("uint32", magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]), idx)
     for i, _ in enumerate(kernel["PackedC1IdxChars"][:-1]):
       idx = kernel["PackedC1IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
+      _reg("uint32", magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]), idx)
+      _reg("uint32", magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]), idx)
 
     # -- Alpha / Beta ----------------------------------------------------------
     numSgprAlpha = max(1, int(self.states.bpeCinternal / 4))
