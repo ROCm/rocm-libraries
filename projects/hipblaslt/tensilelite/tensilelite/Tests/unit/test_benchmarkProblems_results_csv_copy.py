@@ -122,6 +122,19 @@ def test_missing_required_csv_removes_stale_rerun_marker(tmp_path, monkeypatch):
     assert benchmarked == [0]
 
 
+def test_disabled_results_removes_stale_granularity_output(tmp_path, monkeypatch):
+    dataPath = tmp_path / "out" / BENCHMARK_DATA_DIR
+    dataPath.mkdir(parents=True)
+    (dataPath / (PROBLEM_TYPE_NAME + "_00_00.gsp")).write_text("previous tile run\n")
+
+    _run_main(
+        tmp_path, monkeypatch, {".yaml": "solutions\n"},
+        hasLibraryLogic=False, forceRedo=True,
+    )
+
+    assert sorted(os.listdir(dataPath)) == [PROBLEM_TYPE_NAME + "_00_00.yaml"]
+
+
 def test_existing_results_csv_is_copied(tmp_path, monkeypatch):
     """Results and granularity CSVs present: both are copied with the YAML."""
     dataPath, _ = _run_main(

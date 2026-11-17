@@ -291,6 +291,137 @@ def test_write_client_config_ini_no_results_file(tmp_path, _restore_gp):
     ]
 
 
+@pytest.mark.parametrize("writeResultsFile", [False, True], ids=["disable", "enable"])
+def test_cached_tile_reporting_policy(tmp_path, monkeypatch, _restore_gp, writeResultsFile):
+    """A cached policy change reaches every launched INI and preserves tile settings."""
+    from tensilelite.SolutionStructs.Problem import ProblemSizesMockDummy
+
+    restoreDefaultGlobalParameters()
+    monkeypatch.setitem(globalParameters, "CpuOnly", False)
+    monkeypatch.setitem(globalParameters, "ForceRedoBenchmarkProblems", True)
+
+    class ProblemType(dict):
+        def __str__(self):
+            return "TYPE"
+
+    class Step(types.SimpleNamespace):
+        def __str__(self):
+            return "00_Final"
+
+        def isFinal(self):
+            return True
+
+    problemType = ProblemType(TileAwareSelection=True)
+    problemSizes = ProblemSizesMockDummy()
+    problemSizes.totalProblemSizes = 1
+    step = Step(
+        problemSizes=problemSizes,
+        biasTypeArgs=types.SimpleNamespace(totalProblemSizes=1, biasTypes=[]),
+        factorDimArgs=types.SimpleNamespace(totalProblemSizes=1, factorDims=[0]),
+        activationArgs=types.SimpleNamespace(totalProblemSizes=1, settingList=[]),
+        icacheFlushArgs=[], forkParams={}, internalSupportParams={}, deviceScalarAlphaModes=[],
+    )
+
+    class Process:
+        def __init__(self, *args, **kwargs):
+            self.problemType = problemType
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return step
+
+    groupPath = tmp_path / "TYPE_00_00"
+    sourcePath = groupPath / "00_Final" / "caches" / "KEY" / "source"
+    sourcePath.mkdir(parents=True)
+    library = sourcePath / "TensileLibrary.dat"
+    library.write_text("cached library\n")
+    dataPath = groupPath / "Data"
+    dataPath.mkdir()
+    resultsBase = dataPath / "00_Final"
+    resultsCsv = Path(str(resultsBase) + ".csv")
+    granularityCsv = Path(str(resultsBase) + "_Granularity.csv")
+    tileConfig = sourcePath / "ClientParameters_Granularity.ini"
+    tileSettings = (
+        b"# cached tile configuration\r\nproblem-size=576,1152,1,64\r\n"
+        b"problem-size=576,1152,1,128\r\na-strides=1,576,73728\r\n"
+    )
+    oldPolicy = (
+        b"no-results-file=True\n" if writeResultsFile else
+        f"results-file={granularityCsv}\nno-results-file=False\n".encode()
+    )
+    tileConfig.write_bytes(oldPolicy + tileSettings)
+    if not writeResultsFile:
+        resultsCsv.write_text("previous run\n")
+        granularityCsv.write_text("previous tile run\n")
+
+    monkeypatch.setattr(bp, "BenchmarkProcess", Process)
+    monkeypatch.setattr(bp, "_computeCacheKey", lambda *args: "KEY")
+    monkeypatch.setattr(
+        bp, "_loadCacheIfMatches",
+        lambda *args: {"CodeObjectFiles": [], "LibraryFile": str(library)},
+    )
+    monkeypatch.setattr(bp, "tensileLibraryFile", lambda *args: library)
+    monkeypatch.setattr(bp, "ProblemType", lambda *args: {})
+    conProblemType = _make_problem_type()
+    monkeypatch.setattr(
+        bp.ContractionsProblemType, "FromOriginalState", lambda *args: conProblemType
+    )
+    monkeypatch.setattr(bp.LibraryIO, "writeSolutions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bp, "cmdLineArchsFor", lambda *args: ["gfx950"])
+    launched = {}
+
+    def launch(*args, **kwargs):
+        for config in kwargs["configPaths"]:
+            path = Path(config)
+            launched[path.name] = path.read_text().splitlines()
+            for line in launched[path.name]:
+                if line.startswith("results-file="):
+                    Path(line.split("=", 1)[1]).write_text("current run\n")
+        return 0
+
+    monkeypatch.setattr(bp, "runClient", launch)
+
+    def runBackend(config, benchmarkConfig, runner, **kwargs):
+        assert kwargs["cacheValid"] is True
+        return runner([], isCached=True)
+
+    monkeypatch.setattr(
+        bp.BackendFactory, "create", lambda *args: types.SimpleNamespace(run=runBackend)
+    )
+    finalBase, failures = bp._benchmarkProblemType(
+        backendConfig={"Name": "tensile"}, problemTypeConfig={},
+        problemSizeGroupConfig={"ForkParameters": []}, problemSizeGroupIdx=0,
+        outerBenchmarkIdx=0, configPath="config.yaml", useCache=True,
+        asmToolchain=types.SimpleNamespace(assembler=None),
+        srcToolchain=types.SimpleNamespace(compiler="compiler"), cCompiler="compiler",
+        buildTmpPath=tmp_path / "build", benchmarkProblemsPath=tmp_path,
+        debugConfig=DebugConfig(), deviceId=0, gfxName="gfx950", isaInfoMap={}, probSolMap={},
+        writeResultsFile=writeResultsFile,
+    )
+
+    assert finalBase == str(resultsBase)
+    assert failures == 0
+    assert set(launched) == {"ClientParameters.ini", "ClientParameters_Granularity.ini"}
+    for name, lines in launched.items():
+        directives = [
+            line for line in lines
+            if line.startswith(("results-file=", "no-results-file="))
+        ]
+        path = granularityCsv if name == tileConfig.name else resultsCsv
+        assert directives == (
+            [f"results-file={path}"] if writeResultsFile else ["no-results-file=True"]
+        )
+    expectedPolicy = (
+        f"results-file={granularityCsv}\n".encode() if writeResultsFile else
+        b"no-results-file=True\n"
+    )
+    assert tileConfig.read_bytes() == expectedPolicy + tileSettings
+    assert resultsCsv.exists() is writeResultsFile
+    assert granularityCsv.exists() is writeResultsFile
+
+
 # ---------------------------------------------------------------------------
 # ParallelExecution: no merge (and no empty results CSV) without a results file
 # ---------------------------------------------------------------------------

@@ -132,6 +132,22 @@ def _resultsFileConsumed(hasLibraryLogic: bool, backendName: str) -> bool:
     return hasLibraryLogic or backendName == "ductile"
 
 
+def _updateResultsFileConfig(configPath, resultsFileName):
+    """Update reporting in a cached INI without changing its tile sizes or other settings."""
+    with open(configPath, "r", newline="") as f:
+        lines = [
+            line for line in f
+            if line.partition("=")[0].strip() not in ("results-file", "no-results-file")
+        ]
+    policy = (
+        f"results-file={resultsFileName}\n" if resultsFileName is not None else
+        "no-results-file=True\n"
+    )
+    with open(configPath, "w", newline="") as f:
+        f.write(policy)
+        f.writelines(lines)
+
+
 # 12 hex chars = 48 bits. Birthday-collision likely around 2^24 (~16M) entries
 # in one caches/ dir; tuning sweeps produce <<1k entries, so collision risk is
 # negligible. Lookup re-validates by content so a collision becomes a recompile,
@@ -875,6 +891,11 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                                     resultsFileName if writeResultsFile else None,
                                     outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
                                     gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap)
+                if enableTileSelection:
+                    _updateResultsFileConfig(
+                        sourcePath / "ClientParameters_Granularity.ini",
+                        resultsFileBase + "_Granularity.csv" if writeResultsFile else None,
+                    )
 
             # I think the size portion of this yaml could be removed,
             # but for now it's needed, so we update it even in the cache case
@@ -902,8 +923,13 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                 # A results CSV left by an earlier run into this output directory
                 # (reached here only with ForceRedoBenchmarkProblems) would otherwise be
                 # copied to 2_BenchmarkData as this run's results.
-                if not writeResultsFile and os.path.isfile(resultsFileName):
-                    os.remove(resultsFileName)
+                if not writeResultsFile:
+                    staleResults = [resultsFileName]
+                    if enableTileSelection:
+                        staleResults.append(resultsFileBase + "_Granularity.csv")
+                    for staleFile in staleResults:
+                        if os.path.isfile(staleFile):
+                            os.remove(staleFile)
                 returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths,
                                        deviceScalarAlphaModes=benchmarkStep.deviceScalarAlphaModes)
 
@@ -1108,8 +1134,10 @@ def main(
                         # From an earlier run (ForceRedoBenchmarkProblems): not this run's results.
                         os.remove(newResultsFileName)
                     shutil.copy(solutionsFileName, newSolutionsFileName)
-                    if os.path.isfile(granularityFileName):
+                    if writeResultsFile and os.path.isfile(granularityFileName):
                         shutil.copy(granularityFileName, newGranularityFileName)
+                    elif not writeResultsFile and os.path.isfile(newGranularityFileName):
+                        os.remove(newGranularityFileName)
             else:
                 print1("# {}_{:02d}_{:02d} already benchmarked; skipping." \
                         .format(str(problemTypeObj), outerIdx, idx) )
