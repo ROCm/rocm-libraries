@@ -2359,6 +2359,11 @@ class Solution(collections.abc.Mapping):
     if "PostLoopStoreInNll" not in state:
       state["PostLoopStoreInNll"] = True
 
+    # The fused post-loop store has no peer D store (OutputPeerD adds it to the regular epilogue).
+    if state["ProblemType"].get("OutputPeerD", False):
+      state["PostLoopStoreInNll"] = False
+      return
+
     isa = tuple(state["ISA"])
 
     if state["PostLoopStoreInNll"]:
@@ -2435,6 +2440,33 @@ class Solution(collections.abc.Mapping):
       state["PostLoopStoreInNll"] = False
 
   ########################################
+  # OutputPeerD feasibility: what a solution with a second D store must not use
+  @staticmethod
+  def outputPeerDUnmet(state):
+    """The limits of OutputPeerD that `state` does not meet (empty when it is allowed).
+
+    The second D store is added to the plain buffer-store epilogue only (addStore, tc 'D'),
+    and it is a system-scope store, which only gfx1250 is validated for.
+    """
+    problemType = state["ProblemType"]
+    limits = (
+      (tuple(state.get("ISA", (0, 0, 0))) == (12, 5, 0), "gfx1250"),
+      (state.get("BufferStore", 1) == 1, "BufferStore=1"),
+      # SCOPE_SYS with the LU/WB hint is not accepted by the assembler.
+      (state.get("TemporalHintD", 0) != 3, "TemporalHintD != 3"),
+      (state.get("GlobalSplitU", 1) == 1, "GlobalSplitU=1"),
+      (not isPersistent(state), "no StreamK / persistent kernel"),
+      (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
+      (not state.get("UseSubtileImpl", False), "UseSubtileImpl=False"),
+      (state.get("WorkGroup", [0, 0, 1])[2] == 1, "no LocalSplitU"),
+      (not problemType.get("GroupedGemm", False), "no GroupedGemm"),
+      (not problemType.get("OutputAmaxD", False), "no OutputAmaxD"),
+      (not problemType.get("UseE", False), "no UseE"),
+      (problemType.get("FusedA2A", "Disabled") == "Disabled", "FusedA2A=Disabled"),
+    )
+    return [what for ok, what in limits if not ok]
+
+  ########################################
   # assign all derived parameters
   @staticmethod
   def assignDerivedParameters(
@@ -2447,6 +2479,11 @@ class Solution(collections.abc.Mapping):
     dcpAutoSkip=None
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
+    if state["ProblemType"].get("OutputPeerD", False):
+      unmet = Solution.outputPeerDUnmet(state)
+      if unmet:
+        reject(state, printRejectionReason, "OutputPeerD needs: " + ", ".join(unmet))
+        return
     if isPersistent(state) and state["ProblemType"].get("OutputAmaxD", False):
       reject(state, printRejectionReason,
              "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
@@ -2697,30 +2734,65 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GlobalSplitU or a persistent TileProcessingStrategy must be enabled")
       return
 
-    if state["ProblemType"]["FusedGemmA2A"]:
+    fusedA2A = state["ProblemType"]["FusedA2A"]
+    if fusedA2A != "Disabled":
       if isa[:2] not in ((9, 4), (9, 5)):
         reject(state, printRejectionReason,
-               "FusedGemmA2A requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
-               "packet layout is gfx9 only)")
-        return
-      if not state["ProblemType"]["DestDataType"].isBFloat16():
-        reject(state, printRejectionReason, "FusedGemmA2A only supports a bf16 D")
+               "FusedA2A=%s requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
+               "packet layout is gfx9 only)" % fusedA2A)
         return
       if isPersistent(state):
-        reject(state, printRejectionReason, "FusedGemmA2A requires TileProcessingStrategy=None")
-        return
-      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
-      if mt0 not in (128, 256) or mt1 not in (128, 256):
-        reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
+        reject(state, printRejectionReason,
+               "FusedA2A=%s requires TileProcessingStrategy=None" % fusedA2A)
         return
       if state["GlobalSplitU"] != 1:
         reject(state, printRejectionReason,
-               "FusedGemmA2A requires GlobalSplitU=1 (the DRAIN owner is elected "
+               "FusedA2A=%s requires GlobalSplitU=1 (the last work-group is elected "
                "against NumWorkGroups0*NumWorkGroups1; any other GSU can multiply "
                "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
-               "the election may fire early)")
+               "the election may fire early)" % fusedA2A)
+        return
+      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
+      if mt0 not in (128, 256) or mt1 not in (128, 256):
+        reject(state, printRejectionReason,
+               "FusedA2A=%s requires MacroTile0/1 in {128, 256}" % fusedA2A)
         return
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
+
+    if fusedA2A == "GemmA2A":
+      if not state["ProblemType"]["DestDataType"].isBFloat16():
+        reject(state, printRejectionReason, "FusedA2A=GemmA2A requires a bf16 D")
+        return
+
+    if state["A2ASubRounds"] != 1 and fusedA2A != "A2AGemm":
+      reject(state, printRejectionReason, "A2ASubRounds > 1 requires FusedA2A=A2AGemm")
+      return
+
+    if fusedA2A == "A2AGemm":
+      _disableRuntimeStaggerU(state)
+      if not state["ProblemType"]["DataTypeB"].isBFloat16():
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires a bf16 B")
+        return
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires UseSubtileImpl=0")
+        return
+      if state["DirectToVgprA"] or state["DirectToVgprB"]:
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires DirectToVgprA=DirectToVgprB=0")
+        return
+      if not state["BufferLoad"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires BufferLoad=1")
+        return
+      if state["WorkGroupMapping"] < 0:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires WorkGroupMapping >= 0")
+        return
+      if state["WorkGroupMappingXCC"] != 1:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires WorkGroupMappingXCC=1")
+        return
+      if state["SpaceFillingAlgo"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires SpaceFillingAlgo=[]")
+        return
+      state["OptNoLoadLoop"] = 0
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
@@ -4045,6 +4117,12 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
+    if state["A2ASubRounds"] > 1 \
+        and state["DepthU"] * state["ProblemType"]["DataTypeB"].numBytes() % 128 != 0:
+      reject(state, printRejectionReason,
+             "A2ASubRounds > 1 requires DepthU*bpeB %% 128 == 0; got DepthU=%d" % state["DepthU"])
+      return
+
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
@@ -4091,6 +4169,15 @@ class Solution(collections.abc.Mapping):
 
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
+
+    if state["ProblemType"]["FusedA2A"] == "A2AGemm":
+      asem = state["AssertSummationElementMultiple"]
+      if asem not in (1, state["DepthU"]):
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires AssertSummationElementMultiple 1 or DepthU (%u), got %u"
+               % (state["DepthU"], asem))
+        return
+      state["AssertSummationElementMultiple"] = state["DepthU"]
 
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.

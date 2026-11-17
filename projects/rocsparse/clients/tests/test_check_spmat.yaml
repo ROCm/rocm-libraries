@@ -27,6 +27,23 @@ include: rocsparse_common.yaml
 
 Tests:
 # Quick
+# m = 0 CSR: a valid empty matrix, including (0, n) and (0, 0).
+- name: check_spmat_empty_csr
+  category: quick
+  function: check_spmat
+  indextype: *i32i32_i64i32_i64i64
+  precision: *double_only_precisions
+  M_N:
+    - { M: 0, N: 4 }
+    - { M: 0, N: 0 }
+  block_dim: 1
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix_type: [rocsparse_matrix_type_general]
+  uplo: [rocsparse_fill_mode_lower]
+  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_csr]
+
 - name: check_spmat
   category: quick
   function: check_spmat

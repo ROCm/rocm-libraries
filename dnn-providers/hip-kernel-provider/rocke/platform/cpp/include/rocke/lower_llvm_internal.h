@@ -676,6 +676,17 @@ const char* rocke_ll_smem_global_name(rocke_lower_t* L,
  * L->smem_pool_size, and L->smem_pool_name. */
 void rocke_ll_compute_smem_layout(rocke_lower_t* L);
 
+/* The `align N` (bytes) that `op` claims on its LDS access through a pool
+ * segment, or 0 when the op makes no such claim (Python _lds_access_align,
+ * which returns None there). The one home of every typed smem load / store
+ * alignment: the emitters print it, and the pool layout aligns each segment
+ * to the largest value its accesses claim. Never more than
+ * ROCKE_SMEM_POOL_ALIGN: a wider vector access claims the pool alignment.
+ * A store whose `align` attribute is not an integer or not a positive power
+ * of two is refused by rocke_i_align_attr (ckc::TypeError / ckc::ValueError,
+ * reported as ROCKE_ERR_TYPE / ROCKE_ERR_VALUE). */
+int rocke_ll_lds_access_align(const rocke_op_t* op);
+
 /* Emit a byte-level GEP to the start of the smem segment for `gname` inside
  * the unified pool. Returns the pool name directly when offset == 0;
  * otherwise emits one GEP and returns a fresh SSA name (Python
@@ -773,6 +784,8 @@ void rocke_ll_emit_wave_ballot(rocke_lower_t* L,
  * dispatcher (_op_scf_for) picks between them; both live in the flow bucket but
  * are declared here because the unrolled path mutates Value names which the
  * shared operand renderer must see -- keep them visible for the flow handlers.
+ * Both read the loop's iter_args metadata unchecked: call them only on a loop
+ * the loop rule (rocke_i_scf_for_error) accepts, as _op_scf_for does.
  */
 void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op);
 void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op);

@@ -1288,14 +1288,14 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
 
 def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
-    """Return whether this build admits one library logic's GEMM+A2A solutions.
+    """Return whether this build admits one library logic's fused A2A solutions.
 
-    Only an explicit True excludes one: a missing key, or no problem type at all,
+    Only a fused mode excludes one: a missing key, or no problem type at all,
     names a logic file that is not fused. Erring this way keeps a problem type that
     cannot answer the question from emptying the library, which fails far more
     quietly than building the solutions the gate meant to skip.
     """
-    return enabled or (problemType or {}).get("FusedGemmA2A", False) is not True
+    return enabled or (problemType or {}).get("FusedA2A", "Disabled") not in ("GemmA2A", "A2AGemm")
 
 
 ################################################################################
@@ -1379,7 +1379,7 @@ def _childEnvironment() -> Dict[str, str]:
     return env
 
 
-def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
+def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int, argv=None) -> None:
     """Builds each group in its own process, concurrently.
 
     A run names its target by the ISA it parses out of the gfx name, so a
@@ -1390,12 +1390,16 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
 
     The output directory is shared: each run keeps its scratch to itself
     (buildTmpDir) and their per-architecture outputs are named apart.
+
+    ``argv`` is this run's own arguments, the ones main parsed. Not sys.argv:
+    behind the ``tensilelite`` dispatcher that still starts with the command
+    name, which a child would take for its LogicPath.
     """
     print1(
         f"# Architectures requested need {len(groups)} builds to cover: "
         + ", ".join("[" + ";".join(g) + "]" for g in groups)
     )
-    argv = sys.argv[1:]
+    argv = sys.argv[1:] if argv is None else list(argv)
     jobs = _jobsPerGroup(requestedJobs, groups)
     env = _childEnvironment()
     # Spawned inside the try so that a failure to start the second one still
@@ -1431,7 +1435,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
 
 
 @profile
-def main():
+def main(argv=None):
     start = timer()
     print1("")
     print1(HR)
@@ -1439,7 +1443,7 @@ def main():
     print2(HR)
     print2("")
 
-    arguments = parseArguments()
+    arguments = parseArguments() if argv is None else parseArguments(argv)
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
     cxxCompiler, _, offloadBundler, _ = validateToolchain(
@@ -1459,7 +1463,7 @@ def main():
     # takes the one path below, unchanged.
     groups = isaCollisionFreeGroups(archs)
     if len(groups) > 1:
-        _buildGroupsSeparately(groups, arguments["CpuThreads"])
+        _buildGroupsSeparately(groups, arguments["CpuThreads"], argv)
         return
 
     archs = expandAllArchitectures(archs)
@@ -1696,3 +1700,4 @@ def main():
     print(f"Total kernels processed: {numKernels}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
     print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
+    return 0

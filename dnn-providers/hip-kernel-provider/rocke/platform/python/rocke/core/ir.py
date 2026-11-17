@@ -25,6 +25,7 @@ Design constraints:
 from __future__ import annotations
 
 import enum
+import operator
 import os
 import sys
 from dataclasses import dataclass, field
@@ -987,6 +988,144 @@ def type_bits(t: Type) -> int:
     return dtype_info(t.name).encoded_bits
 
 
+def element_type(t: Type) -> Type:
+    """The element type of a vector type, or ``t`` itself for a scalar.
+
+    The C++ engine's twin is ``rocke_i_elem_of``.
+    """
+    return t.elem if isinstance(t, VectorType) else t
+
+
+def lane_count(t: Type) -> int:
+    """The lane count of a vector type, or 1 for a scalar.
+
+    The C++ engine's twin is ``rocke_i_count_of``.
+    """
+    return t.count if isinstance(t, VectorType) else 1
+
+
+def type_bytes(t: Type) -> int:
+    """The number of whole bytes a value of IR type ``t`` occupies.
+
+    :func:`type_bits` divided by eight. Raises ``ValueError`` for a type whose
+    width is not a whole number of bytes (a packed sub-byte format), which has
+    no byte width to give.
+    """
+    bits = type_bits(t)
+    if bits % 8:
+        raise ValueError(
+            f"type_bytes failed - type={t.name} ({bits} bits), "
+            "expected a whole number of bytes"
+        )
+    return bits // 8
+
+
+def vector_access_align(lanes: int, elem: Type) -> int:
+    """The natural alignment, in bytes, of one access of ``lanes`` ``elem``
+    values: its byte width when that is a power of two, else the element width
+    (a 12-byte ``<3 x float>`` guarantees only element alignment).
+
+    Raises ``ValueError`` through :func:`type_bytes` for an element with no
+    whole-byte width. The C++ engine's twin is ``rocke_i_vector_access_align``.
+    """
+    elem_bytes = type_bytes(elem)
+    width = lanes * elem_bytes
+    return width if (width & (width - 1)) == 0 else elem_bytes
+
+
+def smem_vector_access_align(smem_type: Type, lanes: int, elem: Type) -> int:
+    """The alignment, in bytes, of one access of ``lanes`` ``elem`` values
+    into LDS tile type ``smem_type``: :func:`vector_access_align`, bounded by
+    what every row start of the tile guarantees.
+
+    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
+    ``lanes``, so the address advances by the innermost dimension per row.
+    When that dimension is not a multiple of ``lanes`` -- which is exactly what
+    a bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
+    the natural boundary. ``gcd(lanes, innermost)`` elements is what every row
+    start guarantees; outer strides are products that include the innermost
+    dimension, so they never bind tighter. A type with no shape (or a
+    non-positive innermost dimension) gives no row bound.
+
+    An alignment attribute is an assertion to LLVM: overstating it is undefined
+    behaviour even where the hardware tolerates the access, while understating
+    it only costs instruction selection. The C++ engine's twin is
+    ``rocke_i_smem_vector_access_align``.
+    """
+    natural = vector_access_align(lanes, elem)
+    shape = getattr(smem_type, "shape", None)
+    innermost = int(shape[-1]) if shape else 0
+    if innermost <= 0:
+        return natural
+    return min(natural, _gcd(int(lanes), innermost) * type_bytes(elem))
+
+
+def _checked_align(op_name: str, value: object) -> int:
+    """``value`` as the alignment claim of op ``op_name``, in bytes.
+
+    Raises ``TypeError`` for a value that is not an integer (``True`` and
+    ``8.0`` included) and ``ValueError`` for one that is not a positive power
+    of two: converting or capping it would turn an invalid claim into a valid
+    one.
+    """
+    # bool is an int subclass, so operator.index alone would read True as 1.
+    if isinstance(value, bool):
+        raise TypeError(f"{op_name} failed - align=bool, expected an integer")
+    try:
+        align = operator.index(value)
+    except TypeError:
+        raise TypeError(
+            f"{op_name} failed - align={type(value).__name__}, expected an integer"
+        ) from None
+    if align <= 0 or align & (align - 1):
+        raise ValueError(
+            f"{op_name} failed - align={align}, expected a positive power of two"
+        )
+    return align
+
+
+def _global_vector_align(
+    op_name: str, lanes: int, elem: Type, align: object | None
+) -> int:
+    """The ``align`` global vector access builder ``op_name`` records for
+    ``lanes`` ``elem`` values: :func:`vector_access_align` when ``align`` is
+    ``None``, else ``align`` as :func:`_checked_align` accepts it. The C++
+    engine's twin is ``global_vector_align`` in ``ir/ir_mem.cpp``.
+    """
+    if align is None:
+        return vector_access_align(lanes, elem)
+    return _checked_align(op_name, align)
+
+
+def align_attr(op: Op) -> int | None:
+    """The ``align`` attribute of memory op ``op``, in bytes, or ``None`` when
+    the op carries none.
+
+    Refuses an invalid attribute as :func:`_checked_align` does (``TypeError``
+    for one that is not an integer, ``ValueError`` for one that is not a
+    positive power of two). The C++ engine's twin is ``rocke_i_align_attr``,
+    which returns 0 for an absent attribute.
+    """
+    if "align" not in op.attrs:
+        return None
+    return _checked_align(op.name, op.attrs["align"])
+
+
+def claimed_align(op: Op, lanes: int, elem: Type) -> int:
+    """The alignment, in bytes, that vector access ``op`` of ``lanes`` ``elem``
+    values claims: its :func:`align_attr` when it carries one, else
+    :func:`vector_access_align`. The C++ engine's twin is
+    ``rocke_i_claimed_align``.
+
+    An op without ``align`` (older serialized IR, or hand-written IR) claims
+    the builders' default, so it lowers as the builder would have built it.
+    Like that default, the claim is a guarantee the caller gives about the
+    index, not a proof about it: see :meth:`IRBuilder.global_load_vN`.
+    """
+    align = align_attr(op)
+    return vector_access_align(lanes, elem) if align is None else align
+
+
 def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
     if isinstance(source, PtrType) or isinstance(target, PtrType):
         raise TypeError(
@@ -1050,6 +1189,21 @@ def _reused_loop_name_message(name: str) -> str:
     )
 
 
+def _untyped_loop_value_message(name: str) -> str:
+    """The refusal for an ``scf.for`` induction variable or carried value named
+    ``name`` whose type attr (its loop's ``iv_type`` attr or its ``iter_args``
+    entry's ``type``) is not a type name.
+
+    The IR parser refuses such a value before it binds it, and the loop rule
+    (:func:`_scf_for_metadata_entry_error`) refuses such a carried value in IR
+    that reaches the verifier or a lowering without passing the parser.
+    """
+    return (
+        f"scf.for: the loop value '{name}' has no type name; its iv_type attr or "
+        "iter_args entry must name its type"
+    )
+
+
 def _first_reused_loop_name(taken: Sequence[str], names: Sequence[str]) -> str | None:
     """The first of ``names`` that is already taken, or None when all are free.
 
@@ -1106,21 +1260,21 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
 
     It checks each iter_arg's initial value (the operands after lower, upper
     and step) and each value an ``scf.yield`` directly in the loop body yields.
-    It only slices the operand and region lists, so it accepts any counts:
+    It only slices the operand list, so it accepts any operand count, as
     serialized IR reaches the verifier and the lowerings without passing the
-    builder. The verifier and every lowering of ``scf.for`` use it, and the C++
-    engine reports the same text (``rocke_i_scf_for_carried_descriptor_error``).
+    builder; the loop holds one body region (:func:`_scf_for_region_error`).
+    :func:`_scf_for_error` applies it, and the C++ engine reports the
+    same text (``rocke_i_scf_for_carried_descriptor_error``).
     """
     for index, init in enumerate(op.operands[3:]):
         if _is_buffer_descriptor(init):
             return _loop_carried_descriptor_message(index)
-    for body in op.regions[:1]:
-        for body_op in body.ops:
-            if body_op.name != "scf.yield":
-                continue
-            for index, value in enumerate(body_op.operands):
-                if _is_buffer_descriptor(value):
-                    return _loop_carried_descriptor_message(index)
+    for body_op in op.regions[0].ops:
+        if body_op.name != "scf.yield":
+            continue
+        for index, value in enumerate(body_op.operands):
+            if _is_buffer_descriptor(value):
+                return _loop_carried_descriptor_message(index)
     return None
 
 
@@ -1361,62 +1515,365 @@ def _gpu_check_failed_op_error(op: Op) -> str | None:
     return None
 
 
-# The two branches of an scf.if_else, in region order.
-_IF_ELSE_BRANCHES = ("then", "else")
-
-
-def _if_else_result_type_error(index: int, result_type: Type) -> Optional[str]:
-    """The refusal for an ``scf.if_else`` result ``index`` of type
-    ``result_type``, or None when an if/else can carry it.
-
-    An LDS allocation is a name the lowerings resolve to its base, not a value:
-    neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
-    one. The builder and :func:`_if_else_branch_yield` use this rule, and the
-    C++ engine (``rocke_i_if_else_result_type_error``) reports the same text.
-    """
-    if isinstance(result_type, SmemType):
+def _ldexp_types_error(
+    value_type: Type, exponent_type: Type, result_type: Type
+) -> str | None:
+    """The error for ``math.ldexp`` on these types, or None: the op takes an
+    f32 value and an i32 exponent and gives an f32."""
+    if (
+        value_type.name != "f32"
+        or exponent_type.name != "i32"
+        or result_type.name != "f32"
+    ):
         return (
-            f"scf.if_else result {index} is an LDS allocation, which an if/else "
-            "cannot carry; allocate before the if/else and yield an offset into "
-            "the allocation instead"
+            f"ldexp takes an f32 value and an i32 exponent and gives an f32, got "
+            f"{value_type.name}, {exponent_type.name} -> {result_type.name}"
         )
     return None
 
 
-def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
-    """The ``scf.yield`` that gives ``op``'s results their values on branch
-    ``branch`` (0 then, 1 else), or None when the ``scf.if_else`` ``op`` has no
-    results.
+def _ldexp_op_error(op: Op) -> str | None:
+    """The error for a built ``math.ldexp`` op, or None.
 
-    Every ``scf.if_else`` has one condition and two branches. One with results
-    ends each branch in an ``scf.yield`` of one value per result, of the
-    result's type, and never a buffer descriptor
-    (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
-    (HIP) that holds a result can hold the lowered descriptor. No result is an
-    LDS allocation (:func:`_if_else_result_type_error`). The builder, the
-    verifier and every lowering refuse anything else with these texts, in both
-    engines (``rocke_i_if_else_branch_yield``); the counts are checked first,
-    as serialized IR reaches the verifier and the lowerings without passing the
-    builder.
+    Serialized IR reaches the verifier and the lowerings without passing the
+    builder, so they all use this rule, and the C++ engine
+    (``rocke_i_ldexp_op_error``) reports the same text.
     """
-    if len(op.operands) != 1 or len(op.regions) != 2:
-        raise ValueError(
-            f"scf.if_else: expected 1 condition / 2 branches, got "
-            f"{len(op.operands)} / {len(op.regions)}"
-        )
-    if not op.results:
+    if len(op.operands) != 2 or len(op.results) != 1 or op.regions:
+        return "ldexp takes two operands and gives one result"
+    value, exponent = op.operands
+    return _ldexp_types_error(value.type, exponent.type, op.results[0].type)
+
+
+# The two branches of an scf.if_else, in region order.
+_IF_ELSE_BRANCHES = ("then", "else")
+
+# The refusal for an scf.yield that is not directly in a region that takes
+# yields: an scf.for body or a branch of an scf.if_else with results. The
+# verifier and both lowerings report it, in both engines (the C++ engine's
+# ROCKE_ORPHAN_YIELD_ERROR has the same text).
+_ORPHAN_YIELD_ERROR = (
+    "scf.yield must be directly in an scf.for body or in a branch of an "
+    "scf.if_else with results"
+)
+
+# The refusal for an scf.for body with an scf.yield before its last op: the loop
+# takes its carried values only from the yield that ends its body. The C++
+# engine's rocke_i_scf_for_error reports the same text.
+_LOOP_EARLY_YIELD_ERROR = (
+    "scf.for body yields before its last op; a loop takes its values only from "
+    "the scf.yield that ends its body"
+)
+
+# The ops whose regions take the scf.yield ops directly in them: an scf.for
+# carries its body's yield into the next trip, and an scf.if_else applies its own
+# rule (_if_else_yields) to its branches. Every other region, the kernel body
+# and an scf.if branch among them, passes a yield on to nothing.
+_YIELD_OWNING_OPS = ("scf.for", "scf.if_else")
+
+
+def _nested_orphan_yield(op: Op) -> Op | None:
+    """The first ``scf.yield`` in a region of ``op`` that takes no yields,
+    searched through every such region nested in it; None when there is none
+    or ``op`` owns its regions' yields (:data:`_YIELD_OWNING_OPS`).
+
+    The search stops at an owning op, whose own rule covers its regions.
+    """
+    if op.name in _YIELD_OWNING_OPS:
         return None
-    for index, result in enumerate(op.results):
-        error = _if_else_result_type_error(index, result.type)
+    for region in op.regions:
+        found = _orphan_yield(region.ops)
+        if found is not None:
+            return found
+    return None
+
+
+def _orphan_yield(ops: Sequence[Op]) -> Op | None:
+    """The first ``scf.yield`` among ``ops``, or in a region nested in them that
+    takes no yields (:func:`_nested_orphan_yield`); None when there is none.
+
+    Called on the ops of a region that takes no yields (the kernel body), it
+    tells whether the region holds an orphan yield, and returns the first; the
+    if/else rule calls it on a branch's ops.
+    """
+    for op in ops:
+        if op.name == "scf.yield":
+            return op
+        found = _nested_orphan_yield(op)
+        if found is not None:
+            return found
+    return None
+
+
+def _scf_for_region_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when it does not hold exactly one
+    region, its body, or None when it does.
+
+    The loop rule and the lowerings read only the first region, so a second one
+    would be dropped unchecked, yields included. The verifier checks this
+    before it reads the body; :func:`_scf_for_error` checks it first.
+    """
+    if len(op.regions) != 1:
+        return f"scf.for: expected 1 body region, got {len(op.regions)}"
+    return None
+
+
+def _scf_for_carried_count_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when its counts of carried values
+    disagree, or None when they agree.
+
+    The ``num_iter_args`` attr (0 when absent) gives the count, and only a
+    plain int can give it (a bool, a float or a string is refused, as the C++
+    engine refuses any attr but an int one); the init operands (the operands after
+    lower, upper and step), the ``iter_args`` metadata list (empty when absent)
+    and the results each hold one entry per carried value.
+    """
+    count = op.attrs.get("num_iter_args", 0)
+    if not is_plain_int(count):
+        return "scf.for num_iter_args must be an integer count of carried values"
+    metadata = op.attrs.get("iter_args", [])
+    if not isinstance(metadata, list):
+        return "scf.for iter_args metadata must be a list"
+    for what, actual in (
+        ("init operands", len(op.operands[3:])),
+        ("metadata entries", len(metadata)),
+        ("results", len(op.results)),
+    ):
+        if actual != count:
+            return f"scf.for declares {count} iter_args but has {actual} {what}"
+    return None
+
+
+def _untyped_value_message(
+    value_type: object, what: str, index: int, expected: str
+) -> str | None:
+    """The refusal for value ``index`` of ``what`` (``"scf.for result"``,
+    say) when its type ``value_type`` is not a :class:`Type`, or None when it
+    is.
+
+    The builders and the IR parser type every value, but a value built or
+    edited by hand can lack a type. The loop rule (:func:`_scf_for_error`) and
+    the if/else rule (:func:`_if_else_yields`) check each value with it before
+    they read its type's name; the loop rule reports it as a ``ValueError``,
+    as every loop refusal is, and the if/else rule as a ``TypeError``, as its
+    builder refuses a result type. The C++ engine (``untyped_value_message``
+    in ``cpp/core/ir/ir_flow.cpp``) writes the same text, spelling its missing
+    type ``None``.
+    """
+    if isinstance(value_type, Type):
+        return None
+    return f"{what} {index} failed - type={value_type!r}, expected {expected}"
+
+
+def _scf_for_metadata_entry_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when an ``iter_args`` metadata
+    entry does not describe its carried value, or None when every entry does.
+
+    The counts of carried values agree (:func:`_scf_for_carried_count_error`).
+    Entry ``i`` is a map whose ``name`` is a non-empty string and whose
+    ``type`` names the type of init operand ``i``; result ``i`` has that type
+    too. An entry with no type name gets the IR parser's refusal
+    (:func:`_untyped_loop_value_message`), so a loop gets one text whichever
+    of the two meets it first. An init operand or result with no type is
+    refused (:func:`_untyped_value_message`) before its type is read.
+    """
+    for index, (entry, init, result) in enumerate(
+        zip(op.attrs.get("iter_args", []), op.operands[3:], op.results)
+    ):
+        if not isinstance(entry, dict):
+            return f"scf.for iter_arg {index} metadata must be a map"
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            return f"scf.for iter_arg {index} metadata has no name"
+        type_name = entry.get("type")
+        if not isinstance(type_name, str):
+            return _untyped_loop_value_message(name)
+        error = _untyped_value_message(
+            init.type, "scf.for init operand", index, "an IR type"
+        )
         if error is not None:
-            raise ValueError(error)
+            return error
+        if type_name != init.type.name:
+            return (
+                f"scf.for iter_arg {name} metadata type '{type_name}' "
+                f"does not match init type '{init.type.name}'"
+            )
+        error = _untyped_value_message(
+            result.type, "scf.for result", index, init.type.name
+        )
+        if error is not None:
+            return error
+        if result.type != init.type:
+            return (
+                f"scf.for result type '{result.type.name}' does not match "
+                f"iter_arg {name} type '{init.type.name}'"
+            )
+    return None
+
+
+def _scf_for_yield_error(op: Op) -> str | None:
+    """The refusal for the ``scf.yield`` ops directly in the body of the
+    ``scf.for`` ``op``, whose carried-value counts agree
+    (:func:`_scf_for_carried_count_error`), or None when they are sound.
+
+    The loop takes its carried values from the one ``scf.yield`` that ends its
+    body, so the body yields only at its end; it ends in a yield of one value
+    per init operand, of that operand's type, whenever the loop carries any. A
+    loop that carries none may end in an empty yield or in none. A yielded
+    value with no type is refused (:func:`_untyped_value_message`) before its
+    type is read. The loop holds one body region (:func:`_scf_for_region_error`).
+    """
+    body_ops = op.regions[0].ops
+    carried = op.operands[3:]
+    count = len(carried)
+    if any(body_op.name == "scf.yield" for body_op in body_ops[:-1]):
+        return _LOOP_EARLY_YIELD_ERROR
+    if not body_ops or body_ops[-1].name != "scf.yield":
+        if not count:
+            return None
+        return (
+            f"scf.for carries {count} values, so its body must end in scf.yield "
+            f"of {count} values"
+        )
+    yielded = body_ops[-1].operands
+    if len(yielded) != count:
+        return (
+            f"scf.for carries {count} values, but its body yields {len(yielded)} values"
+        )
+    for index, (init, value) in enumerate(zip(carried, yielded)):
+        error = _untyped_value_message(
+            value.type, "scf.for body yield", index, init.type.name
+        )
+        if error is not None:
+            return error
+        if value.type != init.type:
+            return (
+                f"scf.for iter_arg {index} is {init.type.name}, but its body "
+                f"yields {value.type.name}"
+            )
+    return None
+
+
+def _scf_for_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op``, or None when the loop is sound.
+
+    A loop holds exactly one region, its body
+    (:func:`_scf_for_region_error`); its counts of carried values agree
+    (:func:`_scf_for_carried_count_error`) and its ``iter_args`` metadata
+    describes them (:func:`_scf_for_metadata_entry_error`); it cannot carry a buffer
+    descriptor (:func:`_scf_for_carried_descriptor_error`); its body yields
+    once, at its end, the values it carries (:func:`_scf_for_yield_error`); and
+    it takes only the yields directly in its body, so its body nests none in a
+    region that takes no yields (an ``scf.if`` in the body, say;
+    :data:`_ORPHAN_YIELD_ERROR`). It accepts any operand count and refuses any
+    region count but one, as serialized IR reaches the verifier and the
+    lowerings without passing the builder. The verifier and every lowering of
+    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``).
+    """
+    error = _scf_for_region_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_carried_count_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_metadata_entry_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_carried_descriptor_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_yield_error(op)
+    if error is not None:
+        return error
+    body = op.regions[0]
+    if any(_nested_orphan_yield(body_op) is not None for body_op in body.ops):
+        return _ORPHAN_YIELD_ERROR
+    return None
+
+
+def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
+    """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`) and every
+    ``scf.if_else`` (:func:`_if_else_yields`) among ``ops`` and nested in them.
+
+    A lowering calls it on a loop body it does not lower (an unrolled loop of
+    zero trips), so that body's malformed loop or if/else is refused as it is
+    wherever the body is lowered; the C++ engine's
+    ``rocke_i_check_control_flow`` is its twin.
+    """
+    for op in ops:
+        if op.name == "scf.for":
+            error = _scf_for_error(op)
+            if error is not None:
+                raise ValueError(error)
+        elif op.name == "scf.if_else":
+            _if_else_yields(op)
+        for region in op.regions:
+            _refuse_malformed_control_flow(region.ops)
+
+
+def _refuse_if_else_result_type(index: int, result_type: object) -> None:
+    """Refuse an ``scf.if_else`` result ``index`` of type ``result_type`` that
+    an if/else cannot carry.
+
+    A result needs a type (:func:`_untyped_value_message`, ``TypeError``);
+    this comes first, so no later rule reads a missing type. A packed-only type has
+    no value form (:func:`_refuse_packed_only_value`, ``TypeError``). An LDS
+    allocation is a name the lowerings resolve to its base, not a value:
+    neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
+    one (``ValueError``). The packed-only rule comes before the LDS rule, so an
+    LDS tile of i4 gets its ``TypeError``. The builder and
+    :func:`_if_else_yields` use this rule, and the C++ engine
+    (``rocke_i_check_if_else_result_type``) reports the same type and text.
+    """
+    error = _untyped_value_message(
+        result_type, "scf.if_else result", index, "an IR type"
+    )
+    if error is not None:
+        raise TypeError(error)
+    _refuse_packed_only_value("scf.if_else", result_type)
+    if isinstance(result_type, SmemType):
+        raise ValueError(
+            f"scf.if_else result {index} is an LDS allocation, which an if/else "
+            "cannot carry; allocate before the if/else and yield an offset into "
+            "the allocation instead"
+        )
+
+
+def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
+    """The ``scf.yield`` that ends branch ``branch`` (0 then, 1 else) of the
+    ``scf.if_else`` ``op``, whose condition and branch counts
+    :func:`_if_else_yields` has checked; None when ``op`` has no results.
+
+    Only the ``scf.yield`` that ends a branch of an if/else with results has
+    its values taken, so a branch holds no other ``scf.yield``, directly or in
+    a region nested in it that does not take yields (an ``scf.if``,
+    :func:`_orphan_yield`); a nested ``scf.for`` or ``scf.if_else`` owns the
+    yields in its regions. That closing ``scf.yield`` gives
+    one value per result, of the result's type, and never a buffer descriptor
+    (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
+    (HIP) that holds a result can hold the lowered descriptor. A yielded value
+    with no type (:func:`_untyped_value_message`) is a ``TypeError``, raised
+    before any rule reads its type; every other refusal is a ``ValueError``.
+    """
     name = _IF_ELSE_BRANCHES[branch]
     count = len(op.results)
     region = op.regions[branch]
+    if not count:
+        if _orphan_yield(region.ops) is not None:
+            raise ValueError(
+                f"scf.if_else has no results, so its {name} branch cannot "
+                "contain scf.yield"
+            )
+        return None
     if not region.ops or region.ops[-1].name != "scf.yield":
         raise ValueError(
             f"scf.if_else has {count} results, so its {name} branch must end in "
             f"scf.yield of {count} values"
+        )
+    if _orphan_yield(region.ops[:-1]) is not None:
+        raise ValueError(
+            f"scf.if_else has {count} results, so its {name} branch must yield "
+            "only at its end"
         )
     yld = region.ops[-1]
     if len(yld.operands) != count:
@@ -1431,12 +1888,39 @@ def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
                 "descriptor, which an if/else cannot carry; yield the values the "
                 "descriptor is built from and build it after the if/else"
             )
+        error = _untyped_value_message(
+            value.type, f"scf.if_else {name} branch yield", index, result.type.name
+        )
+        if error is not None:
+            raise TypeError(error)
         if value.type != result.type:
             raise ValueError(
                 f"scf.if_else result {index} is {result.type.name}, but its {name} "
                 f"branch yields {value.type.name}"
             )
     return yld
+
+
+def _if_else_yields(op: Op) -> tuple[Op | None, Op | None]:
+    """The ``scf.yield`` that ends the then and the else branch of the
+    ``scf.if_else`` ``op``; both None when ``op`` has no results.
+
+    Every ``scf.if_else`` has one condition and two branches, and each result
+    is a type an if/else can carry (:func:`_refuse_if_else_result_type`); each
+    branch then follows :func:`_if_else_branch_yield`. The builder, the
+    verifier and every lowering refuse anything else with these types and
+    texts, in both engines (``rocke_i_if_else_yields``). The counts are checked
+    first, as serialized IR reaches the verifier and the lowerings without
+    passing the builder.
+    """
+    if len(op.operands) != 1 or len(op.regions) != 2:
+        raise ValueError(
+            f"scf.if_else: expected 1 condition / 2 branches, got "
+            f"{len(op.operands)} / {len(op.regions)}"
+        )
+    for index, result in enumerate(op.results):
+        _refuse_if_else_result_type(index, result.type)
+    return _if_else_branch_yield(op, 0), _if_else_branch_yield(op, 1)
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -2625,6 +3109,24 @@ class IRBuilder:
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
 
+    def ldexp(self, value: Value, exponent: Value) -> Value:
+        """``value * 2^exponent``, rounded once (``llvm.ldexp.f32.i32``,
+        one ``v_ldexp_f32``).
+
+        ``value`` is f32 and ``exponent`` i32; the result is f32. The power of
+        two is never formed as a float, so any i32 exponent works:
+        ``value * exp2(e)`` overflows to Inf for ``e > 127`` and flushes to zero
+        for ``e < -149`` even when the product is an ordinary f32. A product
+        beyond the f32 range gives the infinity of its sign, one below it a
+        subnormal or a zero of its sign; NaN, Inf and zeros pass through.
+        """
+        error = _ldexp_types_error(value.type, exponent.type, F32)
+        if error:
+            raise ValueError(error)
+        return self._op(
+            "math.ldexp", [value, exponent], [F32], result_name_hint="ldexp"
+        ).result
+
     def exp2_fast(self, a: Value) -> Value:
         """Native single-instruction base-2 exp: ``llvm.amdgcn.exp2.f32`` -> one
         ``v_exp_f32``. Unlike ``exp2`` (``llvm.exp2.f32``), it emits NO
@@ -3679,9 +4181,14 @@ class IRBuilder:
         selection depends on target and alignment; 96-bit payloads do not
         require a 96-bit scalar type.
 
-        Default alignment is the payload size for power-of-two loads, and
-        element alignment for 12-byte loads. An explicit alignment is a caller
-        guarantee about the address after adding idx.
+        The default alignment is :func:`vector_access_align`: the payload
+        size when that is a power of two, else the element size (a 12-byte
+        load claims element alignment). The recorded ``align``, given or
+        default, is a caller guarantee about the address after adding idx:
+        the lowering claims it, so an address that is not a multiple of it
+        needs a smaller explicit ``align``. One that is not a positive power
+        of two is refused as by :func:`align_attr` (``TypeError`` for a value
+        that is not an integer, ``ValueError`` otherwise).
 
         ``temporal_hint`` states the access's temporal-locality intent.
         ``TemporalHint.STREAMING`` means the data is read once, so it should
@@ -3695,25 +4202,21 @@ class IRBuilder:
         ``TypeError``.
         """
         if dtype.name in ("f16", "bf16", "i16"):
-            elem_bytes = 2
             # n=16 (32-byte `global_load_dwordx8`) is needed for the RDNA WMMA
             # <16 x half> operand fragment; AMDGPU coalesces it when aligned.
             if n not in (2, 4, 6, 8, 16):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
         elif dtype.name in ("f32", "i32", "tf32"):
-            elem_bytes = 4
             if n not in (2, 3, 4, 8):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         elif dtype.name == "f64":
-            elem_bytes = 8
             if n != 2:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
-            elem_bytes = 1
             if n not in (2, 4, 8, 12, 16):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
@@ -3726,9 +4229,7 @@ class IRBuilder:
         attrs = {
             "elem_type": dtype.name,
             "vec": n,
-            "align": int(
-                align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
-            ),
+            "align": _global_vector_align("memref.global_load_vN", n, dtype, align),
         }
         if _streaming(temporal_hint):
             attrs["nontemporal"] = True
@@ -3904,6 +4405,15 @@ class IRBuilder:
         of the element types :meth:`smem_load_vN` accepts (the shared
         ``_SMEM_VECTOR_ELEMENTS``). For 8-bit element types, ``n=16`` maps to a
         16-byte LDS transaction, which is the native-int WMMA staging shape.
+
+        A vector store (``n > 1``) records ``align`` =
+        :func:`smem_vector_access_align` (the payload size, bounded by what
+        every row start of a padded tile guarantees) and claims it, capped at
+        the 16-byte pool alignment (``lower_llvm.SMEM_POOL_ALIGN``): the
+        indices must address an element whose byte offset in the allocation is
+        a multiple of that claim. The LLVM lowering aligns the allocation's base to it. An
+        ``n=1`` store of a vector value stores it whole and claims only
+        element alignment.
         """
         if n == 1:
             # Single-element store; route through the scalar `tile.smem_store`.
@@ -3919,28 +4429,15 @@ class IRBuilder:
         _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             allowed_n = (2, 4, 8, 16)
-            elem_bytes = 1
         elif elem_name == "f64":
             allowed_n = (2,)
-            elem_bytes = 8
         else:
             allowed_n = (2, 4, 8)
-            elem_bytes = 4 if elem_name in ("f32", "i32", "tf32") else 2
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
-        # The natural alignment is n * elem_bytes, but that only holds if every
-        # address the store can land on is that aligned. An LDS tile advances by
-        # its innermost dimension per row, so a pad that makes that dimension a
-        # non-multiple of n -- lds_k_pad's whole purpose -- leaves alternate rows
-        # off the natural boundary. gcd bounds the claim to what every row start
-        # actually guarantees. Overstating alignment is undefined behaviour even
-        # where the hardware tolerates the access; understating it only affects
-        # instruction selection.
-        shape = getattr(smem.type, "shape", None)
-        align_elems = _gcd(n, int(shape[-1])) if shape else n
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -3948,7 +4445,7 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                "align": align_elems * elem_bytes,
+                "align": smem_vector_access_align(smem.type, n, value.type.elem),
             },
         )
 
@@ -3977,6 +4474,12 @@ class IRBuilder:
         power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
         or three words), using element alignment. The target and alignment
         determine instruction selection.
+
+        The load claims :func:`smem_vector_access_align` (the payload size for
+        a power-of-two payload, bounded by what every row start of a padded
+        tile guarantees), capped at the 16-byte pool alignment: the
+        indices must address an element whose byte offset in the allocation is
+        a multiple of that claim, as for :meth:`smem_store_vN`.
         """
         _require_smem_vector_element("smem_load_vN", dtype.name)
         if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
@@ -7015,7 +7518,11 @@ class IRBuilder:
         emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
         (4-byte), ``f64`` (8-byte, N in {1, 2}), ``i8`` / ``fp8e4m3`` /
         ``bf8e5m2`` (1-byte). Lowers to
-        a single ``store <N x elem>`` with the supplied address alignment.
+        a single ``store <N x elem>`` with the supplied address alignment,
+        by default :func:`vector_access_align` (the payload size), a caller
+        guarantee about the address after adding idx as for
+        ``global_load_vN``; one that is not a positive power of two is refused
+        as by :func:`align_attr`.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
 
@@ -7027,26 +7534,15 @@ class IRBuilder:
         """
         if n not in (1, 2, 4, 8, 16):
             raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")
-        elem_name = (
-            value.type.elem.name
-            if isinstance(value.type, VectorType)
-            else value.type.name
-        )
-        if elem_name in ("f16", "bf16", "i16"):
-            elem_bytes = 2
-            if n == 16:
-                raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
-        elif elem_name in ("f32", "i32", "tf32"):
-            elem_bytes = 4
+        elem = element_type(value.type)
+        elem_name = elem.name
+        if elem_name in ("f16", "bf16", "i16", "f32", "i32", "tf32"):
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
         elif elem_name == "f64":
-            elem_bytes = 8
             if n > 2:
                 raise ValueError(f"global_store_vN n={n} not supported for {elem_name}")
-        elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
-            elem_bytes = 1
-        else:
+        elif elem_name not in ("i8", "fp8e4m3", "bf8e5m2"):
             raise ValueError(
                 "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
@@ -7054,7 +7550,7 @@ class IRBuilder:
         attrs = {
             "elem_type": elem_name,
             "vec": n,
-            "align": int(align or (n * elem_bytes)),
+            "align": _global_vector_align("memref.global_store_vN", n, elem, align),
         }
         if _streaming(temporal_hint):
             attrs["nontemporal"] = True
@@ -7245,9 +7741,12 @@ class IRBuilder:
     def scf_yield(self, *values: Value) -> None:
         """End the current region by yielding ``values`` to its owner.
 
-        In an ``scf.for`` body they become the next iteration's iter_args, so
-        none may be a buffer descriptor (see
-        :func:`_loop_carried_descriptor_message`).
+        The owner is an ``scf.for`` whose body the yield is directly in, or an
+        ``scf.if_else`` with results whose branch it ends; the verifier and the
+        lowerings refuse a yield anywhere else (the kernel body, an ``scf.if``,
+        an ``scf.if_else`` without results). In an ``scf.for`` body the values
+        become the next iteration's iter_args, so none may be a buffer
+        descriptor (see :func:`_loop_carried_descriptor_message`).
         """
         if self._current_region_is_loop_body():
             for index, value in enumerate(values):
@@ -7346,13 +7845,11 @@ class IRBuilder:
                     b.scf_yield(b.zero_vec_f16(8))
             (value,) = branch.results
 
-        Leaving the ``with`` refuses a branch that does not end that way.
+        Leaving the ``with`` refuses a branch that does not end that way, and
+        a branch of an if/else without results that holds an ``scf_yield``.
         """
-        for index, t in enumerate(result_types):
-            _refuse_packed_only_value("scf.if_else", t)
-            error = _if_else_result_type_error(index, t)
-            if error is not None:
-                raise ValueError(error)
+        for index, result_type in enumerate(result_types):
+            _refuse_if_else_result_type(index, result_type)
         results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
@@ -7408,6 +7905,7 @@ PURE_OP_NAMES = {
     "arith.uitofp_f32",
     "arith.cvt_f32_to_u8_sat",
     "math.exp2",
+    "math.ldexp",
     "math.exp2_fast",
     "math.log2",
     "math.rcp",
@@ -7593,8 +8091,7 @@ class _IfElseBuilder:
         # The regions were already popped by their own context managers. Once
         # both branches are built, refuse one that does not yield the results.
         if exc_type is None:
-            for branch in range(len(_IF_ELSE_BRANCHES)):
-                _if_else_branch_yield(self.op, branch)
+            _if_else_yields(self.op)
 
     @property
     def results(self) -> List[Value]:
