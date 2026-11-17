@@ -166,13 +166,16 @@ CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
 CACHE_TILE_K: Tuple[int, ...] = (16, 32, 64)
 # ---- RDNA4 deep-K tiles ------------------------------------------------------
 # The gfx12 RDNA targets (gfx1200 / gfx1201 and their generic target) also
-# build every geometry above at tile_k 128: few-wave tiles over a deep
+# build the forward geometries above at tile_k 128: few-wave tiles over a deep
 # reduction (small grids, wide channels) halve their K-loop barriers there and
 # lead those rows. Appended after the base product (see :func:`_geometries`),
 # so the geometry order and the enumeration chunks of every other target are
 # unchanged.
 CACHE_RDNA4_ARCHS: Tuple[str, ...] = ("gfx1200", "gfx1201", "gfx12-generic")
 CACHE_RDNA4_EXTRA_TILE_K: Tuple[int, ...] = (128,)
+# Only the forward direction walks that axis: its tile_k 128 kernels are
+# GPU-verified (the listed rows); dgrad's are not, so the axis stays off there.
+CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS: Tuple[str, ...] = ("fwd",)
 CACHE_WARP_MN: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
 
@@ -844,13 +847,17 @@ def _geometries(
     ``direction`` selects the grid: wgrad gets the filter-shaped tile and warp
     extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
     base grid. The RDNA4 targets (:data:`CACHE_RDNA4_ARCHS`) walk the same
-    grid again at :data:`CACHE_RDNA4_EXTRA_TILE_K` after it. It must be threaded through wherever a geometry list is built
-    for a direction, or the chunk bounds stop matching the list the worker
-    walks.
+    grid again at :data:`CACHE_RDNA4_EXTRA_TILE_K` after it, for the
+    directions in :data:`CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS` (forward only).
+    It must be threaded through wherever a geometry list is built for a
+    direction, or the chunk bounds stop matching the list the worker walks.
     """
     tile_mn, warp_mn = _grid_axes(direction)
     tile_ks = [_TILE_K]
-    if target.gfx in CACHE_RDNA4_ARCHS:
+    if (
+        target.gfx in CACHE_RDNA4_ARCHS
+        and direction in CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS
+    ):
         # The RDNA4 tile_k axis (CACHE_RDNA4_EXTRA_TILE_K), after the base grid.
         tile_ks.append(CACHE_RDNA4_EXTRA_TILE_K)
     for (
