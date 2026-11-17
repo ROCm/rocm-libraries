@@ -107,7 +107,9 @@ bool IsPacked(const TensorInfo& info)
 
 // MIOpen's own shape check: each statistic needs more than one value. Every dim
 // is at least 1 once the first test passes, so a product exceeds 1 exactly when
-// one of its factors does, and nothing needs multiplying.
+// one of its factors does, and nothing needs multiplying. MIOpen tests only the
+// spatial and per-activation shapes, so a mode it does not know passes here and
+// fails later with InvalidValue.
 bool ValidateShape(const TensorInfo& x, miopenBatchNormMode_t mode)
 {
     if(std::any_of(x.dims.begin(), x.dims.end(), [](int64_t dim) { return dim <= 0; }))
@@ -116,6 +118,8 @@ bool ValidateShape(const TensorInfo& x, miopenBatchNormMode_t mode)
         return true;
     if(mode == miopenBNPerActivation)
         return false;
+    if(mode != miopenBNSpatial)
+        return true;
     return std::any_of(x.dims.begin() + 2, x.dims.end(), [](int64_t dim) { return dim > 1; });
 }
 

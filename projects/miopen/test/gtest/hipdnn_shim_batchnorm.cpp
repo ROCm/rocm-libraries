@@ -2353,6 +2353,26 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
         hs::ExpectStatusParity(
             "no_solver_unknown_mode_bwd", result, miopenStatusInvalidValue, unknown_mode);
     }
+    // MIOpen's shape check knows only spatial and per-activation, so one value
+    // per channel does not stop an unknown mode before the mode is named.
+    {
+        SCOPED_TRACE("unknown mode one value train");
+        RawProblem p(handle, {1, 4, 1, 1}, miopenFloat, miopenFloat, miopenFloat);
+        p.mode            = UnknownBnMode();
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity("no_solver_unknown_mode_one_value_train",
+                               result,
+                               miopenStatusInvalidValue,
+                               unknown_mode);
+    }
+    {
+        SCOPED_TRACE("unknown mode one value bwd");
+        RawProblem p(handle, {1, 4, 1, 1}, miopenFloat, miopenFloat, miopenFloat);
+        p.mode            = UnknownBnMode();
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_unknown_mode_one_value_bwd", result, miopenStatusInvalidValue, unknown_mode);
+    }
     {
         SCOPED_TRACE("tanh infer");
         RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
