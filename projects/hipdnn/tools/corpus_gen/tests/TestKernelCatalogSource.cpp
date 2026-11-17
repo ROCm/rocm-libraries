@@ -238,6 +238,7 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
                              // Built directly; a pack gets this from `kernel_catalog.constants`.
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildAdmissible(metadata, point);
     ASSERT_TRUE(built.has_value());

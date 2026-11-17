@@ -241,6 +241,7 @@ class OperandsEmitter:
         for _, member in self.members:
             self.emit_member(w, member)
         self.emit_entry(w)
+        self.emit_operand_table(w)
         w(f"}} // namespace {namespace}")
         return "\n".join(lines) + "\n"
 
@@ -283,6 +284,18 @@ class OperandsEmitter:
         )
         w("//")
         w(
+            "// OPERANDS lists every node type's operands as the visitor publishes them, each"
+        )
+        w(
+            "// marked optional when a valid node may leave it out: optional scalars and tensor"
+        )
+        w("// references (skipped when unset), vectors of tensor references and vector")
+        w(
+            "// attributes (the schema fixes no length). UHD models must tolerate their absence"
+        )
+        w("// (RFC 0019 section 6.2).")
+        w("//")
+        w(
             "// Strings, nested tables and structs, unions and byte vectors (opaque payloads)"
         )
         w(
@@ -293,6 +306,7 @@ class OperandsEmitter:
         w("")
         w("#pragma once")
         w("")
+        w("#include <array>")
         w("#include <charconv>")
         w("#include <cstddef>")
         w("#include <cstdint>")
@@ -487,6 +501,56 @@ class OperandsEmitter:
         w("        return false;")
         w("    }")
         w("}")
+        w("")
+
+    def operand_rows(self):
+        """(node type, published name, kind, optional) for every operand of every type."""
+        rows = []
+        for tag, member in self.members:
+            for operand in self.operands[member["name"]]:
+                if operand.kind == Operand.TENSOR and operand.vector:
+                    rows.append((tag, operand.name, "TENSORS", True))
+                elif operand.kind == Operand.ELEMENTS:
+                    rows.append((tag, operand.name, "ELEMENTS", True))
+                else:
+                    rows.append(
+                        (tag, operand.name, operand.kind.upper(), operand.optional)
+                    )
+        return rows
+
+    def emit_operand_table(self, w):
+        rows = self.operand_rows()
+        w("/// How an operand is published (see visit()).")
+        w("enum class OperandKind : uint8_t")
+        w("{")
+        w("    SCALAR, ///< `<name>`: a scalar attribute")
+        w("    TENSOR, ///< `<role>.<field>`: a tensor reference")
+        w(
+            "    TENSORS, ///< `<role>[i].<field>`: a vector of tensor references, of any length"
+        )
+        w(
+            "    ELEMENTS, ///< `<name>[i]`: a vector attribute, whose length the schema leaves open"
+        )
+        w("};")
+        w("")
+        w("struct OperandEntry")
+        w("{")
+        w("    std::string_view nodeType;")
+        w("    std::string_view name;")
+        w("    OperandKind kind;")
+        w("    /// Whether a valid node of the type may leave the operand out.")
+        w("    bool optional;")
+        w("};")
+        w("")
+        w(
+            "/// Every operand of every node type, in schema order. Regenerated with the visitor,"
+        )
+        w("/// so a field joins it when the schema gains it.")
+        w(f"inline constexpr std::array<OperandEntry, {len(rows)}> OPERANDS{{{{")
+        for tag, name, kind, optional in rows:
+            flag = "true" if optional else "false"
+            w(f'    {{"{tag}", "{name}", OperandKind::{kind}, {flag}}},')
+        w("}};")
         w("")
 
 

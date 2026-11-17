@@ -80,6 +80,7 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdParser.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdCandidateOrdering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestEngineFeatures.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestOptionalFeatures.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
     $<$<BOOL:${HIPDNN_UHD_GEN_RUNNABLE}>:ingestor/uhd/TestUhdGenArtifact.cpp>

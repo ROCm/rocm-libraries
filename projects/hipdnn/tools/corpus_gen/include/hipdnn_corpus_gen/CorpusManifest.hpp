@@ -76,6 +76,9 @@ struct ManifestEntry
     /// Per entry, not per run: one corpus may cover several operations with different axes.
     std::string operation;
     std::vector<RegimeAxis> regimeAxes;
+
+    /// The operation's form axes: facet columns of their own, after the regime's.
+    std::vector<RegimeAxis> formAxes;
 };
 
 /// Everything the manifest records that is not per-graph.
@@ -104,6 +107,17 @@ struct ManifestContext
 
 namespace detail
 {
+
+/// Every facet @p entry reports: its regime's, then its form's.
+inline std::vector<std::pair<std::string, std::string>> facetsOf(const ManifestEntry& entry)
+{
+    auto facets = regimeFacets(entry.regimeAxes, entry.entry.point);
+    for(auto& facet : regimeFacets(entry.formAxes, entry.entry.point))
+    {
+        facets.push_back(std::move(facet));
+    }
+    return facets;
+}
 
 inline std::string digestOf(const std::filesystem::path& path)
 {
@@ -141,7 +155,7 @@ inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
 
         // Facets come from the point, not split from `regime`: its separator may appear in
         // a label.
-        for(const auto& facet : regimeFacets(entry.regimeAxes, entry.entry.point))
+        for(const auto& facet : detail::facetsOf(entry))
         {
             record[facet.first] = facet.second;
         }
@@ -189,7 +203,7 @@ namespace detail
 {
 
 /// Union of facet (or `q.*`) columns across entries, in first-seen order so a
-/// single-operation corpus keeps declaration order.
+/// single-operation corpus keeps declaration order. Form facets follow every regime facet.
 inline std::vector<std::string> unionOfColumns(const std::vector<ManifestEntry>& entries,
                                                bool facets)
 {
@@ -215,6 +229,16 @@ inline std::vector<std::string> unionOfColumns(const std::vector<ManifestEntry>&
             for(const auto& parameter : entry.entry.point)
             {
                 note("q." + parameter.first);
+            }
+        }
+    }
+    if(facets)
+    {
+        for(const auto& entry : entries)
+        {
+            for(const auto& facet : regimeFacets(entry.formAxes, entry.entry.point))
+            {
+                note(facet.first);
             }
         }
     }
@@ -271,8 +295,7 @@ inline std::string corpusManifestCsv(const std::vector<ManifestEntry>& entries)
         text += detail::asCsvField(entry.benchmark);
         text += "," + detail::asCsvField(entry.name);
         text += "," + detail::asCsvField(entry.entry.regime);
-        for(const auto& value :
-            detail::valuesFor(facetColumns, regimeFacets(entry.regimeAxes, entry.entry.point)))
+        for(const auto& value : detail::valuesFor(facetColumns, detail::facetsOf(entry)))
         {
             text += "," + detail::asCsvField(value);
         }

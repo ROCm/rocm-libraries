@@ -947,6 +947,7 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("fp16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
@@ -1011,6 +1012,7 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
                                  {"is_causal", true},
                                  {"alignment", anchor},
                                  {"generate_stats", false},
+                                 {"form", std::string("plain")},
                                  {"dtype", std::string("bf16")}};
         const auto built = buildGraphFor(*parsed.metadata, point);
         ASSERT_TRUE(built.ok()) << anchor << ": " << built.error;
@@ -1071,6 +1073,7 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", true},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;

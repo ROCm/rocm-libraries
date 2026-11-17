@@ -37,6 +37,7 @@ from .features import (
     require_admissible_kernel_axes,
     signature_references,
 )
+from .optional import require_safe_signature
 from .provenance import (
     ROLES,
     SUPPORTED_FILE_VERSIONS,
@@ -965,6 +966,19 @@ def _build_plan(
         raise PromoteError(
             "explicit knob removal requires training provenance for the intended revised UED; retrain first"
         )
+    if descriptor.get("features_signature"):
+        # RFC 0019 §6.2, after every refusal the runtime would make itself: a model it
+        # loads but that reads bare a feature a valid graph may leave unbound cannot
+        # score that graph, so the engine loses its estimate or ranking there.
+        try:
+            require_safe_signature(
+                descriptor["features_signature"],
+                _score_metric(descriptor),
+                str(descriptor_path),
+                feature_evaluator,
+            )
+        except ValueError as error:
+            raise PromoteError(str(error)) from error
 
     target = (ued_path.resolve(), _role_key(role, slot), arch)
     # Every binding except the ones this promotion replaces, including other metrics here.

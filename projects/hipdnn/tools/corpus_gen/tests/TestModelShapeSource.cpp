@@ -62,8 +62,8 @@ OperationMetadata shippedSdpa()
 
 /// A complete header in the spelling the miner emits, and one complete row.
 const char* kHeader = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
-                      "q.is_causal,q.alignment,q.generate_stats,q.dtype\n";
-const char* kRow = "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16\n";
+                      "q.is_causal,q.alignment,q.generate_stats,q.dtype,q.form\n";
+const char* kRow = "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n";
 
 } // namespace
 
@@ -96,12 +96,36 @@ TEST(TestModelShapeSource, AColumnWithoutTheQueryPrefixStillReads)
     ModelShapeReport report;
 
     const std::string bare = "batch,heads,heads_kv,seqlen_q,seqlen_k,head_dim,is_causal,"
-                             "alignment,generate_stats,dtype\n"
-                             "1,64,8,4096,4096,128,true,top_left,false,bf16\n";
+                             "alignment,generate_stats,dtype,form\n"
+                             "1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", bare), report);
     ASSERT_EQ(entries.size(), 1u);
     EXPECT_NE(entries.front().origin.find("row 1"), std::string::npos) << entries.front().origin;
+}
+
+// A file mined before `form` existed has no column for it; the operation's kernel_catalog
+// constant answers, as it does for a descriptor pack. A present column left empty is still a
+// row that failed to record its form.
+TEST(TestModelShapeSource, AFilePredatingAParameterTakesTheOperationsConstantForIt)
+{
+    const TempTree tree("predates");
+    const auto metadata = shippedSdpa();
+    ModelShapeReport report;
+
+    const std::string old = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
+                            "q.is_causal,q.alignment,q.generate_stats,q.dtype\n"
+                            "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16\n";
+    const auto entries = readModelShapes(metadata, tree.write("old.csv", old), report);
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries.front().point.at("form"), ParameterValue{std::string("plain")});
+
+    const std::string empty
+        = kHeader
+          + std::string("llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16,\n");
+    EXPECT_TRUE(readModelShapes(metadata, tree.write("empty.csv", empty), report).empty());
+    EXPECT_EQ(report.unusable, 1);
+    EXPECT_NE(report.firstProblem.find("form"), std::string::npos) << report.firstProblem;
 }
 
 TEST(TestModelShapeSource, ARowNamingAnotherOperationIsSkippedRatherThanCountedUnusable)
@@ -111,8 +135,8 @@ TEST(TestModelShapeSource, ARowNamingAnotherOperationIsSkippedRatherThanCountedU
     ModelShapeReport report;
 
     const std::string mixed = "op," + std::string(kHeader).substr(std::string("name,").size())
-                              + "gemm,1,64,8,4096,4096,128,true,top_left,false,bf16\n"
-                                "sdpa_fwd,1,64,8,4096,4096,128,true,top_left,false,bf16\n";
+                              + "gemm,1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n"
+                                "sdpa_fwd,1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", mixed), report);
 
@@ -131,9 +155,9 @@ TEST(TestModelShapeSource, AMisspelledColumnLosesEveryRowAndSaysWhichName)
 
     // `causal` for `is_causal`.
     const std::string wrong = "q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
-                              "q.causal,q.alignment,q.generate_stats,q.dtype\n"
-                              "1,64,8,4096,4096,128,true,top_left,false,bf16\n"
-                              "2,64,8,2048,2048,128,true,top_left,false,bf16\n";
+                              "q.causal,q.alignment,q.generate_stats,q.dtype,q.form\n"
+                              "1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n"
+                              "2,64,8,2048,2048,128,true,top_left,false,bf16,plain\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", wrong), report);
 
@@ -152,7 +176,7 @@ TEST(TestModelShapeSource, AValueTheDeclarationDoesNotAcceptIsRefusedRatherThanC
     const std::string bad
         = kHeader
           + std::string("mistyped,1,64,8,4096,4096,128,true,top_left,false,fp8_e4m3\n"
-                        "not a number,1,64,8,4096,4096,many,true,top_left,false,bf16\n");
+                        "not a number,1,64,8,4096,4096,many,true,top_left,false,bf16,plain\n");
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", bad), report);
 
@@ -172,7 +196,8 @@ TEST(TestModelShapeSource, AQuotedFieldMayCarryACommaWithoutSplittingTheRow)
 
     const std::string quoted
         = kHeader
-          + std::string(R"("llama3-70b, prefill",1,64,8,4096,4096,128,true,top_left,false,bf16)")
+          + std::string(
+              R"("llama3-70b, prefill",1,64,8,4096,4096,128,true,top_left,false,bf16,plain)")
           + "\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", quoted), report);
@@ -203,7 +228,7 @@ TEST(TestModelShapeSource, NoOracleIsAppliedSoAShapeNobodyServesStillArrives)
     // Far past any byte budget; admission is the caller's job.
     const std::string huge
         = kHeader
-          + std::string("enormous,64,128,128,131072,131072,256,false,top_left,false,bf16\n");
+          + std::string("enormous,64,128,128,131072,131072,256,false,top_left,false,bf16,plain\n");
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", huge), report);
 
