@@ -19,7 +19,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Upcoming changes
 
 
-## Composable Kernel 1.3.0 for ROCm 10.3.0
+## Composable Kernel 1.4.0 for ROCm 10.3.0
 
 ### Added
 
