@@ -134,9 +134,9 @@ std::vector<RankShapes> rankShapes()
 }
 
 // Shapes shared by the 2D layout, dtype and packing cases (and by the plan builder tests).
-const std::vector<int64_t>& X_DIMS = test_conv_common::CONV_2D_X_DIMS;
-const std::vector<int64_t>& W_DIMS = test_conv_common::CONV_2D_W_DIMS;
-const std::vector<int64_t>& Y_DIMS = test_conv_common::CONV_2D_Y_DIMS;
+const std::vector<int64_t>& convXDims = test_conv_common::CONV_2D_X_DIMS;
+const std::vector<int64_t>& convWDims = test_conv_common::CONV_2D_W_DIMS;
+const std::vector<int64_t>& convYDims = test_conv_common::CONV_2D_Y_DIMS;
 
 // ---------------------------------------------------------------------------------------------
 // Forward, backward data and backward weights
@@ -847,7 +847,7 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsUniformPackedAtEveryRank)
 
 TEST(TestMiopenConvApplicabilityChecks, AcceptsEverySupportedDataType)
 {
-    const RankShapes shapes = {X_DIMS, W_DIMS, Y_DIMS};
+    const RankShapes shapes = {convXDims, convWDims, convYDims};
 
     for(const auto dataType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
@@ -980,12 +980,30 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithSaneDims)
 TEST(TestMiopenConvApplicabilityChecks, DeclinesMixedLayoutWhicheverTensorDiffers)
 {
     const std::vector<ConvCase> cases = {
-        {"dy cl, w cf, dx cf", channelsLast(Y_DIMS), channelsFirst(W_DIMS), channelsFirst(X_DIMS)},
-        {"dy cf, w cl, dx cf", channelsFirst(Y_DIMS), channelsLast(W_DIMS), channelsFirst(X_DIMS)},
-        {"dy cf, w cf, dx cl", channelsFirst(Y_DIMS), channelsFirst(W_DIMS), channelsLast(X_DIMS)},
-        {"dy cf, w cl, dx cl", channelsFirst(Y_DIMS), channelsLast(W_DIMS), channelsLast(X_DIMS)},
-        {"dy cl, w cf, dx cl", channelsLast(Y_DIMS), channelsFirst(W_DIMS), channelsLast(X_DIMS)},
-        {"dy cl, w cl, dx cf", channelsLast(Y_DIMS), channelsLast(W_DIMS), channelsFirst(X_DIMS)},
+        {"dy cl, w cf, dx cf",
+         channelsLast(convYDims),
+         channelsFirst(convWDims),
+         channelsFirst(convXDims)},
+        {"dy cf, w cl, dx cf",
+         channelsFirst(convYDims),
+         channelsLast(convWDims),
+         channelsFirst(convXDims)},
+        {"dy cf, w cf, dx cl",
+         channelsFirst(convYDims),
+         channelsFirst(convWDims),
+         channelsLast(convXDims)},
+        {"dy cf, w cl, dx cl",
+         channelsFirst(convYDims),
+         channelsLast(convWDims),
+         channelsLast(convXDims)},
+        {"dy cl, w cf, dx cl",
+         channelsLast(convYDims),
+         channelsFirst(convWDims),
+         channelsLast(convXDims)},
+        {"dy cl, w cl, dx cf",
+         channelsLast(convYDims),
+         channelsLast(convWDims),
+         channelsFirst(convXDims)},
     };
 
     for(const auto& mixedCase : cases)
@@ -1087,19 +1105,21 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesPackedTensorsWithNeitherCanonica
         return withStrides(dims, generateStrides(dims, order));
     };
 
-    expectDeclined({"all other", other(Y_DIMS), other(W_DIMS), other(X_DIMS)}, LAYOUT_REASON);
-    expectDeclined({"dx other", channelsFirst(Y_DIMS), channelsFirst(W_DIMS), other(X_DIMS)},
+    expectDeclined({"all other", other(convYDims), other(convWDims), other(convXDims)},
                    LAYOUT_REASON);
-    expectDeclined({"w other", channelsLast(Y_DIMS), other(W_DIMS), channelsLast(X_DIMS)},
+    expectDeclined(
+        {"dx other", channelsFirst(convYDims), channelsFirst(convWDims), other(convXDims)},
+        LAYOUT_REASON);
+    expectDeclined({"w other", channelsLast(convYDims), other(convWDims), channelsLast(convXDims)},
                    LAYOUT_REASON);
 }
 
 // Layout is judged before packing: a non-packed tensor does not rescue a mixed-layout graph.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesMixedLayoutWhenOneTensorIsAlsoNotPacked)
 {
-    expectForwardDeclined(withStrides(X_DIMS, {512, 128, 16, 1}),
-                          channelsLast(W_DIMS),
-                          channelsFirst(Y_DIMS),
+    expectForwardDeclined(withStrides(convXDims, {512, 128, 16, 1}),
+                          channelsLast(convWDims),
+                          channelsFirst(convYDims),
                           LAYOUT_REASON);
 }
 
@@ -1109,15 +1129,15 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesMixedLayoutWhenOneTensorIsAlsoNo
 TEST(TestMiopenConvApplicabilityChecks, BackwardJudgesLayoutOfNonPackedTensorsByStrideOrder)
 {
     expectDeclined({"dx cl padded, dy cf, w cl",
-                    channelsFirst(Y_DIMS),
-                    channelsLast(W_DIMS),
-                    paddedTensor(X_DIMS, /*channelsLastLayout=*/true, 1)},
+                    channelsFirst(convYDims),
+                    channelsLast(convWDims),
+                    paddedTensor(convXDims, /*channelsLastLayout=*/true, 1)},
                    LAYOUT_REASON,
                    BACKWARD_OPS);
     expectDeclined({"dy cf padded, w cl, dx cl",
-                    paddedTensor(Y_DIMS, /*channelsLastLayout=*/false, 1),
-                    channelsLast(W_DIMS),
-                    channelsLast(X_DIMS)},
+                    paddedTensor(convYDims, /*channelsLastLayout=*/false, 1),
+                    channelsLast(convWDims),
+                    channelsLast(convXDims)},
                    LAYOUT_REASON,
                    BACKWARD_OPS);
 }
@@ -1131,25 +1151,25 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesMixedDataTypeWhicheverTensorDiff
 {
     const std::vector<ConvCase> cases = {
         {"dx differs",
-         channelsFirst(Y_DIMS, DataType::HALF),
-         channelsFirst(W_DIMS, DataType::HALF),
-         channelsFirst(X_DIMS, DataType::FLOAT)},
+         channelsFirst(convYDims, DataType::HALF),
+         channelsFirst(convWDims, DataType::HALF),
+         channelsFirst(convXDims, DataType::FLOAT)},
         {"w differs",
-         channelsFirst(Y_DIMS, DataType::FLOAT),
-         channelsFirst(W_DIMS, DataType::BFLOAT16),
-         channelsFirst(X_DIMS, DataType::FLOAT)},
+         channelsFirst(convYDims, DataType::FLOAT),
+         channelsFirst(convWDims, DataType::BFLOAT16),
+         channelsFirst(convXDims, DataType::FLOAT)},
         {"dy differs",
-         channelsFirst(Y_DIMS, DataType::HALF),
-         channelsFirst(W_DIMS, DataType::FLOAT),
-         channelsFirst(X_DIMS, DataType::FLOAT)},
+         channelsFirst(convYDims, DataType::HALF),
+         channelsFirst(convWDims, DataType::FLOAT),
+         channelsFirst(convXDims, DataType::FLOAT)},
         {"dy differs, dx and w share a type",
-         channelsFirst(Y_DIMS, DataType::FLOAT),
-         channelsFirst(W_DIMS, DataType::HALF),
-         channelsFirst(X_DIMS, DataType::HALF)},
+         channelsFirst(convYDims, DataType::FLOAT),
+         channelsFirst(convWDims, DataType::HALF),
+         channelsFirst(convXDims, DataType::HALF)},
         {"dx differs, dy and w share a type",
-         channelsFirst(Y_DIMS, DataType::FLOAT),
-         channelsFirst(W_DIMS, DataType::FLOAT),
-         channelsFirst(X_DIMS, DataType::HALF)},
+         channelsFirst(convYDims, DataType::FLOAT),
+         channelsFirst(convWDims, DataType::FLOAT),
+         channelsFirst(convXDims, DataType::HALF)},
     };
 
     for(const auto& mixedCase : cases)
@@ -1161,9 +1181,9 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesMixedDataTypeWhicheverTensorDiff
 TEST(TestMiopenConvApplicabilityChecks, DeclinesUnsupportedDataTypeShared)
 {
     expectDeclined({"double",
-                    channelsFirst(Y_DIMS, DataType::DOUBLE),
-                    channelsFirst(W_DIMS, DataType::DOUBLE),
-                    channelsFirst(X_DIMS, DataType::DOUBLE)},
+                    channelsFirst(convYDims, DataType::DOUBLE),
+                    channelsFirst(convWDims, DataType::DOUBLE),
+                    channelsFirst(convXDims, DataType::DOUBLE)},
                    DATA_TYPE_REASON);
 }
 
@@ -1178,17 +1198,17 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedChannelsFirstInput)
 {
     const std::vector<ConvCase> cases = {
         forwardCase("padded rows",
-                    withStrides(X_DIMS, {512, 128, 16, 1}),
-                    channelsFirst(W_DIMS),
-                    channelsFirst(Y_DIMS)),
+                    withStrides(convXDims, {512, 128, 16, 1}),
+                    channelsFirst(convWDims),
+                    channelsFirst(convYDims)),
         forwardCase("padded channels",
-                    withStrides(X_DIMS, {512, 128, 8, 1}),
-                    channelsFirst(W_DIMS),
-                    channelsFirst(Y_DIMS)),
+                    withStrides(convXDims, {512, 128, 8, 1}),
+                    channelsFirst(convWDims),
+                    channelsFirst(convYDims)),
         forwardCase("padded planes",
-                    withStrides(X_DIMS, {384, 64, 8, 1}),
-                    channelsFirst(W_DIMS),
-                    channelsFirst(Y_DIMS)),
+                    withStrides(convXDims, {384, 64, 8, 1}),
+                    channelsFirst(convWDims),
+                    channelsFirst(convYDims)),
     };
 
     for(const auto& paddedCase : cases)
@@ -1201,17 +1221,17 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedChannelsLastInput)
 {
     const std::vector<ConvCase> cases = {
         forwardCase("padded rows",
-                    withStrides(X_DIMS, {320, 1, 40, 4}),
-                    channelsLast(W_DIMS),
-                    channelsLast(Y_DIMS)),
+                    withStrides(convXDims, {320, 1, 40, 4}),
+                    channelsLast(convWDims),
+                    channelsLast(convYDims)),
         forwardCase("padded columns",
-                    withStrides(X_DIMS, {512, 1, 64, 8}),
-                    channelsLast(W_DIMS),
-                    channelsLast(Y_DIMS)),
+                    withStrides(convXDims, {512, 1, 64, 8}),
+                    channelsLast(convWDims),
+                    channelsLast(convYDims)),
         forwardCase("padded batch",
-                    withStrides(X_DIMS, {384, 1, 32, 4}),
-                    channelsLast(W_DIMS),
-                    channelsLast(Y_DIMS)),
+                    withStrides(convXDims, {384, 1, 32, 4}),
+                    channelsLast(convWDims),
+                    channelsLast(convYDims)),
     };
 
     for(const auto& paddedCase : cases)
@@ -1222,17 +1242,17 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedChannelsLastInput)
 
 TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedWeights)
 {
-    expectForwardDeclined(channelsFirst(X_DIMS),
-                          withStrides(W_DIMS, {48, 12, 4, 1}),
-                          channelsFirst(Y_DIMS),
+    expectForwardDeclined(channelsFirst(convXDims),
+                          withStrides(convWDims, {48, 12, 4, 1}),
+                          channelsFirst(convYDims),
                           PACKED_REASON);
 }
 
 TEST(TestMiopenConvApplicabilityChecks, DeclinesNonPackedOutput)
 {
-    expectForwardDeclined(channelsFirst(X_DIMS),
-                          channelsFirst(W_DIMS),
-                          withStrides(Y_DIMS, {192, 48, 8, 1}),
+    expectForwardDeclined(channelsFirst(convXDims),
+                          channelsFirst(convWDims),
+                          withStrides(convYDims, {192, 48, 8, 1}),
                           PACKED_REASON);
 }
 
@@ -1270,7 +1290,8 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesNonPackedChannelsLast)
 // base; it is not a rule of its own for broadcast tensors.
 TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTensor)
 {
-    const ConvCase base = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, /*channelsLastLayout=*/false);
+    const ConvCase base
+        = uniformCase({convXDims, convWDims, convYDims}, /*channelsLastLayout=*/false);
 
     for(const Role role : ROLES)
     {
@@ -1292,27 +1313,27 @@ TEST(TestMiopenConvApplicabilityChecks, BroadcastAxisIsJudgedLikeAnyNonPackedTen
 
 TEST(TestMiopenConvApplicabilityChecks, DeclinesMalformedTensors)
 {
-    auto nullDyDims = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+    auto nullDyDims = uniformCase({convXDims, convWDims, convYDims}, false);
     nullDyDims.dy.nullDims = true;
     expectDeclined(nullDyDims, "null dims");
 
-    auto nullDxDims = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+    auto nullDxDims = uniformCase({convXDims, convWDims, convYDims}, false);
     nullDxDims.dx.nullDims = true;
     expectDeclined(nullDxDims, "null dims");
 
-    auto nullStrides = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+    auto nullStrides = uniformCase({convXDims, convWDims, convYDims}, false);
     nullStrides.w.nullStrides = true;
     expectDeclined(nullStrides, "null dims or strides");
 
     expectDeclined({"dx dims and strides of different size",
-                    channelsFirst(Y_DIMS),
-                    channelsFirst(W_DIMS),
-                    withStrides(X_DIMS, {256, 64, 8})},
+                    channelsFirst(convYDims),
+                    channelsFirst(convWDims),
+                    withStrides(convXDims, {256, 64, 8})},
                    "different dims and strides sizes");
     expectDeclined({"dy dims and strides of different size",
-                    withStrides(Y_DIMS, {144, 36, 6}),
-                    channelsFirst(W_DIMS),
-                    channelsFirst(X_DIMS)},
+                    withStrides(convYDims, {144, 36, 6}),
+                    channelsFirst(convWDims),
+                    channelsFirst(convXDims)},
                    "different dims and strides sizes");
 
     expectDeclined({"rank 2", channelsFirst({2, 4}), channelsFirst({4, 8}), channelsFirst({2, 8})},
@@ -1326,7 +1347,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesMalformedTensors)
 // Exactly 2^31 - 1 elements, and just below, on dy and on dx separately.
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeAcceptsUpToTheLimit)
 {
-    const TensorSpec small = channelsFirst(Y_DIMS);
+    const TensorSpec small = channelsFirst(convYDims);
 
     const std::vector<std::vector<int64_t>> atOrBelowLimit = {
         {1, MAX_ELEMENTS, 1, 1},
@@ -1345,7 +1366,7 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeAcceptsUpToTheLimit)
 
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeDeclinesAboveTheLimit)
 {
-    const TensorSpec small = channelsFirst(Y_DIMS);
+    const TensorSpec small = channelsFirst(convYDims);
 
     const std::vector<std::vector<int64_t>> aboveLimit = {
         {1, MAX_ELEMENTS + 1, 1, 1},
@@ -1381,7 +1402,7 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeDeclinesTheSingleChannel
 // A product that overflows a 64-bit integer must decline, not wrap around to a small count.
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeDeclinesDimsWhoseProductOverflows)
 {
-    const TensorSpec small = channelsFirst(Y_DIMS);
+    const TensorSpec small = channelsFirst(convYDims);
 
     for(const auto& dims : overflowingDims())
     {
@@ -1399,7 +1420,7 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeDeclinesDimsWhoseProduct
 // them.
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeAcceptsZeroExtentDimsInAnyOrder)
 {
-    const TensorSpec small = channelsFirst(Y_DIMS);
+    const TensorSpec small = channelsFirst(convYDims);
 
     for(const auto& dims : zeroExtentOverflowingDims())
     {
@@ -1415,7 +1436,7 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeAcceptsZeroExtentDimsInA
 // within the limit. A zero counted as 1 would put the first two of these above it.
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeCountsAZeroDimAsZeroElements)
 {
-    const TensorSpec small = channelsFirst(Y_DIMS);
+    const TensorSpec small = channelsFirst(convYDims);
 
     const std::vector<std::vector<int64_t>> emptyDims = {
         {0, 3000000000, 1, 1},
@@ -1434,27 +1455,28 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeCountsAZeroDimAsZeroElem
 
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeDeclinesNullAndNegativeDims)
 {
-    auto nullDy = channelsFirst(Y_DIMS);
+    auto nullDy = channelsFirst(convYDims);
     nullDy.nullDims = true;
-    EXPECT_THAT(sizeDeclineReason(nullDy, channelsFirst(X_DIMS)),
+    EXPECT_THAT(sizeDeclineReason(nullDy, channelsFirst(convXDims)),
                 ::testing::HasSubstr("tensor dy has null dims"));
 
-    auto nullDx = channelsFirst(X_DIMS);
+    auto nullDx = channelsFirst(convXDims);
     nullDx.nullDims = true;
-    EXPECT_THAT(sizeDeclineReason(channelsFirst(Y_DIMS), nullDx),
+    EXPECT_THAT(sizeDeclineReason(channelsFirst(convYDims), nullDx),
                 ::testing::HasSubstr("tensor dx has null dims"));
 
-    EXPECT_THAT(sizeDeclineReason(withStrides({4, -2, 3, 3}, {1, 1, 1, 1}), channelsFirst(X_DIMS)),
-                ::testing::HasSubstr("tensor dy has a negative dim"));
+    EXPECT_THAT(
+        sizeDeclineReason(withStrides({4, -2, 3, 3}, {1, 1, 1, 1}), channelsFirst(convXDims)),
+        ::testing::HasSubstr("tensor dy has a negative dim"));
 }
 
 // The size rule reads only the dims: strides and data type play no part.
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeReadsOnlyTheDims)
 {
-    auto dy = channelsFirst(Y_DIMS, DataType::DOUBLE);
+    auto dy = channelsFirst(convYDims, DataType::DOUBLE);
     dy.nullStrides = true;
 
-    EXPECT_EQ(sizeDeclineReason(dy, withStrides(X_DIMS, {7, 7, 7, 7}, DataType::UNSET)), "");
+    EXPECT_EQ(sizeDeclineReason(dy, withStrides(convXDims, {7, 7, 7, 7}, DataType::UNSET)), "");
 }
 
 // Only validateConvBwdDataSize carries the limit: tensors of more than 2^31 - 1 elements pass the
@@ -1478,7 +1500,7 @@ TEST(TestMiopenConvApplicabilityChecks, SizeLimitIsNotPartOfTheIoTensorRules)
 // Every operation, every tensor in turn, under the tensor's name in the operation.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesDimsWhoseElementCountOverflows)
 {
-    const ConvCase packed = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+    const ConvCase packed = uniformCase({convXDims, convWDims, convYDims}, false);
 
     for(const auto& dims : ioOverflowingDims())
     {
@@ -1506,7 +1528,7 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesDimsWhoseElementCountOverflows)
 // Every operation, every tensor in turn, under the tensor's name in the operation.
 TEST(TestMiopenConvApplicabilityChecks, DeclinesStridesWhoseArithmeticOverflows)
 {
-    const ConvCase packed = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+    const ConvCase packed = uniformCase({convXDims, convWDims, convYDims}, false);
 
     for(const auto& overflowing : overflowingStrides())
     {
@@ -1539,13 +1561,16 @@ TEST(TestMiopenConvApplicabilityChecks, StridesThatDoNotOverflowAreJudgedByLayou
 
     const TensorSpec largePadded = withStrides({1, 4, 1}, {int64_t{1} << 60, int64_t{1} << 58, 1});
     ASSERT_FALSE(isTensorPacked(largePadded.dims, largePadded.strides));
-    expectForwardDeclined(largePadded, channelsFirst(W_DIMS), channelsFirst(Y_DIMS), PACKED_REASON);
-    expectAccepted({"large padded dy", largePadded, channelsFirst(W_DIMS), channelsFirst(X_DIMS)},
-                   BACKWARD_OPS);
+    expectForwardDeclined(
+        largePadded, channelsFirst(convWDims), channelsFirst(convYDims), PACKED_REASON);
+    expectAccepted(
+        {"large padded dy", largePadded, channelsFirst(convWDims), channelsFirst(convXDims)},
+        BACKWARD_OPS);
 
     const TensorSpec reversed = withStrides({1, 3, 1}, {3, -1, 1});
-    expectForwardDeclined(reversed, channelsFirst(W_DIMS), channelsFirst(Y_DIMS), LAYOUT_REASON);
-    expectDeclined({"reversed dy", reversed, channelsFirst(W_DIMS), channelsFirst(X_DIMS)},
+    expectForwardDeclined(
+        reversed, channelsFirst(convWDims), channelsFirst(convYDims), LAYOUT_REASON);
+    expectDeclined({"reversed dy", reversed, channelsFirst(convWDims), channelsFirst(convXDims)},
                    LAYOUT_REASON,
                    BACKWARD_OPS);
 }
@@ -1554,7 +1579,7 @@ TEST(TestMiopenConvApplicabilityChecks, StridesThatDoNotOverflowAreJudgedByLayou
 TEST(TestMiopenConvApplicabilityChecks, DeclinesNegativeDims)
 {
     const TensorSpec negative = withUnitStrides({4, -2, 3, 3});
-    const ConvCase packed = uniformCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+    const ConvCase packed = uniformCase({convXDims, convWDims, convYDims}, false);
 
     for(const Role role : ROLES)
     {
