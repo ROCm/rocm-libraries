@@ -27,8 +27,8 @@ whatever input the target needs. The perf set in "Phase 2" is for the regression
   give the same asm, and a difference is a bug. Print the loaded `rocisa` and `stinkytofu` paths on each
   side, and check that they are the worktree's own.
 - build the baseline and the candidate in separate worktrees, each with its own venv, so the two
-  rocisa bindings do not shadow each other (see the `worktree-venv` skill in `skills/`). Rebuild the
-  candidate after the last edit (see "Tier 1 needs a fresh binding" in `ab.md`).
+  rocisa bindings do not shadow each other. Rebuild the candidate after the last edit (see "Tier 1
+  needs a fresh binding" in `ab.md`).
 - the labels in the generated asm contain random hashes, so two runs of identical code differ in
   label names. Normalize the labels before comparing: in each file, rename every distinct label to a
   sequential name in order of first appearance. At the time of writing a label is the token
