@@ -6,8 +6,6 @@ import os
 import runpy
 import shutil
 
-from email.parser import Parser
-
 from setuptools import setup
 from setuptools.command.build_py import build_py
 from setuptools.command.egg_info import egg_info
@@ -30,17 +28,7 @@ def _distribution_version():
     carries the same identity without the variable being passed again.
     """
     identity = os.environ.get("TENSILELITE_ROCM_VERSION") or None
-    version = _metadata["distribution_version"](_REVISION, identity)
-    pkg_info = Path(__file__).with_name("PKG-INFO")
-    if not pkg_info.is_file():
-        return version
-    recorded = Parser().parsestr(pkg_info.read_text(encoding="utf-8"))["Version"]
-    if identity is not None and recorded != version:
-        raise RuntimeError(
-            f"TENSILELITE_ROCM_VERSION={identity} gives {version}, but this sdist was made "
-            f"as {recorded}"
-        )
-    return recorded
+    return _metadata["distribution_version"](_REVISION, identity)
 
 
 def _write_build_info(path):
@@ -109,5 +97,9 @@ setup(
         "numpy",
         "pandas",
     ],
-    cmdclass={"build_py": CleanBuildPy, "egg_info": BuildEggInfo, "sdist": StampedSdist},
+    cmdclass={
+        "build_py": CleanBuildPy,
+        "egg_info": BuildEggInfo,
+        "sdist": StampedSdist,
+    },
 )

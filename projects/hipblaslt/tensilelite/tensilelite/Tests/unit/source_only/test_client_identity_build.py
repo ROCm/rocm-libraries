@@ -13,6 +13,8 @@ import sys
 
 import pytest
 
+from common.artifact_helpers import _safe_extractall
+
 pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[5]
 _SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -283,7 +285,9 @@ def test_source_export_override_survives_rebuild(project):
 
 
 @pytest.mark.parametrize("rocm_identity", [None, "7.12.0rc1"])
-def test_canonical_wheel_and_client_stay_paired_through_incremental_builds(project, rocm_identity):
+def test_canonical_wheel_and_client_stay_paired_through_incremental_builds(
+    project, rocm_identity
+):
     src, build = project
     # Use the real distributable package and production wheel build module.
     stager = _ROOT / "tensilelite/scripts/stage_release_source.py"
@@ -305,7 +309,9 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
 """)
     _git(src, "add", ".")
     _git(src, "commit", "-qm", "wheel fixture")
-    arguments = [f"-DHIPBLASLT_BUILD_ROCM_VERSION={rocm_identity}"] if rocm_identity else []
+    arguments = (
+        [f"-DHIPBLASLT_BUILD_ROCM_VERSION={rocm_identity}"] if rocm_identity else []
+    )
     _configure(src, build, *arguments)
     manifest = build / "tensilelite-release-wheels/.published"
 
@@ -389,3 +395,90 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
         _git(src, "rev-parse", "HEAD")
         in (unpacked / "tensilelite/_build_info.py").read_text()
     )
+
+
+@pytest.mark.parametrize("identity", ["7.12.0", "7.12.0.dev0+abcdef"])
+def test_saved_rocm_sdist_builds_paired_client_and_canonical_wheel(project, identity):
+    import tarfile
+    import zipfile
+
+    src, build = project
+    package = src / "tensilelite"
+    _run(
+        sys.executable,
+        str(_ROOT / "tensilelite/scripts/stage_release_source.py"),
+        "--source",
+        str(_ROOT / "tensilelite"),
+        "--destination",
+        str(package),
+    )
+    shutil.rmtree(src / ".git")
+    sdist_dir = src.parent / "sdists"
+    _run(
+        sys.executable,
+        "-c",
+        "import os, sys; from setuptools import build_meta; "
+        "os.environ['TENSILELITE_SOURCE_REVISION'] = sys.argv[1]; "
+        "os.environ['TENSILELITE_ROCM_VERSION'] = sys.argv[2]; "
+        "build_meta.build_sdist(sys.argv[3])",
+        _SHA,
+        identity,
+        str(sdist_dir),
+        cwd=package,
+    )
+    (sdist,) = sdist_dir.glob("*.tar.gz")
+    unpacked = src.parent / "unpacked"
+    with tarfile.open(sdist) as archive:
+        _safe_extractall(archive, unpacked)
+    (saved,) = unpacked.iterdir()
+    shutil.rmtree(package)
+    saved.rename(package)
+    # A Python sdist omits native build files. Supply the real native template
+    # separately, and run the production canonical helper against the saved sdist.
+    template = package / "client/TensileLiteClientVersion.hpp.in"
+    template.parent.mkdir()
+    shutil.copyfile(
+        _ROOT / "tensilelite/client/TensileLiteClientVersion.hpp.in", template
+    )
+    _configure(src, build)
+    _build(build)
+    _run(
+        sys.executable,
+        "-B",
+        str(_ROOT / "tensilelite/scripts/build_release_wheel.py"),
+        "--source",
+        str(package),
+        "--metadata",
+        str(build / "metadata/metadata.json"),
+        "--stage",
+        str(build / "wheel-stage"),
+        "--destination",
+        str(build / "tensilelite-release-wheels"),
+    )
+    publication = json.loads(
+        (build / "tensilelite-release-wheels/.published").read_text()
+    )
+    assert publication["metadata"]["source_revision"] == _query(build) == _SHA
+    version = _query(build, "--version")
+    assert "+rocm" in version or "+devrocm" in version
+    assert publication["metadata"]["distribution_version"] == version
+    wheel = build / "tensilelite-release-wheels" / publication["wheel"]
+    assert wheel.name == f"tensilelite-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel) as archive:
+        assert (
+            f"SOURCE_REVISION = {_SHA!r}"
+            in archive.read("tensilelite/_build_info.py").decode()
+        )
+    mismatch = subprocess.run(
+        [
+            sys.executable,
+            str(package / "release_metadata.py"),
+            "metadata",
+            "--rocm-identity",
+            "8.0.0",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert mismatch.returncode != 0
+    assert "this sdist was made as" in mismatch.stderr
