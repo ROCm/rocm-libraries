@@ -4821,6 +4821,66 @@ def dropRelaxedFencesThatRetireNothing(bodies):
                 bound += 1
 
 
+def checkMainLoopLdsOverwrites(bodies, origins):
+    """Raise unless every main-loop A/B direct-to-LDS load is ordered after
+    the reads of the bytes it overwrites.
+
+    bodies are the loop's (name, module) copies in order. origins maps an
+    instruction id to (body name, 'lr' or 'gr', tensor, mtIteration,
+    tiles) of the placement it was emitted for; a load of MT n+2
+    overwrites MT n. Two iterations are laid out back to back, so the
+    back edge counts, and each load of the second is checked: every read
+    of its tiles comes before it, then a wait that retires the read, then
+    an s_barrier. A read moved into the body ahead of its own reads the
+    next MT there. Scale loads are not checked.
+    """
+    seq = []
+    for rep in range(2):
+        for b, (name, body) in enumerate(bodies):
+            at = rep * len(bodies) + b
+            for _c, inst in _bodyLeaves(body):
+                origin = origins.get(id(inst))
+                if _isComment(inst) or origin is None or origin[2] not in ("A", "B"):
+                    seq.append((inst, None))
+                    continue
+                home, kind, tensor, mt, tiles = origin
+                seq.append((inst, (kind, tensor, at + (home != name) + mt, tiles, rep, name)))
+
+    def overlaps(a, b):
+        return (a.tileId_start < b.tileId_end and b.tileId_start < a.tileId_end
+                and a.subIterK_start < b.subIterK_end and b.subIterK_start < a.subIterK_end)
+
+    def guarded(read, load):
+        later, scalar, retired = 0, False, False
+        for inst, _o in seq[read + 1:load]:
+            if not retired:
+                count = _lgkmCount(inst) if _isWaitCnt(inst) else None
+                if count is not None and (count == 0 or (not scalar and later >= count)):
+                    retired = True
+                elif type(inst).__name__.startswith("DS"):
+                    later += 1
+                elif _mayIncrementLgkm(inst):
+                    scalar = True
+            elif _isBarrier(inst):
+                return True
+        return False
+
+    reads = [(i, o) for i, (_inst, o) in enumerate(seq) if o and o[0] == "lr"]
+    for at, (inst, o) in enumerate(seq):
+        if not (o and o[0] == "gr" and o[4] == 1 and _isBufferLoad(inst)):
+            continue
+        _kind, tensor, mt, tiles, _rep, name = o
+        for read, r in reads:
+            if r[1] != tensor or r[2] != mt - 2 or not overlaps(r[3], tiles):
+                continue
+            if read > at or not guarded(read, at):
+                raise RuntimeError(
+                    f"{name}: {tensor} load {tiles.fmt_tiles()} of MT n+2 overwrites "
+                    f"LDS that a read of {r[3].fmt_tiles()} in {r[5]} "
+                    + ("still reads after it" if read > at else
+                       "has not retired behind an s_waitcnt and s_barrier"))
+
+
 def _scheduleHalfDisjointHalf(
         cells, minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
         scaleShadows=None, cellComments=(), crossCellReads=False):

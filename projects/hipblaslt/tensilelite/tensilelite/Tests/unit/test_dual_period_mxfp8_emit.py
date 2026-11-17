@@ -310,6 +310,50 @@ def test_partial_lgkm_waits_each_retire_a_read(any_src):
     assert [(n, bound) for n, bound in waits if bound is not None and bound <= n] == []
 
 
+# Library sols 30 (MIWT 4x14 MIWG 2x2) and 58 (MIWT 8x6 MIWG 1x4): partition 1
+# has no reads of its own, which once left partition 2's B loads with no barrier.
+@pytest.fixture(scope="module", params=[(16, 16, 128, 1, 1, 4, 14, 2, 2),
+                                        (16, 16, 128, 1, 1, 8, 6, 1, 4)],
+                ids=["sol30", "sol58"])
+def uniform_idle_partition_src(request):
+    from tensilelite.Components.Subtile.Kernel import MXFP8_HALF_DISJOINT_ENV
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(MXFP8_HALF_DISJOINT_ENV, "0")
+        return _emit_dual_period_kernel(mi=request.param)
+
+
+def test_uniform_epoch_idle_partition_keeps_three_barriers(uniform_idle_partition_src):
+    assert _body_sync(uniform_idle_partition_src) == [(3, 1), (3, 1)]
+
+
+def test_uniform_epoch_loads_follow_a_drain_and_barrier_after_their_reads(
+        uniform_idle_partition_src):
+    """Each B MT=n+2 load comes after lgkmcnt(0) and s_barrier, in that order,
+    behind every read in its body of the MT n tile it overwrites."""
+    bodies = _mainloop_lines(uniform_idle_partition_src)
+    checked = 0
+    for cell in ("C0", "C1"):
+        start = next(i for i, ln in enumerate(bodies) if f"MAINLOOP_{cell} start" in ln)
+        end = next(i for i, ln in enumerate(bodies) if f"MAINLOOP_{cell} end" in ln)
+        lastRead, drained, synced = {}, set(), set()
+        for ln in bodies[start:end]:
+            code = ln.split("//")[0].strip()
+            read = re.search(r"// B MT=n tile=(\d+) ", ln)
+            load = re.search(r"// B MT=n\+2 tile=(\d+) ", ln)
+            if code.startswith("ds_read") and read:
+                lastRead[read.group(1)] = True
+                drained.discard(read.group(1))
+                synced.discard(read.group(1))
+            elif code.startswith("s_waitcnt lgkmcnt(0)"):
+                drained |= set(lastRead)
+            elif code.startswith("s_barrier"):
+                synced |= drained
+            elif code.startswith("buffer_load") and load and load.group(1) in lastRead:
+                assert load.group(1) in synced, f"{cell}: {ln.strip()}"
+                checked += 1
+    assert checked
+
+
 def test_uniform_epoch_barriers_have_no_valu_behind_them(uniform_src):
     for gap in _mfma_gaps(_mainloop_lines(uniform_src)):
         if "s_barrier" in gap:

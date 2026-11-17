@@ -6533,6 +6533,140 @@ class TestPartitionZeroIssueOrder:
             "after-label", "drain-unmarked", "not-relaxed"]
 
 
+class TestUniformEpochOverwriteSync:
+    """Each uniform-epoch A/B load waits out the reads of the LDS it overwrites."""
+
+    @staticmethod
+    def _cfg(m, n, grA, grSA, grSB, pm, pn, loads):
+        return SchedulerConfig(
+            numMFMATilesM=m, numMFMATilesN=n, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(*grA), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 2), lrSB=ReadGranularity(2, 2),
+            grSA=ReadGranularity(*grSA), grSB=ReadGranularity(*grSB),
+            partitionSizeM=pm, partitionSizeN=pn,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            uniformPgrEpoch=True, uniformEpochVmemCohortSize=5,
+            halfDisjointLds=False, scaleReuse=2, grLoadsPerAtom=loads,
+        )
+
+    @staticmethod
+    def _epoch_syncs(parts):
+        return [
+            [(gr.tensor, gr.tiles.tileId_start, gr.tiles.tileId_end,
+              any(isinstance(op, WaitLROp) and op.has_sync for op in gr.preOps))
+             for slot in slots for gr in slot.grs
+             if gr.mtIteration == 2 and gr.tensor in ("A", "B")]
+            for slots in parts
+        ]
+
+    # MIWT 4x14 MIWG 2x2 (library sol 30) and MIWT 8x6 MIWG 1x4 (sol 58):
+    # partition 1 has no reads of its own, so its sync cannot cover the
+    # partition-0 reads that partition 2's loads overwrite.
+    def test_sol30_partition_two_loads_keep_their_overwrite_sync(self):
+        cfg = self._cfg(4, 14, (1, 1), (4, 2), (14, 2), 2, 8, {"A": 1, "B": 1})
+        parts = LogicalScheduler(cfg).build(stop_after=Pass.REMOVE_DEPS)
+        assert self._epoch_syncs(parts) == [
+            [("A", 0, 4, True), ("B", 0, 1, True)],
+            [("B", 1, 6, False)],
+            [("B", 6, 11, True)],
+            [("B", 11, 14, False)],
+        ]
+
+    def test_sol58_partition_two_loads_keep_their_overwrite_sync(self):
+        cfg = self._cfg(8, 6, (2, 1), (8, 2), (6, 2), 4, 4, {"A": 1, "B": 2})
+        parts = LogicalScheduler(cfg).build(stop_after=Pass.REMOVE_DEPS)
+        assert self._epoch_syncs(parts) == [
+            [("A", 0, 8, True), ("B", 0, 1, True)],
+            [("B", 1, 4, False)],
+            [("B", 4, 6, True)],
+            [],
+        ]
+
+    @staticmethod
+    def _gfx950():
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    def _check(self, c0, c1):
+        """Run checkMainLoopLdsOverwrites on two bodies of (op, mt, tile) or instructions."""
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, DSLoadB128
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            checkMainLoopLdsOverwrites)
+
+        self._gfx950()
+        origins, bodies = {}, []
+        for name, items in (("MAINLOOP_C0", c0), ("MAINLOOP_C1", c1)):
+            body = Module(name)
+            for item in items:
+                if not isinstance(item, tuple):
+                    body.add(item)
+                    continue
+                op, mt, tile, home = (item + (name,))[:4]
+                if op == "lr":
+                    inst = DSLoadB128(dst=vgpr(20, 4), src=vgpr(7),
+                                      ds=DSModifiers(offset=0), comment="read")
+                else:
+                    inst = BufferLoadB128(
+                        dst=None, vaddr=vgpr(0), saddr=sgpr("SrdB", 4), soffset=0,
+                        mubuf=MUBUFModifiers(offen=True, lds=True), comment="load")
+                origins[id(inst)] = (home, op, "B", mt, MFMATileRange(0, 1, tile, tile + 1))
+                body.add(inst)
+            bodies.append((name, body))
+        checkMainLoopLdsOverwrites(bodies, origins)
+
+    @staticmethod
+    def _wait(count=0):
+        from rocisa.instruction import SWaitCnt
+        return SWaitCnt(dscnt=count, comment="wait")
+
+    @staticmethod
+    def _barrier():
+        from rocisa.instruction import SBarrier
+        return SBarrier(comment="barrier")
+
+    def test_load_behind_a_retiring_wait_and_barrier_passes(self):
+        self._check([("lr", 0, 9), self._wait(), self._barrier(), ("gr", 2, 9)],
+                    [("lr", 0, 9), self._wait(), self._barrier(), ("gr", 2, 9)])
+
+    def test_partial_wait_counts_younger_reads(self):
+        self._check(
+            [("lr", 0, 9), ("lr", 0, 3), self._wait(1), self._barrier(), ("gr", 2, 9)],
+            [])
+        with pytest.raises(RuntimeError, match="has not retired"):
+            self._check(
+                [("lr", 0, 9), ("lr", 0, 3), self._wait(2), self._barrier(), ("gr", 2, 9)],
+                [])
+
+    def test_barrier_without_a_wait_raises(self):
+        with pytest.raises(RuntimeError, match="has not retired"):
+            self._check([("lr", 0, 9), self._barrier(), ("gr", 2, 9)], [])
+
+    def test_read_after_the_overwrite_raises(self):
+        with pytest.raises(RuntimeError, match="still reads after it"):
+            self._check([self._wait(), self._barrier(), ("gr", 2, 9), ("lr", 0, 9)], [])
+
+    def test_back_edge_read_needs_the_next_body_barrier(self):
+        # C1 reads its MT n+1, which C0 of the next iteration overwrites.
+        with pytest.raises(RuntimeError, match="in MAINLOOP_C1"):
+            self._check([("gr", 2, 9), self._wait(), self._barrier()], [("lr", 1, 9)])
+        self._check([self._wait(), self._barrier(), ("gr", 2, 9)], [("lr", 1, 9)])
+
+    def test_read_moved_into_the_previous_body_reads_the_next_mt(self):
+        # A C0 read of MT n hoisted to the end of C1 still guards C0's load.
+        with pytest.raises(RuntimeError, match="has not retired"):
+            self._check([("gr", 2, 9)], [("lr", 0, 9, "MAINLOOP_C0")])
+        self._check([self._wait(), self._barrier(), ("gr", 2, 9)],
+                    [("lr", 0, 9, "MAINLOOP_C0")])
+
+
 class TestUniformEpochBodyPasses:
     """Post-passes of a uniform-epoch dual-period body, on hand-built bodies."""
 

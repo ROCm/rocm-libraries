@@ -1041,6 +1041,9 @@ class LogicalScheduler:
         self._mainloopC0Schedule = None
         # The labels _emitLoop has emitted a region module under.
         self._regionLabels = set()
+        # id of each main-loop LR/GR instruction -> (label, kind, tensor,
+        # mtIteration, tiles) of its placement, for checkMainLoopLdsOverwrites.
+        self._mainLoopOrigins = {}
         # The A/B ds_reads emitted into _mainloopC0Schedule.
         self._mainloopC0DataReads = []
         # (tensor, atom tile start) -> half its GR issues in, or None when the
@@ -2952,6 +2955,8 @@ class LogicalScheduler:
         # Step 2 & 3: for each GR with LR dep, walk backward (with
         # wrap-around) to find the previous sync slot providing a last LR
         # for this tensor.
+        uniform = self.config.uniformPgrEpoch and not self.halfDisjoint
+        cleared = []
         for i in range(n):
             _, _, grs_to_check = sync_slots[i]
             for gr in grs_to_check:
@@ -2978,7 +2983,51 @@ class LogicalScheduler:
                         break
 
                 if prev_eo is not None and prev_eo >= cur_eo:
+                    if uniform:
+                        cleared.append((i, gr, dep))
                     gr.deps.clear()
+
+        if cleared:
+            self._restore_uncovered_lr_deps(sync_slots, cleared, _dep_exec_order)
+
+    @staticmethod
+    def _restore_uncovered_lr_deps(sync_slots, cleared, exec_order):
+        """Give back each cleared GR→LR dep that no remaining sync covers.
+
+        Uniform epoch only: its LR waits lose their barriers, so a slot is
+        known to drain and sync only while one of its GRs keeps an LR dep.
+        A dep cleared against a slot that lost all of its own is still
+        open. A cleared dep stays cleared only when an earlier live
+        slot (wrapping into the previous iteration) guarantees an LR of
+        that tensor at or past it. Restoring makes a slot live, so repeat
+        until nothing changes.
+        """
+        n = len(sync_slots)
+        changed = True
+        while changed:
+            changed = False
+            live = [any(gr.deps for gr in grs) for _, _, grs in sync_slots]
+            for i, gr, dep in cleared:
+                if gr.deps:
+                    continue
+                cur_eo = exec_order(dep)
+                covered = False
+                for j in range(1, n + 1):
+                    idx = (i - j) % n
+                    wrapped = j > i
+                    if not live[idx] or (
+                            not wrapped and sync_slots[idx][0] == sync_slots[i][0]):
+                        continue
+                    eo = sync_slots[idx][1].get(dep.ref.tensor)
+                    if eo is not None and wrapped:
+                        eo = (eo[0] - 1, eo[1], eo[2])
+                    if eo is not None and eo >= cur_eo:
+                        covered = True
+                        break
+                if not covered:
+                    gr.deps.append(dep)
+                    live[i] = True
+                    changed = True
 
 
     # ── Remove cross-subIterK deps ─────────────────────────
@@ -5564,6 +5613,14 @@ class LogicalScheduler:
                 for em_list in partition_emitted
                 for em in em_list
                 if em.opType == "mfma")
+        if schedule and label.startswith("MAINLOOP"):
+            self._mainLoopOrigins.update(
+                (id(inst), (label, em.opType, em.source.tensor,
+                            em.source.mtIteration, em.source.tiles))
+                for partition_emitted in emitted_3d
+                for em_list in partition_emitted
+                for em in em_list if em.opType in ("lr", "gr")
+                for inst in em.instructions)
         # A half-disjoint main loop schedules all cells of a half with more
         # than one partition together, so its loads and reads share the
         # half's MFMA gaps.
@@ -7562,6 +7619,7 @@ class LogicalScheduler:
         clearPartitionZeroOverwriteMarks()
         self._earlyOverwriteVgprs = ()
         self._preloopSchedule = None
+        self._mainLoopOrigins = {}
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
@@ -7761,6 +7819,12 @@ class LogicalScheduler:
             dropRelaxedFencesThatRetireNothing(self._mainLoopBodies(mainloop))
         clearPartitionZeroOverwriteMarks()
         self._dropExitDominatedLgkmWaits(module)
+        if self.config.uniformPgrEpoch and not self.halfDisjoint:
+            from .InstructionScheduler import checkMainLoopLdsOverwrites
+            checkMainLoopLdsOverwrites(
+                [(body.name, body) for body in self._mainLoopBodies(mainloop)],
+                self._mainLoopOrigins)
+        self._mainLoopOrigins = {}
 
         return module
 
