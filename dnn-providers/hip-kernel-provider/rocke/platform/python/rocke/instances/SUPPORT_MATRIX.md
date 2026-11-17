@@ -41,8 +41,10 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 `peer_tile_copy` deliberately restricts its initial contract to `gfx942` and
-`gfx950`. Its cells record successful offline compilation, not verified HIP
-peer mappings or GPU execution; see the
+`gfx950`. Its cells record successful offline compilation. The basic two-GPU
+peer-read/write execution gate has also passed on `gfx950`; `gfx942` execution
+is still pending an allocation. Neither is an eight-rank fan-in or bandwidth
+claim; see the
 [peer-copy methodology](../examples/common/peer_tile_copy/README.md).
 
 ---

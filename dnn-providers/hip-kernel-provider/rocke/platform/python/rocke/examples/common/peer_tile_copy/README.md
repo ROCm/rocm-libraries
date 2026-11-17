@@ -5,8 +5,14 @@ ordinary memory accesses before introducing distributed GEMM scheduling. Its
 Python and C++ implementations use the same scalar, masked global-memory IR.
 
 **Current evidence:** CPU logical-access tests, independent builder/binding
-parity, and offline COMGR compilation. **Not yet established:** actual HIP peer
-reads/writes, runtime cross-device visibility, bandwidth, or compute overlap.
+parity, offline COMGR compilation, and successful two-GPU peer reads/writes on
+`gfx950`. Hardware checks covered both directions, F16/BF16, aligned/clipped
+layouts, exact bits/guards, source immutability, repeated launches, and retained
+argument isolation. `gfx942` execution is pending an allocation; a queued lane
+cancelled before execution is not validation.
+
+**Not established:** `gfx942` peer execution, a reusable tile publication
+protocol, bandwidth, large physical-offset stress, or compute overlap.
 
 ## Operation and placement
 
@@ -99,7 +105,7 @@ check its LLVM and canonical-IR snapshots. Preserve existing golden entries:
 `run_diff.py --record-golden --only ...` replaces an entire snapshot key rather
 than merging a family and must not be used to add this family.
 
-## Hardware gate to run next
+## Hardware gate to resume on gfx942
 
 1. Obtain an explicitly authorized allocation with two GPUs on the target.
 2. Record device identities, directed peer capability, partition modes, and the

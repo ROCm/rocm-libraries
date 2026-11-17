@@ -1,8 +1,9 @@
 # Distributed-tile GEMM PoC plan
 
 **Status:** Stage 0 runtime support and Stage 1 peer-copy builders are implemented.
-CPU, compiler, and engine-parity checks passed; GPU peer execution remains
-unvalidated, and fused GEMM kernels are not implemented.
+CPU, compiler, and engine-parity checks passed. The basic two-GPU peer-read/write
+gate passed on `gfx950`; `gfx942` hardware validation is still pending an
+allocation. Fused GEMM kernels are not implemented.
 
 ## Goal and agreed scope
 
@@ -251,7 +252,16 @@ byte-identical output compared with the Stage 0 Python source.
 Completed checks include CPU interpretation of actual IR, independent C++
 builder/binding comparisons, full family parity across supported LLVM flavors,
 canonical IR/verifier parity, and offline COMGR compilation for both dtypes and
-targets. None establishes actual GPU peer execution.
+targets. Two-GPU hardware checks also passed on `gfx950`: both peer directions,
+F16/BF16, aligned/clipped layouts, repeated launches, exact bits and guards,
+source immutability, and device-scoped retained-argument isolation. The `gfx942`
+execution lane could not obtain an allocation within the bounded wait; it was
+cancelled before execution and is not counted as a pass.
+
+The module installation did not expose COMGR release metadata through the helper.
+The external validation adapter confirmed the release using explicit matching
+HIP/COMGR module paths and the HIP runtime version, without disabling the COMGR
+ABI/flavor guard. This was adapter provenance handling, not a kernel change.
 
 Compiler validation also exposed duplicate build-ID accessor definitions. CMake
 now selects the stamped implementation, and a host C++ provenance test guards
@@ -394,12 +404,13 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 - [x] Agree on scope and perform initial read-only discovery.
 - [x] Audit peer/runtime and IR requirements and add CPU-tested runtime support (Stage 0).
 - [x] Implement minimal paired peer-copy builders and CPU/compiler/parity tests (Stage 1).
-- [ ] Validate mapped-peer tile reads/writes on hardware (Stage 1 gate).
+- [x] Validate mapped-peer tile reads/writes on `gfx950` hardware (Stage 1).
+- [ ] Obtain an allocation and validate the `gfx942` hardware lane (Stage 1 gate).
 - [ ] Add parity-tested fused direct-peer GEMM variants (Stage 2).
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
 - [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
 
-**Immediate next action:** review/commit the Stage 1 implementation, then
-separately authorize the two-GPU read/write validation on each target. Use
-explicit per-device modules and raw-buffer ownership; do not change the GEMM
-pipeline until directed peer reads/writes have passed on hardware.
+**Immediate next action:** obtain an approved two-GPU `gfx942` allocation and
+resume its read/write validation. Preserve the passed `gfx950` evidence rather
+than rerunning it unnecessarily. Use explicit per-device modules and raw-buffer
+ownership; do not change the GEMM pipeline until both target lanes have passed.
