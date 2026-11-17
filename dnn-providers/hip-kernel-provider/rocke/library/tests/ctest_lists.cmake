@@ -335,7 +335,7 @@ foreach(_t ${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TEST_RELPATHS})
          " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
 endforeach()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_bwd_hipdnn_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS} -v -rs --timeout=60)\n")
+       "add_test(rocke_library_attention_bwd_hipdnn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS} -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bwd_hipdnn_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
