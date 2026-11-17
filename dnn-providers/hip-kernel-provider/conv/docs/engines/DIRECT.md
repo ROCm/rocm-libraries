@@ -151,7 +151,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - gfx90a/gfx942 384-channel 3x3x3 forward against CK (1.09-1.16x);
   - gfx908 bf16, which runs on the half-rate 16x16x8 atom: `rows` reaches 60-66 TFLOP/s (65-72% of the atom's peak) against CK's 72-78%, so CK keeps most large bf16 layers. gfx908 fp32 is mixed.
   - On gfx942, the 16-bit `rows` tiles (no ping-pong) take most 2-D 3x3 layers from the halo tile in a kernel-only sweep, but for only about 7% of the weighted time. 3x3x3 `rows` tiles measure slower there and do not ship.
-- **Coverage gaps:** no 1-D, no generic tier for other filter sizes, and images past 2 GiB are declined. `CONV_IGEMM` is the floor for all of these.
+- **Coverage gaps:** no 1-D, no generic tier for other filter sizes, and images past 2 GiB are declined. `CONV_IGEMM` is the floor for all of these; it reads 1-D channels-first (N C L) graphs in place on its `cfx` configs.
 
 ## Numerical precision
 - Every config accumulates in fp32. 16-bit products are exact in the atoms, and fp32 runs exact on the fp32 MFMA atoms (CDNA) or FMA (everywhere). The output is rounded once to its type. Split-C writes fp32 partials and rounds once in an in-order reduce.
