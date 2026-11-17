@@ -1087,7 +1087,7 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	s_cbranch_execz .LBB0_63
 .LBB0_69:                               ;   in Loop: Header=BB0_5 Depth=1
 	v_mul_f32_e32 v13, s28, v14
-	v_fma_mix_f32 v14, s28, v14, v77 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v14, v13, 1.0, v77 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v13, v14, v13, s[0:1]
 	v_cvt_f16_f32_e32 v13, v13
 	v_mov_b32_e32 v59, v61
@@ -1095,12 +1095,12 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[16:17], s[14:15], 0, v[14:15]
 	global_store_short v[16:17], v13, off
 	v_mul_f32_e32 v13, s28, v12
-	v_fma_mix_f32 v12, s28, v12, v79 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v12, v13, 1.0, v79 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v12, v12, v13, s[0:1]
 	v_cvt_f16_f32_e32 v18, v12
 	v_mul_f32_e32 v19, s28, v11
 	s_waitcnt vmcnt(1)
-	v_fma_mix_f32 v11, s28, v11, v78 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v11, v19, 1.0, v78 op_sel_hi:[0,0,1]
 	v_mov_b32_e32 v65, v61
 	v_cndmask_b32_e64 v11, v11, v19, s[0:1]
 	v_lshlrev_b64 v[12:13], 1, v[64:65]
@@ -1111,11 +1111,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[18:19], s[14:15], 0, v[16:17]
 	global_store_short v[18:19], v11, off
 	v_mul_f32_e32 v11, s28, v10
-	v_fma_mix_f32 v10, s28, v10, v77 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v10, v11, 1.0, v77 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v10, v10, v11, s[0:1]
 	v_cvt_f16_f32_e32 v18, v10
 	v_mul_f32_e32 v10, s28, v9
-	v_fma_mix_f32 v9, s28, v9, v79 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v9, v10, 1.0, v79 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v9, v9, v10, s[0:1]
 	v_cvt_f16_f32_e32 v9, v9
 	v_lshl_add_u64 v[10:11], s[50:51], 0, v[14:15]
@@ -1123,11 +1123,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[10:11], s[50:51], 0, v[12:13]
 	global_store_short v[10:11], v9, off
 	v_mul_f32_e32 v9, s28, v8
-	v_fma_mix_f32 v8, s28, v8, v78 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v8, v9, 1.0, v78 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v8, v8, v9, s[0:1]
 	v_cvt_f16_f32_e32 v10, v8
 	v_mul_f32_e32 v8, s28, v7
-	v_fma_mix_f32 v7, s28, v7, v77 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v7, v8, 1.0, v77 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v7, v7, v8, s[0:1]
 	v_cvt_f16_f32_e32 v7, v7
 	v_lshl_add_u64 v[8:9], s[50:51], 0, v[16:17]
@@ -1135,11 +1135,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[8:9], s[54:55], 0, v[14:15]
 	global_store_short v[8:9], v7, off
 	v_mul_f32_e32 v7, s28, v6
-	v_fma_mix_f32 v6, s28, v6, v79 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v6, v7, 1.0, v79 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v6, v6, v7, s[0:1]
 	v_cvt_f16_f32_e32 v8, v6
 	v_mul_f32_e32 v6, s28, v5
-	v_fma_mix_f32 v5, s28, v5, v78 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v5, v6, 1.0, v78 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v5, v5, v6, s[0:1]
 	v_cvt_f16_f32_e32 v5, v5
 	v_lshl_add_u64 v[6:7], s[54:55], 0, v[12:13]
@@ -1147,11 +1147,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[6:7], s[54:55], 0, v[16:17]
 	global_store_short v[6:7], v5, off
 	v_mul_f32_e32 v5, s28, v4
-	v_fma_mix_f32 v4, s28, v4, v77 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v4, v5, 1.0, v77 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v4, v4, v5, s[0:1]
 	v_cvt_f16_f32_e32 v6, v4
 	v_mul_f32_e32 v4, s28, v3
-	v_fma_mix_f32 v3, s28, v3, v79 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v3, v4, 1.0, v79 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v3, v3, v4, s[0:1]
 	v_cvt_f16_f32_e32 v3, v3
 	v_lshl_add_u64 v[4:5], s[58:59], 0, v[14:15]
@@ -1159,7 +1159,7 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[4:5], s[58:59], 0, v[12:13]
 	global_store_short v[4:5], v3, off
 	v_mul_f32_e32 v3, s28, v2
-	v_fma_mix_f32 v2, s28, v2, v78 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v2, v3, 1.0, v78 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v13, v2, v3, s[0:1]
 	s_or_b64 s[8:9], s[8:9], exec
 	s_or_b64 exec, exec, s[18:19]
@@ -2371,7 +2371,7 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	s_cbranch_execz .LBB0_154
 .LBB0_156:                              ;   in Loop: Header=BB0_119 Depth=1
 	v_mul_f32_e32 v11, s28, v12
-	v_fma_mix_f32 v12, s28, v12, v69 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v12, v11, 1.0, v69 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v11, v12, v11, s[0:1]
 	v_cvt_f16_f32_e32 v11, v11
 	v_mov_b32_e32 v57, v59
@@ -2379,7 +2379,7 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[14:15], s[14:15], 0, v[12:13]
 	global_store_short v[14:15], v11, off
 	v_mul_f32_e32 v11, s28, v10
-	v_fma_mix_f32 v10, s28, v10, v71 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v10, v11, 1.0, v71 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v10, v10, v11, s[0:1]
 	v_cvt_f16_f32_e32 v16, v10
 	v_add_u32_e32 v58, 1, v56
@@ -2388,7 +2388,7 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	global_store_short v[14:15], v16, off
 	v_mul_f32_e32 v14, s28, v9
 	s_waitcnt vmcnt(2)
-	v_fma_mix_f32 v9, s28, v9, v70 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v9, v14, 1.0, v70 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v9, v9, v14, s[0:1]
 	v_cvt_f16_f32_e32 v9, v9
 	v_add_u32_e32 v58, 2, v56
@@ -2396,11 +2396,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[16:17], s[14:15], 0, v[14:15]
 	global_store_short v[16:17], v9, off
 	v_mul_f32_e32 v9, s28, v8
-	v_fma_mix_f32 v8, s28, v8, v69 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v8, v9, 1.0, v69 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v8, v8, v9, s[0:1]
 	v_cvt_f16_f32_e32 v16, v8
 	v_mul_f32_e32 v8, s28, v7
-	v_fma_mix_f32 v7, s28, v7, v71 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v7, v8, 1.0, v71 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v7, v7, v8, s[0:1]
 	v_cvt_f16_f32_e32 v7, v7
 	v_lshl_add_u64 v[8:9], s[40:41], 0, v[12:13]
@@ -2408,11 +2408,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[8:9], s[40:41], 0, v[10:11]
 	global_store_short v[8:9], v7, off
 	v_mul_f32_e32 v7, s28, v6
-	v_fma_mix_f32 v6, s28, v6, v70 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v6, v7, 1.0, v70 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v6, v6, v7, s[0:1]
 	v_cvt_f16_f32_e32 v8, v6
 	v_mul_f32_e32 v6, s28, v5
-	v_fma_mix_f32 v5, s28, v5, v69 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v5, v6, 1.0, v69 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v5, v5, v6, s[0:1]
 	v_cvt_f16_f32_e32 v5, v5
 	v_lshl_add_u64 v[6:7], s[40:41], 0, v[14:15]
@@ -2420,11 +2420,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[6:7], s[44:45], 0, v[12:13]
 	global_store_short v[6:7], v5, off
 	v_mul_f32_e32 v5, s28, v4
-	v_fma_mix_f32 v4, s28, v4, v71 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v4, v5, 1.0, v71 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v4, v4, v5, s[0:1]
 	v_cvt_f16_f32_e32 v6, v4
 	v_mul_f32_e32 v4, s28, v3
-	v_fma_mix_f32 v3, s28, v3, v70 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v3, v4, 1.0, v70 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v3, v3, v4, s[0:1]
 	v_cvt_f16_f32_e32 v3, v3
 	v_lshl_add_u64 v[4:5], s[44:45], 0, v[10:11]
@@ -2432,11 +2432,11 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[4:5], s[44:45], 0, v[14:15]
 	global_store_short v[4:5], v3, off
 	v_mul_f32_e32 v3, s28, v2
-	v_fma_mix_f32 v2, s28, v2, v69 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v2, v3, 1.0, v69 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v2, v2, v3, s[0:1]
 	v_cvt_f16_f32_e32 v4, v2
 	v_mul_f32_e32 v2, s28, v1
-	v_fma_mix_f32 v1, s28, v1, v71 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v1, v2, 1.0, v71 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v1, v1, v2, s[0:1]
 	v_cvt_f16_f32_e32 v1, v1
 	v_lshl_add_u64 v[2:3], s[48:49], 0, v[12:13]
@@ -2444,7 +2444,7 @@ wvSplitK_vllm_f16_tn_n4_y3u2:      ; @wvSplitK_vllm_f16_tn_n4_y3u2
 	v_lshl_add_u64 v[2:3], s[48:49], 0, v[10:11]
 	global_store_short v[2:3], v1, off
 	v_mul_f32_e32 v1, s28, v0
-	v_fma_mix_f32 v0, s28, v0, v70 op_sel_hi:[0,0,1]
+	v_fma_mix_f32 v0, v1, 1.0, v70 op_sel_hi:[0,0,1]
 	v_cndmask_b32_e64 v11, v0, v1, s[0:1]
 	s_or_b64 s[18:19], s[18:19], exec
 	s_or_b64 exec, exec, s[16:17]

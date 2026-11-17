@@ -301,8 +301,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -386,8 +386,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -471,8 +471,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -556,8 +556,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -641,8 +641,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -726,8 +726,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -811,8 +811,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -896,8 +896,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -981,8 +981,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -1066,8 +1066,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -1151,8 +1151,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -1236,8 +1236,8 @@ Solutions:
   GlobalReadVectorWidthB: 1
   ISA: [9, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
-    SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportCustomWGM: false, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false

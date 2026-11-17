@@ -1494,6 +1494,29 @@ def test_wvspltk_code_object_version_matches_library_build(name):
     assert re.search(r"^\s*\.amdhsa_code_object_version\s+4\s*$", text, re.M)
 
 
+_ARG_BYTES = {"int32": 4, "float32": 4, "address": 8}
+
+
+@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES])
+def test_skinny_tn_args_match_kernarg_layout(name):
+    """hipBLASLt packs these kernels' arguments from custom.config alone, back to
+    back, so the list must match the kernel's own argument metadata: an argument
+    missing from custom.config would leave the kernel reading past the buffer."""
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
+    args = getCustomKernelConfig(name, {}, ck_root)["CustomKernel"]["args"]
+    lines = custom_kernel_text(name).splitlines()
+    start = lines.index("---") + 1
+    kernel = yaml.safe_load("\n".join(lines[start : lines.index("...", start)]))["amdhsa.kernels"][0]
+    assert len(args) == len(kernel[".args"])
+    offset = 0
+    for arg, meta in zip(args, kernel[".args"]):
+        size = _ARG_BYTES[arg["type"]]
+        assert (meta[".offset"], meta[".size"]) == (offset, size), (arg["semantic"], meta)
+        assert (meta[".value_kind"] == "global_buffer") == (arg["type"] == "address"), (arg["semantic"], meta)
+        offset += size
+    assert kernel[".kernarg_segment_size"] == offset
+
+
 _UNIT_STRIDE_KEYS = (
     "AssertStrideAEqual",
     "AssertStrideBEqual",
@@ -1662,7 +1685,10 @@ def test_skinny_tn_range_logic(rel, dataType, kernels, bias):
     K_max], -1 unbounded. hipBLASLt takes the first row containing the problem,
     so the rows must not overlap, and each must sit inside its kernel's
     predicates. Each solution lists its kernel's arguments, the bias address
-    included.
+    included, and refuses a user split-K or WGM override: the kernels take
+    neither, and hipBLASLt would run a split-K by passing the workspace as C
+    and D. A bias file names the same devices and CU count as its plain file,
+    so that hipBLASLt searches both for the same devices.
 
     The BF16 file must also share the placeholder of the shipped plain-GEMM
     Equality file beside it. That is a fact about two corpus files, so
@@ -1691,15 +1717,19 @@ def test_skinny_tn_range_logic(rel, dataType, kernels, bias):
         # the plain-GEMM file first, so rows inside its rows keep those problems
         # on the plain-GEMM rows.
         with open(require_logic_file(_PLAIN_RANGE[dataType])) as f:
-            plainRows = [key for key, _ in yaml.safe_load(f)["ExactLogic"]]
+            plain = yaml.safe_load(f)
+        plainRows = [key for key, _ in plain["ExactLogic"]]
         for key, name in rows:
             assert _box_covered(key, plainRows), (key, name)
+        assert (doc["CUCount"], doc["DeviceNames"]) == (plain["CUCount"], plain["DeviceNames"])
 
     ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     semantics = lambda ck: [a["semantic"] for a in ck["args"]]
     for s in doc["Solutions"]:
         config = getCustomKernelConfig(s["CustomKernel"]["name"], {}, ck_root)
         assert semantics(s["CustomKernel"]) == semantics(config["CustomKernel"]), s["CustomKernel"]["name"]
+        params = s["InternalSupportParams"]
+        assert (params["SupportUserGSU"], params["SupportCustomWGM"]) == (False, False), s["CustomKernel"]["name"]
     for key, name in rows:
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):

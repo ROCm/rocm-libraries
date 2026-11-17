@@ -20,6 +20,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
+* Fixed a user split-K override (for example `GemmTuning` split-K above 1) on the gfx950 skinny TN custom kernels writing D to the workspace instead of D. Their solutions now refuse split-K and WGM overrides, which the kernels do not take.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 

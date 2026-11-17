@@ -300,6 +300,12 @@ namespace
         hipblasOperation_t transA = HIPBLAS_OP_N;
         // The type of C and D. The skinny custom kernels write D in A's type.
         hipDataType dType = HIP_R_32F;
+        // The bias vector's type with useBias. The skinny custom kernels add a
+        // bias of D's type.
+        hipDataType biasType = HIP_R_32F;
+        // Neither 1 nor a power of two, alpha times the dot product rounds, so
+        // an epilogue that fuses it with the bias in some rows only shows.
+        float alpha = 1.0f;
     };
 
     size_t elementSizeOf(hipDataType type)
@@ -405,7 +411,9 @@ namespace
             }
 
             if(m_problem.useBias
-               && hipMalloc(&m_deviceBias, static_cast<size_t>(m) * sizeof(float)) != hipSuccess)
+               && hipMalloc(&m_deviceBias,
+                            static_cast<size_t>(m) * elementSizeOf(m_problem.biasType))
+                      != hipSuccess)
             {
                 skipReason = "hipMalloc failed for bias vector of length " + std::to_string(m);
                 return false;
@@ -457,11 +465,10 @@ namespace
             {
                 // Constant bias across rows: identical A rows + identical bias
                 // keeps the row-uniformity assertion meaningful.
-                std::vector<float> bias(static_cast<size_t>(m), 0.125f);
-                if(hipMemcpy(m_deviceBias,
-                             bias.data(),
-                             bias.size() * sizeof(float),
-                             hipMemcpyHostToDevice)
+                std::vector<float>         bias(static_cast<size_t>(m), 0.125f);
+                const std::vector<uint8_t> biasBytes = encodeOperand(bias, m_problem.biasType);
+                if(hipMemcpy(
+                       m_deviceBias, biasBytes.data(), biasBytes.size(), hipMemcpyHostToDevice)
                    != hipSuccess)
                 {
                     skipReason = "hipMemcpy of bias failed";
@@ -469,7 +476,7 @@ namespace
                 }
 
                 const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
-                const hipDataType         biasType = HIP_R_32F;
+                const hipDataType         biasType = m_problem.biasType;
                 if(hipblasLtMatmulDescSetAttribute(m_desc,
                                                    HIPBLASLT_MATMUL_DESC_EPILOGUE,
                                                    &epilogue,
@@ -611,7 +618,7 @@ namespace
 
             static_cast<void>(hipMemsetAsync(m_deviceD, 0, m_hostD.size(), m_stream));
 
-            const float           alpha = 1.0f;
+            const float           alpha = m_problem.alpha;
             const float           beta  = 0.0f;
             hipblasLtMatmulAlgo_t algo  = candidate.algo;
 
@@ -672,7 +679,7 @@ namespace
         // cannot run it on this problem.
         bool runnable(hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
         {
-            const float alpha    = 1.0f;
+            const float alpha    = m_problem.alpha;
             const float beta     = 0.0f;
             size_t      required = 0;
             if(hipblaslt_ext::matmulIsAlgoSupported(m_handle,
@@ -1131,6 +1138,23 @@ namespace
     {
         checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
                                  "wvSpltK_bf16_tn_m4");
+    }
+
+    // The bias epilogue, with alpha 0.7 so alpha * dot rounds before the bias
+    // is added, and m % 3 != 0 so the last YTILE = 3 row tile is partial.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16BiasTail_12290x4x10248)
+    {
+        checkDefaultPicksUniform(
+            {12290, 4, 10248, HIP_R_16BF, 0, true, HIPBLAS_OP_T, HIP_R_16BF, HIP_R_16BF, 0.7f},
+            "wvSplitK_vllm_bf16_tn_n4_y3u2");
+    }
+
+    // The same past the LDS stage, where K is staged in chunks.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnF16BiasTailLdsChunked_4097x5x16400)
+    {
+        checkDefaultPicksUniform(
+            {4097, 5, 16400, HIP_R_16F, 0, true, HIPBLAS_OP_T, HIP_R_16F, HIP_R_16F, 0.7f},
+            "wvSplitK_vllm_f16_tn_n5_y3u2");
     }
 
     // Measured non-uniform on gfx950 with the default heuristic path.
