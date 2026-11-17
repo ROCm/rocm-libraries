@@ -25,6 +25,7 @@ from .ir import (
     F16,
     I64,
     F32,
+    I1,
     I32,
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
@@ -2266,9 +2267,14 @@ class _Lowerer:
     # -------------------- arith: bitwise / int helpers --------------------
 
     def _op_arith_not(self, op: Op) -> None:
-        # ``arith.not`` is bitwise-NOT. For i1 inputs this is logical-not.
+        # ``arith.not`` is bitwise-NOT, which on an i1 is logical NOT. An i1 is
+        # a C++ ``bool``, where ``~`` promotes to int (``~true`` is -2, still
+        # true), so an i1 takes ``!``.
         (v,) = op.operands
-        self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = ~{_name(v)};")
+        negate = "!" if op.result.type == I1 else "~"
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = {negate}{_name(v)};"
+        )
 
     def _op_arith_xor(self, op: Op) -> None:
         self._binary(op, "^")

@@ -392,6 +392,25 @@ def test_vector_builders_refuse_a_scalar_first_operand(build, message):
     assert b.kernel.body.ops == []
 
 
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    ("operand_type", "negation"), [(I1, "!"), (I32, "~")], ids=["i1", "i32"]
+)
+def test_hip_not_is_logical_on_i1_and_bitwise_otherwise(operand_type, negation, engine):
+    """An i1 is a C++ ``bool`` in HIP, where ``~`` promotes to int (``~true``
+    is -2, still true): each engine's HIP lowering negates an i1 with ``!``
+    and keeps ``~`` for the other integers, as LLVM's ``xor`` with all ones
+    does."""
+    b = IRBuilder("hip_not")
+    value = b.param("value", operand_type)
+    negated = b.lnot(value)
+    b.ret()
+    hip = lower_hip_with_engine(b.kernel, "gfx942", engine=engine)
+    result = negated.name.lstrip("%")
+    hip_type = "bool" if operand_type == I1 else "int"
+    assert f"{hip_type} {result} = {negation}value;" in hip
+
+
 def _compile_via_hipcc(kernel, arch):
     """``kernel`` compiled from its HIP source by hipcc; skip without hipcc."""
     if shutil.which("hipcc") is None:
