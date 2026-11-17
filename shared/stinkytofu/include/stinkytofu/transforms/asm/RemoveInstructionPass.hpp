@@ -31,20 +31,26 @@
 
 namespace stinkytofu {
 class Pass;
+class Function;
 
 /// Default factory: disabled, returns nullptr (no instructions removed).
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveInstructionPass();
 
 /// Removes every instruction whose unified opcode is in \p opcodes. Returns nullptr when empty.
+/// When \p functions is non-empty, removal spans that whole-kernel list (entry
+/// function plus callable functions); otherwise only the single Function the
+/// pipeline runs it on.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveInstructionPass(
-    std::vector<UnifiedOpcode> opcodes);
+    std::vector<UnifiedOpcode> opcodes, std::vector<Function*> functions = {});
 
 /// Resolves each mnemonic against the target arch at run() time. Returns nullptr when empty.
+/// See the opcode overload for \p functions semantics.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveInstructionPass(
-    std::vector<std::string> mnemonics);
+    std::vector<std::string> mnemonics, std::vector<Function*> functions = {});
 
 /// Comma-separated mnemonics (e.g. @c "tensor_load_to_lds,s_nop"). Returns nullptr when empty.
+/// See the opcode overload for \p functions semantics.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveInstructionPass(
-    const std::string& mnemonicsCsv);
+    const std::string& mnemonicsCsv, std::vector<Function*> functions = {});
 
 }  // namespace stinkytofu

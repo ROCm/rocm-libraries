@@ -161,14 +161,12 @@ class OrigamiMatmulSelector:
             self._grid = origami.select_grid_size(self._problem,
                                                   self._hardware,
                                                   self._result.config,
-                                                  origami.grid_selection_t.k_split_aware,
-                                                  self._hardware.N_CU)
+                                                  origami.grid_selection_t.k_split_aware)
         else:
             self._grid = origami.select_grid_size(self._problem,
                                                   self._hardware,
                                                   self._result.config,
-                                                  origami.grid_selection_t.data_parallel,
-                                                  self._hardware.N_CU)
+                                                  origami.grid_selection_t.data_parallel)
 
         self._workgroup_mapping = (
             origami.select_workgroup_mapping(self._problem,
@@ -544,8 +542,7 @@ class OrigamiAttentionSelector:
         self._grid = origami.select_grid_size(self._problem,
                                               self._hardware,
                                               self._result.config,
-                                              origami.grid_selection_t.k_split_aware,
-                                              self._hardware.N_CU)
+                                              origami.grid_selection_t.k_split_aware)
 
         self._workgroup_mapping = (
             origami.select_workgroup_mapping(self._problem,

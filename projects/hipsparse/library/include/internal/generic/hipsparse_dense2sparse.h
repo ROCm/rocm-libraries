@@ -171,7 +171,6 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="dense2sparse_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B
 *  <tr><td>HIP_R_16F
 *  <tr><td>HIP_R_16BF

@@ -1,0 +1,83 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 128
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  Device: 0
+  KernelTime: false
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  KeepBuildTmp: true
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: S
+    DestDataType: S
+    F32XdlMathOp: X
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage:
+      - Assembly
+    ForkParameters:
+    - PrefetchGlobalRead:
+      - 2
+    - PrefetchLocalRead:
+      - 1
+    - DepthU:
+      - 32
+    - ScheduleIterAlg:
+      - 3
+    - ExpandPointerSwap:
+      - false
+    - TransposeLDS:
+      - 1
+    - LocalReadVectorWidth:
+      - 4
+    - GlobalReadVectorWidthA:
+      - 4
+    - GlobalReadVectorWidthB:
+      - 4
+    - DirectToLds:
+      - 1
+    - LdsPadA:
+      - -1
+    - LdsPadB:
+      - -1
+    - StaggerU:
+      - 0
+    - 1LDSBuffer:
+      - 0
+    - NonTemporalA:
+      - 0
+    - NonTemporalB:
+      - 0
+    - NonTemporalD:
+      - 4
+    - SourceSwap:
+      - true
+    - LdsBlockSizePerPadA:
+      - -1
+    - LdsBlockSizePerPadB:
+      - -1
+    - LDSTrInst:
+      - true
+    - UseSgprForGRO:
+      - 0
+    - UseCustomMainLoopSchedule:
+      - 1
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact:
+        - 192
+        - 128
+        - 1
+        - 224

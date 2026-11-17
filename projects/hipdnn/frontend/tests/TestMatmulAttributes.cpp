@@ -169,3 +169,71 @@ TEST(TestMatmulAttributes, SetTensorsConstRef)
     EXPECT_EQ(matmulAttributes.get_b(), bTensor);
     EXPECT_EQ(matmulAttributes.get_c(), cTensor);
 }
+
+TEST(TestMatmulAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::MatmulAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto a1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    a1->set_uid(1).set_name("A").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_a(a1);
+
+    auto b1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    b1->set_uid(2).set_name("B").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_b(b1);
+
+    auto c1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    c1->set_uid(3).set_name("C").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_c(c1);
+
+    hipdnn_frontend::graph::MatmulAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto a2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    a2->set_uid(1).set_name("A").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_a(a2);
+
+    auto b2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    b2->set_uid(2).set_name("B").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_b(b2);
+
+    auto c2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    c2->set_uid(3).set_name("C").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_c(c2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchA->set_uid(99).set_name("MismatchedA");
+    attr2.set_a(structuralMismatchA);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_a(a2); // Revert
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchA
+        ->set_uid(555) // Diverges from attr1's a1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's a1 ("A")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_a(logicalMatchA);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Sanity check on the trivial hooks themselves: since MatmulAttributes has
+    // no extra fields, two default-constructed instances (no tensors, no name,
+    // NOT_SET compute type) should still be logically and strictly equal.
+    const hipdnn_frontend::graph::MatmulAttributes emptyAttr1;
+    const hipdnn_frontend::graph::MatmulAttributes emptyAttr2;
+    EXPECT_TRUE(emptyAttr1 == emptyAttr2);
+    EXPECT_TRUE(emptyAttr1.logicallyEquals(emptyAttr2));
+}

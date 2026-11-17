@@ -10,6 +10,24 @@ rocBLAS deprecations by version
 
 The following sections list the features deprecation by release version.
 
+Removed in rocBLAS 5.8.0
+========================
+
+ROCBLAS_USE_HIPBLASLT_BATCHED environment variable removed
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+``ROCBLAS_USE_HIPBLASLT_BATCHED`` was removed in 5.8.0 and is now ignored. Batched GEMM is controlled by the
+same environment variable as all other GEMM, so no batched-only override is required. Use
+``ROCBLAS_USE_HIPBLASLT=0`` to select the Tensile backend for all GEMM, including batched.
+
+Announced in rocBLAS 5.6.0
+==========================
+
+ROCBLAS_USE_HIPBLASLT_BATCHED environment variable deprecated
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+``ROCBLAS_USE_HIPBLASLT_BATCHED`` is deprecated and will be removed in a future release. This variable should no longer be required for supported hipBLASLt batched GEMM dispatch.
+
 Removed in rocBLAS 5.0
 =========================
 

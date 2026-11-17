@@ -39,8 +39,8 @@ namespace rocisa
 
     std::string getGlcBitName()
     {
-        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
-        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
+        auto hasGLCModifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasGLCModifier");
+        auto hasSC0Modifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasSC0Modifier");
         if(hasGLCModifier)
             return "glc";
         if(hasSC0Modifier)
@@ -50,8 +50,8 @@ namespace rocisa
 
     std::string getSlcBitName()
     {
-        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
-        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
+        auto hasGLCModifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasGLCModifier");
+        auto hasSC0Modifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasSC0Modifier");
         if(hasGLCModifier)
             return "slc";
         if(hasSC0Modifier)
@@ -125,7 +125,13 @@ void init_base(nb::module_ m)
         .def("getVgprMsb", &rocisa::rocIsa::getVgprMsb, "Get vgpr msb.")
         .def("setOutputOptions", &rocisa::rocIsa::setOutputOptions, "Set output options.")
         .def("setVgprIdx", &rocisa::rocIsa::setVgprIdx, "Set vgpr idx.")
-        .def("setVgprMsb", &rocisa::rocIsa::setVgprMsb, "Set vgpr msb.");
+        .def("setVgprMsb", &rocisa::rocIsa::setVgprMsb, "Set vgpr msb.")
+        .def("setForceScaledWMMA",
+             &rocisa::rocIsa::setForceScaledWMMA,
+             "Toggle the gfx1250 low-precision scaled-WMMA workaround (strict/v0 only).")
+        .def("getForceScaledWMMA",
+             &rocisa::rocIsa::getForceScaledWMMA,
+             "Get the gfx1250 low-precision scaled-WMMA workaround toggle.");
 
     auto m_base = m.def_submodule("base", "rocIsa base submodule.");
     nb::class_<IsaVersion>(m_base, "IsaVersion")

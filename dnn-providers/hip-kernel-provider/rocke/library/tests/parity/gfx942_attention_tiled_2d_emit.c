@@ -112,6 +112,76 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_k_single_buffer = false;
         s->use_agpr_alloc_zero = true;
         break;
+    case 7: /* Selector spec for bf16 D128 decode with i64 K/V addressing. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 256;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_i64_kv_addr = true;
+        break;
+    case 8: /* i64 K/V, four warps, two pages per tile. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 256;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_i64_kv_addr = true;
+        break;
+    case 9: /* i64 K/V, one page per tile. */
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 256;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_i64_kv_addr = true;
+        break;
+    case 10: /* cfg7 with K copied by global_load_lds. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 256;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_i64_kv_addr = true;
+        s->use_global_load_lds_k = true;
+        break;
     default:
         return -1;
     }

@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <array>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -84,9 +85,24 @@ class LogicalInstruction : public IRBase {
     std::string comment;                ///< Optional comment
 
     // Instruction modifiers (optional, only used by specific instructions)
-    std::optional<DPPModifiers> dpp;    ///< Data parallel processing modifier
-    std::optional<SDWAModifiers> sdwa;  ///< Sub-dword addressing modifier
-    std::optional<DSModifiers> ds;      ///< LDS/GDS modifier
+    std::optional<DPPModifiers> dpp;                ///< Data parallel processing modifier
+    std::optional<SDWAModifiers> sdwa;              ///< Sub-dword addressing modifier
+    std::optional<DSModifiers> ds;                  ///< LDS/GDS modifier
+    std::optional<FLATModifiers> flat;              ///< Flat/global atomic memory modifier
+    std::optional<GLOBALModifiers> global;          ///< Global memory modifier
+    std::optional<CacheScopeModifiers> cacheScope;  ///< SOPP fence scope (global_wb / global_inv)
+    std::optional<MUBUFModifiers> mubuf;            ///< MUBUF (buffer load/store) modifier
+    std::optional<SMEMModifiers> smem;              ///< SMEM (scalar load/store/atomic) modifier
+    std::optional<VOP3PModifiers> vop3;             ///< VOP3P (op_sel) modifier
+    std::optional<True16Modifiers> true16;          ///< True16 (.l/.h half-select) modifier
+    std::optional<std::vector<int>> memtoken;  ///< Memory token IDs for LDS dependency tracking
+    std::optional<std::array<int, 7>>
+        swaitcnt;  ///< {vlcnt,vscnt,dlcnt,dscnt,kmcnt,maxLgkmcnt,maxVmcnt}
+    std::optional<SDelayAluData>
+        sdelayalu;  ///< s_delay_alu data (instid0/instskip/instid1) carried from the adaptor
+    std::optional<std::string>
+        longBranchLabel;  ///< s_setpc_b64 long-branch target label (forwarded to LabelData so
+                          ///< CFGBuilderPass can build the CFG edge for the computed jump)
 
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {
@@ -286,6 +302,34 @@ class LogicalInstruction : public IRBase {
     }
 
     /**
+     * @brief Get SWaitAlu data (returns nullptr if not SWaitAlu)
+     */
+    SWaitAluLogicalData* asSWaitAlu() {
+        return (opcode_ == logical::SWaitAlu) ? static_cast<SWaitAluLogicalData*>(specialData_)
+                                              : nullptr;
+    }
+
+    const SWaitAluLogicalData* asSWaitAlu() const {
+        return (opcode_ == logical::SWaitAlu)
+                   ? static_cast<const SWaitAluLogicalData*>(specialData_)
+                   : nullptr;
+    }
+
+    /**
+     * @brief Get SBarrier data (returns nullptr for the default logical form)
+     */
+    SBarrierLogicalData* asSBarrier() {
+        return (opcode_ == logical::SBarrier) ? static_cast<SBarrierLogicalData*>(specialData_)
+                                              : nullptr;
+    }
+
+    const SBarrierLogicalData* asSBarrier() const {
+        return (opcode_ == logical::SBarrier)
+                   ? static_cast<const SBarrierLogicalData*>(specialData_)
+                   : nullptr;
+    }
+
+    /**
      * @brief Get Label data (returns nullptr if not Label)
      */
     LogicalLabelData* asLabel() {
@@ -334,6 +378,15 @@ class LogicalInstruction : public IRBase {
             case logical::IntrinsicCall:
                 delete static_cast<IntrinsicCallData*>(specialData_);
                 break;
+            case logical::SWaitAlu:
+                delete static_cast<SWaitAluLogicalData*>(specialData_);
+                break;
+            case logical::SBarrier:
+                delete static_cast<SBarrierLogicalData*>(specialData_);
+                break;
+            case logical::SchedulingFence:
+                // No special data for SchedulingFence
+                break;
             default:
                 // No special data for regular instructions
                 break;
@@ -371,3 +424,20 @@ inline std::shared_ptr<LogicalInstruction> makeLogicalInstructionShared(LogicalI
 //
 // Note: The generated file has its own namespace stinkytofu block
 #include "stinkytofu/ir/logical/LogicalInstructions_generated.hpp"
+
+namespace stinkytofu {
+
+/**
+ * @brief SBarrier overload that preserves split/wait/cluster semantics.
+ *
+ * The generated comment-only overload remains the default logical barrier form.
+ */
+inline LogicalInstruction* SBarrier(bool separate, bool wait, bool clusterBarrier,
+                                    const std::string& comment = "") {
+    auto* inst = IRBase::createIR<LogicalInstruction>(logical::SBarrier);
+    inst->setSpecialData(new SBarrierLogicalData(separate, wait, clusterBarrier));
+    inst->comment = comment;
+    return inst;
+}
+
+}  // namespace stinkytofu

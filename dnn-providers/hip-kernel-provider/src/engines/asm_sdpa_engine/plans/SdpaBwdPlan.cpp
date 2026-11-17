@@ -286,8 +286,9 @@ asm_sdpa_engine::fmha_bwd_post_kernel_args buildPostArgs(const MhaBwdArgs& a)
     return post;
 }
 
-// Build MhaBwdArgs from SdpaBwdParams + runtime pointers
+// Build MhaBwdArgs from SdpaBwdParams + runtime pointers + resolved scale
 MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
+                           float resolvedAttnScale,
                            const void* qPtr,
                            const void* kPtr,
                            const void* vPtr,
@@ -324,7 +325,7 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.nhead_k = p.numHeadsKv;
     a.hdim_q = p.headDimQk;
     a.hdim_v = p.headDimV;
-    a.scale = p.attnScale;
+    a.scale = resolvedAttnScale;
 
     // Q strides (elements)
     a.stride_q = p.qStrideSeq;
@@ -502,18 +503,34 @@ void SdpaBwdPlan::execute(const Handle& handle,
             _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
     }
 
-    // 5. Build convenience args struct (mirrors AITER mha_bwd_args).
-    // Byte-stride uint32 overflow was already rejected by isApplicable.
-    const MhaBwdArgs mhaArgs = buildMhaBwdArgs(
-        _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
+    // 5. Resolve attention scale at execute time (runtime pass-by-value support).
+    const float resolvedScale
+        = static_cast<float>(hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
+            _params.attnScale, deviceBuffers, numDeviceBuffers)));
 
-    // 6. Launch kernels on the same stream.
+    // 6. Build convenience args struct (mirrors AITER mha_bwd_args).
+    // Byte-stride uint32 overflow was already rejected by isApplicable.
+    const MhaBwdArgs mhaArgs = buildMhaBwdArgs(_params,
+                                               resolvedScale,
+                                               qPtr,
+                                               kPtr,
+                                               vPtr,
+                                               oPtr,
+                                               doPtr,
+                                               lsePtr,
+                                               dqPtr,
+                                               dkPtr,
+                                               dvPtr,
+                                               dBufPtr,
+                                               dqAccPtr);
+
+    // 7. Launch kernels on the same stream.
     // a32: 3 kernels — ODO → DQDKDV → DQ_CONVERT (sequential dependencies)
     // a16: 2 kernels — ODO → DQDKDV (dQ written directly in BF16)
     // Launching on the same stream guarantees ordering without explicit barriers.
     auto stream = handle.getStream();
 
-    // 6a. Build args and launch kernel 1: ODO
+    // 7a. Build args and launch kernel 1: ODO
     auto odoArgs = buildOdoArgs(mhaArgs);
 
     const unsigned int gdxOdo = _params.odoTiles.gridDim(mhaArgs.seqlen_q);
@@ -532,9 +549,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward ODO");
     }
-    plan_utils::throwOnLaunchPostError("SDPA backward ODO");
 
-    // 6b. Build args and launch kernel 2: DQDKDV
+    // 7b. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts, _params);
 
     const bool isCausal = (_params.maskOrdinal == 1 || _params.maskOrdinal == 2);
@@ -574,10 +590,9 @@ void SdpaBwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
-    plan_utils::throwOnLaunchPostError("SDPA backward DQDKDV");
 
-    // 6c. DQ_CONVERT (FP32 → BF16) — A32 path only.
-    // A16 wrote dQ directly to the output BF16 buffer in step 6b; no cast needed.
+    // 7c. DQ_CONVERT (FP32 → BF16) — A32 path only.
+    // A16 wrote dQ directly to the output BF16 buffer in step 7b; no cast needed.
     if(_params.accumulatorType == AccumulatorType::A32)
     {
         auto postArgs = buildPostArgs(mhaArgs);
@@ -598,7 +613,6 @@ void SdpaBwdPlan::execute(const Handle& handle,
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQ_CONVERT");
         }
-        plan_utils::throwOnLaunchPostError("SDPA backward DQ_CONVERT");
     }
 }
 

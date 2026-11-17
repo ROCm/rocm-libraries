@@ -149,18 +149,54 @@ inline std::string formatEngineIdHex(int64_t id)
     return oss.str();
 }
 
-// Helper function to get engine name from ID (returns empty if not found)
+/**
+ * @brief Gets the registered name of an engine ID without an exception
+ *
+ * Returns no value when @p id is not registered. Never throws.
+ *
+ * @param id The engine ID to look up
+ * @return std::optional<std::string_view> The registered name, or std::nullopt when unregistered
+ */
+inline std::optional<std::string_view> tryGetEngineNameFromId(int64_t id) noexcept
+{
+    const auto& idToName = getEngineIdToNameMap();
+    const auto found = idToName.find(id);
+    if(found == idToName.end())
+    {
+        return std::nullopt;
+    }
+    return found->second;
+}
+
+// Helper function to get engine name from ID (throws std::out_of_range if not found)
 inline std::string_view getEngineNameFromId(int64_t id)
 {
-    auto& idToName = getEngineIdToNameMap();
-    auto it = idToName.find(id);
-    if(it != idToName.end())
+    if(const auto name = tryGetEngineNameFromId(id); name.has_value())
     {
-        return it->second;
+        return *name;
     }
 
     throw std::out_of_range("Engine ID " + formatEngineIdHex(id)
                             + " not found in registered engines");
+}
+
+/**
+ * @brief Names an engine ID from the static registry, falling back to hexadecimal
+ *
+ * Returns the registered name for @p id, or its zero-padded uppercase
+ * hexadecimal rendering when unregistered. Never empty.
+ *
+ * @param id The engine ID to name
+ * @return std::string The registered name, or the hexadecimal rendering of the ID
+ */
+inline std::string engineNameOrHex(int64_t id)
+{
+    if(const auto name = tryGetEngineNameFromId(id); name.has_value())
+    {
+        return std::string(*name);
+    }
+
+    return formatEngineIdHex(id);
 }
 
 struct EngineRegistrar
@@ -235,6 +271,7 @@ HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE)
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE)
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC)
 HIPDNN_REGISTER_ENGINE(ASM_SDPA_ENGINE)
+HIPDNN_REGISTER_ENGINE(HIP_FLASH2_ENGINE)
 HIPDNN_REGISTER_ENGINE(ROCKE_ENGINE)
 
 // NOLINTEND(bugprone-throwing-static-initialization)

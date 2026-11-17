@@ -190,7 +190,7 @@ def test_select_grid_size(hardware):
     config.workgroup_mapping = 6
 
     grid_size = origami.select_grid_size(
-        problem, hardware, config, origami.grid_selection_t.analytical, hardware.N_CU
+        problem, hardware, config, origami.grid_selection_t.analytical
     )
     assert grid_size > 0
 
@@ -253,7 +253,7 @@ def test_select_grid_size_algorithms(hardware, algorithm):
     config.occupancy = 1
     config.workgroup_mapping = 6
 
-    grid_size = origami.select_grid_size(problem, hardware, config, algorithm, hardware.N_CU)
+    grid_size = origami.select_grid_size(problem, hardware, config, algorithm)
     assert grid_size > 0
 
 
@@ -306,7 +306,8 @@ def test_gfx950_bfloat16_recommended_matrix_instruction():
         25165824,    # L2_capacity
         2.1,         # compute_clock_ghz
         4,           # parallel_mi_cu
-        (1.0, 1.0, 1.0)  # mem_bw_per_wg_coefficients
+        (1.0, 1.0, 1.0),  # mem_bw_per_wg_coefficients
+        None,  # pci_chip_id
     )
     
     # Get recommended matrix instruction for bfloat16
@@ -352,6 +353,9 @@ def test_config_has_formocast_fields():
     assert hasattr(config, 'gwvw_d')
     assert hasattr(config, 'vector_width_a')
     assert hasattr(config, 'vector_width_b')
+    assert hasattr(config, 'cache_hints_d')
+    assert hasattr(config, 'stream_k')
+    assert hasattr(config, 'index')
     
     # Check Tensile-specific fields
     assert hasattr(tensile, 'depth_u')
@@ -361,9 +365,16 @@ def test_config_has_formocast_fields():
     assert hasattr(tensile, 'direct_to_vgpr_a')
     assert hasattr(tensile, 'direct_to_vgpr_b')
     assert hasattr(tensile, 'wave_num')
+    assert hasattr(tensile, 'wavefront_size')
     assert hasattr(tensile, 'wave_group_m')
     assert hasattr(tensile, 'wave_group_n')
     assert hasattr(tensile, 'prefetch_global_read')
+    assert hasattr(tensile, 'one_lds_buffer')
+    assert hasattr(tensile, 'source_swap')
+    assert hasattr(tensile, 'unroll_major_lds_a')
+    assert hasattr(tensile, 'unroll_major_lds_b')
+    assert hasattr(tensile, 'lds_transpose_read_a')
+    assert hasattr(tensile, 'lds_transpose_read_b')
     
     # Verify has_tensile_params returns True after accessing
     assert config.has_tensile_params()
@@ -385,7 +396,8 @@ def test_simulation_mode_returns_valid_latency():
         4000000,     # L2_capacity
         1.5,         # compute_clock_ghz
         1,           # parallel_mi_cu
-        (0.0, 0.015, 0.0)  # mem_bw_per_wg_coefficients
+        (0.0, 0.015, 0.0),  # mem_bw_per_wg_coefficients
+        None,
     )
 
     # Create problem
@@ -420,7 +432,7 @@ def test_simulation_mode_returns_valid_latency():
     config.tensile().prefetch_global_read = 2
     
     # Call compute_total_latency with simulation mode
-    latency = origami.compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.compute_total_latency(problem, hardware, config)
     
     assert latency > 0, f"Expected positive latency, got {latency}"
 
@@ -441,7 +453,8 @@ def test_simulation_mode_via_compute_total_latency():
         4000000,     # L2_capacity
         1.5,         # compute_clock_ghz
         1,           # parallel_mi_cu
-        (0.0, 0.015, 0.0)  # mem_bw_per_wg_coefficients
+        (0.0, 0.015, 0.0),  # mem_bw_per_wg_coefficients
+        None,
     )
     
     # Create problem
@@ -483,9 +496,9 @@ def test_simulation_mode_via_compute_total_latency():
     
     # Get latencies from both modes
     latency_estimation = origami.compute_total_latency(
-        problem, hardware, config_estimation, hardware.N_CU)
+        problem, hardware, config_estimation)
     latency_simulation = origami.compute_total_latency(
-        problem, hardware, config_simulation, hardware.N_CU)
+        problem, hardware, config_simulation)
     
     # Both should return positive values
     assert latency_estimation > 0, f"Estimation latency should be positive: {latency_estimation}"
@@ -509,7 +522,7 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
     # Create hardware for gfx942
     hardware = origami.hardware_t(
         origami.architecture_t.gfx942,
-        304, 65536, 512 * 1024, 8, 1.0, 1.0, 1.0, 4000000, 1.5, 1, (0.0, 0.015, 0.0)
+        304, 65536, 512 * 1024, 8, 1.0, 1.0, 1.0, 4000000, 1.5, 1, (0.0, 0.015, 0.0), None
     )
     
     problem = origami.problem_t()
@@ -538,5 +551,5 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
     config.tensile().wave_group_m = 2
     config.tensile().wave_group_n = 2
     
-    latency = origami.compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.compute_total_latency(problem, hardware, config)
     assert latency > 0, f"Expected positive latency for {m}x{n}x{k}, got {latency}"

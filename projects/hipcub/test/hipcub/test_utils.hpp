@@ -31,6 +31,9 @@
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #include <cub/util_ptx.cuh>
     #include <hipcub/config.hpp>
+    #include <cuda/std/array>
+    #include <cuda/std/mdspan>
+    #include <hipcub/hipcub.hpp>
 #endif
 
 #include "test_utils_assertions.hpp"

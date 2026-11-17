@@ -450,7 +450,7 @@ FusionPlanDescriptor::FusionPlanDescriptor(const miopenFusionDirection_t dir,
     : fusion_dir(dir),
       input_desc(inDesc),
       is_valid(false),
-      kernel_source_type(OpenclText),
+      kernel_source_type(KernelText),
       fp_contains_bn(false),
       data_type(inDesc.GetType())
 {
@@ -763,8 +763,7 @@ static auto GetFusedIGemmSolvers()
 
 static auto GetFusedWinogradSolvers()
 {
-    return solver::SolverContainer<solver::fusion::ConvBinWinogradRxSFused,
-                                   solver::fusion::ConvBinWinogradRxSf2x3g1Fused,
+    return solver::SolverContainer<solver::fusion::ConvBinWinogradRxSf2x3g1Fused,
                                    solver::fusion::ConvWinoFuryRxSFused<2, 3>,
                                    solver::fusion::ConvWinoRageRxSFused<2, 3>>{};
 }

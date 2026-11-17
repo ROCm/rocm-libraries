@@ -63,6 +63,19 @@ project(rpp-test)
 enable_testing()
 include(CTest)
 
+# Include shared test categories module for ctest label support
+# Check monorepo location first, then installed location (share/rpp/test/cmake/shared/ctest/)
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+    set(RPP_ENABLE_CTEST_CATEGORIES ON)
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/shared/ctest/TestCategories.cmake")
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/shared/ctest/TestCategories.cmake)
+    set(RPP_ENABLE_CTEST_CATEGORIES ON)
+else()
+    set(RPP_ENABLE_CTEST_CATEGORIES OFF)
+endif()
+
 # Per-test CTest TIMEOUT (seconds) for selected long-running suites; all other tests use DartConfiguration.tcl TimeOut.
 # Increased timeout for: rpp_qa_tests_tensor_image_host_qa_mode_0, rpp_qa_tests_tensor_misc_host_test_type_1, rpp_qa_tests_tensor_image_hip_qa_mode_0
 # Image qa_mode_0 CTests are omitted when USING_THE_ROCK is ON; misc test_type_1 timeouts apply whenever those tests are registered.
@@ -304,3 +317,8 @@ set_tests_properties(
     rpp_qa_tests_tensor_misc_hip_all
     rpp_qa_tests_tensor_misc_hip_test_type_1
     PROPERTIES LABELS "rpp_rocm_stack_only")
+
+# Apply test category labels for ctest filtering (quick, standard, comprehensive, full)
+if(RPP_ENABLE_CTEST_CATEGORIES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    apply_ctest_category_labels("${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+endif()

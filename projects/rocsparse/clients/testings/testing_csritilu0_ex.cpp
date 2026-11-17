@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,9 +88,7 @@ static rocsparse_status csrilu0(rocsparse_handle          handle_,
         return status;
     }
 
-    rocsparse_csrilu0_clear(handle_, info_);
-
-    return rocsparse_status_success;
+    return rocsparse_csrilu0_clear(handle_, info_);
 }
 
 void testing_csritilu0_ex_extra(const Arguments& arg) {}
@@ -259,7 +257,7 @@ void testing_csritilu0_ex(const Arguments& arg)
     options |= rocsparse_itilu0_option_stopping_criteria; // Add stopping criteria.
     options |= rocsparse_itilu0_option_compute_nrm_residual; // Compute the norm of the residual.
     // options |= rocsparse_itilu0_option_verbose; // Put verbose.
-    // options |= rocsparse_itilu0_option_convergence_history; // Get convergence history.
+    options |= rocsparse_itilu0_option_convergence_history; // Get convergence history.
     // options |= rocsparse_itilu0_option_compute_nrm_correction; // Compute the norm of the correction.
     // options |= rocsparse_itilu0_option_coo_format; // Use internal sparse coordinate format.
 
@@ -518,7 +516,8 @@ void testing_csritilu0_ex(const Arguments& arg)
             return;
         }
 
-        if((p.options & rocsparse_itilu0_option_convergence_history) > 0)
+        if((dA.m > 0) && (dA.nnz > 0)
+           && (p.options & rocsparse_itilu0_option_convergence_history) > 0)
         {
             floating_data_t<T>* history       = new floating_data_t<T>[p.maxiter * 2];
             rocsparse_int       history_niter = 0;

@@ -30,6 +30,13 @@ consumed by the rocSPARSE library. You **cannot** switch devices
 between :ref:`rocsparse_create_handle_` and :ref:`rocsparse_destroy_handle_`. To change the device,
 you must destroy the current handle and create another rocSPARSE handle on a new device.
 
+:ref:`rocsparse_create_handle_` blocks the calling thread until the handle is ready.
+If you want handle creation to be stream-ordered instead, use :ref:`rocsparse_handle_create_`,
+which binds the handle to a user-provided stream and enqueues all setup work on that stream
+without blocking the host. Handles created this way are destroyed with
+:ref:`rocsparse_handle_destroy_`, which also reports an optional error descriptor.
+Neither routine can be called during HIP graph stream capture.
+
 .. note::
 
    :cpp:func:`hipSetDevice` and :cpp:func:`hipGetDevice` are not part of the rocSPARSE API.
@@ -342,6 +349,8 @@ Function name                                        yes no
 :cpp:func:`rocsparse_v2_spmv_buffer_size()`              x
 :cpp:func:`rocsparse_spgeam_buffer_size()`               x
 :cpp:func:`rocsparse_spgeam()`                           x
+:cpp:func:`rocsparse_spsort_buffer_size()`               x
+:cpp:func:`rocsparse_spsort()`                           x
 :cpp:func:`rocsparse_sptrsv_buffer_size()`               x
 :cpp:func:`rocsparse_sptrsm_buffer_size()`               x
 :cpp:func:`rocsparse_spilu0_buffer_size()`               x
@@ -444,7 +453,7 @@ ROC-TX support in rocSPARSE
 
 The `ROC-TX <https://rocm.docs.amd.com/projects/roctracer/en/latest/reference/roctx-spec.html>`_ library contains application code
 instrumentation APIs to support the high-level correlation of runtime API or activity events. When integrated with rocSPARSE, ROC-TX
-enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as :doc:`rocProfiler <rocprofiler:index>`, offering better insights
+enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as `rocProfiler <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_, offering better insights
 into runtime behavior and performance bottlenecks.
 
 To enable ROC-TX profiling, set the environment variable ``ROCSPARSE_ROCTX=1`` when running the program with rocProf:

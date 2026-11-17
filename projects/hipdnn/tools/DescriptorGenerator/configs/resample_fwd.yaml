@@ -184,6 +184,7 @@ operation:
       type: "bool"
       default_value: "false"
       required: false
+      fbs_optional: true
       frontend_getter: "get_generate_index()"
       backend_type_name: "HIPDNN_TYPE_BOOLEAN"
       test_value: false

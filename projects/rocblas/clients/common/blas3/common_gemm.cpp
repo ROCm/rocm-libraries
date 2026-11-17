@@ -25,6 +25,8 @@
 #include "testing_gemm_batched.hpp"
 #include "testing_gemm_strided_batched.hpp"
 
+#include "testing_gemm_grouped_batched.hpp"
+
 #define INSTANTIATE(T_)                 \
     INSTANTIATE_TESTS(gemm, T_)         \
     INSTANTIATE_TESTS(gemm_batched, T_) \
@@ -35,3 +37,6 @@ INSTANTIATE(float)
 INSTANTIATE(double)
 INSTANTIATE(rocblas_float_complex)
 INSTANTIATE(rocblas_double_complex)
+
+INSTANTIATE_TESTS(gemm_grouped_batched, float)
+INSTANTIATE_TESTS(gemm_grouped_batched, double)

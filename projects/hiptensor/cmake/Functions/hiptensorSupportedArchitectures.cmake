@@ -11,10 +11,14 @@ set(SUPPORTED_ARCHITECTURES
     gfx1151
     gfx1152
     gfx1153
+    gfx1170
+    gfx1171
     gfx11-generic
+    gfx11-7-generic
     gfx1200
     gfx1201
     gfx1250
+    gfx1250-strict
     gfx12-generic
 )
 
@@ -24,6 +28,7 @@ set(DEFAULT_ARCHITECTURES
     gfx942
     gfx950
     gfx11-generic
+    gfx11-7-generic
     gfx12-generic
 )
 

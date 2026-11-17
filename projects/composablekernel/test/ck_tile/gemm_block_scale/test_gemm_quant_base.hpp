@@ -97,7 +97,11 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     using AQuantGroupSize           = QuantGroupSize;
     using BQuantGroupSize           = SafeTupleElement_t<Tuple, 11, QuantGroupSize>;
     using BQLayout                  = SafeTupleElement_t<Tuple, 12, AQLayout>;
+    using DsDataType                = SafeTupleElement_t<Tuple, 13, ck_tile::tuple<>>;
+    using DsLayout                  = SafeTupleElement_t<Tuple, 14, ck_tile::tuple<>>;
     using AccDataType               = float; // accumulate always in float
+
+    static_assert(DsDataType::size() == DsLayout::size());
 
     // Get the quant-type specific data types from traits
     using QuantTraits     = QuantTypeTraits<QuantType>;
@@ -118,7 +122,9 @@ class TestCkTileGemmQuantBase : public ::testing::Test
 #if defined(CK_USE_GFX1250)
     static constexpr bool is_8bit = !(std::is_same_v<ComputeDataType, ck_tile::fp16_t> ||
                                       std::is_same_v<ComputeDataType, ck_tile::bf16_t>);
-    static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<is_8bit, M_Warp_Tile>();
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        is_8bit ? ck_tile::max(get_k_warp_tile<true, M_Warp_Tile>(), GemmConfig::MinKWarpTile8Bit)
+                : get_k_warp_tile<false, M_Warp_Tile>();
 #else
     static constexpr ck_tile::index_t K_Warp_Tile = GemmConfig::K_Warp_Tile;
 #endif
@@ -139,7 +145,8 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     void TearDown() override { static_cast<Derived*>(this)->TearDownQuantTypeSpecific(); }
 
     // Common test execution logic
-    void invoke_quant_gemm(const ck_tile::QuantGemmHostArgs& args,
+    template <typename HostArgs>
+    void invoke_quant_gemm(const HostArgs& args,
                            const ck_tile::stream_config& s,
                            bool allow_runtime_splitk_tail = false)
     {
@@ -173,7 +180,8 @@ class TestCkTileGemmQuantBase : public ::testing::Test
                                                                GemmConfig::TransposeC,
                                                                DoubleSmemBuffer,
                                                                false,
-                                                               VectorSize>;
+                                                               VectorSize,
+                                                               GemmConfig::LargeTensors>;
 
         // Let the derived class create the appropriate pipeline and epilogue
         auto* derived = static_cast<Derived*>(this);

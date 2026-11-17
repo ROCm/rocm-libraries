@@ -32,7 +32,13 @@ inline Error {{ op.frontend.packer_function }}(
 
     // Create tensor descriptors (if needed) and set them on the operation
 {% set tf_map = op.tensor_field_frontend_map %}
-{% for tf in op.tensor_fields %}
+{% set mode_field = op.mode_rule_mode_field %}
+{% if op.mode_rules %}
+{% set tensors_to_pack = op.required_tensor_fields %}
+{% else %}
+{% set tensors_to_pack = op.tensor_fields %}
+{% endif %}
+{% for tf in tensors_to_pack %}
 {% set ft = tf_map.get(tf.name) %}
 {% if tf.required %}
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
@@ -48,13 +54,70 @@ inline Error {{ op.frontend.packer_function }}(
                                              "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
 {% endif %}
 {% endfor %}
+{% if op.mode_rules %}
+{% set tf_by_name = op.tensor_field_by_name %}
+{% set df_by_name = op.data_field_by_name %}
+    // Mode selects the canonical optional descriptor footprint.
+    const auto frontendMode = attributes.{{ mode_field.frontend_getter }};
+    auto {{ mode_field.camel_name }}
+        = hipdnn_frontend::{{ mode_field.backend_converter }}(frontendMode);
+{% if mode_field.mode_converter_returns_optional %}
+    if(!{{ mode_field.camel_name }}.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported {{ mode_field.name | replace('_', ' ') }}"};
+    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+        opDesc.get(), {{ mode_field.attr_name }}, {{ mode_field.backend_type }},
+        *{{ mode_field.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% else %}
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+        opDesc.get(), {{ mode_field.attr_name }}, {{ mode_field.backend_type }},
+        {{ mode_field.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% endif %}
+
+    switch(frontendMode)
+    {
+{% for rule in op.mode_rules %}
+    case {{ mode_field.effective_frontend_type }}::{{ rule.mode }}:
+{% for tensor_name in rule.required_optional_tensors %}
+{% set tf = tf_by_name[tensor_name] %}
+{% set ft = tf_map[tf.name] %}
+        HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(
+            opDesc.get(), {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+            attributes.{{ ft.effective_getter_name }}(), tensorDescs,
+            "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
+{% endfor %}
+{% for scalar_name in rule.serialized_scalars %}
+{% set field = df_by_name[scalar_name] %}
+{% if field.is_optional_scalar %}
+        if(attributes.{{ field.frontend_getter }}.has_value())
+        {
+            HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+                opDesc.get(), {{ field.attr_name }}, {{ field.backend_type }},
+                *attributes.{{ field.frontend_getter }},
+                "{{ op.effective_error_label }} {{ field.name }}"));
+        }
+{% else %}
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+            opDesc.get(), {{ field.attr_name }}, {{ field.backend_type }},
+            attributes.{{ field.frontend_getter }},
+            "{{ op.effective_error_label }} {{ field.name }}"));
+{% endif %}
+{% endfor %}
+        break;
+{% endfor %}
+    default:
+        return {ErrorCode::INVALID_VALUE, "{{ op.effective_error_label }} has an unknown routing mode"};
+    }
+{% endif %}
+
 
 {% if op.data_fields_helper is defined and op.data_fields_helper %}
     // Pack shared {{ op.data_fields_helper.label }} parameters
     HIPDNN_CHECK_ERROR({{ op.data_fields_helper.pack_function }}(opDesc.get(), attributes, "{{ op.effective_error_label }}"));
 {% else %}
     // Set {{ op.packer_params_label }} parameters
-{% for df in op.data_fields %}
+{% for df in op.data_fields if not op.mode_rules or (df.name != mode_field.name and df.name not in op.mode_rule_controlled_scalar_names) %}
 {% if df.is_vector %}
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             {{ df.attr_name }},

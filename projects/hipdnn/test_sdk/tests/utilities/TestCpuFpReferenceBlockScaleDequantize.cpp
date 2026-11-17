@@ -316,6 +316,30 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeFp8, IsNegativeScaleE8M0)
 // Validation error path tests
 // ============================================================================
 
+TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, IORankMismatch)
+{
+    // x and y must have the same rank — should throw
+    const Tensor<float> xTensor({2, 4});
+    const Tensor<float> scaleTensor({2, 2});
+    Tensor<float> yTensor({2, 4, 1});
+
+    EXPECT_THROW(
+        CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false),
+        std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, IODimsMismatch)
+{
+    // x and y must have the same dimensions — should throw
+    const Tensor<float> xTensor({2, 4});
+    const Tensor<float> scaleTensor({2, 2});
+    Tensor<float> yTensor({2, 5});
+
+    EXPECT_THROW(
+        CpuFpReferenceBlockScaleDequantize::dequantize(xTensor, scaleTensor, yTensor, {2}, false),
+        std::invalid_argument);
+}
+
 TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, ScaleRankExceedsXRank)
 {
     // Scale tensor has more dimensions than x — should throw
@@ -352,7 +376,7 @@ TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, ScaleDimMismatch)
         std::invalid_argument);
 }
 
-TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, EmptyXDimsThrows)
+TEST(TestCpuFpReferenceBlockScaleDequantizeValidation, EmptyDimsThrows)
 {
     const Tensor<float> xTensor({});
     const Tensor<float> scaleTensor({});

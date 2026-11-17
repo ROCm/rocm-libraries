@@ -1,7 +1,7 @@
 # rocKE
 
 **rocKE** is a dual-engine rocke kernel stack for AMDGPU: a **Python authoring
-frontend** (`rocke`) and a **C++ engine** (`Cpp/` → `librocke_core.a`) that emit
+frontend** (`rocke`) and a **C++ engine** (`cpp/` → `librocke_core.a`) that emit
 **byte-identical** AMDGPU LLVM IR. You author kernels in Python (build a typed
 SSA `KernelDef`), lower to LLVM IR, compile to HSACO in-process via
 `libamd_comgr`, and launch through HIP. The same lowering exists in C++ so
@@ -19,10 +19,10 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 ## Layout
 
 ```text
-rocKE/
-  Python/rocke/   # authoring frontend (import rocke): core, helpers, instances/<arch>,
+rocke/platform/
+  python/rocke/   # authoring frontend (import rocke): core, helpers, instances/<arch>,
                    # runtime, dispatch, analysis, benchmark, heuristics, examples
-  Cpp/             # C++20 engine (mirrors the Python layers): core, helpers, instances,
+  cpp/             # C++20 engine (mirrors the Python layers): core, helpers, instances,
                    # support; include/ckc (public extern "C" ABI); bindings (rocke_engine)
   tests/           # by-layer, language-agnostic; run_all.py is the entrypoint
   dsl_docs/        # merged architecture / runtime / development docs
@@ -30,16 +30,19 @@ rocKE/
   cmake/  CMakeLists.txt  pyproject.toml  requirements.txt
 ```
 
-`Python/rocke/<layer>` and `Cpp/<layer>` mirror each other by layer name. The
+`python/rocke/<layer>` and `cpp/<layer>` mirror each other by layer name. The
 two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.md`](dsl_docs/development/engine_parity.md)).
 
 ## Prerequisites
 
 - **ROCm 7.x** with `libamd_comgr` and `libamdhip64` on the dynamic-linker path
-  (7.2 recommended → `ROCKE_LLVM_FLAVOR=llvm22`; older → `llvm20`). ROCm is a
+  (7.2 recommended). AUTO selects the IR flavor from the loaded COMGR
+  compiler’s LLVM version; ROCm release metadata does not select it. ROCm is a
   system dependency, not a pip package.
 - **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.16+
-  (3.18+ for the `Cpp/bindings` pybind module).
+  (3.18+ for the `cpp/bindings` pybind module). The C++ build needs the Python
+  interpreter too: it generates the engine's intrinsic arch-domain table from the
+  committed JSON columns (`tools/gen_arch_domain_cpp.py`), standard library only.
 - Python deps: `pip install -r requirements.txt` (adds `numpy`, plus `pytest` /
   `pybind11` in the `dev` extra). **torch** must be the ROCm build for your
   system, installed separately from the ROCm wheel index (not via this repo),
@@ -48,7 +51,7 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
   under `sudo -E` (or membership in the `video`/`render` groups).
 
 ```bash
-export ROCKE=$(pwd)        # run from this rocKE/ directory
+export ROCKE=$(pwd)        # run from this rocke/platform/ directory
 export PYTHONPATH=$ROCKE/Python
 ```
 
@@ -62,14 +65,14 @@ cmake --build /tmp/rocke --target rocke_core -j$(nproc)
 # -> /tmp/rocke/librocke_core.a
 ```
 
-The top-level `CMakeLists.txt` globs `Cpp/**/*.cpp` (excluding `Cpp/bindings/`)
-into `rocke_core`, with the public ABI headers at `Cpp/include`. Optional
+The top-level `CMakeLists.txt` globs `cpp/**/*.cpp` (excluding `cpp/bindings/`)
+into `rocke_core`, with the public ABI headers at `cpp/include`. Optional
 diagnostic build: add `-DROCKE_SANITIZE=ON` (ASan/UBSan; not for shipping).
 
 ### The `rocke_engine` Python binding (optional, enables the `cpp` backend)
 
 ```bash
-cmake -S "$ROCKE/Cpp/bindings" -B /tmp/rocke_pybind -DCMAKE_BUILD_TYPE=Release \
+cmake -S "$ROCKE/cpp/bindings" -B /tmp/rocke_pybind -DCMAKE_BUILD_TYPE=Release \
   -DROCKE_ENGINE_ARCHIVE=/tmp/rocke/librocke_core.a \
   -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
   -DPYTHON_EXECUTABLE="$(which python)"

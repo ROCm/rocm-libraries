@@ -6,7 +6,7 @@
 Decoding from a long KV cache with a small batch is bandwidth-limited;
 splitting the K dimension across many CTAs (each handling one
 K-segment) and then reducing the per-segment ``(m, l, acc)`` triples
-lifts occupancy to fully saturate the SMs.
+lifts occupancy to fully saturate the CUs.
 
 Two-launch pipeline:
 
@@ -40,8 +40,8 @@ from rocke.helpers.io import (
     store_scalar_from_f32,
     store_vec,
 )
+from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.spec import kernel_name_join
-from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
 from .fmha_arch import validate_fmha_mfma_atom

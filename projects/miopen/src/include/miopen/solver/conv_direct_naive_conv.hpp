@@ -56,7 +56,6 @@ bool IsInputFp32(const miopen::conv::ProblemDescription&);
 bool IsInputFp16(const miopen::conv::ProblemDescription&);
 bool IsInputBfp16(const miopen::conv::ProblemDescription&);
 bool IsInputInt8(const miopen::conv::ProblemDescription&);
-bool IsAccFp64(const miopen::conv::ProblemDescription&);
 bool IsAccInt32(const miopen::conv::ProblemDescription&);
 bool IsOutputFp32(const miopen::conv::ProblemDescription&);
 bool IsOutputFp16(const miopen::conv::ProblemDescription&);

@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "MiopenApi.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <miopen/miopen.h>
 #include <string>
 #include <unordered_set>
 
@@ -382,6 +382,15 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the plan bakes those dims into the MIOpen
+    // descriptors it builds, so decline rather than risk a mismatch (RFC 0008 §4.6).
+    if(opGraph.getGraph().is_override_shape_enabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Batchnorm plan builder does not support override shapes");
+        return false;
+    }
+
     auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {

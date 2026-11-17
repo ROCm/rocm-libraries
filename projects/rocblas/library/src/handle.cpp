@@ -31,12 +31,7 @@
 #include <hipblaslt/hipblaslt.h>
 #endif
 
-#ifdef BUILD_WITH_TENSILE
-#else
-// see TensileHost.cpp for normal rocblas_initialize definition
-// it isn't compiled if not BUILD_WITH_TENSILE so defining here
-extern "C" void rocblas_initialize() {}
-#endif
+// rocblas_initialize is defined in tensile_host.cpp (always compiled).
 
 // forcing early cleanup
 extern "C" void rocblas_shutdown()
@@ -266,7 +261,7 @@ _rocblas_handle::~_rocblas_handle()
     }
 
 #ifdef BUILD_WITH_HIPBLASLT
-    if(hipblasLtHandle.unique())
+    if(hipblasLtHandle.use_count() == 1)
     {
         hipblasStatus_t hipblas_status = hipblasLtDestroy(*hipblasLtHandle);
         if(HIPBLAS_STATUS_SUCCESS != hipblas_status)
@@ -481,6 +476,14 @@ Processor _rocblas_handle::getActiveArch()
     else if(deviceString.find("gfx1153") != std::string::npos)
     {
         return Processor::gfx1153;
+    }
+    else if(deviceString.find("gfx1170") != std::string::npos)
+    {
+        return Processor::gfx1170;
+    }
+    else if(deviceString.find("gfx1171") != std::string::npos)
+    {
+        return Processor::gfx1171;
     }
     else if(deviceString.find("gfx1200") != std::string::npos)
     {

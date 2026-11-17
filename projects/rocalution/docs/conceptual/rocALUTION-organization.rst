@@ -27,7 +27,7 @@ The primary goal is to use this technology whenever possible to decrease the com
 Each technology has its own backend implementation, dealing with platform-specific functionalities such as initialization, synchronization, reservation, etc.
 The backends are currently available for CPU (naive, OpenMP, MPI) and GPU (HIP).
 
-.. note:: 
+.. note::
 
   ot all functions are ported and present on the accelerator backend. This limited functionality is natural, since all operations can't be performed efficiently on the accelerators (e.g. sequential algorithms, I/O from the file system, etc.).
 
@@ -118,7 +118,7 @@ In the ``src/utils`` directory, all commonly used host (de)allocation, timing, m
 Furthermore, the rocALUTION ``GlobalType``, which is the indexing type for global and distributed structures, can be adjusted in ``src/utils/types.hpp``.
 By default, rocALUTION uses 64-bit wide global indexing.
 
-.. note:: 
+.. note::
 
   It is not recommended to switch to 32-bit global indexing.
 

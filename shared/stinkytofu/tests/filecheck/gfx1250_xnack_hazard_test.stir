@@ -1,0 +1,217 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --Gfx1250HazardPass --print-output
+#
+# Gfx1250HazardPass initially implements single-group replay protection
+# that hardware does not insert itself. It must:
+#   * split unsafe SMEM and FLAT groups with s_wait_xcnt 0;
+#   * drain VMEM before the first atomic, but not between atomics;
+#   * drain before forever s_sleep and non-adjacent s_set_vgpr_msb;
+#   * carry a group through a fall-through block-label boundary.
+
+# CHECK-LABEL: @smem_source_clobber
+# CHECK: s_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_load_b32
+st.func @smem_source_clobber() {
+^entry:
+  s4 = "st.s_load_b32"(s[0:1])
+  s0 = "st.s_load_b32"(s[2:3])
+}
+
+# CHECK-LABEL: @flat_source_clobber_across_fallthrough
+# CHECK: flat_load_b32
+# CHECK: ^fallthrough:
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: flat_load_b32
+st.func @flat_source_clobber_across_fallthrough() {
+^entry:
+  v9 = "st.flat_load_b32"(v[0:1], s[16:17])
+  Successors: ^fallthrough
+^fallthrough:
+  v0 = "st.flat_load_b32"(v[2:3], s[16:17])
+}
+
+# CHECK-LABEL: @atomic_run
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NEXT: flat_atomic_dec_u32
+st.func @atomic_run() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+  v5 = "st.flat_atomic_dec_u32"(v[6:7], v8, s[6:7])
+}
+
+# CHECK-LABEL: @forever_sleep_and_msb
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_sleep"(-32768)
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+st.func @forever_sleep_and_msb() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_sleep"(-32768)
+  v10 = "st.buffer_load_b32"(v1)
+  "st.s_set_vgpr_msb"(1)
+  v11 = "st.v_add_f32"(v2, v3)
+}
+
+# CHECK-LABEL: @preserve_existing_xcnt_and_finite_sleep
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NEXT: s_sleep"(127)
+# CHECK-NOT: s_wait_xcnt
+st.func @preserve_existing_xcnt_and_finite_sleep() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_wait_xcnt"(0)
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+  "st.s_sleep"(127)
+}
+
+# Single-group hardware treats TDM as "other", so tensor -> VMEM is a
+# hardware-drained type switch. The pass must not add a redundant XCnt drain.
+# CHECK-LABEL: @single_group_tensor_is_other
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NOT: s_wait_xcnt
+st.func @single_group_tensor_is_other() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+}
+
+# A single-DWORD SMEM load returns all or nothing, so a one-instruction clause
+# may overwrite its own source.
+# CHECK-LABEL: @smem_singleton_self_overlap
+# CHECK: s_load_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @smem_singleton_self_overlap() {
+^entry:
+  s0 = "st.s_load_b32"(s[0:1])
+}
+
+# The same self-overlap needs a drain when an earlier SMEM keeps the clause open.
+# CHECK-LABEL: @smem_multi_op_self_overlap
+# CHECK: s_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_load_b32
+st.func @smem_multi_op_self_overlap() {
+^entry:
+  s8 = "st.s_load_b32"(s[10:11])
+  s2 = "st.s_load_b32"(s[2:3])
+}
+
+# A multi-DWORD SMEM load may complete partially, so it can never overwrite its
+# own source. That is not repairable with a drain and the pass aborts on it;
+# see the death test in unit/asm/Gfx1250HazardPassTest.cpp.
+
+# prefetch needs XCnt drain when a memory group is still outstanding.
+# CHECK-LABEL: @existing_scalar_prefetch
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_prefetch_inst_pc_rel
+st.func @existing_scalar_prefetch() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_prefetch_inst_pc_rel"(0, s0, 0)
+}
+
+# A single drain covers a consecutive prefetch sequence.
+# CHECK-LABEL: @consecutive_scalar_prefetches
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_prefetch_inst_pc_rel
+# CHECK-NEXT: s_prefetch_inst_pc_rel
+st.func @consecutive_scalar_prefetches() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_prefetch_inst_pc_rel"(0, s0, 0)
+  "st.s_prefetch_inst_pc_rel"(4, s0, 0)
+}
+
+# A one-instruction FLAT group may overwrite its own source.
+# CHECK-LABEL: @flat_singleton_self_overlap
+# CHECK: flat_load_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @flat_singleton_self_overlap() {
+^entry:
+  v0 = "st.flat_load_b32"(v[0:1], s[16:17])
+}
+
+# The same self-overlap needs a drain when an earlier FLAT keeps the group open.
+# CHECK-LABEL: @flat_multi_op_self_overlap
+# CHECK: flat_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: flat_load_b32
+st.func @flat_multi_op_self_overlap() {
+^entry:
+  v9 = "st.flat_load_b32"(v[8:9], s[16:17])
+  v2 = "st.flat_load_b32"(v[2:3], s[16:17])
+}
+
+# Rule 4(b): even when the second atomic overwrites a source of the first,
+# the XNACK scoreboard makes a consecutive atomic run safe without a drain.
+# CHECK-LABEL: @consecutive_atomic_source_overlap
+# CHECK: flat_atomic_dec_u32
+# CHECK-NEXT: flat_atomic_dec_u32
+# CHECK-NOT: s_wait_xcnt
+st.func @consecutive_atomic_source_overlap() {
+^entry:
+  v4 = "st.flat_atomic_dec_u32"(v[6:7], v8, s[6:7])
+  v6 = "st.flat_atomic_dec_u32"(v[10:11], v12, s[6:7])
+}
+
+# Ordered Buffer memory permits a later destination to reuse an earlier source.
+# CHECK-LABEL: @buffer_source_reuse
+# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @buffer_source_reuse() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  v0 = "st.buffer_load_b32"(v1)
+}
+
+# A VGPR-MSB setter adjacent to its VMEM user needs no explicit drain.
+# CHECK-LABEL: @adjacent_vgpr_msb_vmem
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+# CHECK-NEXT: buffer_load_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @adjacent_vgpr_msb_vmem() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_set_vgpr_msb"(1)
+  v10 = "st.buffer_load_b32"(v1)
+}
+
+# Single-group hardware drains at both SMEM -> VMEM and VMEM -> SMEM switches.
+# CHECK-LABEL: @smem_vmem_type_switches
+# CHECK: s_load_b32
+# CHECK-NEXT: buffer_load_b32
+# CHECK-NEXT: s_load_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @smem_vmem_type_switches() {
+^entry:
+  s4 = "st.s_load_b32"(s[0:1])
+  v9 = "st.buffer_load_b32"(v0)
+  s5 = "st.s_load_b32"(s[2:3])
+}
+
+# TDM is Other in single-group mode and does not retain replay state for a
+# following non-memory VGPR-MSB change.
+# CHECK-LABEL: @tensor_then_vgpr_msb
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+# CHECK-NEXT: v_readfirstlane_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @tensor_then_vgpr_msb() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.s_set_vgpr_msb"(1)
+  s5 = "st.v_readfirstlane_b32"(v0)
+}

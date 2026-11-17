@@ -113,7 +113,7 @@ struct device_segmented_radix_sort_pairs_benchmark : public primbench::benchmark
         return j;
     }
 
-    void run_benchmark(primbench::state&& state, size_t num_segments, size_t mean_segment_length)
+    void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
         const auto& seed   = state.seed;
@@ -122,134 +122,191 @@ struct device_segmented_radix_sort_pairs_benchmark : public primbench::benchmark
         using key_type    = Key;
         using value_type  = Value;
 
-        primbench::log("Creating offsets");
-        std::vector<offset_type> offsets;
-        offsets.push_back(0);
+        // Collect the (num_segments, mean_segment_length) pairs to actually run
+        std::vector<std::pair<size_t, size_t>> combos;
 
-        primbench::log("Creating gen");
+        if(m_segment_counts.size() == 1)
+        {
+            combos.emplace_back(m_segment_counts[0], m_segment_lengths[0]);
+        }
+        else
+        {
+            constexpr size_t min_size = 300000;
+            constexpr size_t max_size = 33554432;
+
+            for(const auto segment_count : m_segment_counts)
+            {
+                for(const auto segment_length : m_segment_lengths)
+                {
+                    const auto number_of_elements = segment_count * segment_length;
+                    if(number_of_elements < min_size || number_of_elements > max_size)
+                    {
+                        continue;
+                    }
+                    combos.emplace_back(segment_count, segment_length);
+                }
+            }
+        }
+
+        const int num_input_arrays = combos.size();
+
         static constexpr int iseed = 716;
         engine_type          gen(iseed);
 
-        primbench::log("Generating segment_length_dis");
-        std::normal_distribution<double> segment_length_dis(
-            static_cast<double>(mean_segment_length),
-            0.1 * mean_segment_length);
+        // Build offsets + keys + values for every combo up front
+        std::vector<std::vector<offset_type>> offsets_arrays(num_input_arrays);
+        std::vector<std::vector<key_type>>    keys_input_arrays(num_input_arrays);
+        std::vector<std::vector<value_type>>  values_input_arrays(num_input_arrays);
+        std::vector<size_t>                   items_per_run(num_input_arrays);
+        std::vector<size_t>                   segments_counts(num_input_arrays);
+        size_t                                max_items = 0;
 
-        primbench::log("Calculating offsets");
-        size_t offset = 0;
-        for(size_t segment_index = 0; segment_index < num_segments;)
+        for(int i = 0; i < num_input_arrays; ++i)
         {
-            const double segment_length_candidate = std::round(segment_length_dis(gen));
-            if(segment_length_candidate < 0)
+            const size_t num_segments        = combos[i].first;
+            const size_t mean_segment_length = combos[i].second;
+
+            primbench::log("Creating offsets");
+            std::vector<offset_type>& offsets = offsets_arrays[i];
+            offsets.push_back(0);
+
+            primbench::log("Generating segment_length_dis");
+            std::normal_distribution<double> segment_length_dis(
+                static_cast<double>(mean_segment_length),
+                0.1 * mean_segment_length);
+
+            primbench::log("Calculating offsets");
+            size_t offset = 0;
+            for(size_t segment_index = 0; segment_index < num_segments;)
             {
-                continue;
+                const double segment_length_candidate = std::round(segment_length_dis(gen));
+                if(segment_length_candidate < 0)
+                {
+                    continue;
+                }
+                const offset_type segment_length
+                    = static_cast<offset_type>(segment_length_candidate);
+                offset += segment_length;
+                offsets.push_back(offset);
+                ++segment_index;
             }
-            const offset_type segment_length = static_cast<offset_type>(segment_length_candidate);
-            offset += segment_length;
-            offsets.push_back(offset);
-            ++segment_index;
+            const size_t items = offset;
+
+            items_per_run[i]   = items;
+            segments_counts[i] = offsets.size() - 1;
+            max_items          = std::max(max_items, items);
+
+            primbench::log("Generating keys_input");
+            keys_input_arrays[i]
+                = get_random_data<key_type>(items,
+                                            common::generate_limits<key_type>::min(),
+                                            common::generate_limits<key_type>::max(),
+                                            seed);
+
+            primbench::log("Generating values_input");
+            values_input_arrays[i]
+                = get_random_data<value_type>(items,
+                                              common::generate_limits<value_type>::min(),
+                                              common::generate_limits<value_type>::max(),
+                                              seed);
         }
-        const size_t items          = offset;
-        const size_t segments_count = offsets.size() - 1;
 
-        primbench::log("Generating keys_input");
-        std::vector<key_type> keys_input
-            = get_random_data<key_type>(items,
-                                        common::generate_limits<key_type>::min(),
-                                        common::generate_limits<key_type>::max(),
-                                        seed);
+        primbench::log("Creating d_offsets_arrays");
+        std::vector<common::device_ptr<offset_type>> d_offsets_arrays(num_input_arrays);
+        for(int i = 0; i < num_input_arrays; ++i)
+        {
+            d_offsets_arrays[i].store(offsets_arrays[i]);
+        }
 
-        primbench::log("Generating values_input");
-        std::vector<value_type> values_input
-            = get_random_data<value_type>(items,
-                                          common::generate_limits<value_type>::min(),
-                                          common::generate_limits<value_type>::max(),
-                                          seed);
+        primbench::log("Creating d_keys_input_arrays");
+        std::vector<common::device_ptr<key_type>> d_keys_input_arrays(num_input_arrays);
+        for(int i = 0; i < num_input_arrays; ++i)
+        {
+            d_keys_input_arrays[i].store(keys_input_arrays[i]);
+        }
 
-        primbench::log("Creating d_offsets");
-        common::device_ptr<offset_type> d_offsets(offsets);
+        primbench::log("Creating d_values_input_arrays");
+        std::vector<common::device_ptr<value_type>> d_values_input_arrays(num_input_arrays);
+        for(int i = 0; i < num_input_arrays; ++i)
+        {
+            d_values_input_arrays[i].store(values_input_arrays[i]);
+        }
 
-        primbench::log("Creating d_keys_input");
-        common::device_ptr<key_type> d_keys_input(keys_input);
+        // Shared, reused across all runs (sized to the largest)
         primbench::log("Creating d_keys_output");
-        common::device_ptr<key_type> d_keys_output(items);
-
-        primbench::log("Creating d_values_input");
-        common::device_ptr<value_type> d_values_input(values_input);
+        common::device_ptr<key_type> d_keys_output(max_items);
         primbench::log("Creating d_values_output");
-        common::device_ptr<value_type> d_values_output(items);
+        common::device_ptr<value_type> d_values_output(max_items);
 
+        // Single call to segmented_radix_sort_pairs for one combo, with its own storage size.
+        const auto dispatch_input = [&](void*        d_temp_storage,
+                                        size_t&      temp_storage_size_bytes,
+                                        key_type*    d_keys_input,
+                                        value_type*  d_values_input,
+                                        size_t       items,
+                                        size_t       segments_count,
+                                        offset_type* d_offsets)
+        {
+            HIP_CHECK(rocprim::segmented_radix_sort_pairs<Config>(d_temp_storage,
+                                                                  temp_storage_size_bytes,
+                                                                  d_keys_input,
+                                                                  d_keys_output.get(),
+                                                                  d_values_input,
+                                                                  d_values_output.get(),
+                                                                  items,
+                                                                  segments_count,
+                                                                  d_offsets,
+                                                                  d_offsets + 1,
+                                                                  0,
+                                                                  sizeof(key_type) * 8,
+                                                                  stream,
+                                                                  false));
+        };
+
+        // Size each combo independently and track the max required storage.
         primbench::log("Calculating d_temporary_storage size");
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::segmented_radix_sort_pairs<Config>(nullptr,
-                                                              temporary_storage_bytes,
-                                                              d_keys_input.get(),
-                                                              d_keys_output.get(),
-                                                              d_values_input.get(),
-                                                              d_values_output.get(),
-                                                              items,
-                                                              segments_count,
-                                                              d_offsets.get(),
-                                                              d_offsets.get() + 1,
-                                                              0,
-                                                              sizeof(key_type) * 8,
-                                                              stream,
-                                                              false));
+        std::vector<size_t> temp_storage_bytes_per_run(num_input_arrays);
+        size_t              max_temporary_storage_bytes = 0;
+
+        for(int i = 0; i < num_input_arrays; ++i)
+        {
+            size_t temp_storage_size_bytes = 0;
+            dispatch_input(nullptr,
+                           temp_storage_size_bytes,
+                           d_keys_input_arrays[i].get(),
+                           d_values_input_arrays[i].get(),
+                           items_per_run[i],
+                           segments_counts[i],
+                           d_offsets_arrays[i].get());
+
+            temp_storage_bytes_per_run[i] = temp_storage_size_bytes;
+            max_temporary_storage_bytes
+                = std::max(max_temporary_storage_bytes, temp_storage_size_bytes);
+        }
 
         primbench::log("Resizing d_temporary_storage");
-        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+        common::device_ptr<void> d_temporary_storage(max_temporary_storage_bytes);
 
-        state.set_items(items);
-        state.add_reads<key_type>(items);
-        state.add_reads<value_type>(items);
+        const size_t total_items
+            = std::accumulate(items_per_run.begin(), items_per_run.end(), size_t{0});
+        state.set_items(total_items);
+        state.add_reads<key_type>(total_items);
+        state.add_reads<value_type>(total_items);
 
         state.run(
             [&]
             {
-                HIP_CHECK(rocprim::segmented_radix_sort_pairs<Config>(d_temporary_storage.get(),
-                                                                      temporary_storage_bytes,
-                                                                      d_keys_input.get(),
-                                                                      d_keys_output.get(),
-                                                                      d_values_input.get(),
-                                                                      d_values_output.get(),
-                                                                      items,
-                                                                      segments_count,
-                                                                      d_offsets.get(),
-                                                                      d_offsets.get() + 1,
-                                                                      0,
-                                                                      sizeof(key_type) * 8,
-                                                                      stream,
-                                                                      false));
-            });
-    }
-
-    void run(primbench::state& state) override
-    {
-        if(m_segment_counts.size() == 1)
-        {
-            run_benchmark(std::forward<primbench::state>(state),
-                          m_segment_counts[0],
-                          m_segment_lengths[0]);
-            return;
-        }
-
-        constexpr size_t min_size = 300000;
-        constexpr size_t max_size = 33554432;
-
-        // TODO: Replace with KernelTuner-based autotuning that generates one benchmark per segment_count+length combo.
-        for(const auto segment_count : m_segment_counts)
-        {
-            for(const auto segment_length : m_segment_lengths)
-            {
-                const auto number_of_elements = segment_count * segment_length;
-                if(number_of_elements < min_size || number_of_elements > max_size)
+                for(int i = 0; i < num_input_arrays; ++i)
                 {
-                    continue;
+                    dispatch_input(d_temporary_storage.get(),
+                                   temp_storage_bytes_per_run[i],
+                                   d_keys_input_arrays[i].get(),
+                                   d_values_input_arrays[i].get(),
+                                   items_per_run[i],
+                                   segments_counts[i],
+                                   d_offsets_arrays[i].get());
                 }
-
-                run_benchmark(std::forward<primbench::state>(state), segment_count, segment_length);
-            }
-        }
+            });
     }
 
 private:

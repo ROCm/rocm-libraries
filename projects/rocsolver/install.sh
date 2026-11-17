@@ -582,7 +582,7 @@ if [[ -n "${build_with_sparse+x}" ]]; then
 fi
 
 if [[ -n "${architecture+x}" ]]; then
-  cmake_common_options+=("-DAMDGPU_TARGETS=${architecture}")
+  cmake_common_options+=("-DGPU_TARGETS=${architecture}")
 fi
 
 if [[ "${build_sanitizer}" == true ]]; then

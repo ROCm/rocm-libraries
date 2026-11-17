@@ -36,6 +36,17 @@ FOLDER_PATH = os.path.join(_SCRIPT_DIR, "..", "gtest")
 #              (keep the list sorted to min. git conflicts)
 IGNORE_LIST = {
     "binary_tensor_ops.cpp",
+    # bn_activ_infer / bn_fwd_infer instantiate their suites through the
+    # BN_*_INFER_TIERS macro, so the INSTANTIATE_TEST_SUITE_P calls are hidden
+    # behind line continuations the regex cannot parse (same reason as the
+    # *_tensor_ops.cpp entries).
+    "bn_activ_infer.cpp",
+    "bn_fwd_infer.cpp",
+    # gpu_reference_kernel.cpp instantiates its suites through the
+    # DEFINE_REFERENCE_KERNEL_TEST_2D/3D macros, so TEST_P/INSTANTIATE_TEST_SUITE_P
+    # appear with the macro parameter name (e.g. "SUITE_NAME") rather than a real
+    # suite name, which the regex cannot resolve.
+    "gpu_reference_kernel.cpp",
     "graphapi_conv_bias_res_add_activ_fwd.cpp",
     "graphapi_operation_rng.cpp",
     "layout_transpose.cpp",

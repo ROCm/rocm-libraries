@@ -47,7 +47,12 @@
 template <typename T>
 void unit_check_general(int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU);
 
+// Element-wise "approximately equal" check:
+// |hCPU - hGPU| <= max(atol, rtol * |hCPU|)
+//
+// A negative rtol or atol selects that type's built-in default tolerance.
 template <typename T>
-void unit_check_near(int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU);
+void unit_check_near(
+    int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU, double rtol = -1.0, double atol = -1.0);
 
 #endif // UNIT_HPP

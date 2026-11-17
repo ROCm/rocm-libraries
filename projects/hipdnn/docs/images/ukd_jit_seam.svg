@@ -1,0 +1,71 @@
+<svg viewBox="0 0 940 560" width="940" height="560" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="940" height="560" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arrowUkdJit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="470" y="34" text-anchor="middle" font-size="17" font-weight="600" fill="#222">JIT reuses the whole KDP; only a kernel's source swaps</text>
+
+  <!-- KDP reused box -->
+  <rect x="250" y="60" width="440" height="86" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="470" y="82" text-anchor="middle" font-size="13" font-weight="600" fill="#8e5bc4">KDP: reused unchanged</text>
+  <rect x="280" y="98" width="90" height="30" rx="6" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
+  <text x="325" y="118" text-anchor="middle" font-size="12" fill="#222">matchers</text>
+  <rect x="385" y="98" width="170" height="30" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="470" y="118" text-anchor="middle" font-size="12" fill="#222">engine (carries UHD + KMD)</text>
+  <rect x="570" y="98" width="90" height="30" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="615" y="118" text-anchor="middle" font-size="12" fill="#222">dispatch</text>
+
+  <!-- arrow KDP -> UKD -->
+  <line x1="470" y1="146" x2="470" y2="176" stroke="#444" stroke-width="1.5" marker-end="url(#arrowUkdJit)"/>
+
+  <!-- UKD box -->
+  <rect x="285" y="176" width="370" height="104" rx="8" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="470" y="198" text-anchor="middle" font-size="14" font-weight="600" fill="#222">UKD = kernel source + metadata</text>
+
+  <!-- kernel source half (the swappable seam) -->
+  <rect x="301" y="210" width="165" height="58" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="383" y="233" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">kernel source</text>
+  <text x="383" y="251" text-anchor="middle" font-size="10" fill="#555">swaps: AOT or JIT</text>
+
+  <!-- metadata half -->
+  <rect x="474" y="210" width="165" height="58" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="556" y="233" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">metadata</text>
+  <text x="556" y="251" text-anchor="middle" font-size="10" fill="#555">build features</text>
+
+  <!-- Today: AOT sources -->
+  <text x="150" y="330" text-anchor="middle" font-size="12" fill="#555">today: AOT sources</text>
+  <rect x="40" y="345" width="70" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="75" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">kpack</text>
+  <rect x="118" y="345" width="70" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="153" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">hsaco</text>
+  <rect x="196" y="345" width="60" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="226" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">hip</text>
+  <rect x="264" y="345" width="72" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="300" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">rocKE</text>
+
+  <!-- AOT arrow into the source slot -->
+  <path d="M 220 345 C 285 310, 335 288, 372 268" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowUkdJit)"/>
+
+  <!-- provider SDK dashed container -->
+  <rect x="440" y="330" width="470" height="170" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="762" y="352" font-size="12" font-weight="600" fill="#8e5bc4">provider SDK</text>
+
+  <!-- JIT source (future) dashed box -->
+  <rect x="460" y="366" width="430" height="120" rx="8" fill="#ffffff" stroke="#8e5bc4" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="675" y="390" text-anchor="middle" font-size="13" font-weight="600" fill="#8e5bc4">JIT source (future)</text>
+  <text x="675" y="414" text-anchor="middle" font-size="11" fill="#555">custom functions to call, or a JIT definition + system</text>
+  <text x="675" y="434" text-anchor="middle" font-size="11" fill="#555">e.g. rocKE: template spec + builder</text>
+  <text x="675" y="458" text-anchor="middle" font-size="11" fill="#555">metadata becomes the variant space the heuristic ranks</text>
+
+  <!-- JIT dashed arrow into the SAME source slot -->
+  <path d="M 540 366 C 470 320, 430 298, 400 268" fill="none" stroke="#8e5bc4" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrowUkdJit)"/>
+  <text x="360" y="300" text-anchor="middle" font-size="10" fill="#8e5bc4">same source slot</text>
+
+  <!-- Caption -->
+  <text x="470" y="540" text-anchor="middle" font-size="11" fill="#555">The KDP's matchers, engine, and UDD are reused, with the engine's heuristic and metadata schema; only the source swaps AOT to JIT (Section 8.3).</text>
+</svg>

@@ -174,8 +174,10 @@ TEST_F(LegalizationUtilsTest, VCmpXExpandsWhenNoCMPXWritesSGPR) {
 
     std::string cmpMnemonic(cmpInst->getHwInstDesc()->mnemonic);
     std::string movMnemonic(movInst->getHwInstDesc()->mnemonic);
-    EXPECT_NE(cmpMnemonic.find("_cmp_"), std::string::npos) << "Expected v_cmp_* got: " << cmpMnemonic;
-    EXPECT_NE(movMnemonic.find("s_mov"), std::string::npos) << "Expected s_mov_* got: " << movMnemonic;
+    EXPECT_NE(cmpMnemonic.find("_cmp_"), std::string::npos)
+        << "Expected v_cmp_* got: " << cmpMnemonic;
+    EXPECT_NE(movMnemonic.find("s_mov"), std::string::npos)
+        << "Expected s_mov_* got: " << movMnemonic;
 
     // Original v_cmpx removed
     EXPECT_EQ(countByMnemonic("v_cmpx_lt_f32"), 0);
@@ -187,9 +189,10 @@ TEST_F(LegalizationUtilsTest, VCmpXExpandsWhenNoCMPXWritesSGPR) {
 // ---------------------------------------------------------------------------
 
 TEST_F(LegalizationUtilsTest, WaitCntNonGfx1250IsNoOp) {
-    // Only Gfx1250 is registered in this build; pass a synthetic non-1250 archId
-    // to exercise the early-return path without needing a second arch setup.
-    auto nonGfx1250 = static_cast<GfxArchID>(static_cast<uint32_t>(GfxArchID::Gfx1250) + 1);
+    // Pass an archId past the end of the per-build arch list so getArchInfo() returns null and
+    // isGfx125() is false, exercising the early-return path. A small offset from Gfx1250 would now
+    // collide with the Gfx1250v0 stepping (a real gfx12.5 arch), so use an id no build registers.
+    auto nonGfx1250 = static_cast<GfxArchID>(1u << 20);
 
     StinkyInstruction* inst = createInst(GFX::s_waitcnt);
     inst->addModifier<SWaitCntData>(SWaitCntData(/*vlcnt=*/0));
@@ -254,12 +257,12 @@ TEST_F(LegalizationUtilsTest, WaitCntKmcntOnlyEmitsKmcnt) {
 
 TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
     StinkyInstruction* inst = createInst(GFX::ds_load_b192);
-    inst->addDestReg(StinkyRegister("v", 0, 6));   // v[0:5]
-    inst->addSrcReg(StinkyRegister("v", 40, 1));   // addr
+    inst->addDestReg(StinkyRegister("v", 0, 6));  // v[0:5]
+    inst->addSrcReg(StinkyRegister("v", 40, 1));  // addr
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/32));
 
     AsmIRBuilder builder(*bb, arch);
-    auto result = legalizeDSLoadB192(inst, builder, arch, /*hasVgprMsb=*/false);
+    auto result = legalizeDSLoadB192(inst, builder, arch);
 
     ASSERT_NE(result.first, nullptr);
     ASSERT_NE(result.last, nullptr);
@@ -293,12 +296,12 @@ TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
 
 TEST_F(LegalizationUtilsTest, DSStoreB192SplitsIntoB128AndB64) {
     StinkyInstruction* inst = createInst(GFX::ds_store_b192);
-    inst->addSrcReg(StinkyRegister("v", 50, 1));   // addr
-    inst->addSrcReg(StinkyRegister("v", 0, 6));    // data v[0:5]
+    inst->addSrcReg(StinkyRegister("v", 50, 1));  // addr
+    inst->addSrcReg(StinkyRegister("v", 0, 6));   // data v[0:5]
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);
-    auto result = legalizeDSStoreB192(inst, builder, arch, /*hasVgprMsb=*/false);
+    auto result = legalizeDSStoreB192(inst, builder, arch);
 
     ASSERT_NE(result.first, nullptr);
     ASSERT_NE(result.last, nullptr);
@@ -328,12 +331,12 @@ TEST_F(LegalizationUtilsTest, DSStoreB256SplitsIntoTwoB128) {
     // ds_store_b256 is not registered as a GFX opcode on gfx1250; use ds_store_b128
     // as a surrogate — legalizeDSStoreB256 only requires 0 dests and 2 srcs.
     StinkyInstruction* inst = createInst(GFX::ds_store_b128);
-    inst->addSrcReg(StinkyRegister("v", 60, 1));   // addr
-    inst->addSrcReg(StinkyRegister("v", 0, 8));    // data v[0:7]
+    inst->addSrcReg(StinkyRegister("v", 60, 1));  // addr
+    inst->addSrcReg(StinkyRegister("v", 0, 8));   // data v[0:7]
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);
-    auto result = legalizeDSStoreB256(inst, builder, arch, /*hasVgprMsb=*/false);
+    auto result = legalizeDSStoreB256(inst, builder, arch);
 
     ASSERT_NE(result.first, nullptr);
     ASSERT_NE(result.last, nullptr);
@@ -420,4 +423,109 @@ TEST_F(LegalizationUtilsTest, ImplicitRegistersNotAddedTwice) {
         << "Should not add duplicate implicit src registers";
     EXPECT_EQ(static_cast<int>(inst->getDestRegs().size()), dstsAfterFirst)
         << "Should not add duplicate implicit dst registers";
+}
+
+// ---------------------------------------------------------------------------
+// legalizeReadWriteSources
+//
+// A narrow destination reads itself only where op_sel names the half it writes,
+// so every case here says whether the instruction carries that position.
+// ---------------------------------------------------------------------------
+
+/// A two-source VOP3's op_sel is [src0, src1, dst], so \p dstHalf is the third.
+static StinkyInstruction* withDestHalf(StinkyInstruction* inst, int dstHalf) {
+    inst->addModifier<VOP3PModifiers>(VOP3PModifiers({0, 0, dstHalf}));
+    return inst;
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceAddedForHalfPack) {
+    // The high convert of an FP8 pack keeps the low half of v10, so it reads v10.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_fp8_f32), 1);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    // Appended last, past the printed sources, so the emitter never prints it.
+    ASSERT_EQ(inst->getSrcRegs().size(), 3u);
+    EXPECT_TRUE(inst->getSrcRegs()[2] == StinkyRegister("v", 10, 1));
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceAddedForLowHalfPack) {
+    // The low convert keeps the high half, so it reads its destination too.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_bf8_f32), 0);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    ASSERT_EQ(inst->getSrcRegs().size(), 3u);
+    EXPECT_TRUE(inst->getSrcRegs()[2] == StinkyRegister("v", 10, 1));
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceNotDuplicatedWhenAlreadyPresent) {
+    // The producer's in-place pack already names the destination as src0.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_fp8_f32), 1);
+    inst->addDestReg(StinkyRegister("v", 4, 1));
+    inst->addSrcReg(StinkyRegister("v", 4, 1));
+    inst->addSrcReg(StinkyRegister("v", 5, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourcesLeavesFullWidthWriteAlone) {
+    // v_cvt_pk_f16_f32 replaces its whole destination, so a named half says
+    // nothing about what survives and it reads nothing back.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_f16_f32), 1);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourcesLeavesNarrowWriteWithNoPositionAlone) {
+    // Without op_sel nothing says which half the pack lands in, and a producer
+    // that does not name one is not building a register out of two writes.
+    StinkyInstruction* inst = createInst(GFX::v_cvt_pk_fp8_f32);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourcesLeavesF16ArithmeticAlone) {
+    // v_add_f16 also declares a 16-bit destination, and Tensile uses its result
+    // as a whole register. Reading the other half back would tie a register in
+    // every f16 kernel for a value nothing wants.
+    StinkyInstruction* inst = createInst(GFX::v_add_f16);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceAddedForTableReadWriteWithoutModifiers) {
+    // s_cmov_b32 keeps its whole destination on the untaken path, which is a
+    // property of the opcode, so the table says so and no modifier is needed.
+    StinkyInstruction* inst = createInst(GFX::s_cmov_b32);
+    inst->addDestReg(StinkyRegister("s", 3, 1));
+    inst->addSrcReg(StinkyRegister("s", 4, 1));
+
+    legalizeReadWriteSources(inst);
+
+    ASSERT_EQ(inst->getSrcRegs().size(), 2u);
+    EXPECT_TRUE(inst->getSrcRegs()[1] == StinkyRegister("s", 3, 1));
 }

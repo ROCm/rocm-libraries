@@ -29,13 +29,13 @@ Tests:
 - name: sddmm_csr_bad_arg
   category: pre_checkin
   function: sddmm_csr_bad_arg
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: sddmm_csr
   category: quick
   function: sddmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [84]
@@ -54,7 +54,7 @@ Tests:
 - name: sddmm_csr
   category: pre_checkin
   function: sddmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions
   M: 1
   N: 1

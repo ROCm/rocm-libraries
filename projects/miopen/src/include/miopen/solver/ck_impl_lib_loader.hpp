@@ -43,7 +43,8 @@ enum class CKSolverType
     FusedGrpActiv        = 8,
     FusedGrpBiasActiv    = 9,
     DepthwiseFwd         = 10,
-    Count                = 11
+    DepthwiseBwdData     = 11,
+    Count                = 12
 };
 
 /// Query the HIP runtime for the current device's architecture name.

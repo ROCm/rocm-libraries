@@ -36,25 +36,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class BlockPreconditioner
-  * \brief Block-Preconditioner
-  * \details
-  * When handling vector fields, typically one can try to use different preconditioners
-  * and/or solvers for the different blocks. For such problems, the library provides a
-  * block-type preconditioner. This preconditioner builds the following block-type matrix
-  * \f[
-  *   P = \begin{pmatrix}
-  *         A_{d} & 0     & . & 0     \\
-  *         B_{1} & B_{d} & . & 0     \\
-  *         .     & .     & . & .     \\
-  *         Z_{1} & Z_{2} & . & Z_{d}
-  *       \end{pmatrix}
-  * \f]
-  * The solution of \f$P\f$ can be performed in two ways. It can be solved by
-  * block-lower-triangular sweeps with inversion of the blocks \f$A_{d} \ldots Z_{d}\f$
-  * and with a multiplication of the corresponding blocks. This is set by SetLSolver()
-  * (which is the default solution scheme). Alternatively, it can be used only with an
-  * inverse of the diagonal \f$A_{d} \ldots Z_{d}\f$ (Block-Jacobi type) by using
-  * SetDiagonalSolver().
+  * \brief Block preconditioner for vector-field problems.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

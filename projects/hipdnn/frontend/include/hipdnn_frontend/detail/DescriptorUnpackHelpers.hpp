@@ -474,6 +474,22 @@ template <typename T>
         tensor->set_stride(strides);
     }
 
+    // Restore the runtime pass-by-value flag. Must be set AFTER any set_value()
+    // above, which unconditionally forces the flag to true (it can't tell compile-time-
+    // constant from runtime-with-default). Restoring it here after the fact applies the
+    // actual wire value for both states; for a pure user-supplied tensor IS_BY_VALUE
+    // is false (no value read), and only the flag is restored here.
+    // A pre-1.2.0 backend does not recognize the extension attribute and
+    // reports NOT_SUPPORTED; treat that (and any absent value) as false rather
+    // than surfacing an error, symmetric with the guarded send in lowering.
+    const bool isRuntime
+        = getNullableAttrScalar<bool>(tensorDesc,
+                                      HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                      HIPDNN_TYPE_BOOLEAN,
+                                      "tensor is_runtime_pass_by_value")
+              .value_or(false);
+    tensor->set_is_pass_by_value(isRuntime);
+
     return {};
 }
 

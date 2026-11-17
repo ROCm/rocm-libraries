@@ -42,6 +42,10 @@ The code is open source and hosted at `<https://github.com/ROCm/rocm-libraries/t
     * :ref:`precision-support`
     * :ref:`nomenclature`
 
+  .. grid-item-card:: How to
+
+    * :ref:`running-benchmarks`
+
   .. grid-item-card:: Contribution
 
     * :ref:`Programmer's guide <programmers-guide>`

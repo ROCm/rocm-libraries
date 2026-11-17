@@ -141,7 +141,7 @@ bool BnFwdTrainingSpatial::IsApplicable(
     if(!bn_problem.Is2D())
         return false;
 
-    if(!IsOCLFwdTrainTypeValid(bn_problem))
+    if(!IsFwdTrainTypeValid(bn_problem))
         return false;
 
     int activ_mode = bn_problem.GetActivationDesc().GetMode();
@@ -317,6 +317,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
             {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
+            {"MIO_BN_GFX117X", (StartsWith(handle.GetDeviceName(), "gfx117") ? "1" : "0")},
             {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
             {"MIO_BN_GFX125X", (StartsWith(handle.GetDeviceName(), "gfx125") ? "1" : "0")},
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},

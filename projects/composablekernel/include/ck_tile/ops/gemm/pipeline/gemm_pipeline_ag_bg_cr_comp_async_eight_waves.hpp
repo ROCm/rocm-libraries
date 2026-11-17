@@ -17,9 +17,11 @@ namespace ck_tile {
  * skipping the intermediate loading into pipeline registers.
  */
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompAsyncEightWavesPolicy>
-struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCompV3<Problem>
+struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCompV3<Problem, true>
 {
-    using Base             = BaseGemmPipelineAgBgCrCompV3<Problem>;
+    // The dedicated ping/pong implementation uses the five eight-wave tail cases
+    // on both wave32 and wave64, independently of comp_v3's wave32 schedule.
+    using Base             = BaseGemmPipelineAgBgCrCompV3<Problem, true>;
     using PipelineImplBase = GemmPipelineAgBgCrEightWavesImplBase<Problem, Policy>;
 
     using AsDataType     = remove_cvref_t<typename Problem::AsDataTypeTuple>;
@@ -196,12 +198,15 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
             // Hot loop scheduler
             // ------------------
             auto hot_loop_scheduler = [&]() {
-                __builtin_amdgcn_sched_group_barrier(0x008, MIterPerWarp, 0); // MFMA
-                s_waitcnt_lgkm<4>();
-                __builtin_amdgcn_sched_group_barrier(0x004, 1, 0); // lgkmcnt / SALU
-                static_for<0, MFMA_INST - MIterPerWarp, 1>{}([&](auto) {
-                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
-                });
+                if constexpr(IsScaledGemm)
+                {
+                    __builtin_amdgcn_sched_group_barrier(0x008, MIterPerWarp, 0); // MFMA
+                    s_waitcnt_lgkm<4>();
+                    __builtin_amdgcn_sched_group_barrier(0x004, 1, 0); // lgkmcnt / SALU
+                    static_for<0, MFMA_INST - MIterPerWarp, 1>{}([&](auto) {
+                        __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    });
+                }
                 __builtin_amdgcn_sched_barrier(0);
             };
 
@@ -298,6 +303,31 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
         };
 
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+    }
+
+    // Quant kernel entry point. A/B are not tuples and HasHotLoop and TailNum are part of the
+    // Problem
+    template <typename ADramBlockWindowTmp,
+              typename BDramBlockWindowTmp,
+              typename std::enable_if_t<!is_detected<is_tuple, ADramBlockWindowTmp>::value &&
+                                            !is_detected<is_tuple, BDramBlockWindowTmp>::value,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const BDramBlockWindowTmp& b_dram_block_window_tmp,
+                                   index_t num_loop,
+                                   void* p_smem) const
+    {
+        using NullTileWindowType =
+            decltype(make_null_tile_window(make_tuple(number<0>{}, number<0>{})));
+        return PipelineImpl<Scheduler>{}.template operator()<Problem::HasHotLoop, Problem::TailNum>(
+            a_dram_block_window_tmp,
+            ck_tile::element_wise::PassThrough{},
+            b_dram_block_window_tmp,
+            ck_tile::element_wise::PassThrough{},
+            NullTileWindowType{},
+            NullTileWindowType{},
+            num_loop,
+            p_smem);
     }
 };
 

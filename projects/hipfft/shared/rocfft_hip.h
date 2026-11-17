@@ -62,6 +62,15 @@ public:
         return count;
     }
 
+    static int current_device()
+    {
+        int        currentDevice = hipInvalidDeviceId;
+        const auto ret           = hipGetDevice(&currentDevice);
+        if(ret != hipSuccess)
+            throw hip_runtime_error("failed to get HIP device", ret);
+        return currentDevice;
+    }
+
     rocfft_scoped_device(int device)
     {
         auto ret = hipGetDevice(&orig_device);

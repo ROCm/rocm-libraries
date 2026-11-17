@@ -23,8 +23,10 @@ subtrees:
     - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand/python/rocrand/examples
       title: Examples
 
-  - caption: API reference
+  - caption: Reference
     entries:
+    - url: https://rocm.docs.amd.com/projects/primbench/en/latest
+      title: Benchmarking with Primbench
     - file: api-reference/data-type-support
     - file: api-reference/cpp-api
     - file: api-reference/python-api

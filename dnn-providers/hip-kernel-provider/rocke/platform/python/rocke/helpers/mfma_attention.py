@@ -1,0 +1,988 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""MFMA-tiled FMHA forward inner-body (production attention loop).
+
+Replaces the warp-distributed scalar FMHA body
+(:mod:`kernels.common._fmha_warp_body`) with an MFMA-driven QK→
+softmax→PV pipeline. One wave64 warp processes ``BLOCK_M = 16`` Q
+rows per K-tile, ``BLOCK_K = 16`` K positions per iter. The MFMA
+atom is ``mfma_f32_16x16x16_f16`` (or ``mfma_f32_16x16x32_f16`` for
+the K-packed CDNA3 path). The QK + PV chain delivers 64 FLOPS /
+cycle / lane vs the scalar inner's 2 FLOPS / cycle / lane.
+
+What this helper does:
+
+* **Q pre-load**: ``head_size / atom.k`` MFMA atom slabs of Q rows
+  pre-loaded into per-lane f16 registers (no LDS staging for Q;
+  it's constant over the K-loop so register-only is optimal).
+* **K-tile loop** (``seqlen_k / BLOCK_K`` iterations):
+
+  1. Load K tile into per-lane f16 registers.
+  2. **QK MFMA chain**: ``head_size / atom.k`` MFMA invocations
+     accumulating into a per-lane ``<4 x f32>`` score tile.
+  3. Apply ``scale_log2`` and the spec's mask (causal / sliding
+     window) via the per-row position check.
+  4. **Per-row online softmax**: 16-lane butterfly reduce to get
+     the row max, update ``m / l`` state, compute ``p = exp2(s -
+     m_new)`` per row, rescale the previously-accumulated PV
+     contribution by ``alpha = exp2(m_prev - m_new)``.
+  5. **P operand staging**: cast f32 ``p`` to f16 and re-route via
+     LDS so the PV MFMA gets it in the A-operand lane layout.
+  6. **Load V tile** into per-lane f16 registers.
+  7. **PV MFMA chain**: ``head_size / atom.n`` MFMA invocations
+     accumulating into the per-lane f32 output.
+
+* **Epilogue**: divide acc by ``l`` (per row), cast f32→f16, write
+  to ``O`` in the atom's per-lane output layout.
+
+What it leaves to the caller:
+
+* Q / K / V / O global pointer & stride arithmetic (the kernel
+  builder supplies these via callbacks).
+* The grid layout (``q_tile_idx`` axis -- the caller's grid puts a
+  CTA per ``(q_tile, head, batch)`` triple, where each q_tile
+  spans ``BLOCK_M`` Q rows).
+* The mask configuration (passed as a ``mask_mode`` string + a
+  per-row query position callback).
+
+The helper assumes ``head_size`` is a multiple of ``atom.k`` (16 for
+the 16x16x16 atom, 32 for the K-packed 16x16x32 atom). All standard
+head sizes (64, 128, 256) qualify.
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Optional
+
+from ..core.ir import F16, BF16, IRBuilder, Value
+from .atoms import MfmaAtom
+from .attention_fwd_ext import AttnFwdExt, emit_rows_epilogue, last_index, score_stage
+from .attention import (
+    apply_attention_mask,
+    safe_inv_l,
+)
+from ._attention_shared import (  # noqa: F401 - re-exported private names
+    _SOFTMAX_ROW_REDUCE_DIST,
+    _SOFTMAX_ROW_REDUCE_ENC,
+    MFMA_ATTN_BLOCK_K,
+    _ir_type_for_dtype,
+    _softmax_row_reduce,
+)
+from .wmma_attention import (  # noqa: F401 - re-exported from the WMMA module
+    _WMMA_ATTN_OP_ID,
+    _wmma_attention_fwd_inner_body,
+    _wmma_attn_op_id,
+)
+
+
+__all__ = [
+    "MFMA_ATTN_BLOCK_M",
+    "MFMA_ATTN_BLOCK_K",
+    "mfma_attention_fwd_inner_body",
+]
+
+
+MFMA_ATTN_BLOCK_M = 16  # Q rows per CTA per K-tile
+_WAVE = 64
+
+
+# Map MfmaAtom.dtype_in -> the catalog dtype key consumed by
+# ``ArchTarget.mma`` (which normalises through ``normalize_dtype``).
+_ATOM_DTYPE_TO_CATALOG = {
+    "f16": "f16",
+    "fp16": "f16",
+    "bf16": "bf16",
+    "fp8e4m3": "fp8",
+    "bf8e5m2": "bf8",
+}
+
+
+def _validate_attention_atom(atom: "MfmaAtom", arch: str) -> None:
+    """Reject an attention MFMA atom that is not in ``arch``'s catalog.
+
+    Sources the legal atom set from :class:`rocke.core.arch.ArchTarget`
+    (the SSOT in ``core/arch/data/arch_specs.json``) so the QK/PV atom
+    selected by this helper is guaranteed to exist on the target before
+    it reaches comgr. On the default ``arch="gfx950"`` every atom this
+    helper can select is in the catalog, so this is a pure guard with no
+    effect on the emitted IR.
+    """
+    from ..core.arch import ArchTarget
+
+    cat_dtype = _ATOM_DTYPE_TO_CATALOG.get(atom.dtype_in, atom.dtype_in)
+    target = ArchTarget.from_gfx(arch)
+    if not target.mma.has_shape(
+        a_dtype=cat_dtype,
+        b_dtype=cat_dtype,
+        c_dtype="fp32",
+        m=atom.m,
+        n=atom.n,
+        k=atom.k,
+    ):
+        raise ValueError(
+            f"mfma_attention: atom {atom.dtype_in} "
+            f"{atom.m}x{atom.n}x{atom.k} (op_id {atom.name}) is not in the "
+            f"{arch} MMA catalog; this kernel config is not legal on {arch}"
+        )
+
+
+def _load_kv_dequant_packed(
+    b: IRBuilder,
+    *,
+    src: Value,
+    addr: Value,
+    n_elems: int,
+    kv_dtype_eff: str,
+    kv_dtype_ir,
+    out_dtype_ir,
+) -> Value:
+    """Packed FP8 / BF8 K (or V) load with packed dequant.
+
+    This is the P24 hoist: instead of issuing ``n_elems`` scalar
+    ``global_load`` + ``cvt_fp8_to_f32`` calls (the original shape),
+    issue ONE vector ``global_load_vN(.., n_elems)`` and dequant
+    via ``cvt_pk_f32_fp8x4`` / ``cvt_pk_f32_bf8x4`` (one packed cvt
+    per 4 elements). Then fptrunc to ``out_dtype_ir`` element-wise
+    via :meth:`IRBuilder.vec_cast_f32_to`.
+
+    For the standard ``a_per_lane = 4`` (f16-fallback fp8 path) this
+    halves the vmem transactions and replaces 4 scalar cvts with 1
+    packed cvt. For ``a_per_lane = 8`` (the future native fp8 atom
+    path, P26) it cuts 8x → 1x vmem and 8x → 2x cvts.
+
+    ``kv_dtype_eff`` is the canonical element name (``"fp8e4m3"`` /
+    ``"bf8e5m2"``); ``kv_dtype_ir`` is the matching IR type;
+    ``out_dtype_ir`` is the f16 / bf16 the MFMA atom consumes.
+    """
+    if n_elems % 4 != 0 or n_elems == 0:
+        # Fall back to scalar dequant for non-multiples of 4. This
+        # path only fires on adversarial atoms; the standard atoms
+        # all use a_per_lane in {4, 8}.
+        out = b.zero_vec(out_dtype_ir, n_elems)
+        for j in range(n_elems):
+            raw = b.global_load(src, b.add(addr, b.const_i32(j)), kv_dtype_ir, align=1)
+            f32_v = (
+                b.cvt_fp8_to_f32(raw)
+                if kv_dtype_eff == "fp8e4m3"
+                else b.cvt_bf8_to_f32(raw)
+            )
+            out = b.vec_insert(out, b.cast_f32_to(f32_v, out_dtype_ir), j)
+        return out
+
+    # One vmem transaction for the whole chunk.
+    pk_vec = b.global_load_vN(src, addr, kv_dtype_ir, n_elems, align=n_elems)
+    # Split into <4 x byte> halves, dequant each via the packed cvt,
+    # concat, then fptrunc the <n_elems x f32> to <n_elems x f16/bf16>.
+    f32_parts = []
+    for grp in range(n_elems // 4):
+        # Build a <4 x kv_dtype_ir> vector from positions
+        # [grp*4 .. grp*4 + 3] of the loaded byte vector.
+        chunk = b.zero_vec(kv_dtype_ir, 4)
+        for j in range(4):
+            scalar = b.vec_extract(pk_vec, grp * 4 + j)
+            chunk = b.vec_insert(chunk, scalar, j)
+        if kv_dtype_eff == "fp8e4m3":
+            f32_chunk = b.cvt_pk_f32_fp8x4(chunk)
+        else:
+            f32_chunk = b.cvt_pk_f32_bf8x4(chunk)
+        f32_parts.append(f32_chunk)
+    if len(f32_parts) == 1:
+        f32_full = f32_parts[0]
+    else:
+        f32_full = f32_parts[0]
+        for next_part in f32_parts[1:]:
+            f32_full = b.vec_concat(f32_full, next_part)
+    return b.vec_cast_f32_to(f32_full, out_dtype_ir)
+
+
+def mfma_attention_fwd_inner_body(
+    b: IRBuilder,
+    *,
+    Q: Value,
+    K: Value,
+    V: Value,
+    O: Value,  # noqa: E741 - standard attention notation (Q,K,V,O)
+    head_size: int,
+    seqlen_k: Value,
+    q_tile_base: Value,
+    head_idx: Value,
+    kv_head_idx: Value,
+    q_pos_base: Optional[Value] = None,
+    stride_q_token: Value,
+    stride_q_head: Value,
+    stride_k_token: Value,
+    stride_k_head: Value,
+    stride_v_token: Value,
+    stride_v_head: Value,
+    stride_o_token: Value,
+    stride_o_head: Value,
+    scale_log2: Value,
+    dtype: str = "f16",
+    mask_mode: str = "none",
+    sliding_window: int = 0,
+    causal_ctx_offset: Optional[Value] = None,
+    k_token_offset_elems: Optional[Value] = None,
+    v_token_offset_elems: Optional[Value] = None,
+    k_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]] = None,
+    v_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]] = None,
+    k_tile_start: Optional[Value] = None,
+    k_tile_stop: Optional[Value] = None,
+    extra_score_transform: Optional[
+        Callable[[IRBuilder, Value, Value, int, Value, Value], Value]
+    ] = None,
+    extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
+    extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
+    k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]] = None,
+    kv_dtype: Optional[str] = None,
+    v_scale: Optional[Value] = None,
+    use_wider_atom: bool = False,
+    native_fp8_path: bool = False,
+    use_async_kv: bool = False,
+    codebook_ptr: Optional[Value] = None,
+    wmma_v_lds_stage: bool = False,
+    arch: str = "gfx950",
+    mask_neg_inf: Optional[Value] = None,
+    wmma_seqlen_q: Optional[Value] = None,
+    wmma_kv_tail: bool = False,
+    sink_log2: Optional[Value] = None,
+    k_scale: Optional[Value] = None,
+    wmma_value_tile_size: int = 0,
+    wmma_value_offset: Optional[Value] = None,
+    wmma_v_head_size: int = 0,
+    wmma_v_head_idx: Optional[Value] = None,
+    wmma_head_dim_q: Optional[Value] = None,
+    wmma_head_dim_v: Optional[Value] = None,
+    wmma_k_rsrc: Optional[Value] = None,
+    wmma_v_rsrc: Optional[Value] = None,
+    lse: Optional[Value] = None,
+    write_lse: Optional[Value] = None,
+    stride_lse_token: Optional[Value] = None,
+    stride_lse_head: Optional[Value] = None,
+    ext: Optional[AttnFwdExt] = None,
+) -> None:
+    """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
+
+    The kernel must launch with ``block_size = 64`` (one wave64 warp
+    per CTA). The CTA processes ``BLOCK_M = 16`` Q rows starting at
+    ``q_tile_base``, accumulating attention from the full K span
+    (``seqlen_k`` positions) in ``seqlen_k / BLOCK_K`` K-tiles.
+
+    ``causal_ctx_offset`` (when ``mask_mode == "causal"``) is the
+    offset added to each row's local position to get its
+    causal-mask threshold (``k_idx <= q_pos + offset``). For
+    self-attention pass ``b.const_i32(0)``; for cross-attention pass
+    the cache length.
+
+    ``mask_neg_inf`` supplies true negative infinity for masked scores and the
+    initial row maximum. Empty rows use a zero exponential shift, avoiding
+    inf-inf without excluding large finite negative logits.
+
+    ``sink_log2`` is an optional always-visible logit with no value vector.
+    It initializes the row maximum to that logit and denominator to one.
+
+    ``wmma_seqlen_q`` bounds query loads and output stores on wave32.
+    ``wmma_kv_tail`` includes and masks a final partial KV tile. Both default
+    to the aligned path; enabling either on a non-wave32 target is rejected.
+    ``wmma_value_tile_size`` and ``wmma_value_offset`` optionally select a
+    contiguous PV/output-column tile; QK still traverses the full head size.
+    ``wmma_v_head_size`` (default 0 = ``head_size``) sets a V/output head width
+    that differs from the Q/K ``head_size``; wave32 targets only.
+    ``wmma_v_head_idx`` (default ``kv_head_idx``) addresses V heads separately
+    from K heads. ``wmma_head_dim_q`` / ``wmma_head_dim_v`` are optional runtime
+    i32 widths (multiples of 16, at least 16) within the compiled ``head_size``
+    / V head: Q and K tiles past ``wmma_head_dim_q`` read zeros, and V/output
+    columns past ``wmma_head_dim_v`` are never stored. Both are given together;
+    wave32 targets only, without output-column tiling.
+    Q always reads its dead tiles at a clamped offset and zeroes them. K and V
+    take one of two forms. With ``wmma_k_rsrc`` / ``wmma_v_rsrc`` (bounded
+    buffer resources over this batch's K / V, used for dense 16-bit KV), every
+    tile is a constant byte offset from one per-row base, so dead tiles cost
+    no extra addressing: bytes past the extent read as zero, dead K tiles are
+    zeroed (in-bounds neighbour data may be non-finite), and dead V columns
+    only feed accumulators that are never stored. Without them (ragged, paged
+    or FP8 KV), dead K/V tiles read at clamped in-bounds offsets instead.
+    Either resource requires the dense addressing (no row callbacks), 16-bit
+    KV storage and runtime head widths.
+    ``lse`` is an optional FP32 output with runtime ``write_lse`` gating and
+    token/head strides; it is currently supported by the wave32 path.
+
+    ``k_token_offset_elems`` / ``v_token_offset_elems`` are added to
+    the K / V row base addresses (for varlen / paged-KV layouts).
+
+    ``k_row_base_fn`` / ``v_row_base_fn``: callbacks
+    ``(b, k_row_idx) -> i32`` returning the linear element offset
+    for one K / V row. Overrides the default dense addressing
+    (``k_row_idx * stride + head_offset + token_offset``). Used by
+    the paged-KV kernel where each ``k_row_idx`` indirects through
+    a ``block_table`` to a physical block.
+
+    ``k_tile_start`` / ``k_tile_stop``: when set, the K-tile loop
+    runs in ``[k_tile_start, k_tile_stop)`` instead of ``[0,
+    seqlen_k / BLOCK_K)``. Used by the split-KV decode segment
+    kernel so a single CTA handles one K segment.
+
+    ``extra_score_transform``: callback
+    ``(b, score_log2, k_tile_idx, row_in_atom, query_pos, key_pos) -> score_log2``
+    after QK scaling and before masks. The positions are the same coordinates
+    used by masking; existing per-tile scale callbacks can ignore them.
+
+    ``extra_mask_predicate``: callback ``(b, k_tile_idx) -> i1``
+    returning a per-K-tile keep flag. When false, the whole K-tile
+    is skipped (no MFMA, no V load, no PV). Used by block-sparse
+    (jenga / VSA) attention to short-circuit non-attended K-blocks.
+
+    ``kv_dtype``: K/V storage dtype when it differs from Q's ``dtype``.
+    The CDNA path uses native conversion on load before MFMA. The WMMA path
+    supports OCP ``fp8e4m3`` storage through software byte decoding, then casts
+    each operand to the selected FP16/BF16 Q dtype.
+
+    ``k_scale`` / ``v_scale``: WMMA FP8 storage requires both FP32 scales and
+    applies them after decoding, before the operand casts. Other paths keep
+    the existing optional V-scale epilogue multiply; their callers fold K
+    scale into ``scale_log2`` instead of passing ``k_scale``.
+
+    ``lse`` optionally receives FP32 ``log(sum(exp(scores)))`` in natural-log
+    units. ``write_lse`` is a runtime i32 gate; the two LSE strides are in
+    elements. A value-tiled caller may share one LSE pointer across output CTAs:
+    only the zero value tile writes each row.
+    """
+    if head_size % MFMA_ATTN_BLOCK_M != 0:
+        raise ValueError(
+            f"mfma_attention head_size {head_size} must be a multiple of "
+            f"{MFMA_ATTN_BLOCK_M}"
+        )
+    if dtype not in ("f16", "fp16", "bf16"):
+        raise ValueError(f"mfma_attention dtype must be f16/bf16, got {dtype!r}")
+
+    # Q dtype is the activation dtype; K / V dtype can be fp8e4m3 /
+    # bf8e5m2 (when ``kv_dtype`` is set). The QK MFMA atom picks
+    # ``f16 ⊗ f16 → f32``, ``bf16 ⊗ bf16 → f32`` (gfx940+ via
+    # ``mfma_f32_16x16x16_bf16``) or ``fp8 ⊗ fp8 → f32`` based on K/V
+    # dtype.
+    #
+    # P25: ``use_wider_atom=True`` swaps the 16x16x32 fp8 / bf8 atom
+    # for the 32x32x16 hero. The softmax row-reduce branch in
+    # ``helpers/attention.py`` already exposes ``warp_xor_reduce_*_32lane``
+    # for 32-lane rows; the call site is responsible for matching its
+    # row-reduce stage count to the atom's lane layout. For the f16 /
+    # bf16 path this flag is a no-op (the 16x16x16 atom is already
+    # the canonical small-tile shape).
+    if kv_dtype is None or kv_dtype == dtype:
+        if dtype == "bf16":
+            atom = MfmaAtom.bf16_16x16x16()
+        else:
+            atom = MfmaAtom.f16_16x16x16()
+        kv_dtype_eff = dtype
+    elif kv_dtype == "fp8e4m3":
+        atom = MfmaAtom.fp8_32x32x16() if use_wider_atom else MfmaAtom.fp8_16x16x32()
+        kv_dtype_eff = "fp8e4m3"
+    elif kv_dtype == "bf8e5m2":
+        atom = MfmaAtom.bf8_32x32x16() if use_wider_atom else MfmaAtom.bf8_16x16x32()
+        kv_dtype_eff = "bf8e5m2"
+    else:
+        raise ValueError(
+            f"mfma_attention: unsupported kv_dtype {kv_dtype!r}; "
+            "expected None / 'f16' / 'fp8e4m3' / 'bf8e5m2'"
+        )
+    if head_size % atom.k != 0:
+        raise ValueError(
+            f"head_size {head_size} must be a multiple of atom.k "
+            f"{atom.k} for the selected atom"
+        )
+
+    # The fp8 KV path requires Q and K to share the same MFMA-input
+    # dtype, so when ``kv_dtype`` is fp8/bf8, the kernel is responsible
+    # for pre-casting Q to that dtype before this helper runs. The
+    # helper itself uses ``kv_dtype_eff`` for both operands.
+    dtype_ir = _ir_type_for_dtype(dtype if kv_dtype_eff == dtype else "f16")
+    kv_dtype_ir = (
+        dtype_ir
+        if kv_dtype_eff == dtype
+        else (
+            F16
+            if kv_dtype_eff in ("f16", "fp16")
+            else (BF16 if kv_dtype_eff == "bf16" else dtype_ir)
+        )
+    )
+    # P26: ``native_fp8_path=True`` keeps the fp8 atom selected above
+    # and skips the f16 fallback dequant chain — Q must be pre-cast to
+    # fp8 outside this helper, and the QK MFMA runs natively
+    # ``mfma_f32_16x16x32_fp8``. P also gets quantised to fp8 inside
+    # the K-loop via ``cvt_pk_fp8_f32x4`` (the cvt is already in IR).
+    # When ``native_fp8_path=False`` (default), we dequantise K/V on
+    # load and run the f16 MFMA — slower but smaller code.
+    from ..core.ir import BF8E5M2, FP8E4M3
+
+    if kv_dtype_eff != dtype and not native_fp8_path:
+        # Fall back to the f16 atom; we'll dequantise K/V on load.
+        atom = MfmaAtom.f16_16x16x16()
+        dtype_ir = F16
+        kv_dtype_ir = FP8E4M3 if kv_dtype_eff == "fp8e4m3" else BF8E5M2
+    elif kv_dtype_eff != dtype and native_fp8_path:
+        # Keep the fp8 atom; the input dtype must be fp8 for both
+        # operands. Caller is responsible for the Q pre-cast; we set
+        # ``dtype_ir`` to the fp8 IR type so the load path issues
+        # fp8 vmem.
+        dtype_ir = FP8E4M3 if kv_dtype_eff == "fp8e4m3" else BF8E5M2
+        kv_dtype_ir = dtype_ir
+
+    fp8_kv = kv_dtype_eff != dtype
+    if ext is not None:
+        if fp8_kv or native_fp8_path:
+            raise ValueError("ext is not supported with fp8 / bf8 KV")
+
+    # --- Arch / wave dispatch (MMA contract) ----------------------------------
+    # Resolve the target so the body can select the matmul *op* (MFMA on CDNA,
+    # WMMA on the RDNA wave32 targets) from the same catalog the GEMM
+    # unification uses. On a wave32 target (gfx1151) the QK/PV chain, the
+    # online-softmax row reduction, and the P fragment re-layout are all driven
+    # off the WMMA ``MmaOp`` layout maps via :func:`_wmma_attention_fwd_inner_body`
+    # -- the wave32 attention analogue of the unified GEMM's WMMA branch. On a
+    # wave64 CDNA target the body continues below unchanged (byte-identical to
+    # the historical MFMA emission); the only contract touch on that path is
+    # routing the matmul through the op's ``op_id`` (identical lowering to the
+    # ISA-named MFMA call) and the wave64 reduction helper (identical XOR
+    # butterfly).
+    #
+    # This dispatch precedes the MFMA-atom catalog guard below because the
+    # wave32 path does not use the MFMA ``atom`` object at all (it resolves its
+    # own WMMA op); validating the MFMA atom against the RDNA catalog would
+    # falsely reject the legal WMMA config.
+    from ..core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    wave_size = target.wave_size
+
+    if wave_size == 32:
+        if use_wider_atom or native_fp8_path:
+            raise ValueError("wider-atom and native-FP8 attention paths are CDNA-only")
+        if fp8_kv and kv_dtype_eff != "fp8e4m3":
+            raise ValueError("WMMA FP8 KV storage requires OCP fp8e4m3")
+        if fp8_kv and (k_scale is None or v_scale is None):
+            raise ValueError("WMMA FP8 KV storage requires both FP32 dequant scales")
+        _wmma_attention_fwd_inner_body(
+            b,
+            Q=Q,
+            K=K,
+            V=V,
+            O=O,
+            head_size=head_size,
+            seqlen_k=seqlen_k,
+            q_tile_base=q_tile_base,
+            head_idx=head_idx,
+            kv_head_idx=kv_head_idx,
+            q_pos_base=q_pos_base,
+            stride_q_token=stride_q_token,
+            stride_q_head=stride_q_head,
+            stride_k_token=stride_k_token,
+            stride_k_head=stride_k_head,
+            stride_v_token=stride_v_token,
+            stride_v_head=stride_v_head,
+            stride_o_token=stride_o_token,
+            stride_o_head=stride_o_head,
+            scale_log2=scale_log2,
+            dtype=dtype,
+            mask_mode=mask_mode,
+            sliding_window=sliding_window,
+            causal_ctx_offset=causal_ctx_offset,
+            k_token_offset_elems=k_token_offset_elems,
+            v_token_offset_elems=v_token_offset_elems,
+            k_row_base_fn=k_row_base_fn,
+            v_row_base_fn=v_row_base_fn,
+            k_tile_start=k_tile_start,
+            k_tile_stop=k_tile_stop,
+            extra_score_transform=extra_score_transform,
+            extra_mask_predicate=extra_mask_predicate,
+            extra_skip_predicate=extra_skip_predicate,
+            k_block_iter_fn=k_block_iter_fn,
+            v_scale=v_scale,
+            v_lds_stage=wmma_v_lds_stage,
+            arch=arch,
+            target=target,
+            mask_neg_inf=mask_neg_inf,
+            query_length=wmma_seqlen_q,
+            kv_tail=wmma_kv_tail,
+            sink_log2=sink_log2,
+            kv_dtype=kv_dtype_eff,
+            k_scale=k_scale,
+            value_tile_size=wmma_value_tile_size,
+            value_offset=wmma_value_offset,
+            v_head_size=wmma_v_head_size,
+            v_head_idx=wmma_v_head_idx,
+            head_dim_q=wmma_head_dim_q,
+            head_dim_v=wmma_head_dim_v,
+            k_rsrc=wmma_k_rsrc,
+            v_rsrc=wmma_v_rsrc,
+            lse=lse,
+            write_lse=write_lse,
+            stride_lse_token=stride_lse_token,
+            stride_lse_head=stride_lse_head,
+            ext=ext,
+        )
+        return
+    if wmma_seqlen_q is not None or wmma_kv_tail:
+        raise ValueError("WMMA tail options require a wave32 target")
+    if wmma_value_tile_size or wmma_value_offset is not None:
+        raise ValueError("WMMA output tiling requires a wave32 target")
+    if wmma_v_head_size:
+        raise ValueError("a distinct WMMA V head size requires a wave32 target")
+    if (
+        wmma_v_head_idx is not None
+        or wmma_head_dim_q is not None
+        or wmma_head_dim_v is not None
+        or wmma_k_rsrc is not None
+        or wmma_v_rsrc is not None
+    ):
+        raise ValueError("runtime WMMA head dims require a wave32 target")
+    if lse is not None:
+        raise ValueError("LSE output requires a wave32 target")
+    if k_scale is not None:
+        raise ValueError("explicit K dequant scale requires a wave32 target")
+
+    # --- CDNA wave64 (MFMA) path ----------------------------------------------
+    # Arch guard: the QK/PV MFMA atom selected above must be in the target's MMA
+    # catalog. This is the machine-checkable hook that keeps gfx942 from
+    # selecting a gfx950-only atom (wide f16/bf16 16x16x32 / 32x32x16) --
+    # comgr would otherwise HARD-CRASH with ``LLVM ERROR: Cannot select
+    # intrinsic`` on the missing op. The default arch is gfx950, and
+    # every atom this helper selects today exists on both gfx942 and gfx950, so
+    # for the default the selected atom is unchanged. The guard emits no IR, so
+    # it cannot perturb the byte-identical CDNA emission.
+    _validate_attention_atom(atom, arch)
+
+    # The matmul op_id sourced from the catalog; ``b.mma(op, ...)`` lowers
+    # identically to the historical ``atom.emit`` (the ISA-named MFMA call), so
+    # the emitted IR is byte-for-byte unchanged.
+    qk_op = target.mma.by_op_id(atom.name)
+
+    n_qk_atoms = head_size // atom.k
+    n_pv_atoms = head_size // atom.n  # also == head_size / 16
+
+    lane = b.thread_id_x()
+    c16 = b.const_i32(16)
+    m_in_atom = b.mod(lane, c16)  # 0..15 -- Q row within the BLOCK_M tile
+    k_blk = b.div(lane, c16)  # 0..3  -- which 4-K-element slot
+    c_a_per_lane = b.const_i32(atom.a_per_lane)
+    k_lane_start = b.mul(k_blk, c_a_per_lane)
+
+    k_off = k_token_offset_elems if k_token_offset_elems is not None else b.const_i32(0)
+    v_off = v_token_offset_elems if v_token_offset_elems is not None else b.const_i32(0)
+
+    # ---- Pre-load Q ----
+    # For each QK atom along head_dim, lane t holds Q[q_tile_base +
+    # m_in_atom, k_blk_atom*atom.k + k_blk*a_per_lane + 0..a_per_lane).
+    q_row = b.add(q_tile_base, m_in_atom)
+    if ext is not None and ext.seqlen_q is not None:
+        seq_row = b.add(
+            q_pos_base if q_pos_base is not None else q_tile_base, m_in_atom
+        )
+        overshoot = b.smax(b.sub(seq_row, last_index(b, ext.seqlen_q)), b.const_i32(0))
+        q_row = b.sub(q_row, overshoot)
+    q_addr_row_base = b.add(
+        b.mul(q_row, stride_q_token),
+        b.mul(head_idx, stride_q_head),
+    )
+    q_vecs = []
+    for k_blk_atom in range(n_qk_atoms):
+        d_start = b.add(
+            b.mul(b.const_i32(k_blk_atom), b.const_i32(atom.k)),
+            k_lane_start,
+        )
+        q_addr = b.add(q_addr_row_base, d_start)
+        q_vecs.append(
+            b.global_load_vN(
+                Q,
+                q_addr,
+                dtype_ir,
+                atom.a_per_lane,
+                align=atom.a_per_lane * 2,
+            )
+        )
+
+    # ---- LDS for P-operand staging ----
+    # After softmax we need P in the A-operand lane layout for the PV
+    # MFMA. The score tile lives in registers as 4 cells per lane (4
+    # rows × 1 col). To redistribute for PV we round-trip through
+    # LDS: store each lane's 4 cells into P_lds at (row, col), sync,
+    # load back in the new layout.
+    P_lds = b.smem_alloc(
+        dtype_ir,
+        [MFMA_ATTN_BLOCK_M, MFMA_ATTN_BLOCK_K],
+        name_hint="Pmfma",
+    )
+
+    # ---- Online softmax + PV accumulator iter_args ----
+    # Each lane has 4 rows worth of (m, l) state: rows m_blk*4 + i for
+    # i in 0..3, where m_blk = lane / 16. We carry m_r, l_r per row
+    # slot through the K-loop.
+    neg_inf = mask_neg_inf if mask_neg_inf is not None else b.const_f32(-1e30)
+    zero_f = b.const_f32(0.0)
+    acc_zero = b.zero_vec_f32(atom.c_per_lane)
+    initial_m = sink_log2 if sink_log2 is not None else neg_inf
+    initial_l = b.const_f32(1.0) if sink_log2 is not None else zero_f
+
+    iter_args = []
+    for r in range(atom.c_per_lane):
+        iter_args.append((f"m{r}", initial_m))
+        iter_args.append((f"l{r}", initial_l))
+    for n in range(n_pv_atoms):
+        iter_args.append((f"acc{n}", acc_zero))
+
+    c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
+    k_guard = ext is not None and ext.guard_seqlen_k
+    if k_guard:
+        k_last = last_index(b, seqlen_k)
+    loop_start = k_tile_start if k_tile_start is not None else b.const_i32(0)
+    if k_tile_stop is not None:
+        loop_stop = k_tile_stop
+    elif k_guard:
+        loop_stop = b.div(
+            b.add(seqlen_k, b.const_i32(MFMA_ATTN_BLOCK_K - 1)), c_block_k
+        )
+    else:
+        loop_stop = b.div(seqlen_k, c_block_k)
+
+    kloop = b.scf_for_iter(
+        loop_start,
+        loop_stop,
+        b.const_i32(1),
+        iter_args=iter_args,
+        iv_name="kt",
+    )
+    with kloop as (kt, state_vals):
+        # Unpack state.
+        ms = [state_vals[2 * r] for r in range(atom.c_per_lane)]
+        ls = [state_vals[2 * r + 1] for r in range(atom.c_per_lane)]
+        accs = list(state_vals[2 * atom.c_per_lane :])
+
+        # P29: k_block_iter_fn maps the linear iter index to a real
+        # K-tile index via a caller-supplied LUT. ``effective_kt`` is
+        # the K-tile index every downstream computation uses; the
+        # raw ``kt`` is just the loop counter. This lets VSA and
+        # other block-sparse callers iterate only the attended K-blocks
+        # in dense order rather than masking every K-tile.
+        if k_block_iter_fn is not None:
+            effective_kt = k_block_iter_fn(b, kt)
+        else:
+            effective_kt = kt
+
+        # K row base for this lane: K[k_tile_base + n_in_atom, ...]
+        # where n_in_atom = m_in_atom (same lane decoded for both A
+        # and B operands in the QK MFMA).
+        k_tile_base = b.mul(effective_kt, c_block_k)
+        k_row_for_lane = b.add(k_tile_base, m_in_atom)  # k position for THIS lane
+        if k_guard:
+            k_row_for_lane = b.smin(k_row_for_lane, k_last)
+
+        # Per-K-tile mask predicate (block-sparse / VSA): when false, the
+        # whole tile is skipped -- no K/V loads, no MFMA, no PV. The
+        # iter_args carry through unchanged so the softmax state stays
+        # consistent across skipped tiles.
+        if extra_mask_predicate is not None:
+            keep_tile = extra_mask_predicate(b, kt)
+        else:
+            keep_tile = None
+        # P28: ``extra_skip_predicate`` short-circuits the entire K-tile
+        # body — when False, no K/V loads, no MFMA, no PV fire (the
+        # softmax-mask path above keeps the loads but forces score to
+        # -inf, paying bandwidth + compute for masked tiles). Combined
+        # with ``keep_tile`` so callers can use both.
+        if extra_skip_predicate is not None:
+            skip_mask = extra_skip_predicate(b, kt)
+            keep_tile = (
+                b.land(keep_tile, skip_mask) if keep_tile is not None else skip_mask
+            )
+
+        # Compute the K row base for this lane. Default is dense
+        # ``k_row * stride_k_token + kv_head * stride_k_head + k_off``;
+        # callbacks override for paged-KV / varlen.
+        if k_row_base_fn is not None:
+            k_addr_row_base = k_row_base_fn(b, k_row_for_lane)
+        else:
+            k_addr_row_base = b.add(
+                b.add(
+                    b.mul(k_row_for_lane, stride_k_token),
+                    b.mul(kv_head_idx, stride_k_head),
+                ),
+                k_off,
+            )
+
+        # ---- QK MFMA chain ----
+        # score = sum over qk_atoms of MFMA(Q[atom], K[atom], score)
+        # Per-lane <4 x f32> (4 row-cells, 1 col-cell).
+        # When K/V are fp8 / bf8, we load the bytes packed and dequant
+        # via ``cvt_pk_f32_fp8x4`` / ``cvt_pk_f32_bf8x4`` (P24): one
+        # vmem load + 1-2 packed cvts vs ``a_per_lane`` scalar loads
+        # + ``a_per_lane`` cvts in the original shape. Same FLOPs in
+        # the MFMA but ~8x → 1x vmem transactions and ~8x → 2x
+        # cvt-class instructions per K-tile per atom on the fp8 path.
+        score = atom.zero_acc(b)
+        for k_blk_atom in range(n_qk_atoms):
+            d_start = b.add(
+                b.mul(b.const_i32(k_blk_atom), b.const_i32(atom.k)),
+                k_lane_start,
+            )
+            k_addr = b.add(k_addr_row_base, d_start)
+            if fp8_kv:
+                k_vec = _load_kv_dequant_packed(
+                    b,
+                    src=K,
+                    addr=k_addr,
+                    n_elems=atom.a_per_lane,
+                    kv_dtype_eff=kv_dtype_eff,
+                    kv_dtype_ir=kv_dtype_ir,
+                    out_dtype_ir=dtype_ir,
+                )
+            else:
+                k_vec = b.global_load_vN(
+                    K,
+                    k_addr,
+                    dtype_ir,
+                    atom.a_per_lane,
+                    align=atom.a_per_lane * 2,
+                )
+            score = b.mma(qk_op, q_vecs[k_blk_atom], k_vec, score)
+
+        # ---- Scale + mask + softmax row update ----
+        # Each lane has 4 score cells at (m_blk*4 + i, n_in_atom).
+        # m_blk = lane / 16, n_in_atom = lane % 16 = m_in_atom.
+        m_blk = b.div(lane, c16)
+        # Per-row max via 16-lane butterfly reduction (lanes in the same
+        # m_blk reduce across cols 0..15).
+        new_ms, new_ls, new_accs = [], [], list(accs)
+        ps = []  # per-row scaled probabilities (per-lane f32)
+        for r in range(atom.c_per_lane):
+            s_r_f32 = b.vec_extract(score, r)
+            s_r_scaled = b.fmul(s_r_f32, scale_log2)
+            # Per-row position for the mask check + extra transforms.
+            # ``q_pos_base`` (defaults to ``q_tile_base``) is the
+            # position used by the mask predicate; it's distinct from
+            # ``q_tile_base`` (which addresses Q rows in global memory)
+            # so callers with a batch axis can pass the within-batch Q
+            # position for the causal / sliding-window mask while
+            # still using the global-batched Q address.
+            q_pos_for_mask = q_pos_base if q_pos_base is not None else q_tile_base
+            row_q_pos = b.add(
+                b.add(q_pos_for_mask, b.mul(m_blk, b.const_i32(4))),
+                b.const_i32(r),
+            )
+            k_col_pos = b.add(k_tile_base, m_in_atom)
+            if extra_score_transform is not None:
+                s_r_scaled = extra_score_transform(
+                    b,
+                    s_r_scaled,
+                    kt,
+                    r,
+                    row_q_pos,
+                    k_col_pos,
+                )
+            if ext is not None:
+                s_r_scaled = score_stage(
+                    b,
+                    ext,
+                    s_r_scaled,
+                    q_row=row_q_pos,
+                    k_col=k_col_pos,
+                    kt=kt,
+                    slot=r,
+                    seqlen_k=seqlen_k,
+                )
+            s_r_scaled = apply_attention_mask(
+                b,
+                s_r_scaled,
+                mask_mode=mask_mode,
+                k_idx=k_col_pos,
+                query_pos=row_q_pos,
+                sliding_window=sliding_window,
+                context_len=causal_ctx_offset,
+                neg_inf=mask_neg_inf,
+            )
+            # If the whole K-tile is masked off (sparse-skip), force the
+            # score to -inf so the softmax exponential collapses to 0.
+            if keep_tile is not None:
+                s_r_scaled = b.select(
+                    keep_tile,
+                    s_r_scaled,
+                    mask_neg_inf if mask_neg_inf is not None else neg_inf,
+                )
+            # 16-lane row-max reduce via the distribution-driven
+            # ``block_tile_reduce_sync`` (CK Tile ``BlockReduce2dSync``). The
+            # reduce distribution's lane-owned R level (length 16, derivative 1)
+            # emits the exact 4-stage XOR butterfly (masks 1,2,4,8) the legacy
+            # ``wave_reduce_max(lanes_per_row=16)`` produced.
+            row_max = _softmax_row_reduce(b, s_r_scaled, combine="max")
+            m_new_r = b.fmax(ms[r], row_max)
+            shift = m_new_r
+            if mask_neg_inf is not None:
+                empty = b.fcmp("oeq", m_new_r, mask_neg_inf)
+                shift = b.select(empty, zero_f, m_new_r)
+            alpha_r = b.exp2(b.fsub(ms[r], shift))
+            p_r = b.exp2(b.fsub(s_r_scaled, shift))
+            # Row-sum reduce of p.
+            row_psum = _softmax_row_reduce(b, p_r, combine="sum")
+            l_new_r = b.fadd(b.fmul(ls[r], alpha_r), row_psum)
+
+            new_ms.append(m_new_r)
+            new_ls.append(l_new_r)
+            ps.append(p_r)
+            # Rescale every PV accumulator slot for row r.
+            for n in range(n_pv_atoms):
+                # Accumulator slot n's row r is in vec slot r.
+                old = b.vec_extract(new_accs[n], r)
+                rescaled = b.fmul(old, alpha_r)
+                new_accs[n] = b.vec_insert(new_accs[n], rescaled, r)
+
+        # ---- P operand staging via LDS ----
+        # Lane t holds p[m_blk*4+r, n_in_atom] for r in 0..3.
+        # Write to P_lds[m_blk*4+r, n_in_atom] then sync.
+        for r in range(atom.c_per_lane):
+            p_row = b.add(b.mul(m_blk, b.const_i32(4)), b.const_i32(r))
+            p_col = m_in_atom
+            p_f16 = b.cast_f32_to(ps[r], dtype_ir)
+            b.smem_store_vN(P_lds, [p_row, p_col], p_f16, 1)
+        b.sync()
+
+        # ---- PV MFMA chain ----
+        # For each PV atom along the n (head_dim) axis, load:
+        #   * P operand: lane t holds P[m_in_atom, k_blk*4 + 0..3]
+        #     -- these are 4 P cols at row m_in_atom.
+        #   * V operand: lane t holds V[k_tile_base + k_blk*4 + 0..3,
+        #     n_blk_atom * atom.n + n_in_atom] -- 4 V values at col
+        #     (n_blk_atom * 16 + n_in_atom).
+        # Where n_in_atom = m_in_atom and k_blk*4..k_blk*4+3 are 4
+        # K-positions within the BLOCK_K K-tile.
+        for n_blk_atom in range(n_pv_atoms):
+            # P operand load from LDS.
+            p_a_vec = b.zero_vec(dtype_ir, atom.a_per_lane)
+            for j in range(atom.a_per_lane):
+                p_col_j = b.add(k_lane_start, b.const_i32(j))
+                p_v = b.vec_extract(
+                    b.smem_load_vN(P_lds, m_in_atom, p_col_j, dtype=dtype_ir, n=1),
+                    0,
+                )
+                p_a_vec = b.vec_insert(p_a_vec, p_v, j)
+            # V operand: per-lane scalar loads at strided V[k, n_col].
+            v_col_in_hd = b.add(
+                b.mul(b.const_i32(n_blk_atom), b.const_i32(atom.n)),
+                m_in_atom,
+            )
+            v_a_vec = b.zero_vec(dtype_ir, atom.b_per_lane)
+            for j in range(atom.b_per_lane):
+                v_row_k = b.add(
+                    k_tile_base,
+                    b.add(k_lane_start, b.const_i32(j)),
+                )
+                if k_guard:
+                    v_row_k = b.smin(v_row_k, k_last)
+                if v_row_base_fn is not None:
+                    v_addr_row_base = v_row_base_fn(b, v_row_k)
+                else:
+                    v_addr_row_base = b.add(
+                        b.add(
+                            b.mul(v_row_k, stride_v_token),
+                            b.mul(kv_head_idx, stride_v_head),
+                        ),
+                        v_off,
+                    )
+                v_addr = b.add(v_addr_row_base, v_col_in_hd)
+                if fp8_kv:
+                    # The PV V load is per-row-strided (a different K-row
+                    # per j) so it can't directly use the packed-dequant
+                    # vmem transaction the K path uses (which is
+                    # contiguous in head_dim). Future improvement: prefetch
+                    # rows into LDS and read them via the packed cvt.
+                    raw = b.global_load(V, v_addr, kv_dtype_ir, align=1)
+                    f32_v = (
+                        b.cvt_fp8_to_f32(raw)
+                        if kv_dtype_eff == "fp8e4m3"
+                        else b.cvt_bf8_to_f32(raw)
+                    )
+                    v_scalar = b.cast_f32_to(f32_v, dtype_ir)
+                else:
+                    v_scalar = b.global_load(V, v_addr, dtype_ir, align=2)
+                v_a_vec = b.vec_insert(v_a_vec, v_scalar, j)
+            new_accs[n_blk_atom] = b.mma(
+                qk_op,
+                p_a_vec,
+                v_a_vec,
+                new_accs[n_blk_atom],
+            )
+
+        # Yield updated state.
+        yields = []
+        for r in range(atom.c_per_lane):
+            yields.append(new_ms[r])
+            yields.append(new_ls[r])
+        yields.extend(new_accs)
+        b.scf_yield(*yields)
+        # P_lds will be re-written next iter; sync at top is implied
+        # by the next iteration's smem_store path.
+
+    # ---- Pull final state ----
+    final = kloop.results
+    # ``ms_final`` is the per-lane row-max; the scaled-acc / l_final pair
+    # already encodes everything the epilogue needs, so we only consume
+    # the normalisation factors below.
+    ls_final = [final[2 * r + 1] for r in range(atom.c_per_lane)]
+    accs_final = list(final[2 * atom.c_per_lane :])
+
+    if ext is not None and ext.wants_epilogue:
+        m_blk = b.div(lane, c16)
+        emit_rows_epilogue(
+            b,
+            ext,
+            n_slots=atom.c_per_lane,
+            n_tiles=n_pv_atoms,
+            row_rel_fn=lambda r: b.add(b.mul(m_blk, b.const_i32(4)), b.const_i32(r)),
+            q_pos_base=q_pos_base if q_pos_base is not None else q_tile_base,
+            ms=[final[2 * r] for r in range(atom.c_per_lane)],
+            ls=ls_final,
+            accs=accs_final,
+            is_row_leader=b.cmp_eq(m_in_atom, b.const_i32(0)),
+            out_addr_fn=lambda r, n, row_rel: b.add(
+                b.add(
+                    b.mul(b.add(q_tile_base, row_rel), stride_o_token),
+                    b.mul(head_idx, stride_o_head),
+                ),
+                b.add(b.mul(b.const_i32(n), b.const_i32(atom.n)), m_in_atom),
+            ),
+            O=O,
+            dtype_ir=dtype_ir,
+            v_scale=v_scale,
+        )
+        return
+
+    # ---- Epilogue: O[m, d] = acc[m, d] / l[m] in target dtype ----
+    # Lane t writes to O[q_tile_base + m_blk*4 + r, head, n_blk*16 +
+    # n_in_atom] for r in 0..3, n_blk in 0..n_pv_atoms.
+    m_blk = b.div(lane, c16)
+    for n_blk_atom in range(n_pv_atoms):
+        for r in range(atom.c_per_lane):
+            o_row = b.add(
+                b.add(q_tile_base, b.mul(m_blk, b.const_i32(4))),
+                b.const_i32(r),
+            )
+            o_col = b.add(
+                b.mul(b.const_i32(n_blk_atom), b.const_i32(atom.n)),
+                m_in_atom,
+            )
+            # B08: guard ``l_final == 0`` -- when an entire Q tile is
+            # masked off (sparse jenga / VSA all-masked rows), the
+            # softmax denominator is zero. ``rcp(0) = +inf -> NaN``
+            # would poison the output; force ``inv_l = 0`` for the
+            # zero case so the contribution evaluates to ``acc * 0
+            # == 0`` (the intended "no attention" output).
+            inv_l = safe_inv_l(b, ls_final[r])
+            v_f32 = b.fmul(b.vec_extract(accs_final[n_blk_atom], r), inv_l)
+            if v_scale is not None:
+                v_f32 = b.fmul(v_f32, v_scale)
+            v_out = b.cast_f32_to(v_f32, dtype_ir)
+            addr = b.add(
+                b.add(
+                    b.mul(o_row, stride_o_token),
+                    b.mul(head_idx, stride_o_head),
+                ),
+                o_col,
+            )
+            b.global_store(O, addr, v_out, align=2)

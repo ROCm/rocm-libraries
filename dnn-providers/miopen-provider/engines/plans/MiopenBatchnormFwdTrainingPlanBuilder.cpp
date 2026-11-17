@@ -257,6 +257,16 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the plan bakes those dims into the MIOpen
+    // descriptors it builds, so decline rather than risk a mismatch (RFC 0008 §4.6).
+    if(opGraph.getGraph().is_override_shape_enabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(
+            "BatchnormFwdTraining plan builder does not support override shapes");
+        return false;
+    }
+
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
     {
         return false;

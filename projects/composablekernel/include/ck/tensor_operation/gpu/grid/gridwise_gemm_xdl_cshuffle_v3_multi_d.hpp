@@ -44,7 +44,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_multi_d(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -79,7 +79,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_multi_d_2lds(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // Pass two lds pointer is the key to tell compiler that ds_read/write
@@ -158,7 +158,13 @@ template <typename ALayout,
           typename LDSTypeB                           = BDataType,
           bool DoElementwiseBeforeCShuffle            = false,
           bool DirectLoad                             = false,
-          bool LargeTensors                           = false>
+          bool LargeTensors                           = false,
+          // When true, skip the logical M*K/N*K/M*N <= 2GB validity check below.
+          // Callers that address memory via non-trivial grid descriptors (e.g. the
+          // implicit-GEMM view of a convolution) validate the actual descriptor span
+          // separately (AreDescriptorsSmallerThan2GB); for them the logical GEMM matrix
+          // size (im2col) far exceeds the real footprint and must not gate int32 support.
+          bool SkipGemmSizeCheck = false>
 struct GridwiseGemmMultiD_xdl_cshuffle_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -1045,7 +1051,8 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             return false;
         }
 
-        constexpr bool IsGfx11            = is_same_v<decltype(get_device_arch()), gfx11_t>;
+        constexpr bool IsGfx11 = is_same_v<decltype(get_device_arch()), gfx11_t> ||
+                                 is_same_v<decltype(get_device_arch()), gfx117_t>;
         constexpr auto EstimateVgprCount  = GetEstimateVgprCount<IsGfx11>();
         constexpr auto AvailableVgprCount = get_max_vgpr_count(get_device_arch());
         if constexpr(EstimateVgprCount > (AvailableVgprCount + AvailableVgprCount / 4))
@@ -1064,6 +1071,11 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
 
         if constexpr(NXdlPerWave % CShuffleNXdlPerWavePerShuffle != 0)
         {
+#if DEBUG_LOG
+            std::cout << "NXdlPerWave mod CShuffleNXdlPerWavePerShuffle != 0 in" << __FILE__ << ":"
+                      << __LINE__ << ", in function: " << __func__ << std::endl;
+
+#endif // DEBUG_LOG
             return false;
         }
         constexpr index_t ldsBufferCount =
@@ -1137,6 +1149,11 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             auto KReadPadSplited    = math::integer_divide_ceil(karg.K, K_t) * KReadVec;
             if((KReadPadSplited * (karg.KBatch - 1)) >= karg.K)
             {
+#if DEBUG_LOG
+                std::cout << "(KReadPadSplited * (karg.KBatch - 1)) >= karg.K in" << __FILE__ << ":"
+                          << __LINE__ << ", in function: " << __func__ << std::endl;
+
+#endif // DEBUG_LOG
                 return false;
             }
         }
@@ -1241,7 +1258,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             }
         }
 
-        if constexpr(!LargeTensors)
+        if constexpr(!LargeTensors && !SkipGemmSizeCheck)
         {
             constexpr long_index_t TwoGB = (long_index_t{1} << 31);
             if(!(karg.M * karg.K * sizeof(ADataType) <= TwoGB &&
@@ -1261,7 +1278,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             {
                 return get_max_vgpr_count(gfx120_t{});
             }
-            else if(ck::is_gfx11_supported())
+            else if(ck::is_gfx11_supported() || ck::is_gfx117_supported())
             {
                 return get_max_vgpr_count(gfx11_t{});
             }
@@ -1271,8 +1288,9 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             }
         }();
 
-        const auto estimateVgprCount =
-            ck::is_gfx11_supported() ? GetEstimateVgprCount<true>() : GetEstimateVgprCount<false>();
+        const auto estimateVgprCount = (ck::is_gfx11_supported() || ck::is_gfx117_supported())
+                                           ? GetEstimateVgprCount<true>()
+                                           : GetEstimateVgprCount<false>();
         if(estimateVgprCount > (availableVgprCount + availableVgprCount / 4))
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))

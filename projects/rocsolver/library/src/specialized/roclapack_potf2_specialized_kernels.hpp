@@ -38,6 +38,9 @@
 #include <cmath>
 
 ROCSOLVER_BEGIN_NAMESPACE
+#define ASSERT(x) \
+    {             \
+    }
 
 /**
  * ------------------------------------------------------
@@ -64,12 +67,12 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
     auto const tidx = hipThreadIdx_x;
     auto const tidy = hipThreadIdx_y;
 
-    assert(hipBlockDim_z == 1);
+    ASSERT(hipBlockDim_z == 1);
 
     // get batch index
     auto const bid = hipBlockIdx_z;
-    assert(AA != nullptr);
-    assert(info != nullptr);
+    ASSERT(AA != nullptr);
+    ASSERT(info != nullptr);
 
     T* const A = load_ptr_batch(AA, bid, shiftA, strideA);
     INFO* const info_bid = info + bid;
@@ -411,4 +414,5 @@ rocblas_status potf2_run_small(rocblas_handle handle,
         rocblas_handle handle, const rocblas_fill uplo, const I n, U A, const rocblas_stride shiftA, \
         const I lda, const rocblas_stride strideA, INFO* info, const I batch_count)
 
+#undef ASSERT
 ROCSOLVER_END_NAMESPACE

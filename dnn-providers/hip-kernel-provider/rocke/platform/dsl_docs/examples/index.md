@@ -2,22 +2,22 @@
 
 Shipped CK DSL examples come in two forms:
 
-1. **Python-owned generators** in `Python/rocke/examples/`. They build HSACO + manifest and (for `examples/*.py` other than the bake-offs) launch + verify in one process.
+1. **Python-owned generators** in `python/rocke/examples/`. They build HSACO + manifest and (for `examples/*.py` other than the bake-offs) launch + verify in one process.
 2. **CMake-integrated generators** in `example/ck_tile/dsl/<NN>_*/gen.py`. Each `gen.py` wraps a Python-owned generator and adds an `expected.json` gate for `test_rocke_examples.py`.
 
 Per the validation pass on this checkout, every shipped example builds and verifies end-to-end on MI355X / gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.
 
-## Python-Owned Generators (`Python/rocke/examples/`)
+## Python-Owned Generators (`python/rocke/examples/`)
 
 | File                                              | Purpose                                                          | Reproduction command |
 |---------------------------------------------------|------------------------------------------------------------------|----------------------|
-| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m rocke.examples.common.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m rocke.examples.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
-| `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python Python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096` |
-| `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python Python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128` |
-| `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python Python/rocke/examples/ck_tile_parity.py --op all` |
-| `attention/parity_unified_attention.py`           | Triton vs CK DSL attention parity. All paths (`auto`, `2d`, `3d`) on the AITER unified-attention contract. | `python Python/rocke/examples/gfx950/attention/parity_unified_attention.py --attempts 10 --warmup 5` |
+| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m builders.common.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m builders.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
+| `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096` |
+| `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128` |
+| `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python python/rocke/examples/ck_tile_parity.py --op all` |
+| `parity_unified_attention.py`                     | Triton vs rocKE attention parity. All paths (`auto`, `2d`, `3d`) on the AITER unified-attention contract. Lives in `library/builders/gfx950/attention/prefill/`. | `python -m builders.gfx950.attention.prefill.parity_unified_attention --attempts 10 --warmup 5` |
 
 The bake-offs build a HSACO and manifest; you launch / verify with `python -m rocke.run_manifest <hsaco> manifest.json --verify`. The other examples are self-contained and verify in-process.
 
@@ -43,9 +43,9 @@ Build + verify one example by hand:
 
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=Python python example/ck_tile/dsl/08_bake_off_implicit_gemm/gen.py \
+PYTHONPATH=python python example/ck_tile/dsl/08_bake_off_implicit_gemm/gen.py \
     --output-dir "$OUT_DIR"
-PYTHONPATH=Python python -m rocke.run_manifest \
+PYTHONPATH=python python -m rocke.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
@@ -66,11 +66,11 @@ The harness asserts `max_abs_diff = 0` for bit-exact kernels, `bad = 0` for conv
 
 ```bash
 # Generate dispatcher-set HSACOs for the hero subset, in parallel.
-PYTHONPATH=Python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
+PYTHONPATH=python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
     --output-dir "$OUT_DIR" --subset compute --parallel 16
 
 # Benchmark each entry with median + spread reporting.
-PYTHONPATH=Python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+PYTHONPATH=python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
     --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 
@@ -84,7 +84,7 @@ The benchmark writes a CSV with `(kernel, shape, median_tflops, min_tflops, max_
 
 ## Attention Parity Methodology
 
-`examples/gfx950/attention/parity_unified_attention.py` is the canonical attention parity harness. It:
+`library/builders/gfx950/attention/prefill/parity_unified_attention.py` is the canonical attention parity harness. (Its gfx942 sibling, `library/builders/gfx942/attention/prefill/parity_unified_attention.py`, checks against a fp32 torch reference only, with no Triton/AITER lanes.) It:
 
 - forces Triton onto the 2D / 3D kernel per row by monkey-patching its `use_2d_kernel(...)` heuristic;
 - forces CK DSL onto the matching path via `run_unified_attention_torch(..., backend="tiled" / "3d" / "auto")`;
@@ -99,16 +99,16 @@ Scenario sets:
 - `fmha` — shapes adapted from CK FMHA testing matrix;
 - `all` — `default + creative`.
 
-The published 5-run mean numbers (`auto` geomean ~1.799x, `3D vs 3D` ~1.743x) come from `--attempts 10 --warmup 5` over the `default` set; see `examples/gfx950/attention/README.md`.
+The published 5-run mean numbers (`auto` geomean ~1.799x, `3D vs 3D` ~1.743x) come from `--attempts 10 --warmup 5` over the `default` set; see `library/builders/gfx950/attention/README.md`.
 
 ## Running Everything In Order
 
 The full validation flow used during this docs pass:
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocke>/platform
 export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=Python
+export PYTHONPATH=python:../library
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 # 1. Static unit suite.
@@ -118,20 +118,19 @@ python tests/test_rocke.py
 python python/test/test_rocke_examples.py
 
 # 3. README-style implicit-GEMM conv build + verify.
-python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 # 4. Distribution demos.
-python Python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096
-python Python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128
+python python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096
+python python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128
 
 # 5. Small-op parity.
-python Python/rocke/examples/ck_tile_parity.py --op all
+python python/rocke/examples/ck_tile_parity.py --op all
 
 # 6. Attention smoke.
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+python -m builders.gfx950.attention.prefill.parity_unified_attention \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 

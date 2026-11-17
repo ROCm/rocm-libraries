@@ -22,8 +22,8 @@ Two modes:
 
 Usage (no GPU, runs anywhere with rocke importable):
 
-    PYTHONPATH=Python python -m builders.gfx1250.attention.aiter_ua2_runner \\
-        --build-only --shapes Python/rocke/library/builders/gfx950/attention/aiter_ua_2_shapes.json
+    PYTHONPATH=python python -m builders.gfx1250.attention.aiter_ua2_runner \\
+        --build-only --shapes python/rocke/library/builders/gfx950/attention/aiter_ua_2_shapes.json
 
 Usage (on the gfx1250 box, venv python + ROCm on LD_LIBRARY_PATH):
 
@@ -160,13 +160,13 @@ def build_only(rows: List[Dict]) -> int:
     try:
         for sig, rec in sorted(seen.items()):
             problem = build_problem(rec)
-            ok, why = au.supports_native_unified_attention_tiled(problem)
+            ok, why = au.supports_native_unified_attention_tiled(problem, "gfx1250")
             if not ok:
                 print(f"  SKIP sig={sig}: {why}")
                 n_skip += 1
                 continue
             try:
-                spec = au._tiled_spec_from_problem(problem)
+                spec = au._tiled_spec_from_problem(problem, "gfx1250")
                 kernel = build_unified_attention_2d_tiled(spec, arch="gfx1250")
                 ll = lower_kernel_to_llvm(kernel, arch="gfx1250")
                 bf16_wmma = "llvm.amdgcn.wmma.f32.16x16x32.bf16" in ll

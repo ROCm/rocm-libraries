@@ -223,6 +223,13 @@ std::size_t Handle::GetLocalMemorySize() const { return this->impl->local_mem_si
 
 std::size_t Handle::GetGlobalMemorySize() const { return this->impl->global_mem_size; }
 
+// NOGPU backend has no live device to query; these GPU-descriptor fields are
+// only consumed by the optional LGBM solver picker, which is not exercised in
+// NOGPU runs.
+std::size_t Handle::GetL2CacheSize() const { return 0; }
+
+std::size_t Handle::GetClockRateKhz() const { return 0; }
+
 std::size_t Handle::GetMaxComputeUnits() const { return this->impl->num_cu; }
 
 std::size_t Handle::GetImage3dMaxWidth() const { return this->impl->img3d_max_width; }

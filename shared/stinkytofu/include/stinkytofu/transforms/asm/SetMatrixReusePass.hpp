@@ -31,6 +31,10 @@ class Pass;
 
 /// Sets matrix_a_reuse / matrix_b_reuse on matrix (WMMA/MFMA) instructions from
 /// consecutive MMA operand equality in final program order (post-scheduler).
+///
+/// Reuse is a per-function microarchitectural promise: the chain never spans a
+/// call site (the callee may clobber the operand-reuse buffer) and never spans
+/// a function boundary.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createSetMatrixReusePass();
 
 }  // namespace stinkytofu

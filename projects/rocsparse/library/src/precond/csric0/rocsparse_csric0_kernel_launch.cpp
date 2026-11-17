@@ -34,7 +34,7 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
                                                  void*                 buffer)
 {
 
-    const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
+    const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908
                         && handle->asic_rev < 2);
 
     auto trm_info = csric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
@@ -51,12 +51,22 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
         launch = rocsparse::find_csric0_kernel_hash_launch(handle, csric0_info, A);
     }
 
+    const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                                  0,
-                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 sizeof(int32_t) * A->rows * A_batch_count,
                                                  handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csric0_info, A, buffer_size, buffer));
+
+    // Every instance aliases instance 0, so they all share its pivot.
+    if(A->batch_stride == 0 && A->batch_count > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, csric0_info->get_singularity_numeric_exact(), A->batch_count));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, csric0_info->get_singularity_numeric_near(), A->batch_count));
+    }
 
     return rocsparse_status_success;
 }

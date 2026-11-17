@@ -1,5 +1,8 @@
 # rocPRIM
 
+> [!IMPORTANT]
+> This project location is being retired. rocPRIM is now developed as part of the unified [hipCCL](../hipccl) project - see [`projects/hipccl/hipccl3/rocprim`](../hipccl/hipccl3/rocprim) for the actively-maintained copy. This location will no longer be actively maintained after ROCm 10.2.
+
 > [!NOTE]
 > The published rocPRIM documentation is available [here](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
@@ -247,24 +250,16 @@ static constexpr unsigned int seeds [] = {};
 
 ## Running benchmarks
 
+rocPRIM uses [primbench](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench) for benchmarking; see its [command-line options](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench#command-line-options).
+
 ```shell
 # Go to rocPRIM build directory
 cd rocPRIM; cd build
 
-# To run benchmark for warp functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_warp_<function_name> [--size <size>] [--trials <trials>]
-
-# To run benchmark for block functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_block_<function_name> [--size <size>] [--trials <trials>]
-
-# To run benchmark for device functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_device_<function_name> [--size <size>] [--trials <trials>]
+# To run benchmarks for warp, block, or device functions:
+./benchmark/benchmark_warp_<function_name>
+./benchmark/benchmark_block_<function_name>
+./benchmark/benchmark_device_<function_name>
 ```
 
 ### Performance configuration

@@ -700,7 +700,7 @@ auto GenericSearch(const Solver s,
             }
 
             // Banchmarked kernels will not be used anymore.
-            // Now we can delete Program objects that belong to OCL/HIP
+            // Now we can delete Program objects that belong to HIP
             // runtime and free the associated resources (memory, file handles...)
             for(const auto& kernelInfo : current_solution.construction_params)
                 profile_h.ClearProgram(kernelInfo.kernel_file, kernelInfo.comp_options);

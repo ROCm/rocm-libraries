@@ -33,7 +33,6 @@ const char* rocsparse_indextype_name(rocsparse_indextype value)
 {
     switch(value)
     {
-        CASE(rocsparse_indextype_u16);
         CASE(rocsparse_indextype_i32);
         CASE(rocsparse_indextype_i64);
     }
@@ -358,6 +357,18 @@ const char* rocsparse_gpsv_interleaved_alg_name(rocsparse_gpsv_interleaved_alg v
     }
     RETURN_INVALID;
 }
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+const char* rocsparse_spsort_alg_name(rocsparse_spsort_alg value)
+{
+    switch(value)
+    {
+        CASE(rocsparse_spsort_alg_default);
+        CASE(rocsparse_spsort_alg_radix_sort);
+    }
+    RETURN_INVALID;
+}
+#endif
 
 #undef CASE
 #undef RETURN_INVALID

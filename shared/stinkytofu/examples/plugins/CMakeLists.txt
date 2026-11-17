@@ -33,7 +33,12 @@ if(BUILD_SHARED_LIBS)
     # (see PassBuilder::examplePluginPath), using STINKYTOFU_PLUGIN_INSTALL_RELDIR — the
     # single source of truth (defined at the stinkytofu top level) shared by that runtime
     # lookup, this install rule, and consumers that vendor libstinkytofu.
-    target_compile_definitions(stinkytofu PRIVATE
+    #
+    # This must go on stinkytofu_objs, not stinkytofu: PassBuilder.cpp (which reads these
+    # macros) compiles as part of the stinkytofu_objs OBJECT library; stinkytofu just links
+    # $<TARGET_OBJECTS:stinkytofu_objs>, so PRIVATE compile definitions set on stinkytofu
+    # itself never reach that compilation.
+    target_compile_definitions(stinkytofu_objs PRIVATE
         STINKYTOFU_HAVE_EXAMPLE_PLUGIN
         STINKYTOFU_PLUGIN_INSTALL_RELDIR="${STINKYTOFU_PLUGIN_INSTALL_RELDIR}"
         STINKYTOFU_EXAMPLE_PLUGIN_FILENAME="$<TARGET_FILE_NAME:stinkytofu-plugin-helloworld>"
@@ -43,7 +48,7 @@ if(BUILD_SHARED_LIBS)
     # lib dir. When rocisa add_subdirectory's stinkytofu with EXCLUDE_FROM_ALL this
     # rule does not fire; rocisa installs the plugin into its wheel itself.
     install(TARGETS stinkytofu-plugin-helloworld
-        DESTINATION "lib/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
 else()
     add_library(stinkytofu-plugin-helloworld OBJECT
         HelloWorldPass.cpp

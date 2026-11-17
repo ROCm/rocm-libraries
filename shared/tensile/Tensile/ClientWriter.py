@@ -228,10 +228,13 @@ def writeRunScript(path, forBenchmark, enableTileSelection, configPaths=None):
     runScriptFile.write("exit %err%\n")
   else:
     runScriptFile.write("set -ex\n")
-    if globalParameters["PinClocks"] and globalParameters["ROCmSMIPath"]:
-      runScriptFile.write("%s -d 0 --setfan 255 --setsclk 7\n" % globalParameters["ROCmSMIPath"])
+    if globalParameters["PinClocks"] and globalParameters["AMDSMIPath"]:
+      # amd-smi set/reset require elevated privileges. Pin to max
+      # performance and run the fan at full speed for the benchmark.
+      runScriptFile.write("sudo %s set -g 0 --fan 255\n" % globalParameters["AMDSMIPath"])
+      runScriptFile.write("sudo %s set -g 0 --perf-level HIGH\n" % globalParameters["AMDSMIPath"])
       runScriptFile.write("sleep 1\n")
-      runScriptFile.write("%s -d 0 -a\n" % globalParameters["ROCmSMIPath"])
+      runScriptFile.write("%s metric -g 0 --clock\n" % globalParameters["AMDSMIPath"])
 
     runScriptFile.write("ERR=0\n")
     for configFile in configPaths:
@@ -242,9 +245,11 @@ def writeRunScript(path, forBenchmark, enableTileSelection, configPaths=None):
       runScriptFile.write( "    ERR=$?\n")
       runScriptFile.write( "fi\n")
 
-    if globalParameters["PinClocks"] and globalParameters["ROCmSMIPath"]:
-      runScriptFile.write("%s -d 0 --resetclocks\n" % globalParameters["ROCmSMIPath"])
-      runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
+    if globalParameters["PinClocks"] and globalParameters["AMDSMIPath"]:
+      # Reset clocks/overdrive to default and return fans to automatic
+      # (driver) control. amd-smi rejects --clocks and --fans together.
+      runScriptFile.write("sudo %s reset -g 0 --clocks\n" % globalParameters["AMDSMIPath"])
+      runScriptFile.write("sudo %s reset -g 0 --fans\n" % globalParameters["AMDSMIPath"])
 
     runScriptFile.write("exit $ERR\n")
 

@@ -52,7 +52,7 @@ Coverage caveats:
 
 Every IR op must have explicit production lowering. Unsupported ops raise at lowering time.
 
-There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `Cpp/` port, reached via the `rocke_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`ROCKE_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
+There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `cpp/` port, reached via the `rocke_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`ROCKE_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
 
 HIP debug lowering is narrower than LLVM production lowering. CK Tile spec emission is narrower still and operates from selected specs, not `KernelDef`.
 
@@ -174,6 +174,15 @@ Runtime launchers assume:
 
 CI / dev machines without matching ROCm libraries can still build docs, import `rocke`, run the static unit suite, and inspect Python code. They cannot run end-to-end HSACO compile + launch.
 
+**Launcher-cache identity is in-process only.** Kernels that declare `runtime_param_fields` (see [Runtime Param Fields](../instances/attention.md#runtime-param-fields)) are keyed by a semantic key with those fields excluded, not by their symbol name. The two are not equivalent, and the key is the stronger of the pair — `batch` has never appeared in the dense attention symbol on any path, so a spec that bakes `batch` and one that reads it at runtime are **homonyms**: same symbol, different bodies.
+
+That is harmless for in-process dispatch, where the key is the identity. It blocks two things:
+
+- **AOT packaging**, where the symbol *is* the identity and the two bodies collide.
+- **Partial specialization** — baking `batch` for a hot shape while keeping the seqlens runtime. The cache key follows a narrowed `runtime_param_fields` automatically, but `_shape_name_parts()` is all-or-nothing (it emits both seqlen tokens or neither) and does not derive from that tuple.
+
+Precondition for either: make the symbol name derive from `runtime_param_fields` first. Baking the *whole* shape is already safe — it goes through an existing mode flag, which restores both the per-shape key and the `sq`/`sk` name tokens: persistent / ragged / varlen / paged / sliding-window on gfx950, ragged / varlen / paged on gfx942 (where persistent and sliding-window are on the runtime path and restore neither).
+
 ## Multi-GPU and RCCL
 
 The DSL has **no first-class multi-GPU support**. Verified by inspecting the entire `rocke` tree on this checkout:
@@ -207,7 +216,7 @@ What does work for multi-GPU usage of the DSL:
 
  This pattern is verified end-to-end by `dsl_docs/development/verify_dsl_docs.py` on the GPU available to this box; the per-device launcher constructed under `torch.cuda.device(d)` correctly launches on that device.
 
-- **Torch-stream-aware launches**: `runtime/torch_module.py::resolve_stream(stream, device=None)` honors `torch.cuda.current_stream(device).cuda_stream`, so the standard pattern of allocating tensors and launching all under `torch.cuda.device(d):` interoperates with torch's caching allocator on the right device.
+- **Torch-stream-aware launches**: `runtime/torch_interop.py::resolve_stream(stream, device=None)` honors `torch.cuda.current_stream(device).cuda_stream`, so the standard pattern of allocating tensors and launching all under `torch.cuda.device(d):` interoperates with torch's caching allocator on the right device.
 
 - **Composing with `torch.distributed` (RCCL on ROCm)**: the user runs `torch.distributed.init_process_group(backend="nccl")` (PyTorch's "nccl" backend on ROCm is implemented by RCCL — `librccl.so`). DSL kernels then execute on each rank's local device; collectives (`torch.distributed.all_reduce`, `all_gather`, etc.) execute outside the DSL on a separate communication stream. The DSL never invokes RCCL itself.
 

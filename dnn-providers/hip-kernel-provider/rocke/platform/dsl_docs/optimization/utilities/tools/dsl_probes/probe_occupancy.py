@@ -56,7 +56,7 @@ def _bootstrap_rocke() -> None:
     # utilities/tools/dsl_probes/<this>  -> dsl_docs/optimization/...
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "Python"
+        candidate = parent / "python"
         if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
@@ -352,7 +352,7 @@ def probe_occupancy(
 
 
 def _demo_implicit_gemm(arch: ArchCaps) -> None:
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,

@@ -9,7 +9,7 @@ hipBLASLt documentation
 ===========================
 
 hipBLASLt is a library that provides General Matrix-Matrix (GEMM) operations with flexible APIs and extends functionality beyond the traditional BLAS library.
-To learn more, see :doc:`What is hipBLASLt?<./what-is-hipBLASLt>`
+To learn more, see :doc:`What is hipBLASLt?<./what-is-hipBLASLt>`.
 
 The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt>`_.
 
@@ -41,6 +41,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
     * :doc:`Use logging and heuristics <./how-to/use-logging-heuristics>`
     * :doc:`Use Stream-K with hipBLASLt <./how-to/how-to-use-streamk>`
     * :doc:`Detect NaN in GEMM output <./how-to/how-to-detect-nan>`
+    * :doc:`Use general batched GEMM <./how-to/how-to-general-batched-gemm>`
 
   .. grid-item-card:: Examples
 

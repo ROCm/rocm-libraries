@@ -867,7 +867,7 @@ requires-dist = [
     { name = "cmake" },
     { name = "hip-python" },
     { name = "joblib", specifier = ">=1.4.0" },
-    { name = "msgpack" },
+    { name = "msgpack", specifier = ">=1.0" },
     { name = "nanobind" },
     { name = "numpy" },
     { name = "orjson" },

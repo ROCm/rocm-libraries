@@ -131,11 +131,6 @@ vectorizedBwdActivationOp(FpPrecVecType const& dy,
 
 } // namespace
 
-// Note: Calls with !MIO_BN_USESAVED configurations are not tested with the CI. Apparently there are
-// some precision issues with the original CL version as well; it is not clear if this is an
-// implementation or design problem. During the HIP port we only verified that these kernels run and
-// give valid numerical result, but the precision issues were not addressed.
-
 namespace miopen {
 namespace batchnorm {
 
@@ -440,7 +435,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex(lid + less4);
+                    unsigned int index = getTensorIndex((lid << 2) + less4);
                     if(index + read_size - 1 < mio_bn_config::nchw)
                     {
                         read4 = cast<fp_prec_read_vec_type>(
@@ -923,7 +918,7 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type
@@ -1023,7 +1018,7 @@ extern "C" __global__ void __launch_bounds__(
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * mio_bn_config::lds_size];
@@ -1184,7 +1179,7 @@ extern "C" __global__ void __launch_bounds__(
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * mio_bn_config::lds_size];
@@ -1283,7 +1278,7 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type

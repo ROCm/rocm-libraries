@@ -32,9 +32,13 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "ClientProblemFactory.hpp"
+#include "DeviceContext.hpp"
 #include "Rotating.hpp"
 
+#include <mxDataGen.hpp>
+
 #include <cstddef>
+#include <map>
 #include <random>
 
 #include "RunListener.hpp"
@@ -60,24 +64,16 @@ namespace TensileLite
                 return false;
             auto dt = tensor.dataType();
             return dt == rocisa::DataType::Float4
+                || dt == rocisa::DataType::Float6
+                || dt == rocisa::DataType::BFloat6
                 || dt == rocisa::DataType::Float8
                 || dt == rocisa::DataType::BFloat8;
         }
 
-        inline bool isF6(const TensorDescriptor& tensor)
+        inline bool isMXProblem(const ContractionProblemGemm& problem)
         {
-            auto const dt = tensor.dataType();
-
-            return dt == rocisa::DataType::Float6
-                || dt == rocisa::DataType::BFloat6;
-        }
-
-        inline bool isMXProblemExceptF6(const ContractionProblemGemm& problem)
-        {
-            bool isAnyF6 = isF6(problem.a()) or isF6(problem.b());
-            return !isAnyF6 &&
-                (isMXTensor(problem.a(), problem.mxBlockA())
-                || isMXTensor(problem.b(), problem.mxBlockB()));
+            return isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB());
         }
 
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
@@ -177,6 +173,17 @@ namespace TensileLite
             DataInitialization(po::variables_map const&    args,
                                ClientProblemFactory const& problemFactory);
             ~DataInitialization();
+
+            // True when the CPU reference must be recomputed for this solution
+            // because DataInitialization refreshes MX inputs per solution
+            // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
+            // gfx1250, gfx942, non-MX) the per-problem reference is still valid
+            // and can be reused across all solutions.
+            bool referenceNeedsPerSolutionRecompute(ContractionProblemGemm const& problem,
+                                                    ContractionSolution const*    solution) const
+            {
+                return needsSolutionDependentMXPreswizzle(problem, solution);
+            }
 
             /**
              * Returns a ContractionInputs object with pointers to CPU memory,
@@ -472,21 +479,15 @@ namespace TensileLite
                         initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
                 case rocisa::DataType::Float6:
                     initArray<Float6x32>(initMode, static_cast<Float6x32*>(array), descriptor);
                     break;
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
                 case rocisa::DataType::BFloat6:
                     initArray<BFloat6x32>(initMode, static_cast<BFloat6x32*>(array), descriptor);
                     break;
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
                 case rocisa::DataType::Float4:
                     initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor);
                     break;
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
                 case rocisa::DataType::E8:
                     initArray<E8>(initMode, static_cast<E8*>(array), descriptor);
@@ -502,6 +503,7 @@ namespace TensileLite
                 case rocisa::DataType::ComplexDouble:
                     initArray<std::complex<double>>(initMode, static_cast<std::complex<double>*>(array), descriptor);
                     break;
+                case rocisa::DataType::Int4:
                 case rocisa::DataType::Int8x4:
                 case rocisa::DataType::Count:
                 case rocisa::DataType::Float8BFloat8:
@@ -764,8 +766,8 @@ namespace TensileLite
             template <typename T, InitMode Mode>
             void initArray(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
@@ -775,8 +777,8 @@ namespace TensileLite
             template <typename T>
             void initArrayConvert(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = ConvertTo<T>(i);
@@ -793,9 +795,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialIdx(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -808,9 +810,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialDim(T* array, int dim, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -823,17 +825,16 @@ namespace TensileLite
             template <>
             void initArraySerialDim<Half>(Half* array, int dim, TensorDescriptor const& tensor)
             {
-                union
-                {
-                    uint16_t bits;
-                    Half     value;
-                } x;
-
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx++)
                 {
+                    union
+                    {
+                        uint16_t bits;
+                        Half     value;
+                    } x;
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
                     x.bits                     = static_cast<uint16_t>(coord[dim]);
@@ -844,9 +845,9 @@ namespace TensileLite
             template <typename T>
             void initArrayIdentity(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -859,9 +860,9 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -874,7 +875,7 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, size_t elements)
             {
-#pragma omp parallel for
+#pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
                 {
                     array[i / TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
@@ -907,46 +908,40 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
-                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
-                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
+                // Re-init MX inputs for solution-dependent HostPreSwizzle.
                 if(m_currentSolution != nullptr
-                   && m_mxScaleFormat > 0
                    && m_currentGemmProblem != nullptr
-                   && !m_gpuPtrs.empty())
+                   && !m_gpuPtrs.empty()
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
+                                                         m_currentSolution))
                 {
-                    bool isMX = isMXProblemExceptF6(*m_currentGemmProblem);
-                    if(isMX)
+                    ScopedDevice device(m_deviceId);
+                    initializeMXData(*m_currentGemmProblem);
+                    copyValidToGPUBuffer(*m_currentGemmProblem);
+                    copyInputs(m_gpuPtrs,
+                               m_gpuBatchPtrs,
+                               m_maxElements,
+                               m_groupedOffsets,
+                               *m_currentGemmProblem,
+                               hipMemcpyDeviceToDevice);
+                    // Sync CPU current buffers so the reference matches GPU data.
+                    for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                  ContractionProblemGemm::TENSOR::B,
+                                  ContractionProblemGemm::TENSOR::MXSA,
+                                  ContractionProblemGemm::TENSOR::MXSB})
                     {
-                        initializeMXData(*m_currentGemmProblem);
-                        copyValidToGPUBuffer(*m_currentGemmProblem);
-                        copyInputs(m_gpuPtrs,
-                                   m_gpuBatchPtrs,
-                                   m_maxElements,
-                                   m_groupedOffsets,
-                                   *m_currentGemmProblem,
-                                   hipMemcpyDeviceToDevice);
-                        // Sync cpuInput.current from cpuInput.valid for MX
-                        // tensors so the CPU reference reads the regenerated
-                        // data that matches what the GPU received.
-                        for(int ti : {ContractionProblemGemm::TENSOR::A,
-                                      ContractionProblemGemm::TENSOR::B,
-                                      ContractionProblemGemm::TENSOR::MXSA,
-                                      ContractionProblemGemm::TENSOR::MXSB})
+                        auto& desc = m_currentGemmProblem->tensors()[ti];
+                        auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                        if(it == m_vdata[ti].pristine.end())
+                            continue;
+                        auto& p = it->second;
+                        if(p.cpuInput.valid && p.cpuInput.current)
                         {
-                            auto& desc = m_currentGemmProblem->tensors()[ti];
-                            auto  it   = m_vdata[ti].pristine.find(desc.dataType());
-                            if(it == m_vdata[ti].pristine.end())
-                                continue;
-                            auto& p = it->second;
-                            if(p.cpuInput.valid && p.cpuInput.current)
-                            {
-                                size_t bytes = multiplyElementSize(
-                                    p.maxElements, desc.elementBytes());
-                                std::memcpy(p.cpuInput.current.get(),
-                                            p.cpuInput.valid.get(),
-                                            bytes);
-                            }
+                            size_t bytes = multiplyElementSize(
+                                p.maxElements, desc.elementBytes());
+                            std::memcpy(p.cpuInput.current.get(),
+                                        p.cpuInput.valid.get(),
+                                        bytes);
                         }
                     }
                 }
@@ -973,13 +968,12 @@ namespace TensileLite
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override
             {
                 m_numRunsInSolution++;
             }
@@ -997,15 +991,14 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override
             {
             }
 
@@ -1077,6 +1070,23 @@ namespace TensileLite
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
             void initializeMXData(ContractionProblemGemm const& problem);
+
+            void initNonMXSideWithMXGenerator(int                     dataTensorEnum,
+                                              int                     scaleTensorEnum,
+                                              TensorDescriptor const& dataDesc,
+                                              bool                    transposed,
+                                              bool                    isMatrixA);
+
+            // True when swizzled MX scales depend on the solution.
+            bool needsSolutionDependentMXPreswizzle(
+                ContractionProblemGemm const& problem,
+                ContractionSolution const*    solution) const
+            {
+                return isMXProblem(problem) && m_mxScaleFormat > 0
+                       && m_mxScaleLayout == MXScaleLayout::GFX950
+                       && solution != nullptr
+                       && solution->problemType.mxScaleFormat == 1;
+            }
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
@@ -1173,16 +1183,27 @@ namespace TensileLite
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
 
+            int m_deviceId = 0;
+
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
-            // True when the current GPU uses preswizzled MX scale layout (gfx950 subtile).
-            // False for architectures that use K-swizzle layout (e.g. gfx1250).
-            bool m_isMXPreswizzleArch = false;
-            // Set by initializeMXDataForFP4 when preswizzled scale was uploaded to gpuInput.valid.
+            /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator
+            /// for A/B, MX or not (non-MX A/B must be FP8/BF8). 0: initArray for A/B, MX or not, with
+            /// MX scales from init-mx-a/b (MX FP8/BF8/FP4 data). 1 and 0 give F8 and MXF8
+            /// runs identical A/B bytes.
+            int m_mxDataGenerator = -1;
+            MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+            // Set by initializeMXData when a preswizzled scale was uploaded
+            // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
+            // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
+
+            // Scale descriptor most recently swizzled into gpuInput.valid, per
+            // tensor index. The MX equivalent of g_swizzleCache.
+            std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
         };
 
         template <>
@@ -2278,7 +2299,6 @@ namespace TensileLite
             return std::numeric_limits<int8_t>::min();
         }
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Zero>()
         {
@@ -2375,9 +2395,7 @@ namespace TensileLite
         {
             throw std::runtime_error("BadOutput not available for float4.");
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::Zero>()
         {
@@ -2477,10 +2495,8 @@ namespace TensileLite
         {
             throw std::runtime_error("BadOutput not available for float4.");
         }
-#endif // #ifdef TENSILE_USE_BF6
 
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Zero>()
         {
@@ -2584,9 +2600,9 @@ namespace TensileLite
                 Float4x2 value;
             } x;
 
-            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
-            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
-            x.bits = (val1 << 4) | val0;
+            uint8_t val0 = static_cast<uint8_t>(rand() % 16);
+            uint8_t val1 = static_cast<uint8_t>(rand() % 16);
+            x.bits       = (val1 << 4) | val0;
             return x.value;
         }
         template <>
@@ -2599,7 +2615,6 @@ namespace TensileLite
         {
             throw std::runtime_error("BadOutput not available for float4.");
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -2809,29 +2824,23 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline bool DataInitialization::isBadInput<Float6x32>(Float6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline bool DataInitialization::isBadInput<BFloat6x32>(BFloat6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline bool DataInitialization::isBadInput<Float4x2>(Float4x2 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -2926,29 +2935,23 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline bool DataInitialization::isBadOutput<Float6x32>(Float6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline bool DataInitialization::isBadOutput<BFloat6x32>(BFloat6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline bool DataInitialization::isBadOutput<Float4x2>(Float4x2 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3039,7 +3042,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getTrigValue<Float6x32>(int idx, bool useCos, bool useAbs)
         {
@@ -3081,9 +3083,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getTrigValue<BFloat6x32>(int idx, bool useCos, bool useAbs)
         {
@@ -3125,17 +3125,14 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getTrigValue<Float4x2>(int idx, bool useCos, bool useAbs)
         {
             float val0 = getTrigValue<float>(idx, useCos, useAbs);
-            float val1 = getTrigValue<float>(idx, useCos, useAbs);
+            float val1 = getTrigValue<float>(idx + 1, useCos, useAbs);
             return Float4x2(val0, val1);
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3376,7 +3373,7 @@ namespace TensileLite
         template <>
         inline Float8 DataInitialization::getValue<Float8, InitMode::RandomNarrow>()
         {
-#if _WIN32
+#if defined(_WIN32)
             //msvc's STL implementation follows [rand.req.genl](1.5), so Float8 as template arg
             //is not allowed
             return Float8(rocm_random_narrow_range<float>{}());
@@ -3388,7 +3385,7 @@ namespace TensileLite
         template <>
         inline BFloat8 DataInitialization::getValue<BFloat8, InitMode::RandomNarrow>()
         {
-#if _WIN32
+#if defined(_WIN32)
             //msvc's STL implementation follows [rand.req.genl](1.5), so BFloat8 as template arg
             //is not allowed
             return BFloat8(rocm_random_narrow_range<float>{}());
@@ -3444,7 +3441,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNarrow>()
         {
@@ -3486,9 +3482,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::RandomNarrow>()
         {
@@ -3530,15 +3524,12 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNarrow>()
         {
             return getValue<Float4x2, InitMode::Random>();
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3659,7 +3650,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNegPosLimited>()
         {
@@ -3701,9 +3691,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::RandomNegPosLimited>()
         {
@@ -3745,17 +3733,14 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNegPosLimited>()
         {
             return Float4x2(getValueWithUpperLowerBoundFP<float>(),
                             getValueWithUpperLowerBoundFP<float>());
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3814,7 +3799,6 @@ namespace TensileLite
 #undef TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32
             DataInitialization::getValue<Float6x32, InitMode::UniformLowPrecision>()
@@ -3828,9 +3812,7 @@ namespace TensileLite
                             v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
                             v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32
             DataInitialization::getValue<BFloat6x32, InitMode::UniformLowPrecision>()
@@ -3844,9 +3826,7 @@ namespace TensileLite
                             v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
                             v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2
             DataInitialization::getValue<Float4x2, InitMode::UniformLowPrecision>()
@@ -3855,7 +3835,6 @@ namespace TensileLite
             return Float4x2(getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal),
                             getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal));
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3956,7 +3935,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::ConvertTo<Float6x32>(size_t i)
         {
@@ -3998,9 +3976,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::ConvertTo<BFloat6x32>(size_t i)
         {
@@ -4042,15 +4018,12 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::ConvertTo<Float4x2>(size_t i)
         {
             return Float4x2(float(i), float(i));
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -4145,7 +4118,6 @@ namespace TensileLite
             return static_cast<BFloat8_fnuz>(value);
         }
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::convertDoubleTo<Float6x32>(double value)
         {
@@ -4187,9 +4159,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::convertDoubleTo<BFloat6x32>(double value)
         {
@@ -4231,15 +4201,12 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::convertDoubleTo<Float4x2>(double value)
         {
             return Float4x2(float(value), float(value));
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>

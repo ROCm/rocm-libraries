@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Implemented on both engines (Python and C++) |
 | **Decision** | A separate, explicit machine format; `print_ir` stays human-only |
-| **Implementation** | Python: `rocke/core/ir_serialize.py` (`serialize` / `parse`), `rocke/core/verify.py`. C++: `Cpp/core/ir/serialize.cpp` (`rocke_ir_parse` and the serializer), header `Cpp/include/rocke/ir_serialize.h`. |
+| **Implementation** | Python: `rocke/core/ir_serialize.py` (`serialize` / `parse`), `rocke/core/verify.py`. C++: `cpp/core/ir/serialize.cpp` (`rocke_ir_parse` and the serializer), header `cpp/include/rocke/ir_serialize.h`. |
 | **Scope** | A fully round-trippable text encoding of a `KernelDef` (`rocke/core/ir.py`) |
 
 ---
@@ -386,3 +386,9 @@ kernel @add_one {
 
 (`parse` of that text rebuilds a `KernelDef` whose `lower_kernel_to_llvm`
 output is identical to the original's.)
+
+The scalar name `tf32` denotes logical TF32 with a 32-bit I32 carrier. It may
+appear in vectors, pointers, shared-memory types and loop carries, using the
+existing type grammar (for example, `vec<tf32x2>`). Serialization preserves its
+logical identity independently of `f32` and `i32`; no format-version change is
+needed. The public dtype alias `xf32` normalizes to `tf32` before IR construction.

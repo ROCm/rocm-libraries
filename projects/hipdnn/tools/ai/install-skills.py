@@ -23,7 +23,7 @@ Examples:
     python3 install-skills.py --codex
 
     # Install specific skills to Claude only
-    python3 install-skills.py --claude hipdnn-review pr-summary
+    python3 install-skills.py --claude hipdnn-pr-quality hipdnn-superbuild
 
     # Install all skills to both Codex and Claude (explicit)
     python3 install-skills.py --codex --claude
@@ -32,7 +32,7 @@ Examples:
     python3 install-skills.py --target /path/to/skills
 
     # Backward-compatible positional target form
-    python3 install-skills.py /path/to/skills hipdnn-review
+    python3 install-skills.py /path/to/skills hipdnn-pr-quality
 """
 
 import argparse

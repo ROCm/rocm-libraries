@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -81,6 +81,15 @@ foreach( bench ${bench_list})
 
   target_compile_options( ${bench} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
 
+  # On Linux, always include amdgcnspirv target so the clients work
+  # on an architecture that the runtime supports but was not
+  # specified a build time.
+  # TODO: amdgcnspirv is not compatible with ASAN.
+  get_target_property(bench_opts ${bench} COMPILE_OPTIONS)
+  if( NOT WIN32 AND NOT bench_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+    target_compile_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+    target_link_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+  endif()
   # NB: hip-clang includes omp.h, so we need to specify the location
   # of ROCM_CLANG_ROOT at cmake config time if we are using clang++.
 
@@ -122,7 +131,7 @@ foreach( bench ${bench_list})
     )
 
   target_link_libraries( ${bench} PUBLIC
-    ${ROCFFT_CLIENTS_HOST_LINK_LIBS}
+    hip::host
   )
 
   if( ROCFFT_MPI_ENABLE )

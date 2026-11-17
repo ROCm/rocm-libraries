@@ -691,6 +691,8 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.isXnackEnabled())
         return false;
+    if(IsGfx9ConsumerApu(target))
+        return false;
 
     const auto name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx9") || StartsWith(name, "gfx10") || StartsWith(name, "gfx11") ||
@@ -867,7 +869,7 @@ ConvSolution ConvBinWinoRxS<Winodata, Winofilter>::GetSolution(
     const auto name     = ctx.GetStream().GetDeviceName();
     const auto is_gfx9  = StartsWith(name, "gfx9");
     const auto is_gfx10 = StartsWith(name, "gfx10");
-    const auto is_gfx11 = StartsWith(name, "gfx11");
+    const auto is_gfx11 = StartsWith(name, "gfx11"); // includes gfx117x
     const auto is_gfx12 = StartsWith(name, "gfx120");
     const auto is_v21   = IsWinogradV21Preferred<Winodata, Winofilter>(name, problem);
     size_t wg_size      = is_gfx9 ? 512 : 256;

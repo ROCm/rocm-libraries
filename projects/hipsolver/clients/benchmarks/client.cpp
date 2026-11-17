@@ -93,7 +93,7 @@ try
         ("iters,i",
          value<rocblas_int>(&argus.iters)->default_value(10),
             "Iterations to run inside the GPU timing loop.\n"
-            "                           Reported time will be the average.\n"
+            "                           Reported time will be the median.\n"
             "                           ")
 
         ("mem_query",
@@ -338,6 +338,14 @@ try
             "                           Indicates how the right singular vectors are to be calculated and stored.\n"
             "                           ")
 
+        // trtri options
+        ("diag",
+         value<char>()->default_value('N'),
+            "N = non-unit triangular, U = unit triangular.\n"
+            "                           Indicates whether the diagonal elements of a triangular matrix are assumed to be one.\n"
+            "                           Only applicable to trtri.\n"
+            "                           ")
+
         // partial eigenvalue/singular value decomposition options
         ("il",
          value<rocblas_int>(),
@@ -423,11 +431,11 @@ try
             "                           ")
 
         // other options
-        // ("direct",
-        //  value<char>()->default_value('F'),
-        //     "F = forward, B = backward.\n"
-        //     "                           The order in which a series of transformations are applied.\n"
-        //     "                           ")
+        ("direct",
+         value<char>()->default_value('F'),
+            "F = forward, B = backward.\n"
+            "                           The order in which a series of transformations are applied.\n"
+            "                           ")
 
         // ("fast_alg",
         //  value<char>()->default_value('O'),
@@ -458,11 +466,11 @@ try
             "                           The side from which a matrix should be multiplied.\n"
             "                           ")
 
-        // ("storev",
-        //  value<char>(),
-        //     "C = column-wise, R = row-wise.\n"
-        //     "                           Indicates whether data is stored column-wise or row-wise.\n"
-        //     "                           ")
+        ("storev",
+         value<char>(),
+            "C = column-wise, R = row-wise.\n"
+            "                           Indicates whether data is stored column-wise or row-wise.\n"
+            "                           ")
 
         ("trans",
          value<char>()->default_value('N'),
@@ -504,8 +512,9 @@ try
     argus.validate_operation("trans");
     argus.validate_side("side");
     argus.validate_fill("uplo");
-    // argus.validate_direct("direct");
-    // argus.validate_storev("storev");
+    argus.validate_diag("diag");
+    argus.validate_direct("direct");
+    argus.validate_storev("storev");
     argus.validate_svect("jobu");
     argus.validate_svect("jobv");
     // argus.validate_workmode("fast_alg");

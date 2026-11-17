@@ -86,7 +86,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spsm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
@@ -95,7 +94,7 @@ extern "C" {
 *  </table>
 *
 *  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, and \ref rocsparse_format_csc.
 *
 *  \note
 *  Only the \ref rocsparse_spsm_stage_buffer_size stage and the \ref rocsparse_spsm_stage_compute stage are non-blocking

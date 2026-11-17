@@ -64,7 +64,7 @@ include(CMakeDependentOption)
 CMAKE_DEPENDENT_OPTION(TENSILE_BUILD_CLIENT "Build the benchmarking client" ON
                         "TENSILE_USE_HIP" OFF)
 
-if(TENSILE_USE_HIP)
+if(TENSILE_USE_HIP AND NOT TARGET hip::host)
     find_package(HIP REQUIRED CONFIG PATHS ${ROCM_PATH_ENV_VALUE} /opt/rocm)
 endif()
 

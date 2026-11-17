@@ -28,11 +28,18 @@ import sys
 import yaml
 import msgpack
 
+# Library YAML runs to tens of megabytes, where the libyaml-backed loader is several times
+# faster than the pure-Python one. The name also satisfies bandit's B506 check (SEC-00404).
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     infile = args[0]
     outfile = args[1]
     with open(infile) as f:
-        data = yaml.load(f)
+        data = yaml.load(f, SafeLoader)
     with open(outfile, 'wb') as f:
         msgpack.dump(data, f)

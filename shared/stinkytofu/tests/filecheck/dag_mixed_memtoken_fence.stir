@@ -122,3 +122,47 @@ st.func @tensor_load_no_memtoken_fence() {
   "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
   acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
 }
+
+##===----------------------------------------------------------------------===##
+# 5. global_store_async_from_lds without memtoken acts as fence.
+##===----------------------------------------------------------------------===##
+#
+# Same pattern as (3)/(4) but with an untokenized async store as the fence.
+#
+# CHECK-LABEL: @async_store_no_memtoken_fence
+#
+# CHECK-NOT: v_wmma
+# CHECK: global_store_async_from_lds_b64
+#
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @async_store_no_memtoken_fence() {
+^entry:
+  v0 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+##===----------------------------------------------------------------------===##
+# 6. global_store_async_from_lds WITH memtoken is movable (not a fence).
+##===----------------------------------------------------------------------===##
+#
+# Inverse of (5): a tokenized async store gets LDS pseudo-regs after
+# BuildImplicitDependency, so hasSideEffect() gates it like the other tokenized
+# LDS ops and it is NOT a fence. The WMMA has no register dependency on the
+# v_add or the async store, so with the async store movable the scheduler hoists
+# the WMMA to the TOP, ahead of both. If the async store were a fence (as it is
+# when untokenized, case 5) the WMMA could not cross it and would stay last.
+#
+# CHECK-LABEL: @async_store_memtoken_movable
+# CHECK: v_wmma_f32_16x16x16_bf16
+# CHECK: global_store_async_from_lds_b64
+
+st.func @async_store_memtoken_movable() {
+^entry:
+  v0 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

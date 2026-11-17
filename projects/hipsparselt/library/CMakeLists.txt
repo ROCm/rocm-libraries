@@ -1,10 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-if(HIPSPARSELT_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
-    add_library(hipsparselt SHARED)
-else()
-    add_library(hipsparselt STATIC)
+add_library(hipsparselt)
+if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(hipsparselt PRIVATE HIPSPARSELT_STATIC_LIB)
 endif()
 
@@ -29,8 +27,9 @@ if(HIPSPARSELT_ENABLE_HIP)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Enable F16C intrinsics
-    target_compile_options(hipsparselt PRIVATE -mf16c)
+    if(HIPSPARSELT_CXX_HAS_MF16C)
+        target_compile_options(hipsparselt PRIVATE -mf16c)
+    endif()
 endif()
 
 if(HIPSPARSELT_ENABLE_ASAN)

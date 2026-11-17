@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 typedef struct _rocsparse_nnzsplit_info
 {
 
@@ -33,6 +35,13 @@ typedef struct _rocsparse_nnzsplit_info
 
     void* starting_ids{};
     void* starting_block_ids{};
+
+    // Launch tuning chosen at analysis time and replayed verbatim at compute
+    // time so the two phases always agree (the block layout of starting_ids /
+    // starting_block_ids depends on both).
+    uint32_t block_size{}; // threads per block (wavefront-relative)
+    uint32_t nnz_per_thread{}; // nnz-per-thread granularity (1 / 4 / 8)
+    int64_t  max_row_nnz{}; // longest row length (row-skew signal)
 
 public:
     ~_rocsparse_nnzsplit_info();

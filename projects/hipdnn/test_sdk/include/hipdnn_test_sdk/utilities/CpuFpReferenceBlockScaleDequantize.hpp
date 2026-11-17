@@ -34,12 +34,23 @@ public:
                            const std::vector<int32_t>& blockSize,
                            bool isNegativeScale = false)
     {
+        static_assert(std::is_same_v<ComputeDataType, float>
+                          || std::is_same_v<ComputeDataType, double>,
+                      "BlockScaleDequantize only supports float or double compute type.");
+
         const auto& xDims = x.dims();
+        const auto& yDims = y.dims();
         const auto& scaleDims = scale.dims();
 
-        if(xDims.empty())
+        if(xDims.empty() || yDims.empty() || scaleDims.empty())
         {
             throw std::runtime_error("BlockScaleDequantize requires non-empty tensor dimensions.");
+        }
+
+        if(xDims != yDims)
+        {
+            throw std::invalid_argument("BlockScaleDequantize requires input and output tensors to "
+                                        "have the same dimensions.");
         }
 
         // blockSize entries map to the trailing dimensions of the tensor.

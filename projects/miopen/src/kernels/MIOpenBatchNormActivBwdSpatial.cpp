@@ -28,13 +28,6 @@
 #include <hip/hip_runtime.h>
 #endif
 
-#if defined(__AMDGCN__) && \
-    !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX115X || MIO_BN_GFX120X || MIO_BN_GFX125X)
-#define MIOPEN_USE_AMDGCN 1
-#else
-#define MIOPEN_USE_AMDGCN 0
-#endif
-
 #include "float_types.h"
 
 #include "activation_functions.hpp"
@@ -52,7 +45,7 @@ constexpr static unsigned int NLOOP    = SEGMENT > 0 ? (MIO_BN_NHW + SEGMENT - 1
 constexpr static unsigned int SEGIHW   = SEGMENT / (MIO_BN_HW);
 constexpr static unsigned int NLOOPM   = NLOOP - 1;
 constexpr static unsigned int SNHW     = NLOOPM * SEGIHW;
-constexpr static unsigned int LDS_SIZE = MIOPEN_USE_AMDGCN ? LDSGCN_SIZE : LDSNOGCN_SIZE;
+constexpr static unsigned int LDS_SIZE = MIOPEN_USE_GFX9_DPP ? LDSGCN_SIZE : LDSNOGCN_SIZE;
 
 constexpr static unsigned int MAX_READ = 2;
 constexpr static unsigned int GRPRD    = LOCAL_SIZE_X * 4;

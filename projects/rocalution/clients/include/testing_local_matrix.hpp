@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -196,7 +196,6 @@ void testing_local_matrix_bad_args(void)
 
     // AMG
     {
-        int                   val;
         LocalVector<bool>*    bool_null_vec  = nullptr;
         LocalVector<int64_t>* int64_null_vec = nullptr;
         ASSERT_DEATH(mat1.AMGGreedyAggregate(0.1, bool_null_vec, &int641, &int641),
@@ -524,13 +523,10 @@ bool testing_local_matrix_allocations(Arguments argus)
 template <typename T>
 bool testing_local_matrix_zero(Arguments argus)
 {
-    int size     = argus.size;
-    int blockdim = argus.blockdim;
+    int size = argus.size;
 
-    int m  = size;
-    int n  = size;
-    int mb = (m + blockdim - 1) / blockdim;
-    int nb = (n + blockdim - 1) / blockdim;
+    int m = size;
+    int n = size;
 
     int nnz = 0.05 * m * n;
     if(nnz == 0)
@@ -583,10 +579,8 @@ bool testing_local_matrix_set_data_ptr(Arguments argus)
     set_device_rocalution(device);
     init_rocalution();
 
-    int ndiag       = 5;
     int ell_max_row = 6;
     int ell_nnz     = ell_max_row * m;
-    int coo_nnz     = (nnz - ell_nnz) < 0 ? 0 : nnz - ell_nnz;
 
     // Testing allocating matrix types
     {
@@ -734,7 +728,6 @@ template <typename T>
 void getTestMatrix(Arguments argus, LocalMatrix<T>& matrix, bool& is_invertible)
 {
     int         size        = argus.size;
-    int         blockdim    = argus.blockdim;
     std::string matrix_type = argus.matrix_type;
 
     // Generate A
@@ -891,6 +884,28 @@ std::vector<std::vector<T>> extract_dense_matrix(const LocalMatrix<T>& matrix)
         }
     }
     return dense;
+}
+
+template <typename T>
+std::vector<std::vector<bool>> extract_dense_pattern(const LocalMatrix<T>& matrix)
+{
+    int                            m   = matrix.GetM();
+    int                            n   = matrix.GetN();
+    int                            nnz = matrix.GetNnz();
+    std::vector<std::vector<bool>> pattern(m, std::vector<bool>(n, false));
+    std::vector<int>               row_offsets(m + 1);
+    std::vector<int>               col_indices(nnz);
+    std::vector<T>                 values(nnz);
+
+    matrix.CopyToCSR(row_offsets.data(), col_indices.data(), values.data());
+    for(int row = 0; row < m; ++row)
+    {
+        for(int idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
+        {
+            pattern[row][col_indices[idx]] = true;
+        }
+    }
+    return pattern;
 }
 
 template <typename T>
@@ -2123,6 +2138,93 @@ void testing_write_file_RSIO()
 }
 
 template <typename T>
+void testing_read_file_RSIO_mixed_precision()
+{
+    // Read a file written in one precision into a matrix of the other precision, for every
+    // format, so that the readers convert the values while reading
+    using U = typename std::conditional<std::is_same<T, float>::value, double, float>::type;
+
+    // Matrix representation, with dimensions that are a multiple of the BCSR block dimension:
+    // [ 1.0  0.0  2.0  0.0 ]
+    // [ 0.0  3.0  0.0  0.0 ]
+    // [ 4.0  0.0  5.0  6.0 ]
+    // [ 0.0  0.0  0.0  7.0 ]
+    const int n              = 4;
+    PtrType   row_offsets[5] = {0, 2, 3, 6, 7};
+    int       col_indices[7] = {0, 2, 1, 0, 2, 3, 3};
+    T         values[7]      = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0};
+    U         dense_ref[16]
+        = {1.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 4.0, 0.0, 5.0, 6.0, 0.0, 0.0, 0.0, 7.0};
+
+    const std::string filename = get_temp_dir() + "test_matrix_mixed_precision.rsio";
+
+    for(unsigned int format = DENSE; format <= HYB; ++format)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        LocalMatrix<T> matrix;
+        matrix.AllocateCSR("test", 7, n, n);
+        matrix.CopyFromCSR(row_offsets, col_indices, values);
+        matrix.ConvertTo(format, (format == BCSR) ? 2 : 1);
+        ASSERT_EQ(matrix.GetFormat(), format);
+        ASSERT_NO_THROW(matrix.WriteFileRSIO(filename));
+
+        LocalMatrix<U> mat;
+        mat.ReadFileRSIO(filename);
+        EXPECT_EQ(mat.GetFormat(), format);
+        ASSERT_EQ(mat.GetM(), n);
+        ASSERT_EQ(mat.GetN(), n);
+
+        // Compare the dense representation, as some formats store explicit zeros
+        mat.ConvertToCSR();
+        std::vector<PtrType> ptr(n + 1);
+        std::vector<int>     col(mat.GetNnz());
+        std::vector<U>       val(mat.GetNnz());
+        mat.CopyToCSR(ptr.data(), col.data(), val.data());
+
+        U dense[n * n] = {};
+        for(int i = 0; i < n; ++i)
+        {
+            for(PtrType j = ptr[i]; j < ptr[i + 1]; ++j)
+            {
+                dense[i * n + col[j]] += val[j];
+            }
+        }
+
+        for(int i = 0; i < n * n; ++i)
+        {
+            EXPECT_EQ(dense[i], dense_ref[i]);
+        }
+    }
+
+    // Clean up the test file
+    std::remove(filename.c_str());
+}
+
+template <typename T>
+void testing_write_file_RSIO_close_failure()
+{
+    // Writes to /dev/full are buffered and only fail when the file is closed
+    const std::string filename = "/dev/full";
+    FILE*             f        = fopen(filename.c_str(), "wb");
+    if(f == nullptr)
+    {
+        GTEST_SKIP() << filename << " is not available";
+    }
+    fclose(f);
+
+    LocalMatrix<T> matrix;
+    matrix.AllocateCSR("test", 5, 3, 3);
+
+    int row_offsets[4] = {0, 2, 3, 5};
+    int col_indices[5] = {0, 2, 1, 0, 2};
+    T   values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
+    matrix.CopyFromCSR(row_offsets, col_indices, values);
+
+    EXPECT_EXIT(matrix.WriteFileRSIO(filename), ::testing::ExitedWithCode(1), "");
+}
+
+template <typename T>
 void testing_local_apply(Arguments argus)
 {
     LocalMatrix<T> matrix;
@@ -2304,33 +2406,49 @@ void testing_local_extract_l(Arguments argus)
 template <typename T>
 void testing_local_matrix_add(Arguments argus)
 {
+    // For "Random", matrix1 and matrix2 have different sparsity patterns
     LocalMatrix<T> matrix1;
     getTestMatrix<T>(argus, matrix1);
     LocalMatrix<T> matrix2;
     getTestMatrix<T>(argus, matrix2);
 
     // Save dense representations before addition
-    auto dense1 = extract_dense_matrix(matrix1);
-    auto dense2 = extract_dense_matrix(matrix2);
+    auto dense1   = extract_dense_matrix(matrix1);
+    auto dense2   = extract_dense_matrix(matrix2);
+    auto pattern1 = extract_dense_pattern(matrix1);
 
-    // Perform matrix addition
+    LocalMatrix<T> union_sum;
+    union_sum.CloneFrom(matrix1);
+
+    matrix1.MoveToAccelerator();
+    matrix2.MoveToAccelerator();
+    union_sum.MoveToAccelerator();
+
+    // structure == false keeps the sparsity pattern of matrix1
     EXPECT_NO_THROW(matrix1.MatrixAdd(matrix2));
 
-    // Extract the result as dense
-    auto dense_sum = extract_dense_matrix(matrix1);
+    // structure == true computes the union of both patterns
+    EXPECT_NO_THROW(union_sum.MatrixAdd(matrix2, static_cast<T>(1), static_cast<T>(1), true));
 
-    // Check that the result is the element-wise sum
+    // Extract the results as dense
+    auto dense_sum       = extract_dense_matrix(matrix1);
+    auto dense_union_sum = extract_dense_matrix(union_sum);
+
     int m = dense1.size();
     int n = m > 0 ? dense1[0].size() : 0;
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
-            EXPECT_EQ(dense_sum[i][j], dense1[i][j] + dense2[i][j]);
+        {
+            EXPECT_EQ(dense_sum[i][j],
+                      pattern1[i][j] ? dense1[i][j] + dense2[i][j] : static_cast<T>(0));
+            EXPECT_EQ(dense_union_sum[i][j], dense1[i][j] + dense2[i][j]);
+        }
 }
 
 template <typename T>
 void testing_local_gershgorin(Arguments argus)
 {
-    if(argus.matrix_type != "Laplacian2D" || argus.matrix_type != "PermutedIdentity")
+    if(argus.matrix_type != "Laplacian2D" && argus.matrix_type != "PermutedIdentity")
     {
         return;
     }
@@ -2342,14 +2460,15 @@ void testing_local_gershgorin(Arguments argus)
 
     if(argus.matrix_type == "Laplacian2D")
     {
-        // For Laplacian2D, the Gershgorin bounds should be [0, 4]
+        // Interior rows have 4 on the diagonal and four -1 neighbors
         EXPECT_NEAR(lower, static_cast<T>(0), getTolerance<T>());
-        EXPECT_NEAR(upper, static_cast<T>(4), getTolerance<T>());
+        EXPECT_NEAR(upper, static_cast<T>(8), getTolerance<T>());
     }
     else if(argus.matrix_type == "PermutedIdentity")
     {
-        // For PermutedIdentity, the Gershgorin bounds should be [1, 1]
-        EXPECT_NEAR(lower, static_cast<T>(1), getTolerance<T>());
+        // gen_permuted_identity() builds a cyclic column shift, which has no diagonal
+        // entries for the tested sizes, so every disc is centered at 0 with radius 1
+        EXPECT_NEAR(lower, static_cast<T>(-1), getTolerance<T>());
         EXPECT_NEAR(upper, static_cast<T>(1), getTolerance<T>());
     }
 }
@@ -2420,8 +2539,20 @@ void testing_local_add_scalar_off_diagonal(Arguments argus)
     LocalMatrix<T> matrix;
     getTestMatrix<T>(argus, matrix);
 
-    // Extract strictly lower and strictly upper matrices
+    int m = matrix.GetM();
+    int n = matrix.GetN();
+    // A non-square matrix has min(m, n) diagonal entries
+    int k = std::min(m, n);
+
     LocalMatrix<T> L, U;
+    LocalVector<T> diag_vec;
+
+    matrix.MoveToAccelerator();
+    L.MoveToAccelerator();
+    U.MoveToAccelerator();
+    diag_vec.MoveToAccelerator();
+
+    // Extract strictly lower and strictly upper matrices
     matrix.ExtractL(&L, false); // strictly lower
     matrix.ExtractU(&U, false); // strictly upper
 
@@ -2430,45 +2561,58 @@ void testing_local_add_scalar_off_diagonal(Arguments argus)
     U.AddScalar(1.0);
 
     // Extract diagonal matrix
-    LocalMatrix<T> D;
-    D.AllocateCSR("diag", matrix.GetM(), matrix.GetM(), matrix.GetN());
-    LocalVector<T> diag_vec;
     matrix.ExtractDiagonal(&diag_vec);
-    int              m = matrix.GetM();
-    std::vector<int> row_offsets(m + 1), col_indices(m);
-    std::vector<T>   values(m);
-    for(int i = 0; i < m; ++i)
+    diag_vec.MoveToHost();
+    ASSERT_EQ(diag_vec.GetSize(), k);
+
+    LocalMatrix<T>   D;
+    std::vector<int> row_offsets(m + 1), col_indices(k);
+    std::vector<T>   values(k);
+    for(int i = 0; i <= m; ++i)
     {
-        row_offsets[i] = i;
+        row_offsets[i] = std::min(i, k);
+    }
+    for(int i = 0; i < k; ++i)
+    {
         col_indices[i] = i;
         values[i]      = diag_vec[i];
     }
-    row_offsets[m] = m;
+    D.AllocateCSR("diag", k, m, n);
     D.CopyFromCSR(row_offsets.data(), col_indices.data(), values.data());
+    D.MoveToAccelerator();
 
     // Now perform AddScalarOffDiagonal on the matrix under test
     EXPECT_NO_THROW(matrix.AddScalarOffDiagonal(1.0));
 
     // Validate by applying all matrices to a random vector and comparing results
     LocalVector<T> x, y_expected, y_actual, y_L, y_U, y_D;
-    int            n = matrix.GetN();
     x.Allocate("x", n);
-    y_expected.Allocate("y_expected", matrix.GetM());
-    y_actual.Allocate("y_actual", matrix.GetM());
-    y_L.Allocate("y_L", matrix.GetM());
-    y_U.Allocate("y_U", matrix.GetM());
-    y_D.Allocate("y_D", matrix.GetM());
+    y_expected.Allocate("y_expected", m);
+    y_actual.Allocate("y_actual", m);
+    y_L.Allocate("y_L", m);
+    y_U.Allocate("y_U", m);
+    y_D.Allocate("y_D", m);
     x.SetRandomUniform(static_cast<T>(0), static_cast<T>(1));
+
+    x.MoveToAccelerator();
+    y_actual.MoveToAccelerator();
+    y_L.MoveToAccelerator();
+    y_U.MoveToAccelerator();
+    y_D.MoveToAccelerator();
 
     L.Apply(x, &y_L);
     U.Apply(x, &y_U);
     D.Apply(x, &y_D);
+    matrix.Apply(x, &y_actual);
+
+    y_actual.MoveToHost();
+    y_L.MoveToHost();
+    y_U.MoveToHost();
+    y_D.MoveToHost();
 
     // y_expected = y_L + y_U + y_D
     for(int i = 0; i < y_expected.GetSize(); ++i)
         y_expected[i] = y_L[i] + y_U[i] + y_D[i];
-
-    matrix.Apply(x, &y_actual);
 
     for(int i = 0; i < y_actual.GetSize(); ++i)
         EXPECT_NEAR(y_actual[i], y_expected[i], getTolerance<T>() * std::abs(y_expected[i]));
@@ -2517,12 +2661,33 @@ void testing_local_matrix_mult(Arguments argus)
 template <typename T>
 void testing_local_triple_matrix_product(Arguments argus)
 {
+    // Use the shapes of a Galerkin product: for an m x n input C,
+    // D = C^T * B * C with an m x m matrix B, which gives an n x n result
     LocalMatrix<T> matrixA, matrixB, matrixC, matrixD;
 
-    getTestMatrix<T>(argus, matrixA);
-    getTestMatrix<T>(argus, matrixB);
     getTestMatrix<T>(argus, matrixC);
-    getTestMatrix<T>(argus, matrixD);
+    matrixC.Transpose(&matrixA);
+
+    int m = matrixC.GetM();
+    if(m == matrixC.GetN())
+    {
+        getTestMatrix<T>(argus, matrixB);
+    }
+    else
+    {
+        int* csr_ptr = NULL;
+        int* csr_col = NULL;
+        T*   csr_val = NULL;
+        gen_random(m, m, 6, &csr_ptr, &csr_col, &csr_val);
+        int nnz = csr_ptr[m];
+        matrixB.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "B", nnz, m, m);
+    }
+
+    matrixA.MoveToAccelerator();
+    matrixB.MoveToAccelerator();
+    matrixC.MoveToAccelerator();
+    matrixD.MoveToAccelerator();
+
     // Perform triple matrix product
     // d = A * B * C
     EXPECT_NO_THROW(matrixD.TripleMatrixProduct(matrixA, matrixB, matrixC));
@@ -2531,13 +2696,19 @@ void testing_local_triple_matrix_product(Arguments argus)
     int            n = matrixD.GetN();
     LocalVector<T> x, y1, y2, y3, y_ref;
     x.Allocate("x", n);
-    y1.Allocate("y1", matrixC.GetN());
-    y2.Allocate("y2", matrixB.GetN());
-    y3.Allocate("y3", matrixA.GetN());
+    y1.Allocate("y1", matrixC.GetM());
+    y2.Allocate("y2", matrixB.GetM());
+    y3.Allocate("y3", matrixA.GetM());
     y_ref.Allocate("y_ref", matrixD.GetM());
 
     // Fill x with random values
     x.SetRandomUniform(static_cast<T>(0), static_cast<T>(1));
+
+    x.MoveToAccelerator();
+    y1.MoveToAccelerator();
+    y2.MoveToAccelerator();
+    y3.MoveToAccelerator();
+    y_ref.MoveToAccelerator();
 
     // Reference: y_ref = matrixD * x
     matrixD.Apply(x, &y_ref);
@@ -2549,10 +2720,23 @@ void testing_local_triple_matrix_product(Arguments argus)
     // y3 = matrixA * y2
     matrixA.Apply(y2, &y3);
 
+    y3.MoveToHost();
+    y_ref.MoveToHost();
+
     // Compare y3 (stepwise) with y_ref (direct)
     ASSERT_EQ(y3.GetSize(), y_ref.GetSize());
     for(int i = 0; i < y_ref.GetSize(); ++i)
         EXPECT_NEAR(y_ref[i], y3[i], getTolerance<T>() * std::abs(y_ref[i]));
+}
+
+// Non-constant values, so that row and column scaling differ on square matrices
+template <typename T>
+std::vector<T> diagonal_test_values(int size)
+{
+    std::vector<T> values(size);
+    for(int i = 0; i < size; ++i)
+        values[i] = static_cast<T>(1 + i % 4);
+    return values;
 }
 
 template <typename T>
@@ -2560,15 +2744,19 @@ void testing_local_diagonal_matrix_mult_r(Arguments argus)
 {
     LocalMatrix<T> matrix;
     getTestMatrix<T>(argus, matrix);
+    int m = matrix.GetM();
     int n = matrix.GetN();
 
+    auto           diag_values = diagonal_test_values<T>(n);
     LocalVector<T> diag;
-    diag.Allocate("diag", matrix.GetN());
-    for(int i = 0; i < diag.GetSize(); ++i)
-        diag[i] = static_cast<T>(2);
+    diag.Allocate("diag", n);
+    diag.CopyFromData(diag_values.data());
 
     // Save original dense matrix
     auto orig_dense = extract_dense_matrix(matrix);
+
+    matrix.MoveToAccelerator();
+    diag.MoveToAccelerator();
 
     // Perform right diagonal multiplication
     EXPECT_NO_THROW(matrix.DiagonalMatrixMultR(diag));
@@ -2577,12 +2765,11 @@ void testing_local_diagonal_matrix_mult_r(Arguments argus)
     auto new_dense = extract_dense_matrix(matrix);
 
     // Each column j should be scaled by diag[j]
-    int m = matrix.GetM();
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
             EXPECT_NEAR(new_dense[i][j],
-                        orig_dense[i][j] * diag[j],
-                        getTolerance<T>() * std::abs(orig_dense[i][j] * diag[j]));
+                        orig_dense[i][j] * diag_values[j],
+                        getTolerance<T>() * std::abs(orig_dense[i][j] * diag_values[j]));
 }
 
 template <typename T>
@@ -2591,29 +2778,32 @@ void testing_local_diagonal_matrix_mult(Arguments argus)
     LocalMatrix<T> matrix;
     getTestMatrix<T>(argus, matrix);
     int m = matrix.GetM();
+    int n = matrix.GetN();
 
-    // Create a diagonal vector with known values
+    // DiagonalMatrixMult() is DiagonalMatrixMultR(), so diag has n entries
+    auto           diag_values = diagonal_test_values<T>(n);
     LocalVector<T> diag;
-    diag.Allocate("diag", m);
-    for(int i = 0; i < diag.GetSize(); ++i)
-        diag[i] = static_cast<T>(2);
+    diag.Allocate("diag", n);
+    diag.CopyFromData(diag_values.data());
 
     // Save original dense matrix
     auto orig_dense = extract_dense_matrix(matrix);
 
-    // Perform left diagonal multiplication
+    matrix.MoveToAccelerator();
+    diag.MoveToAccelerator();
+
+    // Perform right diagonal multiplication
     EXPECT_NO_THROW(matrix.DiagonalMatrixMult(diag));
 
     // Extract new dense matrix
     auto new_dense = extract_dense_matrix(matrix);
 
-    // Each row i should be scaled by diag[i]
-    int n = matrix.GetN();
+    // Each column j should be scaled by diag[j]
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
             EXPECT_NEAR(new_dense[i][j],
-                        orig_dense[i][j] * diag[i],
-                        getTolerance<T>() * std::abs(orig_dense[i][j] * diag[i]));
+                        orig_dense[i][j] * diag_values[j],
+                        getTolerance<T>() * std::abs(orig_dense[i][j] * diag_values[j]));
 }
 
 template <typename T>
@@ -2622,15 +2812,18 @@ void testing_local_diagonal_matrix_mult_l(Arguments argus)
     LocalMatrix<T> matrix;
     getTestMatrix<T>(argus, matrix);
     int m = matrix.GetM();
+    int n = matrix.GetN();
 
-    // Create a diagonal vector with known values
+    auto           diag_values = diagonal_test_values<T>(m);
     LocalVector<T> diag;
     diag.Allocate("diag", m);
-    for(int i = 0; i < diag.GetSize(); ++i)
-        diag[i] = static_cast<T>(2);
+    diag.CopyFromData(diag_values.data());
 
     // Save original dense matrix
     auto orig_dense = extract_dense_matrix(matrix);
+
+    matrix.MoveToAccelerator();
+    diag.MoveToAccelerator();
 
     // Perform left diagonal multiplication
     EXPECT_NO_THROW(matrix.DiagonalMatrixMultL(diag));
@@ -2639,12 +2832,11 @@ void testing_local_diagonal_matrix_mult_l(Arguments argus)
     auto new_dense = extract_dense_matrix(matrix);
 
     // Each row i should be scaled by diag[i]
-    int n = matrix.GetN();
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
             EXPECT_NEAR(new_dense[i][j],
-                        orig_dense[i][j] * diag[i],
-                        getTolerance<T>() * std::abs(orig_dense[i][j] * diag[i]));
+                        orig_dense[i][j] * diag_values[i],
+                        getTolerance<T>() * std::abs(orig_dense[i][j] * diag_values[i]));
 }
 
 template <typename T>
@@ -2666,7 +2858,6 @@ void testing_local_compress(Arguments argus)
     // Extract values after compression
     int64_t new_nnz     = matrix.GetNnz();
     int     m           = matrix.GetM();
-    int     n           = matrix.GetN();
     int*    row_offsets = new int[m + 1];
     int*    col_indices = new int[new_nnz];
     T*      new_values  = new T[new_nnz];

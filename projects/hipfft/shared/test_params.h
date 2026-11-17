@@ -25,8 +25,8 @@
 #include <stdexcept>
 
 extern int verbose;
-extern int ngpus;
 
+extern size_t gpus_per_rank;
 extern size_t n_random_tests;
 
 extern size_t random_seed;
@@ -37,6 +37,7 @@ extern double complex_interleaved_prob_factor;
 extern double real_prob_factor;
 extern double complex_planar_prob_factor;
 extern double callback_prob_factor;
+extern double very_large_prob_factor;
 
 extern double half_epsilon;
 extern double single_epsilon;

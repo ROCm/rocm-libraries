@@ -4,14 +4,16 @@
 find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
 
-if(HIPSPARSELT_ENABLE_THEROCK)
-    # TheRock's cblas package provides OpenBLAS which includes BLAS, CBLAS, and LAPACK Use NO_*_PATH
-    # to prevent finding system packages and rely solely on theRock's packages
-    find_package(cblas REQUIRED CONFIG HINTS ${CMAKE_PREFIX_PATH})
-elseif(HIPSPARSELT_ENABLE_BLIS)
+# Check the explicit BLAS selection before HIPSPARSELT_ENABLE_THEROCK: the two are
+# independent, and TheRock's cblas target is unavailable outside TheRock.
+if(HIPSPARSELT_ENABLE_BLIS)
     # Use BLIS as an AMD optimized BLAS alternative, this may be removed in the future to
     # consolidate the vendoring strategy of BLAS/LAPACK, but remains for historical purposes
     find_package(BLIS REQUIRED)
+elseif(HIPSPARSELT_ENABLE_THEROCK)
+    # TheRock's cblas package provides OpenBLAS which includes BLAS, CBLAS, and LAPACK Use NO_*_PATH
+    # to prevent finding system packages and rely solely on theRock's packages
+    find_package(cblas REQUIRED CONFIG HINTS ${CMAKE_PREFIX_PATH})
 endif()
 
 add_library(hipsparselt-clients-common OBJECT)
@@ -21,7 +23,9 @@ target_compile_features(hipsparselt-clients-common PRIVATE cxx_std_17)
 target_compile_definitions(hipsparselt-clients-common PUBLIC HIPSPARSELT_INTERNAL_API)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
+    if(HIPSPARSELT_CXX_HAS_MF16C)
+        target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
+    endif()
 endif()
 
 target_sources(

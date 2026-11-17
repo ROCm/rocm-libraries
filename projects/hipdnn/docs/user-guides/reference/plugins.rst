@@ -18,8 +18,17 @@ Plugins
   - Convolution operations (Forward, Dgrad, Wgrad)
   - Batchnorm operations (Training, Backward, Inference)
   - Fused operation graphs
+  - Standalone pointwise activation and binary elementwise operations
 
 - :ref:`hipblaslt`: Provides integration with AMD's `hipBLASLt library <https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html>`_ that provides optimized GEMM operations.
+
+  - Matmul, with optional fused bias and activation
+  - MX block-scaled Matmul
+
+- HIP kernel provider (``dnn-providers/hip-kernel-provider``): Provides custom HIP kernels compiled at runtime with HIPRTC, and assembly SDPA kernels. This plugin is under active development and is built separately from hipDNN.
+
+  - Batchnorm, layer normalization, RMS normalization, and resample (HIP MLops engine)
+  - Scaled dot-product attention (ASM SDPA engine, and the optional HIP Flash2 engine)
 
 
 .. _dimension-layouts:
@@ -59,6 +68,16 @@ Convolution
      - ``(N, K, H_out, W_out)``
      - ``(N, K, D_out, H_out, W_out)``
      - Batch, output channels, output spatial dims
+   * - Backward data output (dx)
+     - ``(N, C, H, W)``
+     - ``(N, C, D, H, W)``
+     - Must match the original forward input ``x`` shape; set explicitly before graph validation/build
+   * - Backward weights output (dw)
+     - ``(K, C/groups, R, S)``
+     - ``(K, C/groups, T, R, S)``
+     - Must match the original forward weights ``w`` shape; set explicitly before graph validation/build
+
+For convolution backward data and backward weights, hipDNN does not infer the ``dx`` or ``dw`` dimensions from the other tensors. Set ``dx`` to the original forward input shape and ``dw`` to the original forward weights shape before graph validation/build. The forward convolution spatial formula uses floor division, so multiple input or kernel shapes can produce the same ``dy`` shape; only output strides may be inferred once explicit output dimensions are present.
 
 .. code:: cpp
 

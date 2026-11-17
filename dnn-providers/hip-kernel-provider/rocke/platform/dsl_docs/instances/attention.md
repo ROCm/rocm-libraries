@@ -1,16 +1,23 @@
 # Attention Instances
 
-The attention implementation is spread across:
+The attention kernels are the SDPA/MHA product and live under `library/`
+(post-#8977 split): kernel defs in `library/kernels/`, verify/parity/bench
+drivers in `library/builders/`, dispatch in `library/dispatch/`. The reusable
+attention **helper** layer stays in `platform/` (`library → platform` one-way).
 
 Production tiled matrix-core, paged-KV decode:
-- `instances/common/attention_unified.py`
-- `instances/gfx950/attention_tiled_2d.py`, `instances/gfx942/attention_tiled_2d.py`
-- `instances/gfx950/attention_tiled_3d.py`, `instances/gfx942/attention_tiled_3d.py`
-- `instances/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
-- `helpers/attention.py`
+- `library/kernels/common/attention_unified.py`
+- `library/kernels/gfx950/attention_tiled_2d.py`, `library/kernels/gfx942/attention_tiled_2d.py`, `library/kernels/gfx1250/attention_tiled_2d.py`
+- `library/kernels/gfx950/attention_tiled_3d.py`, `library/kernels/gfx942/attention_tiled_3d.py`, `library/kernels/gfx1250/attention_tiled_3d.py`
+- `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
+- `library/kernels/gfx950/attention_dense.py` -- dense (non-paged) flash prefill; block orders and
+  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md)
+- `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
+- `platform/python/rocke/helpers/attention.py`
 
- FMHA expansion (CK Tile `01_fmha` family parity), all under `instances/common/`:
+ FMHA expansion (CK Tile `01_fmha` family parity), all under `library/kernels/common/`:
 - `_fmha_common.py` -- shared FmhaCommonSpec + scalar-inner body
+- `_fmha_warp_body.py` -- shared warp-tiled inner body
 - `fmha_varlen.py` -- 01_fmha varlen
 - `fmha_appendkv.py` -- 01_fmha appendkv (with optional rotary)
 - `fmha_paged_prefill.py` -- 01_fmha pagedkv_prefill
@@ -19,38 +26,58 @@ Production tiled matrix-core, paged-KV decode:
 - `fmha_bwd.py` -- 01_fmha bwd (dQ / dK / dV atomic)
 - `fmha_fwd_fp8.py` -- 01_fmha fp8 (per-tensor scales)
 
-Helpers:
-- `helpers/rotary.py` -- RoPE (interleaved + half layouts)
-- `helpers/rng.py` -- Philox4x32-10 RNG for dropout
-- `helpers/attention.py` (ext) -- alibi_bias_log2, alibi_bias_matrix, custom_mask
+RDNA / gfx1250 WMMA forward:
+- `library/kernels/gfx1151/wmma_fmha_fwd_v2.py` -- gfx11 / gfx12 multi-wave WMMA prefill
+  (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
+  head counts incl. a separate V head count, head widths, masks and bias strides;
+  baked features: softcap, attention sinks, ALiBi, QQ-bias, OCP E4M3FN K/V, ragged and
+  paged (power-of-two page) layouts; body in `platform/python/rocke/helpers/rdna_attention.py`)
+- `library/kernels/gfx1151/wmma_fmha_decode.py` -- gfx11 / gfx12 split-KV, GQA-packed WMMA
+  decode (Sq up to a few 16-row tiles: decode, speculative decode, cross attention); runtime
+  split count with a fused or separate merge (`build_wmma_fmha_decode_module` ships decode +
+  merge as one code object), runtime head counts incl. a separate V head count, head widths,
+  masks and bias strides; the same baked features as the prefill; host helpers for split
+  count, grids and workspace mirrored in C (`instance_gfx1151_wmma_fmha_decode.h`)
+- `library/kernels/gfx1250/wmma_attention_fwd.py`, `library/kernels/gfx1250/_wmma_attention_common.py`
 
- Sage + sparse attention (CK Tile `49_sageattention`, `50_sparse_attn`), under `instances/common/`:
+Helpers (all under `platform/python/rocke/helpers/`):
+- `rotary.py` -- RoPE (interleaved + half layouts)
+- `rng.py` -- Philox4x32-10 RNG for dropout
+- `attention.py` (ext) -- alibi_bias_log2, alibi_bias_matrix, custom_mask
+- `mfma_attention.py`, `mfma_attention_bwd.py` -- dtype-specific MFMA dispatch; `wmma_attention.py` -- the wave32 WMMA forward body (re-exported from `mfma_attention.py`)
+
+ Sage + sparse attention (CK Tile `49_sageattention`, `50_sparse_attn`), under `library/kernels/common/`:
 - `sage_attention.py` -- 4 quant variants (fp16/bf16, fp8-bf16, i8-fp8, i4-fp8)
 - `sparse_attention.py` -- jenga + VSA sparse fwd
 
-Helpers:
-- `helpers/qk_scale.py` -- per-head / per-block Q+K scale loaders
-- `helpers/codebook.py` -- i8 / i4 -> fp8 codebook dequant chains
-- `helpers/sparse_iter.py` -- block-sparse bitmap + VSA LUT K-iterators
+Helpers (under `platform/python/rocke/helpers/`):
+- `qk_scale.py` -- per-head / per-block Q+K scale loaders
+- `codebook.py` -- i8 / i4 -> fp8 codebook dequant chains
+- `sparse_iter.py` -- block-sparse bitmap + VSA LUT K-iterators
 
 The shipped stack supports scalar correctness kernels, tiled 2D matrix-core
-kernels, and tiled 3D split-KV pipelines; added the v1 scalar-inner
-kernels for every FMHA variant CK Tile ships in `01_fmha`, and closed
-the roadmap with Sage attention (four quant variants sharing one builder) and
-two sparse attention kernels (Jenga block-sparse + VSA variable-size). All v2
-matrix-core hoists drop in via the same per-variant spec surface (same pattern
- used for StreamK / block-scale GEMM).
+kernels, and tiled 3D split-KV pipelines; scalar-inner kernels for every FMHA
+variant CK Tile ships in `01_fmha`; Sage attention (four quant variants sharing
+one builder); and two sparse attention kernels (Jenga block-sparse + VSA
+variable-size). Per-variant spec surfaces mirror the pattern used for StreamK /
+block-scale GEMM.
 
-Arch coverage: the cross-arch builders live in `instances/common/` and the
-arch-specialized tiled bodies in `instances/gfx942/` and `instances/gfx950/`
-(the gfx950 tiled-2D kernel uses the wide-K MFMA atoms + `ds_read_*_tr_*`;
-gfx942 uses the narrow 16x16x16 atom). The tiled FMHA forward
+Arch coverage: the cross-arch builders live in `library/kernels/common/` and the
+arch-specialized tiled bodies in `library/kernels/gfx942/`,
+`library/kernels/gfx950/`, and `library/kernels/gfx1250/` (the gfx950 tiled-2D
+kernel uses the wide-K MFMA atoms + `ds_read_*_tr_*`; gfx942 uses the narrow
+16x16x16 atom; gfx1250 uses wave32 WMMA). The tiled FMHA forward
 (`build_fmha_fwd_mfma`) emits one unified body that lowers to **MFMA on CDNA
 (gfx942 / gfx950, wave64)** or **WMMA on RDNA (gfx1151 / gfx1201 RDNA4,
 wave32)** by selecting the atom family from the target's MMA catalog; the
-scalar unified 2D/3D kernels compile on all four arches.
+scalar unified 2D/3D kernels compile across the supported arches.
 
 ## Main Concepts
+
+The gfx942/gfx950 tiled 3D decode kernels also accept non-paged, strided KV
+through `kv_layout="strided"`. See the
+[input contract and adapter usage](../../../docs/strided-kv-decode.md)
+for BHSD/BSHD views, bounded outer strides, per-sequence lengths, and validation.
 
 `UnifiedAttentionProblem` describes the problem and selects between paths.
 
@@ -72,9 +99,9 @@ The runtime caches HSACO and launchers by semantic problem keys. This matters be
 
 ## Attention Features
 
-Current coverage (verified via `examples/gfx950/attention/parity_unified_attention.py` `default` scenario set):
+Current coverage (verified via `library/builders/gfx950/attention/prefill/parity_unified_attention.py` `default` scenario set):
 
-- causal masking (`helpers/attention.py::causal_mask`);
+- causal masking (`rocke.helpers.attention::causal_mask`);
 - sliding window (`sliding_window_mask`);
 - softcap (`apply_softcap_log2`, `apply_softcap_scalar`);
 - sinks;
@@ -87,6 +114,17 @@ Current coverage (verified via `examples/gfx950/attention/parity_unified_attenti
 - FP8 K/V cache via `UnifiedAttentionProblem.use_fp8` (per-tensor `k_scale` / `v_scale`, cache stored as `fp8e4m3`) with output scale/clamp;
 - 2D scalar correctness kernel + 2D MFMA tiled kernel;
 - 3D split-KV (segment + reduce pipeline).
+
+Additive attention bias (`UnifiedAttentionProblem.use_additive_bias`): an fp32
+`[B, H, Sq, Sk]` bias added to the scores after softcap, like ALiBi/QQ bias
+(`softcap(QK * scale) + bias`), broadcastable over B and/or H via a
+zero stride, indexed by the query head under GQA. Forward only, **gfx950 only**
+(tiled 2D and 3D split-KV, Python engine); other arches report it unsupported
+through `supports_native_unified_attention_tiled` / `_3d_tiled`. Verified by the
+on-GPU numeric lane
+[test_attention_additive_bias_gfx950_numeric.py](../../../library/tests/test_attention_additive_bias_gfx950_numeric.py)
+rather than the parity scenario set above; knob semantics are in the
+[builders/common Knob reference](../../../library/builders/common/README.md#knob-reference).
 
 bf16 attention uses the `mfma_f32_16x16x16_bf16` op via the `_1k` LLVM variant (with `<4 x i16>` operands; the plain `bf16.16x16x16` intrinsic does not exist on this target).
 
@@ -109,8 +147,8 @@ already live in `attention_tiled_2d.py` / `attention_tiled_3d.py` and will be
 hoisted under the same `FmhaCommonSpec` in v2.
 
 The FP8 path uses the existing `cvt_fp8_to_f32` / `cvt_bf8_to_f32`
-intrinsics and per-tensor scales. Per-block / per-head Q+K scales arrive in
- via `helpers.qk_scale` and are wired into `instances.sage_attention`.
+intrinsics and per-tensor scales. Per-block / per-head Q+K scales arrive
+via `rocke.helpers.qk_scale` and are wired into `kernels.common.sage_attention`.
 
 CK Tile ``49_sageattention``, ``50_sparse_attn``:
 - Sage attention fwd with four ``quant_mode`` variants:
@@ -131,7 +169,7 @@ CK Tile ``49_sageattention``, ``50_sparse_attn``:
 File:
 
 ```text
-helpers/attention.py
+platform/python/rocke/helpers/attention.py
 ```
 
 Important helper ideas:
@@ -147,12 +185,114 @@ Important helper ideas:
 
 Attention uses both raw IR and descriptors. Addressing is descriptor-friendly; butterfly reductions and some per-warp control patterns are specialized enough to stay closer to raw IR.
 
+## MFMA / WMMA Forward Body Extension Points
+
+Files:
+
+```text
+platform/python/rocke/helpers/mfma_attention.py        # MFMA forward inner body (dispatches to the WMMA body on wave32)
+platform/python/rocke/helpers/wmma_attention.py        # WMMA (wave32) forward inner body
+platform/python/rocke/helpers/_attention_shared.py     # row reduce / K-tile size / dtype map shared by both
+platform/python/rocke/helpers/attention_fwd_ext.py     # the extension carrier and its emitters
+platform/python/rocke/helpers/attention_band.py        # runtime two-sided band (shell-side)
+```
+
+`mfma_attention_fwd_inner_body` (which dispatches to the WMMA body on gfx11 / gfx12) takes one extra
+keyword-only argument, `ext: Optional[AttnFwdExt] = None`. With `ext=None` (or an `AttnFwdExt()` with every
+field at its default) the emitted IR is byte-identical to a build that does not know about the argument, so
+existing kernels, kernel names and cache keys are unchanged. The existing hook conventions
+(`extra_score_transform` in the body, the three-argument form in the warp body, the C function-pointer form in
+the C++ twin) are untouched; the new options are Python-only and opt-in.
+
+```python
+AttnFwdExt(
+    score_hook=None,        # (b, score, ScoreCoord) -> score
+    seqlen_q=None,          # i32 runtime query length
+    guard_seqlen_k=False,   # runtime key-length tail guard
+    epilogue_hook=None,     # (b, RowEpilogue) -> Optional[i1]
+)
+```
+
+- `score_hook` runs once per accumulator slot (four on MFMA, eight on WMMA) after the `scale_log2` multiply and
+  the legacy `extra_score_transform`, before the key-tail select and the body's own mask. `ScoreCoord` carries
+  `q_row` and `k_col` (i32, in-sequence), the raw K-loop value `kt`, the `slot`, and `q_valid` / `k_valid`
+  (i1, `None` unless the matching guard is enabled). Scores are in the log2 domain: an additive natural-log
+  bias must be multiplied by `LOG2E`. Loads inside the hook must be guarded by `q_valid` / `k_valid`.
+- `seqlen_q` clamps Q addresses (the in-sequence row is pulled back; the overshoot is subtracted from the
+  physical row, so callers that fold the batch into `q_tile_base` and pass `q_pos_base` can use it) and wraps
+  the O store in `scf.if(q_row < seqlen_q)`, so rows past the sequence are never read or written.
+- `guard_seqlen_k` uses a ceiling K trip count, clamps the K and V row addresses to the last valid key and
+  masks key columns past `seqlen_k` with `-inf`. A caller that supplies `k_tile_stop` must supply a ceiling.
+- `epilogue_hook` runs once per row slot after the K loop with a `RowEpilogue`: `q_row`, `m_log2` (running max,
+  log2 domain), `l` (running sum), `row_valid`, `in_range`, and `is_row_leader` (true on exactly one lane of
+  the row, for single-writer stores). `natural_lse_from_log2_stats` gives `LN2 * (m_log2 + log2(l))`. When the
+  hook returns an i1 it is ANDed into the output-store validity. When `seqlen_q` or `epilogue_hook` is set the
+  body stores O itself (invalid rows store exactly `0.0`, by select) and returns; the LSE is written by the hook.
+
+Validity contract. A row is valid when its running max rose above `ROW_VALID_SENTINEL` (`-1e29`; the max
+starts at `-1e30`) and the row is inside `seqlen_q`. This does not depend on `l`. Cells masked by a hook must
+be filled with a true `-inf` (or a value at or below `-1e30`); with a milder finite fill the hook must return a
+validity predicate derived from its mask or bounds. The body's own mask keeps its finite `-1e30` fill.
+
+Not supported with `ext`: fp8 / bf8 K/V storage (raises `ValueError` before any emission) and the wide-atom
+paths.
+
+`attention_band.py` is a utility for the shell that owns the hooks; the bodies never call it.
+`AttnRuntimeBounds(seqlen_q, seqlen_k, diag_offset=0, left_bound=-1, right_bound=-1)` accepts Python ints or
+i32 values; `BandEmitter` provides `row_band`, `col_in`, `cell_keep`, `k_tile_range` and `k_tile_count_ceil`.
+
+    keep(q, k) = k < seqlen_k
+             and (right < 0 or k <= q + diag_offset + right)
+             and (left  < 0 or k >= q + diag_offset - left)
+
+`diag_offset` is `0` for a top-left diagonal and `seqlen_k - seqlen_q` for bottom-right. A row is valid when it
+is inside `seqlen_q` and its band clipped to `[0, seqlen_k)` is non-empty. Bounds must stay below `2**30`.
+
+Batch strides need no body support: a shell rebases the Q/K/V/O pointers by a 64-bit byte offset
+(`global_ptr_add`) and passes per-slab strides. Rebased byte offsets must keep the vector-load alignment the
+parameters declare.
+
+Tests: `platform/tests/instances/test_attention_fwd_ext_ir.py`, `test_attention_band_ir.py` (offline) and
+`test_attention_fwd_ext_numeric.py` (device, probe shell `_attention_fwd_ext_harness.py`).
+
+## LSE Store (Forward Epilogue)
+
+`kernels/common/_lse_store.py` provides epilogue-hook factories that store the log-sum-exp of each query row from the
+MFMA / WMMA forward body (see the hook contract above). They are Python-only and opt-in: nothing changes unless the hook is
+passed through `AttnFwdExt.epilogue_hook`.
+
+Convention:
+
+- natural log: `LSE = (m_log2 + log2(l)) * ln(2)`, with `m_log2` the running max in the log2 domain and `l` the running sum of
+  `exp2(s - m_log2)`;
+- stored as FP32;
+- `-inf` for a row with no kept key. Dead rows are decided from the body's row validity (running-max sentinel and
+  `q_row < seqlen_q`) plus the optional `extra_valid` predicate the caller supplies -- never from `l`;
+- rows `>= seqlen_q` are not written; nothing is allocated (no LDS, no scratch).
+
+```python
+from kernels.common._lse_store import make_mfma_lse_epilogue, make_wmma_lse_epilogue
+
+hook = make_mfma_lse_epilogue(          # make_wmma_lse_epilogue for the WMMA body
+    b, lse_ptr, head_idx=head,
+    row_stride=1, head_stride=seqlen_q,  # [B, H_q, S_q, 1]; batch via batch_idx/batch_stride
+    extra_valid=None,                    # optional (b, RowEpilogue) -> i1, also returned to the body
+)
+ext = AttnFwdExt(seqlen_q=seqlen_q, epilogue_hook=hook, ...)
+```
+
+Element index of a row is `(row_base + q_row) * row_stride + head_idx * head_stride`; strides are ints or i32 values. For a
+packed `[T_q, H_q, 1]` output use `row_stride=H_q`, `head_stride=1` and `row_base` = first token of the sequence. With
+`batch_idx` and `batch_stride` the pointer is rebased once with a 64-bit byte offset. The MFMA accumulator replicates a row
+across 16 lanes (4 row slots per lane) and the WMMA accumulator gives a lane 8 row slots; the body passes `is_row_leader`
+(one lane per row), so each row is stored exactly once. The factories only differ in the slot count they accept.
+
 ## Scalar 2D Kernel
 
 File:
 
 ```text
-instances/common/attention_unified.py
+library/kernels/common/attention_unified.py
 ```
 
 Concept:
@@ -202,7 +342,7 @@ Correctness-sensitive details:
 File:
 
 ```text
-instances/gfx950/attention_tiled_2d.py  (gfx942 variant: instances/gfx942/attention_tiled_2d.py)
+library/kernels/gfx950/attention_tiled_2d.py  (variants: library/kernels/gfx942/attention_tiled_2d.py, library/kernels/gfx1250/attention_tiled_2d.py)
 ```
 
 Concept:
@@ -217,7 +357,7 @@ High-level stages:
 1. Stage Q into LDS.
 2. Iterate over K/V tiles.
 3. Compute QK with MFMA.
-4. Apply masks/bias/softcap.
+4. Apply softcap, then masks and bias.
 5. Online softmax reduce per row.
 6. Compute P*V with MFMA.
 7. Store output with coalesced vector stores.
@@ -249,10 +389,13 @@ Detailed flow:
 
 5. Score processing:
  - apply scale;
- - apply ALiBi/QQ bias if configured;
- - apply causal and sliding-window masks;
  - apply softcap when configured;
- - set invalid positions to -inf.
+ - apply causal and sliding-window masks (invalid positions become -inf);
+ - add ALiBi/QQ bias if configured;
+ - add the additive bias if configured (gfx950).
+
+ The biases are added after the softcap, so the score is
+ `softcap(QK * scale) + bias`.
 
 6. Online softmax:
  - reduce row max across lanes/waves;
@@ -279,7 +422,7 @@ Tiled 2D is useful for chunked prefill, sliding-window rows, and moderate contex
 Files:
 
 ```text
-instances/gfx950/attention_tiled_3d.py  (gfx942 variant: instances/gfx942/attention_tiled_3d.py)
+library/kernels/gfx950/attention_tiled_3d.py  (variants: library/kernels/gfx942/attention_tiled_3d.py, library/kernels/gfx1250/attention_tiled_3d.py)
 ```
 
 The 3D path has two stages:
@@ -311,7 +454,7 @@ Step by step:
 3. Stage Q.
 4. Iterate only over KV tiles in this segment.
 5. Compute QK with MFMA.
-6. Apply masks/bias/softcap.
+6. Apply softcap, then masks and bias.
 7. Maintain online softmax state for this segment:
  - seg_max
  - seg_expsum
@@ -413,6 +556,32 @@ Runtime path:
 ```
 
 This is why benchmark methodology matters: first-run compile and cache creation are not kernel steady-state.
+
+## Runtime Param Fields
+
+Step 1 above builds the key from the spec. By default *every* spec field participates, so each distinct batch/seqlen combination compiles its own kernel — the AOT instance explosion.
+
+A **runtime param field** is a spec field the kernel body reads as a kernel argument instead of baking into the body. The spec declares them by overriding `runtime_param_fields`, and `attention_dense_cache_key` excludes exactly those fields from the key, so one compiled binary serves every value of them:
+
+```text
+attention_dense_cache_key(spec, arch) -> (arch, type(spec), <fields not in runtime_param_fields> + <block order>)
+```
+
+The block order the kernel uses is keyed explicitly because auto may pick it from shape fields the key drops.
+
+The declaration lives on the spec that owns the body, not in the shared key function, because the two must agree: declaring a field the body still bakes is a cache collision — different problems served by the wrong binary. `library/tests/test_attention_builds.py::TestAttentionDenseRuntimeShapeCollision` guards that direction by asserting specs sharing a key lower to identical IR.
+
+Today only `library/kernels/gfx950/attention_dense.py` opts in, declaring `("batch", "seqlen_q", "seqlen_kv")` on its aligned, unshifted dense path. Sub-modes that still bake seqlen into the body — persistent, ragged, varlen, paged, sliding-window, and bottom-right causal with unequal Q/K lengths — declare nothing and keep per-shape identity. Equal-length bottom-right adds no extra shape specialization. `library/kernels/gfx942/attention_dense.py` opts in further on both its default and persistent grids (sliding-window included), declaring `("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")`; only ragged, varlen and paged declare nothing. The persistent body also takes a host-computed fast-division magic/shift pair per work-decode divisor, after those five (`runtime_kernarg_fields`); the pairs are derived from the declared fields, so they do not enter the key. Every other family also declares nothing, so its identity is unchanged.
+
+A spec on the runtime path also drops the `sq`/`sk` tokens from its symbol name, since one symbol now covers all shapes; the gfx942 spec likewise drops `hq`/`kv`. See `## Runtime Assumptions` in [runtime/limitations.md](../runtime/limitations.md) for why partial specialization (baking `batch` while keeping the seqlens runtime) is not safe to ship yet.
+
+### Shape validity moves from compile time to launch time
+
+Declaring a field runtime also moves *when* its validity can be checked. A baked shape is a constant the builder can inspect at emission; a runtime shape is a device-side `mul` of two kernargs, so there is nothing in the IR to look at — and because the field no longer splits the cache key, a check that only ran on a cache miss would be skipped for every later shape served by the same binary.
+
+So shape validity belongs in `supports_attention_dense`, which runs **per launch**: `run_attention_dense` calls it before the launcher-cache lookup, on a spec still carrying the real shape. The checks that are properties of the base spec — dataclass re-validation, positive extents, `block_m % block_n`, and the 32-bit K/V and Q/O extent bounds — live in one shared `check_dense_spec_preflight` in `library/kernels/common/attention_dense_spec.py`, which each arch's `supports_attention_dense` calls before adding its own scope. A check belongs there only if it reads base-spec fields **and** its verdict is the same for every dense body; the LDS budget, dtype/head-size sets, mode rejections, and private knobs all stay per-arch.
+
+The 32-bit bound is **signed**: offsets are built from IRBuilder `add`/`mul`, which lower to `add nsw` / `mul nsw` i32, where overflow is UB rather than a wrap. The buffer-resource `num_records` field is unsigned in hardware, but it is emitted through `const_i32` with no range check and the voffset feeding it is signed, so 2³¹ binds on both paths.
 
 ## Attention Failure Modes
 

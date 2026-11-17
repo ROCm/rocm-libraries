@@ -7,6 +7,10 @@
 
 #include <optional>
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
+#endif
+
 /**
  * @brief HIP kernel provider plugin-specific execution settings.
  *
@@ -18,4 +22,10 @@ struct Settings
     /// Accumulator precision for backward SDPA dQ gradient.
     /// nullopt means no user preference (default: A32).
     std::optional<asm_sdpa_engine::AccumulatorType> accumulatorType;
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    /// Populated by initializeExecutionSettings(); getMaxWorkspaceSize() reads it here
+    /// since it receives only this Settings object.
+    hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings;
+#endif
 };

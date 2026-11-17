@@ -73,6 +73,12 @@ static void log_debug(const std::string& msg) {
   origami::Logger::instance().log(origami::LogLevel::DEBUG, msg, "test", 0);
 }
 
+// gfx1250's BFloat16 WMMA is 16x16x32. gfx942 and gfx950 use 16x16x16.
+static origami::config_t make_logger_config(int gpu_arch) {
+  const size_t mi_k = gpu_arch == 1250 ? 32 : 16;
+  return make_config(128, 128, 64, 16, 16, mi_k, false, 1);
+}
+
 static void disable_logger() {
   portable_unsetenv("ORIGAMI_LOG_FILE");
   portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
@@ -102,9 +108,9 @@ TEST_CASE("Logger: text log writes debug messages when enabled", "[logger]") {
 
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(2048, 2048, 1024);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto config   = make_logger_config(gpu_arch);
 
-      origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      origami::gemm::compute_total_latency(problem, hardware, config);
       origami::Logger::instance().flush();
 
       std::string contents = read_file(log_path);
@@ -132,7 +138,7 @@ TEST_CASE("Logger: text log is not written when debug is disabled", "[logger]") 
   auto problem  = make_problem(2048, 2048, 1024);
   auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-  origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+  origami::gemm::compute_total_latency(problem, hardware, config);
   origami::Logger::instance().flush();
 
   std::string contents = read_file(log_path);
@@ -224,10 +230,10 @@ TEST_CASE("Logger: CSV output from GEMM evaluation contains expected columns", "
   auto problem  = make_problem(4096, 4096, 2048);
   auto config   = make_config(256, 256, 64, 16, 16, 16, false, 1);
 
-  origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+  origami::gemm::compute_total_latency(problem, hardware, config);
 
   auto problem2 = make_problem(256, 256, 16384);
-  origami::gemm::compute_total_latency(problem2, hardware, config, hardware.N_CU);
+  origami::gemm::compute_total_latency(problem2, hardware, config);
 
   origami::Logger::instance().flush();
 
@@ -281,10 +287,10 @@ TEST_CASE("Logger: debug logging produces consistent latency values", "[logger]"
     DYNAMIC_SECTION("gfx" << gpu_arch) {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(2048, 2048, 1024);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto config   = make_logger_config(gpu_arch);
 
-      double latency1 = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
-      double latency2 = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      double latency1 = origami::gemm::compute_total_latency(problem, hardware, config);
+      double latency2 = origami::gemm::compute_total_latency(problem, hardware, config);
 
       REQUIRE(latency1 == latency2);
       REQUIRE(latency1 > 0.0);
@@ -300,15 +306,15 @@ TEST_CASE("Logger: latency matches between debug enabled and disabled", "[logger
     DYNAMIC_SECTION("gfx" << gpu_arch) {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 2048);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto config   = make_logger_config(gpu_arch);
 
       portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
       origami::runtime_options::get().update_from_env();
-      double latency_no_debug = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      double latency_no_debug = origami::gemm::compute_total_latency(problem, hardware, config);
 
       portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
       origami::runtime_options::get().update_from_env();
-      double latency_with_debug = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      double latency_with_debug = origami::gemm::compute_total_latency(problem, hardware, config);
 
       REQUIRE(latency_no_debug == latency_with_debug);
     }

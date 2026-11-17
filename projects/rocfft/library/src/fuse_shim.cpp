@@ -469,6 +469,7 @@ std::unique_ptr<TreeNode> R2CTrans_FuseShim::FuseKernels()
                                                                   : rocfft_placement_notinplace;
     }
     fused->outputLength = transpose->outputLength;
+    fused->dimension    = transpose->dimension;
 
     // This fusion is crossing sub-trees of the plan, so adjust the
     // parent CS_REAL_TRANSFORM_EVEN to output what this fused kernel
@@ -569,6 +570,7 @@ std::unique_ptr<TreeNode> TransC2R_FuseShim::FuseKernels()
                                                                   : rocfft_placement_notinplace;
     }
     fused->outputLength = c2r->outputLength;
+    fused->dimension    = transpose->dimension;
 
     // This fusion is crossing sub-trees of the plan, so adjust the
     // parent CS_REAL_TRANSFORM_EVEN to expect what this fused kernel

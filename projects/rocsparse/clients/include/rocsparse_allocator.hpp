@@ -269,6 +269,15 @@ private:
     }
 #endif
 
+    static void report_allocation_failure(size_t nbytes)
+    {
+        fprintf(stderr, "Error allocating %zu bytes (%zu GB)\n", nbytes, nbytes >> 30);
+
+        // Consume the error so that it is not reported by the next hipGetLastError
+        // call, e.g. the one in rocsparse_create_handle of the next test.
+        static_cast<void>(hipGetLastError());
+    }
+
 public:
     static T* malloc(size_t size)
     {
@@ -284,7 +293,7 @@ public:
         {
             if(rocsparse_hipHostMalloc(&d, nbytes) != hipSuccess)
             {
-                fprintf(stderr, "Error allocating %'zu bytes (%zu GB)\n", nbytes, nbytes >> 30);
+                report_allocation_failure(nbytes);
                 d = nullptr;
                 throw std::bad_alloc();
             }
@@ -294,7 +303,7 @@ public:
         {
             if(rocsparse_hipMalloc(&d, nbytes) != hipSuccess)
             {
-                fprintf(stderr, "Error allocating %'zu bytes (%zu GB)\n", nbytes, nbytes >> 30);
+                report_allocation_failure(nbytes);
                 d = nullptr;
                 throw std::bad_alloc();
             }
@@ -305,7 +314,7 @@ public:
 
             if(rocsparse_hipMallocManaged(&d, nbytes) != hipSuccess)
             {
-                fprintf(stderr, "Error allocating %'zu bytes (%zu GB)\n", nbytes, nbytes >> 30);
+                report_allocation_failure(nbytes);
                 d = nullptr;
                 throw std::bad_alloc();
             }

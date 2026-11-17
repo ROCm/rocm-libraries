@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 /*! \file
@@ -132,6 +132,22 @@ typedef enum
     HIPSOLVER_ALLOW_NON_DETERMINISTIC_RESULTS = 242,
 } hipsolverDeterministicMode_t;
 
+typedef enum
+{
+    HIPBLAS_DIRECT_FORWARD  = 251,
+    HIPBLAS_DIRECT_BACKWARD = 252,
+    HIPSOLVER_DIRECT_FORWARD  = HIPBLAS_DIRECT_FORWARD,
+    HIPSOLVER_DIRECT_BACKWARD = HIPBLAS_DIRECT_BACKWARD,
+} hipsolverDirectMode_t;
+
+typedef enum
+{
+    HIPBLAS_STOREV_COLUMNWISE = 261,
+    HIPBLAS_STOREV_ROWWISE    = 262,
+    HIPSOLVER_STOREV_COLUMNWISE = HIPBLAS_STOREV_COLUMNWISE,
+    HIPSOLVER_STOREV_ROWWISE    = HIPBLAS_STOREV_ROWWISE,
+} hipsolverStorevMode_t;
+
 // Aliases for hipBLAS enums
 
 /*! \brief Alias of hipblasOperation_t. HIPSOLVER_OP_N, HIPSOLVER_OP_T, and HIPSOLVER_OP_C
@@ -155,5 +171,12 @@ typedef hipblasFillMode_t hipsolverFillMode_t;
 typedef hipblasSideMode_t hipsolverSideMode_t;
 #define HIPSOLVER_SIDE_LEFT HIPBLAS_SIDE_LEFT
 #define HIPSOLVER_SIDE_RIGHT HIPBLAS_SIDE_RIGHT
+
+/*! \brief Alias of hipblasDiagType_t. HIPSOLVER_DIAG_NON_UNIT and HIPSOLVER_DIAG_UNIT
+ *  are provided as equivalents to HIPBLAS_DIAG_NON_UNIT and HIPBLAS_DIAG_UNIT.
+ ********************************************************************************/
+typedef hipblasDiagType_t hipsolverDiagType_t;
+#define HIPSOLVER_DIAG_NON_UNIT HIPBLAS_DIAG_NON_UNIT
+#define HIPSOLVER_DIAG_UNIT HIPBLAS_DIAG_UNIT
 
 #endif // HIPSOLVER_TYPES_H

@@ -125,6 +125,25 @@ void expectFullTensorMocksForDesc(Mock_hipdnn_backend& mock,
                             std::memcpy(arrayOfElements, &val, sizeof(bool));
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
+
+    EXPECT_CALL(mock,
+                backendGetAttribute(fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    _,
+                                    _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = false;
+                            std::memcpy(arrayOfElements, &val, sizeof(bool));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
 }
 
 /// Registers all backendGetAttribute expectations needed for unpackTensorAttributes to
@@ -242,6 +261,25 @@ void expectScalarByValueTensorMocks(Mock_hipdnn_backend& mock,
                                              int64_t*,
                                              void* arrayOfElements) {
                             std::memcpy(arrayOfElements, &scalarValue, sizeof(T));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    EXPECT_CALL(mock,
+                backendGetAttribute(fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    _,
+                                    _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = false;
+                            std::memcpy(arrayOfElements, &val, sizeof(bool));
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
 }
@@ -534,7 +572,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesSuccess)
     EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{K_DIMS.begin(), K_DIMS.end()}));
     EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{K_STRIDES.begin(), K_STRIDES.end()}));
     EXPECT_FALSE(tensor->get_is_virtual());
-    EXPECT_FALSE(tensor->get_pass_by_value());
+    EXPECT_FALSE(tensor->get_is_pass_by_value());
 }
 
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValue)
@@ -552,9 +590,13 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValue)
     EXPECT_EQ(tensor->get_data_type(), DataType::FLOAT);
     EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{1}));
     EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{1}));
-    EXPECT_TRUE(tensor->get_pass_by_value());
-    ASSERT_TRUE(tensor->get_pass_by_value<float>().has_value());
-    EXPECT_FLOAT_EQ(tensor->get_pass_by_value<float>().value(), K_SCALAR_VALUE);
+    // IS_RUNTIME_PASS_BY_VALUE is never set by these mocks (flag == false), so a
+    // value + cleared flag is a compile-time constant per RFC-0016 §4.2.
+    EXPECT_TRUE(tensor->get_is_pass_by_value());
+    EXPECT_FALSE(tensor->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(tensor->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(tensor->get_compile_time_constant<float>().value(), K_SCALAR_VALUE);
+    EXPECT_FALSE(tensor->get_pass_by_value<float>().has_value());
 }
 
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueInt64)
@@ -572,9 +614,11 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueInt6
     EXPECT_EQ(tensor->get_data_type(), DataType::INT64);
     EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{1}));
     EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{1}));
-    EXPECT_TRUE(tensor->get_pass_by_value());
-    ASSERT_TRUE(tensor->get_pass_by_value<int64_t>().has_value());
-    EXPECT_EQ(tensor->get_pass_by_value<int64_t>().value(), K_SCALAR_VALUE);
+    EXPECT_TRUE(tensor->get_is_pass_by_value());
+    EXPECT_FALSE(tensor->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(tensor->get_compile_time_constant<int64_t>().has_value());
+    EXPECT_EQ(tensor->get_compile_time_constant<int64_t>().value(), K_SCALAR_VALUE);
+    EXPECT_FALSE(tensor->get_pass_by_value<int64_t>().has_value());
 }
 
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueBoolean)
@@ -592,9 +636,11 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueBool
     EXPECT_EQ(tensor->get_data_type(), DataType::BOOLEAN);
     EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{1}));
     EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{1}));
-    EXPECT_TRUE(tensor->get_pass_by_value());
-    ASSERT_TRUE(tensor->get_pass_by_value<bool>().has_value());
-    EXPECT_EQ(tensor->get_pass_by_value<bool>().value(), K_SCALAR_VALUE);
+    EXPECT_TRUE(tensor->get_is_pass_by_value());
+    EXPECT_FALSE(tensor->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(tensor->get_compile_time_constant<bool>().has_value());
+    EXPECT_EQ(tensor->get_compile_time_constant<bool>().value(), K_SCALAR_VALUE);
+    EXPECT_FALSE(tensor->get_pass_by_value<bool>().has_value());
 }
 
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dDims)
@@ -722,6 +768,26 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dD
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
 
+    // IS_RUNTIME_PASS_BY_VALUE: false (compile-time constant)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    _,
+                                    _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = false;
+                            std::memcpy(arrayOfElements, &val, sizeof(bool));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
     std::shared_ptr<TensorAttributes> tensor;
     auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
@@ -729,9 +795,12 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dD
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->get_uid(), K_UID);
     EXPECT_EQ(tensor->get_data_type(), DataType::FLOAT);
-    EXPECT_TRUE(tensor->get_pass_by_value());
-    ASSERT_TRUE(tensor->get_pass_by_value<float>().has_value());
-    EXPECT_FLOAT_EQ(tensor->get_pass_by_value<float>().value(), K_SCALAR_VALUE);
+    // Flag never set on the mock → compile-time constant; dims/strides must survive.
+    EXPECT_TRUE(tensor->get_is_pass_by_value());
+    EXPECT_FALSE(tensor->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(tensor->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(tensor->get_compile_time_constant<float>().value(), K_SCALAR_VALUE);
+    EXPECT_FALSE(tensor->get_pass_by_value<float>().has_value());
     // Verify dims and strides are preserved (not reset to {1} by set_value)
     EXPECT_EQ(tensor->get_dim(),
               (std::vector<int64_t>{K_SCALAR_DIMS.begin(), K_SCALAR_DIMS.end()}));

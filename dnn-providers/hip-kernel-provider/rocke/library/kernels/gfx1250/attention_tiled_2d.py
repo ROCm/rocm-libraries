@@ -21,11 +21,14 @@ independently.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from typing import Optional, Tuple
 
 from rocke.core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, KernelDef, PtrType, Type
-from rocke.helpers.attention import PagedKvDescriptor, binary_search_seq_idx
+from rocke.helpers.attention import (
+    PagedKvDescriptor,
+    binary_search_seq_idx,
+    binary_search_seq_idx_iters,
+)
 from ._wmma_attention_common import (
     BLOCK_M as _BLOCK_M,
     HEAD_SIZE as _HEAD_SIZE,
@@ -127,9 +130,7 @@ class UnifiedAttention2DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -168,6 +169,7 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
+    use_d256_fast: bool = False,
 ) -> Tuple[bool, str]:
     del (
         use_mfma_32x32x8,
@@ -175,6 +177,7 @@ def supports_tiled_2d(
         use_k_single_buffer,
         use_conflict_free_v_store,
         use_k_sliced_ring,
+        use_d256_fast,
     )
     if arch != "gfx1250":
         return False, f"gfx1250 tiled 2D only supports arch='gfx1250' (got {arch!r})"

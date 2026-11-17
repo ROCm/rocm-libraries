@@ -87,13 +87,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
         }
 
         // reduce to get block sum
-        block_sum += shift_left(block_sum, 1);
-        block_sum += shift_left(block_sum, 2);
-        block_sum += shift_left(block_sum, 4);
-        block_sum += shift_left(block_sum, 8);
-        block_sum += shift_left(block_sum, 16);
-        if(warpSize > 32)
-            block_sum += shift_left(block_sum, 32);
+        reduce_wave_sum(block_sum);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = block_sum;
         __syncthreads();
@@ -136,13 +130,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     }
 
     // reduce to find max
-    norm_frobenius += shift_left(norm_frobenius, 1);
-    norm_frobenius += shift_left(norm_frobenius, 2);
-    norm_frobenius += shift_left(norm_frobenius, 4);
-    norm_frobenius += shift_left(norm_frobenius, 8);
-    norm_frobenius += shift_left(norm_frobenius, 16);
-    if(warpSize > 32)
-        norm_frobenius += shift_left(norm_frobenius, 32);
+    reduce_wave_sum(norm_frobenius);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = norm_frobenius;
     __syncthreads();
@@ -188,13 +176,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
         }
 
         // reduce to get row sum
-        row_sum += shift_left(row_sum, 1);
-        row_sum += shift_left(row_sum, 2);
-        row_sum += shift_left(row_sum, 4);
-        row_sum += shift_left(row_sum, 8);
-        row_sum += shift_left(row_sum, 16);
-        if(warpSize > 32)
-            row_sum += shift_left(row_sum, 32);
+        reduce_wave_sum(row_sum);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = row_sum;
         __syncthreads();
@@ -236,13 +218,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
     }
 
     // reduce to find max
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 1));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 2));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 4));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 8));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 16));
-    if(warpSize > 32)
-        norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 32));
+    reduce_wave_max_nan(norm_one);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = norm_one;
     __syncthreads();
@@ -287,13 +263,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
         }
 
         // reduce to get column sum
-        col_sum += shift_left(col_sum, 1);
-        col_sum += shift_left(col_sum, 2);
-        col_sum += shift_left(col_sum, 4);
-        col_sum += shift_left(col_sum, 8);
-        col_sum += shift_left(col_sum, 16);
-        if(warpSize > 32)
-            col_sum += shift_left(col_sum, 32);
+        reduce_wave_sum(col_sum);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = col_sum;
         __syncthreads();
@@ -335,13 +305,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
     }
 
     // reduce to find max
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 1));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 2));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 4));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 8));
-    norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 16));
-    if(warpSize > 32)
-        norm_one = rocblas_max_nan(norm_one, shift_left(norm_one, 32));
+    reduce_wave_max_nan(norm_one);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = norm_one;
     __syncthreads();
@@ -392,13 +356,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
         }
 
         // reduce to get block max
-        block_max = rocblas_max_nan(block_max, shift_left(block_max, 1));
-        block_max = rocblas_max_nan(block_max, shift_left(block_max, 2));
-        block_max = rocblas_max_nan(block_max, shift_left(block_max, 4));
-        block_max = rocblas_max_nan(block_max, shift_left(block_max, 8));
-        block_max = rocblas_max_nan(block_max, shift_left(block_max, 16));
-        if(warpSize > 32)
-            block_max = rocblas_max_nan(block_max, shift_left(block_max, 32));
+        reduce_wave_max_nan(block_max);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = block_max;
         __syncthreads();
@@ -441,13 +399,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     }
 
     // reduce to find max
-    norm_max = rocblas_max_nan(norm_max, shift_left(norm_max, 1));
-    norm_max = rocblas_max_nan(norm_max, shift_left(norm_max, 2));
-    norm_max = rocblas_max_nan(norm_max, shift_left(norm_max, 4));
-    norm_max = rocblas_max_nan(norm_max, shift_left(norm_max, 8));
-    norm_max = rocblas_max_nan(norm_max, shift_left(norm_max, 16));
-    if(warpSize > 32)
-        norm_max = rocblas_max_nan(norm_max, shift_left(norm_max, 32));
+    reduce_wave_max_nan(norm_max);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = norm_max;
     __syncthreads();

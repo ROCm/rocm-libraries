@@ -30,7 +30,6 @@
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hipsparselt/hipsparselt.h>
-#include <immintrin.h>
 #include <type_traits>
 
 /* ============================================================================================ */

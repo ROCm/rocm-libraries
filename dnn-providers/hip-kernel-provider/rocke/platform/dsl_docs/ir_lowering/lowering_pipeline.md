@@ -17,7 +17,7 @@ CK Tile parity:
   selected spec dataclasses -> CK Tile C++ text  (core/lower_cktile.py)
 ```
 
-The production path (KernelDef SSA IR -> AMDGPU LLVM IR text) is served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`Cpp/`, via the `rocke_engine` extension). The engine is selected by `core/backend.py::resolve_backend()` (explicit `backend=` argument, then `ROCKE_BACKEND` env of `python` / `cpp` / `both`, then the package default `cpp`); `cpp` falls back to the native lowerer when the extension is unbuilt. The IR-lowering contract described below is shared by both.
+The production path (KernelDef SSA IR -> AMDGPU LLVM IR text) is served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`cpp/`, via the `rocke_engine` extension). The engine is selected by `core/backend.py::resolve_backend()` (explicit `backend=` argument, then `ROCKE_BACKEND` env of `python` / `cpp` / `both`, then the package default `cpp`); `cpp` falls back to the native lowerer when the extension is unbuilt. The IR-lowering contract described below is shared by both.
 
 ## Production Path
 
@@ -38,7 +38,7 @@ Implementation (`helpers/compile.py`):
 ```text
 1. optimize_kernel(kernel) if optimize_ir         # passes (constant fold + CSE + DCE)
 2. print_ir(kernel) if capture_ir_text            # MLIR-style debug dump
-3. lower_kernel_to_llvm(kernel)                   # AMDGPU LLVM IR text
+3. lower_kernel_to_llvm(kernel, arch=arch)        # AMDGPU LLVM IR text
 4. build_hsaco_from_llvm_ir(llvm_text, isa=...)  # libamd_comgr
 5. return KernelArtifact(kernel, ir_text, llvm_text, hsaco, timings, pass_stats, isa)
 ```
@@ -65,7 +65,9 @@ elementwise / reduce / norm / transpose:                    ~5-15 ms
 
 ## LLVM Lowering Details
 
-Entry point: `core/lower_llvm.py::lower_kernel_to_llvm(kernel: KernelDef) -> str`.
+Entry point: `core/lower_llvm.py::lower_kernel_to_llvm(kernel: KernelDef, *, arch: str,
+llvm_flavor: Optional[str] = None) -> str`. `arch` is required: there is no default target,
+and omitting it raises.
 
 `_Lowerer` walks regions and emits LLVM IR text:
 
@@ -114,6 +116,7 @@ attributes #0 = {
 | `tile.mfma_f32_32x32x8_f16`    | `llvm.amdgcn.mfma.f32.32x32x8f16(<4xhalf>, <4xhalf>, <16xfloat>, 0,0,0)`   |
 | `tile.mfma_f32_32x32x16_f16`   | `llvm.amdgcn.mfma.f32.32x32x16.f16(<8xhalf>, <8xhalf>, <16xfloat>, 0,0,0)` |
 | `tile.mfma_f32_4x4x4_f16`      | `llvm.amdgcn.mfma.f32.4x4x4f16(<4xhalf>, <4xhalf>, <4xfloat>, 0,0,0)`      |
+| `tile.mfma_f32_4x4x4_bf16`     | `llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4xi16>, <4xi16>, <4xfloat>, 0,0,0)`    |
 | `tile.readfirstlane`           | `llvm.amdgcn.readfirstlane.{i32,i64}`                                      |
 | `tile.pin_sgpr`                | `asm volatile("" : "+s"(x))`                                               |
 | `tile.wave_all` / `wave_any`   | `ballot.i64` + compare                                                     |
@@ -169,7 +172,7 @@ amd_comgr_action_data_get_data(EXECUTABLE)           # extract bytes
 Libraries are loaded from the default ROCm library locations or the dynamic
 linker search path. The HSACO bytes returned are ready for `hipModuleLoadData`.
 
-`ComgrTimings(bc, relocatable, executable)` returns per-stage seconds; `compile_kernel` converts to ms in the artifact.
+`ComgrTimings(bc, link, relocatable, executable)` returns per-stage seconds (`link` is 0.0 for a single module); `compile_kernel` converts to ms in the artifact.
 
 ## HIP Debug Lowering
 
@@ -181,7 +184,7 @@ This backend emits readable HIP C++:
 - typedef aliases for ext-vector types: `f16x4`, `f32x16`, `i32x4`, `boolx8`, etc.;
 - builtin shims for clang-unfriendly intrinsics (`ds.read.tr16.b64`, `raw.ptr.buffer.load.lds`);
 - `__shared__ <elem> name_storage[...]` for LDS allocations;
-- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/0x00027000)`;
+- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/word3)`, where `word3` is the target ISA backend's `buffer_rsrc_word3` (the same word the LLVM route emits);
 - `__builtin_amdgcn_mfma_*` for matrix ops;
 - inline `asm volatile("" : "+s"(x))` for `pin_sgpr`;
 - normal C++ `for` / `if` for structured control flow.
@@ -265,6 +268,6 @@ If you add a new builder operation, update in this order:
 1. `core/ir.py` — builder method and the op name + result type.
 2. `core/ir_print.py` — only if you want a clean MLIR-style debug print.
 3. `core/lower_llvm.py` — production lowering and any new `_INTRINSIC_DECLS` entry.
-4. the C++ engine (`Cpp/`) — port the same lowering so both engines stay byte-identical; the differential gate (`backend=both` / the harness under `tests/instances/differential/`) will flag any divergence.
+4. the C++ engine (`cpp/`) — port the same lowering so both engines stay byte-identical; the differential gate (`backend=both` / the harness under `tests/instances/differential/`) will flag any divergence.
 5. `core/lower_hip.py` — optional readable debug output.
 6. tests/examples that lower the op and assert the expected LLVM/ISA shape.

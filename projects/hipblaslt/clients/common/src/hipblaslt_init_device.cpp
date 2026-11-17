@@ -29,9 +29,10 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
+#include <array>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <array>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -53,6 +54,58 @@ void set_host_side_fill_kernel_state(bool enable)
 bool host_side_fill_kernel()
 {
     return host_side_fill_kernel_state();
+}
+
+namespace
+{
+    bool& ulp_positive_init_state()
+    {
+        static bool enable = false;
+        return enable;
+    }
+}
+
+void set_ulp_positive_init_state(bool enable)
+{
+    ulp_positive_init_state() = enable;
+}
+
+bool ulp_positive_init()
+{
+    return ulp_positive_init_state();
+}
+
+namespace
+{
+    struct IntegerExactPatternState
+    {
+        IntegerExactPattern pattern    = IntegerExactPattern::standard;
+        size_t              K          = 0;
+        bool                a_k_is_row = false;
+    };
+    IntegerExactPatternState& integer_exact_pattern_state()
+    {
+        static thread_local IntegerExactPatternState state;
+        return state;
+    }
+}
+
+bool parse_integer_exact_pattern(const char* name, IntegerExactPattern& pattern)
+{
+    if(!name || !*name || !strcmp(name, "standard"))
+        pattern = IntegerExactPattern::standard;
+    else if(!strcmp(name, "ternary"))
+        pattern = IntegerExactPattern::ternary;
+    else if(!strcmp(name, "sparse_k"))
+        pattern = IntegerExactPattern::sparse_k;
+    else
+        return false;
+    return true;
+}
+
+void set_integer_exact_pattern_state(IntegerExactPattern pattern, size_t K, bool a_k_is_row)
+{
+    integer_exact_pattern_state() = {pattern, K, a_k_is_row};
 }
 
 template <typename T, typename F>
@@ -168,6 +221,13 @@ template <>
 __host__ __device__ int8_t small_int_positive<int8_t>(size_t idx)
 {
     return static_cast<int8_t>(pseudo_random_device(idx) % 3);
+}
+
+/*! \brief  generate a random number in range [-1, 0, 1] for the ternary integer_exact pattern */
+template <typename T>
+__host__ __device__ T small_int_ternary(size_t idx)
+{
+    return T(float(int(pseudo_random_device(idx) % 3) - 1));
 }
 
 #if defined(HIPBLASLT_USE_FP4)
@@ -619,6 +679,30 @@ __host__ __device__ hipblaslt_bf6x16 norm_dist(uint32_t base_seed, size_t idx)
 }
 #endif
 
+/*! \brief Return |v| for ULP positive-only init. Packed fp4/fp6 and scale
+ *  (e8/e5m3) types are left unchanged; every other scalar keeps its exact
+ *  value (only the sign bit is flipped via negate when negative). */
+template <typename T>
+__host__ __device__ inline T force_positive_scalar(T v)
+{
+    if constexpr(
+        false
+#if defined(HIPBLASLT_USE_FP4)
+        || std::is_same_v<T, hipblaslt_f4x2>
+#endif
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+        || std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>
+#endif
+        || std::is_same_v<T, hipblaslt_e8> || std::is_same_v<T, hipblaslt_e5m3>)
+    {
+        return v;
+    }
+    else
+    {
+        return (static_cast<float>(v) < 0.f) ? negate(v) : v;
+    }
+}
+
 template <typename T>
 void hipblaslt_init_device(ABC_dims                 abc,
                            hipblaslt_initialization init,
@@ -632,6 +716,12 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            int                      norm_dist_one_special_type = -1)
 {
     using T_real = get_real_type_t<T>;
+
+    // ULP validation: force hpl / trig_float inputs positive so the reference
+    // dot products do not cancel toward zero (see set_ulp_positive_init_state).
+    const bool positive_only = ulp_positive_init()
+                               && (init == hipblaslt_initialization::hpl
+                                   || init == hipblaslt_initialization::trig_float);
 
     // Helper to construct std::complex types from two real components
     auto make_std_complex = [] __device__ __host__ (T_real r, T_real i) -> T {
@@ -755,13 +845,18 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 stride = std::max(lda * N, stride);
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto b = idx / stride;
                             auto j = (idx - b * stride) / lda;
                             auto i = (idx - b * stride) - j * lda;
                             auto arg = double(i + j * M + b * M * N);
                             auto real_val = sin(random_int<T_real>(arg));
                             auto imag_val = cos(random_int<T_real>(arg + 1000000));
+                            if(positive_only)
+                            {
+                                real_val = fabs(real_val);
+                                imag_val = fabs(imag_val);
+                            }
                             auto complex_val = make_std_complex(real_val, imag_val);
                             return complex_val;
                         });
@@ -769,13 +864,18 @@ void hipblaslt_init_device(ABC_dims                 abc,
             else
             {
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto j = idx / lda;
                             auto b = (idx - j * lda) / stride;
                             auto i = (idx - j * lda) - b * stride;
                             auto arg = double(i + j * M + b * M * N);
                             auto real_val = sin(random_int<T_real>(arg));
                             auto imag_val = cos(random_int<T_real>(arg + 1000000));
+                            if(positive_only)
+                            {
+                                real_val = fabs(real_val);
+                                imag_val = fabs(imag_val);
+                            }
                             auto complex_val = make_std_complex(real_val, imag_val);
                             return complex_val;
                         });
@@ -787,35 +887,45 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 stride = std::max(lda * N, stride);
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto b = idx / stride;
                             auto j = (idx - b * stride) / lda;
                             auto i = (idx - b * stride) - j * lda;
                             auto arg = double(i + j * M + b * M * N);
-                            return T((abc == ABC_dims::B) ? cos(arg) : sin(arg));
+                            auto val = (abc == ABC_dims::B) ? cos(arg) : sin(arg);
+                            return T(positive_only ? fabs(val) : val);
                         });
             }
             else
             {
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto j = idx / lda;
                             auto b = (idx - j * lda) / stride;
                             auto i = (idx - j * lda) - b * stride;
                             auto arg = double(i + j * M + b * M * N);
-                            return T((abc == ABC_dims::B) ? cos(arg) : sin(arg));
+                            auto val = (abc == ABC_dims::B) ? cos(arg) : sin(arg);
+                            return T(positive_only ? fabs(val) : val);
                         });
             }
             }
             break;
         case hipblaslt_initialization::hpl:
             if constexpr(is_std_complex<T>::value)
-                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex] __host__ __device__ (size_t idx) -> T {
-                    return make_std_complex(random_hpl<T_real>(idx), random_hpl<T_real>(idx + 1000000));
+                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex, positive_only] __host__ __device__ (size_t idx) -> T {
+                    auto real_val = random_hpl<T_real>(idx);
+                    auto imag_val = random_hpl<T_real>(idx + 1000000);
+                    if(positive_only)
+                    {
+                        real_val = fabs(real_val);
+                        imag_val = fabs(imag_val);
+                    }
+                    return make_std_complex(real_val, imag_val);
                 });
             else
-            fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
-                return random_hpl<T>(idx);
+            fill_batch(A, M, N, lda, stride, batch_count, [positive_only] __host__ __device__ (size_t idx) -> T {
+                auto value = random_hpl<T>(idx);
+                return positive_only ? force_positive_scalar<T>(value) : value;
             });
             break;
         case hipblaslt_initialization::uniform_low_precision:
@@ -917,8 +1027,49 @@ void hipblaslt_init_device(ABC_dims                 abc,
             });
             break;
         case hipblaslt_initialization::integer_exact:
-            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]
-            if(abc == ABC_dims::A || abc == ABC_dims::C)
+        {
+            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]. The ternary and sparse_k
+            // patterns are described with IntegerExactPattern in hipblaslt_init.hpp.
+            const IntegerExactPatternState pat = integer_exact_pattern_state();
+            if(pat.pattern == IntegerExactPattern::ternary)
+            {
+                // B's PRNG offset keeps its values independent of A's.
+                const size_t offset = abc == ABC_dims::B ? 1000003 : 0;
+                fill_batch(A,
+                           M,
+                           N,
+                           lda,
+                           stride,
+                           batch_count,
+                           [offset] __host__ __device__(size_t idx) -> T {
+                               return small_int_ternary<T>(idx + offset);
+                           });
+            }
+            else if(abc == ABC_dims::A && pat.pattern == IntegerExactPattern::sparse_k)
+            {
+                // A stride of 0 means packed batches. Any other stride is the allocation's layout,
+                // which must not be widened: overlapping batches would be written past the end.
+                const size_t fill_stride  = stride ? stride : lda * N;
+                const size_t index_stride = std::max(fill_stride, lda * N);
+                const size_t K            = pat.K;
+                const bool   k_is_row     = pat.a_k_is_row;
+                fill_batch(A,
+                           M,
+                           N,
+                           lda,
+                           fill_stride,
+                           batch_count,
+                           [index_stride, lda, K, k_is_row] __host__ __device__(size_t idx) -> T {
+                               auto in_batch = idx % index_stride;
+                               auto j        = in_batch / lda;
+                               auto i        = in_batch - j * lda;
+                               return integer_exact_sparse_k_kept(
+                                          k_is_row ? i : j, K, k_is_row ? j : i)
+                                          ? T(float(1 + pseudo_random_device(idx) % 2))
+                                          : T(0);
+                           });
+            }
+            else if(abc == ABC_dims::A || abc == ABC_dims::C)
             {
                 fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                     return small_int_positive<T>(idx);
@@ -943,6 +1094,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 });
             }
             break;
+        }
         case hipblaslt_initialization::fp16_accumulator_probe:
             if constexpr(std::is_same_v<T, hipblasLtHalf>)
             {

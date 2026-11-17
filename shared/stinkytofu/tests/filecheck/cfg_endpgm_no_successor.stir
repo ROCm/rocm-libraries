@@ -1,0 +1,26 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --print-output
+#
+# CFGBuilderPass: s_endpgm terminates the wave, so its basic block must have no
+# successors — in particular it must NOT fall through to the textually next
+# block. Here ^bb1 ends in s_endpgm and is followed by ^label_end; the CFG must
+# not add a ^bb1 -> ^label_end fall-through edge. ^label_end stays reachable via
+# the entry s_cbranch_scc1.
+
+# CHECK-LABEL: @endpgm_no_successor
+# CHECK: ^entry:
+# CHECK: s_cbranch_scc1
+# CHECK-NEXT: Successors: ^bb1, ^label_end
+# CHECK: s_endpgm
+# CHECK-NOT: Successors:
+# CHECK: ^label_end:
+
+st.func @endpgm_no_successor() {
+^entry:
+  "st.s_cbranch_scc1"("label_end", SCC0)
+  Successors: ^bb1, ^label_end
+^bb1:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+^label_end:
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}

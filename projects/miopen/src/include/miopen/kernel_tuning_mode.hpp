@@ -504,19 +504,52 @@ AddKernelToJsonAccumulator(const std::string& kernel_name, float time_ms, bool i
     data.current_config.kernels.push_back({kernel_name, time_ms, is_transform});
 }
 
+/// Thread-local override for the solver name reported by LogSolutionName.
+///
+/// Background: when a TransposingSolver wrapper delegates Search/GetSolution to
+/// its inner NHWC-native solver, the inner's own search machinery calls
+/// LogSolutionName with the inner's name (e.g. "ConvBinWinogradRxSf2x3").
+/// Without an override the perf log credits the inner against the user's
+/// original (e.g. NCHW) problem key, even though the actual candidate the
+/// runtime would select is the wrapper. Downstream parsers can't then locate
+/// the wrapper's perf row.
+///
+/// When non-empty, LogSolutionName substitutes these values for the ones the
+/// caller passed. Use `ScopedSolverNameOverride` to set in an RAII scope.
+struct SolverNameOverride
+{
+    std::string solution_name;
+    uint64_t solver_id = 0;
+    bool active        = false;
+};
+
+inline SolverNameOverride& GetSolverNameOverride()
+{
+    thread_local SolverNameOverride override_state;
+    return override_state;
+}
+
 /// Log solution name if appropriate for the current log level
-/// Only prints if the solution name has changed since the last call
+/// Only prints if the solution name has changed since the last call.
+/// Honors any active ScopedSolverNameOverride so wrapper solvers can be
+/// credited correctly when their inner solver does the logging.
 inline void
 LogSolutionName(const std::string& solution_name, uint64_t solver_id, size_t workspace_bytes = 0)
 {
     const bool logging_enabled = IsLoggingKernel();
     if(logging_enabled && !solution_name.empty())
     {
+        // Apply override if active (wrapper solver delegating to inner).
+        const auto& override_state = GetSolverNameOverride();
+        const std::string& effective_name =
+            override_state.active ? override_state.solution_name : solution_name;
+        const uint64_t effective_id = override_state.active ? override_state.solver_id : solver_id;
+
         auto& last_solution  = GetLastPrintedSolutionName();
         auto& last_solver_id = GetLastPrintedSolverId();
 
         // Check if solution name or solver_id has changed
-        if(solution_name != last_solution || solver_id != last_solver_id)
+        if(effective_name != last_solution || effective_id != last_solver_id)
         {
             // Flush previous solution's JSON data
             FlushJsonAccumulator();
@@ -524,12 +557,12 @@ LogSolutionName(const std::string& solution_name, uint64_t solver_id, size_t wor
             // Set up new solution in accumulator
             const KernelPhase current_phase = GetKernelPhase();
             auto& data                      = GetJsonAccumulator();
-            data.solution_name              = solution_name;
-            data.solver_id                  = solver_id;
+            data.solution_name              = effective_name;
+            data.solver_id                  = effective_id;
             data.workspace_bytes            = workspace_bytes;
             data.phase                      = KernelPhaseToString(current_phase);
-            last_solution                   = solution_name;
-            last_solver_id                  = solver_id;
+            last_solution                   = effective_name;
+            last_solver_id                  = effective_id;
         }
     }
 }
@@ -551,6 +584,45 @@ public:
 
 private:
     KernelPhase prev_phase;
+};
+
+/// RAII helper that forces LogSolutionName to attribute its records to a
+/// specific solver name + id for the duration of the scope, regardless of what
+/// the caller passes. Used by TransposingSolver to credit the wrapper instead
+/// of the inner NHWC-native solver when it delegates Search/GetSolution.
+/// Restores the previous override (if any) on scope exit, so nesting is safe.
+///
+/// Gated on MIOPEN_PERFORMANCE_LOGS>0: when performance logging is disabled
+/// the constructor and destructor are no-ops, so the thread-local is never
+/// touched and the caller pays only an env-var read plus a branch. This keeps
+/// the override fully zero-impact for normal production paths.
+class ScopedSolverNameOverride
+{
+public:
+    ScopedSolverNameOverride(const std::string& wrapper_name, uint64_t wrapper_id)
+        : engaged(IsPerformanceLoggingEnabled()), prev_state()
+    {
+        if(!engaged)
+            return;
+        prev_state      = GetSolverNameOverride();
+        auto& s         = GetSolverNameOverride();
+        s.solution_name = wrapper_name;
+        s.solver_id     = wrapper_id;
+        s.active        = !wrapper_name.empty();
+    }
+
+    ~ScopedSolverNameOverride()
+    {
+        if(engaged)
+            GetSolverNameOverride() = prev_state;
+    }
+
+    ScopedSolverNameOverride(const ScopedSolverNameOverride&)            = delete;
+    ScopedSolverNameOverride& operator=(const ScopedSolverNameOverride&) = delete;
+
+private:
+    bool engaged;
+    SolverNameOverride prev_state;
 };
 
 } // namespace miopen

@@ -1,0 +1,211 @@
+#!/bin/bash
+
+
+# #################################################
+# helper functions
+# #################################################
+function display_help()
+{
+    echo "rocPRIM build & installation helper script"
+    echo "./install [-h|--help] "
+    echo "    [-h|--help] prints this help message"
+    echo "    [-i|--install] install after build"
+    echo "    [-p]--package build package"
+    echo "    [-r]--relocatable] create a package to support relocatable ROCm"
+    #Not implemented yet
+    #    echo "    [-d|--dependencies] install build dependencies"
+    echo "    [-c|--clients] build library clients too (combines with -i & -d)"
+    echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
+    echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
+    echo "    [-b|--benchmark] builds and runs benchmark"
+    echo "    [-s|--static] build static libraries"
+    echo "    [--codecoverage] build with code coverage profiling enabled"
+    echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
+    echo "    [--address-sanitizer] build with address sanitizer enabled"
+    echo "    [--rm-legacy-include-dir] Remove legacy include dir Packaging added for file/folder reorg backward compatibility"
+}
+
+
+# #################################################
+# global variables
+# #################################################
+install_package=false
+build_package=false
+build_clients=false
+build_release=true
+build_release_debug=false
+build_static_libraries=false
+build_codecoverage=false
+build_type=Release
+build_hip_clang=false
+run_tests=false
+build_benchmark=false
+rocm_path=/opt/rocm
+build_relocatable=false
+build_address_sanitizer=false
+
+# #################################################
+# Parameter parsing
+# #################################################
+
+# check if we have a modern version of getopt that can handle whitespace and long parameters
+getopt -T
+if [[ $? -eq 4 ]]; then
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable,relwithdebinfo,static,codecoverage,address-sanitizer,rm-legacy-include-dir --options hicdtbpgrsk -- "$@")
+else
+    echo "Need a new version of getopt"
+    exit 1
+fi
+
+if [[ $? -ne 0 ]]; then
+    echo "getopt invocation failed; could not parse the command line";
+    exit 1
+fi
+
+eval set -- "${GETOPT_PARSE}"
+
+check_exit_code( )
+{
+    if (( $1 != 0 )); then
+	exit $1
+    fi
+}
+
+while true; do
+    case "${1}" in
+        -h|--help)
+            display_help
+            exit 0
+            ;;
+        -i|--install)
+            install_package=true
+            shift ;;
+        -p|--package)
+            build_package=true
+            shift ;;
+        -r|--relocatable)
+            build_relocatable=true
+            shift ;;
+        -c|--clients)
+            build_clients=true
+	    build_benchmarks=true
+            shift ;;
+        -g|--debug)
+            build_release=false
+            build_type=Debug
+            shift ;;
+        -t|--test)
+            run_tests=true
+            shift ;;
+        -b|--benchmark)
+            build_benchmark=true
+            shift ;;
+        -s|--static)
+            build_static_libraries=true
+            shift ;;
+        --codecoverage)
+            build_codecoverage=true
+            shift ;;
+        -k|--relwithdebinfo)
+	    build_release=false
+	    build_release_debug=true
+            build_type=RelWithDebInfo
+            shift ;;
+        --hip-clang)
+            build_hip_clang=true
+            shift ;;
+        --address-sanitizer)
+            build_address_sanitizer=true
+            shift ;;
+        --) shift ; break ;;
+        *)  echo "Unexpected command line parameter received; aborting";
+            exit 1
+            ;;
+    esac
+done
+
+if [[ "${build_relocatable}" == true ]]; then
+    if ! [ -z ${ROCM_PATH+x} ]; then
+        rocm_path=${ROCM_PATH}
+    fi
+fi
+
+# Go to rocPRIM directory, create and go to the build directory.
+mkdir -p build; cd build
+if [[ "${build_release}" == true ]]; then
+    mkdir -p release; cd release
+elif [[ "${build_release_debug}" == true ]]; then
+    mkdir -p release-debug; cd release-debug
+else
+    mkdir -p debug; cd debug
+fi
+
+# Configure rocPRIM, setup options for your system.
+# See README.md under "Build and Install" for options and defaults.
+
+cmake_executable="cmake"
+cmake_common_options="--toolchain=toolchain-linux.cmake"
+
+benchmark="OFF"
+if [[ "${build_benchmark}" == true ]]; then
+    benchmark="ON"
+fi
+
+clients="OFF"
+if [[ "${build_clients}" == true ]]; then
+    clients="ON"
+fi
+
+if [[ "${build_static_libraries}" == true ]]; then
+    static_libs="-DBUILD_SHARED_LIBS=OFF"
+fi
+
+if [[ "${build_address_sanitizer}" == true ]]; then
+    CFLAGS="${CLFAGS} -fsanitize=address -shared-libasan"
+    CXXFLAGS="${CXXFLAGS} -fsanitize=address -shared-libasan"
+    LDFLAGS="${LDFLAGS} -fuse-ld=lld -fsanitize=address -shared-libasan"
+fi
+
+codecoverage="OFF"
+if [[ "${build_codecoverage}" == true ]]; then
+    if [[ "${build_release}" == true ]]; then
+        echo "Code coverage is disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
+        exit 1
+    fi
+    codecoverage="ON"
+fi
+
+if [[ "${build_relocatable}" == true ]]; then
+    ${cmake_executable} ${cmake_common_options} \
+       -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
+       -DCMAKE_PREFIX_PATH="${rocm_path}  ${rocm_path}/hip" \
+       -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
+       -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" \
+       "${static_libs}" \
+       ../../.     # or cmake-gui ../.
+else
+    ${cmake_executable} ${cmake_common_options} -DBUILD_BENCHMARK=${benchmark} \
+       -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
+
+fi
+
+# Build
+make -j$(nproc)
+check_exit_code "$?"
+
+if ($run_tests); then
+# Optionally, run tests if they're enabled.
+ctest --output-on-failure
+fi
+
+if ($install_package); then
+# Install
+make install
+check_exit_code "$?"
+fi
+
+if ($build_package); then
+# Install
+make package -j$(nproc)
+check_exit_code "$?"
+fi

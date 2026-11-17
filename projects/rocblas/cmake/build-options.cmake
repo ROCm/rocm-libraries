@@ -38,6 +38,12 @@ option( BUILD_SHARED_LIBS "Build rocBLAS as a shared library" ON )
 # library without tensile to allow for rapid iteration without GEMM functionality
 option( BUILD_WITH_TENSILE "Build full functionality which requires tensile?" ON )
 
+# Sets BUILD_WITH_TENSILE to be OFF, link hipBLASLt and compile hipblaslt_host.cpp so
+# rocblas_*gemm*_ex can dispatch via hipBLASLt (no Tensile codegen; tensile_host.cpp
+# remains compiled for shared dispatch helpers with Tensile paths ifdef'd out).
+option( BUILD_WITH_HIPBLASLT_ONLY
+  "Build rocBLAS with hipBLASLt GEMM backend only (no Tensile)" OFF )
+
 include(clients/cmake/client-build-options.cmake)
 
 if (WIN32)

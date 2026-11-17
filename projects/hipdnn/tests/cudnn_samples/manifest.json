@@ -1,0 +1,343 @@
+{
+  "corpus": {
+    "repo": "https://github.com/NVIDIA/cudnn-frontend.git",
+    "tag": "v1.24.0",
+    "sparse_path": "samples/cpp",
+    "frontend_version": 12400
+  },
+  "environment": {
+    "CUDART_VERSION": 12000,
+    "CUDNN_VERSION": 92200
+  },
+  "samples": [
+    {
+      "path": "causal_conv1d/causal_conv1d.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "convolution/conv_dynamic_shape_benchmark.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Catch2 benchmark TU; performance is out of scope",
+      "rot_check": {
+        "includes_present": [
+          "catch2/benchmark/catch_benchmark.hpp"
+        ]
+      }
+    },
+    {
+      "path": "convolution/dgrads.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "convolution/fp8_fprop.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "convolution/fprop.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'key' in",
+      "reason": "Graph::key() has no hipDNN counterpart; a user-maintained plan cache keyed on graph identity"
+    },
+    {
+      "path": "convolution/int8_fprop.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "convolution/wgrads.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "matmul/blackwell_nvfp4_mxfp8_block_scale_matmul.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'set_reordering_type'",
+      "reason": "TensorReordering_t has no hipDNN tensor-descriptor attribute behind it"
+    },
+    {
+      "path": "matmul/complex_fp32_matmul.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "matmul/fp8_matmul.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "matmul/general_block_scale_matmul.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "matmul/int8_matmul.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "matmul/matmuls.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'key' in",
+      "reason": "Graph::key() has no hipDNN counterpart"
+    },
+    {
+      "path": "matmul/mixed_matmul.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "membound/boolean_fusion.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "membound/concat.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "membound/membound_fusion.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "membound/reshape.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "membound/slice.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "membound/transpose.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "misc/autotuning.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "unknown type name 'cudaEvent_t'",
+      "reason": "Overlay gap: the CUDA event API is not mapped onto hipEvent_t"
+    },
+    {
+      "path": "misc/compile_time_constant_example.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "misc/cudagraphs.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Needs the real CUDA-graph runtime API; the shim declines graph capture"
+    },
+    {
+      "path": "misc/custom_plan.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "misc/deviceless_aot_compilation.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'set_device_id'",
+      "reason": "DeviceProperties is a placeholder; deviceless AOT compilation is deliberately not supported"
+    },
+    {
+      "path": "misc/parallel_compilation.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Catch2 benchmark TU; performance is out of scope. Not named *benchmark* -- excluding by filename would miss it",
+      "rot_check": {
+        "includes_present": [
+          "catch2/benchmark/catch_benchmark.hpp"
+        ]
+      }
+    },
+    {
+      "path": "misc/pointwise.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "misc/resample.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "misc/serialization.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "misc/slice.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "misc/sm_carveout.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "moe_grouped_matmul/moe_grouped_matmul.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Sole <cublasLt.h> consumer; no hipBLASLt-side equivalent is provided",
+      "rot_check": {
+        "includes_present": [
+          "cublasLt.h"
+        ]
+      }
+    },
+    {
+      "path": "norm/adaptive_layernorm.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "norm/batchnorm.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "norm/layernorm.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "norm/layernorm_bitmask_relu.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "norm/norm_block_scale.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "norm/norm_zero_centered_gamma.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "norm/rmsnorm.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no matching member function for call to 'warmup'",
+      "reason": "warmup(handle) is a CUDA-graph stream-capture routine end to end; the shim declines capture"
+    },
+    {
+      "path": "sdpa/fp16_benchmark.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Catch2 benchmark TU; performance is out of scope",
+      "rot_check": {
+        "includes_present": [
+          "catch2/benchmark/catch_benchmark.hpp"
+        ]
+      }
+    },
+    {
+      "path": "sdpa/fp16_bwd.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_bwd_with_cudagraphs.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Needs the real CUDA-graph runtime API; the shim declines graph capture"
+    },
+    {
+      "path": "sdpa/fp16_bwd_with_flexible_graphs.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'attn' in namespace",
+      "reason": "graph::attn::score_modifiers needs a programmable score-modifier engine, not just the type"
+    },
+    {
+      "path": "sdpa/fp16_bwd_with_sink_token.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_cached.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'key' in",
+      "reason": "Graph::key() has no hipDNN counterpart",
+      "group": [
+        "sdpa/fp16_fwd.cpp",
+        "sdpa/fp16_bwd.cpp"
+      ],
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_dynamic_shapes.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_fwd.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_fwd_paged_decode_and_prefill.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_fwd_with_block_mask.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_fwd_with_cudagraphs.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Needs the real CUDA-graph runtime API; the shim declines graph capture"
+    },
+    {
+      "path": "sdpa/fp16_fwd_with_custom_dropout.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_fwd_with_flexible_graphs.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'attn' in namespace",
+      "reason": "graph::attn::score_modifiers needs a programmable score-modifier engine, not just the type"
+    },
+    {
+      "path": "sdpa/fp16_fwd_with_max_and_sum_exp.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp16_fwd_with_paged_caches.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "unknown type name 'cudaEvent_t'",
+      "reason": "Overlay gap: the CUDA event API is not mapped onto hipEvent_t"
+    },
+    {
+      "path": "sdpa/fp16_fwd_with_sink_token.cpp",
+      "tier": "RUN",
+      "requires_sdpa": true
+    },
+    {
+      "path": "sdpa/fp8_bwd.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "sdpa/fp8_bwd_bottom_right_causal_mask.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "sdpa/fp8_bwd_with_current_scaling.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "sdpa/fp8_fwd.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "sdpa/fp8_fwd_bottom_right_causal_mask.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "sdpa/fp8_fwd_current_scaling.cpp",
+      "tier": "RUN"
+    },
+    {
+      "path": "sdpa/mxfp8_bwd.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'set_reordering_type'",
+      "reason": "TensorReordering_t has no hipDNN tensor-descriptor attribute behind it"
+    },
+    {
+      "path": "sdpa/mxfp8_fwd.cpp",
+      "tier": "XFAIL_COMPILE",
+      "anchor": "no member named 'set_reordering_type'",
+      "reason": "TensorReordering_t has no hipDNN tensor-descriptor attribute behind it"
+    },
+    {
+      "path": "sdpa/prefill_oss_engine.cpp",
+      "tier": "EXCLUDED",
+      "reason": "Includes the sm90/sm100 experimental prefill engines unguarded; the shim ships neither",
+      "rot_check": {
+        "headers_absent": [
+          "cudnn_frontend/experimental/sm90_sdpa_prefill_engine.h",
+          "cudnn_frontend/experimental/sm100_sdpa_prefill_engine.h"
+        ]
+      }
+    }
+  ]
+}

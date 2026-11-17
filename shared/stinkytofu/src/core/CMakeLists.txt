@@ -7,5 +7,8 @@ target_sources(stinkytofu_objs PRIVATE
     BasicBlock.cpp
     Function.cpp
     PassManager.cpp
+    ModulePassManager.cpp
     DebugPrintInstrumentation.cpp
+    TimePassesInstrumentation.cpp
+    Version.cpp
 )

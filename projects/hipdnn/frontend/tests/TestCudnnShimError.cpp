@@ -15,7 +15,7 @@
 namespace cfe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 // The error types must be the *same* types as hipDNN's, not parallel
-// re-declarations (RFC 0012 §4.6 — alias, do not wrap).
+// re-declarations (alias, do not wrap).
 static_assert(std::is_same_v<cfe::error_t, hipdnn_frontend::error_t>,
               "cudnn_frontend::error_t must alias hipdnn_frontend::error_t");
 static_assert(std::is_same_v<cfe::error_object, hipdnn_frontend::error_object>,
@@ -25,9 +25,9 @@ static_assert(std::is_same_v<cfe::error_code_t, hipdnn_frontend::error_code_t>,
 
 namespace
 {
-// Mirror a hipified consumer: bring the shim names into scope so the bare
-// macro identifiers (error_code_t, error_t) resolve as they do upstream.
-using namespace hipdnn_frontend::compatibility::cudnn_frontend;
+using cfe::error_code_t;
+using cfe::error_object;
+using cfe::error_t;
 
 TEST(TestCudnnShimError, DefaultObjectIsOkAndGood)
 {

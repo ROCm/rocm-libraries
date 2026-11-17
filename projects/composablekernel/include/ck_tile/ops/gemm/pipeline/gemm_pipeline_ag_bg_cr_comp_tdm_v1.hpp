@@ -119,6 +119,60 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
 
     static_assert(!std::is_same_v<BDataType, pk_int4_t>, "Not implemented");
 
+    /**
+     * 6-bit (FP6/BF6) operands. The TDM descriptor gives a 6-bit pack the 1-byte data size while
+     * counting box, dims and strides in packs, so such an instantiation compiles but addresses the
+     * wrong bytes. Support is enabled per operand type and only for one configuration: the same
+     * 6-bit type on A and B, row-major A, column-major B, a 16x16x128 warp tile, an MX problem
+     * with 32-element scale blocks, and no padding. The guard precedes BlockGemm, so it is the
+     * first error even for a 6-bit type without a WMMA warp trait.
+     */
+    static constexpr bool kTdmFp6Enabled  = false;
+    static constexpr bool kTdmBf6Enabled  = false;
+    static constexpr bool kHas6BitOperand = is_pk_f6_v<ADataType> || is_pk_f6_v<BDataType>;
+
+    template <typename P>
+    using ProblemScaleBlockSize = decltype(P::ScaleBlockSize);
+
+    static constexpr bool Is6BitConfigSupported()
+    {
+        using WarpTile         = typename BlockGemmShape::WarpTile;
+        constexpr bool same_ab = std::is_same_v<ADataType, BDataType>;
+        constexpr bool rcr     = std::is_same_v<ALayout, tensor_layout::gemm::RowMajor> &&
+                             std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
+        constexpr bool warp_16x16x128 = WarpTile::at(number<0>{}) == 16 &&
+                                        WarpTile::at(number<1>{}) == 16 &&
+                                        WarpTile::at(number<2>{}) == 128;
+        constexpr bool mx_scale32 = is_detected<ProblemScaleBlockSize, Problem>{} &&
+                                    detail::scale_block_size_or_default<Problem>::value == 32;
+        return same_ab && rcr && warp_16x16x128 && mx_scale32 && !Problem::kPadM &&
+               !Problem::kPadN && !Problem::kPadK;
+    }
+
+    template <typename T>
+    static constexpr bool kTdm6BitTypeEnabledFor =
+        !is_pk_f6_v<T> || (std::is_same_v<T, pk_fp6x16_t> && kTdmFp6Enabled) ||
+        (std::is_same_v<T, pk_bf6x16_t> && kTdmBf6Enabled);
+    static constexpr bool kTdm6BitTypeEnabled =
+        kTdm6BitTypeEnabledFor<ADataType> && kTdm6BitTypeEnabledFor<BDataType>;
+    static constexpr bool kTdm6BitConfigSupported = [] {
+        if constexpr(kHas6BitOperand)
+        {
+            return Is6BitConfigSupported();
+        }
+        else
+        {
+            return true;
+        }
+    }();
+    static_assert(!kHas6BitOperand || kTdm6BitTypeEnabled,
+                  "TDM GEMM pipelines (comp_tdm v1/v2) do not support this FP6/BF6 operand type "
+                  "yet: the TDM load path does not handle 6-bit packs.");
+    static_assert(!kHas6BitOperand || !kTdm6BitTypeEnabled || kTdm6BitConfigSupported,
+                  "TDM GEMM pipelines (comp_tdm v1/v2) support FP6/BF6 operands only with the same "
+                  "type on A and B, row-major A, column-major B, a 16x16x128 warp tile, an MX "
+                  "problem with 32-element scale blocks and no padding.");
+
     static constexpr index_t APackedSize =
         ck_tile::numeric_traits<remove_cvref_t<ADataType>>::PackedSize;
     static constexpr index_t BPackedSize =
@@ -313,7 +367,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                   typename BLdsGemmWindows,
                   typename TDMConfigA,
                   typename TDMConfigB,
-                  typename std::enable_if_t<NumLdsBuffers == 2, bool> = true>
+                  typename std::enable_if_t<NumLdsBuffers == 2, bool> = true,
+                  typename BlockGemmT                                 = BlockGemm>
         CK_TILE_DEVICE auto RunPipelineLoop(ACopyDramWindow& a_copy_dram_window,
                                             BCopyDramWindow& b_copy_dram_window,
                                             ACopyLdsWindows& a_copy_lds_windows,
@@ -324,7 +379,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                             TDMConfigB& tdm_config_b,
                                             index_t num_loop,
                                             bool data_cache_prefetch_a,
-                                            bool data_cache_prefetch_b) const
+                                            bool data_cache_prefetch_b,
+                                            BlockGemmT block_gemm = {}) const
         {
             // initialize DRAM window steps, used to advance the DRAM windows
             using ADramTileWindowStep = typename ACopyDramWindow::BottomTensorIndex;
@@ -358,9 +414,6 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                     b_copy_lds_windows[I0{}],
                                     b_copy_dram_window,
                                     b_dram_tile_window_step);
-
-            // initialize block gemm
-            auto block_gemm = BlockGemm();
 
             // initialize C block tile
             auto c_block_tile = block_gemm.MakeCBlockTile();
@@ -1072,13 +1125,15 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                   typename BElementFunction,
                   typename std::enable_if_t<is_detected<is_tuple, AsDramBlockWindowTmp>::value &&
                                                 is_detected<is_tuple, BsDramBlockWindowTmp>::value,
-                                            bool>* = nullptr>
+                                            bool>* = nullptr,
+                  typename BlockGemmT              = BlockGemm>
         CK_TILE_DEVICE auto operator()(const AsDramBlockWindowTmp& a_dram_block_window_tmp,
                                        const AElementFunction& a_element_func,
                                        const BsDramBlockWindowTmp& b_dram_block_window_tmp,
                                        const BElementFunction& b_element_func,
                                        index_t num_loop,
-                                       void* __restrict__ p_smem) const
+                                       void* __restrict__ p_smem,
+                                       BlockGemmT block_gemm = {}) const
         {
             // TODO: tdm config will update with problem and policy; currently use default value
             TDMConfig tdm_config_a;
@@ -1204,7 +1259,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                                     tdm_config_b,
                                                     num_loop,
                                                     data_cache_prefetch_a,
-                                                    data_cache_prefetch_b);
+                                                    data_cache_prefetch_b,
+                                                    block_gemm);
         }
 
         template <
@@ -1255,8 +1311,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
 
             // NOTE: this is used only for data cache prefetch in current implementation when
             // enabled. Maybe move it somewhere else
-            bool data_cache_prefetch_a = false;
-            bool data_cache_prefetch_b = false;
+            bool data_cache_prefetch_a = Policy::DataCachePrefetchA != DataCachePrefetchKind::None;
+            bool data_cache_prefetch_b = Policy::DataCachePrefetchB != DataCachePrefetchKind::None;
 
             if constexpr(UseClusterLaunch)
             {

@@ -17,7 +17,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                          hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
                          hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                          const std::vector<int64_t>& dims,
-                         const hipdnn_data_sdk::utilities::TensorLayout& layout)
+                         const hipdnn_data_sdk::utilities::TensorLayout& layout,
+                         bool runtimeEpsilon = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("RMSNormFwdTest");
@@ -50,12 +51,17 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(uid++)
-        .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_dim({1})
-        .set_stride({1})
-        .set_value(1e-5);
+    epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
+    if(runtimeEpsilon)
+    {
+        // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+        // from the variant pack at execute.
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_value(1e-5f);
+    }
 
     hipdnn_frontend::graph::RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("rmsnorm_fwd");
@@ -146,10 +152,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(uid++)
         .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1})
         .set_stride({1})
-        .set_value(1e-5);
+        .set_value(1e-5f);
 
     hipdnn_frontend::graph::RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("rmsnorm_fwd_bias");

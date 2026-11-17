@@ -114,8 +114,16 @@ set(MIOPEN_ENABLE_SQLITE On CACHE BOOL "")
 # Use SQLITE for compiled kernels, when turned off this will use raw files
 set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 
-# By default build shared libraries
-option(BUILD_SHARED_LIBS "Create shared libraries" ON)
+# By default build shared libraries. Use a directory-scoped (non-cache) default
+# rather than option()/a cache entry: a cache write to the global BUILD_SHARED_LIBS
+# leaks out of MIOpen's subtree and forces sibling subprojects in a parent
+# superbuild to build shared too (e.g. hipDNN's internal, un-exported
+# hipdnn_backend_private, which then breaks install(EXPORT)). An explicit
+# user/parent value (cache or -D) is still honored because we only set a default
+# when BUILD_SHARED_LIBS is not already defined.
+if(NOT DEFINED BUILD_SHARED_LIBS)
+    set(BUILD_SHARED_LIBS ON)
+endif()
 
 # PREPEND (rather than APPEND) so MIOpen's local cmake helpers (ClangTidy,
 # ClangCheck, etc.) take precedence over any same-named modules a parent
@@ -144,6 +152,21 @@ option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIO
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
+# Gate for the MIOpen public/private library split. When ON, libMIOpen.so is built
+# as a thin public wrapper forwarding to a private implementation library
+# (libMIOpen_private.so); when OFF (the default), a single libMIOpen.so is produced
+# whose public ABI is unchanged from the pre-wrapper baseline. All of the split
+# machinery is compiled only when this flag is ON.
+option(MIOPEN_ENABLE_HIPDNN_WRAPPER
+    "Build MIOpen as a public wrapper over a private implementation, with optional forwarding to hipDNN."
+    OFF)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    message(STATUS
+        "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
+        "wrapper over libMIOpen_private.so. Set MIOPEN_HIPDNN_FORWARDING=enabled "
+        "at run time to forward the convolution entry points to hipDNN.")
+endif()
+
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)
     enable_language(ASM)
@@ -155,7 +178,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.2)
+rocm_setup_version(VERSION 3.6.3)
 
 include(TargetFlags)
 
@@ -167,13 +190,12 @@ endif()
 
 ############################################################
 # OPTION - MIOpen Backend
-# - OpenCL
 # - HIP
 check_cxx_compiler_flag("--cuda-host-only -x hip" HAS_HIP)
 if(HAS_HIP)
     set(MIOPEN_DEFAULT_BACKEND "HIP")
 else()
-    set(MIOPEN_DEFAULT_BACKEND "OpenCL")
+    message(FATAL_ERROR "HIP compiler support is required but not detected.")
 endif()
 
 if(NOT WIN32)
@@ -224,38 +246,11 @@ endif()
 set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
-    OpenCL HIP HIPOC HIPNOGPU)
+    HIP HIPOC HIPNOGPU)
 
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
-
-# OpenCL 1.2
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
-    set(MIOPEN_BACKEND_OPENCL 1)
-    find_package( OpenCL REQUIRED )
-    find_program(MIOPEN_HIP_COMPILER clang++
-        PATH_SUFFIXES bin
-        PATHS
-            /opt/rocm/llvm
-            ${CMAKE_INSTALL_PREFIX}/llvm
-    )
-    if(MIOPEN_HIP_COMPILER)
-        message(STATUS "hip compiler: ${MIOPEN_HIP_COMPILER}")
-    else()
-        message(FATAL_ERROR "hip compiler not found")
-    endif()
-
-    # TODO (priority_low) Use to build HIP and ASM kernels.
-    if(MIOPEN_USE_COMGR)
-        message(FATAL_ERROR "comgr cannot be used with OpenCL backend")
-    endif()
-
-    # This is to pass all necessary build flags to HIP compiler
-    # for device code compilation. Used within "find_package(hip...".
-    # See https://github.com/ROCm-Developer-Tools/HIP/pull/2035#issuecomment-616861118.
-    set (HIP_CXX_COMPILER ${MIOPEN_HIP_COMPILER})
-endif()
 
 # HIP SDK on Windows does not detect platform correctly, defaulting to "amd"
 if(NOT HIP_PLATFORM AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -296,16 +291,16 @@ endif()
 # (src/ck_impl, itself arch-gated) and the CK-header-dependent gtest; the host configures and builds
 # cleanly whether or not a CK package is found, so no per-arch build gating of this flag is needed.
 option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for various operations" On)
-if(MIOPEN_BACKEND_OPENCL)
-    set(MIOPEN_USE_COMPOSABLEKERNEL OFF)
-endif()
 option(MIOPEN_CK_UNBUNDLE_PER_ARCH
     "Generate per-architecture CK static archives for MIOpenCKGroupedConv_<arch> shared libraries"
     OFF)
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
-set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT (NOT DEFINED MIOPEN_BACKEND_OPENCL) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
+option(MIOPEN_USE_HIPCONV "Enable MIOpen to use vendored hipconv convolution kernels" On)
+message(STATUS "Enable hipconv: ${MIOPEN_USE_HIPCONV}")
+
+set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU"))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
 
 set(MIOPEN_hip_VERSION ${MIOPEN_hip_VERSION_MAJOR}.${MIOPEN_hip_VERSION_MINOR}.${MIOPEN_hip_VERSION_PATCH})
@@ -364,6 +359,36 @@ endif()
 message(STATUS "Hip compiler flags: ${HIP_COMPILER_FLAGS}")
 
 add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPILER_FLAGS}>)
+
+# MIOpen's HIP device code is compiled in the same translation units as host code, so a host
+# sanitizer request (e.g. CI's debug '-fsanitize=undefined -fno-sanitize-recover=undefined')
+# also instruments AMDGPU device code. MIOpen does not use device UBSan: older toolchains ship no
+# device UBSan runtime (instrumented device objects fail to link with undefined
+# __ubsan_handle_*_abort symbols), and newer ones (LLVM #219973) link a host-side ubsan_offload
+# runtime into --hip-link shared libraries that the executables cannot satisfy. When UBSan is
+# requested, disable UBSan on the device side only -- via '-Xarch_device -fno-sanitize=undefined'
+# -- so device code is left uninstrumented while host code stays instrumented. Gated on
+# 'undefined' specifically, so ASan-only builds keep their working device ASan.
+#
+# Note: -fno-gpu-sanitize is deliberately NOT used. On this toolchain it drops the user -I include
+# directories from the AMDGPU device compilation pass, so device-side '#include <miopen/...>'
+# then fails with "file not found". -Xarch_device scopes the flag to the device sub-compile
+# without that side effect.
+#
+# Detection lives here (before add_subdirectory); the flag is applied narrowly with
+# target_compile_options and target_link_options on the MIOpen library and CK plugin targets
+# (src/CMakeLists.txt, src/ck_impl/CMakeLists.txt) so it only touches the device-code libraries
+# and not host tools (addkernels), tests, driver, or fin.
+if(HAS_HIP)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" MIOPEN_BUILD_TYPE_UPPER)
+    set(MIOPEN_EFFECTIVE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MIOPEN_BUILD_TYPE_UPPER}}")
+    if(MIOPEN_EFFECTIVE_CXX_FLAGS MATCHES "-fsanitize=[^ ]*undefined")
+        message(STATUS "UBSan requested: will disable device-side UBSan on MIOpen HIP targets via "
+                       "'-Xarch_device -fno-sanitize=undefined' so AMDGPU device code links without "
+                       "a device UBSan runtime (host instrumentation retained)")
+        set(MIOPEN_DISABLE_DEVICE_UBSAN ON)
+    endif()
+endif()
 
 # HIP
 if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
@@ -461,20 +486,6 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         set(MIOPEN_MODE_NOGPU 1)
     endif()
     set(MIOPEN_BACKEND_HIP 1)
-
-    find_program(HIP_OC_COMPILER NAMES amdclang clang
-        PATH_SUFFIXES bin
-        PATHS
-            /opt/rocm
-            ${CMAKE_INSTALL_PREFIX}
-        ENV HIP_PATH
-    )
-    if(HIP_OC_COMPILER)
-        message(STATUS "OpenCL compiler: ${HIP_OC_COMPILER}")
-        set(HIP_OC_COMPILER "${HIP_OC_COMPILER}")
-    else()
-        message(STATUS "OpenCL compiler not found")
-    endif()
 
         # Hcc's clang always defines __HCC__ even when not using hcc driver
         add_definitions(-U__HCC__)
@@ -574,8 +585,6 @@ find_program(MIOPEN_AMDGCN_ASSEMBLER
         ${CMAKE_INSTALL_PREFIX}
         ${CMAKE_INSTALL_PREFIX}/llvm
     PATH_SUFFIXES
-        /opencl/bin/x86_64
-        /opencl/bin
         /bin
 )
 message(STATUS "AMDGCN assembler: ${MIOPEN_AMDGCN_ASSEMBLER}")
@@ -681,18 +690,6 @@ set(MIOPEN_PACKAGE_REQS "${MIOPEN_PACKAGE_REQS}, rocrand")
 if(MIOPEN_BACKEND STREQUAL "HIP")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "${MIOPEN_PACKAGE_REQS}")
     set(CPACK_RPM_PACKAGE_REQUIRES "${MIOPEN_PACKAGE_REQS}")
-
-    # Make backends explicitly conflict
-    set(CPACK_DEBIAN_PACKAGE_CONFLICTS miopen-opencl)
-    set(CPACK_RPM_PACKAGE_CONFLICTS miopen-opencl)
-
-elseif(MIOPEN_BACKEND STREQUAL "OpenCL")
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "${MIOPEN_PACKAGE_REQS}, rocm-opencl-dev")
-    set(CPACK_RPM_PACKAGE_REQUIRES "${MIOPEN_PACKAGE_REQS}, rocm-opencl-devel")
-
-    # Make backends explicitly conflict
-    set(CPACK_DEBIAN_PACKAGE_CONFLICTS miopen-hip)
-    set(CPACK_RPM_PACKAGE_CONFLICTS miopen-hip)
 endif()
 
 set(KERNELS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/src/kernels)
@@ -785,7 +782,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030)
+set(ALL_GPU_DATABASES gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
@@ -815,7 +812,7 @@ if(NOT ROCM_LIBS_SUPERBUILD)
         DESCRIPTION "AMD DNN Library"
         MAINTAINER "MIOpen Maintainer <miopen-lib.support@amd.com>"
         LDCONFIG
-        # DEPENDS rocm-opencl hip-rocclr tinygemm
+        # DEPENDS hip-rocclr tinygemm
     )
 endif()
 
@@ -838,6 +835,8 @@ enable_clang_tidy(
         "\.hpp$"
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
+        # Clang 21 cannot pass AMDGCN builtins as arguments to the HIP header feature probe.
+        -D__builtin_amdgcn_is_invocable=__has_builtin
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
         -nogpulib
 )
@@ -852,6 +851,12 @@ enable_cppcheck(
     SUPPRESS
         ConfigurationNotChecked
         constStatement
+        # cppcheck cannot resolve a transitive header for the LGBM picker gtests
+        # in project mode, so it aborts parsing the whole TU with a spurious
+        # syntaxError at the first TEST_F. The files compile fine with the real
+        # toolchain; suppress the parse-abort for just these two.
+        syntaxError:*test/gtest/lgbm_picker.cpp
+        syntaxError:*test/gtest/lgbm_pcfg_picker.cpp
         # There is no ODR violation because of using separate executables,
         # but cppcheck doesn't understand that as it assumes everything
         # will be compiled together in one binary.
@@ -871,6 +876,7 @@ enable_cppcheck(
         # Ignore initializer lists in the tests
         useInitializationList:*test/*.cpp
         *:*src/sqlite/*.cpp
+        *:*src/hipconv/*
         *:*.cl
         *:*src/kernels/*.h
         # These are HIP kernel files compiled at runtime with -D defines; cppcheck
@@ -954,6 +960,7 @@ if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)
 endif()
 add_subdirectory(addkernels)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/MiopenCkCompileDefs.cmake)
 add_subdirectory(src)
 if(MIOPEN_BUILD_DRIVER)
     add_subdirectory(driver)

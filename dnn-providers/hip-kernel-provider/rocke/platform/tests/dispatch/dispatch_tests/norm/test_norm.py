@@ -9,7 +9,9 @@ import unittest
 from rocke.dispatch.families.norm import (
     NormRequest,
     dispatch_norm,
+    dispatch_norm_all,
     norm_candidates,
+    norm_sweep_space,
 )
 
 
@@ -76,7 +78,7 @@ class TestNormDispatch(unittest.TestCase):
     def test_kind_gate_filters_candidates(self):
         req = _rms(4096, 4096, "gfx950")
         for c in norm_candidates():
-            ok, _ = c.supports(req)
+            ok, _ = c.admits(req)
             if ok:
                 self.assertEqual(c.algorithm, "rmsnorm")
 
@@ -94,6 +96,15 @@ class TestNormDispatch(unittest.TestCase):
         )
         r = dispatch_norm(req)
         self.assertEqual(r.candidate.spec_id, "rmsnorm_b256_v4")
+
+    def test_sweep_space_enumerates_valid_block_vec_combos(self):
+        req = _rms(4096, 4096, "gfx950")
+        winner = dispatch_norm(req)
+        specs = norm_sweep_space(req)
+        results = dispatch_norm_all(req)
+        self.assertGreater(len(specs), 1)
+        self.assertEqual(len(results), len(specs))
+        self.assertEqual(results[0].candidate.name, winner.candidate.name)
 
 
 if __name__ == "__main__":

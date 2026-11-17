@@ -62,6 +62,7 @@ set(hipblas_test_source
   blas2/trsv_gtest.cpp
   blas3/dgmm_gtest.cpp
   blas3/gemm_gtest.cpp
+  blas3/gemm_grouped_batched_gtest.cpp
   blas3/hemm_gtest.cpp
   blas3/geam_gtest.cpp
   blas3/herk_gtest.cpp
@@ -81,6 +82,7 @@ set(hipblas_test_source
   blas_ex/scal_ex_gtest.cpp
   blas_ex/trsm_ex_gtest.cpp
   blas_ex/gemm_ex_gtest.cpp
+  blas_ex/gemm_grouped_batched_ex_gtest.cpp
   blas_ex/syrk_ex_gtest.cpp
   blas_ex/herk_ex_gtest.cpp
 )
@@ -164,7 +166,7 @@ if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE stdc++fs )
 endif()
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   target_link_libraries( hipblas-test PRIVATE hip::host )
 
   if( CUSTOM_TARGET )
@@ -172,12 +174,7 @@ if(HIP_PLATFORM STREQUAL amd)
   endif( )
 
 else( )
-  target_include_directories( hipblas-test
-    PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
-
-  target_link_libraries( hipblas-test PRIVATE ${CUDA_LIBRARIES} )
+  target_link_libraries( hipblas-test PRIVATE hip::host CUDA::cudart )
 endif( )
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
@@ -215,7 +212,8 @@ set_target_properties( hipblas-test PROPERTIES
     IMPORT_PREFIX ""
     IMPORT_SUFFIX ".lib"
     LINKER_LANGUAGE CXX
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging" )
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+    ENABLE_EXPORTS ON )
 
 set( HIPBLAS_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipblas_gtest.data")
 
@@ -234,13 +232,14 @@ set( HIPBLAS_L2_YAML_DATA blas2/gbmv_gtest.yaml blas2/gemv_gtest.yaml blas2/ger_
                           blas2/trmv_gtest.yaml blas2/trsv_gtest.yaml )
 
 set( HIPBLAS_L3_YAML_DATA blas3/dgmm_gtest.yaml blas3/geam_gtest.yaml blas3/gemm_gtest.yaml
-                          blas3/hemm_gtest.yaml blas3/herk_gtest.yaml blas3/her2k_gtest.yaml
+                          blas3/gemm_grouped_batched_gtest.yaml blas3/hemm_gtest.yaml blas3/herk_gtest.yaml blas3/her2k_gtest.yaml
                           blas3/herkx_gtest.yaml blas3/symm_gtest.yaml blas3/syrk_gtest.yaml
                           blas3/syr2k_gtest.yaml blas3/syrkx_gtest.yaml blas3/trmm_gtest.yaml
                           blas3/trsm_gtest.yaml blas3/trtri_gtest.yaml )
 
 set( HIPBLAS_EX_YAML_DATA blas_ex/axpy_ex_gtest.yaml blas_ex/dot_ex_gtest.yaml blas_ex/nrm2_ex_gtest.yaml
-                          blas_ex/rot_ex_gtest.yaml blas_ex/scal_ex_gtest.yaml blas_ex/gemm_ex_gtest.yaml 
+                          blas_ex/rot_ex_gtest.yaml blas_ex/scal_ex_gtest.yaml blas_ex/gemm_ex_gtest.yaml
+                          blas_ex/gemm_grouped_batched_ex_gtest.yaml
                           blas_ex/syrk_ex_gtest.yaml blas_ex/herk_ex_gtest.yaml blas_ex/trsm_ex_gtest.yaml )
 
 if( BUILD_WITH_SOLVER )

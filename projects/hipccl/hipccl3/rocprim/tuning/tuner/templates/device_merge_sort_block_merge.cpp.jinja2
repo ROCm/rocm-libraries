@@ -1,0 +1,11 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::detail::merge_sort_block_merge_config<{{ config.block_size_x }}, {{ config.ipt }}, 0, 128, {{ config.block_size_x }}, {{ config.ipt }}>
+{%- endblock %}
+{% block benchmark_type %}
+using benchmark_type = device_merge_sort_block_merge_benchmark<key_type, value_type, config>;
+{% endblock %}
+{% block type_definitions %}
+using key_type = {{ key_type }};
+using value_type = {{ value_type }};
+{% endblock %}

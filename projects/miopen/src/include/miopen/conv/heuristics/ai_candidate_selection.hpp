@@ -85,9 +85,10 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
                              const std::string& solver);
 
 /// Expands problem features into the vector consumed by the input_encoder submodel.
-/// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp) --
-/// they share the derived-feature math via common::EngineeredConvFeatures -- except the direction
-/// one-hot is omitted here when direction is a CandidateSelection constant.
+/// Produces the engineered features consumed by the input_encoder submodel for 2D and 3D models.
+/// Shares derived-feature math with ExtractTunaNetNDFeatures (ai_heuristics.cpp); the direction
+/// one-hot is omitted here when direction is a CandidateSelection constant. Raw numerics follow
+/// metadata input_params order (training-time constants such as dilation_* for 3D are excluded).
 /// All metadata-driven quantities (precision/layout one-hot encodings and widths, and num_cu for
 /// the derived block) are read from `metadata`.
 MIOPEN_INTERNALS_EXPORT std::vector<float>
@@ -175,7 +176,8 @@ public:
     MIOPEN_INTERNALS_EXPORT std::vector<float>
     EncodeInputFeatures(const std::map<std::string, float>& features) const;
     MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
-    EncodeKernelConfigs(const std::vector<std::vector<float>>& encoded_candidates) const;
+    EncodeKernelConfigs(const std::vector<std::vector<float>>& encoded_candidates,
+                        const std::vector<std::string>* candidate_kernel_names = nullptr) const;
     MIOPEN_INTERNALS_EXPORT std::vector<std::pair<int, float>>
     SelectBestCandidateIndices(const std::vector<float>& encoded_features,
                                const std::vector<std::vector<float>>& encoded_configs) const;

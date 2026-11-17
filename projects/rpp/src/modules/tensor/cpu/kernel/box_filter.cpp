@@ -263,7 +263,8 @@ template <typename T>
 static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr srcDescPtr,
                                                   T* dstPtrImage, RpptDescPtr dstDescPtr,
                                                   Rpp32u kernelSize, RpptROI roi,
-                                                  RppLayoutParams layoutParams) {
+                                                  RppLayoutParams layoutParams,
+                                                  Rpp32u intraThreads) {
     // set the required masks array needed for shuffle operations
 #if __AVX2__
     __m128i pxMaskPln[7] = {xmm_pxMaskRotate0To1, xmm_pxMaskRotate0To3, xmm_pxMaskRotate0To5,
@@ -292,26 +293,28 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
     dstPtrChannel = dstPtrImage;
     if (kernelSize == 3) {
-        T *srcPtrRow[3], *dstPtrRow;
-        for (int i = 0; i < 3; i++) srcPtrRow[i] = srcPtrChannel + i * srcDescPtr->strides.hStride;
-        dstPtrRow = dstPtrChannel;
-
         // box filter without fused output-layout toggle (NCHW -> NCHW)
         if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude 2 * padLength number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
-               computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+               computed using raw c code. Also exclude 8 bytes to prevent _mm256_storeu_si256
+               (which always writes 32 bytes) from crossing row boundaries in multithreaded mode */
+            Rpp32u reservedLength = (2 * padLength) + 8;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                srcPtrRow[1] = srcPtrRow[0] + srcDescPtr->strides.hStride;
-                srcPtrRow[2] = srcPtrRow[1] + srcDescPtr->strides.hStride;
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
-                    T* srcPtrTemp[3] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]};
-                    T* dstPtrTemp = dstPtrRow;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                    T* srcPtrTemp[3];
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                    srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     // get the number of rows needs to be loaded for the corresponding row
                     Rpp32s rowKernelLoopLimit = kernelSize;
@@ -373,11 +376,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -387,16 +385,26 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[3] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]};
-                T* dstPtrTemp = dstPtrRow;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[3];
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[3] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -454,32 +462,40 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[3] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]};
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[3];
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannel + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrTempChannels[0] + dstDescPtr->strides.cStride;
+                dstPtrTempChannels[2] = dstPtrTempChannels[1] + dstDescPtr->strides.cStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[3] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -540,30 +556,34 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, dstDescPtr->c, dstDescPtr->strides.hStride);
             }
         } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
-               computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+               computed using raw c code. Also exclude 2 columns (6 bytes) to prevent the last
+               _mm_storeu_si128 (which writes 16 bytes but only 12 are valid) from crossing
+               row boundaries in multithreaded mode */
+            Rpp32u reservedLength = (2 * padLength) + 2;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[3][3] = {{srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]},
-                                       {srcPtrRow[0] + srcDescPtr->strides.cStride,
-                                        srcPtrRow[1] + srcDescPtr->strides.cStride,
-                                        srcPtrRow[2] + srcDescPtr->strides.cStride},
-                                       {srcPtrRow[0] + 2 * srcDescPtr->strides.cStride,
-                                        srcPtrRow[1] + 2 * srcDescPtr->strides.cStride,
-                                        srcPtrRow[2] + 2 * srcDescPtr->strides.cStride}};
 
-                T* dstPtrTemp = dstPtrRow;
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[3][3];
+                for (int c = 0; c < 3; c++) {
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    srcPtrTemp[c][1] = srcPtrChan + srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][2] = srcPtrChan + 2 * srcDescPtr->strides.hStride;
+                }
+
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
                 // get the number of rows needs to be loaded for the corresponding row
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -646,11 +666,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
     } else if (kernelSize == 5) {
@@ -662,21 +677,26 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
         if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
-               computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+               computed using raw c code. Also exclude 8 bytes to prevent _mm256_storeu_si256
+               (which always writes 32 bytes) from crossing row boundaries in multithreaded mode */
+            Rpp32u reservedLength = (2 * padLength) + 8;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                srcPtrRow[1] = srcPtrRow[0] + srcDescPtr->strides.hStride;
-                srcPtrRow[2] = srcPtrRow[1] + srcDescPtr->strides.hStride;
-                srcPtrRow[3] = srcPtrRow[2] + srcDescPtr->strides.hStride;
-                srcPtrRow[4] = srcPtrRow[3] + srcDescPtr->strides.hStride;
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
-                    T* srcPtrTemp[5] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2], srcPtrRow[3],
-                                        srcPtrRow[4]};
-                    T* dstPtrTemp = dstPtrRow;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                    T* srcPtrTemp[5];
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                    srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+                    srcPtrTemp[3] = srcPtrTemp[2] + srcDescPtr->strides.hStride;
+                    srcPtrTemp[4] = srcPtrTemp[3] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     // get the number of rows needs to be loaded for the corresponding row
                     Rpp32s rowKernelLoopLimit = kernelSize;
@@ -739,11 +759,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -752,18 +767,31 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
-               be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 18) * 18;
+               be computed using raw c code. Also subtract 14 to account for SIMD write width (32
+               bytes) exceeding the processing width (18 bytes) to prevent buffer overrun. */
+            Rpp32u reservedLength = (2 * padLength) * 3 + 14;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 18) * 18;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[5] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2], srcPtrRow[3],
-                                    srcPtrRow[4]};
-                T* dstPtrTemp = dstPtrRow;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[5];
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+                srcPtrTemp[3] = srcPtrTemp[2] + srcDescPtr->strides.hStride;
+                srcPtrTemp[4] = srcPtrTemp[3] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[5] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -821,33 +849,43 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 18) * 18;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 18) * 18;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[5] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2], srcPtrRow[3],
-                                    srcPtrRow[4]};
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[5];
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+                srcPtrTemp[3] = srcPtrTemp[2] + srcDescPtr->strides.hStride;
+                srcPtrTemp[4] = srcPtrTemp[3] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannel + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrTempChannels[0] + dstDescPtr->strides.cStride;
+                dstPtrTempChannels[2] = dstPtrTempChannels[1] + dstDescPtr->strides.cStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[5] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -909,27 +947,34 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, dstDescPtr->c, dstDescPtr->strides.hStride);
             }
         } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength * 3 number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[3][5];
                 for (int c = 0; c < 3; c++) {
-                    Rpp32u channelStride = c * srcDescPtr->strides.cStride;
-                    for (int k = 0; k < 5; k++) srcPtrTemp[c][k] = srcPtrRow[k] + channelStride;
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    srcPtrTemp[c][1] = srcPtrChan + srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][2] = srcPtrChan + 2 * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][3] = srcPtrChan + 3 * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][4] = srcPtrChan + 4 * srcDescPtr->strides.hStride;
                 }
-                T* dstPtrTemp = dstPtrRow;
+
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
                 // get the number of rows needs to be loaded for the corresponding row
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -1011,11 +1056,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
     } else if (kernelSize == 7) {
@@ -1027,19 +1067,24 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
         if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
-               computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+               computed using raw c code. Also exclude 8 bytes to prevent _mm256_storeu_si256
+               (which always writes 32 bytes) from crossing row boundaries in multithreaded mode */
+            Rpp32u reservedLength = (2 * padLength) + 8;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                for (int k = 1; k < 7; k++)
-                    srcPtrRow[k] = srcPtrRow[k - 1] + srcDescPtr->strides.hStride;
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                     T* srcPtrTemp[7];
-                    for (int k = 0; k < 7; k++) srcPtrTemp[k] = srcPtrRow[k];
-                    T* dstPtrTemp = dstPtrRow;
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    for (int k = 1; k < 7; k++)
+                        srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     // get the number of rows needs to be loaded for the corresponding row
                     Rpp32s rowKernelLoopLimit = kernelSize;
@@ -1102,11 +1147,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -1115,17 +1155,29 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
-               computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+               computed using raw c code. Also exclude 2 columns (6 bytes) to prevent the last
+               _mm_storeu_si128 (which writes 16 bytes but only 12 are valid) from crossing
+               row boundaries in multithreaded mode */
+            Rpp32u reservedLength = (2 * padLength) + 2;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[3][7];
                 for (int c = 0; c < 3; c++) {
-                    Rpp32u channelStride = c * srcDescPtr->strides.cStride;
-                    for (int k = 0; k < 7; k++) srcPtrTemp[c][k] = srcPtrRow[k] + channelStride;
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    for (int k = 1; k < 7; k++)
+                        srcPtrTemp[c][k] = srcPtrTemp[c][k - 1] + srcDescPtr->strides.hStride;
                 }
-                T* dstPtrTemp = dstPtrRow;
+
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
                 // get the number of rows needs to be loaded for the corresponding row
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -1206,28 +1258,33 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - 2 * padLength * 3) / 12) * 12;
+            Rpp32u reservedLength = 2 * padLength * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[7];
-                for (int k = 0; k < 7; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTemp = dstPtrRow;
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 7; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[7] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4], srcPtrTemp[5], srcPtrTemp[6]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -1276,33 +1333,41 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - 2 * padLength * 3) / 12) * 12;
+            Rpp32u reservedLength = 2 * padLength * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[7] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2], srcPtrRow[3],
-                                    srcPtrRow[4], srcPtrRow[5], srcPtrRow[6]};
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[7];
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 7; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannel + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrTempChannels[0] + dstDescPtr->strides.cStride;
+                dstPtrTempChannels[2] = dstPtrTempChannels[1] + dstDescPtr->strides.cStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[7] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4], srcPtrTemp[5], srcPtrTemp[6]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -1357,11 +1422,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, dstDescPtr->c, dstDescPtr->strides.hStride);
             }
         }
     } else if (kernelSize == 9) {
@@ -1372,18 +1432,22 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                for (int k = 1; k < 9; k++)
-                    srcPtrRow[k] = srcPtrRow[k - 1] + srcDescPtr->strides.hStride;
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                     T* srcPtrTemp[9];
-                    for (int k = 0; k < 9; k++) srcPtrTemp[k] = srcPtrRow[k];
-                    T* dstPtrTemp = dstPtrRow;
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    for (int k = 1; k < 9; k++)
+                        srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     Rpp32s rowKernelLoopLimit = kernelSize;
                     get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -1436,11 +1500,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -1450,17 +1509,28 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 64) * 64;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 64) * 64;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[9];
-                for (int k = 0; k < 9; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTemp = dstPtrRow;
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 9; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[9] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2],
+                                   srcPtrTemp[3], srcPtrTemp[4], srcPtrTemp[5],
+                                   srcPtrTemp[6], srcPtrTemp[7], srcPtrTemp[8]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -1535,27 +1605,32 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[3][9];
                 for (int c = 0; c < 3; c++) {
-                    Rpp32u channelStride = c * srcDescPtr->strides.cStride;
-                    for (int k = 0; k < 9; k++) srcPtrTemp[c][k] = srcPtrRow[k] + channelStride;
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    for (int k = 1; k < 9; k++)
+                        srcPtrTemp[c][k] = srcPtrTemp[c][k - 1] + srcDescPtr->strides.hStride;
                 }
-                T* dstPtrTemp = dstPtrRow;
+
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -1624,32 +1699,41 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 64) * 64;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 64) * 64;
             T* dstPtrChannels[3];
             for (int c = 0; c < 3; c++)
                 dstPtrChannels[c] = dstPtrChannel + c * dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[9];
-                for (int k = 0; k < 9; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 9; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannel + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrTempChannels[0] + dstDescPtr->strides.cStride;
+                dstPtrTempChannels[2] = dstPtrTempChannels[1] + dstDescPtr->strides.cStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[9] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2],
+                                   srcPtrTemp[3], srcPtrTemp[4], srcPtrTemp[5],
+                                   srcPtrTemp[6], srcPtrTemp[7], srcPtrTemp[8]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -1726,11 +1810,6 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, 3, dstDescPtr->strides.hStride);
             }
         }
     }
@@ -1752,18 +1831,19 @@ RppStatus box_filter_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstP
                                               roiTensorPtrSrc, roiType, layoutParams, handle);
 
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         T *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         box_filter_char_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, kernelSize, roi,
-                                  layoutParams);
+                                  layoutParams, intraThreads);
     }
     return RPP_SUCCESS;
 }
@@ -1772,7 +1852,8 @@ template <typename T>
 static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr srcDescPtr,
                                                    T* dstPtrImage, RpptDescPtr dstDescPtr,
                                                    Rpp32u kernelSize, RpptROI roi,
-                                                   RppLayoutParams layoutParams) {
+                                                   RppLayoutParams layoutParams,
+                                                   Rpp32u intraThreads) {
     // set the required masks array needed for permute operations
 #if __AVX2__
     __m256i pxMaskPln[7] = {avx_pxMaskRotate0To1, avx_pxMaskRotate0To2, avx_pxMaskRotate0To3,
@@ -1809,17 +1890,24 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+            /* Note: AVX loop processes 14 pixels per iteration but stores 16 pixels.
+               To prevent buffer overrun, ensure alignedLength + 16 <= bufferLength - padLength */
+            Rpp32u reservedLength = padLength + 16;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 14) * 14;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                srcPtrRow[1] = srcPtrRow[0] + srcDescPtr->strides.hStride;
-                srcPtrRow[2] = srcPtrRow[1] + srcDescPtr->strides.hStride;
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
-                    T* srcPtrTemp[3] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]};
-                    T* dstPtrTemp = dstPtrRow;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                    T* srcPtrTemp[3];
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                    srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     // get the number of rows needs to be loaded for the corresponding row
                     Rpp32s rowKernelLoopLimit = kernelSize;
@@ -1865,11 +1953,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -1879,16 +1962,26 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[3] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]};
-                T* dstPtrTemp = dstPtrRow;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[3];
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[3] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -1931,31 +2024,39 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[3] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]};
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[3];
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                srcPtrTemp[1] = srcPtrTemp[0] + srcDescPtr->strides.hStride;
+                srcPtrTemp[2] = srcPtrTemp[1] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannels[0] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrChannels[1] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[2] = dstPtrChannels[2] + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[3] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -2002,30 +2103,35 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, dstDescPtr->c, dstDescPtr->strides.hStride);
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+            /* Note: AVX loop stores 16 pixels (48 PKD3 elements) but advances by 14 pixels
+               (42 PKD3 elements). Subtract overshoot of 6 PKD3 elements to prevent buffer overrun.
+             */
+            Rpp32u reservedLength = (2 * padLength) + 6;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 14) * 14;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
-                T* srcPtrTemp[3][3] = {{srcPtrRow[0], srcPtrRow[1], srcPtrRow[2]},
-                                       {srcPtrRow[0] + srcDescPtr->strides.cStride,
-                                        srcPtrRow[1] + srcDescPtr->strides.cStride,
-                                        srcPtrRow[2] + srcDescPtr->strides.cStride},
-                                       {srcPtrRow[0] + 2 * srcDescPtr->strides.cStride,
-                                        srcPtrRow[1] + 2 * srcDescPtr->strides.cStride,
-                                        srcPtrRow[2] + 2 * srcDescPtr->strides.cStride}};
 
-                T* dstPtrTemp = dstPtrRow;
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                T* srcPtrTemp[3][3];
+                for (int c = 0; c < 3; c++) {
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    srcPtrTemp[c][1] = srcPtrChan + srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][2] = srcPtrChan + 2 * srcDescPtr->strides.hStride;
+                }
+
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
                 // get the number of rows needs to be loaded for the corresponding row
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -2090,11 +2196,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
     } else if (kernelSize == 5) {
@@ -2107,19 +2208,22 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = (2 * padLength) + 4;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                for (int k = 1; k < 5; k++)
-                    srcPtrRow[k] = srcPtrRow[k - 1] + srcDescPtr->strides.hStride;
-
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
-                    T* srcPtrTemp[5] = {srcPtrRow[0], srcPtrRow[1], srcPtrRow[2], srcPtrRow[3],
-                                        srcPtrRow[4]};
-                    T* dstPtrTemp = dstPtrRow;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
+                    T* srcPtrTemp[5];
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    for (int k = 1; k < 5; k++)
+                        srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     // get the number of rows needs to be loaded for the corresponding row
                     Rpp32s rowKernelLoopLimit = kernelSize;
@@ -2165,11 +2269,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -2179,17 +2278,27 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength * 3)) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[5];
-                for (int k = 0; k < 5; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTemp = dstPtrRow;
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 5; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[5] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -2235,27 +2344,31 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[3][5];
                 for (int c = 0; c < 3; c++) {
-                    Rpp32u channelStride = c * srcDescPtr->strides.cStride;
-                    for (int k = 0; k < 5; k++) srcPtrTemp[c][k] = srcPtrRow[k] + channelStride;
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    for (int k = 1; k < 5; k++)
+                        srcPtrTemp[c][k] = srcPtrChan + k * srcDescPtr->strides.hStride;
                 }
-                T* dstPtrTemp = dstPtrRow;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 // get the number of rows needs to be loaded for the corresponding row
                 Rpp32s rowKernelLoopLimit = kernelSize;
@@ -2312,32 +2425,40 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[5];
-                for (int k = 0; k < 5; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 5; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannels[0] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrChannels[1] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[2] = dstPtrChannels[2] + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[5] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -2386,11 +2507,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, 3, dstDescPtr->strides.hStride);
             }
         }
     } else if (kernelSize == 7) {
@@ -2403,19 +2519,22 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                for (int k = 1; k < 7; k++)
-                    srcPtrRow[k] = srcPtrRow[k - 1] + srcDescPtr->strides.hStride;
-
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                     T* srcPtrTemp[7];
-                    for (int k = 0; k < 7; k++) srcPtrTemp[k] = srcPtrRow[k];
-                    T* dstPtrTemp = dstPtrRow;
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    for (int k = 1; k < 7; k++)
+                        srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     // get the number of rows needs to be loaded for the corresponding row
                     Rpp32s rowKernelLoopLimit = kernelSize;
@@ -2463,11 +2582,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -2477,17 +2591,27 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[7];
-                for (int k = 0; k < 7; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTemp = dstPtrRow;
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 7; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[7] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4], srcPtrTemp[5], srcPtrTemp[6]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -2548,27 +2672,31 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[3][7];
                 for (int c = 0; c < 3; c++) {
-                    Rpp32u channelStride = c * srcDescPtr->strides.cStride;
-                    for (int k = 0; k < 7; k++) srcPtrTemp[c][k] = srcPtrRow[k] + channelStride;
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    for (int k = 1; k < 7; k++)
+                        srcPtrTemp[c][k] = srcPtrChan + k * srcDescPtr->strides.hStride;
                 }
-                T* dstPtrTemp = dstPtrRow;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 // get the number of rows needs to be loaded for the corresponding row
                 Rpp32s rowKernelLoopLimit = kernelSize;
@@ -2625,32 +2753,40 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[7];
-                for (int k = 0; k < 7; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 7; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannels[0] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrChannels[1] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[2] = dstPtrChannels[2] + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[7] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2], srcPtrTemp[3],
+                                   srcPtrTemp[4], srcPtrTemp[5], srcPtrTemp[6]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -2706,11 +2842,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, 3, dstDescPtr->strides.hStride);
             }
         }
     } else if (kernelSize == 9) {
@@ -2723,18 +2854,22 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
-                srcPtrRow[0] = srcPtrChannel;
-                for (int k = 1; k < 9; k++)
-                    srcPtrRow[k] = srcPtrRow[k - 1] + srcDescPtr->strides.hStride;
-                dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
-                    bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                    // Calculate row pointers based on current row index i
+                    Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                     T* srcPtrTemp[9];
-                    for (int k = 0; k < 9; k++) srcPtrTemp[k] = srcPtrRow[k];
-                    T* dstPtrTemp = dstPtrRow;
+                    srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                    for (int k = 1; k < 9; k++)
+                        srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                    T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                     // get the number of rows needs to be loaded for the corresponding row
                     Rpp32s rowKernelLoopLimit = kernelSize;
@@ -2785,11 +2920,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                         dstPtrTemp++;
                     }
-                    // for the first padLength rows, we need not increment the src row pointers to
-                    // next rows
-                    increment_row_ptrs(srcPtrRow, kernelSize,
-                                       (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                    dstPtrRow += dstDescPtr->strides.hStride;
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
                 dstPtrChannel += dstDescPtr->strides.cStride;
@@ -2799,17 +2929,28 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[9];
-                for (int k = 0; k < 9; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTemp = dstPtrRow;
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 9; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[9] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2],
+                                   srcPtrTemp[3], srcPtrTemp[4], srcPtrTemp[5],
+                                   srcPtrTemp[6], srcPtrTemp[7], srcPtrTemp[8]};
                 process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                     padLength, unpaddedWidth, rowKernelLoopLimit,
                                                     kernelSizeInverseSquare, padVertical);
@@ -2868,11 +3009,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
         // box filter with fused output-layout toggle (NCHW -> NHWC)
@@ -2881,16 +3017,25 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[3][9];
                 for (int c = 0; c < 3; c++) {
-                    Rpp32u channelStride = c * srcDescPtr->strides.cStride;
-                    for (int k = 0; k < 9; k++) srcPtrTemp[c][k] = srcPtrRow[k] + channelStride;
+                    T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                    windowRow * srcDescPtr->strides.hStride;
+                    srcPtrTemp[c][0] = srcPtrChan;
+                    for (int k = 1; k < 9; k++)
+                        srcPtrTemp[c][k] = srcPtrChan + k * srcDescPtr->strides.hStride;
                 }
-                T* dstPtrTemp = dstPtrRow;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 // get the number of rows needs to be loaded for the corresponding row
                 Rpp32s rowKernelLoopLimit = kernelSize;
@@ -2945,32 +3090,41 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                         dstPtrTemp++;
                     }
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         } else if ((srcDescPtr->layout == RpptLayout::NHWC) &&
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 40) * 40;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 40) * 40;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[9];
-                for (int k = 0; k < 9; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1],
-                                            dstPtrChannels[2]};
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < 9; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+
+                T* dstPtrTempChannels[3];
+                dstPtrTempChannels[0] = dstPtrChannels[0] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[1] = dstPtrChannels[1] + i * dstDescPtr->strides.hStride;
+                dstPtrTempChannels[2] = dstPtrChannels[2] + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 Rpp32s padVertical = i < padLength ? 0 : 1;
+                T* srcPtrRow[9] = {srcPtrTemp[0], srcPtrTemp[1], srcPtrTemp[2],
+                                   srcPtrTemp[3], srcPtrTemp[4], srcPtrTemp[5],
+                                   srcPtrTemp[6], srcPtrTemp[7], srcPtrTemp[8]};
                 process_left_border_columns_pkd_pln(
                     srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                     rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -3030,11 +3184,6 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTempChannels[channel]++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                increment_row_ptrs(dstPtrChannels, 3, dstDescPtr->strides.hStride);
             }
         }
     }
@@ -3057,18 +3206,19 @@ RppStatus box_filter_float_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                               roiTensorPtrSrc, roiType, layoutParams, handle);
 
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         T *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         box_filter_float_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, kernelSize,
-                                   roi, layoutParams);
+                                   roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -3078,7 +3228,8 @@ template <typename T>
 static inline RppStatus box_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr srcDescPtr,
                                                      T* dstPtrImage, RpptDescPtr dstDescPtr,
                                                      Rpp32u kernelSize, RpptROI roi,
-                                                     RppLayoutParams layoutParams) {
+                                                     RppLayoutParams layoutParams,
+                                                     Rpp32u intraThreads) {
     Rpp32u padLength = kernelSize / 2;
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
     Rpp32f kernelSizeInverseSquare = 1.0 / (kernelSize * kernelSize);
@@ -3096,16 +3247,17 @@ static inline RppStatus box_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr
     dstPtrRow = dstPtrChannel;
     if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
         for (int c = 0; c < srcDescPtr->c; c++) {
-            srcPtrRow[0] = srcPtrChannel;
-            for (int k = 1; k < kernelSize; k++)
-                srcPtrRow[k] = srcPtrRow[k - 1] + srcDescPtr->strides.hStride;
-            dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
-                bool padLengthRows = (i < padLength) ? 1 : 0;
+
+                // Calculate row pointers based on current row index i
+                Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
                 T* srcPtrTemp[kernelSize];
-                for (int k = 0; k < kernelSize; k++) srcPtrTemp[k] = srcPtrRow[k];
-                T* dstPtrTemp = dstPtrRow;
+                srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+                for (int k = 1; k < kernelSize; k++)
+                    srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+                T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
                 Rpp32s rowKernelLoopLimit = kernelSize;
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -3124,27 +3276,29 @@ static inline RppStatus box_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
-                // for the first padLength rows, we need not increment the src row pointers to next
-                // rows
-                increment_row_ptrs(srcPtrRow, kernelSize,
-                                   (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
             srcPtrChannel += srcDescPtr->strides.cStride;
             dstPtrChannel += dstDescPtr->strides.cStride;
         }
     } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
                (dstDescPtr->layout == RpptLayout::NHWC)) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             int vectorLoopCount = 0;
-            bool padLengthRows = (i < padLength) ? 1 : 0;
+
+            // Calculate row pointers based on current row index i
+            Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
             T* srcPtrTemp[kernelSize];
-            for (int k = 0; k < kernelSize; k++) srcPtrTemp[k] = srcPtrRow[k];
-            T* dstPtrTemp = dstPtrRow;
+            srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+            for (int k = 1; k < kernelSize; k++)
+                srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+            T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
             Rpp32s rowKernelLoopLimit = kernelSize;
             get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
             Rpp32s padVertical = i < padLength ? 0 : 1;
+            T* srcPtrRow[kernelSize];
+            for (int k = 0; k < kernelSize; k++) srcPtrRow[k] = srcPtrTemp[k];
             process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
                                                 padLength, unpaddedWidth, rowKernelLoopLimit,
                                                 kernelSizeInverseSquare, padVertical);
@@ -3159,23 +3313,24 @@ static inline RppStatus box_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr
                 increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                 dstPtrTemp++;
             }
-            // for the first padLength rows, we need not increment the src row pointers to next rows
-            increment_row_ptrs(srcPtrRow, kernelSize,
-                               (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NHWC)) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             int vectorLoopCount = 0;
-            bool padLengthRows = (i < padLength) ? 1 : 0;
+
+            // Calculate row pointers based on current row index i
+            Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
             T* srcPtrTemp[3][kernelSize];
             for (int c = 0; c < 3; c++) {
-                Rpp32u channelStride = c * srcDescPtr->strides.cStride;
-                for (int k = 0; k < kernelSize; k++)
-                    srcPtrTemp[c][k] = srcPtrRow[k] + channelStride;
+                T* srcPtrChan = srcPtrChannel + c * srcDescPtr->strides.cStride +
+                                windowRow * srcDescPtr->strides.hStride;
+                srcPtrTemp[c][0] = srcPtrChan;
+                for (int k = 1; k < kernelSize; k++)
+                    srcPtrTemp[c][k] = srcPtrChan + k * srcDescPtr->strides.hStride;
             }
-            T* dstPtrTemp = dstPtrRow;
+            T* dstPtrTemp = dstPtrChannel + i * dstDescPtr->strides.hStride;
 
             Rpp32s rowKernelLoopLimit = kernelSize;
             get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
@@ -3202,26 +3357,33 @@ static inline RppStatus box_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr
                     dstPtrTemp++;
                 }
             }
-            // for the first padLength rows, we need not increment the src row pointers to next rows
-            increment_row_ptrs(srcPtrRow, kernelSize,
-                               (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     } else if ((srcDescPtr->layout == RpptLayout::NHWC) &&
                (dstDescPtr->layout == RpptLayout::NCHW)) {
         T* dstPtrChannels[3];
         for (int c = 0; c < 3; c++)
             dstPtrChannels[c] = dstPtrChannel + c * dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             int vectorLoopCount = 0;
-            bool padLengthRows = (i < padLength) ? 1 : 0;
+
+            // Calculate row pointers based on current row index i
+            Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
             T* srcPtrTemp[kernelSize];
-            for (int k = 0; k < kernelSize; k++) srcPtrTemp[k] = srcPtrRow[k];
-            T* dstPtrTempChannels[3] = {dstPtrChannels[0], dstPtrChannels[1], dstPtrChannels[2]};
+            srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
+            for (int k = 1; k < kernelSize; k++)
+                srcPtrTemp[k] = srcPtrTemp[k - 1] + srcDescPtr->strides.hStride;
+
+            T* dstPtrTempChannels[3];
+            dstPtrTempChannels[0] = dstPtrChannels[0] + i * dstDescPtr->strides.hStride;
+            dstPtrTempChannels[1] = dstPtrChannels[1] + i * dstDescPtr->strides.hStride;
+            dstPtrTempChannels[2] = dstPtrChannels[2] + i * dstDescPtr->strides.hStride;
 
             Rpp32s rowKernelLoopLimit = kernelSize;
             get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
             Rpp32s padVertical = i < padLength ? 0 : 1;
+            T* srcPtrRow[kernelSize];
+            for (int k = 0; k < kernelSize; k++) srcPtrRow[k] = srcPtrTemp[k];
             process_left_border_columns_pkd_pln(
                 srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
                 rowKernelLoopLimit, kernelSizeInverseSquare, padVertical);
@@ -3237,10 +3399,6 @@ static inline RppStatus box_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr
                 increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                 dstPtrTempChannels[channel]++;
             }
-            // for the first padLength rows, we need not increment the src row pointers to next rows
-            increment_row_ptrs(srcPtrRow, kernelSize,
-                               (!padLengthRows) ? srcDescPtr->strides.hStride : 0);
-            increment_row_ptrs(dstPtrChannels, 3, dstDescPtr->strides.hStride);
         }
     }
 
@@ -3254,18 +3412,19 @@ RppStatus box_filter_generic_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                          RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         T *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         box_filter_generic_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, kernelSize,
-                                     roi, layoutParams);
+                                     roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -3289,8 +3448,11 @@ RppStatus box_filter_char_host_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+
+    Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
     return box_filter_char_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, kernelSize, roi,
-                                     layoutParams);
+                                     layoutParams, intraThreads);
 }
 
 // F32 and F16 bitdepth
@@ -3310,8 +3472,11 @@ RppStatus box_filter_float_host_single_image(T* srcPtr, RpptDescPtr srcDescPtr, 
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+
+    Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
     return box_filter_float_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, kernelSize, roi,
-                                      layoutParams);
+                                      layoutParams, intraThreads);
 }
 
 template <typename T>
@@ -3322,8 +3487,11 @@ RppStatus box_filter_generic_host_single_image(T* srcPtr, RpptDescPtr srcDescPtr
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+
+    Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
     return box_filter_generic_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, kernelSize, roi,
-                                        layoutParams);
+                                        layoutParams, intraThreads);
 }
 
 template RppStatus box_filter_char_host_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,

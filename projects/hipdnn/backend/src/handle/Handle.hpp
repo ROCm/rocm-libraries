@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <optional>
 #include <spdlog/fmt/fmt.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct hipdnnHandle // NOLINT
@@ -19,12 +21,17 @@ public:
     virtual ~hipdnnHandle() = default;
     virtual void setStream(hipStream_t stream);
     virtual hipStream_t getStream() const;
+    // Device the handle's stream runs on: a concrete stream's owning device, or the calling
+    // thread's current device for the null, hipStreamLegacy and hipStreamPerThread tokens.
+    virtual hipError_t getDevice(int* deviceId) const;
     virtual std::shared_ptr<hipdnn_backend::plugin::EnginePluginResourceManager>
         getPluginResourceManager() const;
     virtual std::shared_ptr<hipdnn_backend::plugin::HeuristicPluginResourceManager>
         getHeuristicPluginResourceManager() const;
     virtual size_t getEngineCount() const;
     virtual std::vector<hipdnn_backend::plugin::EngineInfo> getEngineInfos() const;
+    virtual std::optional<int64_t> findEngineIdByName(std::string_view engineName) const;
+    virtual std::optional<std::string> findEngineNameById(int64_t engineId) const;
     virtual std::string toString() const;
 
 private:

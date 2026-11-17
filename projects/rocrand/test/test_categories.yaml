@@ -87,9 +87,9 @@ test_categories:
       - "*xorwow_engine_type_test.*"
       - "*xorwow_generator/*"
     exclude:
-      # Trailing negative filter from TheRock's QUICK_TESTS list:
-      #   "-*basic_tests/rocrand_basic_tests.rocrand_create_destroy_generator_test/10*"
-      - "*basic_tests/rocrand_basic_tests.rocrand_create_destroy_generator_test/10*"
+      # The parameter instance is named after its RNG type (see the name generator in
+      # test_rocrand_basic.cpp), so this stays valid regardless of tests order.
+      - "*basic_tests/rocrand_basic_tests.rocrand_create_destroy_generator_test/Sobol32*"
     labels:
       - "quick"
 

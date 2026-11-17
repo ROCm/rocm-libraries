@@ -52,6 +52,7 @@ Tests:
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
              HIPSPARSE_SPMM_CSR_ALG2]
+  call_preprocess: [true, false]
 
 - name: spmm_csc
   category: pre_checkin
@@ -76,7 +77,8 @@ Tests:
   filename: [nos1,
              nos4, 
              nos5]
-
+  call_preprocess: [true]
+  
 - name: spmm_csc
   category: nightly
   function: spmm_csc
@@ -98,3 +100,4 @@ Tests:
              HIPSPARSE_SPMM_CSR_ALG1,
              HIPSPARSE_SPMM_CSR_ALG2]
   filename: [Chebyshev4]
+  call_preprocess: [true]

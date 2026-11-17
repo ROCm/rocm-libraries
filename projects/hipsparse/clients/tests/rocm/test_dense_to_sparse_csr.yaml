@@ -26,6 +26,19 @@ include: hipsparse_common.yaml
 
 
 Tests:
+# Quick
+- name: dense_to_sparse_csr
+  category: quick
+  function: dense_to_sparse_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [23, 45, 78, 100]
+  N: [10, 55, 70, 99]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
+
+# Pre-checkin
 - name: dense_to_sparse_csr_bad_arg
   category: pre_checkin
   function: dense_to_sparse_csr_bad_arg
@@ -33,12 +46,24 @@ Tests:
   precision: *single_double_precisions_complex_real
 
 - name: dense_to_sparse_csr
-  category: quick
+  category: pre_checkin
   function: dense_to_sparse_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [100]
-  N: [10]
+  M: [345, 481, 587, 657]
+  N: [205, 324, 401, 463]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
+
+# Nightly
+- name: dense_to_sparse_csr
+  category: nightly
+  function: dense_to_sparse_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [1000, 2000]
+  N: [500, 1000]
   orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]

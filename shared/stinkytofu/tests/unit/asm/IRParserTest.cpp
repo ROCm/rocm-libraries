@@ -38,6 +38,10 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 
+// For test rocisa modifier extraction, may remove in the future.
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/serialization/asm/RawAsmParser.hpp"
+
 using namespace stinkytofu;
 
 /**
@@ -498,7 +502,8 @@ TEST_F(IRParserTest, HandlesLargeFile) {
     // Generate large assembly file (MLIR format)
     std::ostringstream input;
     for (int i = 0; i < 1000; ++i) {
-        input << R"(v[0] = "st.v_add_f32"(v[1], v[2]))" << "\n";
+        input << R"(v[0] = "st.v_add_f32"(v[1], v[2]))";
+        input << "\n";
     }
 
     auto instructions = parseAssemblyString(input.str());
@@ -550,6 +555,30 @@ TEST_F(IRParserTest, ParsesMultipleModifiers) {
     auto exec = instructions[0].modifiers.find("mod.exec");
     ASSERT_NE(exec, instructions[0].modifiers.end());
     EXPECT_EQ(exec->second["setHi"], "true");
+}
+
+TEST_F(IRParserTest, RawAsmParsesFinalMatrixBScaleModifierWithoutTrailingComment) {
+    // Temporary regression coverage for ToStinkyTofuUtils.cpp.
+    // This may be removed if the rocisa modifier extraction implementation changes.
+    const std::string input =
+        "v_wmma_scale_f32_16x16x128_f8f6f4 v[0:7], v[8:15], v[16:23], v[0:7] "
+        "matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4 "
+        "matrix_a_scale_fmt:2 matrix_b_scale_fmt:2\n";
+
+    auto result = parseRawAsmString(input, getGfxArchID(12, 5, 0));
+
+    ASSERT_FALSE(result.hasErrors());
+    ASSERT_NE(result.parsedFunction, nullptr);
+    ASSERT_EQ(result.parsedFunction->blocks.size(), 1u);
+    ASSERT_EQ(result.parsedFunction->blocks[0]->instructions.size(), 1u);
+
+    const auto& inst = *result.parsedFunction->blocks[0]->instructions[0];
+    auto matrixFmt = inst.modifiers.find("mod.matrix_fmt");
+    ASSERT_NE(matrixFmt, inst.modifiers.end());
+
+    const auto& fields = matrixFmt->second;
+    ASSERT_TRUE(fields.contains("scaleFmtB"));
+    EXPECT_EQ(fields.at("scaleFmtB"), "2");
 }
 
 TEST_F(IRParserTest, ParsesHierarchicalFunctionFormat) {

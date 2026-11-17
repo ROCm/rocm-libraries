@@ -67,6 +67,7 @@ from rocke.core.ir import (
 )
 from rocke.helpers.i4_dequant import unpack_i4_byte_to_pair_i32
 from rocke.helpers.io import io_ir_type, load_scalar_as_f32
+from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -79,7 +80,6 @@ from rocke.helpers.qk_scale import (
     load_q_scale_for_block,
 )
 from rocke.helpers.spec import kernel_name_join
-from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE, fmha_warp_fwd_inner_body
 from .fmha_arch import validate_fmha_mfma_atom
@@ -532,7 +532,12 @@ def _build_sage_mfma(spec: SageAttentionSpec, arch: str = "gfx950") -> KernelDef
         c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
 
         def _k_block_scale_transform(
-            b: IRBuilder, score: Value, kt: Value, _row_in_atom: int
+            b: IRBuilder,
+            score: Value,
+            kt: Value,
+            _row_in_atom: int,
+            _query_pos: Value,
+            _key_pos: Value,
         ) -> Value:
             """Apply ``k_scale[k_block_idx(kt)]`` to one per-lane score.
 
@@ -726,9 +731,9 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
         """
         if is_i4:
             byte_off = _magic_div(b, lane_d_base, 2)  # = tid
-            packed_k = b.global_load(K, b.add(k_row_base, byte_off), I8)
+            packed_k = b.global_load_i8(K, b.add(k_row_base, byte_off))
             lo_k, hi_k = _codebook_i4_pair_to_f32(b, cb_k, packed_k)
-            packed_v = b.global_load(V, b.add(v_row_base, byte_off), I8)
+            packed_v = b.global_load_i8(V, b.add(v_row_base, byte_off))
             v_lo, v_hi = _codebook_i4_pair_to_f32(b, cb_v, packed_v)
             return [lo_k, hi_k], [v_lo, v_hi]
         k_lane = _load_kv_lane_f32(

@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 namespace Tensile
 {
     namespace Client
@@ -38,8 +41,14 @@ namespace Tensile
             CLK_TYPE_DCEF,
             CLK_TYPE_SOC,
             CLK_TYPE_MEM,
-            CLK_TYPE_LAST = CLK_TYPE_MEM,
-            CLK_INVALID   = 0xFFFFFFFF
+            CLK_TYPE_LAST = CLK_TYPE_MEM
         } ClockType;
+
+        /// Averages a sum of amd-smi temperature readings; amdsmi_get_temp_metric
+        /// is already in Celsius, unlike rocm-smi's millidegrees.
+        constexpr double smiTempSumToCelsius(int64_t sum, size_t dataPoints)
+        {
+            return static_cast<double>(sum) / dataPoints;
+        }
     }
 }

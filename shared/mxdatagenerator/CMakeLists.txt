@@ -18,6 +18,14 @@ target_include_directories(mxDataGenerator
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+add_library(mxDataGeneratorPreSwizzle INTERFACE)
+add_library(roc::mxDataGeneratorPreSwizzle ALIAS mxDataGeneratorPreSwizzle)
+target_include_directories(mxDataGeneratorPreSwizzle
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
 # Optional HIP/GPU backend (`DGen::DataGeneratorGPU`). The implementation is
 # header-only and gated behind `__HIPCC__`; host-only consumers see nothing.
 # We deliberately do *not* link `hip::device` into the INTERFACE here, since
@@ -180,7 +188,7 @@ configure_package_config_file(
 )
 
 install(
-    TARGETS mxDataGenerator
+    TARGETS mxDataGenerator mxDataGeneratorPreSwizzle
     EXPORT mxDataGenerator-targets
     COMPONENT mxDataGenerator_Development
 )

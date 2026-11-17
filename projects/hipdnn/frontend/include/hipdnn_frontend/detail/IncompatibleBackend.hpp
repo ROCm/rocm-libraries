@@ -164,10 +164,25 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
+    hipdnnStatus_t setHeuristicPluginPathsExt(size_t /*numPaths*/,
+                                              const char* const* /*pluginPaths*/,
+                                              hipdnnPluginLoadingMode_ext_t /*mode*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
     hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t /*handle*/,
                                                  size_t* /*numPluginPaths*/,
                                                  char** /*pluginPaths*/,
                                                  size_t* /*maxStringLen*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t /*handle*/,
+                                        int64_t /*engineId*/,
+                                        char* /*engineName*/,
+                                        size_t* /*engineNameLen*/) override
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
@@ -190,6 +205,24 @@ public:
                                           size_t* /*pluginVersionLen*/,
                                           char* /*apiVersion*/,
                                           size_t* /*apiVersionLen*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t setUserLogCallbackExt(hipdnnUserLogCallback_t /*callback*/,
+                                         hipdnnSeverity_t /*minLevel*/,
+                                         hipdnnLogCallbackMode_t /*mode*/,
+                                         hipdnnUserLogCallbackHandle_t /*userHandle*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t /*level*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* /*level*/) override
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }

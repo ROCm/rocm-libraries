@@ -31,6 +31,7 @@ struct SerializedExecutionPlanT : public ::flatbuffers::NativeTable {
   std::vector<int64_t> tensor_uids{};
   std::vector<uint8_t> plugin_payload{};
   bool is_override_shape_enabled = false;
+  std::vector<int64_t> tensor_alignments{};
 };
 
 struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -42,7 +43,8 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
     VT_WORKSPACE_SIZE = 8,
     VT_TENSOR_UIDS = 10,
     VT_PLUGIN_PAYLOAD = 12,
-    VT_IS_OVERRIDE_SHAPE_ENABLED = 14
+    VT_IS_OVERRIDE_SHAPE_ENABLED = 14,
+    VT_TENSOR_ALIGNMENTS = 16
   };
   uint32_t version() const {
     return GetField<uint32_t>(VT_VERSION, 0);
@@ -80,6 +82,12 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
   bool mutate_is_override_shape_enabled(bool _is_override_shape_enabled = 0) {
     return SetField<uint8_t>(VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(_is_override_shape_enabled), 0);
   }
+  const ::flatbuffers::Vector<int64_t> *tensor_alignments() const {
+    return GetPointer<const ::flatbuffers::Vector<int64_t> *>(VT_TENSOR_ALIGNMENTS);
+  }
+  ::flatbuffers::Vector<int64_t> *mutable_tensor_alignments() {
+    return GetPointer<::flatbuffers::Vector<int64_t> *>(VT_TENSOR_ALIGNMENTS);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint32_t>(verifier, VT_VERSION, 4) &&
@@ -90,6 +98,8 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
            VerifyOffset(verifier, VT_PLUGIN_PAYLOAD) &&
            verifier.VerifyVector(plugin_payload()) &&
            VerifyField<uint8_t>(verifier, VT_IS_OVERRIDE_SHAPE_ENABLED, 1) &&
+           VerifyOffset(verifier, VT_TENSOR_ALIGNMENTS) &&
+           verifier.VerifyVector(tensor_alignments()) &&
            verifier.EndTable();
   }
   SerializedExecutionPlanT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -119,6 +129,9 @@ struct SerializedExecutionPlanBuilder {
   void add_is_override_shape_enabled(bool is_override_shape_enabled) {
     fbb_.AddElement<uint8_t>(SerializedExecutionPlan::VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(is_override_shape_enabled), 0);
   }
+  void add_tensor_alignments(::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> tensor_alignments) {
+    fbb_.AddOffset(SerializedExecutionPlan::VT_TENSOR_ALIGNMENTS, tensor_alignments);
+  }
   explicit SerializedExecutionPlanBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -137,10 +150,12 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
     int64_t workspace_size = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> tensor_uids = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> plugin_payload = 0,
-    bool is_override_shape_enabled = false) {
+    bool is_override_shape_enabled = false,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> tensor_alignments = 0) {
   SerializedExecutionPlanBuilder builder_(_fbb);
   builder_.add_workspace_size(workspace_size);
   builder_.add_engine_id(engine_id);
+  builder_.add_tensor_alignments(tensor_alignments);
   builder_.add_plugin_payload(plugin_payload);
   builder_.add_tensor_uids(tensor_uids);
   builder_.add_version(version);
@@ -155,9 +170,11 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
     int64_t workspace_size = 0,
     const std::vector<int64_t> *tensor_uids = nullptr,
     const std::vector<uint8_t> *plugin_payload = nullptr,
-    bool is_override_shape_enabled = false) {
+    bool is_override_shape_enabled = false,
+    const std::vector<int64_t> *tensor_alignments = nullptr) {
   auto tensor_uids__ = tensor_uids ? _fbb.CreateVector<int64_t>(*tensor_uids) : 0;
   auto plugin_payload__ = plugin_payload ? _fbb.CreateVector<uint8_t>(*plugin_payload) : 0;
+  auto tensor_alignments__ = tensor_alignments ? _fbb.CreateVector<int64_t>(*tensor_alignments) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
       _fbb,
       version,
@@ -165,7 +182,8 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
       workspace_size,
       tensor_uids__,
       plugin_payload__,
-      is_override_shape_enabled);
+      is_override_shape_enabled,
+      tensor_alignments__);
 }
 
 ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionPlan(::flatbuffers::FlatBufferBuilder &_fbb, const SerializedExecutionPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -178,7 +196,8 @@ inline bool operator==(const SerializedExecutionPlanT &lhs, const SerializedExec
       (lhs.workspace_size == rhs.workspace_size) &&
       (lhs.tensor_uids == rhs.tensor_uids) &&
       (lhs.plugin_payload == rhs.plugin_payload) &&
-      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled);
+      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled) &&
+      (lhs.tensor_alignments == rhs.tensor_alignments);
 }
 
 inline bool operator!=(const SerializedExecutionPlanT &lhs, const SerializedExecutionPlanT &rhs) {
@@ -201,6 +220,7 @@ inline void SerializedExecutionPlan::UnPackTo(SerializedExecutionPlanT *_o, cons
   { auto _e = tensor_uids(); if (_e) { _o->tensor_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->tensor_uids[_i] = _e->Get(_i); } } else { _o->tensor_uids.resize(0); } }
   { auto _e = plugin_payload(); if (_e) { _o->plugin_payload.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->plugin_payload.begin()); } }
   { auto _e = is_override_shape_enabled(); _o->is_override_shape_enabled = _e; }
+  { auto _e = tensor_alignments(); if (_e) { _o->tensor_alignments.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->tensor_alignments[_i] = _e->Get(_i); } } else { _o->tensor_alignments.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<SerializedExecutionPlan> SerializedExecutionPlan::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const SerializedExecutionPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -217,6 +237,7 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
   auto _tensor_uids = _o->tensor_uids.size() ? _fbb.CreateVector(_o->tensor_uids) : 0;
   auto _plugin_payload = _o->plugin_payload.size() ? _fbb.CreateVector(_o->plugin_payload) : 0;
   auto _is_override_shape_enabled = _o->is_override_shape_enabled;
+  auto _tensor_alignments = _o->tensor_alignments.size() ? _fbb.CreateVector(_o->tensor_alignments) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
       _fbb,
       _version,
@@ -224,7 +245,8 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
       _workspace_size,
       _tensor_uids,
       _plugin_payload,
-      _is_override_shape_enabled);
+      _is_override_shape_enabled,
+      _tensor_alignments);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::SerializedExecutionPlan *GetSerializedExecutionPlan(const void *buf) {

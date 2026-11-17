@@ -16,6 +16,7 @@ try:
         transpose_t,
         grid_selection_t,
         reduction_t,
+        hybrid_mode_t,
         prediction_modes_t,
         model_t,
         # Data structures
@@ -47,6 +48,7 @@ try:
         compute_total_latency,
         compute_number_matrix_instructions,
         compute_mt_compute_latency,
+        compute_local_read_latency,
         # Memory functions
         check_lds_capacity,
         estimate_l2_hit,
@@ -69,6 +71,7 @@ try:
         compute_number_of_output_tiles,
         # Reduction functions
         int_to_reduction_t,
+        hybrid_mode_to_string,
         # Attention functions
         att_compute_total_latency,
         att_compute_number_matrix_instructions,
@@ -105,6 +108,7 @@ __all__ = [
     "transpose_t",
     "grid_selection_t",
     "reduction_t",
+    "hybrid_mode_t",
     "prediction_modes_t",
     "model_t",
     # Data structures
@@ -135,6 +139,7 @@ __all__ = [
     "compute_total_latency",
     "compute_number_matrix_instructions",
     "compute_mt_compute_latency",
+    "compute_local_read_latency",
     # Memory functions
     "wgm_to_grid",
     "compute_l2_tiles",
@@ -156,6 +161,7 @@ __all__ = [
     "compute_number_of_output_tiles",
     # Reduction functions
     "int_to_reduction_t",
+    "hybrid_mode_to_string",
     # Attention functions
     "att_compute_total_latency",
     "att_compute_number_matrix_instructions",

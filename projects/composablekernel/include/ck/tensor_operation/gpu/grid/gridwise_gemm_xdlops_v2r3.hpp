@@ -45,7 +45,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                             const CGridDesc_M_N c_grid_desc_m_n)
 {
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx11__) || \
-    defined(__gfx12__)
+    defined(__gfx12__) || defined(__gfx117__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -79,7 +79,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
     kernel_gemm_xdlops_v2r3(const typename GridwiseGemm::Argument karg)
 {
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx11__) || \
-    defined(__gfx12__)
+    defined(__gfx12__) || defined(__gfx117__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -470,7 +470,7 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3
     __device__ static void Run(const ElementDataTypeAB* p_a_grid,
                                const ElementDataTypeAB* p_b_grid,
                                FloatC* p_c_grid,
-                               void* __restrict__ p_shared,
+                               void* p_shared, /*FIXME: reinstate __restrict__ qualifier*/
                                const AGridDesc_K0_M_K1& a_grid_desc_k0_m_k1,
                                const BGridDesc_K0_N_K1& b_grid_desc_k0_n_k1,
                                const CGridDesc_M_N& c_grid_desc_m_n)

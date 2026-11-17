@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # Add CK DSL to path
-ROCKE_ROOT = Path(__file__).resolve().parents[3] / "Python"  # rocKE/Python
+ROCKE_ROOT = Path(__file__).resolve().parents[3] / "python"  # rocke/platform/python
 if str(ROCKE_ROOT) not in sys.path:
     sys.path.insert(0, str(ROCKE_ROOT))
 
@@ -38,7 +38,7 @@ def test_is_constant():
 
     # Create lowerer
     kernel = b.kernel
-    lowerer = _Lowerer(kernel)
+    lowerer = _Lowerer(kernel, arch="gfx950")
 
     # Test constant detection
     assert lowerer._is_constant(c0), "Should detect c0 as constant"
@@ -67,7 +67,7 @@ def test_eval_constant():
 
     # Create lowerer
     kernel = b.kernel
-    lowerer = _Lowerer(kernel)
+    lowerer = _Lowerer(kernel, arch="gfx950")
 
     # Test constant evaluation
     assert lowerer._eval_constant(c0) == 0, "Should evaluate c0 to 0"
@@ -92,7 +92,7 @@ def test_eval_constant_error():
 
     # Create lowerer
     kernel = b.kernel
-    lowerer = _Lowerer(kernel)
+    lowerer = _Lowerer(kernel, arch="gfx950")
 
     # Test error on non-constant
     try:
@@ -124,7 +124,7 @@ def test_loop_bounds_detection():
 
     # Create lowerer
     kernel = b.kernel
-    lowerer = _Lowerer(kernel)
+    lowerer = _Lowerer(kernel, arch="gfx950")
 
     # Test Case 1: Constant bounds
     is_unrollable_1 = (
@@ -174,7 +174,7 @@ def test_conv_k_loop_bounds():
 
     # Create lowerer
     kernel = b.kernel
-    lowerer = _Lowerer(kernel)
+    lowerer = _Lowerer(kernel, arch="gfx950")
 
     # Check if unrollable
     assert lowerer._is_constant(lower), "lower should be constant"

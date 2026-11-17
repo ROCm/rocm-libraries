@@ -85,12 +85,11 @@ struct LayernormFpropSignatureKey
 
     constexpr std::size_t hashSelf() const
     {
-        return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 8)
-               ^ (static_cast<std::size_t>(static_cast<int>(meanInvVarianceDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20);
+        return static_cast<std::size_t>(nodeType) ^ (static_cast<std::size_t>(xDataType) << 4)
+               ^ (static_cast<std::size_t>(scaleBiasDataType) << 8)
+               ^ (static_cast<std::size_t>(meanInvVarianceDataType) << 12)
+               ^ (static_cast<std::size_t>(outputDataType) << 16)
+               ^ (static_cast<std::size_t>(computeDataType) << 20);
     }
 
     bool operator==(const LayernormFpropSignatureKey& other) const noexcept

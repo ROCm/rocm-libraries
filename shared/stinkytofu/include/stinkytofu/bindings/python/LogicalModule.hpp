@@ -33,6 +33,67 @@ namespace stinkytofu {
 // Forward declarations
 class LogicalInstruction;
 
+/// Entry for a .set directive to be emitted inline with instructions.
+/// @c position is the instruction index before which the directive is inserted.
+/// @c order is the global insertion sequence used to interleave with other entry types.
+struct SetDirectiveEntry {
+    size_t position;
+    size_t order;
+    std::string symbol;
+    std::string value;
+};
+
+enum class ConditionalDirectiveKind { IF, ENDIF };
+
+/// Entry for an assembler conditional directive emitted inline with instructions.
+struct ConditionalDirectiveEntry {
+    size_t position;
+    size_t order;
+    ConditionalDirectiveKind kind;
+    std::string payload;  // Condition for .if; comment for .endif.
+};
+
+/// Entry for a label to be emitted inline with instructions.
+/// @c position is the instruction index before which the label is inserted.
+/// @c order is the global insertion sequence used to interleave with other entry types.
+struct LabelEntry {
+    size_t position;
+    size_t order;
+    std::string labelName;
+    uint16_t alignment;
+    std::string comment;
+};
+
+/// Entry for a textblock (comment/raw text) to be emitted inline with instructions.
+/// @c position is the instruction index before which the textblock is inserted.
+/// @c order is the global insertion sequence used to interleave with other entry types.
+struct TextBlockEntry {
+    size_t position;
+    size_t order;
+    std::string text;
+};
+
+/// Entry for an instruction-group scope marker.
+/// @c position is the instruction count at the time the marker was recorded.
+/// @c order is the global insertion sequence used to interleave with other entry types.
+/// @c isBegin == true marks the start of a named group scope; false marks the end.
+struct GroupMarkerEntry {
+    size_t position;
+    size_t order;
+    std::string name;
+    bool isBegin;
+};
+
+/// Entry delimiting a callable function body in the logical instruction stream.
+/// The begin marker also records the position where the callable must be restored
+/// to the final linear ASM stream after per-function optimization.
+struct CallableMarkerEntry {
+    size_t position;
+    size_t order;
+    std::string name;
+    bool isBegin;
+};
+
 // ========================================================================
 // PYTHON-SPECIFIC MODULE - Can be removed when Python bindings are deprecated
 // ========================================================================
@@ -117,6 +178,87 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @return The same instruction (for chaining)
      */
     std::shared_ptr<LogicalInstruction> add(std::shared_ptr<LogicalInstruction> inst);
+
+    /**
+     * @brief Record a .set directive to be emitted inline at the current position.
+     *
+     * The directive will appear in the output immediately before the next
+     * instruction added after this call, preserving source ordering.
+     *
+     * @param symbol Symbol name (e.g. "vgprBase")
+     * @param value  Value expression (e.g. "516" or "vgprBase+0")
+     */
+    void addSetDirective(const std::string& symbol, const std::string& value);
+
+    /**
+     * @brief Get all recorded .set directive entries (position-tagged).
+     */
+    const std::vector<SetDirectiveEntry>& getSetDirectives() const;
+
+    /// Record assembler conditional directives at the current source position.
+    void addIfDirective(const std::string& condition);
+    void addEndifDirective(const std::string& comment = "");
+    const std::vector<ConditionalDirectiveEntry>& getConditionalDirectives() const;
+
+    /**
+     * @brief Record a label to be emitted inline at the current position.
+     *
+     * @param labelName  Full label name (e.g. "label_0042")
+     * @param alignment  Alignment (1 = no .align prefix)
+     * @param comment    Optional comment
+     */
+    void addLabel(const std::string& labelName, uint16_t alignment = 1,
+                  const std::string& comment = "");
+
+    /**
+     * @brief Get all recorded label entries (position-tagged).
+     */
+    const std::vector<LabelEntry>& getLabels() const;
+
+    /**
+     * @brief Record a textblock (comment / raw asm text) at the current position.
+     *
+     * @param text  Raw text content (e.g. a block comment string)
+     */
+    void addTextBlock(const std::string& text);
+
+    /**
+     * @brief Get all recorded textblock entries (position-tagged).
+     */
+    const std::vector<TextBlockEntry>& getTextBlocks() const;
+
+    /**
+     * @brief Mark the beginning of a named instruction-group scope.
+     *
+     * All instructions added between a matching beginGroup/endGroup pair
+     * are considered part of the named group.  The C++ lowering pipeline
+     * uses these markers to populate StinkyAsmModule instruction-group
+     * ranges (mirroring the native toStinkyTofuModule behaviour).
+     *
+     * @param name  Group name (e.g. "noLoadLoopBody")
+     */
+    void beginGroup(const std::string& name);
+
+    /**
+     * @brief Mark the end of a named instruction-group scope.
+     * @param name  Group name (must match a preceding beginGroup call)
+     */
+    void endGroup(const std::string& name);
+
+    /**
+     * @brief Get all recorded group marker entries (position-tagged).
+     */
+    const std::vector<GroupMarkerEntry>& getGroupMarkers() const;
+
+    /**
+     * @brief Mark the beginning/end of a callable function body.
+     *
+     * Lowering creates a separate callable Function and leaves an ASM placement
+     * marker in the entry Function, matching native rocisa conversion.
+     */
+    void beginCallable(const std::string& name);
+    void endCallable(const std::string& name);
+    const std::vector<CallableMarkerEntry>& getCallableMarkers() const;
 
     /**
      * @brief Get all IR instructions in this module (const version)

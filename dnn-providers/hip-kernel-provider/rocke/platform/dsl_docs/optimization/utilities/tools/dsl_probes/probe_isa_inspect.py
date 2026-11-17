@@ -49,7 +49,7 @@ def _bootstrap_rocke() -> None:
         pass
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "Python"
+        candidate = parent / "python"
         if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
@@ -121,7 +121,11 @@ def _objdump_path() -> str:
         if not c:
             continue
         try:
-            subprocess.run([c, "--version"], capture_output=True, timeout=5, check=True)
+            # generous: on a loaded host a cold start of the tool can take
+            # seconds, and a time-out here reads as "no llvm-objdump"
+            subprocess.run(
+                [c, "--version"], capture_output=True, timeout=60, check=True
+            )
             return c
         except (
             FileNotFoundError,

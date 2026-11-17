@@ -51,11 +51,16 @@ TEST(TestTypes, FromHipdnn{{ fe_type }}RoundTrip)
 {% endfor %}
         })
     {
+{% if df.mode_converter_returns_optional %}
         auto hipdnnOpt = {{ df.backend_converter }}(mode);
         ASSERT_TRUE(hipdnnOpt.has_value())
             << "{{ df.backend_converter }} failed for mode "
             << static_cast<int>(mode);
         auto [roundTripped, err] = {{ df.frontend_inverse_converter }}(hipdnnOpt.value());
+{% else %}
+        auto hipdnnMode = {{ df.backend_converter }}(mode);
+        auto [roundTripped, err] = {{ df.frontend_inverse_converter }}(hipdnnMode);
+{% endif %}
         EXPECT_TRUE(err.is_good())
             << "{{ df.frontend_inverse_converter }} failed for mode "
             << static_cast<int>(mode);

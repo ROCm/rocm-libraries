@@ -8,7 +8,7 @@ include(hipsparse_shim)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
-project(hipsparse VERSION 4.6.0 LANGUAGES CXX C)
+project(hipsparse VERSION 4.8.0 LANGUAGES CXX C)
 
 if(POLICY CMP0066)
     cmake_policy(SET CMP0066 NEW) # Honor per-config flags in try_compile()
@@ -21,7 +21,7 @@ endif()
 # Set cpack license file here to avoid rocm-cmake warning
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
-include(fetch_rocm_cmake)
+include(find_rocm_cmake)
 include(GNUInstallDirs)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
@@ -68,7 +68,6 @@ if(HIPSPARSE_ENABLE_CLIENT)
 endif()
 
 option(HIPSPARSE_BUILD_TESTING "Build test client." OFF)
-option(HIPSPARSE_ENABLE_SPMV_BSR "Build hipSPARSE with BSR format support in hipsparseSpMV." ON)
 option(HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled." OFF)
 option(HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSE_BUILD_DOCS "Build documentation." OFF)
@@ -96,6 +95,8 @@ if(HIPSPARSE_ENABLE_CUDA)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
     find_package(rocsparse REQUIRED)
+    get_target_property(ROCSPARSE_LOCATION roc::rocsparse LOCATION)
+    message(STATUS "Found rocsparse shared library: ${ROCSPARSE_LOCATION}")
 endif()
 
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)

@@ -40,7 +40,7 @@ Tests:
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
-  percentage: [0.25, 0.5, 1.0]
+  percentage: [25, 50, 100]
 
 - name: csrcolor
   category: pre_checkin
@@ -51,7 +51,7 @@ Tests:
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
-  percentage: [0.25, 0.5, 1.0]
+  percentage: [25, 50, 100]
 
 - name: csrcolor_file
   category: pre_checkin
@@ -67,7 +67,7 @@ Tests:
              nos4,
              nos6,
              scircuit]
-  percentage: [0.25, 0.5, 1.0]
+  percentage: [25, 50, 100]
 
 - name: csrcolor
   category: quick
@@ -78,7 +78,7 @@ Tests:
   N: [33, 300]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
-  percentage: [0.25, 0.5, 1.0]
+  percentage: [25, 50, 100]
 
 - name: csrcolor
   category: nightly
@@ -88,7 +88,7 @@ Tests:
   M: [4049, 5000]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
-  percentage: [0.25, 0.5, 1.0]
+  percentage: [25, 50, 100]
 
 - name: csrcolor_file
   category: nightly
@@ -101,7 +101,7 @@ Tests:
   filename: [Chevron2,
              Chevron3,
              Chevron4]
-  percentage: [0.25, 0.5, 1.0]
+  percentage: [25, 50, 100]
 
 - name: csrcolor_file
   category: nightly
@@ -117,4 +117,4 @@ Tests:
              sme3Dc,
              webbase-1M,
              Chebyshev4]
-  percentage: [0.25, 0.5, 1.0]
+  percentage: [25, 50, 100]

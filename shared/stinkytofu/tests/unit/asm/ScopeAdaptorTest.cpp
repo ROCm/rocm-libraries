@@ -27,8 +27,35 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
+
+// Lifts the extracted region to attached SSA and leaves it attached, standing in
+// for any inner pipeline that reasons about SSA.
+class LiftAndLeaveAttachedPass : public Pass {
+   public:
+    static char ID;
+
+    PassID getPassID() const override {
+        return &ID;
+    }
+
+    const char* getName() const override {
+        return "LiftAndLeaveAttachedPass";
+    }
+
+    PreservedAnalyses run(Function& func, PassContext& /*ctx*/, AnalysisManager& /*AM*/) override {
+        Expected<LiftAttachedSSAResult> lifted = liftAsmRegistersToAttachedSSA(func);
+        lifted_ = lifted.hasValue();
+        return PreservedAnalyses::none();
+    }
+
+    bool lifted_ = false;
+};
+char LiftAndLeaveAttachedPass::ID = 0;
 
 // A simple counting pass: counts StinkyInstructions in the Function.
 class CountingPass : public Pass {
@@ -81,6 +108,19 @@ class ScopeAdaptorTest : public ::testing::Test {
         return inst;
     }
 
+    /// Add one label to the module's entry BB and update group ranges.
+    StinkyInstruction* addLabel(StinkyAsmModule& module, AsmIRBuilder& builder,
+                                const std::string& name,
+                                const std::vector<const std::string*>& groups) {
+        BasicBlock& bb = *module.getFunction().getEntryBlock();
+        size_t before = bb.size();
+
+        StinkyInstruction* inst = builder.createLabel(name);
+
+        module.updateInstructionGroups(groups, before);
+        return inst;
+    }
+
     /// Create a module with two groups:
     ///   [inst0]  [inst1 inst2]  [inst3 inst4]  [inst5]
     ///            ^--group0--^   ^--group1--^
@@ -105,6 +145,38 @@ class ScopeAdaptorTest : public ::testing::Test {
         addInst(*module, builder, 2, g1);         // inst3: group1
         addInst(*module, builder, 3, g1);         // inst4: group1
         addInst(*module, builder, 11, noGroups);  // inst5: after groups
+
+        return module;
+    }
+
+    /// Same two groups, but split across labels so CFGBuilderPass has something to
+    /// work with and each group ends up in a block of its own:
+    ///   [inst0] ^loop[inst1 inst2] ^noload[inst3 inst4] ^tail[inst5]
+    ///                ^--group0--^         ^--group1--^
+    std::unique_ptr<StinkyAsmModule> createLabelledModuleWithGroups() {
+        auto opts = makeDefaultOptions();
+        auto module = std::make_unique<StinkyAsmModule>("test", ARCH, opts);
+
+        module->addGroup("group0");
+        module->addGroup("group1");
+
+        BasicBlock& bb = *module->getFunction().getEntryBlock();
+        GfxArchID archId = getGfxArchID(ARCH[0], ARCH[1], ARCH[2]);
+        AsmIRBuilder builder(bb, archId);
+
+        std::vector<const std::string*> noGroups;
+        std::vector<const std::string*> g0 = {&groupName0};
+        std::vector<const std::string*> g1 = {&groupName1};
+
+        addInst(*module, builder, 10, noGroups);
+        addLabel(*module, builder, "loop", noGroups);
+        addInst(*module, builder, 0, g0);
+        addInst(*module, builder, 1, g0);
+        addLabel(*module, builder, "noload", noGroups);
+        addInst(*module, builder, 2, g1);
+        addInst(*module, builder, 3, g1);
+        addLabel(*module, builder, "tail", noGroups);
+        addInst(*module, builder, 11, noGroups);
 
         return module;
     }
@@ -160,6 +232,48 @@ TEST_F(ScopeAdaptorTest, SingleRegionExtractAndSpliceBack) {
     EXPECT_EQ(module->getFunction().size(), 1u);
     // Group range should still be valid
     EXPECT_TRUE(module->findGroupRange("group0").has_value());
+}
+
+// Attached SSA must not survive splice-back. The values belong to an SSAArena
+// owned by the temporary Function, which is destroyed once the region has been
+// moved back into the kernel, so an instruction that kept its SSA would be left
+// holding freed values -- an assert in a debug build and a use-after-free in
+// StinkyOpOperand's destructor otherwise. ScopeAdaptor detaches so that no inner
+// pipeline has to remember to.
+TEST_F(ScopeAdaptorTest, SpliceBackLeavesNoAttachedSSA) {
+    auto module = createModuleWithGroups();
+    const int totalBefore = countInstructions(module->getFunction());
+
+    auto outerPM = createOuterPM();
+    PassManager innerPM;
+    auto lift = std::make_unique<LiftAndLeaveAttachedPass>();
+    LiftAndLeaveAttachedPass* liftRaw = lift.get();
+    innerPM.addPass(std::move(lift));
+    outerPM.addPass(createKernelToRegionPassAdaptor(*module, "group0", std::move(innerPM)));
+    outerPM.run(module->getFunction());
+
+    // The test is only meaningful if the region actually lifted.
+    ASSERT_TRUE(liftRaw->lifted_);
+    EXPECT_FALSE(module->getFunction().hasAttachedSSA());
+    EXPECT_EQ(countInstructions(module->getFunction()), totalBefore);
+}
+
+// Same invariant for the whole-kernel mode, which splices through a different path.
+TEST_F(ScopeAdaptorTest, WholeKernelSpliceBackLeavesNoAttachedSSA) {
+    auto module = createModuleWithGroups();
+    const int totalBefore = countInstructions(module->getFunction());
+
+    auto outerPM = createOuterPM();
+    PassManager innerPM;
+    auto lift = std::make_unique<LiftAndLeaveAttachedPass>();
+    LiftAndLeaveAttachedPass* liftRaw = lift.get();
+    innerPM.addPass(std::move(lift));
+    outerPM.addPass(createKernelPassAdaptor(*module, std::move(innerPM)));
+    outerPM.run(module->getFunction());
+
+    ASSERT_TRUE(liftRaw->lifted_);
+    EXPECT_FALSE(module->getFunction().hasAttachedSSA());
+    EXPECT_EQ(countInstructions(module->getFunction()), totalBefore);
 }
 
 // Verify that setGroupRange is called correctly during single-region splice-back.
@@ -304,4 +418,42 @@ TEST_F(ScopeAdaptorTest, MissingGroupDoesNotCrash) {
     outerPM.run(module->getFunction());
 
     EXPECT_EQ(countInstructions(module->getFunction()), 6);
+}
+
+// A group range is a walk along one instruction list, so a CFG built upstream
+// breaks it: the two bounds end up in different blocks and incrementing from the
+// first never arrives at the last. FlattenCFGPass is what makes a CFG safe to
+// build before an adaptor, and the measure of that is the inner PM seeing exactly
+// what it would have seen had no CFG ever been built.
+TEST_F(ScopeAdaptorTest, FlattenAfterCFGBuildRestoresTheMultiRegionWalk) {
+    auto runAndCountInner = [this](bool buildAndFlattenCFG) {
+        auto module = createLabelledModuleWithGroups();
+        const int totalBefore = countInstructions(module->getFunction());
+
+        auto outerPM = createOuterPM();
+        if (buildAndFlattenCFG) {
+            outerPM.addPass(createCFGBuilderPass());
+            outerPM.addPass(createFlattenCFGPass());
+        }
+
+        auto* countingPassPtr = new CountingPass();
+        PassManager innerPM;
+        innerPM.addPass(std::unique_ptr<Pass>(countingPassPtr));
+        outerPM.addPass(
+            createKernelToRegionsPassAdaptor(*module, {"group0", "group1"}, std::move(innerPM)));
+        outerPM.run(module->getFunction());
+
+        EXPECT_EQ(countInstructions(module->getFunction()), totalBefore);
+        EXPECT_EQ(module->getFunction().size(), 1u);
+        return countingPassPtr->count;
+    };
+
+    const int flatKernel = runAndCountInner(/*buildAndFlattenCFG=*/false);
+    const int cfgThenFlattened = runAndCountInner(/*buildAndFlattenCFG=*/true);
+
+    // inst1, inst2, ^noload, inst3, inst4. Spelled out so that a walk which
+    // stopped at the end of group0's block would fail here rather than compare
+    // two equally truncated numbers.
+    ASSERT_EQ(flatKernel, 5);
+    EXPECT_EQ(cfgThenFlattened, flatKernel);
 }

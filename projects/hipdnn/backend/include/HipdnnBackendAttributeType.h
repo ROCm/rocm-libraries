@@ -114,6 +114,9 @@ typedef enum
     /** @brief Padding mode enumeration (hipdnnPaddingMode_t) */
     HIPDNN_TYPE_PADDING_MODE = 30,
 
+    /** @brief MoE grouped matmul mode enumeration (hipdnnMoeGroupedMatmulMode_t) */
+    HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE = 31,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types

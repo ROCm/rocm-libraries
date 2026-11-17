@@ -2,15 +2,24 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <limits>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <numeric>
+#include <string>
 #include <string_view>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "EnginePlugin.hpp"
@@ -22,6 +31,7 @@
 #include "descriptors/ExecutionPlanDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
+#include "heuristics/RankingMetric.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
@@ -83,19 +93,18 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
-const hipdnn_data_sdk::utilities::Version&
-    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled)
+/// True when every tagged knob value in @p config has its payload. FlatBuffers unions are
+/// optional, so VerifyBuffer accepts a missing payload that UnPack() would dereference.
+bool everyKnobValueIsPresent(const hipdnn_flatbuffers_sdk::data_objects::EngineConfig* config)
 {
-    static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
-        hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    static const hipdnn_data_sdk::utilities::Version s_overrideExecuteMinVersion{
-        hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
-
-    if(isOverrideShapeEnabled)
+    if(config == nullptr || config->knobs() == nullptr)
     {
-        return s_overrideExecuteMinVersion;
+        return true;
     }
-    return s_baselineVersion;
+    return std::all_of(config->knobs()->begin(), config->knobs()->end(), [](const auto* setting) {
+        return setting->value_type() == hipdnn_flatbuffers_sdk::data_objects::KnobValue::NONE
+               || setting->value() != nullptr;
+    });
 }
 
 } // namespace
@@ -138,7 +147,52 @@ size_t EnginePluginResourceManager::getEngineCount() const
 
 std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
 {
-    if(_cachedEngineInfos.has_value())
+    return buildEngineIndex();
+}
+
+std::optional<int64_t>
+    EnginePluginResourceManager::findEngineIdByName(std::string_view engineName) const
+{
+    buildEngineIndex();
+
+    const auto it = _cachedEngineIdsByName->find(std::string(engineName));
+    if(it == _cachedEngineIdsByName->end())
+    {
+        return std::nullopt;
+    }
+
+    return it->second;
+}
+
+std::optional<std::string> EnginePluginResourceManager::findEngineNameById(int64_t engineId) const
+{
+    // Scanning rather than adding a third memo keeps the fill-both-together
+    // invariant intact, and the engine count is small.
+    const auto& infos = buildEngineIndex();
+
+    const auto it = std::find_if(infos.begin(), infos.end(), [engineId](const EngineInfo& info) {
+        return info.engineId == engineId;
+    });
+
+    if(it == infos.end())
+    {
+        return std::nullopt;
+    }
+
+    return it->engineName;
+}
+
+const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() const
+{
+    // Public entry points reach this concurrently, so the fill is
+    // serialized. Neither memo is invalidated afterwards, which is what lets
+    // callers hold the returned reference past the lock; a future reset path
+    // would have to return copies instead.
+    const std::lock_guard<std::mutex> lock(_engineIndexMutex);
+
+    // Both memos are filled together on every path, so requiring both here keeps
+    // findEngineIdByName() from ever seeing a half-built index.
+    if(_cachedEngineInfos.has_value() && _cachedEngineIdsByName.has_value())
     {
         return *_cachedEngineInfos;
     }
@@ -146,8 +200,8 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
     std::vector<EngineInfo> infos;
     if(!_pm)
     {
-        _cachedEngineInfos = infos;
-        return infos;
+        _cachedEngineIdsByName.emplace();
+        return _cachedEngineInfos.emplace(std::move(infos));
     }
 
     const auto& plugins = _pm->getPlugins();
@@ -157,8 +211,9 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
         auto pluginType = std::string(::toString(plugin->type()));
         auto pluginName = std::string(plugin->name());
 
-        auto engineIds = plugin->getAllEngineIds();
-        for(const auto id : engineIds)
+        // The accepted set omits engines dropped at load time, so they reach
+        // neither the enumeration nor the reverse index.
+        for(const auto id : _pm->acceptedEngineIds(*plugin))
         {
             EngineInfo info;
             info.engineId = id;
@@ -166,25 +221,86 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
             info.type = pluginType;
             info.pluginName = pluginName;
 
-            try
-            {
-                info.engineName = hipdnn_data_sdk::utilities::getEngineNameFromId(id);
-            }
-            catch(const std::out_of_range&)
-            {
-                info.engineName = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
-            }
+            // No graph here, so no EngineDetails candidate.
+            info.engineName = resolveEngineName(id, std::nullopt);
 
             infos.push_back(std::move(info));
         }
     }
 
+    // Alphabetical by resolved name is the documented contract. The tie breakers
+    // make the comparator a total order, keeping the order stable across runs.
     std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
-        return a.engineName < b.engineName;
+        return std::tie(a.engineName, a.engineId, a.pluginName)
+               < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
-    _cachedEngineInfos = infos;
-    return infos;
+    // Built from the sorted vector, so it agrees with the enumeration. Admission
+    // ties each declared name to its own hash, so declared names cannot collide
+    // here; an unnamed engine is keyed by a rendering of its ID, which is unique
+    // for the same reason.
+    auto& idsByName = _cachedEngineIdsByName.emplace();
+    idsByName.reserve(infos.size());
+    for(const auto& info : infos)
+    {
+        idsByName.emplace(info.engineName, info.engineId);
+    }
+
+    return _cachedEngineInfos.emplace(std::move(infos));
+}
+
+std::string EnginePluginResourceManager::resolveEngineName(
+    int64_t engineId, std::optional<std::string_view> detailsName) const
+{
+    const EnginePlugin* owningPlugin = _pm ? _pm->engineOwner(engineId) : nullptr;
+
+    const std::string_view pluginName = owningPlugin != nullptr
+                                            ? std::string_view(owningPlugin->cachedName())
+                                            : std::string_view("<unknown>");
+
+    // The entry point is the only channel a plugin can name an engine through,
+    // because it is the only one load-time admission can reach. Admission resolved
+    // it once, so this reads a map.
+    const std::optional<std::string> entryPointName
+        = _pm ? _pm->engineEntryPointName(engineId) : std::optional<std::string>{};
+
+    if(entryPointName.has_value())
+    {
+        // The entry point is authoritative; a disagreement is a plugin defect
+        // worth reporting, not worth failing over.
+        if(detailsName.has_value() && !detailsName->empty() && *detailsName != *entryPointName)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Plugin '{}' names engine {} '{}' through hipdnnEnginePluginGetEngineName but "
+                "'{}' in EngineDetails.name; using '{}'",
+                pluginName,
+                hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+                *entryPointName,
+                *detailsName,
+                *entryPointName);
+        }
+
+        // Admission already established that this name hashes to engineId.
+        return *entryPointName;
+    }
+
+    // EngineDetails.name records a name but never confers one. Admission is
+    // graph-blind and cannot see this field, so honoring a candidate that
+    // survived to here would surface a name no load-time gate ever checked.
+    // Declaring a name here but not through the entry point is a plugin defect;
+    // the name resolves from the registry or the hex ID instead.
+    if(detailsName.has_value() && !detailsName->empty())
+    {
+        HIPDNN_BACKEND_LOG_WARN(
+            "Plugin '{}' names engine {} '{}' in EngineDetails.name but does not report that name "
+            "through hipdnnEnginePluginGetEngineName. An engine name must be declared through the "
+            "entry point so load-time admission can validate it; ignoring the reported name.",
+            pluginName,
+            hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+            *detailsName);
+    }
+
+    return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
 }
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
@@ -257,21 +373,10 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 
         _handleToPlugin[handle] = plugin.get();
 
-        std::vector<int64_t> engineIds;
-        try
-        {
-            engineIds = plugin->getAllEngineIds();
-        }
-        catch(const std::exception& e)
-        {
-            HIPDNN_BACKEND_LOG_ERROR(
-                "Failed to get engine IDs for plugin '{}': {}", plugin->name(), e.what());
-            safeDestroyHandle(plugin.get(), handle);
-            _handleToPlugin.erase(handle);
-            continue;
-        }
-
-        for(const auto id : engineIds)
+        // Nested in the success path on purpose: a plugin that never got a handle
+        // has nothing to route to. Routing is built from the accepted set, so a
+        // dropped engine cannot be reached at all.
+        for(const auto id : _pm->acceptedEngineIds(*plugin))
         {
             _engineIdToHandle[id] = handle;
         }
@@ -312,6 +417,7 @@ EnginePluginResourceManager::EnginePluginResourceManager(
     : _handleToPlugin(std::move(other._handleToPlugin))
     , _engineIdToHandle(std::move(other._engineIdToHandle))
     , _cachedEngineInfos(std::move(other._cachedEngineInfos))
+    , _cachedEngineIdsByName(std::move(other._cachedEngineIdsByName))
 {
     // Move base class member explicitly
     _pm = std::move(other._pm);
@@ -325,6 +431,7 @@ EnginePluginResourceManager&
         _handleToPlugin = std::move(other._handleToPlugin);
         _engineIdToHandle = std::move(other._engineIdToHandle);
         _cachedEngineInfos = std::move(other._cachedEngineInfos);
+        _cachedEngineIdsByName = std::move(other._cachedEngineIdsByName);
         _pm = std::move(other._pm);
     }
     return *this;
@@ -342,7 +449,33 @@ std::vector<int64_t>
     EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc,
                                                         bool findFirst) const
 {
+    return queryApplicableEngineIds(graphDesc, findFirst, std::nullopt);
+}
+
+bool EnginePluginResourceManager::isEngineApplicable(int64_t engineId,
+                                                     const GraphDescriptor* graphDesc) const
+{
+    const auto engineIds = queryApplicableEngineIds(graphDesc, false, engineId);
+    return std::find(engineIds.begin(), engineIds.end(), engineId) != engineIds.end();
+}
+
+std::vector<int64_t> EnginePluginResourceManager::queryApplicableEngineIds(
+    const GraphDescriptor* graphDesc, bool findFirst, std::optional<int64_t> pinnedEngineId) const
+{
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
+
+    // A pinned engine is answered by its owning plugin alone; an engine no loaded
+    // plugin owns is not applicable.
+    std::optional<hipdnnEnginePluginHandle_t> ownerHandle;
+    if(pinnedEngineId.has_value())
+    {
+        const auto ownerIt = _engineIdToHandle.find(*pinnedEngineId);
+        if(ownerIt == _engineIdToHandle.end())
+        {
+            return {};
+        }
+        ownerHandle = ownerIt->second;
+    }
 
     auto serializedGraphData = graphDesc->getSerializedGraph();
 
@@ -350,12 +483,27 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const auto& requiredVersion = computeMinimumPluginApiVersion(isOverrideShapeEnabled);
+    const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
+    const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
+    const bool hasNonDefaultTensorAlignment = graphDesc->hasNonDefaultTensorAlignment();
+    const bool isRaggedOffsetMultiplier = graphDesc->hasRaggedOffsetMultiplier();
+
+    const auto& requiredVersion
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
+                                                                  isRuntimePBV,
+                                                                  isRaggedTensorEnabled,
+                                                                  hasNonDefaultTensorAlignment,
+                                                                  isRaggedOffsetMultiplier);
 
     std::vector<int64_t> engineIds;
 
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
+        if(ownerHandle.has_value() && handle != *ownerHandle)
+        {
+            continue;
+        }
+
         // Safe to deref: validateBeforeAdding rejected plugins with
         // unparseable versions at load time.
         const auto pluginVersion = *plugin->parsedApiVersion();
@@ -378,23 +526,60 @@ std::vector<int64_t>
             continue;
         }
 
-        auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
-        engineIds.insert(engineIds.end(), ids.begin(), ids.end());
+        // A plugin that cannot answer for this graph (it threw, or returned a malformed
+        // list) offers no engines; the remaining plugins must still be consulted. When
+        // the owner of a pinned engine cannot answer, its error is the real reason the
+        // pin fails and propagates unchanged.
+        std::vector<int64_t> ids;
+        if(ownerHandle.has_value())
+        {
+            ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
+        }
+        else
+        {
+            try
+            {
+                ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
+            }
+            catch(const std::exception& e)
+            {
+                HIPDNN_BACKEND_LOG_WARN(
+                    "Skipping plugin '{}': querying its applicable engines failed: {}",
+                    plugin->cachedName(),
+                    e.what());
+                continue;
+            }
+            catch(...)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Skipping plugin '{}': querying its applicable engines "
+                                        "threw an unknown exception",
+                                        plugin->cachedName());
+                continue;
+            }
+        }
 
         for(const auto& id : ids)
         {
-            if(_engineIdToHandle.find(id) == _engineIdToHandle.end())
+            const auto handleIt = _engineIdToHandle.find(id);
+            if(handleIt == _engineIdToHandle.end())
             {
-                throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Unknown engine ID");
+                // A plugin is never told which of its engines were dropped, so it
+                // keeps offering them; skipping beats failing the whole graph.
+                HIPDNN_BACKEND_LOG_INFO(
+                    "Skipping engine {} offered by plugin '{}': it was dropped at load time",
+                    hipdnn_data_sdk::utilities::formatEngineIdHex(id),
+                    plugin->cachedName());
+                continue;
             }
 
-            auto existingHandle = _engineIdToHandle.at(id);
-            if(existingHandle != handle)
+            if(handleIt->second != handle)
             {
                 throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+
+            engineIds.push_back(id);
         }
 
         if(findFirst && !engineIds.empty())
@@ -433,6 +618,263 @@ void EnginePluginResourceManager::getEngineDetails(int64_t engineId,
                               "Engine details for engine ID " + std::to_string(engineId)
                                   + " are empty or null");
     }
+}
+
+std::vector<uint8_t>
+    EnginePluginResourceManager::enumerateCandidates(int64_t engineId,
+                                                     const hipdnnPluginConstData_t& engineConfig,
+                                                     const GraphDescriptor* graph,
+                                                     uint64_t offset,
+                                                     uint64_t limit) const
+{
+    THROW_IF_NULL(graph, HIPDNN_STATUS_BAD_PARAM, "Candidate enumeration requires a graph");
+    THROW_IF_TRUE(limit == 0 || limit > 10000,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "Candidate page limit must be in [1, 10000]");
+    const auto it = _engineIdToHandle.find(engineId);
+    THROW_IF_TRUE(it == _engineIdToHandle.end(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "Candidate enumeration engine is not loaded");
+    const auto handle = it->second;
+    const auto plugin = _handleToPlugin.at(handle);
+    const auto serializedGraph = graph->getSerializedGraph();
+    hipdnnPluginConstData_t data{nullptr, 0};
+    // Own the allocation before calling the plugin: enumerateCandidates may throw after
+    // writing one into `data`.
+    const auto release = [&plugin, handle](hipdnnPluginConstData_t* owned) {
+        if(owned->ptr != nullptr)
+        {
+            try
+            {
+                plugin->destroyEngineDetails(handle, owned);
+            }
+            catch(const std::exception& error)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release candidate page: {}", error.what());
+            }
+            catch(...)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release candidate page");
+            }
+        }
+    };
+    const std::unique_ptr<hipdnnPluginConstData_t, decltype(release)> guard(&data, release);
+    plugin->enumerateCandidates(handle, &engineConfig, &serializedGraph, offset, limit, &data);
+    THROW_IF_NULL(data.ptr, HIPDNN_STATUS_PLUGIN_ERROR, "Plugin returned a null candidate page");
+    // Verification also enforces the schema's required page and candidate strings.
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
+    THROW_IF_FALSE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>(),
+                   HIPDNN_STATUS_PLUGIN_ERROR,
+                   "Plugin returned an invalid candidate page");
+    const auto* details = hipdnn_flatbuffers_sdk::data_objects::GetEngineDetails(data.ptr);
+    const auto* page = details->candidate_page();
+    THROW_IF_TRUE(details->engine_id() != engineId || page == nullptr,
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Plugin returned the wrong enumeration engine");
+    const auto count = page->candidates() == nullptr ? 0 : page->candidates()->size();
+    THROW_IF_TRUE(page->offset() != offset || page->total_count() < offset
+                      || count != std::min<uint64_t>(limit, page->total_count() - offset),
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Plugin returned an inconsistent candidate page");
+    const auto* begin = static_cast<const uint8_t*>(data.ptr);
+    return {begin, begin + data.size};
+}
+
+hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+    EnginePluginResourceManager::getEnginePrediction(const hipdnnPluginConstData_t& engineConfig,
+                                                     const hipdnnPluginConstData_t& opGraph,
+                                                     hipdnnEnginePredictionKind_t kind,
+                                                     bool evaluate) const
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        engineConfig.ptr, engineConfig.size);
+    THROW_IF_FALSE(config.isValid(), HIPDNN_STATUS_BAD_PARAM, "Invalid prediction engine config");
+    THROW_IF_TRUE(kind != HIPDNN_ENGINE_PREDICTION_ENGINE
+                      && kind != HIPDNN_ENGINE_PREDICTION_CONFIGURATION,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "Unknown engine prediction kind");
+    THROW_IF_NULL(opGraph.ptr, HIPDNN_STATUS_BAD_PARAM, "Prediction requires a graph");
+    const int64_t engineId = config.engineId();
+    const auto it = _engineIdToHandle.find(engineId);
+    THROW_IF_TRUE(
+        it == _engineIdToHandle.end(), HIPDNN_STATUS_BAD_PARAM, "Prediction engine is not loaded");
+    // RFC 0019 §11.4: refuse an unregistered metric before calling the plugin.
+    const auto* requestedName = config.getEngineConfig().ranking_metric();
+    const auto& metric = heuristics::resolveRankingMetric(
+        requestedName == nullptr ? std::string_view{} : requestedName->string_view());
+    fb::EnginePredictionT result;
+    result.engine_id = engineId;
+    result.kind = static_cast<fb::PredictionKind>(kind);
+    result.metric = std::string(metric.name);
+    const auto invalid = [&](const std::string& reason) {
+        fb::EnginePredictionT failure;
+        failure.engine_id = engineId;
+        failure.kind = result.kind;
+        failure.metric = result.metric;
+        failure.status = fb::PredictionStatus::INVALID;
+        failure.reason = reason;
+        HIPDNN_BACKEND_LOG_WARN("Engine {} prediction rejected: {}", engineId, reason);
+        return failure;
+    };
+    const auto handle = it->second;
+    const auto plugin = _handleToPlugin.at(handle);
+    const auto annotateBuild = [&](fb::EnginePredictionT& prediction) {
+        if(evaluate)
+        {
+            return true;
+        }
+        auto binding = prediction.binding_json.empty()
+                           ? nlohmann::json::object()
+                           : nlohmann::json::parse(prediction.binding_json, nullptr, false);
+        if(!binding.is_object())
+        {
+            return false;
+        }
+        // Diagnostic identity of the loaded binary, not a model compatibility key.
+        binding["provider_build"] = {{"name", std::string(plugin->name())},
+                                     {"version", std::string(plugin->version())},
+                                     {"api_version", std::string(plugin->apiVersion())}};
+        prediction.binding_json = binding.dump();
+        return true;
+    };
+    hipdnnPluginConstData_t data{nullptr, 0};
+    const auto release = [plugin, handle](hipdnnPluginConstData_t* owned) {
+        if(owned->ptr != nullptr)
+        {
+            try
+            {
+                plugin->destroyEngineDetails(handle, owned);
+            }
+            catch(const std::exception& error)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release engine prediction: {}", error.what());
+            }
+            catch(...)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release engine prediction");
+            }
+        }
+    };
+    // Establish ownership before entering the plugin, including its failure paths.
+    const std::unique_ptr<hipdnnPluginConstData_t, decltype(release)> guard(&data, release);
+    try
+    {
+        if(!plugin->getPrediction(handle, &engineConfig, &opGraph, kind, evaluate, &data))
+        {
+            result.reason = "Engine does not expose this prediction capability";
+            if(!annotateBuild(result))
+            {
+                return invalid("Prediction binding must be a JSON object");
+            }
+            return result;
+        }
+    }
+    catch(const HipdnnException& error)
+    {
+        return invalid(error.what());
+    }
+    constexpr size_t MAX_PREDICTION_BYTES = size_t{16} * 1024 * 1024;
+    if(data.ptr == nullptr || data.size == 0 || data.size > MAX_PREDICTION_BYTES)
+    {
+        return invalid("Empty or oversized prediction response");
+    }
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
+    if(!verifier.VerifyBuffer<fb::EnginePrediction>())
+    {
+        return invalid("Malformed prediction response");
+    }
+    const auto* response = fb::GetEnginePrediction(data.ptr);
+    // Checked before UnPackTo() below, which runs for every status.
+    if(!everyKnobValueIsPresent(response->engine_config()))
+    {
+        return invalid("Prediction configuration names a knob value it does not carry");
+    }
+    if(response->engine_id() != engineId || response->kind() != result.kind)
+    {
+        return invalid("Prediction engine or layer does not match the request");
+    }
+    // An answer in another metric is invalid whatever its status; it is never converted
+    // (RFC 0019 §4.4).
+    const auto answered
+        = response->metric() == nullptr ? std::string_view{} : response->metric()->string_view();
+    if(answered != metric.name)
+    {
+        return invalid("Prediction answered in metric '" + std::string(answered)
+                       + "' instead of the requested '" + result.metric + "'");
+    }
+    if(response->status() != fb::PredictionStatus::UNAVAILABLE
+       && response->status() != fb::PredictionStatus::AVAILABLE
+       && response->status() != fb::PredictionStatus::INVALID)
+    {
+        return invalid("Unknown prediction status");
+    }
+    if(response->status() == fb::PredictionStatus::AVAILABLE)
+    {
+        if(!evaluate || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, response->value()))
+        {
+            return invalid("Available prediction needs an evaluation and a valid '" + result.metric
+                           + "' value");
+        }
+        // An engine estimate only ever comes from a UHD, so it names one. A configuration
+        // answer may instead be a measured value (RFC 0019 §5 step 9), which names no UHD.
+        if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE
+           && (response->uhd_id() == nullptr || response->uhd_id()->empty()))
+        {
+            return invalid("Available engine prediction needs the UHD that evaluated it");
+        }
+        const auto* selected = response->engine_config();
+        if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
+           && (selected == nullptr || selected->engine_id() != engineId))
+        {
+            return invalid("Configuration prediction must preserve the requested engine");
+        }
+        if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE && selected != nullptr)
+        {
+            return invalid("Engine-level prediction must not select a configuration");
+        }
+        if(selected != nullptr && selected->ranking_metric() != nullptr
+           && !selected->ranking_metric()->empty()
+           && selected->ranking_metric()->string_view() != metric.name)
+        {
+            return invalid("Configuration prediction selected a configuration by another metric");
+        }
+    }
+    response->UnPackTo(&result);
+    if(!annotateBuild(result))
+    {
+        return invalid("Prediction binding must be a JSON object");
+    }
+    if(result.status != fb::PredictionStatus::AVAILABLE)
+    {
+        result.value = 0.0;
+        result.engine_config.reset();
+        return result;
+    }
+    if(result.engine_config != nullptr)
+    {
+        // The configuration was chosen by this metric, so it builds by it too (§11.4).
+        result.engine_config->ranking_metric = result.metric;
+        const auto& requested = config.getEngineConfig();
+        if(requested.knobs() != nullptr)
+        {
+            for(const auto* knob : *requested.knobs())
+            {
+                const std::unique_ptr<fb::KnobSettingT> constraint(knob->UnPack());
+                const auto matching
+                    = std::find_if(result.engine_config->knobs.begin(),
+                                   result.engine_config->knobs.end(),
+                                   [&](const auto& setting) {
+                                       return setting != nullptr && *setting == *constraint;
+                                   });
+                if(matching == result.engine_config->knobs.end())
+                {
+                    return invalid("Prediction changed an explicit configuration constraint");
+                }
+            }
+        }
+    }
+    return result;
 }
 
 void EnginePluginResourceManager::destroyEngineDetails(int64_t engineId,
@@ -658,6 +1100,44 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         deviceBuffers.push_back(buffer);
     }
 
+    // Enforce each tensor's required device-pointer byte alignment. Alignments
+    // are carried on the execution plan (populated from the graph at finalize and
+    // preserved across plan serialization), keyed by tensor uid. Null pointers
+    // (absent optional tensors) and uids without a recorded alignment are skipped.
+    const auto& planTensorUids = executionPlanDesc->getTensorUids();
+    const auto& planTensorAlignments = executionPlanDesc->getTensorAlignments();
+    if(!planTensorAlignments.empty() && planTensorUids.size() == planTensorAlignments.size())
+    {
+        std::unordered_map<int64_t, int64_t> alignmentByUid;
+        alignmentByUid.reserve(planTensorUids.size());
+        for(size_t i = 0; i < planTensorUids.size(); ++i)
+        {
+            alignmentByUid.emplace(planTensorUids[i], planTensorAlignments[i]);
+        }
+
+        for(const auto& buffer : deviceBuffers)
+        {
+            if(buffer.ptr == nullptr)
+            {
+                continue;
+            }
+
+            const auto it = alignmentByUid.find(buffer.uid);
+            if(it == alignmentByUid.end() || it->second <= 0)
+            {
+                continue;
+            }
+
+            const auto alignment = static_cast<uintptr_t>(it->second);
+            const auto address = reinterpret_cast<uintptr_t>(buffer.ptr);
+            THROW_IF_TRUE(address % alignment != 0,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Tensor uid " + std::to_string(buffer.uid)
+                              + " device pointer is not aligned to the required "
+                              + std::to_string(it->second) + " bytes");
+        }
+    }
+
     const auto& overrideUniqueIds = variantPackDesc->getOverrideUniqueIds();
     const auto& overrideShapesFlat = variantPackDesc->getOverrideShapes();
     const auto& overrideStridesFlat = variantPackDesc->getOverrideStrides();
@@ -693,9 +1173,23 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
                        "carries override-tensor selectors.");
 
+        // Defense-in-depth recheck of the override-execute floor. Override-shape
+        // support is hipDNN-owned routing metadata carried in the execution plan
+        // envelope, so it is cheap and correct to re-verify here that the selected
+        // plugin still meets the override API floor. Pass-by-value is intentionally
+        // false: per RFC 0009, once a serialized plan resolves to an engine id the
+        // plugin owns its own payload versioning/compatibility, so hipDNN does not
+        // re-gate feature floors (like pbv) that live in the plugin payload rather
+        // than the envelope.
         const auto pluginApiVersion = plugin->parsedApiVersion();
         THROW_IF_FALSE(pluginApiVersion.has_value()
-                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true),
+                           && *pluginApiVersion
+                                  >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+                                      true,
+                                      /*isRuntimePassByValue=*/false,
+                                      /*isRaggedTensorEnabled=*/false,
+                                      /*hasNonDefaultTensorAlignment=*/false,
+                                      /*isRaggedOffsetMultiplier=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

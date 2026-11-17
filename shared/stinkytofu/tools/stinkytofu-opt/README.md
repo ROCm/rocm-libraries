@@ -64,6 +64,9 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 **Options:**
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
 - `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
+- `--tensor-load-wmma-space=<int>`: Scheduler tuning knob for tensor-load/WMMA spacing (`TensorLoadWmmaSpace`). `0` disables this adjustment; values `> 0` apply the CDNA5 barrier-threshold offset.
+- `--tensor-load-ds-load-gap-cycles=<int>`: Extra cycles between an after-barrier and the before-side ds_loads on gap placement (`TensorLoadDsLoadGapCycles`). Default `64`; `0` disables the extra gap.
+- `--time-passes`: Report per-pass wall time on stderr (self / total / runs, slowest first)
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
@@ -147,7 +150,7 @@ Apply multiple optimization passes in sequence:
 `RemoveInstructionPass` deletes every instruction whose unified opcode matches
 one of the comma-separated mnemonics. See
 [RemoveInstructionPass](../../docs/user/remove-instruction-pass.md) for gfx1250
-pipeline integration and Tensile `ModuleOptions.RemoveInstructions`.
+pipeline integration and TensileLite `ModuleOptions.RemoveInstructions`.
 
 ```bash
 # Remove tensor_load_to_lds only
@@ -382,4 +385,4 @@ Use `--remarks` to enable optimization remarks on stderr. Remarks report code qu
     --remarks --print-output
 ```
 
-See [Global Parameters](../../docs/user/global-parameters.md) for the `StinkyTofuEnableRemarks` equivalent in the Tensile/KernelWriter path.
+See [Global Parameters](../../docs/user/global-parameters.md) for the `StinkyTofuEnableRemarks` equivalent in the TensileLite/KernelWriter path.

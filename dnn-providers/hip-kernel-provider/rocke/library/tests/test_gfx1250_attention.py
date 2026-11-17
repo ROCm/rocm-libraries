@@ -13,7 +13,7 @@ Covers the wave32 WMMA attention surface:
 
 The GPU probe class is skipped unless run on a gfx1250 device.
 
-    PYTHONPATH=Python python3 -m pytest rocke/tests/test_gfx1250_attention.py -k "not Gpu"
+    PYTHONPATH=python python3 -m pytest rocke/tests/test_gfx1250_attention.py -k "not Gpu"
 """
 
 from __future__ import annotations
@@ -23,22 +23,14 @@ import subprocess
 import sys
 import unittest
 
+from rocke.runtime.hip_module import get_device_arch
+
 # Subprocess `-m` runs (rocke.*, kernels.*, builders.*) resolve through the
 # editable-installed rocke + library packages; no PYTHONPATH wiring needed
 # (see rocke/BUILDING.md).
 
-
-def _device_arch():
-    """(arch_str_or_None) via the rocke HIP runtime (no torch dependency)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:
-        return None
-
-
-_ARCH = _device_arch()
+# Running device's gfx arch via the rocke HIP runtime (no torch dependency).
+_ARCH = get_device_arch(0)
 
 
 class TestGfx1250DenseAttention(unittest.TestCase):
@@ -144,13 +136,15 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
                 sliding_window=128,
                 use_fp8=True,
             )
-            ok, why = au.supports_native_unified_attention_tiled(problem)
+            ok, why = au.supports_native_unified_attention_tiled(problem, "gfx1250")
             self.assertTrue(ok, why)
-            spec = au._tiled_spec_from_problem(problem)
+            spec = au._tiled_spec_from_problem(problem, "gfx1250")
             self.assertEqual(spec.kernel_name().split("_")[2], "tiled")
             self.assertEqual(spec.num_warps, 1)
             self.assertEqual(spec.block_q, 2)
-            meta = au._get_2d_launch_meta(problem, au._tiled_cache_key(problem))
+            meta = au._get_2d_launch_meta(
+                problem, au._tiled_cache_key(problem, "gfx1250"), arch="gfx1250"
+            )
             self.assertEqual(meta.block, (32, 1, 1))
             self.assertEqual(meta.grid, (8, 6, 1))
         finally:
@@ -416,9 +410,9 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
                 use_sinks=True,
                 use_fp8=True,
             )
-            ok, why = au.supports_native_unified_attention_3d_tiled(problem)
+            ok, why = au.supports_native_unified_attention_3d_tiled(problem, "gfx1250")
             self.assertTrue(ok, why)
-            spec = au._tiled_3d_spec_from_problem(problem)
+            spec = au._tiled_3d_spec_from_problem(problem, "gfx1250")
             self.assertEqual(spec.block_q, 2)
             self.assertGreaterEqual(spec.num_segments, 1)
             Spec, _, _, _, _ = au._tiled_3d_impl("gfx1250")
@@ -428,6 +422,12 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 
 
 class TestGfx1250ScalarFp8Attention(unittest.TestCase):
+    # The gates below take the arch as an argument, so this class needs no host
+    # pin: passing "gfx1250" asserts gfx1250 behaviour on any runner. Without an
+    # explicit arch an fnuz-native runner (gfx942) would correctly reject the
+    # OCP-declared fp8 problem built below, and the test would fail for a reason
+    # that has nothing to do with gfx1250.
+
     @staticmethod
     def _small_fp8_problem(**overrides):
         from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -453,7 +453,9 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
             supports_native_unified_attention,
         )
 
-        ok, reason = supports_native_unified_attention(self._small_fp8_problem())
+        ok, reason = supports_native_unified_attention(
+            self._small_fp8_problem(), "gfx1250"
+        )
         self.assertTrue(ok, reason)
         self.assertIn("supported", reason)
 
@@ -463,10 +465,10 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
         )
 
         ok_alibi, reason_alibi = supports_native_unified_attention(
-            self._small_fp8_problem(use_alibi=True)
+            self._small_fp8_problem(use_alibi=True), "gfx1250"
         )
         ok_qq, reason_qq = supports_native_unified_attention(
-            self._small_fp8_problem(use_qq_bias=True)
+            self._small_fp8_problem(use_qq_bias=True), "gfx1250"
         )
         self.assertFalse(ok_alibi)
         self.assertIn("ALiBi", reason_alibi)
@@ -525,12 +527,14 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
                 shapes = qwen3_decode_attention_shapes(kv_storage_dtype=kv_storage)
                 for shape in shapes:
                     problem = self._decode_problem(shape)
-                    ok, why = au.supports_native_unified_attention_3d_tiled(problem)
+                    ok, why = au.supports_native_unified_attention_3d_tiled(
+                        problem, "gfx1250"
+                    )
                     self.assertTrue(ok, f"{kv_storage} kv{shape.kv_len}: {why}")
-                    (_SegSpec, ReduceSpec, build_seg, build_red, _) = au._tiled_3d_impl(
+                    _SegSpec, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(
                         "gfx1250"
                     )
-                    seg_spec = au._tiled_3d_spec_from_problem(problem)
+                    seg_spec = au._tiled_3d_spec_from_problem(problem, "gfx1250")
                     ll = lower_kernel_to_llvm(
                         build_seg(seg_spec, arch="gfx1250"), arch="gfx1250"
                     )
@@ -577,7 +581,7 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
                 dtype=shape.dtype,
                 use_sinks=False,
             )
-            ok, why = supports_native_unified_attention(problem)
+            ok, why = supports_native_unified_attention(problem, "gfx1250")
             self.assertTrue(ok, f"prefill q{shape.q_len}: {why}")
             ll = lower_kernel_to_llvm(
                 build_unified_attention_2d(

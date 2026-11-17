@@ -1,0 +1,59 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+MinimumRequiredVersion: 5.0.0
+ScheduleName: gfx1250
+ArchitectureName: gfx1250
+CUCount: null
+DeviceNames: [Device 73f0]
+ProblemType:
+  Batched: true
+  DataType: 7
+  OperationType: GEMM
+  StridedBatched: true
+  TransposeA: 0
+  TransposeB: 0
+  UseBeta: true
+DefaultSolution:
+  DepthU: -1
+  GlobalSplitU: 1
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  WorkGroup: [16, 16, 1]
+Solutions:
+- SolutionIndex: 0
+  SolutionNameMin: Sol_dict_0
+  KernelNameMin: Kernel_dict_0
+  BaseName: Base_dict_0
+  DepthU: 32
+  MacroTile0: 16
+  MacroTile1: 16
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  WorkGroup: [16, 2, 1]
+  _staggerStrideShift: 2
+- SolutionIndex: 1
+  SolutionNameMin: Sol_dict_1
+  KernelNameMin: Kernel_dict_1
+  BaseName: Base_dict_1
+  DepthU: 64
+  GlobalSplitU: 4
+  MacroTile0: 32
+  MacroTile1: 32
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  WorkGroup: [32, 4, 1]
+  _staggerStrideShift: 2
+IndexOrder: [2, 3, 0, 1]
+ExactLogic:
+- - [129, 129, 1, 129]
+  - [0, 0.0]
+- - [128, 128, 1, 128]
+  - [1, 0.0]
+- - [256, 256, 1, 256]
+  - [0, 0.0]
+RangeLogic: null
+PerfMetric: DeviceEfficiency
+LibraryType: GridBased

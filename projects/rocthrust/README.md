@@ -1,5 +1,8 @@
 # rocThrust
 
+> [!IMPORTANT]
+> This project location is being retired. rocThrust is now developed as part of the unified [hipCCL](../hipccl) project - see [`projects/hipccl/hipccl3/rocthrust`](../hipccl/hipccl3/rocthrust) for the actively-maintained copy. This location will no longer be actively maintained after ROCm 10.2.
+
 > [!NOTE]
 > The published rocThrust documentation is available [here](https://rocm.docs.amd.com/projects/rocThrust/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
@@ -30,6 +33,8 @@ Optional:
   * This is automatically downloaded and built by the CMake script
 * [doxygen](https://www.doxygen.nl/)
   * Required for building the documentation
+* [AMD SMI](https://github.com/ROCm/amdsmi)
+  * Required only for benchmarks. Building benchmarks is off by default.
 
 For ROCm hardware requirements, refer to:
 
@@ -73,7 +78,7 @@ mkdir build; cd build
 #   BUILD_BENCHMARK              - OFF by default,
 #   ROCPRIM_FETCH_METHOD         - PACKAGE is the default, see below for a description of available options
 #   ROCRAND_FETCH_METHOD         - PACKAGE is the default, see below for a description of available options
-#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (eg. Google Test / Benchmark)
+#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (e.g., Google Test)
 #   BUILD_ADDRESS_SANITIZER      - OFF by default, builds with clang address sanitizer enabled.
 #   RNG_SEED_COUNT               - 0 by default, controls non-repeatable random dataset count
 #   PRNG_SEEDS                   - 1 by default, reproducible seeds to generate random data
@@ -106,7 +111,7 @@ rocThrust can (optionally) automatically fetch a number of dependencies for you 
 Alternatively, it can seach for an existing installation on your system.
 The following cmake build options control how dependencies are located.
 
-- `EXTERNAL_DEPS_FORCE_DOWNLOAD` (default: `OFF`) - when set to `ON`, non-ROCm dependencies (Google Test, Google Benchmark) will always be downloaded, even if they are already installed ony your system. When set to `OFF`, rocThrust first searches for existing installations of the dependencies on your system, and only downloads them if they cannot be found.
+- `EXTERNAL_DEPS_FORCE_DOWNLOAD` (default: `OFF`) - when set to `ON`, non-ROCm dependencies (Google Test) will always be downloaded, even if they are already installed on your system. When set to `OFF`, rocThrust first searches for existing installations of the dependencies on your system, and only downloads them if they cannot be found.
 
 - `ROCPRIM_FETCH_METHOD` (default: `PACKAGE`) - controls the way that the rocPRIM dependency is fetched. This option must be set to one of:
   - `PACKAGE` - searches for an existing installation of the dependency. If it is not found, rocThrust will fall back to using the `DOWNLOAD` setting (below).
@@ -291,6 +296,8 @@ make -j4
 ```
 
 ## Running benchmarks
+
+rocThrust uses [primbench](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench) for benchmarking; see its [command-line options](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench#command-line-options) for advanced usage.
 
 ```sh
 # Go to rocThrust build directory

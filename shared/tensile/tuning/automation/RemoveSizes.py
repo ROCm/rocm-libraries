@@ -27,7 +27,7 @@
 # $ python3 RemoveSizes.py [-v] <input lib logic> <output lib logic> <csv file with sizes>
 
 from yaml import SafeDumper as yamlDumper
-from yaml import SafeLoader as yamlLoader
+from yaml import SafeLoader
 
 import argparse
 import csv
@@ -58,7 +58,7 @@ def main():
         print("Sizes File  : " + args.sizeList)
 
     with open(args.inLogic) as inFile:
-        logicData = yaml.load(inFile, yamlLoader)
+        logicData = yaml.load(inFile, SafeLoader)
 
     mapping = logicData[7]
     if args.verbose:

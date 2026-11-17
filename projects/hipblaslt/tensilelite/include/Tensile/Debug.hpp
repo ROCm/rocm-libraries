@@ -35,8 +35,6 @@
 #include <roctracer/roctx.h>
 #endif
 
-#include <Tensile/Singleton.hpp>
-
 namespace TensileLite
 {
     using StringSet = std::set<std::string>;
@@ -44,9 +42,11 @@ namespace TensileLite
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug
     {
     public:
+        static Debug& Instance();
+
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
         bool printPredicateEvaluationVerbose() const;
@@ -77,6 +77,23 @@ namespace TensileLite
         // Reports the effective Stream-K (SK5 hybrid) scheduling mode selected at
         // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
         bool printStreamKModeSelection() const;
+
+        // Emits the canonical persistent launch summary. Actual StreamK
+        // launches also retain their compatibility decision fields. Purely
+        // observational; TENSILE_DB bit 0x200000 retains its existing meaning.
+        bool printPersistentLaunchSummary() const;
+        // Legacy source/ABI accessor for the same diagnostic control.
+        bool printStreamKLaunchSummary() const;
+
+        // Reports, on stderr, every problem for which solution selection came
+        // back with nothing, together with the uniform-summation-order clauses
+        // that eliminated the candidates. Answers "why does my problem have no
+        // solution when uniform summation order is on" without requiring the
+        // gate to be re-derived from outside the library. Gated by TENSILE_DB
+        // bit 0x400000: a dedicated bit, so it can be turned on by itself
+        // without also enabling per-call tracing or the StreamK launch summary
+        // on 0x200000 above.
+        bool printNoSolutionUniformSummationOrder() const;
 
         bool naivePropertySearch() const;
 
@@ -149,8 +166,6 @@ namespace TensileLite
         }
 
     private:
-        friend LazySingleton<Debug>;
-
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;
@@ -172,4 +187,3 @@ namespace TensileLite
         Debug();
     };
 } // namespace TensileLite
-

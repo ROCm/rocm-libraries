@@ -153,3 +153,49 @@ TEST(TestEngineOrdering, UnknownEngineIdsTreatedAsMiddlePriority)
     EXPECT_EQ(engineIds[1], unknown1);
     EXPECT_EQ(engineIds[2], unknown2);
 }
+
+TEST(TestEngineOrdering, AsmRankedAboveRocke)
+{
+    // When both the ASM (ASM_SDPA) and rocKE engines are applicable, ASM
+    // must be selected first. Start reversed to prove the sort reorders them.
+    std::vector<int64_t> engineIds = {ROCKE_ENGINE_ID, ASM_SDPA_ENGINE_ID};
+    sortEngineIds(engineIds);
+
+    ASSERT_EQ(engineIds.size(), 2u);
+    EXPECT_EQ(engineIds[0], ASM_SDPA_ENGINE_ID) << "ASM (ASM_SDPA) should rank above rocKE";
+    EXPECT_EQ(engineIds[1], ROCKE_ENGINE_ID);
+}
+
+TEST(TestEngineOrdering, RockeSelectedWhenAsmAbsent)
+{
+    // With ASM not applicable, rocKE still ranks ahead of generic "other"
+    // engines and MIOPEN_ENGINE_DETERMINISTIC, matching prior behaviour.
+    const int64_t otherEngine = HIPBLASLT_ENGINE_ID;
+    std::vector<int64_t> engineIds = {MIOPEN_ENGINE_DETERMINISTIC_ID, otherEngine, ROCKE_ENGINE_ID};
+    sortEngineIds(engineIds);
+
+    ASSERT_EQ(engineIds.size(), 3u);
+    EXPECT_EQ(engineIds[0], ROCKE_ENGINE_ID) << "rocKE ranks above other engines when ASM absent";
+    EXPECT_EQ(engineIds[1], otherEngine);
+    EXPECT_EQ(engineIds[2], MIOPEN_ENGINE_DETERMINISTIC_ID);
+}
+
+TEST(TestEngineOrdering, FullPriorityOrdering)
+{
+    // Full ordering: MIOPEN_ENGINE > ASM_SDPA (ASM) > ROCKE > others >
+    // MIOPEN_ENGINE_DETERMINISTIC. Provide the candidates shuffled.
+    const int64_t otherEngine = HIPBLASLT_ENGINE_ID;
+    std::vector<int64_t> engineIds = {MIOPEN_ENGINE_DETERMINISTIC_ID,
+                                      ROCKE_ENGINE_ID,
+                                      otherEngine,
+                                      ASM_SDPA_ENGINE_ID,
+                                      MIOPEN_ENGINE_ID};
+    sortEngineIds(engineIds);
+
+    ASSERT_EQ(engineIds.size(), 5u);
+    EXPECT_EQ(engineIds[0], MIOPEN_ENGINE_ID);
+    EXPECT_EQ(engineIds[1], ASM_SDPA_ENGINE_ID);
+    EXPECT_EQ(engineIds[2], ROCKE_ENGINE_ID);
+    EXPECT_EQ(engineIds[3], otherEngine);
+    EXPECT_EQ(engineIds[4], MIOPEN_ENGINE_DETERMINISTIC_ID);
+}

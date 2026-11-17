@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -206,6 +206,20 @@ constexpr double
     return (reads + writes) / 1e9;
 }
 
+template <typename T, typename I>
+constexpr double
+    bellmm_gbyte_count(I Mb, I ell_cols, I ell_block_size, I nnz_B, I nnz_C, bool beta = false)
+{
+    //reads
+    size_t reads = sizeof(I) * Mb * ell_cols / ell_block_size
+                   + sizeof(T) * (Mb * ell_cols * ell_block_size + nnz_B + (beta ? nnz_C : 0));
+
+    //writes
+    size_t writes = sizeof(T) * nnz_C;
+
+    return (reads + writes) / 1e9;
+}
+
 template <typename T, typename I, typename J>
 constexpr double csrmm_gbyte_count(J M, I nnz_A, I nnz_B, I nnz_C, bool beta = false)
 {
@@ -331,6 +345,27 @@ constexpr double sddmm_coo_gbyte_count(J M, J N, J K, I nnz, bool beta = false)
 {
     return (size_t(nnz) * 2 * sizeof(I) + size_t(nnz) * (K * 2 + ((beta) ? 1 : 0)) * sizeof(T))
            / 1e9;
+}
+
+template <typename T, typename I, typename J>
+constexpr double sddmm_csr_batched_gbyte_count(
+    J M, J N, J K, I nnz, J batch_count_A, J batch_count_B, J batch_count_C, bool beta = false)
+{
+    // read A matrix
+    size_t readA = size_t(batch_count_A) * size_t(nnz) * size_t(K) * sizeof(T);
+
+    // read B matrix
+    size_t readB = size_t(batch_count_B) * size_t(nnz) * size_t(K) * sizeof(T);
+
+    // read C matrix (row pointers, column indices and optional beta contribution)
+    size_t readC = size_t(batch_count_C)
+                   * ((size_t(M) + 1) * sizeof(I) + size_t(nnz) * sizeof(J)
+                      + ((beta) ? size_t(nnz) * sizeof(T) : 0));
+
+    // write C matrix
+    size_t writeC = size_t(batch_count_C) * size_t(nnz) * sizeof(T);
+
+    return (readA + readB + readC + writeC) / 1e9;
 }
 
 template <typename T, typename I, typename J>

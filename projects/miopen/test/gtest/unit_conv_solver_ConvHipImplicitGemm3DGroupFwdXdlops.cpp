@@ -75,7 +75,7 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     else
     {
         supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
-                           Gpu::gfx115X | Gpu::gfx120X;
+                           Gpu::gfx115X | Gpu::gfx120X | Gpu::gfx125X;
     }
 #else
     Gpu supportedDevices = Gpu::None;
@@ -213,4 +213,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(Gpu::None), testing::Values(GetDeterministicConvCase())));
+    testing::Combine(testing::Values(GetTestParams<TestDataType::FP16>()),
+                     testing::Values(GetDeterministicConvCase())));

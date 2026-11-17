@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -129,6 +129,27 @@ struct real_type<rocfft_complex<rocfft_fp16>>
     typedef rocfft_fp16 type;
 };
 
+// Define real_type for types that are already reals, to simplify
+// code generation when we know we want a real but don't know if the
+// incoming type is real or complex
+template <>
+struct real_type<float>
+{
+    typedef float type;
+};
+
+template <>
+struct real_type<double>
+{
+    typedef double type;
+};
+
+template <>
+struct real_type<rocfft_fp16>
+{
+    typedef rocfft_fp16 type;
+};
+
 template <class T>
 using real_type_t = typename real_type<T>::type;
 
@@ -155,59 +176,52 @@ using complex_type_t = typename complex_type<T>::type;
 // complex_type_t<double> double_complex_val;
 
 template <typename T>
-__device__ T TWLstep1(const T* twiddles, size_t u)
+__device__ T TWLstep(const T* twiddles, size_t u, unsigned int step)
 {
     size_t j      = u & 255;
     T      result = twiddles[j];
+
+#pragma unroll
+    for(unsigned int i = 0; i < step - 1; i++)
+    {
+        u >>= 8;
+        j      = u & 255;
+        result = T(
+            (result.x * twiddles[256 * (i + 1) + j].x - result.y * twiddles[256 * (i + 1) + j].y),
+            (result.y * twiddles[256 * (i + 1) + j].x + result.x * twiddles[256 * (i + 1) + j].y));
+    }
+
     return result;
+}
+
+template <typename T>
+__device__ T TWLstep1(const T* twiddles, size_t u)
+{
+    return TWLstep(twiddles, u, 1);
 }
 
 template <typename T>
 __device__ T TWLstep2(const T* twiddles, size_t u)
 {
-    size_t j      = u & 255;
-    T      result = twiddles[j];
-    u >>= 8;
-    j      = u & 255;
-    result = T((result.x * twiddles[256 + j].x - result.y * twiddles[256 + j].y),
-               (result.y * twiddles[256 + j].x + result.x * twiddles[256 + j].y));
-    return result;
+    return TWLstep(twiddles, u, 2);
 }
 
 template <typename T>
 __device__ T TWLstep3(const T* twiddles, size_t u)
 {
-    size_t j      = u & 255;
-    T      result = twiddles[j];
-    u >>= 8;
-    j      = u & 255;
-    result = T((result.x * twiddles[256 + j].x - result.y * twiddles[256 + j].y),
-               (result.y * twiddles[256 + j].x + result.x * twiddles[256 + j].y));
-    u >>= 8;
-    j      = u & 255;
-    result = T((result.x * twiddles[512 + j].x - result.y * twiddles[512 + j].y),
-               (result.y * twiddles[512 + j].x + result.x * twiddles[512 + j].y));
-    return result;
+    return TWLstep(twiddles, u, 3);
 }
 
 template <typename T>
 __device__ T TWLstep4(const T* twiddles, size_t u)
 {
-    size_t j      = u & 255;
-    T      result = twiddles[j];
-    u >>= 8;
-    j      = u & 255;
-    result = T((result.x * twiddles[256 + j].x - result.y * twiddles[256 + j].y),
-               (result.y * twiddles[256 + j].x + result.x * twiddles[256 + j].y));
-    u >>= 8;
-    j      = u & 255;
-    result = T((result.x * twiddles[512 + j].x - result.y * twiddles[512 + j].y),
-               (result.y * twiddles[512 + j].x + result.x * twiddles[512 + j].y));
-    u >>= 8;
-    j      = u & 255;
-    result = T((result.x * twiddles[768 + j].x - result.y * twiddles[768 + j].y),
-               (result.y * twiddles[768 + j].x + result.x * twiddles[768 + j].y));
-    return result;
+    return TWLstep(twiddles, u, 4);
+}
+
+template <typename T>
+__device__ T TWLstep5(const T* twiddles, size_t u)
+{
+    return TWLstep(twiddles, u, 5);
 }
 
 #define TWIDDLE_STEP_MUL_FWD(TWFUNC, TWIDDLES, INDEX, REG) \

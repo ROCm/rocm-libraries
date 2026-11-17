@@ -188,6 +188,25 @@ public:
         forward_phase = phase;
         return *this;
     }
+
+    /**
+     * @brief Custom equality hook for RMSNorm-specific attributes
+     *
+     * Compares the forward phase, which determines the semantics of the
+     * normalization (e.g. whether inv_rms is computed) rather than tensor
+     * layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const RMSNormAttributes& other) const
+    {
+        return forward_phase == other.forward_phase;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const RMSNormAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 
 using Rmsnorm_attributes = RMSNormAttributes; // NOLINT(readability-identifier-naming)

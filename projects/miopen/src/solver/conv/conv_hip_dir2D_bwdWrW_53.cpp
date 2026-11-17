@@ -26,7 +26,7 @@
 
 #include <miopen/conv/solvers.hpp>
 
-#include <miopen/conv/invokers/ocl_wrw_rdc.hpp>
+#include <miopen/conv/invokers/wrw_rdc.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/env.hpp>
@@ -601,7 +601,7 @@ ConvSolution ConvHipBwdWrW53::GetSolution(const ExecutionContext& ctx,
 
     const auto ws_sz       = GetWorkspaceSize(ctx, problem);
     result.workspace_sz    = ws_sz;
-    result.invoker_factory = miopen::conv::MakeOclWrWRdcInvokerFactory(n_batch_blks > 1, ws_sz);
+    result.invoker_factory = miopen::conv::MakeWrWRdcInvokerFactory(n_batch_blks > 1, ws_sz);
 
     return result;
 }

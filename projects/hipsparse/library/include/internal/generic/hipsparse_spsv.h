@@ -211,7 +211,6 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spsv_uniform">Uniform Precisions</caption>
 *  <tr><th>A / X / Y / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F

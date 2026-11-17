@@ -99,7 +99,7 @@ plan below shifts.
   HSACO bytes** (loadable via `hipModuleLoadData`, no Python state
   required at launch time). (This finding reflects the M1 state, when
   the DSL was Python-only. There is now also a peer C++ engine
-  (`Cpp/`) that lowers byte-identical LLVM-IR; the provider has
+  (`cpp/`) that lowers byte-identical LLVM-IR; the provider has
   since shipped with three execution modes — prebuilt HSACO, JIT from
   shipped `.ll` via comgr, and a Python-free C-JIT path — so the
   "runtime JIT requires a Python interpreter" implication below is
@@ -323,7 +323,7 @@ src/adapters/                                    (C++, the durable surface)
         ElementwiseSpec.hpp                      # mirrors the Python dataclass
     # gemm/, conv/ … added in later milestones
 
-Python/rocke_provider/                          (Python, the throwaway glue)
+python/rocke_provider/                          (Python, the throwaway glue)
     __init__.py
     compile_service.py                           # ~30 LoC entry point
 ```
@@ -371,10 +371,10 @@ real CPU-reference verification, both of which are meaningful only on a
 non-trivial kernel.
 
 **Op:** forward 2D convolution via `build_implicit_gemm_conv`
-(`dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/common/conv_implicit_gemm.py`).
+(`dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`).
 
 **Shape:** the bake-off shape from
-`dnn-providers/hip-kernel-provider/rocKE/Python/rocke/examples/common/bake_off_implicit_gemm.py`
+`dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
 — `N=8, H=W=56, C=64, K=64, Y=X=3, stride=1, pad=1, dilation=1`, FP16,
 NHWC. This is the smallest shape we know already compiles cleanly; the
 example documents `248 TFLOPS per-launch / 280 TFLOPS graph 5×200` on
@@ -385,13 +385,18 @@ kernel (`bake_off_implicit_gemm.py:16–17`). Tolerable for an
 integration test; the second invocation hits the JIT cache and is
 sub-millisecond.
 
-**Launch ABI:** 6 kernel args — `A_ptr, B_ptr, D_ptr` (FP16 globals)
-plus `A_bytes, B_bytes, D_bytes` (i32). Grid is 2D over `(num_pid_n,
-num_pid_m, 1)` where `num_pid_m = ceil((N·Ho·Wo)/tile_m)` and
-`num_pid_n = ceil(K/tile_n)`. Block size: `warp_m · warp_n ·
-wave_size`. All of this is derivable from the spec at JIT time and
-emitted by the DSL into the kernel artifact's launch metadata — the C++
-side does not hard-code it.
+**Launch ABI:** the kernel is AOT-compiled and shape-generic, so the
+shape travels as kernargs: `A_ptr, B_ptr, D_ptr` (FP16 globals) and
+`A_bytes, B_bytes, D_bytes` (i32), then the conv problem block
+(extents, strides, padding, dilation, groups, per-group channels, GEMM
+dims, operand strides, magic-division constants and the tile counts),
+in the order of `kernels.common.conv_abi.conv_arg_names("fwd")` (C++:
+`rocke_conv_arg_names`). `ConvArgs.from_problem(...)` computes every
+value on the host. Grid is `(num_pid_n, num_pid_m, groups)` where
+`num_pid_m = ceil((N·Ho·Wo)/tile_m)` and `num_pid_n = ceil(kpg/tile_n)`.
+Block size: `warp_m · warp_n · wave_size`. All of this is recorded in
+the kernel artifact's launch metadata (`args_signature`) — the C++ side
+does not hard-code it.
 
 ### Spec mirroring scope
 
@@ -572,7 +577,7 @@ simplicity.
 - **P-4.** Confirm the `rocke` package version surface. Does
   `rocke.__version__` exist? If not, plan a small upstream patch to
   add it (we need it for the cache key).
-- **P-5.** Read `instances/common/conv_implicit_gemm.py` and
+- **P-5.** Read `library/kernels/common/conv_implicit_gemm.py` and
   `examples/common/bake_off_implicit_gemm.py` end to end. Inventory the 36
   spec fields, mark which are graph-derived vs constexpr defaults, and
   capture the bake-off knob values verbatim. This becomes the
@@ -784,7 +789,7 @@ listed below for traceability; full rationale is in the change log
 - ~~`[Q1b]`~~ — pybind11 confirmed as the binding library; raw CPython
   C API is the fallback. *(v0.4)*
 - ~~`[Q2]`~~ — Provider-local Python service confirmed
-  (`dnn-providers/rocke-provider/Python/rocke_provider/compile_service.py`).
+  (`dnn-providers/rocke-provider/python/rocke_provider/compile_service.py`).
   C++ adapter logic lives under `src/adapters/<op>/`. *(v0.4)*
 - ~~`[Q3]`~~ — First kernel is **implicit-GEMM convolution** with the
   bake-off shape (N=8, 56×56×64→64, 3×3, stride 1, pad 1, FP16, NHWC).
@@ -820,10 +825,10 @@ listed below for traceability; full rationale is in the change log
 
 All entries are committed code or in-tree documentation.
 
-- DSL compile entry: `dnn-providers/hip-kernel-provider/rocKE/Python/rocke/helpers/compile.py`
-- DSL instances: `dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/`
-- DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/common/conv_implicit_gemm.py`
-- DSL conv example (shape + perf numbers cited in §4): `dnn-providers/hip-kernel-provider/rocKE/Python/rocke/examples/common/bake_off_implicit_gemm.py`
+- DSL compile entry: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/helpers/compile.py`
+- DSL instances: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/`
+- DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`
+- DSL conv example (shape + perf numbers cited in §4): `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
 - Existing DSL C++ launcher (HSACO load + launch): `projects/composablekernel/example/ck_tile/dsl/common/launcher.cpp`
 - Plugin SDK developer guide: `projects/hipdnn/docs/PluginDevelopment.md`
 - RFC 0002 (Plugin SDK design): `projects/hipdnn/docs/rfcs/0002_PluginSdkDesign.md`
@@ -868,7 +873,7 @@ All entries are committed code or in-tree documentation.
   (subprocess) as the fallback if libpython linkage proves
   unworkable. **Q1b** pybind11 as the binding library, raw CPython C
   API as fallback. **Q2** the Python compile service lives provider-
-  local at `dnn-providers/rocke-provider/Python/rocke_provider/`,
+  local at `dnn-providers/rocke-provider/python/rocke_provider/`,
   not under `rocke/`. Five open questions remain (Q3–Q8); the most
   load-bearing is Q3 (first kernel — default still elementwise).
 - **v0.5** (2026-05-21) — **Q3 resolved: implicit-GEMM convolution**

@@ -76,6 +76,17 @@ Tests:
                rocsparse_itilu0_alg_async_inplace]
   matrix: [rocsparse_matrix_random]
 
+# Coverage: exercise the default algorithm selection explicitly.
+- name: csritilu0
+  category: quick
+  function: csritilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  itilu0_alg: [rocsparse_itilu0_alg_default]
+  matrix: [rocsparse_matrix_random]
+
 - name: csritilu0
   category: quick
   function: csritilu0

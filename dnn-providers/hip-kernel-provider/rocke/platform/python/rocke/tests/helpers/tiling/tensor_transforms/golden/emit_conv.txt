@@ -1,0 +1,95 @@
+kernel @emit_test() {
+  %tid1 = gpu.thread_id {axis = "x"} : i32
+  %bid2 = gpu.block_id {axis = "x"} : i32
+  %c3 = arith.constant {ity = "i32", value = 16} : i32
+  %mul4 = arith.mul %bid2, %c3 : i32
+  %range5 = arith.assume_range %mul4 {hi = 72, lo = 0, multiple_of = 1, residue = 0} : i32
+  %c6 = arith.constant {ity = "i32", value = 4} : i32
+  %div7 = arith.div %tid1, %c6 : i32
+  %add8 = arith.add %range5, %div7 : i32
+  %c9 = arith.constant {ity = "i32", value = 4} : i32
+  %mod10 = arith.mod %tid1, %c9 : i32
+  %c11 = arith.constant {ity = "i32", value = 8} : i32
+  %mul12 = arith.mul %mod10, %c11 : i32
+  %c13 = arith.constant {ity = "i32", value = 1} : i32
+  %add14 = arith.add %mul12, %c13 : i32
+  %c15 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh16 = arith.umul_hi_i32 %mul12, %c15 : i32
+  %add17 = arith.add %umh16, %mul12 {wrap = "nuw"} : i32
+  %c18 = arith.constant {ity = "i32", value = 2} : i32
+  %lshr19 = arith.lshr %add17, %c18 : i32
+  %c20 = arith.constant {ity = "i32", value = 3} : i32
+  %mul21 = arith.mul %lshr19, %c20 : i32
+  %sub22 = arith.sub %mul12, %mul21 : i32
+  %c23 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh24 = arith.umul_hi_i32 %lshr19, %c23 : i32
+  %add25 = arith.add %umh24, %lshr19 {wrap = "nuw"} : i32
+  %c26 = arith.constant {ity = "i32", value = 2} : i32
+  %lshr27 = arith.lshr %add25, %c26 : i32
+  %mul28 = arith.mul %lshr27, %c20 : i32
+  %sub29 = arith.sub %lshr19, %mul28 : i32
+  %c30 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh31 = arith.umul_hi_i32 %range5, %c30 : i32
+  %add32 = arith.add %umh31, %range5 {wrap = "nuw"} : i32
+  %c33 = arith.constant {ity = "i32", value = 3} : i32
+  %lshr34 = arith.lshr %add32, %c33 : i32
+  %c35 = arith.constant {ity = "i32", value = 6} : i32
+  %mul36 = arith.mul %lshr34, %c35 : i32
+  %sub37 = arith.sub %range5, %mul36 : i32
+  %c38 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh39 = arith.umul_hi_i32 %div7, %c38 : i32
+  %add40 = arith.add %umh39, %div7 {wrap = "nuw"} : i32
+  %c41 = arith.constant {ity = "i32", value = 3} : i32
+  %lshr42 = arith.lshr %add40, %c41 : i32
+  %mul43 = arith.mul %lshr42, %c35 : i32
+  %sub44 = arith.sub %div7, %mul43 : i32
+  %add45 = arith.add %sub37, %sub44 : i32
+  %ge46 = arith.cmp %add45, %c35 {pred = "ge"} : i1
+  %c47 = arith.constant {ity = "i32", value = 0} : i32
+  %sel48 = arith.select %ge46, %c35, %c47 : i32
+  %sub49 = arith.sub %add45, %sel48 : i32
+  %zx50 = arith.zext %ge46 : i32
+  %c51 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh52 = arith.umul_hi_i32 %lshr34, %c51 : i32
+  %add53 = arith.add %umh52, %lshr34 {wrap = "nuw"} : i32
+  %c54 = arith.constant {ity = "i32", value = 3} : i32
+  %lshr55 = arith.lshr %add53, %c54 : i32
+  %mul56 = arith.mul %lshr55, %c35 : i32
+  %sub57 = arith.sub %lshr34, %mul56 : i32
+  %add58 = arith.add %sub57, %lshr42 : i32
+  %add59 = arith.add %add58, %zx50 : i32
+  %ge60 = arith.cmp %add59, %c35 {pred = "ge"} : i1
+  %sel61 = arith.select %ge60, %c35, %c47 : i32
+  %sub62 = arith.sub %add59, %sel61 : i32
+  %zx63 = arith.zext %ge60 : i32
+  %add64 = arith.add %sub62, %lshr27 : i32
+  %add65 = arith.add %sub49, %sub29 : i32
+  %c66 = arith.constant {ity = "i32", value = 108} : i32
+  %mul67 = arith.mul %zx63, %c66 : i32
+  %mul68 = arith.mul %lshr55, %c66 : i32
+  %c69 = arith.constant {ity = "i32", value = 18} : i32
+  %mul70 = arith.mul %add64, %c69 : i32
+  %mul71 = arith.mul %add65, %c20 : i32
+  %add72 = arith.add %mul67, %mul70 : i32
+  %add73 = arith.add %add72, %mul71 : i32
+  %add74 = arith.add %add73, %sub22 : i32
+  %c75 = arith.constant {ity = "i32", value = 1} : i32
+  %add76 = arith.add %sub22, %c75 : i32
+  %ge77 = arith.cmp %add76, %c20 {pred = "ge"} : i1
+  %sel78 = arith.select %ge77, %c20, %c47 : i32
+  %sub79 = arith.sub %add76, %sel78 : i32
+  %zx80 = arith.zext %ge77 : i32
+  %add81 = arith.add %sub29, %zx80 : i32
+  %ge82 = arith.cmp %add81, %c20 {pred = "ge"} : i1
+  %sel83 = arith.select %ge82, %c20, %c47 : i32
+  %sub84 = arith.sub %add81, %sel83 : i32
+  %zx85 = arith.zext %ge82 : i32
+  %add86 = arith.add %lshr27, %zx85 : i32
+  %add87 = arith.add %sub62, %add86 : i32
+  %add88 = arith.add %sub49, %sub84 : i32
+  %mul89 = arith.mul %add87, %c69 : i32
+  %mul90 = arith.mul %add88, %c20 : i32
+  %add91 = arith.add %mul67, %mul89 : i32
+  %add92 = arith.add %add91, %mul90 : i32
+  %add93 = arith.add %add92, %sub79 : i32
+}

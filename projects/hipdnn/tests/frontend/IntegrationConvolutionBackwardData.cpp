@@ -185,6 +185,7 @@ protected:
             tensors.dx->set_uid(uid++);
         }
         tensors.dx->set_data_type(DataType_t::FLOAT);
+        tensors.dx->set_dim(tensorBundle.dxTensor.dims());
 
         return {graph, tensors};
     }

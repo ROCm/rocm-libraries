@@ -291,6 +291,7 @@ namespace ck
                             addInstance<256 , 128 , 128 , 8  , 8  , ck::Sequence<0 , 1> , ck::Sequence<2>  , ck::Sequence<2>>(opPtrs);
                             addInstance<256 , 128 , 128 , 8  , 8  , ck::Sequence<0 , 1> , ck::Sequence<1>  , ck::Sequence<1>>(opPtrs);
 
+
                         } else if  constexpr(std::is_same_v<InDataTypeTuple, ck::Tuple<ck::half_t>> && NumDim == 4) {
 
                             addInstance<64  , 128 , 32  , 8  , 8  , ck::Sequence<0 , 1> , ck::Sequence<8>  , ck::Sequence<8>>(opPtrs);
@@ -317,6 +318,31 @@ namespace ck
                             // the following instances are the safety net to half and rank4
                             addInstance<64  , 128 , 32  , 8  , 8  , ck::Sequence<0 , 1> , ck::Sequence<2>  , ck::Sequence<2>>(opPtrs);
                             addInstance<64  , 128 , 32  , 8  , 8  , ck::Sequence<0 , 1> , ck::Sequence<1>  , ck::Sequence<1>>(opPtrs);
+
+                        } else if  constexpr(std::is_same_v<InDataTypeTuple, ck::Tuple<double>> && NumDim == 2) {
+
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<4>  , ck::Sequence<4>>(opPtrs);
+
+                            // the following instances are the safety net to double and rank2
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<2>  , ck::Sequence<2>>(opPtrs);
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<1>  , ck::Sequence<1>>(opPtrs);
+
+                        } else if  constexpr(std::is_same_v<InDataTypeTuple, ck::Tuple<double>> && NumDim == 3) {
+
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<4>  , ck::Sequence<4>>(opPtrs);
+
+                            // the following instances are the safety net to double and rank3
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<2>  , ck::Sequence<2>>(opPtrs);
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<1>  , ck::Sequence<1>>(opPtrs);
+
+                        } else if  constexpr(std::is_same_v<InDataTypeTuple, ck::Tuple<double>> && NumDim == 4) {
+
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<4>  , ck::Sequence<4>>(opPtrs);
+
+                            // the following instances are the safety net to double and rank4
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<2>  , ck::Sequence<2>>(opPtrs);
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<1>  , ck::Sequence<1>>(opPtrs);
+
                         } else if  constexpr(InDataTypeTuple::Size() == 1 && (NumDim == 5 || NumDim == 6)){
                             // We haven't yet determined the optimal hyper-parameters for elementwise permute rank<5|6>.
                             // We're currently using these specific hyper-parameters as they performed best across the

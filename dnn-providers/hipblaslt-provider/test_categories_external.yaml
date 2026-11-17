@@ -1,0 +1,32 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipblaslt-provider CTest Categories (RFC0010).
+#
+# hipblaslt-provider's GTest binaries are categorised by the GTest-filtered
+# categories in test_categories.yaml. This file labels the *pre-registered*
+# (non-GTest) CTest tests that share this provider's check targets.
+#
+# The only such test today is the generated <project>_test_name_validation
+# meta-test (see dnn-providers/cmake/Tests.cmake
+# _create_test_name_validation_target_internal). hipblaslt-provider currently
+# sets SKIP_TEST_NAME_VALIDATION ON, so no such test exists yet — this file is
+# still required scaffolding: YAML categorization only activates once
+# test_categories.yaml, this file, and test_categories_integration.yaml all
+# exist (see the EXISTS check in CMakeLists.txt). If test-name validation is
+# ever enabled here, the pattern below labels it into the quick tier so the
+# shared parser's tier cascade (quick -> quick, standard, comprehensive,
+# full) runs it in every cumulative check target.
+#
+# The pattern is the exact CTest test name (hipblaslt-provider_test_name_validation)
+# so it matches only the validation meta-test and never the
+# external-integration-check target, which is categorised separately via
+# test_categories_integration.yaml.
+test_categories:
+  quick:
+    description: "Pre-registered CTest meta-checks (test-name validation)"
+    test_patterns:
+      - "hipblaslt-provider_test_name_validation"
+    labels:
+      - "quick"
+      - "pre-commit"

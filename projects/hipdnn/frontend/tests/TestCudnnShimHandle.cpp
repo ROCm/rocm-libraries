@@ -131,6 +131,14 @@ TEST_F(TestCudnnShimHandle, GetVersionReturnsClaimedRuntimeVersion)
     EXPECT_EQ(cudnnGetVersion(), static_cast<size_t>(CUDNN_VERSION));
 }
 
+TEST_F(TestCudnnShimHandle, GetCudartVersionReturnsClaimedCudaRuntimeVersion)
+{
+    // No CUDA runtime exists behind the shim; the claim only has to clear the
+    // CUDA 12 baseline upstream samples gate on (see cudnn_runtime_version.h).
+    EXPECT_EQ(cudnnGetCudartVersion(), static_cast<size_t>(CUDNN_CUDART_VERSION));
+    EXPECT_GE(cudnnGetCudartVersion(), static_cast<size_t>(12000));
+}
+
 TEST_F(TestCudnnShimHandle, FrontendVersionMacroMatchesUpstreamPin)
 {
     // RFC 0012 §4.8 / §2: pinned to cuDNN FE v1.24.0.
@@ -198,6 +206,7 @@ INSTANTIATE_TEST_SUITE_P(
         HipdnnToCudnnCase{HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED,
                           CUDNN_STATUS_ALLOC_FAILED},
         HipdnnToCudnnCase{HIPDNN_STATUS_EXECUTION_FAILED, CUDNN_STATUS_EXECUTION_FAILED},
+        HipdnnToCudnnCase{HIPDNN_STATUS_VERSION_MISMATCH, CUDNN_STATUS_VERSION_MISMATCH},
         HipdnnToCudnnCase{HIPDNN_STATUS_INTERNAL_ERROR, CUDNN_STATUS_INTERNAL_ERROR},
         // PLUGIN_ERROR has no cuDNN equivalent and falls through to the default.
         HipdnnToCudnnCase{HIPDNN_STATUS_PLUGIN_ERROR, CUDNN_STATUS_INTERNAL_ERROR}));
@@ -237,6 +246,6 @@ INSTANTIATE_TEST_SUITE_P(
         CudnnToHipdnnCase{CUDNN_STATUS_RUNTIME_PREREQUISITE_MISSING, HIPDNN_STATUS_INTERNAL_ERROR},
         CudnnToHipdnnCase{CUDNN_STATUS_RUNTIME_IN_PROGRESS, HIPDNN_STATUS_INTERNAL_ERROR},
         CudnnToHipdnnCase{CUDNN_STATUS_RUNTIME_FP_OVERFLOW, HIPDNN_STATUS_INTERNAL_ERROR},
-        CudnnToHipdnnCase{CUDNN_STATUS_VERSION_MISMATCH, HIPDNN_STATUS_INTERNAL_ERROR}));
+        CudnnToHipdnnCase{CUDNN_STATUS_VERSION_MISMATCH, HIPDNN_STATUS_VERSION_MISMATCH}));
 
 } // namespace

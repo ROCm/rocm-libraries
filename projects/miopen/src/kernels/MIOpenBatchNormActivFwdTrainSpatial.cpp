@@ -216,7 +216,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
             using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
             fp_type4 read4;
 
-            /*__attribute__((opencl_unroll_hint(2)))*/
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid << 2; k < less4; k += grprd)
             {
@@ -244,7 +243,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         }
         else
         {
-            /*__attribute__((opencl_unroll_hint(4))) */
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
@@ -292,7 +290,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
 
         if constexpr(mio_config::layout_nhwc || rem == 0)
         {
-            /*__attribute__((opencl_unroll_hint(2)))*/
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
@@ -310,7 +307,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         }
         else
         {
-            /*__attribute__((opencl_unroll_hint(2)))*/
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = max_read * lid; k < lessout; k += chunk)
             {

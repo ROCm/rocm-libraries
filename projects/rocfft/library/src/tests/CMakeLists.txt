@@ -18,8 +18,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+include( ../../../cmake/sqlite.cmake )
+
 add_executable( rocfft-internal-test
+  data_layout_test.cpp
   function_pool_test.cpp
+  internal_test_main.cpp
+  rtc_test.cpp
+  ../data_layout.cpp
+  ../rocfft_stub.cpp
 )
 
 target_include_directories( rocfft-internal-test PRIVATE
@@ -37,11 +44,18 @@ set_target_properties( rocfft-internal-test PROPERTIES
 
 target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 
-# Link rocfft-function-pool directly (not roc::rocfft, which would
-# duplicate the function_pool_data singleton).
+# Link rocfft-function-pool directly, not roc::rocfft, to avoid a duplicate function_pool_data singleton.
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
+  rocfft-rtc-cache
+  rocfft-rtc-common
+  rocfft-rtc-compile
+  rocfft-rtc-gen
+  rocfft-rtc-launch
+  rocfft-rtc-subprocess
+  generator
   hip::host
+  ${ROCFFT_SQLITE_LIB}
 )
 
 # Use installed GTest, or build from source (BUILD_GTEST=ON forces this).
@@ -49,7 +63,7 @@ if( NOT BUILD_GTEST )
   find_package( GTest QUIET )
 endif()
 if( GTest_FOUND )
-  target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest GTest::gtest_main )
+  target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest )
 else()
   include( ${PROJECT_SOURCE_DIR}/cmake/build-gtest.cmake )
   add_dependencies( rocfft-internal-test gtest )
@@ -61,6 +75,9 @@ include( GoogleTest )
 gtest_discover_tests( rocfft-internal-test
   TEST_FILTER ${ROCFFT_INTERNAL_TESTS_FILTER}
 )
+
+add_executable( rtc_helper_crash rtc_helper_crash.cpp )
+add_dependencies( rocfft-internal-test rtc_helper_crash )
 
 # Run at build time; --no-tests=error fails if the filter matched nothing.
 if( ROCFFT_RUN_INTERNAL_TESTS )

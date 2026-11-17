@@ -289,6 +289,7 @@ struct scan_config_params
     ::rocprim::block_load_method    block_load_method{};
     ::rocprim::block_store_method   block_store_method{};
     ::rocprim::block_scan_algorithm block_scan_method{};
+    unsigned int                    lookback_scan_state_alignment{};
 };
 
 } // namespace detail
@@ -306,7 +307,8 @@ template<unsigned int                    BlockSize,
          ::rocprim::block_load_method    BlockLoadMethod,
          ::rocprim::block_store_method   BlockStoreMethod,
          ::rocprim::block_scan_algorithm BlockScanMethod,
-         unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+         unsigned int                    SizeLimit         = ROCPRIM_GRID_SIZE_LIMIT,
+         unsigned int                    LookbackAlignment = 0>
 struct scan_config : ::rocprim::detail::scan_config_params
 {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -327,13 +329,17 @@ struct scan_config : ::rocprim::detail::scan_config_params
     /// \brief Limit on the number of items for a single scan kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
 
+    /// \brief Alignment of the lookback state atomic flag
+    static constexpr unsigned int lookback_alignment = LookbackAlignment;
+
     constexpr scan_config()
         : ::rocprim::detail::scan_config_params{
-            {BlockSize, ItemsPerThread, SizeLimit},
-            BlockLoadMethod,
-            BlockStoreMethod,
-            BlockScanMethod
-    } {};
+              {BlockSize, ItemsPerThread, SizeLimit},
+              BlockLoadMethod,
+              BlockStoreMethod,
+              BlockScanMethod,
+              LookbackAlignment
+    } { };
 #endif
 };
 
@@ -1069,7 +1075,7 @@ constexpr partition_config_params partition_config_params_base()
     // Additional shared memory is required by the lookback scan state.
     constexpr unsigned int shared_mem_offset = sizeof(
         typename offset_lookback_scan_prefix_op<offset_t,
-                                                lookback_scan_state<offset_t>>::storage_type);
+                                                lookback_scan_state_impl<offset_t>>::storage_type);
 
     return partition_config_params{
         {fallback_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
@@ -1570,6 +1576,54 @@ constexpr topk_air_config_params topk_air_config_params_base()
     return topk_air_config_params{
         {limit_block_size<256u, sizeof(SizeIn) * 2, ROCPRIM_WARP_SIZE_64>::value,
          ::rocprim::max(1u, 10u / item_scale)}
+    };
+};
+
+} // namespace detail
+
+namespace detail
+{
+struct segmented_topk_air_config_params
+{
+    kernel_config_params kernel_config;
+    unsigned int         radix_bits                   = 8;
+    unsigned int         candidate_buffer_coefficient = 256;
+    unsigned int         thread_counter_limit         = 32;
+};
+} // namespace detail
+
+/// \brief Configuration of device-level segmented_topk_air
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+/// \tparam RadixBits How many bits are processed per iteration.
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int RadixBits,
+         unsigned int CandidateBufferCoefficient = 256,
+         unsigned int ThreadCounterLimit         = 32>
+struct segmented_topk_air_config : public detail::segmented_topk_air_config_params
+{
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+    constexpr segmented_topk_air_config()
+        : detail::segmented_topk_air_config_params{
+              {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT},
+              RadixBits,
+              CandidateBufferCoefficient,
+              ThreadCounterLimit
+    }
+    {}
+#endif
+};
+
+namespace detail
+{
+template<class Key, class Value, class SizeIn>
+constexpr segmented_topk_air_config_params segmented_topk_air_config_params_base()
+{
+    // TODO: calculate default config based on item_scale
+    return segmented_topk_air_config_params{
+        {256, 4}
     };
 };
 

@@ -51,7 +51,7 @@ Since, by default, CMake installs into `/usr/local` (on Linux) and ` C:\Program 
 cmake -B build -S . -D CMAKE_INSTALL_PREFIX=/opt/rocm -D CMAKE_PREFIX_PATH=/opt/rocm
 ```
 
-To simplify the configure and build commands for various build contexts, presets are provided in [CMakePresets.json](../CMakePresets.json). To view available presets:
+To simplify the configure and build commands for various build contexts, presets are provided in [CMakePresets.json](CMakePresets.json). To view available presets:
 
 ```bash
 # show configure presets

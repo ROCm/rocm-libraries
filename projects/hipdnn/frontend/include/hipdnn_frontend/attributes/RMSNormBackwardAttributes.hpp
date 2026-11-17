@@ -187,6 +187,26 @@ public:
         return set_compute_dbias(value);
     }
 
+    /**
+     * @brief Custom equality hook for RMSNorm-backward-specific attributes
+     *
+     * Compares the compute_dbias flag, which determines whether the bias
+     * gradient is computed and thus defines the semantics of the backward
+     * pass rather than tensor layout, so logical and strict equality
+     * coincide here.
+     */
+    bool logicallyEqualsImpl(const RMSNormBackwardAttributes& other) const
+    {
+        return compute_dbias == other.compute_dbias;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const RMSNormBackwardAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
+
 private:
     // NOLINTNEXTLINE(readability-identifier-naming)
     bool compute_dbias = false;

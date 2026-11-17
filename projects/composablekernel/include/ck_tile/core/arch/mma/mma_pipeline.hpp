@@ -3,13 +3,14 @@
 #pragma once
 
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
-#include "ck_tile/core/config.hpp"
-#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
+#include "ck_tile/core/tensor/static_distributed_tensor.hpp"
 
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-#include <concepts>
-#endif
+#include "amdgcn_mma.hpp"
+#include "mma_selector.hpp"
+#include "mma_traits.hpp"
+#include "mma_transforms.hpp"
 
 namespace ck_tile::core::arch::mma {
 
@@ -43,7 +44,7 @@ struct MmaPipelineBase
      * @return The output WaveTile D after accumulation and post-transform.
      */
     template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
-    CK_TILE_DEVICE static decltype(auto) exec(ATensor& a, BTensor& b, CTensor& accum)
+    CK_TILE_DEVICE static decltype(auto) exec(const ATensor& a, const BTensor& b, CTensor& accum)
     {
         if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
         {
@@ -52,7 +53,8 @@ struct MmaPipelineBase
                 decltype(auto) a_transformed = Derived::ATransform::exec(b);
                 decltype(auto) b_transformed = Derived::BTransform::exec(a);
                 decltype(auto) c_transformed = Derived::CTransform::exec(accum);
-                Derived::template execImpl<Params...>(a_transformed, b_transformed, c_transformed);
+                Derived::template execImpl<Params..., SwapReuse_<true>>(
+                    a_transformed, b_transformed, c_transformed);
                 return Derived::DTransform::exec(c_transformed);
             }
             else
@@ -74,12 +76,53 @@ struct MmaPipelineBase
         }
     }
 
-    // Entry point for dense and sparse operations. TODO: Add c_vec = a_vec * b_vec variant.
-    // TODO: Parse params with WarpGemmParamsParser<>
+    // CAB = (C, A, B).
     template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
-    CK_TILE_DEVICE void operator()(CTensor& c, ATensor& a, const BTensor& b) const
+    CK_TILE_DEVICE void operator()(CTensor& c, const ATensor& a, const BTensor& b) const
     {
-        exec<Params...>(a, b, c);
+        static_assert(detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>,
+                                                               typename Derived::CWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>,
+                                                               typename Derived::AWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
+                                                               typename Derived::BWarpTensor>);
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale &&
+                     MmaOpTraits<typename Derived::MmaOp>::IsMfma)
+        {
+            // GFX950 MFMA with (0,0) scale args
+            exec<Params...>(a, b, c, 0, 0);
+        }
+        else
+        {
+            // GFX1250 WMMA with no scale args
+            exec<Params...>(a, b, c);
+        }
+    }
+
+    // AB = (A, B)
+    // Same as CAB when C is not pre-existing
+    template <typename... Params, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE auto operator()(const ATensor& a, const BTensor& b) const
+    {
+        static_assert(detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>,
+                                                               typename Derived::AWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
+                                                               typename Derived::BWarpTensor>);
+        typename Derived::CWarpTensor c;
+        for(index_t i = 0; i < Derived::CWarpTensor::get_thread_buffer_size(); ++i)
+        {
+            c.get_thread_buffer()[i] = typename Derived::CDataType{0};
+        }
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale &&
+                     MmaOpTraits<typename Derived::MmaOp>::IsMfma)
+        {
+            exec<Params...>(a, b, c, 0, 0);
+        }
+        else
+        {
+            exec<Params...>(a, b, c);
+        }
+        return c;
     }
 
     template <typename... Params,
@@ -88,8 +131,11 @@ struct MmaPipelineBase
               typename CTensor,
               typename ScaleADataType,
               typename ScaleBDataType>
-    CK_TILE_DEVICE static decltype(auto)
-    exec(ATensor& a, BTensor& b, CTensor& accum, ScaleADataType& scale_A, ScaleBDataType& scale_B)
+    CK_TILE_DEVICE static decltype(auto) exec(ATensor& a,
+                                              BTensor& b,
+                                              CTensor& accum,
+                                              const ScaleADataType& scale_A,
+                                              const ScaleBDataType& scale_B)
     {
         static_assert(MmaOpTraits<typename Derived::MmaOp>::IsScale,
                       "This exec variant is intended for scale policy structs");
@@ -105,7 +151,7 @@ struct MmaPipelineBase
                 decltype(auto) b_transformed = Derived::BTransform::exec(a);
                 decltype(auto) c_transformed = Derived::CTransform::exec(accum);
                 Derived::template execImpl<Params...>(
-                    a_transformed, b_transformed, c_transformed, scale_A, scale_B);
+                    a_transformed, b_transformed, c_transformed, scale_B, scale_A);
                 return Derived::DTransform::exec(c_transformed);
             }
             else
@@ -124,10 +170,9 @@ struct MmaPipelineBase
         }
     }
 
-    // Entry point for scale operations. TODO: Add c_vec = a_vec * b_vec variant (+ scaleless
-    // variant?)
+    // Scale operations
+    // CABSS = (C, A, B, ScaleA, ScaleB)
     // TODO: Add support for other scale types.
-    // TODO: Parse params with WarpGemmParamsParser<>
     template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
     CK_TILE_DEVICE void operator()(CTensor& c,
                                    const ATensor& a,
@@ -135,19 +180,34 @@ struct MmaPipelineBase
                                    const int32_t& a_scale,
                                    const int32_t& b_scale) const
     {
+        static_assert(detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>,
+                                                               typename Derived::CWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>,
+                                                               typename Derived::AWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
+                                                               typename Derived::BWarpTensor>);
         exec<Params...>(a, b, c, a_scale, b_scale);
     }
+
+    // ABSS = (A, B, ScaleA, ScaleB)
+    // Same as CABSS, but C is not pre-existing
+    template <typename... Params, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE auto operator()(const ATensor& a,
+                                   const BTensor& b,
+                                   const int32_t& a_scale,
+                                   const int32_t& b_scale) const
+    {
+        static_assert(detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>,
+                                                               typename Derived::AWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
+                                                               typename Derived::BWarpTensor>);
+        typename Derived::CWarpTensor c;
+        for(index_t i = 0; i < Derived::CWarpTensor::get_thread_buffer_size(); ++i)
+        {
+            c.get_thread_buffer()[i] = typename Derived::CDataType{0};
+        }
+        exec<Params...>(a, b, c, a_scale, b_scale);
+        return c;
+    }
 };
-
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-
-/**
- * @concept MmaPipelineI
- * @brief  Expresses the meta-data interface required for a CRTP MmaPipeline.
- */
-template <typename Derived>
-concept MmaPipelineInterface = std::derived_from<Derived, MmaPipelineBase<Derived>>;
-
-#endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-
 } // namespace ck_tile::core::arch::mma

@@ -1,0 +1,798 @@
+# TensileLite Testing Strategy
+
+- **Owner:** T.J. Alumbaugh (@talumbau)
+- **Technical Lead:** Tony Davis (@tony-davis)
+
+> TensileLite is the Python code generator that emits hipBLASLt's GEMM kernels and the
+> solution-selection library the C++ runtime loads at dispatch time. It lives inside hipBLASLt's
+> directory tree, but it is consumed by more than one component today (hipSPARSELt links it
+> directly, per that project's own CI configuration), and the intent is for more consumers to follow.
+> That is why its testing strategy is documented separately from hipBLASLt's C++ client and library.
+>
+> This document covers TensileLite's Python unit and characterization suites, the `rocisa` extension
+> that backs its instruction generation, the build-time validation of the logic data it produces, and
+> the CI lanes specific to all of that. For hipBLASLt's own GTest client suite, sanitizer lane, static
+> analysis, and the overall two-CI-system gating picture (of which TensileLite is one large part), see
+> [../TESTING.md](../TESTING.md).
+
+## Contents
+
+- Incident write-ups, headed *How this one was learned*:
+  - [Why the net came before the tests](#how-this-one-was-learned-why-the-net-came-before-the-tests)
+  - [One number and three months](#how-this-one-was-learned-one-number-and-three-months)
+  - [A naming drift silently dropped a working kernel](#how-this-one-was-learned-a-naming-drift-silently-dropped-a-working-kernel)
+- [Unit Testing Strategy](#unit-testing-strategy)
+  - [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)
+- [rocisa](#rocisa)
+- [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic)
+- [Pre-submit / CI Gates](#pre-submit--ci-gates)
+  - [How Multi-Arch CI decides whether TensileLite runs at all](#how-multi-arch-ci-decides-whether-tensilelite-runs-at-all)
+  - [Where these tests actually run](#where-these-tests-actually-run)
+- [Coverage](#coverage)
+- [Improvement Roadmap](#improvement-roadmap), shared with hipBLASLt
+- [Known Risks and Gaps](#known-risks-and-gaps)
+
+## Unit Testing Strategy
+
+**Purpose.** Validate logic that can be exercised without dispatching a kernel to a physical device:
+kernel and solution selection, code generation, and the library logic data that drives them. This is
+where most of hipBLASLt's hardware-independent testing lives overall — see
+[../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) for how this compares to
+the C++ client's much thinner unit-test story.
+
+The code generator is pure Python producing text, so essentially all of it is testable with no GPU.
+How much of that testing is *unit* testing, as opposed to characterization scaffolding, is a separate
+question that this section returns to below. It matters more than the headline coverage number does.
+
+| Item | Detail |
+| --- | --- |
+| Framework | pytest, orchestrated by `tox` |
+| Location | [`tensilelite/Tests/unit/`](tensilelite/Tests/unit/) |
+| Golden snapshots | [syrupy](https://github.com/syrupy-project/syrupy), `.ambr` files in per-module `__snapshots__/` directories |
+| How to run | `cd tensilelite && tox -e unit` (skips the client build), or `tox -e rocisa` for the extension only |
+| Coverage | `tox -e coverage-unit` measures; `tox -e coverage-gate` enforces the floors against what it wrote |
+
+A significant part of that suite is a **characterization suite** under
+[`tensilelite/Tests/unit/characterization/`](tensilelite/Tests/unit/characterization/), established in
+[PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989) and grown considerably since. It now
+spans dozens of characterized module directories, each backed by one or more `.ambr` golden files
+in its own `__snapshots__/` directory, plus a separate codegen harness that characterizes generated
+assembly per architecture. These
+are explicitly *not* specification tests: they pin down what the code does today, including latent
+bugs, so that the ongoing consolidation refactor shows any unintended behavior change as a reviewable
+diff rather than a silent downstream regression. Latent bugs found while characterizing are flagged in
+that directory's `DECISIONS.md` rather than silently fixed, so a golden that encodes wrong behavior is
+documented as such.
+
+**Characterization coverage is not unit coverage, and the coverage numbers do not distinguish them.**
+This is the most important caveat on every percentage in this document. A characterization golden
+proves that behavior did not change. It does not prove the behavior is correct, and by design some
+goldens pin behavior that is known to be wrong. A unit test asserts what the code *should* do. So a
+line reached only by a characterization test is protected against accidental change but unverified,
+and it still owes a real test.
+
+### How this one was learned: why the net came before the tests
+
+> [!IMPORTANT]
+>
+> **The generator that emits every GEMM kernel takes a bug fix every four days on median, and those
+> fixes keep landing on the same few concepts; that is what code with no testable seam does to the
+> people maintaining it, and the goldens exist to create the seam, as scaffolding with a demolition
+> date rather than a destination.**
+>
+> <details>
+> <summary>The full account: the churn, the deadlock, and the plan that makes the net unnecessary</summary>
+>
+> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel is turned into
+> assembly, which makes it one of the highest-consequence files in the repository. It is 20,259 lines.
+> Since the monorepo reorganization in April 2025 it has taken 303 commits from 78 authors, adding
+> 13,810 lines and removing 7,277. That window undercounts the file, which is years older than this
+> repository. Roughly one commit in four is a fix, 74 of them, and the median gap between one fix and
+> the next is four days.
+>
+> The fixes are not scattered. They cluster on a few ideas that keep coming back. Register lifetime is
+> the worst by a distance, with 16 separate fixes to SGPR and VGPR allocation, release, alignment and
+> overlap. Four of those land in a single nine-week run: not releasing certain SGPRs in one TDM kernel
+> variant, then releasing them correctly in another, then releasing them before a StaggerU boundary,
+> then a fourth on instantiation failures in a third variant. After that come tail-loop handling,
+> StreamK and StaggerU work distribution, and sparse metadata at seven fixes each, then LDS layout,
+> addressing and descriptors, and prefetch scheduling at six each. There are seven reverts. One had to
+> be done by hand, deleting 472 lines, because the change had drifted too far to revert mechanically.
+> Another was reverted the same day it landed and reapplied five days later.
+>
+> It is worth being careful about what that history means, because the obvious reading is the wrong
+> one. Read the fix list and what you actually see is people repeatedly getting hard things right in a
+> file where the language offers them no help: registers allocated by hand with no type to check the
+> arithmetic, assembly built up as text, and correctness observable only on hardware.
+> `KernelWriterAssembly.py` holds a single class with 287 methods and 290 distinct instance
+> attributes. `KernelWriter.py` has one method 3,284 lines long. `mfmaIter` contains a single
+> 34-branch `if`/`elif` chain. Landing a correct change in that requires holding more state in your
+> head than anyone should be asked to hold, and that 78 people have moved it forward with no more
+> breakage than this is the impressive part. The churn is a property of the code's shape. Change the
+> shape and the churn goes with it.
+>
+> That is the case for refactoring, and it runs straight into a deadlock. The campaign's own
+> assessment (AIHPBLAS-3865) states it plainly: the codegen path is simultaneously the least tested,
+> at about 22.5 percent line and branch coverage under unit, and the most complex, with a file-average
+> cyclomatic complexity of 16 to 27 and a worst function at 815 by that assessment's tooling. You
+> cannot safely unit-test or refactor code in that shape without first recording what it does. The two
+> halves hold each other in place: there is no seam to write a unit test against, and no safe way to
+> create the seam without tests.
+>
+> The characterization suite is how that deadlock breaks. Photograph the behavior first, including the
+> bugs, which are flagged in `DECISIONS.md` rather than quietly corrected. Reshape the code behind the
+> photograph, so that any unintended change shows up as a reviewable diff. Then replace the
+> photographs with real unit tests as each piece finally becomes testable. Every step of that order is
+> forced by the situation rather than chosen.
+>
+> (One thing the history shows in passing: most of those 74 fixes carry no tracker reference, so the
+> defect record for this file has largely lived in commit subject lines. That is actively being
+> improved by the PR description and traceability hygiene now applied at review time and by the PR
+> bot. It is a repository-wide practice rather than a testing question, so this document does not
+> pursue it.)
+>
+> Two things have to stay true for any of this to be worth the trouble. The net has to stay honest,
+> which is why blanket regeneration of the goldens is forbidden rather than merely discouraged. And
+> something has to show that the net would actually notice a change, which today is mutation testing
+> and nothing else. The plan then runs in phases: land the net, lock it with the coverage floor and
+> snapshot governance, widen mutation beyond the pilot, make the codegen goldens portable across
+> architectures, and finally refactor, each function graduating to real unit tests and losing its pins
+> as it goes. Until that last phase lands, every coverage percentage in this document describes how
+> much code is protected from change, not how much is known to be right.
+>
+> </details>
+
+How that migration gets measured, and why no enforced number can see it, is covered under
+[Coverage](#coverage).
+
+The discipline that goes with goldens is documented in the suite's
+[README.md](tensilelite/Tests/unit/characterization/README.md) and is worth stating here because it is
+easy to get wrong: **never run a blanket `pytest --snapshot-update`.** It rewrites every golden at
+once and produces a green run that proves nothing. Update the smallest node id you intend to change,
+read the resulting diff, and explain the behavior change in your PR description.
+
+**The goldens are enforced, and they do gate a merge.** Which lanes assert them, and the one lane
+that skips them, is covered under
+[Where these tests actually run](#where-these-tests-actually-run).
+
+The suite also carries two enforced coverage floors: a whole-project floor and a per-file ratchet
+with a one percentage point tolerance, so per-file coverage can only move up over time. Both are
+enforced in CI (see [Coverage](#coverage)).
+
+A GPU-less seam, the `--cpu-only` switch, lets the client and device-probe paths of the benchmark
+flow be exercised without hardware, via an architecture spoof and a client-launch stub. Its
+performance output is synthetic and fixed, so it is useful for testing the plumbing and useless for
+anything performance-related. The switch is covered by
+[`tensilelite/Tests/unit/test_cpu_only_switch.py`](tensilelite/Tests/unit/test_cpu_only_switch.py) and
+documented, with that caveat, at
+[`_codegen/GPU-MOCK.md`](tensilelite/Tests/unit/characterization/_codegen/GPU-MOCK.md).
+
+**Mutation testing** is how the scaffolding earns its keep. Coverage only says a line was executed;
+a surviving mutant says the suite did not notice when that line's behavior changed, which is exactly
+the failure mode a golden-based suite is prone to. It is the only signal available today that
+distinguishes a characterization test that would catch a regression from one that merely runs the
+code, so widening it is what makes the scaffolding trustworthy while the unit tests are still being
+written.
+
+Today it is a report-only pilot on a ten-file slice, run through `tox -e mutation-unit` and
+configured in `pyproject.toml`. It started at five files in
+[PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989), grew by three in
+[PR #9337](https://github.com/ROCm/rocm-libraries/pull/9337), and by two more in
+[PR #10021](https://github.com/ROCm/rocm-libraries/pull/10021).
+It is not a gate and does not run in CI. Accepted equivalent mutants
+and every `# pragma: no mutate` are justified in `DECISIONS.md`. A series of PRs that would have
+widened the slice, starting at [PR #10133](https://github.com/ROCm/rocm-libraries/pull/10133), was
+closed in August 2026. Widening now goes through a manual, agent-assisted workflow instead: a
+safety core in [PR #10685](https://github.com/ROCm/rocm-libraries/pull/10685) plus the skill and
+guidance documents that followed it.
+
+**Suite size.** The characterization half and the pure-unit half are roughly comparable in size, and
+together they run into the thousands of tests; a small minority are GPU-guarded and skip on a
+CPU-only runner. All of them run in four separate CI lanes (see
+[Where these tests actually run](#where-these-tests-actually-run)).
+
+**Coverage expectation.** The enforced whole-project floor is `fail_under = 82` in
+[`pyproject.toml`](pyproject.toml), which is deliberately the only place that number lives. The
+comment beside it records the intent: the GPU-less run is stable at about 84%, and the floor sits two
+percentage points below that on purpose so that ordinary run-to-run noise cannot trip an exact
+cutoff. Per-file floors ratchet separately.
+
+Read that number with the caveat above firmly in mind: it is union coverage across the unit and
+characterization suites, so it describes how much code is *protected*, not how much is *verified*.
+There is no enforced target on the unit-only share, which is the number that actually tracks the
+migration. See [Coverage](#coverage) for the full breakdown.
+
+### Logic-corpus consistency regression tests
+
+A third category sits outside the unit/characterization split: checks that validate the *entire
+production logic YAML corpus* for cross-file naming and metadata invariants, rather than exercising a
+fixture or pinning current behavior. In spirit this is closer to
+[`TensileLogic --check-all`](#build-time-validation-of-library-logic) than to a unit test: both
+validate tuning data rather than code, and where each one lives follows from that.
+
+One of these checks, sibling-`DeviceNames` consistency, is implemented in
+`tensilelite.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
+`TensileLogic --check-all`, so every kernel-generating build checks it regardless of which test lane
+executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
+corpus-backed pytest copy also lives in
+[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/test_PlaceholderMerge.py), as redundant confirmation
+wherever the real corpus happens to be on disk, not the enforcement point. (A second check, on the
+shape of the gfx1250v0 logic overlay, was retired together with that overlay in
+[PR #11777](https://github.com/ROCm/rocm-libraries/pull/11777).)
+
+The chip-ID-aware-arch lock, confirming that only gfx950 carries chip-ID-aware dispatch predicates,
+stays a pytest-only check. Its whole-corpus form in `test_PlaceholderMerge.py` scans every
+architecture in the corpus to assert a whole-corpus fact, and wiring it into the build-scoped
+`--check-all` invocation instead would let a single-arch build silently check only its own target
+architecture, which is exactly the guarantee this check exists to provide. A hermetic version in
+`test_valid_corpus_consistency.py` runs everywhere, but it only checks gfx950 and gfx942, so it would
+not notice a new architecture becoming chip-ID-aware. `test_PlaceholderMerge.py`'s
+remaining three tests, an AST scan of `SolutionLibrary.py` plus two function-level unit tests, validate
+code rather than data.
+
+The corpus-backed pytest tests are gated on whether the raw corpus
+(`library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full`, relative to the hipBLASLt root) happens
+to be present, which it is not everywhere these tests run (see
+[Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
+doc, and [CI visibility and gating](#ci-visibility-and-gating) below). A separate hermetic suite,
+[`test_valid_corpus_consistency.py`](tensilelite/Tests/unit/test_valid_corpus_consistency.py), tests the
+`ValidCorpusConsistency` checker itself against synthetic fixtures and does not depend on that gate.
+
+### How this one was learned: a naming drift silently dropped a working kernel
+
+> [!IMPORTANT]
+>
+> **A naming rule that quietly fell out of step with a runtime hardware check made the library
+> throw away a working kernel with no error at all, and gfx942 users found out only when real GEMM
+> calls stopped finding any kernel to run.**
+>
+> <details>
+> <summary>The full account: how a filename drift turned into a missing kernel</summary>
+>
+> In February 2026 ([PR #6946](https://github.com/ROCm/rocm-libraries/pull/6946), ROCM-23637), GEMM
+> calls on gfx942 started failing outright with "no solution found," for problem sizes that had
+> worked before. Nothing crashed and no test caught it in advance.
+>
+> hipBLASLt decides which compiled kernel to run in two places that are supposed to always agree
+> with each other: a runtime check of which GPU chip is actually in front of it, and a naming
+> convention baked into the kernel files when the library is built. A recent change had let those two
+> drift apart for one family of kernels. The runtime check still considered two kernel files
+> identical, but the build now gave them different names. The step that assembles the final library
+> trusted the names over the runtime check, treated the two as unrelated, and quietly kept only one
+> of them. No error, no log line, just a kernel that had existed a moment before and no longer did.
+>
+> The fix closed both ends: it put the naming rule back in step with the runtime check, and it
+> straightened out the affected kernels' metadata so that files describing the same kernel agreed
+> with each other again. It also added `test_PlaceholderMerge.py`, so that a naming/runtime
+> disagreement like this one gets caught immediately instead of surfacing as a mysterious missing
+> kernel later.
+>
+> </details>
+
+## rocisa
+
+`rocisa` is the Python/C++ extension backing TensileLite's instruction generation. It lives at
+[`rocisa/`](rocisa/), inside TensileLite rather than as a separate Math CI project — there is no
+dedicated CODEOWNERS team or monorepo CI "project" entry for it, so it is documented here rather than
+split out further.
+
+| Item | Detail |
+| --- | --- |
+| Run it | `cd tensilelite && tox -e rocisa` |
+| Location | [`rocisa/test/`](rocisa/test/) |
+| Framework | pytest |
+
+**StinkyTofu coupling.** `_rocisa`'s native extension links directly against `stinkytofu::stinkytofu`
+(see [`rocisa/CMakeLists.txt`](rocisa/CMakeLists.txt)), and the rocisa↔StinkyTofu conversion glue
+(`AllHwMappings.cpp`, `ToStinkyTofuUtils.cpp`) is compiled straight into `_rocisa` rather than into
+StinkyTofu's own library. This is a deep build-time coupling, not an incidental one, and the CI
+triggers reflect it. Math CI schedules a pull request by its `project:` label, and the labeler in
+`.github/labeler.yml` applies `project: hipblaslt` to `shared/stinkytofu/**` (and to
+`shared/origami/**`), so a StinkyTofu-only change (nothing under `projects/hipblaslt/**` touched)
+still retriggers hipBLASLt's own `precheckin` and `preliminary`. StinkyTofu and Origami are also the
+two names `preliminary`'s own diff check looks for internally, so its tests actually run rather than
+no-op. The labeler does not apply that label to `shared/rocroller/**` or
+`shared/mxdatagenerator/**`, so a pull request touching only those gets no hipBLASLt Math CI jobs at
+all (see [Dependencies and Validation Handoffs](../TESTING.md#dependencies-and-validation-handoffs)
+in the hipBLASLt doc for the full comparison). StinkyTofu is still a separately owned, separately gated
+component (`@ROCm/stinkytofu-reviewers`), so its own dedicated suite runs in its own CI project
+independent of this; the two runs are not linked to each other.
+
+**Component CI: rocISA**, despite the name, does not run these tests: it only tests a `pip install`
+of the rocisa package. See [Where these tests actually run](#where-these-tests-actually-run).
+
+## Build-Time Validation of Library Logic
+
+**What it does.** `TensileLogic --check-all` validates the library logic YAML before any of it is
+compiled. It checks chip IDs, matrix instructions, work-group shapes, the XCC work-group mapping, and
+custom kernel declarations, one file at a time. It reads YAML only, so it needs no GPU and no compiled
+kernels, and it is fast. A failure stops the build. It is the only mechanism in the component that
+validates tuning data rather than code, it does not look or report like a test, and it exists because
+of one specific incident.
+
+### How this one was learned: one number and three months
+
+> [!IMPORTANT]
+>
+> **One retuned number in a YAML file silently disqualified every kernel candidate on a 38-CU
+> partition, the fallback path hid that as a 3x slowdown rather than a failure, and it cost the better
+> part of three months; the validator that would have caught it in seconds was already sitting in this
+> repository, wired to nothing.**
+>
+> <details>
+> <summary>The full account: how it was found, why nobody caught it, and what the fix actually took</summary>
+>
+> In February 2026, someone investigating a slow inference workload on an MI300X found that ROCm 7.2
+> took three times as long as ROCm 7.0 to do the same work. Nothing crashed. No answer was wrong. It
+> was just slow. They minimized it to three back-to-back matmul calls, and the numbers were stark: 2.6
+> seconds became 8.5, and the count of `hipGetDeviceProperties` calls went from 2,594 to 66,189.
+> Twenty-five times the driver traffic for three matrix multiplications. Swapping the caller's BLAS
+> backend made it vanish, which is what turned it into a hipBLASLt ticket, ROCM-2963.
+>
+> The cause was one number in a YAML file. The GPU was in CPX mode, which partitions it into eight
+> units of 38 compute units each. Kernel selection has a predicate, `WorkgroupMappingXCCCheck`, that
+> requires the CU count to divide evenly by a solution's `WorkGroupMappingXCC`. Somewhere between 7.0
+> and 7.2, that value was retuned from 1 to 4 in the 38-CU library. 38 is not divisible by 4. Every
+> solution failed the predicate, the heuristic returned zero candidates, and the library fell back to
+> `getAllSolutions`, an exhaustive scan of roughly 2,680 candidates, on every single call.
+>
+> Notice that the fallback worked. It did exactly what it was designed to do, and that is precisely why
+> nobody caught this: the safety net converted a total kernel-selection failure into a performance
+> problem, and performance has no gate in this component (see
+> [Performance and Benchmarking Testing](../TESTING.md#performance-and-benchmarking-testing) in the
+> hipBLASLt doc). So it shipped.
+>
+> Then there is the scale. The fix, [PR #5009](https://github.com/ROCm/rocm-libraries/pull/5009),
+> changed 15,841 lines across 21 YAML files, and every one of those lines was the same edit:
+> `WorkGroupMappingXCC: 4` back to `1`. Nearly sixteen thousand solutions, every one syntactically
+> valid, every one reviewed and merged, every one silently unusable on the hardware that library exists
+> to serve. Nothing in the component could have caught it, because nothing in the component was looking
+> at the data at all.
+>
+> The fix then had a rough month. It merged, was cherry-picked into the 7.2 release branch, was
+> reverted, was proposed for revert again, and was reverted a second time when the 7.2.1 release team
+> decided not to take it. That part never shows up in a root-cause summary. One retuned parameter
+> produced the better part of three months of tickets, cherry-picks, reverts and meetings between the
+> first symptom and a guardrail that would have caught it in seconds.
+>
+> Here is the part that should change how you read the rest of this document: most of what the fix
+> needed already existed. `TensileLogic` had been in the tree for over a year, with validators for
+> work-group shapes and matrix instructions already written. Somebody had been bitten by bad logic data
+> before and had built a tool to catch it. But nothing ran that tool. It was wired into neither the
+> build nor CI, and it had drifted out of step with the data it was meant to check.
+>
+> So [PR #5039](https://github.com/ROCm/rocm-libraries/pull/5039) was less about writing a checker than
+> about making the existing one bite: clean it up, add a `WorkGroupMappingXCC`-versus-CU validator for
+> the rule that had actually been violated, and wire the whole thing into the build ahead of codegen so
+> invalid logic cannot reach a `.dat` file. It also added a validation API in TensileLite encoding the
+> rules a solution must satisfy to be selectable, with unit tests that inject a CU count of 38 directly
+> and assert that `WorkGroupMappingXCC: 4` fails and `1` passes. That is the original three-month bug,
+> reproduced in milliseconds on a CPU, with no CPX-mode hardware anywhere in the loop.
+>
+> The uncomfortable implication is that ROCM-2963 was probably not the first time this class of defect
+> cost somebody weeks. It is the first time it was well enough documented to point at. A validator
+> nobody runs is indistinguishable from no validator at all, and this document names three more of
+> them: `tox -e lint`, configured and invoked by no CI job; a CodeQL workflow that never sees C++ and
+> never runs on a pull request; and TSAN build options that exist while no lane uses them. Each one is
+> a tool somebody wrote because they had been burned, sitting where it cannot burn anything back.
+>
+> </details>
+
+### Why it runs in the build
+
+Relative to the build, the logic YAML is compiler input rather than build output:
+`TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
+rather than testing, and running codegen over input already known to be invalid produces output nobody
+should trust. So the check is wired in as a CMake custom command in
+[`hipblaslt_codegen.cmake`](../cmake/hipblaslt_codegen.cmake) that runs ahead of
+`TensileCreateLibrary` and writes a stamp file. A failure stops the build.
+
+That placement buys good reach. It runs on every build that generates kernels, including every
+developer's local one, so a bad entry surfaces in the edit-build loop instead of a CI round trip
+later. It cannot be skipped by a path filter and it cannot be dropped by a gating rule, neither of
+which is true of the gating `preliminary` job.
+
+That reach used to extend past the build's own target architectures. From when this gate was wired
+into the build ([PR #5039](https://github.com/ROCm/rocm-libraries/pull/5039), 2026-05-05) until
+2026-08-13, the build-wired invocation validated every logic file in the corpus regardless of which
+`GPU_TARGETS` were being compiled, so a developer building only gfx1151 would still notice a broken
+gfx942 entry.
+[PR #9218](https://github.com/ROCm/rocm-libraries/pull/9218) (merged 2026-08-13) removed that:
+whole-corpus validation was dominating incremental build time on single-arch builds (roughly ten
+minutes locally for a gfx1151 build, validating the full multi-arch logic set when only a few dozen
+files were relevant), so the CMake step now passes `--architecture "${GPU_TARGETS}"` to
+`TensileLogic`, and only logic files matching the build's own target architectures are checked.
+`TensileLogic --check-all` still defaults to validating the whole
+corpus when a developer runs it by hand with no `--architecture` argument; it is only the build-wired
+invocation that is now scoped down. The trade was deliberate and reasonable for build time, but it is
+worth naming plainly: a single-architecture CI build no longer catches a broken entry in an
+architecture it does not target, which narrows this gate's reach to exactly the union of architectures
+across whatever set of builds happen to run on a given pull request.
+
+What the placement costs is visibility and strictness. There is no check name in the pull request, no
+test report, and no way for CI to run it in isolation. It also cannot be tightened in place, because
+`--strict-known-bugs` would fail local developer builds over a stale entry someone else owns, which is
+not a reasonable thing to do to a person trying to build. Both costs point at the same answer, and
+that answer is a second lane rather than a different home for this one.
+
+One of the checks named in
+[Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests),
+sibling-`DeviceNames` consistency, lives here rather than in that section's pytest tests for exactly
+this reason: this gate cannot be skipped by a path filter or a `_needs_logic_dir` gap, and that check
+needs that reach. The chip-ID-arch-lock check is the one that stays
+pytest-only, since it asserts a whole-corpus fact (only gfx950 carries chip-ID-aware predicates) that a
+per-architecture, per-build invocation would silently narrow.
+
+### What it found once it existed
+
+The first thing a new gate does is argue with itself, and this one was no exception. Pointed at the
+full library it reported `Total 552358 solutions / Keep 552345 / Reject 13`. Thirteen gfx950 solutions
+failing matrix instruction validation, quarantined rather than fixed and still open under ROCM-7144.
+Shortly after, it failed a TheRock CI build on a gfx942 fp8 configuration, and that one turned out to
+be the validator's fault rather than the data's: its MFMA tables were missing the fnuz key variants
+(ROCM-24036, fixed in the same PR that added the gate).
+
+Since then it has been quiet, which is the outcome you want and the hardest one to take credit for. A
+retuning that breaks a CU-variant library the way ROCM-2963 did now fails a build in seconds instead
+of reaching a customer's model three months earlier in the story. There is no way to know how many
+times that has already happened, because a build that fails on line one of a bad YAML file does not
+generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
+
+Its known-bug list, [`tensilelite/TensileLogic/known_bugs.yaml`](tensilelite/TensileLogic/known_bugs.yaml), is
+the best-structured quarantine in the component (see
+[Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
+doc). Entries are keyed on the logic file path plus the solution's `SolutionNameMin`, a
+content-derived name adopted in [PR #9355](https://github.com/ROCm/rocm-libraries/pull/9355) so that
+keys survive library re-tuning instead of drifting with a positional index, and each entry carries a
+`ticket:` field. The checker re-validates every entry and reports the ones that no longer reproduce, so
+a fixed bug is detected rather than skipped forever. The list is currently empty because those gfx950
+validation-drift entries were removed after becoming stale.
+
+`--strict-known-bugs` turns that detection into a failure, but it defaults off and nothing passes it
+today, so a stale entry only warns. Enforcing it is tracked in AIHPBLAS-4196, which proposes the
+right fix: a dedicated GitHub Actions job running
+[`run_tensile_logic_check.py`](../scripts/run_tensile_logic_check.py) with the flag, rather than
+tightening the in-build command. That ticket also names a remaining hole, which is that an orphaned
+entry whose `solution_name` resolves to nothing currently matches nothing and is silently ignored, so
+strict mode is not yet a complete dead-entry detector. Extending the gate to cover derived-parameter
+assignment is tracked in AIHPBLAS-3575.
+
+## Pre-submit / CI Gates
+
+TensileLite is exercised by both of hipBLASLt's CI systems (see
+[Pre-submit / CI Gates](../TESTING.md#pre-submit--ci-gates) in the hipBLASLt doc for the two-system
+overview). The Math CI job that matters most for TensileLite is **`preliminary`**, the functional gate
+for TensileLite, which runs two stages on gfx12, gfx90a, gfx942, and gfx950. (Since September 2026 it
+also has a two-GPU gfx950 node, which skips both stages and runs only the multi-GPU `tox -e comm`
+tests.)
+
+As of the Aug-26 2026 `rocJenkins` reorder (`bc21df82`, AIHPBLAS-4431), the stage order is: first
+`tox -e unit -- tensilelite/Tests/unit`, which carries no marker filter and therefore runs the entire unit
+tree, characterization included, on all four architectures. Then, *only if that stage passed*,
+`tox -e py3 -- tensilelite/Tests "-m common"`, the GEMM selection that genuinely needs hardware. (Before
+that reorder, `common` ran first and `unit` was conditional on it; if you are reading an older mirror
+of this document or a stale local copy, check which order applies before trusting either stage's
+gating story.)
+
+Two conditions narrow when any of this happens, and both are easy to miss:
+
+1. The job diffs the change against `develop` and skips entirely when nothing under
+   `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` has changed. A pull request touching
+   none of those passes it without running anything. That includes a change only to the library
+   logic YAML, which lives outside `tensilelite/`. `shared/rocroller/**` and
+   `shared/mxdatagenerator/**` are not in this list either, and a pull request touching only those
+   does not get hipBLASLt's Math CI jobs at all, because the labeler does not give it the
+   `project: hipblaslt` label that Math CI schedules by (see
+   [Dependencies and Validation Handoffs](../TESTING.md#dependencies-and-validation-handoffs) in the
+   hipBLASLt doc).
+2. The gate itself can be dropped, on top of condition 1 above. Math CI's `statusGate` carries a rule
+   that removes `preliminary` from hipBLASLt's *required* gating list whenever the same pull request
+   also touches rocroller specifically (no equivalent rule exists for mxdatagenerator), so a
+   rocroller-touching change loses this gate silently even if it also happened to touch tensilelite,
+   stinkytofu, or origami and would otherwise have run for real.
+
+**A short-circuit from this reorder has already had a real consequence.** Two days after the Aug-26
+reorder landed, an unrelated gfx1250 unit-test failure caused the `unit` stage to fail first, so the
+`common`/GEMM stage — the one that would have directly exercised a StreamK register-pool regression
+(the bug behind [#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in
+[#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) — never ran at all. Under the pre-Aug-26
+order, `common` ran unconditionally and would have caught it directly. See the corresponding row under
+[Known Risks and Gaps](#known-risks-and-gaps) below.
+
+**TheRock runs `Tests/common` (real codegen, build, and execution against a CPU reference) on real
+hardware through the `hw-common` category in [`test_categories.yaml`](test_categories.yaml).**
+TheRock's `tensilelite-common` job pins that category and runs it against the installed artifact with
+the prebuilt `tensilelite-client`. It is a separate job from the unit-tree `tensilelite` job, so a unit
+failure cannot hide a GEMM result the way it can in `preliminary`. Selection is `-m common` plus each
+config's own `skip-gfxNNNN` marks for the arch `rocm_agent_enumerator` reports, the same mechanism
+`preliminary` uses.
+
+The job is opt-in per family: gfx90a, gfx94X, gfx950, and gfx120X, matching `preliminary`. It has to
+be, because a family whose configs declare no `skip-` marks for it (gfx1103, gfx115X) would try to run
+all of them. A pull request to this repository asks Multi-Arch CI for gfx94X, gfx950 and gfx125X, so
+since the TheRock pin of 2026-10-02 both gfx942 and gfx950 run it per PR. gfx90a and gfx120X run it
+only in TheRock's own postsubmit and nightly runs. Measured in `preliminary`, the suite takes about
+an hour on gfx942 and about two on gfx950, and TheRock runs it unsharded.
+
+gfx1250 still gets no `Tests/common` coverage in TheRock. TheRock's own family matrix now names a
+gfx1250 runner, but the CI configuration overlay this repository uses leaves it empty, and both the
+`tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. So its whole Test stage is
+skipped, and the emulation categories (`ffm-quick`, `emu-fast`, `emu-full`) are not selected by any
+TheRock job.
+
+Other Math CI jobs post checks without gating. The one worth knowing is
+`tensilelite-unit-codecov`, which runs the TensileLite Python and C++ coverage environments on gfx950
+and uploads to codecov under the `TensileLite-Unit` and `TensileLite-CPP` flags. It is two jobs in
+one, a Python coverage run and a C++ coverage run sharing a single script, which is why it needs
+gfx950 and why it takes hours rather than minutes. It reports a check, but that check is not
+required, and a failure anywhere in it skips the codecov uploads, so a codecov number can be older
+than the commit you are looking at.
+
+### How Multi-Arch CI decides whether TensileLite runs at all
+
+The narrowing conditions above are specific to Math CI's `preliminary`. TheRock/GitHub Actions'
+side has its own, separate selection step: rocm-libraries' Multi-Arch CI workflow
+(`therock-multi-arch-ci.yml`) passes every changed path, including the monorepo's five `shared/*`
+subtrees, straight into TheRock's own native selector
+(`test_tools/determine_rocm_test_dependencies.py`), the same one every `projects/*` path uses
+([PR #11901](https://github.com/ROCm/rocm-libraries/pull/11901)).
+
+Two things make TensileLite specifically visible to that selector:
+
+- **`projects/hipblaslt/tensilelite` has its own identity in change detection**, registered as a
+  nested subtree distinct from `projects/hipblaslt` ([PR #11785](https://github.com/ROCm/rocm-libraries/pull/11785)),
+  so a TensileLite-only change is distinguishable from a hipBLASLt-proper one.
+- **TensileLite has a node in TheRock's consumer graph**, even though it has no CMake target of its
+  own for `test_tools/therock_consumer_graph.json` to walk. TheRock's `test_policies.toml` declares it
+  as a `[synthetic.tensilelite]` subproject with `hipblaslt` and `hipsparselt` as its consumers at an
+  unbounded walk level, so a TensileLite change retests both and everything downstream of them exactly
+  as if TensileLite were a real graph node (ROCm/TheRock#7998, ROCm/TheRock#7999).
+
+The other `shared/*` paths reach TensileLite only by way of a dependency rather than a direct edit.
+Their current selection outcome, verified against the pinned TheRock commit:
+
+| Changed path | Selects the `tensilelite` job? | Notes |
+| --- | --- | --- |
+| `shared/origami`, `shared/stinkytofu`, `shared/mxdatagenerator` | Yes | |
+| `shared/rocroller` | **No** | See below |
+| `shared/tensile` | No — correctly | Not TensileLite. See below |
+
+**`shared/tensile` is not TensileLite.** It is the legacy standalone `ROCm/Tensile` repository,
+subtree-synced at `shared/tensile` and consumed only by rocBLAS's own kernel generator; nothing under
+`projects/hipblaslt/tensilelite` depends on it. Worth stating plainly here given how easy the two names
+are to conflate — a change there has no reason to retest hipBLASLt or TensileLite, and the selector
+does not.
+
+**A `shared/rocroller`-only change does not run TensileLite's own suite in Multi-Arch CI.** The
+selector does resolve it to `hipblaslt` (among others), so hipBLASLt's own C++ client suite exercises
+rocRoller-backed kernel dispatch at runtime. But it does not resolve to `tensilelite`: rocRoller has no
+declared edge onto TensileLite's synthetic consumer-graph node, and
+[`projects/hipblaslt/CMakeLists.txt`](../CMakeLists.txt) confirms why — rocRoller is a separate C++
+kernel source linked directly into hipBLASLt (`HIPBLASLT_ENABLE_ROCROLLER`), not a dependency of
+TensileLite's Python code generator. That is very likely the architecturally correct answer, but it
+means TensileLite's own Python unit/characterization suite has no coverage at all for a rocRoller-only
+change; see the corrected rows in Known Risks and Gaps below.
+
+### Where these tests actually run
+
+The TensileLite Python tree under `tensilelite/Tests/unit` (characterization *and* unit, about six
+thousand tests) executes in four separate CI lanes. They are easy to confuse with each other, and
+with three adjacent lanes that sound like them but run none of these tests, so the whole set is worth
+laying out once.
+
+| Lane | Where defined | Hardware | Gates? |
+| --- | --- | --- | --- |
+| `Component CI: TensileLite coverage` | [`component-ci-tensilelite-coverage.yml`](../../../.github/workflows/component-ci-tensilelite-coverage.yml) | CPU only | **Yes**, via the required `Component CI Summary` |
+| `preliminary` | Math CI (internal) | gfx12, gfx90a, gfx942, gfx950 | **Yes**, via the required `Math CI Summary` |
+| TheRock `Test tensilelite` | [`pytest_runner.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/pytest_runner.py) in TheRock, driven by [`test_categories.yaml`](test_categories.yaml) | GPU runner, Linux | **Yes**, via the required `Multi-Arch CI Summary` |
+| `tensilelite-unit-codecov` | Math CI (internal) | gfx950 | No |
+
+Three observations follow from that table, and they are the ones that most often get stated
+backwards in review:
+
+**The tests gate, and so does the coverage floor.** All three required checks (`Math CI Summary`
+through `preliminary`, `Multi-Arch CI Summary` through the TensileLite job, and
+`Component CI Summary` through the coverage lane) execute the unit and characterization suites, so
+a broken test blocks a merge. The coverage lane also runs the whole-project floor and the per-file
+ratchet, so a coverage regression in a pull request that touches `tensilelite/` blocks a merge too.
+What stays advisory is the characterization-versus-unit split card and the codecov numbers.
+
+**Three of the four lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
+is validating a real install, so its GPU is the point. `preliminary` needs hardware for its
+`-m common` GEMM stage and the unit tests share the node because they run in the same job.
+`tensilelite-unit-codecov` needs gfx950 for its C++ half only; the Python coverage run is along for
+the ride, which is most of why that job takes about two and a half hours where the CPU-only GitHub
+Actions lane takes seven minutes.
+
+**Every one of these lanes is fail-fast, and that erases signal.** In each case one stage runs first
+and everything after it is conditional on it passing: the two coverage lanes through the ordering of
+tox `commands`, `preliminary` through an explicit exit-code guard between its two stages (see
+[Pre-submit / CI Gates](#pre-submit--ci-gates) above for which stage now runs first), TheRock's
+through plain sequential ordering. One early failure means you get no information at all from the
+stages behind it, which is why a red run so often says less than it appears to.
+
+**The goldens are asserted in all four lanes.** Every tox environment involved inherits syrupy from
+the base `[testenv]` dependency list, and TheRock's installed-artifact lane installs it from
+[`requirements-test.txt`](requirements-test.txt)
+([PR #11396](https://github.com/ROCm/rocm-libraries/pull/11396),
+[TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). Three of those lanes gate, so a stale
+golden fails a required check. The CPU-only GitHub Actions lane is fast enough that it is usually
+where a stale golden surfaces first.
+
+The installed-artifact lane used to skip the snapshot tests, because it had no syrupy. The suite's
+`conftest.py` still detects a missing plugin and skips those tests cleanly rather than erroring the
+whole run, so if a lane ever drops syrupy again, its log will show skips rather than failures.
+
+Three adjacent lanes run none of these tests, despite their names:
+`Component CI: rocISA` only tests a `pip install` of the rocisa package; Math CI's `codecov` job is
+C++ hipBLASLt coverage and is one character away from `tensilelite-unit-codecov`; and `precheckin` is
+hipBLASLt's own client-suite job, unrelated to any of this despite building TensileLite as a
+dependency.
+
+## Coverage
+
+Code coverage (how much code the tests execute) and test coverage (how much of the intended
+functionality and scenarios are tested) are different things, and TensileLite is a good illustration
+of the difference: it could reach high line coverage while leaving whole categories of
+kernel-generation behavior unexercised.
+
+TensileLite has a third distinction on top of those two, and it is the one most likely to mislead: a
+covered line may be covered by a *unit test* that asserts intended behavior or by a *characterization
+golden* that merely pins current behavior, bugs included. Every enforced number here is the union of
+the two and cannot tell them apart. See [Unit Testing Strategy](#unit-testing-strategy) for why that
+matters; the short version is that characterization coverage is scaffolding to be repaid, not testing
+that is finished.
+
+### The characterization-versus-unit split
+
+The enforced floors cannot see that migration at all. Coverage is measured on the union of the two
+suites, so converting a line from characterization protection to a genuine unit test leaves every
+enforced number identical. A file can sit at 80% while almost all of that 80% is scaffolding, and no
+gate will say a word.
+
+What shows the migration is the split summary card, rendered into the GitHub Actions run summary
+by the coverage lane. It splits every measurable statement into four buckets that sum to 100%:
+reached by both suites, by characterization only, by unit only, and by no test at all. The
+characterization-only count is the migration debt, and the goal is for it to fall toward zero.
+
+The card also ranks the largest files by statement count with each file's unit-suite and
+characterization-suite percentages side by side, which is how the next refactor target gets picked: a
+high characterization percentage next to a low unit percentage is a file still leaning on scaffolding.
+The two suites are kept disjoint in the coverage lane specifically so this attribution means
+something.
+
+Worth being blunt about the consequence. The one number that measures real progress is the one number
+nothing enforces. Reading a file's coverage without reading its split is how a team convinces itself
+it is further along than it is.
+
+### What is measured today
+
+| Scope | Tool | Measured in | Enforced |
+| --- | --- | --- | --- |
+| TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `tensilelite/**`; Math CI measures it again for codecov | Floor plus per-file ratchet, 1 pp tolerance. The lane rolls up to the required `Component CI Summary`, so a regression blocks a merge |
+| TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
+| TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on ten files |
+| TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
+
+The GitHub Actions coverage lane is CPU-only and takes roughly seven minutes. It runs the
+characterization suite and the pure unit suite once each under coverage, keeping the two selections
+disjoint so each line can be attributed to one or both, unions the results, and renders the
+non-gating split summary card. That lane is deliberately scoped and is expected to retire once the
+characterization-to-unit conversion finishes, which makes the card's characterization-only count a
+rough progress bar for the lane's own retirement.
+
+### Measuring and enforcing are separate tox environments
+
+This is worth knowing before you try to reproduce a coverage failure. `coverage-unit` runs the suites
+and writes the reports, reporting with `--fail-under=0` so it never gates. `coverage-gate` reads those
+artifacts and applies both floors. The GitHub Actions lane runs them as two named steps and owns the
+floors; Math CI's `tensilelite-unit-codecov` runs only the first, so it cannot be failed by a gate it
+does not own.
+
+The practical benefit is local reproduction. `coverage-gate` sets `skip_install = true` and depends
+only on `coverage[toml]`, so it builds no rocisa, needs no ROCm, and runs no tests. Run
+`coverage-unit` once, then re-run `coverage-gate` as often as you like against the `coverage.json`
+you already have. Chasing a floor failure costs seconds rather than another pass over the full test
+suite.
+
+### Targets
+
+Two different mechanisms carry a number, and they are easy to confuse:
+
+- The **enforced floor** is `fail_under = 82` in [`pyproject.toml`](pyproject.toml), checked on the
+  combined characterization-plus-unit dataset, alongside the per-file floors in
+  `coverage-baseline.json`. This is what actually fails a run.
+- The **codecov target** is 80% project coverage per flag, set in the monorepo's
+  [`../../../codecov.yml`](../../../codecov.yml) for `TensileLite-Unit` and `TensileLite-CPP` along
+  with every other library. No patch-coverage target is configured. Codecov's report is advisory here
+  because the job that uploads it is not a required check.
+
+The enforced floor has already passed codecov's 80%, and the per-file ratchet keeps it moving up.
+
+Neither mechanism sets a target on the unit-only share, and neither one would notice if the
+characterization-only count stopped falling. Both numbers can be fully satisfied by a codebase whose
+Python is entirely pinned and barely verified. Setting an explicit target on the unit-only share, so
+the migration has a gate and not just a dashboard, is on the [roadmap](#improvement-roadmap).
+
+### Scope and exclusions
+
+Coverage measurement is Python-focused, and measured on Linux only; Linux
+and Windows are not tracked separately. The exclusions in
+[`pyproject.toml`](pyproject.toml) cover test, build and packaging paths
+rather than product modules. The kernel writers are sometimes described as uncovered exceptions, but
+they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/Solution.py` all
+carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
+including `ExperimentalLibrary.py` at zero and much of `tensilelite/Components/`.
+
+**No C++ coverage target exists** for the reasons given under
+[../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
+structural blockers). Setting one before the host-side code is linkable in isolation would produce a
+number nobody could act on.
+
+## Improvement Roadmap
+
+TensileLite and hipBLASLt share one testing plan, because they are tightly coupled: TensileLite
+generates the kernels hipBLASLt ships, and most of hipBLASLt's correctness signal exercises them. The
+plan, including its testing philosophy, target test kinds, cadence contract, and workstreams, is in
+[../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap).
+
+The TensileLite items this section used to list are there now, each with its ticket and under the
+workstream it serves: toolchain resolution and the move to TheRock CI under *Consolidate*, sharding
+`tensilelite-common` under *Cadence*, and the `--strict-known-bugs` lane, the characterization-to-unit
+migration, mutation testing, the linter, and type checking under *Keep it honest*.
+
+The shared plan also proposes how kernel testing is divided across StinkyTofu, TensileLite, a kernel
+corpus layer, and hipBLASLt; see
+[Who tests what](../TESTING.md#who-tests-what). For TensileLite, the proposal narrows what its
+hardware tests are for. TensileLite would own one question: given solution parameters, does it emit
+the kernel those parameters describe? That is answered by its Python unit tests and by one small
+hardware test per code-generation feature. Sweeps over the shapes of shipped kernels, which
+`Tests/common` does in part today, would move to the corpus layer, which tests every shipped kernel
+however it was generated.
+
+## Known Risks and Gaps
+
+Stated plainly, so none of these are a surprise at release time. This section covers TensileLite,
+rocisa, and library-logic validation; hipBLASLt's own C++/client gaps are in
+[../TESTING.md#known-risks-and-gaps](../TESTING.md#known-risks-and-gaps). On the Tracking column, see
+the note there. As of October 2026 every row has a ticket. Each ticket tracks one shortcoming rather
+than a strategy, and each one belongs to exactly one workstream in the shared plan at
+[../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap). Math CI is being retired in favor of
+TheRock CI, so the rows about Math CI's `preliminary` job point at the work to move TensileLite's
+testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
+
+### Coverage and verification
+
+| Gap | Regression risk | Impact | Mitigation today | Tracking |
+| --- | --- | --- | --- | --- |
+| Enforced coverage counts characterization scaffolding as unit testing, overstating how much is verified | High | Medium | The split summary card reports the characterization-only share, but it gates nothing | AIHPBLAS-5041 |
+| Mutation testing, the only evidence a golden would catch a regression, covers ten files and runs nowhere in CI | Medium | Medium | Manual `tox -e mutation-unit`, with an agent-assisted workflow for widening it. Treated as report-only | AIHPBLAS-3868 |
+
+### CI visibility and gating
+
+| Gap | Regression risk | Impact | Mitigation today | Tracking |
+| --- | --- | --- | --- | --- |
+| A pull request that touches only `shared/mxdatagenerator` gets no hipBLASLt Math CI jobs, so it never gets `preliminary`'s four-architecture GPU stage | Medium | Medium | Multi-Arch CI's native selector resolves `shared/mxdatagenerator` to `tensilelite` among others, so the unit/characterization tree runs there | AIHPBLAS-3354 |
+| `preliminary` is dropped from hipBLASLt's gating list whenever a PR also touches rocroller, and a rocroller-only PR gets no hipBLASLt Math CI jobs at all, so a rocroller change gets no TensileLite functional testing from Math CI | High | High if hit | Multi-Arch CI's native selector selects hipBLASLt's own client suite for a rocroller-only change, exercising rocRoller-backed dispatch at runtime (see [How Multi-Arch CI decides whether TensileLite runs at all](#how-multi-arch-ci-decides-whether-tensilelite-runs-at-all)), but it does not select the `tensilelite` job. TensileLite's own Python unit/characterization suite has no coverage for this path | AIHPBLAS-3354 |
+| As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | On gfx942 and gfx950, TheRock's `tensilelite-common` runs `common` as its own job on every pull request, so a unit failure there no longer hides it; gfx90a and gfx12 still depend on `preliminary`'s ordering | AIHPBLAS-3354 |
+| `Tests/common` (real codegen, build, execution) runs in TheRock only on gfx90a/gfx942/gfx950/gfx120X, and only gfx942 and gfx950 on the pull-request path. gfx1250 and any family whose configs declare no `skip-gfxNNNN` for it (gfx1103, gfx115X) get none (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) | Medium | High if hit | Math CI's `preliminary` runs it per PR on `gfx90a`/`gfx942`/`gfx950`/`gfx12`; TheRock's `tensilelite-common` adds installed-artifact coverage on the same families | [#12491](https://github.com/ROCm/rocm-libraries/issues/12491) |
+| The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation | AIHPBLAS-3354 |
+| A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`. Of the logic-corpus consistency checks, that leaves the whole-corpus chip-ID-arch-lock check unrun on that path; sibling-`DeviceNames` runs via `TensileLogic --check-all` regardless | Medium | Medium | `TensileLogic --check-all` checks sibling-`DeviceNames` in every kernel-generating build; Math CI's pytest suite still runs the chip-ID-arch-lock check on any PR that also touches `tensilelite/` | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
+| The `_needs_logic_dir` skipif (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) always skips in TheRock CI, because the installed tree does not ship the corpus, so the corpus-backed pytest checks never execute there. Only the chip-ID-arch-lock check is actually exposed to this; sibling-`DeviceNames` runs via `TensileLogic --check-all` regardless | Low | Medium | `TensileLogic --check-all` covers sibling-`DeviceNames` regardless; Math CI's pytest suite can still catch a chip-ID-arch-lock violation when it runs, and the hermetic version runs everywhere but checks only gfx950 and gfx942 | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
+| gfx1250 gets no TheRock Test stage at all: the CI configuration overlay leaves its runner empty, and the `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. That includes the pytest copies of the logic-corpus checks. Sibling-`DeviceNames` still gets build-time coverage there via `TensileLogic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the missing runner | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
+| TheRock's `Test tensilelite` job runs the whole unit tree on one worker in every tier: `quick` and `standard` select the same tests in [`test_categories.yaml`](test_categories.yaml), and `quick` runs under a 15-minute step cap. Several unit tests read the embedded metadata of every shipped custom kernel, some at collection time, so the job's wall time grows with each custom kernel added. The gfx950 rocRoller kernels carry about 13k lines of metadata each, and adding 69 of them took the job from 11 to 14 minutes to 17 to 21 minutes | Medium | Medium | Metadata is parsed with libyaml (`CSafeLoader`). `readCustomKernelConfig` parses only the `custom.config` entry, and `getCustomKernelConfig` parses the whole block (for `amdhsa.kernels`) only for a kernel without an explicit `CustomKernel` block. `standard` runs under a 30-minute cap | [#14049](https://github.com/ROCm/rocm-libraries/issues/14049) |
+
+### Known bugs and flaky tests
+
+| Gap | Regression risk | Impact | Mitigation today | Tracking |
+| --- | --- | --- | --- | --- |
+| A stale `TensileLogic` known-bugs entry only warns, because `--strict-known-bugs` defaults off | Low | Low | The checker re-validates and reports stale entries on every build | AIHPBLAS-4196 |
+| The library logic gate has no check name, no test report, and cannot be run in isolation by CI | Low | Medium | It runs on every kernel-generating build including local ones, which gives it good reach | AIHPBLAS-4196 |
+| The library logic gate checks matrix instructions, work-group shapes, and the XCC work-group mapping, but does not run derived-parameter assignment (`Solution.assignDerivedParameters`), so a logic entry that fails there still passes the gate | Medium | Medium | Such an entry fails later in the build, during code generation, rather than at the gate | AIHPBLAS-3575 |
+
+### Static analysis and type checking
+
+| Gap | Regression risk | Impact | Mitigation today | Tracking |
+| --- | --- | --- | --- | --- |
+| Python linting is configured (`tox -e lint`) but no CI job runs it, and `ignore = E, W` narrows it to pyflakes | Medium | Low | `black` is enforced through `pre-commit`; pyflakes-class bugs are otherwise caught in review | AIHPBLAS-5037 |
+| No type checking on TensileLite, despite type hints being a documented style rule | Medium | Medium | None. A large dynamically typed code generator with no type verification | AIHPBLAS-5038 |

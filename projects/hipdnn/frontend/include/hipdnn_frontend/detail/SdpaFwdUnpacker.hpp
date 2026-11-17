@@ -150,7 +150,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa PAGE_TABLE_K_EXT tensor"));
     if(pageTableKTensor)
     {
-        attributes.set_page_table_k(pageTableKTensor);
+        attributes.set_paged_attention_k_table(pageTableKTensor);
     }
 
     // Unpack page_table_v tensor
@@ -162,7 +162,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa PAGE_TABLE_V_EXT tensor"));
     if(pageTableVTensor)
     {
-        attributes.set_page_table_v(pageTableVTensor);
+        attributes.set_paged_attention_v_table(pageTableVTensor);
     }
 
     // Unpack block_mask tensor
@@ -282,7 +282,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa MAX_EXT tensor"));
     if(maxOutputTensor)
     {
-        attributes.set_max(maxOutputTensor);
+        attributes.set_logit_max(maxOutputTensor);
     }
 
     // Unpack sum_exp tensor
@@ -294,7 +294,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa SUM_EXP_EXT tensor"));
     if(sumExpTensor)
     {
-        attributes.set_sum_exp(sumExpTensor);
+        attributes.set_score_sum_exp(sumExpTensor);
     }
 
     // Unpack rng_dump tensor

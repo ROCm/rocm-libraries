@@ -41,10 +41,9 @@ set(_ctest_content [=[
 # SPDX-License-Identifier: MIT
 
 # C++ tests
-add_test(origami-tests "${CMAKE_CURRENT_LIST_DIR}/../origami-tests")
+add_test(origami-tests "../origami-tests")
 set_tests_properties(origami-tests PROPERTIES
     LABELS "cpp"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
 )
 
 ]=])
@@ -54,13 +53,12 @@ if(ORIGAMI_ENABLE_PYTHON)
 
     string(APPEND _ctest_content [=[
 # Python tests (using pytest)
-add_test(origami_python_tests python3 -m pytest "${CMAKE_CURRENT_LIST_DIR}/tests" -v)
+add_test(origami_python_tests python3 -m pytest "tests" -v)
 
 set_tests_properties(origami_python_tests PROPERTIES
     LABELS "python"
     SKIP_RETURN_CODE 5
-    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
-    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_CURRENT_LIST_DIR}/../../@CMAKE_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=${CMAKE_CURRENT_LIST_DIR}/../../@CMAKE_INSTALL_LIBDIR@/python@Python_VERSION_MAJOR@.@Python_VERSION_MINOR@/site-packages:$ENV{PYTHONPATH}"
+    ENVIRONMENT "LD_LIBRARY_PATH=../../@CMAKE_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=../../@CMAKE_INSTALL_LIBDIR@/python@Python_VERSION_MAJOR@.@Python_VERSION_MINOR@/site-packages:$ENV{PYTHONPATH}"
 )
 ]=])
 endif()

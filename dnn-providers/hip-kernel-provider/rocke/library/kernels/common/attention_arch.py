@@ -143,3 +143,24 @@ def require_tiled_attention_arch(arch: str) -> None:
     ok, reason = validate_tiled_attention_arch(arch)
     if not ok:
         raise NotImplementedError(reason)
+
+
+# Conservative default for a target absent from the catalog: 64 KiB is the smallest
+# per-workgroup LDS capacity any supported target has, so an unknown arch is gated
+# more strictly, never more loosely.
+_DEFAULT_LDS_CAPACITY_BYTES = 65536
+
+
+def attention_lds_capacity_bytes(arch: str) -> int:
+    """Per-workgroup LDS capacity for ``arch`` from the target catalog.
+
+    Single definition for the attention family's LDS-budget gates (dense, tiled-2D).
+    ``ArchTarget.from_gfx`` raises ``KeyError`` for a target with no catalog row; we
+    fall back to :data:`_DEFAULT_LDS_CAPACITY_BYTES` so a catalog gap degrades the
+    budget check to a conservative default instead of breaking the caller's
+    ``(ok, reason)`` contract. Never raises.
+    """
+    try:
+        return ArchTarget.from_gfx(arch).lds_capacity_bytes
+    except KeyError:
+        return _DEFAULT_LDS_CAPACITY_BYTES

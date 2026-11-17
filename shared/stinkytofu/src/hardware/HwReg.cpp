@@ -44,6 +44,9 @@ namespace {
 #ifdef STINKYTOFU_ARCH_GFX1250
 #include "hardware/generated/Gfx1250_hwreg.inc"
 #endif
+#ifdef STINKYTOFU_ARCH_GFX1250V0
+#include "hardware/generated/Gfx1250v0_hwreg.inc"
+#endif
 
 bool isGfx12Plus(GfxArchID arch) {
     const auto* info = ArchHelper::getInstance().getArchInfo(arch);
@@ -58,6 +61,9 @@ bool nameToId(GfxArchID arch, std::string_view name, Id& out) {
 #ifdef STINKYTOFU_ARCH_GFX1250
     if (arch == GfxArchID::Gfx1250) return nameToIdGfx1250(name, out);
 #endif
+#ifdef STINKYTOFU_ARCH_GFX1250V0
+    if (arch == GfxArchID::Gfx1250v0) return nameToIdGfx1250v0(name, out);
+#endif
     (void)arch;
     (void)name;
     (void)out;
@@ -67,6 +73,9 @@ bool nameToId(GfxArchID arch, std::string_view name, Id& out) {
 std::string_view idToName(GfxArchID arch, uint16_t id) {
 #ifdef STINKYTOFU_ARCH_GFX1250
     if (arch == GfxArchID::Gfx1250) return idToNameGfx1250(id);
+#endif
+#ifdef STINKYTOFU_ARCH_GFX1250V0
+    if (arch == GfxArchID::Gfx1250v0) return idToNameGfx1250v0(id);
 #endif
     (void)arch;
     (void)id;
@@ -83,8 +92,18 @@ SubField schedModeDepMode(GfxArchID arch) {
     return {0, 0};
 }
 
+// Each arch declares its own bit position; the HW doc is the only source, it is not probeable.
+// One row per encoding, rows must be mutually exclusive.
 SubField schedModeDisableXdlArbStall(GfxArchID arch) {
-    if (isGfx12Plus(arch)) return {/*offset=*/4, /*size=*/1};
+    static const struct {
+        bool (*cond)(GfxArchID);
+        SubField field;
+    } kRows[] = {
+        {isGfx125, {/*offset=*/2, /*size=*/1}},
+        // A new arch adds a row here; do not widen an existing predicate.
+    };
+    for (const auto& row : kRows)
+        if (row.cond(arch)) return row.field;
     return {0, 0};
 }
 

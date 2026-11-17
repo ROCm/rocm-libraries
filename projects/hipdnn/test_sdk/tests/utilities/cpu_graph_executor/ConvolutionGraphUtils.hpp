@@ -13,8 +13,7 @@ namespace hipdnn_sdk_test_utils
 {
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildConvolutionFwdGraph(ConvolutionFwdTensorBundle<InputType>& tensorBundle,
                              hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
@@ -69,8 +68,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 }
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildConvolutionBwdGraph(ConvolutionBwdTensorBundle<InputType>& tensorBundle,
                              hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
@@ -120,15 +118,15 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
 
     dxTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+    dxTensorAttr->set_dim(tensorBundle.dxTensor.dims());
 
-    auto variantPack = tensorBundle.createVariantPack(*dyTensorAttr, *wTensorAttr, *dxTensorAttr);
+    auto variantPack = tensorBundle.createVariantPack(*dxTensorAttr, *wTensorAttr, *dyTensorAttr);
 
     return std::make_tuple(graph, variantPack);
 }
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildConvolutionWrwGraph(ConvolutionWrwTensorBundle<InputType>& tensorBundle,
                              hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
@@ -178,6 +176,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
 
     dwTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+    dwTensorAttr->set_dim(tensorBundle.dwTensor.dims());
 
     auto variantPack = tensorBundle.createVariantPack(*xTensorAttr, *dwTensorAttr, *dyTensorAttr);
 

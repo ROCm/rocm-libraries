@@ -32,20 +32,20 @@ import yaml
 sys.path.append('../..')
 from Tensile.SolutionStructs import Solution
 from Tensile import Utils
-from Tensile.Utilities.ConditionalImports import yamlDumper
+from Tensile.Utilities.ConditionalImports import SafeLoader, yamlDumper
 
 def merge_libraries(args):
     inFiles = args[:-1]
     outFile = args[-1]
 
     with open(inFiles[0]) as inf:
-        data = yaml.load(inf)
+        data = yaml.load(inf, SafeLoader)
 
     masterLibrary = MasterSolutionLibrary.FromOriginalState(data)
 
     for inFile in Utils.tqdm(inFiles[1:], desc="Merge libraries"):
         with open(inFile) as inf:
-            data = yaml.load(inf)
+            data = yaml.load(inf, SafeLoader)
         newLibrary = MasterSolutionLibrary.FromOriginalState(data)
         masterLibrary.merge(newLibrary)
         del newLibrary
@@ -63,7 +63,7 @@ def merge_libraries(args):
 def convert_one(args):
 
     with open(args[0]) as inFile:
-        data = yaml.load(inFile)
+        data = yaml.load(inFile, SafeLoader)
 
     if True:
         masterLibrary = MasterSolutionLibrary.FromOriginalState(data)

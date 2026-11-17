@@ -1230,7 +1230,10 @@ namespace Tensile
         template <>
         inline Float8 DataInitialization::getValue<Float8, InitMode::BadOutput>()
         {
-            return getValue<Float8, InitMode::Inf>();
+            // OCP E4M3 (gfx950) has no infinity; use NaN as the guard band. On FNUZ
+            // (gfx942) NaN and Inf share the same bit pattern (0x80), so this is
+            // byte-for-byte unchanged there. isBadOutput<Float8> matches with isnan.
+            return getValue<Float8, InitMode::NaN>();
         }
 
         // BFloat8
@@ -1529,7 +1532,9 @@ namespace Tensile
         template <>
         inline bool DataInitialization::isBadOutput<Float8>(Float8 value)
         {
-            return std::isinf(value);
+            // Matches the NaN guard band from getValue<Float8, BadOutput>. On FNUZ
+            // (gfx942) NaN and Inf are the same bit pattern, so this is unchanged there.
+            return std::isnan(value);
         }
 
         template <>

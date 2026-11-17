@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -210,7 +210,7 @@ rocblas_trmm_outofplace_kernel(rocblas_diagonal diag,
         auto C     = load_ptr_batch(C_arg, batch, offset_c, stride_c);
 
         if(alpha == 0)
-            return;
+            continue;
 
         const rocblas_int k = LEFT ? m : n;
 
@@ -2230,8 +2230,8 @@ rocblas_status rocblas_internal_trmm_launcher(rocblas_handle    handle,
         if constexpr(!BATCHED)
         {
             // single bathc so applying offset here
-            rocblas_set_matrix_zero_if_alpha_zero_template(
-                handle, m, n, &alpha_0<T>, 0, dC + offset_c, ldc, 0, 1);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_set_matrix_zero_if_alpha_zero_template(
+                handle, m, n, &alpha_0<T>, 0, dC + offset_c, ldc, 0, 1)));
             return rocblas_internal_trmm_outofplace_template<T>(handle,
                                                                 side,
                                                                 uplo,

@@ -206,15 +206,6 @@ System FindDb has only been populated for these architectures:
 If your architecture isn't listed, you must run the find API on your system (once per application)
 to take advantage of immediate mode's more efficient behavior.
 
-Backend limitations
------------------------------------------------------------------------------------------------
-
-OpenCL support for immediate mode via the fallback is limited to ``FP32`` datatypes. This is because the
-current release's fallback path uses GEMM, which is serviced through MIOpenGEMM (on
-OpenCL). MIOpenGEMM only contains support for ``FP32``.
-
-The HIP backend uses rocBLAS as its fallback path, which contains a more robust set of data types.
-
 .. _find_modes:
 
 Find modes

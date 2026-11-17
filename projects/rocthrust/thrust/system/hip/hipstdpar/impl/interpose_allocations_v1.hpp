@@ -22,8 +22,9 @@
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
 #include <hip/hip_runtime.h>
 
-#if __has_include(<pthread.h>)
+#if __has_include(<pthread.h>) && __has_include(<sys/resource.h>)
     #include <pthread.h>
+    #include <sys/resource.h>
     #define __HIPSTDPAR_INTERPOSE_ALLOC_HAS_STACK_ACCESS__
 #endif
 #if __has_include(<sys/mman.h>)
@@ -33,6 +34,7 @@
     #include <sys/unistd.h>
 #endif
 
+#include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +43,11 @@
 #include <memory>
 #include <stdexcept>
 #include <utility>
+
+#if __has_include(<malloc.h>)
+    #include <malloc.h>
+    #define __HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__
+#endif
 
 extern "C" {
     __attribute__((weak)) void __hipstdpar_hidden_free(void*);
@@ -92,6 +99,12 @@ inline static const bool __initialised{hipInit(0) == hipSuccess};
                 throw ::std::runtime_error(
                     "Failed to retrieve accelerator for HIPSTDPAR");
             }
+            if (rlimit l{}; getrlimit(RLIMIT_STACK, &l)) {
+                throw ::std::runtime_error("Failed to query stack limits.");
+            }
+            else if (l.rlim_cur == RLIM_INFINITY) { // Unlimited stack, cap it.
+                n_ = PTHREAD_STACK_MIN;
+            }
             if (touch_stack_() &&
                 hipMemAdvise(ps_, n_, hipMemAdviseSetAccessedBy, d_) != hipSuccess) {
                 throw ::std::runtime_error(
@@ -119,6 +132,7 @@ extern "C" {
         auto r = __hipstdpar_hidden_memalign(a, n);
 
         if (!hipstd::__initialised) return r;
+        if (n == 0) return r; // hipMemAdvise rejects zero-length ranges; nothing to advise.
 
         hipDevice_t d{};
         hipGetDevice(&d);
@@ -165,7 +179,21 @@ extern "C" {
     inline __attribute__((used)) void* __hipstdpar_realloc(void* p,
                                                            std::size_t n)
     {
-        auto q = std::memcpy(__hipstdpar_malloc(n), p, n);
+        if (!p) return __hipstdpar_malloc(n);
+
+        if (n == 0) {
+            __hipstdpar_free(p);
+            return nullptr;
+        }
+
+        auto q = __hipstdpar_malloc(n);
+        if (!q) return nullptr;
+
+        std::size_t old = n;
+        #if defined(__HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__)
+            old = malloc_usable_size(p);
+        #endif
+        std::memcpy(q, p, std::min(old, n));
         __hipstdpar_free(p);
 
         return q;

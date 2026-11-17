@@ -62,7 +62,7 @@ using FmhaBwdTestParam     = std::tuple<      //
     FmhaBwdDimsMaskParam,
     bool // deterministic
     >;
-void fmha_bwd_test(const FmhaBwdTestParam& param)
+void fmha_bwd_test(const FmhaBwdTestParam& param, bool require_instance = false)
 {
     auto [mode, hdims, perm, bias_str, use_dbias, p_drop, drop_misc, dims_mask, det] = param;
     auto [hdim_q, hdim_v]                                                            = hdims;
@@ -98,7 +98,7 @@ void fmha_bwd_test(const FmhaBwdTestParam& param)
         1,
         stream_config);
 
-    if(result == bwd_result::no_instance)
+    if(result == bwd_result::no_instance && !require_instance)
         GTEST_SKIP() << "No instance for current parameters";
     ASSERT_EQ(result, bwd_result::success);
 }
@@ -223,13 +223,66 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
                                  Values(0.123f, 0.5f),              // p_drop
                                  Values(std::tuple{10, 123, false}, // seed/offset/prefs
                                         std::tuple{34534564645, 7876878876864, true}),
+                                 // The last two exercise short queries at low
+                                 // grid sizes; DecodeDropout below additionally
+                                 // clears the gfx1250 decode dispatch threshold.
                                  Values(std::tuple{2, 6, 2, 180, 512, "0"},
                                         std::tuple{3, 2, 2, 256, 128, "1"},
-                                        std::tuple{4, 2, 1, 100, 768, "2"}),
+                                        std::tuple{4, 2, 1, 100, 768, "2"},
+                                        std::tuple{2, 6, 2, 16, 512, "0"},
+                                        std::tuple{3, 2, 2, 32, 768, "2"}),
                                  Values(false) // deterministic
                                  ));
 
 TEST_P(Dropout, DataTypeConfig) { fmha_bwd_test(GetParam()); }
+
+class DecodeDropout : public TestWithParam<FmhaBwdTestParam>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaBwd,
+    DecodeDropout,
+    Combine(ModeValues,
+            Values(std::tuple{64, -1}),
+            Values(std::tuple{true, true}),
+            Values("n"),
+            Values(false),
+            Values(0.123f, 0.5f),
+            Values(std::tuple{10, 123, true}, std::tuple{34534564645, 7876878876864, true}),
+            Values(std::tuple{128, 6, 6, 16, 64, "0"}, std::tuple{128, 6, 6, 32, 96, "0"}),
+            Values(false)));
+
+TEST_P(DecodeDropout, DataTypeConfig)
+{
+    if constexpr(std::is_same_v<DataTypeConfig, FmhaBwdFp32>)
+        GTEST_SKIP() << "Decode dropout instances support fp16 and bf16";
+    const auto device_name = ck_tile::get_device_name();
+    if(device_name.compare(0, 6, "gfx950") != 0 && device_name.compare(0, 6, "gfx125") != 0)
+        GTEST_SKIP() << "Decode dropout coverage requires gfx950 or gfx1250";
+    const auto& [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = std::get<7>(GetParam());
+    const bool group            = std::get<0>(GetParam()) == mode_enum::group;
+    const std::string data_type = std::is_same_v<DataTypeConfig, FmhaBwdFp16> ? "fp16" : "bf16";
+    fmha_bwd_launcher launcher(fmha_bwd_traits{group ? batch * seqlen_q : seqlen_q,
+                                               group ? batch * seqlen_k : seqlen_k,
+                                               batch,
+                                               seqlen_q,
+                                               seqlen_k,
+                                               64,
+                                               64,
+                                               nhead,
+                                               nhead_k,
+                                               data_type,
+                                               group,
+                                               mask_enum::no_mask,
+                                               bias_enum::no_bias,
+                                               false,
+                                               true,
+                                               true,
+                                               false});
+    ASSERT_EQ(launcher.selected_max_seqlen_q(), 32);
+    fmha_bwd_test(GetParam(), true);
+}
 
 class Deterministic : public TestWithParam<FmhaBwdTestParam>
 {
@@ -997,28 +1050,27 @@ TEST_P(MultiBatchPadding, DataTypeConfig)
 }
 
 // ============================================================================
-// Regression test for sink_host group-mode OOB fix (PR #7272)
+// Regression tests for the backward sink path
 // ----------------------------------------------------------------------------
-// Bug: in group mode, fmha_bwd_runner.hpp allocated sink_host with first
-// dimension shape_batch (=1) but the fwd reference loop iterates wb in
-// [0, batch-1], causing out-of-bounds reads of heap garbage when batch > 1.
+// Originally added for the sink_host group-mode OOB fix (PR #7272): in group
+// mode fmha_bwd_runner.hpp allocated sink_host with first dimension
+// shape_batch (=1) while the fwd reference loop iterates wb in [0, batch-1],
+// reading heap garbage when batch > 1. That one needs sink_grad=true AND
+// mode=group AND batch>=2; without the fix the poisoned LSE made validation
+// fail non-deterministically (~25-67% of 30 runs at b=2,h=2,s=516,s_k=253,
+// d=72,bf16,mask=no), and all 30 passed with it.
 //
-// Repro condition: sink_grad=true AND mode=group AND batch>=2.
-// Without the fix, the fwd reference computes a poisoned LSE and the bwd
-// validation fails non-deterministically (~25-67% failure rate observed
-// across 30 trial runs at b=2,h=2,s=516,s_k=253,d=72,bf16,mask=no).
-// With the fix (1-line change shape_batch -> batch on line 267 of
-// fmha_bwd_runner.hpp), all 30 runs PASS.
-//
-// This test exercises the fixed code path; a regression that re-introduces
-// the OOB will be detected as flaky/failing validation in CI.
+// The suite now also guards the sink_ptr / d_sink_ptr [nhead] contract, which
+// a [batch, nhead] index broke. That defect is not group-mode specific, so
+// batch mode is instantiated as well.
 // ============================================================================
-class SinkGradGroupMode : public TestWithParam<FmhaBwdTestParam>
+class SinkGrad : public TestWithParam<FmhaBwdTestParam>
 {
 };
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
-                         SinkGradGroupMode,
-                         Combine(Values(mode_enum::group),  // group mode required to hit OOB
+                         SinkGrad,
+                         Combine(Values(mode_enum::group,   // group mode required to hit the OOB
+                                        mode_enum::batch),  // batch mode still hits a wrong index
                                  Values(std::tuple{72, -1}, // hdim covered by repro command
                                         std::tuple{64, -1},
                                         std::tuple{128, -1}),
@@ -1035,7 +1087,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
                                         std::tuple{4, 2, -1, 200, 180, "0"}), // batch=4 stress
                                  Values(false)                                // deterministic
                                  ));
-TEST_P(SinkGradGroupMode, DataTypeConfig)
+TEST_P(SinkGrad, DataTypeConfig)
 {
     auto [mode, hdims, perm, bias_str, use_dbias, p_drop, drop_misc, dims_mask, det] = GetParam();
     auto [hdim_q, hdim_v]                                                            = hdims;
@@ -1072,6 +1124,247 @@ TEST_P(SinkGradGroupMode, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
-        GTEST_SKIP() << "No instance for sink_grad group-mode regression";
+        GTEST_SKIP() << "No instance for sink_grad regression";
+    ASSERT_EQ(result, bwd_result::success);
+}
+
+// ============================================================================
+// Does the kernel read *its own* head's sink?
+// ----------------------------------------------------------------------------
+// The suite above detects a wrong sink index only as a numeric mismatch, which
+// requires the sink init range to stay narrow: with the earlier [30, 60] the
+// softmax saturated, d_sink collapsed to -sum_q D[q] regardless of which sink
+// element was read, and a [batch, nhead] index went unnoticed in 12 of 15
+// cases. Widening the range again would silently disarm that guard.
+//
+// This suite asks the question directly instead. The kernel documents -inf as
+// "no sink" (P_sink = exp(-inf - lse) = 0), so the runner hands -inf to every
+// even head and an ordinary value to every odd one. The result must then show a
+// strict pattern: even heads contribute nothing and their d_sink is exactly 0,
+// odd heads are non-zero. Since no value other than -inf yields exactly 0, a
+// shifted index - or garbage read past the end of the [nhead] buffer - breaks
+// the pattern rather than merely perturbing a number, so no tolerance and no
+// init range is involved. batch >= 2 and an even nhead >= 2 are required for
+// both failure directions to be observable.
+// ============================================================================
+class SinkGradNeutralHeads : public TestWithParam<FmhaBwdTestParam>
+{
+};
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         SinkGradNeutralHeads,
+                         Combine(Values(mode_enum::group, mode_enum::batch),
+                                 Values(std::tuple{72, -1}, std::tuple{128, -1}),
+                                 Values(std::tuple{true, true}),
+                                 Values("n"),
+                                 Values(false),                   // use_dbias
+                                 Values(0.0f),                    // no dropout
+                                 Values(std::tuple{0, 0, false}), // seed/offset/prefs
+                                 // batch >= 2 and an even nhead >= 2 throughout. mask "0" keeps
+                                 // every row attended, so a neutral head never combines a -inf
+                                 // sink with a fully masked row - that pairing is the subject of
+                                 // SinkGradNeutralHeadsMaskedRows below.
+                                 Values(std::tuple{2, 2, -1, 516, 253, "0"},
+                                        std::tuple{3, 4, 2, 259, -1, "0"},
+                                        std::tuple{4, 2, -1, 200, 180, "0"}),
+                                 Values(false) // deterministic
+                                 ));
+TEST_P(SinkGradNeutralHeads, DataTypeConfig)
+{
+    auto [mode, hdims, perm, bias_str, use_dbias, p_drop, drop_misc, dims_mask, det] = GetParam();
+    auto [hdim_q, hdim_v]                                                            = hdims;
+    auto [i_perm, o_perm]                                                            = perm;
+    auto [drop_seed, drop_offset, drop_prefs]                                        = drop_misc;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str]                       = dims_mask;
+
+    auto result = fmha_bwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {seqlen_q},
+        {seqlen_k},
+        {-1},
+        {-1},
+        hdim_q,
+        hdim_v,
+        i_perm,
+        o_perm,
+        0, // scale
+        bias_str,
+        use_dbias,
+        p_drop,
+        drop_seed,
+        drop_offset,
+        drop_prefs,
+        mask_str,
+        true, // sink_grad
+        det,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,
+        stream_config,
+        std::nullopt, // json
+        sink_regime::neutral_heads);
+
+    if(result == bwd_result::no_instance)
+        GTEST_SKIP() << "No instance for sink_grad neutral-head check";
+    ASSERT_EQ(result, bwd_result::success);
+}
+
+// ============================================================================
+// A -inf sink meeting a fully masked row
+// ----------------------------------------------------------------------------
+// SinkGradNeutralHeads pins mask "0" so a neutral head never sees a row with no
+// attended key. This suite removes that restriction, which is the one case
+// where "-inf means no sink" stops being free: a fully masked row carries
+// lse == -inf as well, so exp(sink - lse) becomes exp(-inf - -inf) == NaN.
+//
+// Bottom-right causal with seqlen_q > seqlen_k produces such rows - row q
+// attends keys up to q - seqlen_q + seqlen_k, so the first seqlen_q - seqlen_k
+// rows attend nothing.
+//
+// The NaN had two independent reach conditions, hence both seqlen pairings
+// below. Let m = seqlen_q - seqlen_k:
+//   m % 32 != 0  a masked row shares an M tile with an attended one, so the
+//                kernel visits it and d_sink goes NaN (GetTileRangeAlongY
+//                rounds y_start down to a tile boundary).
+//   m % 32 == 0  the kernel skips the masked rows entirely, but the host
+//                reference still rescaled P by exp(lse_old - lse_new) there,
+//                and its NaN O is uploaded as a kernel input, so D = rowsum(O
+//                * dO) carries it into dQ and dK.
+// Both directions are covered per hdim, and every hdim here is a distinct
+// dot_do_o instantiation (72 is the head-dim-padded one).
+// ============================================================================
+// Only mode, head dim and shape vary here; everything else the runner takes is
+// pinned, so it is passed at the call site rather than as a one-element axis.
+using SinkGradMaskedRowsParam = std::tuple<mode_enum, std::tuple<int, int>, FmhaBwdDimsMaskParam>;
+
+class SinkGradNeutralHeadsMaskedRows : public TestWithParam<SinkGradMaskedRowsParam>
+{
+};
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         SinkGradNeutralHeadsMaskedRows,
+                         Combine(Values(mode_enum::batch, mode_enum::group),
+                                 Values(std::tuple{64, -1},
+                                        std::tuple{72, -1}, // head-dim padded
+                                        std::tuple{128, -1}),
+                                 // every entry needs mask "2"/"b:*" and seqlen_q > seqlen_k
+                                 Values(std::tuple{2, 2, -1, 512, 128, "2"}, // m=384, tile aligned
+                                        std::tuple{2, 2, -1, 160, 128, "2"}, // m=32,  tile aligned
+                                        std::tuple{2, 2, -1, 129, 128, "2"}, // m=1,   partial tile
+                                        std::tuple{2, 2, -1, 161, 128, "2"}, // m=33,  partial tile
+                                        std::tuple{3, 4, 2, 259, 128, "2"},  // m=131, GQA
+                                        std::tuple{2, 2, -1, 512, 128, "b:64,0"}) // swa
+                                 ));
+TEST_P(SinkGradNeutralHeadsMaskedRows, DataTypeConfig)
+{
+    auto [mode, hdims, dims_mask]                              = GetParam();
+    auto [hdim_q, hdim_v]                                      = hdims;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    auto result = fmha_bwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {seqlen_q},
+        {seqlen_k},
+        {-1},
+        {-1},
+        hdim_q,
+        hdim_v,
+        true,  // i_perm
+        true,  // o_perm
+        0,     // scale
+        "n",   // bias_str
+        false, // use_dbias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        true,  // sink_grad
+        false, // deterministic
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,
+        stream_config,
+        std::nullopt, // json
+        sink_regime::neutral_heads);
+
+    if(result == bwd_result::no_instance)
+        GTEST_SKIP() << "No instance for sink_grad masked-row check";
+    ASSERT_EQ(result, bwd_result::success);
+}
+
+// ============================================================================
+// Keep the saturated sink regime alive
+// ----------------------------------------------------------------------------
+// The sink init range was narrowed to [-1, 1] so that d_sink still depends on
+// which sink element was read. That was the right call, but it left the
+// opposite regime uncovered: with a sink far above rowmax, P_sink -> 1, every
+// token weight is scaled to ~0 and d_sink collapses to -sum_q D[q]. This case
+// puts the range back to [30, 60] for that path alone.
+//
+// It is not a correctness check - the collapse is exactly why the regime is
+// numerically blind - but it keeps the lse-saturation arithmetic exercised, so
+// an inf/NaN or an overflow escaping from it would still be caught.
+// ============================================================================
+class SinkGradSaturated : public TestWithParam<FmhaBwdTestParam>
+{
+};
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         SinkGradSaturated,
+                         Combine(Values(mode_enum::group, mode_enum::batch),
+                                 Values(std::tuple{72, -1}, std::tuple{128, -1}),
+                                 Values(std::tuple{true, true}),
+                                 Values("n"),
+                                 Values(false),                   // use_dbias
+                                 Values(0.0f),                    // no dropout
+                                 Values(std::tuple{0, 0, false}), // seed/offset/prefs
+                                 Values(std::tuple{2, 2, -1, 516, 253, "0"},
+                                        std::tuple{2, 2, -1, 516, 253, "1"}),
+                                 Values(false) // deterministic
+                                 ));
+TEST_P(SinkGradSaturated, DataTypeConfig)
+{
+    auto [mode, hdims, perm, bias_str, use_dbias, p_drop, drop_misc, dims_mask, det] = GetParam();
+    auto [hdim_q, hdim_v]                                                            = hdims;
+    auto [i_perm, o_perm]                                                            = perm;
+    auto [drop_seed, drop_offset, drop_prefs]                                        = drop_misc;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str]                       = dims_mask;
+
+    auto result = fmha_bwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {seqlen_q},
+        {seqlen_k},
+        {-1},
+        {-1},
+        hdim_q,
+        hdim_v,
+        i_perm,
+        o_perm,
+        0, // scale
+        bias_str,
+        use_dbias,
+        p_drop,
+        drop_seed,
+        drop_offset,
+        drop_prefs,
+        mask_str,
+        true, // sink_grad
+        det,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,
+        stream_config,
+        std::nullopt, // json
+        sink_regime::saturated);
+
+    if(result == bwd_result::no_instance)
+        GTEST_SKIP() << "No instance for sink_grad saturated regime";
     ASSERT_EQ(result, bwd_result::success);
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -189,7 +189,69 @@ void rocsparse::bsrxmvn_general(rocsparse_handle     handle,
 
     const J size = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
     // Differentiate BSR block dimensions
-    if(block_dim <= 8)
+    //
+    // On wave32 hardware (e.g. RDNA), bsrmv always routes through this general path.
+    // The launch geometry keeps BLOCKSIZE == WFSIZE * WFSIZE so that each of the WFSIZE
+    // logical wavefronts owns one row of the BSR block (row stride == WFSIZE below).
+    // For small block dimensions the old block_dim<=8 bucket launched WFSIZE=8 (64 threads)
+    // regardless, so only (block_dim/8)^2 of the launched threads did any work and the
+    // remaining wavefronts occupied wave slots while idle. Fitting WFSIZE to block_dim for
+    // the 1..4 range removes those idle wave slots and raises effective occupancy on wave32,
+    // without changing the computed result. The >=8 buckets are already fully packed and are
+    // left untouched so the bandwidth-bound cases never regress.
+    //
+    // Performance portability: the tight-fit buckets are gated on wavefront_size == 32.
+    // Wide-wavefront (wave64) parts, which have their own specialized small-block paths and
+    // were never tuned for this reshaping, fall through to the original block_dim<=8 ->
+    // WFSIZE=8 bucket unchanged. The tighter WFSIZE is a logical row-owner group (not the
+    // hardware wave), so results are identical on every architecture regardless of the gate.
+    if(block_dim <= 2 && handle->wavefront_size == 32)
+    {
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_general_kernel<4, 2>),
+            dim3(size),
+            dim3(2 * 2),
+            0,
+            handle->stream,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            block_dim,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+    }
+    else if(block_dim <= 4 && handle->wavefront_size == 32)
+    {
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_general_kernel<16, 4>),
+            dim3(size),
+            dim3(4 * 4),
+            0,
+            handle->stream,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            block_dim,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+    }
+    else if(block_dim <= 8)
     {
         THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrxmvn_general_kernel<64, 8>),

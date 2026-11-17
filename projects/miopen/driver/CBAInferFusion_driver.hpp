@@ -689,10 +689,6 @@ int CBAInferFusionDriver<Tgpu, Tref>::createSaveBuffers()
 {
 
     status_t status = STATUS_SUCCESS;
-#if MIOPEN_BACKEND_OPENCL
-    cl_context ctx;
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     if(status != STATUS_SUCCESS)
         printf("Error copying data to GPU\n");
@@ -706,9 +702,6 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
 
     status_t status = STATUS_SUCCESS;
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     if(useBatchNorm)
     {
@@ -756,9 +749,6 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     status_t status = STATUS_SUCCESS;
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     size_t in_sz  = GetTensorSize(inputTensor);
     size_t wei_sz = GetTensorSize(weightTensor);

@@ -1,4 +1,4 @@
-// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,9 @@
 #ifndef ROCFFT_CLIENT_EXCEPT_H
 #define ROCFFT_CLIENT_EXCEPT_H
 
+#include "hiprtc_except.h"
 #include <stdexcept>
+#include <string>
 
 // exception type to throw when we want to skip a problem
 struct ROCFFT_SKIP : public std::runtime_error
@@ -49,6 +51,10 @@ struct ROCFFT_FAIL : public std::runtime_error
             GTEST_SKIP() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
         else                                                                        \
             GTEST_FAIL() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
+    }                                                                               \
+    catch(const hiprtc_runtime_error& e)                                            \
+    {                                                                               \
+        GTEST_FAIL() << e.what() << "\nHIPRTC error: " << e.hiprtc_error << ".";    \
     }                                                                               \
     catch(const HOSTBUF_MEM_USAGE& e)                                               \
     {                                                                               \

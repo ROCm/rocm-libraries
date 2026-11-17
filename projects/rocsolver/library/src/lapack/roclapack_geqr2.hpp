@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     November 2019
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -99,13 +99,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) geqr2_kernel_small(const I m,
             norm2 += x[i + 1] * conj(x[i + 1]);
 
         // reduce squared entries to find squared norm of x
-        norm2 += shift_left(norm2, 1);
-        norm2 += shift_left(norm2, 2);
-        norm2 += shift_left(norm2, 4);
-        norm2 += shift_left(norm2, 8);
-        norm2 += shift_left(norm2, 16);
-        if(warpSize > 32)
-            norm2 += shift_left(norm2, 32);
+        reduce_wave_sum(norm2);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = norm2;
         __syncthreads();

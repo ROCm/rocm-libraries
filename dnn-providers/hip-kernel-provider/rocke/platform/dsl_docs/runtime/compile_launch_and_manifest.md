@@ -34,6 +34,10 @@ kernel_name  : str
 hsaco_bytes  : int
 ```
 
+Scheduler selection is a typed per-kernel policy rather than an arbitrary
+`compile_kernel(options=...)` escape hatch. See
+[`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
+
 Timing keys:
 
 ```text
@@ -66,7 +70,7 @@ passes the IR text through
 `COMPILE_SOURCE_TO_BC -> CODEGEN_BC_TO_RELOCATABLE -> LINK_RELOCATABLE_TO_EXECUTABLE`;
 and extracts the executable bytes.
 
-`ComgrTimings(bc, relocatable, executable)` returns per-stage seconds. `compile_kernel` converts to milliseconds for `KernelArtifact.timings`.
+`ComgrTimings(bc, link, relocatable, executable)` returns per-stage seconds (`link` is 0.0 unless several modules are linked into one code object). `compile_kernel` converts to milliseconds for `KernelArtifact.timings`.
 
 ## HIP Runtime Layer
 
@@ -97,7 +101,8 @@ Both fixes are automatic when launches go through `KernelLauncher`.
 
 ## Torch Runtime Layer
 
-File: `runtime/torch_module.py`.
+Files: `runtime/packing.py` (torch-agnostic arg packing) and
+`runtime/torch_interop.py` (stream resolution + torch-tensor launch).
 
 ```text
 pack_args(signature, values) -> bytes      # packs kernel args in declaration order
@@ -319,8 +324,8 @@ Common entry points:
 
 ```text
 gemm_args_signature(*, with_bytes=False)
-conv_args_signature()
 attention_args_signature(*, path="2d" | "reduce")
+# conv: kernels.common.conv_abi.conv_args_signature (library; conv-specific)
 
 make_gemm_manifest(...)
 make_conv_manifest(...)
@@ -408,16 +413,16 @@ ms = launch_kernel(
 ### Manifest execute
 
 ```bash
-PYTHONPATH=Python python -m rocke.run_manifest out.hsaco manifest.json --verify
+PYTHONPATH=python python -m rocke.run_manifest out.hsaco manifest.json --verify
 ```
 
 ### Sweep + benchmark
 
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=Python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
+PYTHONPATH=python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
     --output-dir "$OUT_DIR" --subset compute --parallel 16
-PYTHONPATH=Python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+PYTHONPATH=python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
     --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 

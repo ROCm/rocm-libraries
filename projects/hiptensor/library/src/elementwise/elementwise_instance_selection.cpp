@@ -4141,7 +4141,11 @@ namespace hiptensor
             case 6:
                 break;
             }
-            if(lut)
+            // The table was tuned over inputs that carry every output mode, so a key only means
+            // anything when both the lengths and the permutation cover the full rank. A broadcast
+            // input leaves them short, in which case fall through to the default hyper-parameters.
+            if(lut && lengths.size() == static_cast<std::size_t>(numDim)
+               && outputMode.size() == static_cast<std::size_t>(numDim))
             {
                 auto key = hipTypeToString(typeIn[0]);
                 for(auto&& index : findRepresentPointOfSubSpace(lengths))

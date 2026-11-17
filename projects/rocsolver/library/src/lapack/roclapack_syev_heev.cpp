@@ -30,16 +30,16 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename S, typename W>
+template <typename T, typename S, typename W, typename I>
 rocblas_status rocsolver_syev_heev_impl(rocblas_handle handle,
                                         const rocblas_evect evect,
                                         const rocblas_fill uplo,
-                                        const rocblas_int n,
+                                        const I n,
                                         W A,
-                                        const rocblas_int lda,
+                                        const I lda,
                                         S* D,
                                         S* E,
-                                        rocblas_int* info)
+                                        I* info)
 try
 {
     const char* name = (!rocblas_is_complex<T> ? "syev" : "heev");
@@ -54,13 +54,13 @@ try
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // normal (non-batched non-strided) execution
     rocblas_stride strideA = 0;
     rocblas_stride strideD = 0;
     rocblas_stride strideE = 0;
-    rocblas_int batch_count = 1;
+    I batch_count = 1;
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -172,6 +172,80 @@ rocblas_status rocsolver_zheev(rocblas_handle handle,
 {
     return rocsolver::rocsolver_syev_heev_impl<rocblas_double_complex>(handle, evect, uplo, n, A,
                                                                        lda, D, E, info);
+}
+
+rocblas_status rocsolver_ssyev_64(rocblas_handle handle,
+                                  const rocblas_evect evect,
+                                  const rocblas_fill uplo,
+                                  const int64_t n,
+                                  float* A,
+                                  const int64_t lda,
+                                  float* D,
+                                  float* E,
+                                  int64_t* info)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_impl<float>(handle, evect, uplo, n, A, lda, D, E, info);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_dsyev_64(rocblas_handle handle,
+                                  const rocblas_evect evect,
+                                  const rocblas_fill uplo,
+                                  const int64_t n,
+                                  double* A,
+                                  const int64_t lda,
+                                  double* D,
+                                  double* E,
+                                  int64_t* info)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_impl<double>(handle, evect, uplo, n, A, lda, D, E, info);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_cheev_64(rocblas_handle handle,
+                                  const rocblas_evect evect,
+                                  const rocblas_fill uplo,
+                                  const int64_t n,
+                                  rocblas_float_complex* A,
+                                  const int64_t lda,
+                                  float* D,
+                                  float* E,
+                                  int64_t* info)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_impl<rocblas_float_complex>(handle, evect, uplo, n, A,
+                                                                      lda, D, E, info);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zheev_64(rocblas_handle handle,
+                                  const rocblas_evect evect,
+                                  const rocblas_fill uplo,
+                                  const int64_t n,
+                                  rocblas_double_complex* A,
+                                  const int64_t lda,
+                                  double* D,
+                                  double* E,
+                                  int64_t* info)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_impl<rocblas_double_complex>(handle, evect, uplo, n, A,
+                                                                       lda, D, E, info);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # Add CK DSL to path
-ROCKE_ROOT = Path(__file__).resolve().parents[3] / "Python"  # rocKE/Python
+ROCKE_ROOT = Path(__file__).resolve().parents[3] / "python"  # rocke/platform/python
 if str(ROCKE_ROOT) not in sys.path:
     sys.path.insert(0, str(ROCKE_ROOT))
 
@@ -51,7 +51,7 @@ def test_unrolled_lowering():
 
     # Lower to LLVM IR
     kernel = b.kernel
-    llvm_ir = lower_kernel_to_llvm(kernel)
+    llvm_ir = lower_kernel_to_llvm(kernel, arch="gfx950")
 
     print("LLVM IR generated:")
     print("-" * 50)
@@ -120,7 +120,7 @@ def test_normal_lowering():
 
     # Lower to LLVM IR
     kernel = b.kernel
-    llvm_ir = lower_kernel_to_llvm(kernel)
+    llvm_ir = lower_kernel_to_llvm(kernel, arch="gfx950")
 
     # Verify loop structure
     has_loop_header = "for.header" in llvm_ir
@@ -169,7 +169,7 @@ def test_multiple_iter_args():
 
     # Lower to LLVM IR
     kernel = b.kernel
-    llvm_ir = lower_kernel_to_llvm(kernel)
+    llvm_ir = lower_kernel_to_llvm(kernel, arch="gfx950")
 
     # Verify unrolling
     has_loop = "for.header" in llvm_ir
@@ -214,7 +214,7 @@ def test_realistic_conv_loop():
 
     # Lower to LLVM IR
     kernel = b.kernel
-    llvm_ir = lower_kernel_to_llvm(kernel)
+    llvm_ir = lower_kernel_to_llvm(kernel, arch="gfx950")
 
     # Verify unrolling
     has_loop = "for.header" in llvm_ir
@@ -261,7 +261,7 @@ def test_non_constant_fallback():
 
     # Lower to LLVM IR
     kernel = b.kernel
-    llvm_ir = lower_kernel_to_llvm(kernel)
+    llvm_ir = lower_kernel_to_llvm(kernel, arch="gfx950")
 
     # Should fall back to normal loop
     has_loop = "for.header" in llvm_ir

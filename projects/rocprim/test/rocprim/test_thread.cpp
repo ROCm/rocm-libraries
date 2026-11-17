@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,7 +68,17 @@ using Params = ::testing::Types<params<32, 1, 1>,
                                 params<128, 2, 2>,
                                 params<256, 2, 2>>;
 
-TYPED_TEST_SUITE(RocprimThreadTests, Params);
+struct RocprimThreadTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return std::to_string(Params::block_size_x) + "_" + std::to_string(Params::block_size_y)
+               + "_" + std::to_string(Params::block_size_z);
+    }
+};
+
+TYPED_TEST_SUITE(RocprimThreadTests, Params, RocprimThreadTestsNameGenerator);
 
 template<
     unsigned int BlockSizeX,

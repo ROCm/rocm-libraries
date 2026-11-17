@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "hipsparse_bench.hpp"
 #include "hipsparse_bench_cmdlines.hpp"
+#include "utility.hpp"
 
 // Return version.
 std::string hipsparse_get_version()
@@ -37,30 +38,26 @@ std::string hipsparse_get_version()
     status = hipsparseCreate(&handle);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "The creation of the hipsparseHandle_t failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseCreate", status);
     }
 
     status = hipsparseGetVersion(handle, &hipsparse_ver);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetVersion failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseGetVersion", status);
     }
 
     status = hipsparseGetGitRevision(handle, hipsparse_rev);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetGitRevision failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseGetGitRevision", status);
     }
 
     status = hipsparseDestroy(handle);
 
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseDestroy", status);
     }
 
     std::ostringstream os;
@@ -78,7 +75,7 @@ void hipsparse_bench::parse(int& argc, char**& argv, hipsparse_arguments_config&
     int i = config.parse(argc, argv, this->desc);
     if(i == -1)
     {
-        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
+        throw_hipsparse_error("hipsparse_bench::parse", HIPSPARSE_STATUS_INTERNAL_ERROR);
     }
     else if(i == -2)
     {
@@ -146,7 +143,7 @@ void hipsparse_bench::info_devices(std::ostream& out_) const
     std::cout << "Query device success: there are " << devs << " devices" << std::endl;
     for(int i = 0; i < devs; ++i)
     {
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
         if(hipGetDeviceProperties(&prop, i) != hipSuccess)
         {
             std::cerr << "hipsparse_bench error: cannot get device properties" << std::endl;
@@ -162,7 +159,7 @@ void hipsparse_bench::info_devices(std::ostream& out_) const
     // Print header.
     {
         int             device_id = this->get_device_id();
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
         if(hipGetDeviceProperties(&prop, device_id) != hipSuccess)
         {
             std::cerr << "hipsparse_bench error: cannot get device properties" << std::endl;

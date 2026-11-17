@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -91,18 +91,18 @@ void rocsolver_orglq_unglq_getMemorySize(const rocblas_int m,
     }
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename U, typename I = rocblas_int>
 rocblas_status rocsolver_orglq_unglq_template(rocblas_handle handle,
-                                              const rocblas_int m,
-                                              const rocblas_int n,
-                                              const rocblas_int k,
+                                              const I m,
+                                              const I n,
+                                              const I k,
                                               U A,
-                                              const rocblas_int shiftA,
-                                              const rocblas_int lda,
+                                              const rocblas_stride shiftA,
+                                              const I lda,
                                               const rocblas_stride strideA,
                                               T* ipiv,
                                               const rocblas_stride strideP,
-                                              const rocblas_int batch_count,
+                                              const I batch_count,
                                               T* scalars,
                                               T* work,
                                               T* Abyx_tmptr,
@@ -124,17 +124,17 @@ rocblas_status rocsolver_orglq_unglq_template(rocblas_handle handle,
         return rocsolver_orgl2_ungl2_template<T>(handle, m, n, k, A, shiftA, lda, strideA, ipiv,
                                                  strideP, batch_count, scalars, Abyx_tmptr, workArr);
 
-    rocblas_int ldw = xxGxQ_BLOCKSIZE;
+    I ldw = xxGxQ_BLOCKSIZE;
     rocblas_stride strideW = rocblas_stride(ldw) * ldw;
 
     // start of first blocked block
-    rocblas_int jb = ldw;
-    rocblas_int j = ((k - xxGxQ_xxGxQ2_SWITCHSIZE - 1) / jb) * jb;
+    I jb = ldw;
+    I j = ((k - xxGxQ_xxGxQ2_SWITCHSIZE - 1) / jb) * jb;
 
     // start of the unblocked block
-    rocblas_int kk = std::min(k, j + jb);
+    I kk = std::min(k, j + jb);
 
-    rocblas_int blocksy, blocksx;
+    I blocksy, blocksx;
 
     // compute the unblockled part and set to zero the
     // corresponding left submatrix
@@ -157,10 +157,10 @@ rocblas_status rocsolver_orglq_unglq_template(rocblas_handle handle,
         // applying the current block reflector using larft + larfb
         if(j + jb < m)
         {
-            rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_row_wise, n - j,
-                                        jb, A, shiftA + idx2D(j, j, lda), lda, strideA, (ipiv + j),
-                                        strideP, trfact, ldw, strideW, batch_count, scalars, work,
-                                        workArr);
+            rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_row_wise,
+                                        (n - j), jb, A, shiftA + idx2D(j, j, lda), lda, strideA,
+                                        (ipiv + j), strideP, trfact, ldw, strideW, batch_count,
+                                        scalars, work, workArr);
 
             rocsolver_larfb_template<BATCHED, STRIDED, T>(
                 handle, rocblas_side_right, rocblas_operation_conjugate_transpose,

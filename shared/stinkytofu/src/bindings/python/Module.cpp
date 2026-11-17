@@ -22,14 +22,20 @@
  * ************************************************************************ */
 #include "stinkytofu/bindings/python/Module.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -65,6 +71,7 @@ struct StinkyAsmModule::Impl {
     std::unordered_map<std::string, InstructionGroupRange> instructionGroups;
 
     Function function;
+    std::vector<std::unique_ptr<Function>> callableFunctions;
 
     // Total instruction encoding size in bytes (for .amdhsa_inst_pref_size). -1 if not set.
     int64_t totalInstructionBytes = -1;
@@ -89,11 +96,7 @@ struct StinkyAsmModule::Impl {
 
 StinkyAsmModule::StinkyAsmModule(const std::string& name, const std::array<int, 3>& arch,
                                  const ModuleOptions& moduleOptions)
-    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {
-    // SwPrefetchScratchSgpr == -1: do not run SwPrefetchInsertionPass (see Gfx1250Backend).
-    this->moduleOptions.EnableSwPrefetchInsertion =
-        (this->moduleOptions.SwPrefetchScratchSgpr != -1);
-}
+    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {}
 
 StinkyAsmModule::~StinkyAsmModule() = default;
 
@@ -120,6 +123,10 @@ std::string StinkyAsmModule::getOutputDir() const {
     return pImpl->outputDir;
 }
 
+bool StinkyAsmModule::ModuleOptions::sgprsCompacted() const {
+    return kernelRewritesRegisters(RegisterAllocation, RegisterAllocationConfig, RegType::S);
+}
+
 std::array<int, 3> StinkyAsmModule::getArch() const {
     return pImpl->arch;
 }
@@ -132,6 +139,57 @@ const Function& StinkyAsmModule::getFunction() const {
     return pImpl->function;
 }
 
+Function& StinkyAsmModule::createFunction(std::string_view name, bool isCallable) {
+    if (name.empty()) {
+        report_fatal_error("Cannot create a callable Function with an empty name");
+    }
+    if (getFunction(name) != nullptr) {
+        report_fatal_error("Duplicate StinkyTofu Function name '" + std::string(name) +
+                           "' (names must be unique within the module)");
+    }
+    auto& func =
+        pImpl->callableFunctions.emplace_back(std::make_unique<Function>(std::string(name)));
+    func->setIsCallable(isCallable);
+    func->createBasicBlock("entry");
+    return *func;
+}
+
+Function* StinkyAsmModule::getFunction(std::string_view name) {
+    if (name.empty()) return &pImpl->function;
+    for (auto& func : pImpl->callableFunctions) {
+        if (func && func->getName() == name) return func.get();
+    }
+    return nullptr;
+}
+
+const Function* StinkyAsmModule::getFunction(std::string_view name) const {
+    if (name.empty()) return &pImpl->function;
+    for (const auto& func : pImpl->callableFunctions) {
+        if (func && func->getName() == name) return func.get();
+    }
+    return nullptr;
+}
+
+std::vector<Function*> StinkyAsmModule::getFunctions() {
+    std::vector<Function*> out;
+    out.reserve(1 + pImpl->callableFunctions.size());
+    out.push_back(&pImpl->function);
+    for (auto& func : pImpl->callableFunctions) out.push_back(func.get());
+    return out;
+}
+
+std::vector<const Function*> StinkyAsmModule::getFunctions() const {
+    std::vector<const Function*> out;
+    out.reserve(1 + pImpl->callableFunctions.size());
+    out.push_back(&pImpl->function);
+    for (const auto& func : pImpl->callableFunctions) out.push_back(func.get());
+    return out;
+}
+
+size_t StinkyAsmModule::numFunctions() const {
+    return 1 + pImpl->callableFunctions.size();
+}
+
 std::string StinkyAsmModule::emitAssembly() const {
     // Configure the emitter with default options
     stinkytofu::AsmEmitterOptions options;
@@ -142,7 +200,11 @@ std::string StinkyAsmModule::emitAssembly() const {
     options.useSymbolicNames = true;  // Enable symbolic register names
 
     stinkytofu::StinkyAsmEmitter emitter(options);
-    return emitter.emit(getFunction());
+    std::string result = emitter.emit(getFunction());
+    for (const auto& callable : pImpl->callableFunctions) {
+        if (callable) result += emitter.emit(*callable);
+    }
+    return result;
 }
 
 void StinkyAsmModule::runOptimizationPipeline() {
@@ -154,6 +216,10 @@ std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) 
     return getFunction().getMetaData(key);
 }
 
+void StinkyAsmModule::setMetaDataU64(const std::string& key, uint64_t value) {
+    getFunction().setMetaData(key, value);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;
@@ -163,6 +229,37 @@ void StinkyAsmModule::addGroup(const std::string& name) {
 
 bool StinkyAsmModule::hasGroup(const std::string& name) const {
     return pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end();
+}
+
+std::vector<std::string> StinkyAsmModule::invalidateGroupsInBlocks(
+    const std::vector<BasicBlock*>& blocks) {
+    if (blocks.empty()) return {};
+
+    const std::unordered_set<const BasicBlock*> dying(blocks.begin(), blocks.end());
+    std::vector<std::string> cleared;
+
+    for (auto& [groupName, range] : pImpl->instructionGroups) {
+        if (range.first == IntrusiveListIterator<IRBase>()) continue;
+
+        // A boundary listed in no block at all is already unusable, so it counts
+        // as dying too.
+        const IRBase* first = range.first.getNodePtr();
+        const IRBase* last = range.last.getNodePtr();
+        const BasicBlock* firstBB = first != nullptr ? first->getParent() : nullptr;
+        const BasicBlock* lastBB = last != nullptr ? last->getParent() : nullptr;
+        const bool firstSurvives = firstBB != nullptr && !dying.contains(firstBB);
+        const bool lastSurvives = lastBB != nullptr && !dying.contains(lastBB);
+        if (firstSurvives && lastSurvives) continue;
+
+        range.first = IntrusiveListIterator<IRBase>();
+        range.last = IntrusiveListIterator<IRBase>();
+        cleared.push_back(groupName);
+    }
+
+    // instructionGroups is unordered, so sort what little comes out of it rather
+    // than the whole name list: callers report these and want a stable order.
+    std::sort(cleared.begin(), cleared.end());
+    return cleared;
 }
 
 std::optional<std::pair<IntrusiveListIterator<IRBase>, IntrusiveListIterator<IRBase>>>
@@ -207,6 +304,29 @@ void StinkyAsmModule::setGroupRange(const std::string& groupName,
     auto& groupRange = pImpl->instructionGroups.at(groupName);
     groupRange.first = first;
     groupRange.last = last;
+}
+
+void StinkyAsmModule::retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast) {
+    if (!from) return;
+    for (auto& entry : pImpl->instructionGroups) {
+        auto& range = entry.second;
+        const bool firstMatch = range.first.getNodePtr() == from;
+        const bool lastMatch = range.last.getNodePtr() == from;
+        if (!firstMatch && !lastMatch) continue;
+        if (firstMatch && lastMatch) {
+            IRBase* repl = ifFirst ? ifFirst : ifLast;
+            if (!repl) continue;
+            range.first = IntrusiveListIterator<IRBase>(repl);
+            range.last = IntrusiveListIterator<IRBase>(repl);
+            continue;
+        }
+        if (firstMatch && ifFirst) {
+            range.first = IntrusiveListIterator<IRBase>(ifFirst);
+        }
+        if (lastMatch && ifLast) {
+            range.last = IntrusiveListIterator<IRBase>(ifLast);
+        }
+    }
 }
 
 const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const {

@@ -1,0 +1,88 @@
+<svg viewBox="0 0 960 460" width="960" height="460" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrowBA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- ================= LEFT PANEL ================= -->
+  <rect x="20" y="20" width="320" height="420" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="180" y="46" text-anchor="middle" font-weight="600">Today: hand-written C++ per kernel</text>
+
+  <!-- box 1 -->
+  <rect x="44" y="66" width="272" height="46" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
+  <text x="180" y="86" text-anchor="middle" font-family="Consolas, monospace" font-size="11">IPlanBuilder::isApplicable</text>
+  <text x="180" y="102" text-anchor="middle" font-size="11">hand-coded switch over the graph</text>
+
+  <!-- box 2 -->
+  <rect x="44" y="124" width="272" height="46" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
+  <text x="180" y="144" text-anchor="middle" font-family="Consolas, monospace" font-size="11">IEngine</text>
+  <text x="180" y="160" text-anchor="middle" font-size="11">per engine</text>
+
+  <!-- box 3 -->
+  <rect x="44" y="182" width="272" height="46" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
+  <text x="180" y="202" text-anchor="middle" font-family="Consolas, monospace" font-size="11">engine-registration table</text>
+  <text x="180" y="218" text-anchor="middle" font-size="11">HIPDNN_REGISTER_ENGINE id</text>
+
+  <!-- box 4 -->
+  <rect x="44" y="240" width="272" height="46" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
+  <text x="180" y="260" text-anchor="middle" font-size="12">bespoke launch code</text>
+  <text x="180" y="276" text-anchor="middle" font-size="11">grid / args / module load</text>
+
+  <!-- box 5 -->
+  <rect x="44" y="298" width="272" height="46" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
+  <text x="180" y="325" text-anchor="middle" font-size="12">heuristic / kernel ranking</text>
+
+  <!-- caption -->
+  <text x="180" y="378" text-anchor="middle" font-size="12" fill="#c65353" font-weight="600">new C++ + recompile for every kernel</text>
+
+  <!-- ================= BIG GENERALIZE ARROW ================= -->
+  <line x1="350" y1="230" x2="552" y2="230" stroke="#444" stroke-width="1.5" marker-end="url(#arrowBA)"/>
+  <text x="450" y="220" text-anchor="middle" font-size="13" font-weight="600">generalize</text>
+
+  <!-- ================= RIGHT PANEL ================= -->
+  <rect x="560" y="20" width="388" height="420" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="754" y="46" text-anchor="middle" font-weight="600">Proposed: drop in data</text>
+
+  <!-- descriptor boxes: KDP (batched UKDs) + reusable descriptors -->
+  <rect x="566" y="70" width="56" height="44" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="594" y="90" text-anchor="middle" font-family="Consolas, monospace" font-size="11">KDP</text>
+  <text x="594" y="106" text-anchor="middle" font-size="9" fill="#8a6d1f">kernels</text>
+
+  <rect x="630" y="70" width="56" height="44" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
+  <text x="658" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UMD</text>
+
+  <rect x="694" y="70" width="56" height="44" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="722" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UDD</text>
+
+  <rect x="758" y="70" width="56" height="44" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="786" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UED</text>
+
+  <rect x="822" y="70" width="56" height="44" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="850" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UHD</text>
+
+  <rect x="886" y="70" width="56" height="44" rx="8" fill="#f6ede2" stroke="#b5651d" stroke-width="1.5"/>
+  <text x="914" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">KMD</text>
+
+  <text x="754" y="132" text-anchor="middle" font-size="11" fill="#8a6d1f">descriptor files (a KDP + reusable UMD/UDD/UED/UHD/KMD)</text>
+
+  <!-- arrow down into engine -->
+  <line x1="754" y1="140" x2="754" y2="182" stroke="#444" stroke-width="1.5" marker-end="url(#arrowBA)"/>
+
+  <!-- generic reused engine box -->
+  <rect x="618" y="188" width="272" height="150" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="754" y="214" text-anchor="middle" font-weight="600" fill="#2f6e44">Generic, reused engine</text>
+
+  <rect x="646" y="228" width="216" height="30" rx="8" fill="#ffffff" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="754" y="248" text-anchor="middle" font-size="12">declarative matcher</text>
+
+  <rect x="646" y="264" width="216" height="30" rx="8" fill="#ffffff" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="754" y="284" text-anchor="middle" font-size="12">symbolic launcher</text>
+
+  <rect x="646" y="300" width="216" height="30" rx="8" fill="#ffffff" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="754" y="320" text-anchor="middle" font-size="12">kernel selector</text>
+
+  <!-- caption -->
+  <text x="754" y="378" text-anchor="middle" font-size="12" fill="#3f9159" font-weight="600">no per-kernel C++</text>
+</svg>

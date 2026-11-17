@@ -43,6 +43,8 @@ def runCI =
     {
         platform, project->
 
+        // runCoverageCommand launches both unit-test binaries before coverage.
+        // Calls placed before it in this closure are not executed.
         def gfilter = "*quick*:*pre_checkin*"
         commonGroovy.runCoverageCommand(platform, project, gfilter, "release-debug")
     }

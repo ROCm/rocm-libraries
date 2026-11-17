@@ -95,6 +95,93 @@ inline flatbuffers::FlatBufferBuilder createValidGraph()
     return builder;
 }
 
+/// Same shape as createValidGraph(), but the X tensor carries a ragged-offset
+/// link to an auxiliary offset tensor. The parameters decide whether and how the
+/// aux tensor lands in the tensor list; the defaults build a valid graph that
+/// exercises the derived GraphDescriptor::hasRaggedTensors() path.
+///
+/// @param includeAux false omits the aux, leaving a dangling ragged_offset_tensor_uid.
+/// @param auxVirtual true marks the aux tensor virtual (no backing storage).
+/// @param auxNested  true gives the aux its own ragged_offset_tensor_uid.
+inline flatbuffers::FlatBufferBuilder createValidGraphWithRaggedTensor(bool includeAux = true,
+                                                                       bool auxVirtual = false,
+                                                                       bool auxNested = false)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using namespace hipdnn_tests::constants;
+
+    flatbuffers::FlatBufferBuilder builder;
+
+    TensorAttributesT xTensor;
+    xTensor.uid = K_FPROP_TENSOR_X_UID;
+    xTensor.data_type = DataType::FLOAT;
+    xTensor.dims = hipdnn_tests::toVec(K_FPROP_TENSOR_X_DIMS);
+    xTensor.strides = hipdnn_tests::toVec(K_FPROP_TENSOR_X_STRIDES);
+    xTensor.ragged_offset_tensor_uid = K_FPROP_TENSOR_RAGGED_OFFSET_UID;
+
+    TensorAttributesT wTensor;
+    wTensor.uid = K_FPROP_TENSOR_W_UID;
+    wTensor.data_type = DataType::FLOAT;
+    wTensor.dims = hipdnn_tests::toVec(K_FPROP_TENSOR_W_DIMS);
+    wTensor.strides = hipdnn_tests::toVec(K_FPROP_TENSOR_W_STRIDES);
+
+    TensorAttributesT yTensor;
+    yTensor.uid = K_FPROP_TENSOR_Y_UID;
+    yTensor.data_type = DataType::FLOAT;
+    yTensor.dims = hipdnn_tests::toVec(K_FPROP_TENSOR_Y_DIMS);
+    yTensor.strides = hipdnn_tests::toVec(K_FPROP_TENSOR_Y_STRIDES);
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorOffsets;
+    tensorOffsets.push_back(TensorAttributes::Pack(builder, &xTensor));
+    tensorOffsets.push_back(TensorAttributes::Pack(builder, &wTensor));
+    tensorOffsets.push_back(TensorAttributes::Pack(builder, &yTensor));
+
+    if(includeAux)
+    {
+        // Auxiliary ragged-offset tensor referenced by xTensor.
+        TensorAttributesT raggedOffsetTensor;
+        raggedOffsetTensor.uid = K_FPROP_TENSOR_RAGGED_OFFSET_UID;
+        raggedOffsetTensor.data_type = DataType::INT64;
+        raggedOffsetTensor.dims = hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_DIMS);
+        raggedOffsetTensor.strides = hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES);
+        raggedOffsetTensor.virtual_ = auxVirtual;
+        if(auxNested)
+        {
+            // A ragged aux may not itself be ragged; point at an existing tensor
+            // so nesting is the sole reason for rejection.
+            raggedOffsetTensor.ragged_offset_tensor_uid = K_FPROP_TENSOR_X_UID;
+        }
+        tensorOffsets.push_back(TensorAttributes::Pack(builder, &raggedOffsetTensor));
+    }
+
+    ConvolutionFwdAttributesT convAttrs;
+    convAttrs.x_tensor_uid = K_FPROP_TENSOR_X_UID;
+    convAttrs.w_tensor_uid = K_FPROP_TENSOR_W_UID;
+    convAttrs.y_tensor_uid = K_FPROP_TENSOR_Y_UID;
+    convAttrs.pre_padding = hipdnn_tests::toVec(K_FPROP_CONV_PADDING);
+    convAttrs.post_padding = hipdnn_tests::toVec(K_FPROP_CONV_PADDING);
+    convAttrs.stride = hipdnn_tests::toVec(K_FPROP_CONV_STRIDE);
+    convAttrs.dilation = hipdnn_tests::toVec(K_FPROP_CONV_DILATION);
+    convAttrs.conv_mode = ConvMode::CROSS_CORRELATION;
+
+    NodeT nodeT;
+    nodeT.compute_data_type = DataType::FLOAT;
+    nodeT.attributes.Set(ConvolutionFwdAttributesT(convAttrs));
+
+    std::vector<flatbuffers::Offset<Node>> nodeOffsets;
+    nodeOffsets.push_back(Node::Pack(builder, &nodeT));
+
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::HALF,
+                                         DataType::BFLOAT16,
+                                         &tensorOffsets,
+                                         &nodeOffsets);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;

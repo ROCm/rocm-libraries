@@ -424,8 +424,8 @@ int main(int argc, char* argv[]) {
             }
             if (errorCodeCapture != RPP_SUCCESS) {
                 cout << "\nThe functionality " << func << " returned an error status "
-                     << rppStatusToString[errorCodeCapture] << " on run number " << perfRunCount + 1
-                     << " of " << numRuns << " runs.\n";
+                     << rppGetStatusString(errorCodeCapture) << " on run number "
+                     << perfRunCount + 1 << " of " << numRuns << " runs.\n";
                 return errorCodeCapture;
             }
         }
@@ -527,8 +527,10 @@ int main(int argc, char* argv[]) {
                         uint dataSize = niftiHeaderTemp[batchCount].dim[1] *
                                         niftiHeaderTemp[batchCount].dim[2] *
                                         niftiHeaderTemp[batchCount].dim[3];
-                        uchar* niftiDataU8 = (uchar*)malloc(dataSize * sizeof(uchar));
-                        uchar* outputBufferOpenCV = (uchar*)calloc(xyFrameSizeROI, sizeof(uchar));
+                        unsigned char* niftiDataU8 =
+                            (unsigned char*)malloc(dataSize * sizeof(unsigned char));
+                        unsigned char* outputBufferOpenCV =
+                            (unsigned char*)calloc(xyFrameSizeROI, sizeof(unsigned char));
 
                         // Convert RpptDataType::F32 strided buffer to default NIFTI_DATATYPE
                         // unstrided buffer
@@ -549,9 +551,9 @@ int main(int argc, char* argv[]) {
                         Rpp32f multiplier = 255.0f / (max - min);
                         for (int i = 0; i < dataSize; i++)
                             niftiDataU8[i] =
-                                (uchar)((niftiDataArray[batchCount][i] - min) * multiplier);
+                                (unsigned char)((niftiDataArray[batchCount][i] - min) * multiplier);
 
-                        uchar* niftiDataU8Temp = niftiDataU8;
+                        unsigned char* niftiDataU8Temp = niftiDataU8;
                         for (int zPlane = roiGenericSrcPtr[batchCount].xyzwhdROI.xyz.z;
                              zPlane < roiGenericSrcPtr[batchCount].xyzwhdROI.xyz.z +
                                           roiGenericSrcPtr[batchCount].xyzwhdROI.roiDepth;
@@ -614,6 +616,7 @@ int main(int argc, char* argv[]) {
              << minWallTime << "," << avgWallTime;
     }
     rppDestroy(handle, backend);
+    CHECK_RETURN_STATUS(hipStreamDestroy(stream));
 
     // Free memory
     free(niftiDataArray);

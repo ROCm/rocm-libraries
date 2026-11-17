@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -807,18 +807,15 @@ namespace rocalution
             format += sstr.str() + "/" + _matrix_format_names[this->matrix_ghost_.GetFormat()];
         }
 
-        LOG_INFO("GlobalMatrix"
-                 << " name=" << this->object_name_ << ";"
-                 << " rows=" << this->GetM() << ";"
-                 << " cols=" << this->GetN() << ";"
-                 << " nnz=" << this->GetNnz() << ";"
-                 << " prec=" << 8 * sizeof(ValueType) << "bit;"
-                 << " format=" << format << ";"
-                 << " subdomains=" << ((this->pm_ != NULL) ? this->pm_->num_procs_ : 1) << ";"
-                 << " host backend={" << _rocalution_host_name[0] << "};"
-                 << " accelerator backend={"
-                 << _rocalution_backend_name[this->local_backend_.backend] << "};"
-                 << " current=" << current_backend_name);
+        LOG_INFO("GlobalMatrix" << " name=" << this->object_name_ << ";" << " rows=" << this->GetM()
+                                << ";" << " cols=" << this->GetN() << ";" << " nnz="
+                                << this->GetNnz() << ";" << " prec=" << 8 * sizeof(ValueType)
+                                << "bit;" << " format=" << format << ";" << " subdomains="
+                                << ((this->pm_ != NULL) ? this->pm_->num_procs_ : 1) << ";"
+                                << " host backend={" << _rocalution_host_name[0] << "};"
+                                << " accelerator backend={"
+                                << _rocalution_backend_name[this->local_backend_.backend] << "};"
+                                << " current=" << current_backend_name);
     }
 
     template <typename ValueType>
@@ -1336,14 +1333,12 @@ namespace rocalution
 
         // Only CSR matrices are supported
         LocalMatrix<ValueType> R_int;
-        LocalMatrix<ValueType> R_gst;
         LocalMatrix<ValueType> A_int;
         LocalMatrix<ValueType> A_gst;
         LocalMatrix<ValueType> P_int;
         LocalMatrix<ValueType> P_gst;
 
         const LocalMatrix<ValueType>* R_int_ptr = &R.matrix_interior_;
-        const LocalMatrix<ValueType>* R_gst_ptr = &R.matrix_ghost_;
         const LocalMatrix<ValueType>* A_int_ptr = &A.matrix_interior_;
         const LocalMatrix<ValueType>* A_gst_ptr = &A.matrix_ghost_;
         const LocalMatrix<ValueType>* P_int_ptr = &P.matrix_interior_;
@@ -2414,7 +2409,16 @@ namespace rocalution
             send_offset_index[n + 1] = m;
         }
 
-        // Communicate boundary offsets
+        // Coarse boundary size per neighbor
+        int* send_boundary_size = NULL;
+        allocate_host(this->pm_->nsend_, &send_boundary_size);
+
+        for(int n = 0; n < this->pm_->nsend_; ++n)
+        {
+            send_boundary_size[n] = send_offset_index[n + 1] - send_offset_index[n];
+        }
+
+        // Communicate boundary sizes
         for(int n = 0; n < this->pm_->nrecv_; ++n)
         {
             communication_async_recv(&recv_offset_index[n + 1],
@@ -2427,7 +2431,7 @@ namespace rocalution
 
         for(int n = 0; n < this->pm_->nsend_; ++n)
         {
-            communication_async_send(&send_offset_index[n + 1],
+            communication_async_send(&send_boundary_size[n],
                                      1,
                                      this->pm_->sends_[n],
                                      0,
@@ -2464,8 +2468,10 @@ namespace rocalution
         int64_t nnzc = tmp.GetNnz();
         tmp.LeaveDataPtrCSR(&Ac_interior_row_offset, &Ac_interior_col, &Ac_interior_val);
 
-        // Wait for boundary offset communication to finish
+        // Wait for boundary size communication to finish
         communication_syncall(this->pm_->nrecv_ + this->pm_->nsend_, &req_offsets[0]);
+
+        free_host(&send_boundary_size);
 
         recv_offset_index[0] = 0;
         for(int n = 0; n < this->pm_->nrecv_; ++n)
@@ -2497,8 +2503,9 @@ namespace rocalution
                 i < this->pm_->recv_offset_index_[n + 1] - this->pm_->recv_offset_index_[n];
                 ++i)
             {
-                ghost_G[k]
-                    = (i < recv_map_size[n]) ? (recv_offset_index[n] + recv_ghost_map[n][i]) : -1;
+                int coarse_map = (i < recv_map_size[n]) ? recv_ghost_map[n][i] : -1;
+
+                ghost_G[k] = (coarse_map == -1) ? -1 : recv_offset_index[n] + coarse_map;
                 ++k;
             }
         }
@@ -3198,14 +3205,8 @@ namespace rocalution
         // Start with fresh P operator
         prolong->Clear();
 
-        int64_t global_row_begin = this->pm_->GetGlobalRowBegin();
-        int64_t global_row_end   = this->pm_->GetGlobalRowEnd();
         int64_t global_col_begin = this->pm_->GetGlobalColumnBegin();
         int64_t global_col_end   = this->pm_->GetGlobalColumnEnd();
-
-        // Communication sizes
-        int nsend = this->pm_->GetNumSenders();
-        int nrecv = this->pm_->GetNumReceivers();
 
         // Obtain the local to global ghost mapping
         LocalVector<int64_t> l2g;
@@ -3327,18 +3328,10 @@ namespace rocalution
         // Rename P
         prolong->object_name_ = "Prolongation Operator of " + this->object_name_;
 
-        const int*     boundary_index = this->pm_->GetBoundaryIndex();
-        const int64_t* ghost_mapping  = this->pm_->GetGhostToGlobalMap();
-
-        int            prolong_nsend          = prolong->pm_self_->GetNumSenders();
-        int            prolong_nrecv          = prolong->pm_self_->GetNumReceivers();
-        const int*     prolong_boundary_index = prolong->pm_self_->GetBoundaryIndex();
-        const int64_t* prolong_ghost_mapping  = prolong->pm_self_->GetGhostToGlobalMap();
-
-        int64_t prolong_global_row_begin = prolong->pm_->GetGlobalRowBegin();
-        int64_t prolong_global_row_end   = prolong->pm_->GetGlobalRowEnd();
-        int64_t prolong_global_col_begin = prolong->pm_->GetGlobalColumnBegin();
-        int64_t prolong_global_col_end   = prolong->pm_->GetGlobalColumnEnd();
+        // GetGhostToGlobalMap() exchanges the map with the neighbors on its first call,
+        // so make that call here, where all ranks take part
+        this->pm_->GetGhostToGlobalMap();
+        prolong->pm_self_->GetGhostToGlobalMap();
 
         if(this->GetFormat() != CSR)
         {
@@ -3416,14 +3409,8 @@ namespace rocalution
         // Start with fresh P operator
         prolong->Clear();
 
-        int64_t global_row_begin = this->pm_->GetGlobalRowBegin();
-        int64_t global_row_end   = this->pm_->GetGlobalRowEnd();
         int64_t global_col_begin = this->pm_->GetGlobalColumnBegin();
         int64_t global_col_end   = this->pm_->GetGlobalColumnEnd();
-
-        // Communication sizes
-        int nsend = this->pm_->GetNumSenders();
-        int nrecv = this->pm_->GetNumReceivers();
 
         // fine to coarse map
         LocalVector<int> f2c_map;
@@ -3535,24 +3522,16 @@ namespace rocalution
         // Rename P
         prolong->object_name_ = "Prolongation Operator of " + this->object_name_;
 
-        const int*     boundary_index = this->pm_->GetBoundaryIndex();
-        const int64_t* ghost_mapping  = this->pm_->GetGhostToGlobalMap();
-
-        int            prolong_nsend          = prolong->pm_self_->GetNumSenders();
-        int            prolong_nrecv          = prolong->pm_self_->GetNumReceivers();
-        const int*     prolong_boundary_index = prolong->pm_self_->GetBoundaryIndex();
-        const int64_t* prolong_ghost_mapping  = prolong->pm_self_->GetGhostToGlobalMap();
-
-        int64_t prolong_global_row_begin = prolong->pm_->GetGlobalRowBegin();
-        int64_t prolong_global_row_end   = prolong->pm_->GetGlobalRowEnd();
-        int64_t prolong_global_col_begin = prolong->pm_->GetGlobalColumnBegin();
-        int64_t prolong_global_col_end   = prolong->pm_->GetGlobalColumnEnd();
+        // GetGhostToGlobalMap() exchanges the map with the neighbors on its first call,
+        // so make that call here, where all ranks take part
+        this->pm_->GetGhostToGlobalMap();
+        prolong->pm_self_->GetGhostToGlobalMap();
 
         if(this->GetFormat() != CSR)
         {
             LOG_VERBOSE_INFO(
                 2,
-                "*** warning: GlobalMatrix::AMGSmoothedAggregation() is performed in CSR format");
+                "*** warning: GlobalMatrix::AMGUnsmoothedAggregation() is performed in CSR format");
         }
 
 #ifdef DEBUG_MODE
@@ -4039,6 +4018,125 @@ namespace rocalution
 #ifdef DEBUG_MODE
         prolong->Check();
 #endif
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSMMExtPIInterpolation(const LocalVector<int>&  CFmap,
+                                                         const LocalVector<bool>& S,
+                                                         GlobalMatrix<ValueType>* prolong) const
+    {
+        log_debug(this,
+                  "GlobalMatrix::RSMMExtPIInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        assert(prolong != NULL);
+        assert(this != prolong);
+
+        assert(prolong->GetFormat() == CSR);
+
+        assert(this->is_host_() == prolong->is_host_());
+        assert(this->is_host_() == CFmap.is_host_());
+        assert(this->is_host_() == S.is_host_());
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+
+        // The matrix-matrix formulation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSMMExtPIInterpolation() is not implemented for more than "
+                     "one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSMMExtPIInterpolation(CFmap, S, &prolong->matrix_interior_);
+
+        // Prolongation PM
+        prolong->CreateParallelManager_();
+        prolong->pm_self_->SetMPICommunicator(this->pm_->comm_);
+
+        prolong->pm_self_->SetGlobalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetGlobalNcol(prolong->matrix_interior_.GetN());
+
+        prolong->pm_self_->SetLocalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetLocalNcol(prolong->matrix_interior_.GetN());
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSInterpolationTruncation(float trunc_factor, int max_elmts)
+    {
+        log_debug(this, "GlobalMatrix::RSInterpolationTruncation()", trunc_factor, max_elmts);
+
+        if(trunc_factor <= 0.0f && max_elmts <= 0)
+        {
+            return;
+        }
+
+        // Truncation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSInterpolationTruncation() is not implemented for more "
+                     "than one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSInterpolationTruncation(trunc_factor, max_elmts);
+
+        this->nnz_ = this->matrix_interior_.GetNnz();
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSMMExtPEInterpolation(const LocalVector<int>&  CFmap,
+                                                         const LocalVector<bool>& S,
+                                                         GlobalMatrix<ValueType>* prolong) const
+    {
+        log_debug(this,
+                  "GlobalMatrix::RSMMExtPEInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        assert(prolong != NULL);
+        assert(this != prolong);
+
+        assert(prolong->GetFormat() == CSR);
+
+        assert(this->is_host_() == prolong->is_host_());
+        assert(this->is_host_() == CFmap.is_host_());
+        assert(this->is_host_() == S.is_host_());
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+
+        // The matrix-matrix formulation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSMMExtPEInterpolation() is not implemented for more than "
+                     "one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSMMExtPEInterpolation(CFmap, S, &prolong->matrix_interior_);
+
+        // Prolongation PM
+        prolong->CreateParallelManager_();
+        prolong->pm_self_->SetMPICommunicator(this->pm_->comm_);
+
+        prolong->pm_self_->SetGlobalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetGlobalNcol(prolong->matrix_interior_.GetN());
+
+        prolong->pm_self_->SetLocalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetLocalNcol(prolong->matrix_interior_.GetN());
     }
 
     template <typename ValueType>

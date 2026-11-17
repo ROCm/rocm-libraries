@@ -1,0 +1,11 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --no-ds-spread --barrier-half-slack=1 --ds-read-per-cap=2 --print-output 2>&1
+#
+# Removed options (--barrier-half-slack, --ds-read-per-cap) and the negated --no-ds-spread are
+# accepted on the command line; none is reported as an unknown pass.
+# CHECK-NOT: Unknown pass
+# CHECK-LABEL: @removed_flags
+
+st.func @removed_flags() {
+^entry:
+  "st.global_wb"() { issueCycles = 1, latencyCycles = 1, mod.cache_scope = { scope = "SCOPE_DEV" } }
+}

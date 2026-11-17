@@ -1,0 +1,107 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "1_3_14_14_bfp16_nchw",
+          "1_3_14_14_bfp16_nhwc",
+          "1_3_14_14_fp16_nchw",
+          "1_3_14_14_fp16_nhwc",
+          "1_3_14_14_fp32_nchw",
+          "1_3_14_14_fp32_nhwc",
+          "2_3_2_4_4_bfp16_ncdhw",
+          "2_3_2_4_4_bfp16_ndhwc",
+          "2_3_2_4_4_fp16_ncdhw",
+          "2_3_2_4_4_fp16_ndhwc",
+          "2_3_2_4_4_fp16_ndhwc_101c44",
+          "2_3_2_4_4_fp32_ncdhw",
+          "2_3_2_4_4_fp32_ncdhw_599716",
+          "2_3_2_4_4_fp32_ndhwc",
+          "32_3_1_14_bfp16_nchw_5c3461",
+          "32_3_1_14_fp16_nhwc_aa268a",
+          "32_3_1_14_fp32_nchw_35b688",
+          "32_3_1_14_fp32_nhwc_00ba43"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_3_14_14_bfp16_nchw",
+          "1_3_14_14_bfp16_nhwc",
+          "1_3_14_14_fp16_nchw",
+          "1_3_14_14_fp16_nhwc",
+          "1_3_14_14_fp32_nchw",
+          "1_3_14_14_fp32_nhwc",
+          "1_3_14_bfp16_ncl",
+          "1_3_14_bfp16_nlc",
+          "1_3_14_fp16_ncl",
+          "1_3_14_fp16_nlc",
+          "1_3_14_fp32_ncl",
+          "1_3_14_fp32_nlc",
+          "2_3_2_4_4_bfp16_ncdhw",
+          "2_3_2_4_4_bfp16_ndhwc",
+          "2_3_2_4_4_fp16_ncdhw",
+          "2_3_2_4_4_fp16_ndhwc",
+          "2_3_2_4_4_fp32_ncdhw",
+          "2_3_2_4_4_fp32_ndhwc"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

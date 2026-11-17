@@ -25,6 +25,7 @@
 #include "rocsparse_bsrilu0_kernel_2_8.hpp"
 #include "rocsparse_bsrilu0_info.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -48,13 +49,20 @@ namespace rocsparse
                                                  rocsparse_index_base idx_base,
                                                  int                  boost,
                                                  double               boost_tol,
-                                                 T                    boost_val)
+                                                 T                    boost_val,
+                                                 J                    idx)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        // Keep the row map read in bounds.
+        if(idx >= mb)
+        {
+            return;
+        }
+
         // Current row this wavefront is working on
-        J row = map[blockIdx.x];
+        J row = map[idx];
 
         // Diagonal entry point of the current row
         I row_diag = bsr_diag_ind[row];
@@ -101,17 +109,18 @@ namespace rocsparse
                 }
 
                 // Spin loop until dependency has been resolved
-                while(!__hip_atomic_load(
-                    &done_array[bsr_col], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT))
+                while(!rocsparse::atomic_load(
+                    &done_array[bsr_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                     ;
 
-                // Make sure dependencies are visible in global memory
-                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+                // Read the results of the dependencies only after their done flags
+                rocsparse::acquire_done_rows();
 
                 // Load updated BSR block into shared memory
                 sdata1[threadIdx.y][threadIdx.x]
                     = (threadIdx.x < block_dim && threadIdx.y < block_dim)
-                          ? bsr_val[BSR_IND(diag_j, threadIdx.x, threadIdx.y, dir)]
+                          ? rocsparse::load_done_row_data(
+                              &bsr_val[BSR_IND(diag_j, threadIdx.x, threadIdx.y, dir)])
                           : static_cast<T>(0);
 
                 // Make sure all writes to shared memory are visible
@@ -147,7 +156,8 @@ namespace rocsparse
                     __threadfence_block();
                 }
 
-                // Write row j back to global memory
+                // Write row j back to global memory. Dependent rows only read the diagonal and
+                // upper blocks of this row, so only those are exchanged with device scope accesses.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
                     bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)]
@@ -182,7 +192,8 @@ namespace rocsparse
                         // Load BSR block from row k into shared memory
                         sdata1[threadIdx.y][threadIdx.x]
                             = (threadIdx.x < block_dim && threadIdx.y < block_dim)
-                                  ? bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)]
+                                  ? rocsparse::load_done_row_data(
+                                      &bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)])
                                   : static_cast<T>(0);
 
                         // Make sure all writes to shared memory are visible
@@ -196,7 +207,10 @@ namespace rocsparse
                                 sdata2[bk][threadIdx.x], sdata1[threadIdx.y][bk], sum);
                         }
 
-                        // Write back to global row m
+                        // Write back to global row m. Block m can be the diagonal or an upper
+                        // block, which dependent rows read. This plain store is safe only
+                        // because the diagonal and upper blocks are stored again below with
+                        // device scope before the done flag is set.
                         if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                         {
                             // Do not pre-cache row m as we read/write only once
@@ -276,11 +290,13 @@ namespace rocsparse
 
                 __threadfence_block();
 
-                // Write diagonal BSR block back to global memory
+                // Write diagonal BSR block back to global memory. This device scope store also
+                // publishes the earlier plain updates of this block to dependent rows.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
-                    bsr_val[BSR_IND(row_diag, threadIdx.x, threadIdx.y, dir)]
-                        = sdata1[threadIdx.y][threadIdx.x];
+                    rocsparse::store_done_row_data(
+                        &bsr_val[BSR_IND(row_diag, threadIdx.x, threadIdx.y, dir)],
+                        sdata1[threadIdx.y][threadIdx.x]);
                 }
             }
 
@@ -309,11 +325,13 @@ namespace rocsparse
 
                 __threadfence_block();
 
-                // Write row j back to global memory
+                // Write row j back to global memory. This device scope store also publishes the
+                // earlier plain updates of this block to dependent rows.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
-                    bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)]
-                        = sdata2[threadIdx.y][threadIdx.x];
+                    rocsparse::store_done_row_data(
+                        &bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)],
+                        sdata2[threadIdx.y][threadIdx.x]);
                 }
             }
         }
@@ -326,7 +344,7 @@ namespace rocsparse
         if(threadIdx.x == 0 && threadIdx.y == 0)
         {
             // First lane writes "we are done" flag
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::set_done_flag(&done_array[row], 1);
 
             if(pivot)
             {
@@ -345,6 +363,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrilu0_kernel_2_8(rocsparse_direction dir,
                             J                   mb,
+                            int64_t             batch_count,
                             const I* __restrict__ bsr_row_ptr,
                             const J* __restrict__ bsr_col_ind,
                             T*      bsr_val,
@@ -365,7 +384,6 @@ namespace rocsparse
                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
                             bool is_val_host_mode)
     {
-        const auto batch_index = hipBlockIdx_y;
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
             enable_boost && (size_boost_tol == sizeof(float)), is_tol_host_mode, boost_tol_32);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
@@ -374,21 +392,39 @@ namespace rocsparse
         const double boost_tol = (size_boost_tol == sizeof(double)) //
                                      ? boost_tol_64 //
                                      : boost_tol_32;
-        rocsparse::bsrilu0_device_2_8<BLOCKSIZE, WFSIZE, BSRDIM>(
-            dir,
-            mb,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val + batch_index * bsr_val_stride,
-            bsr_diag_ind,
-            bsr_dim,
-            done_array + batch_index * done_array_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            idx_base,
-            enable_boost,
-            boost_tol,
-            boost_val);
+        static_assert(BLOCKSIZE == WFSIZE, "The row loop relies on a one-wavefront block.");
+
+        //
+        // grid.x is clamped, so walk the contiguous chunk of rows grid_x_chunk gives
+        // this block. The block is a single wavefront, so the next row can reuse the
+        // shared arrays without a barrier.
+        //
+        int64_t first, last;
+        rocsparse::grid_x_chunk(mb, hipGridDim_x, hipBlockIdx_x, first, last);
+
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            for(int64_t idx = first; idx < last; ++idx)
+            {
+                rocsparse::bsrilu0_device_2_8<BLOCKSIZE, WFSIZE, BSRDIM>(
+                    dir,
+                    mb,
+                    bsr_row_ptr,
+                    bsr_col_ind,
+                    rocsparse::load_pointer(bsr_val, batch_index, bsr_val_stride),
+                    bsr_diag_ind,
+                    bsr_dim,
+                    rocsparse::load_pointer(done_array, batch_index, done_array_stride),
+                    map,
+                    rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                    idx_base,
+                    enable_boost,
+                    boost_tol,
+                    boost_val,
+                    static_cast<J>(idx));
+            }
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -421,17 +457,21 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        // A zero value stride aliases every instance onto the same values.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
 
         auto numeric_exact = bsrilu0_info->get_singularity_numeric_exact();
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_2_8<BLOCKSIZE, WFSIZE, BSRDIM>),
-            dim3(A->rows, A->batch_count),
+            dim3(rocsparse::get_grid_size_x(handle, A->rows, 8),
+                 rocsparse::get_grid_size_y(handle, A_batch_count)),
             dim3(8, 8),
             0,
             handle->stream,
             A->block_dir,
             static_cast<J>(A->rows),
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

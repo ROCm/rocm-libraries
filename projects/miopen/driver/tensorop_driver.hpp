@@ -194,9 +194,6 @@ template <typename Tgpu, typename Tref>
 int TensorOpDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 {
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     size_t sz = GetTensorSize(aTensor);
 
