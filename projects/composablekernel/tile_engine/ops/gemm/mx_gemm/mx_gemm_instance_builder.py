@@ -161,9 +161,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         kernel_name = self._format_kernel_name(
             trait_combo, tile_config
         ) + mx_tdm_scheduled.instance_name_suffix(spec, tuning)
-        instance_code = self._v4_instance_code(
-            kernel_name, tile_config, spec, tuning, epilogue
-        )
+        instance_code = self._v4_instance_code(kernel_name, tile_config, spec, tuning)
 
         simplified_name = kernel_name[len(self.kernel_name_prefix) + 1 :]
         header_file = (
@@ -175,15 +173,8 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         print(f"Generated {header_file}")
         return kernel_name, instance_code
 
-    def _v4_instance_code(self, kernel_name, tile_config, spec, tuning, epilogue):
+    def _v4_instance_code(self, kernel_name, tile_config, spec, tuning):
         t = tile_config
-        # direct: MxDirectStoreEpilogue, E from the accumulators; tdm: TdmEpilogue, E through LDS
-        # (the store_width tuning only limits N; take 1 to run any N).
-        epilogue_type = (
-            "ck_tile::MxTdmStoreEpilogue<P>"
-            if epilogue == "tdm"
-            else "ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<P>>"
-        )
         return f"""// Generated kernel instance for {kernel_name}
 #pragma once
 
@@ -237,7 +228,7 @@ struct SelectedKernel {{
     using KernelOf = ck_tile::MxGemmKernel<
         ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
         P,
-        {epilogue_type}>;
+        ck_tile::MxTdmStoreEpilogue<P>>;
 
     // The pipeline's TailHandler picks the kernel of K's whole-tile count on the host.
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)

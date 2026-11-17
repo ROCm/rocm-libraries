@@ -24,41 +24,18 @@ using Bad = Kernel<pk_fp4_t,
                    2,
                    32,
                    Tu<4, 4, 4, false>,
-                   Shape<false, false, 0, 8>>;
+                   Shape<false, false, 0>>;
 #elif MX_TDM_SCHEDULED_REJECT == 2
 // 8-bit types on the 32x16 FP4 atom.
-using Bad =
-    Kernel<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 32, Tu<2, 2>, Shape<false, false, 0, 4>>;
+using Bad = Kernel<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 32, Tu<2, 2>, Shape<false, false, 0>>;
 #elif MX_TDM_SCHEDULED_REJECT == 3
-// A 16-element D store with an N repeat of 8.
-using Bad = Kernel<pk_fp4_t,
-                   pk_fp4_t,
-                   fp8_t,
-                   256,
-                   256,
-                   512,
-                   2,
-                   2,
-                   32,
-                   Tu<4, 4>,
-                   Shape<false, false, 0, 16>>;
-#elif MX_TDM_SCHEDULED_REJECT == 4
 // GL2 prefetch distance 1.
-using Bad = Kernel<pk_fp4_t,
-                   pk_fp4_t,
-                   fp8_t,
-                   256,
-                   256,
-                   512,
-                   2,
-                   2,
-                   32,
-                   Tu<4, 4, 1>,
-                   Shape<false, false, 0, 8>>;
-#elif MX_TDM_SCHEDULED_REJECT == 5
+using Bad =
+    Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<4, 4, 1>, Shape<false, false, 0>>;
+#elif MX_TDM_SCHEDULED_REJECT == 4
 // A cluster of 32 workgroups.
 using Bad =
-    Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<8, 4>, Shape<false, false, 0, 8>>;
+    Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<8, 4>, Shape<false, false, 0>>;
 #else
 #error "set MX_TDM_SCHEDULED_REJECT"
 #endif

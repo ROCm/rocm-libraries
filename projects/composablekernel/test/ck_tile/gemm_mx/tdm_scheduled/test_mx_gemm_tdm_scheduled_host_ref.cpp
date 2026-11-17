@@ -16,7 +16,6 @@
 
 #include "ck_tile/host/mx_processing.hpp"
 #include "ck_tile/host/reference/reference_mx_gemm_tdm_scheduled.hpp"
-#include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
 namespace {
 
@@ -134,37 +133,6 @@ TEST(MxGemmTdmScheduledHostRef, Fp8SaturatesAsTheEpilogue)
     EXPECT_EQ(d[1] & 0x7F, 0x7F);
     EXPECT_EQ(d[2], 0x7E);
     EXPECT_EQ(d[3], 0x80);
-}
-
-// The epilogues' SaturateFp8E4M3 is the reference's saturate_fp8: +-inf to NaN, NaN kept, finite
-// values clamped to +-448.
-TEST(MxGemmTdmScheduledHostRef, SaturateFp8E4M3IsTheReferenceSaturation)
-{
-    const float inf = std::numeric_limits<float>::infinity();
-    const float nan = std::numeric_limits<float>::quiet_NaN();
-    for(float v : {0.0f,
-                   -0.0f,
-                   3.0f,
-                   447.9f,
-                   448.0f,
-                   449.0f,
-                   -1000.0f,
-                   1e30f,
-                   -1e30f,
-                   std::numeric_limits<float>::max(),
-                   std::numeric_limits<float>::denorm_min(),
-                   inf,
-                   -inf,
-                   nan,
-                   -nan})
-    {
-        const float got  = ck_tile::element_wise::SaturateFp8E4M3::apply(v);
-        const float want = sched::saturate_fp8(v);
-        if(std::isnan(want))
-            EXPECT_TRUE(std::isnan(got)) << v;
-        else
-            EXPECT_EQ(sched::float_bits(got), sched::float_bits(want)) << v;
-    }
 }
 
 TEST(MxGemmTdmScheduledHostRef, Fp16AndBf16RoundToNearestEven)

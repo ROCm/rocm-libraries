@@ -133,20 +133,18 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
  * EdgeM / EdgeN (kPadM / kPadN): the last M (N) tile is partial, its TDM rows clipped and its D
  * vectors masked. WideA / WideB / WideD (LargeTensors if any): A's, B's or D's byte offsets pass
  * 2^31 and are i64. TailSteps: the K steps of a last, partial tile when tile_k does not divide K
- * (0 without one). StoreWidth: D columns per vector store. The edge and wide paths are supersets
- * of the ones they replace (an edge kernel runs whole tiles, a wide one narrow offsets) and any
- * store width dividing N works, so one instance serves every problem its traits cover;
- * TailSteps must be the problem's. The parity of the whole-tile count is the pipeline's
+ * (0 without one). The edge and wide paths are supersets of the ones they replace (an edge kernel
+ * runs whole tiles, a wide one narrow offsets), so one instance serves every problem its traits
+ * cover; TailSteps must be the problem's. The parity of the whole-tile count is the pipeline's
  * TailNumber, chosen at run time.
  * MxTdmScheduledSelectTraits gives the values an M x N x K problem needs.
  */
-template <bool EdgeM_         = false,
-          bool EdgeN_         = false,
-          bool WideA_         = false,
-          bool WideB_         = false,
-          bool WideD_         = false,
-          index_t TailSteps_  = 0,
-          index_t StoreWidth_ = 1>
+template <bool EdgeM_        = false,
+          bool EdgeN_        = false,
+          bool WideA_        = false,
+          bool WideB_        = false,
+          bool WideD_        = false,
+          index_t TailSteps_ = 0>
 struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
                                                           EdgeN_,
                                                           false,
@@ -165,14 +163,13 @@ struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
                                                           false,
                                                           WideA_ || WideB_ || WideD_>
 {
-    static constexpr bool kEdgeM         = EdgeM_;
-    static constexpr bool kEdgeN         = EdgeN_;
-    static constexpr bool kWideA         = WideA_;
-    static constexpr bool kWideB         = WideB_;
-    static constexpr bool kWideD         = WideD_;
-    static constexpr index_t kTailSteps  = TailSteps_;
-    static constexpr bool kHasTail       = TailSteps_ != 0;
-    static constexpr index_t kStoreWidth = StoreWidth_;
+    static constexpr bool kEdgeM        = EdgeM_;
+    static constexpr bool kEdgeN        = EdgeN_;
+    static constexpr bool kWideA        = WideA_;
+    static constexpr bool kWideB        = WideB_;
+    static constexpr bool kWideD        = WideD_;
+    static constexpr index_t kTailSteps = TailSteps_;
+    static constexpr bool kHasTail      = TailSteps_ != 0;
 };
 
 /// The MxTdmScheduledGemmTraits values of one M x N x K problem, as host values.
@@ -184,15 +181,11 @@ struct MxTdmScheduledShapeTraits
     bool wide_b;
     bool wide_d;
     index_t tail_steps;
-    index_t store_width;
 };
 
 /**
  * @brief The MxTdmScheduledGemmTraits an M x N x K problem needs from an instance of Problem's
  *        tile and types.
- *
- * The store width is the widest of at most 16 B and the N repeat that divides N, so a vector is
- * wholly inside or outside N and stays aligned.
  */
 template <typename Problem>
 CK_TILE_HOST_DEVICE constexpr MxTdmScheduledShapeTraits
@@ -202,22 +195,15 @@ MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
     constexpr long_index_t span = 1ll << 31;
     constexpr index_t k_per_byte =
         std::is_same_v<remove_cvref_t<typename Problem::ADataType>, pk_fp4_t> ? 2 : 1;
-    constexpr index_t out_bytes =
-        std::is_same_v<remove_cvref_t<typename Problem::ODataType>, fp8_t> ? 1 : 2;
-    constexpr index_t repeat_n  = Shape::kN / (Shape::BlockWarps::at(number<1>{}) * 16);
     const long_index_t span_m   = integer_least_multiple(M, Shape::kM);
     const long_index_t span_n   = integer_least_multiple(N, Shape::kN);
     const long_index_t packed_k = K / k_per_byte;
-    index_t width               = repeat_n < 16 / out_bytes ? repeat_n : 16 / out_bytes;
-    while(width > 1 && N % width)
-        width /= 2;
     return {M % Shape::kM != 0,
             N % Shape::kN != 0,
             span_m * packed_k > span,
             span_n * packed_k > span,
             span_m * span_n > span,
-            static_cast<index_t>(integer_divide_ceil(K % Shape::kK, 128)),
-            width};
+            static_cast<index_t>(integer_divide_ceil(K % Shape::kK, 128))};
 }
 
 /**
@@ -466,25 +452,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     CK_TILE_HOST_DEVICE static constexpr bool GetSplitBLdsRead()
     {
         return kPrefetchLdsRead && kSplitBLdsRead;
-    }
-
-    /// Bytes of an E element (fp8_t 1, half_t and bf16_t 2).
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetOutBytes()
-    {
-        return std::is_same_v<typename Problem::ODataType, fp8_t> ? 1 : 2;
-    }
-    /// Elements per D store and C load at most: 16 B and the N repeat.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetMaxStoreWidth()
-    {
-        return min_i(GetWaveRepeatN<Problem>(), 16 / GetOutBytes<Problem>());
-    }
-    /// Floats per FP8 conversion of the direct-store epilogue.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetFp8ConvertWidth()
-    {
-        return GetWaveRepeatN<Problem>() % 8 == 0 ? 8 : 4;
     }
 
     /// LDS reads of a K step, clamped to the 6-bit s_wait_dscnt immediate.
@@ -1028,27 +995,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                                        tuple<sequence<0, 0>, sequence<2, 1>>,
                                        sequence<1, 2, 1, 1>,
                                        sequence<4, 2, 1, 3>>{});
-    }
-
-    /// The C block tile's elements with the N repeat innermost: (rm, slot / 8, slot % 8, rn), so
-    /// a thread's adjacent columns are adjacent in its buffer, as D is stored and C loaded.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeCStoreTileDistribution()
-    {
-        constexpr index_t warp_m   = GetWarps<Problem, true>();
-        constexpr index_t warp_n   = GetWarps<Problem, false>();
-        constexpr index_t atom_m   = GetAtomM<Problem>();
-        constexpr index_t atom_n   = GetAtomN<Problem>();
-        constexpr index_t repeat_m = GetWaveRepeatM<Problem>();
-        constexpr index_t repeat_n = GetWaveRepeatN<Problem>();
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<warp_m, atom_m / 16, 2, 8, repeat_m>,
-                                             sequence<warp_n, atom_n, repeat_n>>,
-                                       tuple<sequence<1, 2>, sequence<1, 2>>,
-                                       tuple<sequence<0, 0>, sequence<2, 1>>,
-                                       sequence<1, 1, 1, 2>,
-                                       sequence<4, 1, 3, 2>>{});
     }
 
     /// The block GEMM: BlockGemmARegBRegCRegV1 with PackMNIter (M and N in the fragment order of

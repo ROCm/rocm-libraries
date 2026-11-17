@@ -20,7 +20,7 @@ on gfx1250 also `comp_tdm_scheduled`, an explicitly scheduled MX GEMM with K-maj
 | gfx1250 | `comp_async` | `GemmPipelineAgBgCrCompAsync` | CShuffle |
 | gfx1250 | `comp_async_eight_waves` | `GemmPipelineAgBgCrCompAsyncEightWaves` | CShuffle |
 | gfx1250 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
-| gfx1250 | `comp_tdm_scheduled` | `MxGemmPipelineAgBgCrCompTDMScheduled` (`MxGemmKernel`) | `direct` (`MxDirectStoreEpilogue`) or `tdm` (`TdmEpilogue`) |
+| gfx1250 | `comp_tdm_scheduled` | `MxGemmPipelineAgBgCrCompTDMScheduled` (`MxGemmKernel`) | `tdm` (`TdmEpilogue`) |
 
 The first five are the choices in the native `MxGemmPipelineType` selector.
 CK-Tile also has a separate `MXFlatmmKernel` family, including
@@ -88,11 +88,8 @@ FP16 E, through the sweep driver `mx_gemm_full_benchmark.py`; the Tile Engine CM
 rejects it. Example 56
 (`example/ck_tile/56_gemm_comp_tdm_scheduled_mx`) and the C++ tests cover the rest.
 
-It takes two epilogues. `direct` (`MxDirectStoreEpilogue`, the default) stores E from
-the accumulators with no LDS, in vectors of the `store_width` shape trait, so N must
-be a multiple of it. `tdm` (`TdmEpilogue`, as `comp_tdm`) stages the E tile in LDS and
-stores it with TDM; it ignores `store_width`, so a `tdm` instance takes `store_width = 1`
-to run any N.
+Its epilogue is `tdm` (`MxTdmStoreEpilogue`, a `TdmEpilogue` as for `comp_tdm`): it
+stages the E tile in LDS and stores it with TDM, for any N.
 
 Scales are K-major, `[ceil(K / 128)][MN][4]` E8M0 bytes. The kernel reads the
 scales of one tile with a single TDM box. Callers pass the natural `[MN][K / 32]`
@@ -118,9 +115,8 @@ instance's shape traits.
 | `edge` | `true` | Partial M and N tiles (`false` drops the edge code) |
 | `tail_steps` | `0` | K tail in 128-wide steps (`K mod tile_k`) |
 | `wide` | `false` | 64-bit offsets for operands past 2^31 bytes |
-| `store_width` | `0` | D store width in elements; `0` is the widest the tile allows |
 
-The first five are the tuning knobs; the last four are shape traits fixed at
+The first five are the tuning knobs; the last three are shape traits fixed at
 compile time. Every kernel runs any K tile count: the pipeline picks the odd or even
 variant at run time, as the other TDM pipelines do. The kernel name adds the tuning
 suffix (`_pf<n>`, and `_lp0`, `_hplrnone` and `_lsi0` for the three knobs turned off)
@@ -270,7 +266,7 @@ used as given.
 | --- | --- |
 | `bridge_ci_config_gfx950.json` | Default on gfx950. Small sweep covering all three gfx950 pipelines. |
 | `bridge_ci_config_gfx1250.json` | Default on gfx1250. Small sweep covering all six gfx1250 pipelines. |
-| `comp_tdm_scheduled_tuning_gfx1250.json` | `comp_tdm_scheduled` with every tuning key listed: both epilogues and a product of the five knobs (540 FP4 kernels). |
+| `comp_tdm_scheduled_tuning_gfx1250.json` | `comp_tdm_scheduled` with every tuning key listed: a product of the five knobs (270 FP4 kernels). |
 | `comp_tdm_scheduled_{maf,medium,mab}_gfx1250.json` | The tuned `comp_tdm_scheduled` instance of each problem (1 FP4 kernel each); `comp_tdm_scheduled_{maf,medium,mab}_problems.json` hold the problems. |
 | `default_ci_config.json` | Old-TE CI sweep: `comp_async`, with and without persistence. |
 | `default_config.json` | Old-TE full gfx950 sweep (194 FP4 / 150 FP8 kernels). |
@@ -316,7 +312,7 @@ bridge generator:
 | `comp_async_eight_waves` | gfx950, gfx1250 | `4 × 2 × 1` warps; M and N block tiles divisible by 128 |
 | `weight_preshuffle` | gfx950, gfx1250 | `1 × 4 × 1` warps; block tiles divisible by `32 × 128 × 256`; FP4 also needs block N divisible by 512 |
 | `comp_tdm`, `comp_tdm_v2` | gfx1250 | `2 × 2 × 1` warps; `tdm` epilogue |
-| `comp_tdm_scheduled` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `direct` or `tdm` epilogue; the policy's rules for each tuning |
+| `comp_tdm_scheduled` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `tdm` epilogue; the policy's rules for each tuning |
 
 gfx950 uses the 16 × 16 × 128 warp tile. gfx1250 does not support `pad_k` or
 `persistent`. Phase 1 prints `Expanded configs: N`, the number of kernels left

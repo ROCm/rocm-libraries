@@ -13,7 +13,7 @@
     "trait_config": {
         "pipeline": {"values": ["comp_tdm_scheduled"]},
         "scheduler": {"values": ["intrawave"]},
-        "epilogue": {"values": ["direct"]},
+        "epilogue": {"values": ["tdm"]},
         "pad_m": {"values": [false]},
         "pad_n": {"values": [false]},
         "pad_k": {"values": [false]},
@@ -27,8 +27,7 @@
         "interleave_lds_regions": {"values": [true]},
         "edge": {"values": [false]},
         "tail_steps": {"values": [0]},
-        "wide": {"values": [false]},
-        "store_width": {"values": [4]}
+        "wide": {"values": [false]}
     },
     "k_block_per_cu": 1
 }

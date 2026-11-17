@@ -52,13 +52,12 @@ TUNING_DEFAULTS: Dict[str, object] = {
 }
 
 #: Shape-dependent code paths of an instance (the Problem's MxTdmScheduledGemmTraits): an
-#: instance fixes them and runs every problem they cover. The defaults run any M and N with no K tail; store_width 0 means the widest the tile
-#: allows. Every instance runs any tile count (the pipeline's TailNumber picks the parity).
+#: instance fixes them and runs every problem they cover. The defaults run any M and N with no
+#: K tail. Every instance runs any tile count (the pipeline's TailNumber picks the parity).
 SHAPE_DEFAULTS: Dict[str, object] = {
     "edge": True,
     "tail_steps": 0,
     "wide": False,
-    "store_width": 0,
 }
 
 # The short reason codes, in validate()'s order (MxTdmScheduledReason).
@@ -290,31 +289,12 @@ class MxTdmScheduledSpec:
         )
 
     @property
-    def out_bytes(self) -> int:
-        return 1 if self.out_dtype == "fp8e4m3" else 2
-
-    @property
-    def max_store_width(self) -> int:
-        return min(self.wave_repeat_n, 16 // self.out_bytes)
-
-    @property
-    def store_width(self) -> int:
-        width = self.max_store_width
-        while width > 1 and self.N % width:
-            width //= 2
-        return width
-
-    @property
     def has_cluster(self) -> bool:
         return not (self.cluster_dim[0] == 1 and self.cluster_dim[1] == 1)
 
     @property
     def half_b(self) -> bool:
         return self.prefetch_lds_read and self.split_b_lds_read
-
-    @property
-    def fp8_convert_width(self) -> int:
-        return 8 if self.wave_repeat_n % 8 == 0 else 4
 
     @property
     def a_scale_reads(self) -> int:
@@ -748,12 +728,6 @@ def spec_from_tile(
     )
 
 
-def instance_store_width(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> int:
-    t = normalize_tuning(tuning)
-    width = int(t["store_width"]) or spec.max_store_width
-    return width
-
-
 def instance_name_suffix(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
     """What a comp_tdm_scheduled instance adds to the tile_engine kernel name: the tuning suffix without the
     parts the name already carries, then the shape traits that are not the defaults."""
@@ -765,8 +739,6 @@ def instance_name_suffix(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> st
         suffix += f"_tail{t['tail_steps']}"
     if t["wide"]:
         suffix += "_wide"
-    if t["store_width"]:
-        suffix += f"_w{t['store_width']}"
     return suffix
 
 
@@ -776,14 +748,6 @@ def validate_instance(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
     if reason != "ok":
         return reason
     t = normalize_tuning(tuning)
-    width = instance_store_width(spec, t)
-    if (
-        width < 1
-        or width > spec.max_store_width
-        or spec.wave_repeat_n % width
-        or not _is_pow2(width)
-    ):
-        return "store_width"
     if not 0 <= t["tail_steps"] < spec.k_steps:
         return "tail_steps"
     return "ok"
@@ -813,7 +777,7 @@ def cpp_kernel_traits(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
     wide = "true" if t["wide"] else "false"
     return (
         f"ck_tile::MxTdmScheduledGemmTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
-        f"{t['tail_steps']}, {instance_store_width(spec, t)}>"
+        f"{t['tail_steps']}>"
     )
 
 
@@ -830,7 +794,6 @@ __all__ = [
     "cpp_policy_type",
     "expand_tuning_config",
     "instance_name_suffix",
-    "instance_store_width",
     "is_default_tuning",
     "normalize_tuning",
     "schedule_tunings",

@@ -288,13 +288,11 @@ class MxGemmKernelConfig:
     def to_codegen_config(self) -> dict:
         arch = normalize_arch(self.gpu_target or _get_arch())
         pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
-        if pipeline == "comp_tdm_scheduled":
-            default_epilogue = "direct"
-        elif pipeline in ("comp_tdm", "comp_tdm_v2"):
-            default_epilogue = "tdm"
-        else:
-            default_epilogue = "cshuffle"
-        epilogue = self.epilogue or default_epilogue
+        epilogue = self.epilogue or (
+            "tdm"
+            if pipeline in ("comp_tdm", "comp_tdm_v2", "comp_tdm_scheduled")
+            else "cshuffle"
+        )
         tuning = {
             k: list(v) if isinstance(v, tuple) else v
             for k, v in (self.tuning or {}).items()
@@ -382,17 +380,12 @@ class MxGemmKernelConfig:
             self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async"),
             self.epilogue
             or (
-                "direct"
-                if self.pipeline == "comp_tdm_scheduled"
-                else (
-                    "tdm"
-                    if (
-                        self.pipeline
-                        or ("comp_tdm" if arch == "gfx1250" else "comp_async")
-                    )
-                    in ("comp_tdm", "comp_tdm_v2")
-                    else "cshuffle"
+                "tdm"
+                if (
+                    self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
                 )
+                in ("comp_tdm", "comp_tdm_v2", "comp_tdm_scheduled")
+                else "cshuffle"
             ),
             self.scheduler,
             str(self.pad_m),

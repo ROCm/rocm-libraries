@@ -279,7 +279,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             name += "_odd";
         else if(Problem::TailNum == TailNumber::Two)
             name += "_even";
-        return name + "_w" + std::to_string(Traits::kStoreWidth);
+        return name;
     }
 
     /// nullptr if this instance runs an M x N x K problem, else why not: a rule that needs the
@@ -322,8 +322,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         if(Problem::TailNum != TailNumber::Full && Base::GetTailNumber(K) != Problem::TailNum)
             return "the whole K tile count's parity is not the instance's TailNum "
                    "(the base's TailHandler picks it)";
-        if(N % Traits::kStoreWidth != 0)
-            return "the store width does not divide N";
         return nullptr;
     }
 

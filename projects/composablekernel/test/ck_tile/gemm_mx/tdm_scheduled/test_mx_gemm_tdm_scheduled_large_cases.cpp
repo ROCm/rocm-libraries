@@ -69,11 +69,11 @@ TEST(MxGemmTdmScheduledLargeCases, WideA)
                      1,
                      16,
                      Tu<1, 4, 0, false, false>,
-                     ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0, 1>>;
+                     ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0>>;
     check_sampled<K>(65536, 16, 81920);
 }
 
-// E past 2^31 bytes: 33024 x 33024 FP16 (2.03 GiB), stored by the direct and the TDM epilogue.
+// E past 2^31 bytes: 33024 x 33024 FP16 (2.03 GiB).
 TEST(MxGemmTdmScheduledLargeCases, WideD)
 {
     using K = Kernel<pk_fp4_t,
@@ -86,21 +86,8 @@ TEST(MxGemmTdmScheduledLargeCases, WideD)
                      2,
                      32,
                      Tu<1, 1>,
-                     ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 8>>;
+                     ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0>>;
     check_sampled<K>(33024, 33024, 1024);
-    check_sampled<
-        TdmKernel<pk_fp4_t,
-                  pk_fp4_t,
-                  half_t,
-                  256,
-                  256,
-                  512,
-                  2,
-                  2,
-                  32,
-                  Tu<1, 1>,
-                  ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 1>>>(
-        33024, 33024, 1024);
 }
 
 } // namespace

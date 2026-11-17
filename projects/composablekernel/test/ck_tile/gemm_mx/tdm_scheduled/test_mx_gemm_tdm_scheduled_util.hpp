@@ -32,7 +32,7 @@ using ck_tile::long_index_t;
 namespace sched = ck_tile::mx_tdm_scheduled;
 
 /// A comp_tdm_scheduled pipeline: A, B and E types, tile, wave group, WMMA atom (32 or 16 rows),
-/// tuning (a Tu) and the shape traits (edge M/N, wide A/B/E, tail steps, store width).
+/// tuning (a Tu) and the shape traits (edge M/N, wide A/B/E, tail steps).
 template <typename A,
           typename B,
           typename O,
@@ -56,42 +56,22 @@ using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
         Traits>,
     typename Tuning::Policy>;
 
-/// The kernel of a comp_tdm_scheduled pipeline: its N-major partitioner and the direct-store
-/// epilogue.
+/// The kernel of a comp_tdm_scheduled pipeline: its N-major partitioner and TdmEpilogue (E
+/// through LDS).
 template <typename P>
 using KernelOf =
-    ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
-                          P,
-                          ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<P>>>;
-
-/// The kernel of a comp_tdm_scheduled pipeline with TdmEpilogue (E through LDS).
-template <typename P>
-using TdmKernelOf =
     ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
                           P,
                           ck_tile::MxTdmStoreEpilogue<P>>;
 
 /// Kernel with its pipeline's Problem::TailNum T. TdmEpilogue does not depend on the pipeline's
-/// TailNum; the direct-store epilogue stores the pipeline's C block tile.
+/// TailNum.
 template <typename Kernel, ck_tile::TailNumber T>
 struct WithTailNum;
 template <typename Partitioner, typename P, typename Epilogue, ck_tile::TailNumber T>
 struct WithTailNum<ck_tile::MxGemmKernel<Partitioner, P, Epilogue>, T>
 {
     using type = ck_tile::MxGemmKernel<Partitioner, typename P::template WithTailNum<T>, Epilogue>;
-};
-template <typename Partitioner, typename P, index_t StoreWidth, ck_tile::TailNumber T>
-struct WithTailNum<ck_tile::MxGemmKernel<Partitioner,
-                                         P,
-                                         ck_tile::MxDirectStoreEpilogue<
-                                             ck_tile::MxDirectStoreEpilogueProblem<P, StoreWidth>>>,
-                   T>
-{
-    using PT   = typename P::template WithTailNum<T>;
-    using type = ck_tile::MxGemmKernel<
-        Partitioner,
-        PT,
-        ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<PT, StoreWidth>>>;
 };
 
 /// Calls f(WithTailNum<Kernel, T>{}) with T the TailNum of K: the pipeline's TailHandler picks
@@ -123,20 +103,6 @@ template <typename A,
 using Kernel =
     KernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
 
-template <typename A,
-          typename B,
-          typename O,
-          index_t TileM,
-          index_t TileN,
-          index_t TileK,
-          index_t WarpM,
-          index_t WarpN,
-          index_t AtomM,
-          typename Tuning,
-          typename Traits>
-using TdmKernel =
-    TdmKernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
-
 /// A tuning: the cluster (CX N tiles by CY M tiles), then the policy's knobs with its defaults:
 /// GL2 prefetch distance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions.
 template <index_t CX,
@@ -152,9 +118,8 @@ struct Tu
         ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, LdsPrefetch, SplitB, Interleave>;
 };
 
-template <bool EdgeM, bool EdgeN, index_t TailSteps, index_t StoreWidth>
-using Shape =
-    ck_tile::MxTdmScheduledGemmTraits<EdgeM, EdgeN, false, false, false, TailSteps, StoreWidth>;
+template <bool EdgeM, bool EdgeN, index_t TailSteps>
+using Shape = ck_tile::MxTdmScheduledGemmTraits<EdgeM, EdgeN, false, false, false, TailSteps>;
 
 /// The sparse check: A and B nonzero only in a few 128-K steps
 /// (the first and last, both sides of the first and last tile boundaries, then random ones up to

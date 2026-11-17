@@ -51,6 +51,9 @@ class TestTuning(unittest.TestCase):
         # The tile-count parity is the pipeline's TailNumber, not an instance trait.
         with self.assertRaises(ValueError):
             sched.normalize_tuning({"odd_tiles": 1})
+        # TdmEpilogue stores E with no vector width.
+        with self.assertRaises(ValueError):
+            sched.normalize_tuning({"store_width": 1})
 
     def test_instance_rules(self):
         def reason(t):
@@ -60,8 +63,6 @@ class TestTuning(unittest.TestCase):
 
         self.assertEqual(reason({}), "ok")
         self.assertEqual(reason({"prefetch_lds_read": False}), "split_b_read")
-        self.assertEqual(reason({"store_width": 16}), "store_width")
-        self.assertEqual(reason({"store_width": 3}), "store_width")
         self.assertEqual(reason({"tail_steps": 4}), "tail_steps")
         self.assertEqual(reason({"cluster_dim": [8, 4]}), "cluster_size")
 
@@ -82,7 +83,7 @@ class TestTuning(unittest.TestCase):
         )
         self.assertEqual(
             sched.cpp_kernel_traits(spec, {"edge": False, "tail_steps": 2}),
-            "ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 2, 8>",
+            "ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 2>",
         )
         self.assertEqual(
             sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
@@ -103,7 +104,7 @@ class TestValidationUtils(unittest.TestCase):
 
     def test_traits(self):
         ok = vu.is_trait_combination_valid
-        self.assertTrue(
+        self.assertFalse(
             ok(
                 "comp_tdm_scheduled",
                 "direct",
@@ -145,7 +146,7 @@ class TestValidationUtils(unittest.TestCase):
         self.assertFalse(
             ok(
                 "comp_tdm_scheduled",
-                "direct",
+                "tdm",
                 "intrawave",
                 True,
                 "mx_gemm",
@@ -158,7 +159,7 @@ class TestValidationUtils(unittest.TestCase):
         self.assertFalse(
             ok(
                 "comp_tdm_scheduled",
-                "direct",
+                "tdm",
                 "intrawave",
                 False,
                 "mx_gemm",
@@ -253,7 +254,7 @@ def _cfg(**extra):
 
 class TestDispatcher(unittest.TestCase):
     def test_names(self):
-        base = "mx_gemm_fp4_rcr_comp_tdm_scheduled_direct_intrawave_False_False_False_False_256x256x512_2x2x1_32x16x128"
+        base = "mx_gemm_fp4_rcr_comp_tdm_scheduled_tdm_intrawave_False_False_False_False_256x256x512_2x2x1_32x16x128"
         self.assertEqual(codegen.kernel_name(_cfg()), base + "_c4x4")
         self.assertEqual(
             codegen.kernel_name(
@@ -267,8 +268,9 @@ class TestDispatcher(unittest.TestCase):
             codegen.kernel_name(_cfg(prefetch_lds_read=False))
         with self.assertRaisesRegex(ValueError, "only for comp_tdm_scheduled"):
             codegen.kernel_name(_cfg(pipeline="comp_tdm", cluster_dim=[2, 2]))
-        with self.assertRaisesRegex(ValueError, "epilogue"):
-            codegen.kernel_name(_cfg(epilogue="cshuffle"))
+        for epilogue in ("cshuffle", "direct"):
+            with self.assertRaisesRegex(ValueError, "epilogue"):
+                codegen.kernel_name(_cfg(epilogue=epilogue))
         with self.assertRaisesRegex(ValueError, "gfx950"):
             codegen.kernel_name(_cfg(gpu_target="gfx950"))
 
@@ -283,17 +285,8 @@ class TestDispatcher(unittest.TestCase):
             header,
         )
         self.assertIn("KMajorScales = true", header)
-        self.assertIn("ck_tile::MxDirectStoreEpilogue<", header)
-
-    def test_tdm_epilogue_header(self):
-        with tempfile.TemporaryDirectory() as out:
-            path = codegen.generate_kernel(
-                Path(out), _cfg(epilogue="tdm", store_width=1)
-            )
-            header = path.read_text()
         self.assertIn("_comp_tdm_scheduled_tdm_", path.name)
         self.assertIn("ck_tile::MxTdmStoreEpilogue<P>", header)
-        self.assertNotIn("MxDirectStoreEpilogue", header)
 
     def test_kernel_config(self):
         cfg = mx.MxGemmKernelConfig(
@@ -307,7 +300,7 @@ class TestDispatcher(unittest.TestCase):
             warp_tile_n=16,
             tuning={"cluster_dim": (2, 2), "gl2_prefetch_distance": 2},
         ).to_codegen_config()
-        self.assertEqual(cfg["epilogue"], "direct")
+        self.assertEqual(cfg["epilogue"], "tdm")
         self.assertEqual(cfg["cluster_dim"], [2, 2])
         self.assertTrue(codegen.kernel_name(cfg).endswith("_c2x2_pf2"))
 
@@ -320,7 +313,7 @@ class TestDispatcher(unittest.TestCase):
         cfgs = mx.expand_mx_sweep(path, "gfx1250", "fp4")
         self.assertTrue(cfgs)
         self.assertEqual({c.pipeline for c in cfgs}, {"comp_tdm_scheduled"})
-        self.assertEqual({c.epilogue for c in cfgs}, {"direct", "tdm"})
+        self.assertEqual({c.epilogue for c in cfgs}, {"tdm"})
         names = [c.name for c in cfgs]
         self.assertEqual(len(set(names)), len(names))
         problems = json.loads(
@@ -333,13 +326,13 @@ class TestDispatcher(unittest.TestCase):
     def test_tuned_instance_configs(self):
         # Example 56's maf, medium and mab256, each with its one problem.
         expect = {
-            "maf": ("256x256x512_2x2x1_32x16x128_c4x4_noedge_w8", (4096, 4096, 65536)),
+            "maf": ("256x256x512_2x2x1_32x16x128_c4x4_noedge", (4096, 4096, 65536)),
             "medium": (
-                "128x128x1024_2x2x1_16x16x128_c4x4_hplrnone_noedge_w4",
+                "128x128x1024_2x2x1_16x16x128_c4x4_hplrnone_noedge",
                 (2048, 2048, 65536),
             ),
             "mab": (
-                "256x16x512_4x1x1_16x16x128_c1x4_pf0_lp0_hplrnone_noedge_w1",
+                "256x16x512_4x1x1_16x16x128_c1x4_pf0_lp0_hplrnone_noedge",
                 (65536, 16, 65536),
             ),
         }

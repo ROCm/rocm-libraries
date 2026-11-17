@@ -171,7 +171,7 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     // 3 scale reads and 2 chunks of 4 x 2 A rows and 8 B fragments.
     static_assert(Default::GetReadsPerStep<MafProblem>() == 35);
     EXPECT_EQ((PipelineOf<MafProblem, Default>::GetKernelName()),
-              "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_w1");
+              "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4");
     EXPECT_EQ(Default::GetTuningName<MafProblem>(), "_c4x4");
 
     using Pf2 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2>;
@@ -180,7 +180,7 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     using Mab = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, false, false>;
     static_assert(Mab::GetReason<MabProblem>() == MxTdmScheduledReason::Ok);
     EXPECT_EQ((PipelineOf<MabProblem, Mab>::GetKernelName()),
-              "mx_gemm_tdm_scheduled_mxfp4_t128x16x512_c1x4_fp16_wg4x1_pf0_lp0_hplrnone_mma16_w1");
+              "mx_gemm_tdm_scheduled_mxfp4_t128x16x512_c1x4_fp16_wg4x1_pf0_lp0_hplrnone_mma16");
     EXPECT_EQ(Mab::GetTuningName<MabProblem>(), "_c1x4_pf0_lp0_hplrnone");
 }
 
@@ -209,8 +209,8 @@ TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCount)
 #else
     EXPECT_EQ(picked(512), TailNumber::Full);
 #endif
-    EXPECT_EQ(One::GetKernelName(), "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_odd_w1");
-    EXPECT_EQ(Two::GetKernelName(), "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_even_w1");
+    EXPECT_EQ(One::GetKernelName(), "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_odd");
+    EXPECT_EQ(Two::GetKernelName(), "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_even");
     for(index_t K : {512, 1024, 1536, 2048})
     {
         const bool odd = K / 512 % 2;

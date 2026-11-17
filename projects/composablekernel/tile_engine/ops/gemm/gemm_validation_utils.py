@@ -411,12 +411,11 @@ GEMM_MX_PIPELINES = list(
         p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
     )
 )
-# comp_tdm_scheduled: K-major scales, its own tuning knobs and two epilogues: "direct"
-# (MxDirectStoreEpilogue, E from the accumulators; the default) and "tdm" (TdmEpilogue, E
-# through LDS).
+# comp_tdm_scheduled: K-major scales, its own tuning knobs and the "tdm" epilogue
+# (MxTdmStoreEpilogue: TdmEpilogue, E through LDS).
 MX_TDM_SCHEDULED_PIPELINE = "comp_tdm_scheduled"
-MX_TDM_SCHEDULED_EPILOGUES = ("direct", "tdm")
-MX_TDM_SCHEDULED_EPILOGUE = MX_TDM_SCHEDULED_EPILOGUES[0]
+MX_TDM_SCHEDULED_EPILOGUES = ("tdm",)
+MX_TDM_SCHEDULED_EPILOGUE = "tdm"
 
 
 def load_mx_tdm_scheduled():

@@ -3,8 +3,7 @@
 
 // MX GEMM on the comp_tdm_scheduled pipeline (gfx1250): E = A @ B^T with K-major E8M0 scales
 // [ceil(K/128)][MN][4]. Named instances carry the policy's tuning knobs; -list prints them,
-// -kernel picks one. -epilogue picks how E is stored: direct (from the accumulators,
-// MxDirectStoreEpilogue) or tdm (through LDS, TdmEpilogue).
+// -kernel picks one. E is stored through LDS by TDM (MxTdmStoreEpilogue).
 //
 //   verify  the sparse check inputs, E bit for bit against the host reference (sampled rows
 //           when the problem is large)
@@ -58,14 +57,11 @@ using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
         Traits>,
     typename Tuning::Policy>;
 
-template <typename P, typename Epilogue>
-using KernelOf = ck_tile::
-    MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>, P, Epilogue>;
 template <typename P>
-using DirectKernel =
-    KernelOf<P, ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<P>>>;
-template <typename P>
-using TdmKernel = KernelOf<P, ck_tile::MxTdmStoreEpilogue<P>>;
+using Kernel =
+    ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
+                          P,
+                          ck_tile::MxTdmStoreEpilogue<P>>;
 
 /// Launches K: the grid of GridSize, and with a cluster tuning the cluster of ClusterSize.
 template <typename K>
@@ -109,11 +105,9 @@ struct Tu
 };
 
 // Whole M and N tiles, no K tail.
-template <index_t StoreWidth>
-using Whole = ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 0, StoreWidth>;
+using Whole = ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 0>;
 // Any M, N (edges), no K tail.
-template <index_t StoreWidth>
-using Any = ck_tile::MxTdmScheduledGemmTraits<true, true, false, false, false, 0, StoreWidth>;
+using Any = ck_tile::MxTdmScheduledGemmTraits<true, true, false, false, false, 0>;
 
 using ck_tile::bf16_t;
 using ck_tile::bf8_t;
@@ -124,7 +118,7 @@ using ck_tile::pk_fp4_t;
 struct Options
 {
     index_t M, N, K;
-    std::string epilogue, mode, data;
+    std::string mode, data;
     int warmup, repeat;
     uint32_t seed;
 };
@@ -359,7 +353,7 @@ int run_kernel(const Options& o)
     return bad ? 1 : 0;
 }
 
-/// Runs pipeline P with the epilogue -epilogue names, in the variant of K's whole-tile count.
+/// Runs pipeline P in the variant of K's whole-tile count.
 template <typename P>
 int run(const Options& o)
 {
@@ -367,8 +361,7 @@ int run(const Options& o)
     return P::TailHandler(
         [&](auto, auto tail_num) {
             using PT = typename P::template WithTailNum<decltype(tail_num)::value>;
-            return o.epilogue == "tdm" ? run_kernel<TdmKernel<PT>>(o)
-                                       : run_kernel<DirectKernel<PT>>(o);
+            return run_kernel<Kernel<PT>>(o);
         },
         P::BlockHasHotloop(full_tiles),
         P::GetBlockLoopTailNum(full_tiles));
@@ -382,69 +375,19 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
         m{
             {"maf",
              {"mxfp4 t256x256x512 c4x4, fp8 out (MAF winner)",
-              run<Pipeline<pk_fp4_t,
-                           pk_fp4_t,
-                           fp8_t,
-                           256,
-                           256,
-                           512,
-                           2,
-                           2,
-                           32,
-                           Tu<4, 4>,
-                           Whole<8>>>}},
+              run<Pipeline<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Whole>>}},
             {"maf_fp16",
              {"maf with fp16 out",
-              run<Pipeline<pk_fp4_t,
-                           pk_fp4_t,
-                           half_t,
-                           256,
-                           256,
-                           512,
-                           2,
-                           2,
-                           32,
-                           Tu<4, 4>,
-                           Whole<8>>>}},
+              run<Pipeline<pk_fp4_t, pk_fp4_t, half_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Whole>>}},
             {"maf_bf16",
              {"maf with bf16 out",
-              run<Pipeline<pk_fp4_t,
-                           pk_fp4_t,
-                           bf16_t,
-                           256,
-                           256,
-                           512,
-                           2,
-                           2,
-                           32,
-                           Tu<4, 4>,
-                           Whole<8>>>}},
+              run<Pipeline<pk_fp4_t, pk_fp4_t, bf16_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Whole>>}},
             {"maf_c2x2",
              {"maf on a 2x2 cluster",
-              run<Pipeline<pk_fp4_t,
-                           pk_fp4_t,
-                           fp8_t,
-                           256,
-                           256,
-                           512,
-                           2,
-                           2,
-                           32,
-                           Tu<2, 2>,
-                           Whole<8>>>}},
+              run<Pipeline<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<2, 2>, Whole>>}},
             {"medium_t128",
              {"mxfp4 t128x128x1024 c2x2",
-              run<Pipeline<pk_fp4_t,
-                           pk_fp4_t,
-                           fp8_t,
-                           128,
-                           128,
-                           1024,
-                           2,
-                           2,
-                           32,
-                           Tu<2, 2>,
-                           Whole<4>>>}},
+              run<Pipeline<pk_fp4_t, pk_fp4_t, fp8_t, 128, 128, 1024, 2, 2, 32, Tu<2, 2>, Whole>>}},
             {"medium",
              {"mxfp4 t128x128x1024 16x16 atom, c4x4, no SplitBLdsRead (medium winner)",
               run<Pipeline<pk_fp4_t,
@@ -457,7 +400,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            16,
                            Tu<4, 4, 4, true, false>,
-                           Whole<4>>>}},
+                           Whole>>}},
             {"mab",
              {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no PrefetchLdsRead (MAB)",
               run<Pipeline<pk_fp4_t,
@@ -470,7 +413,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            1,
                            16,
                            Tu<1, 4, 0, false, false>,
-                           Whole<1>>>}},
+                           Whole>>}},
             {"mab256",
              {"mab with a t256x16x512 tile (MAB winner)",
               run<Pipeline<pk_fp4_t,
@@ -483,16 +426,16 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            1,
                            16,
                            Tu<1, 4, 0, false, false>,
-                           Whole<1>>>}},
+                           Whole>>}},
             {"any",
              {"mxfp4 t256x256x512 c1x1 for any M, N and tile count (no K tail)",
-              run<Pipeline<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<1, 1>, Any<1>>>}},
+              run<Pipeline<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<1, 1>, Any>>}},
             {"fp8",
              {"mxfp8 t128x128x256 16x16 atom c2x2",
-              run<Pipeline<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Whole<4>>>}},
+              run<Pipeline<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Whole>>}},
             {"fp8_bf8_bf16",
              {"fp8 x bf8, bf16 out, t128x128x256 c2x2",
-              run<Pipeline<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Whole<4>>>}},
+              run<Pipeline<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Whole>>}},
         };
     return m;
 }
@@ -507,7 +450,6 @@ int main(int argc, char* argv[])
         .insert("m", "1024", "M")
         .insert("n", "1024", "N")
         .insert("k", "2048", "K (a multiple of 32)")
-        .insert("epilogue", "direct", "direct (from the accumulators) | tdm (through LDS)")
         .insert("mode", "verify", "verify | bench | check")
         .insert("data", "trig", "bench data: trig (FP4 sin/cos codes) | random")
         .insert("warmup", "50", "bench: untimed launches")
@@ -530,7 +472,6 @@ int main(int argc, char* argv[])
     const Options o{arg.get_int("m"),
                     arg.get_int("n"),
                     arg.get_int("k"),
-                    arg.get_str("epilogue"),
                     arg.get_str("mode"),
                     arg.get_str("data"),
                     arg.get_int("warmup"),
@@ -539,11 +480,6 @@ int main(int argc, char* argv[])
     if(o.mode != "verify" && o.mode != "bench" && o.mode != "check")
     {
         std::cerr << "-mode must be verify, bench or check\n";
-        return 1;
-    }
-    if(o.epilogue != "direct" && o.epilogue != "tdm")
-    {
-        std::cerr << "-epilogue must be direct or tdm\n";
         return 1;
     }
     if(o.data != "trig" && o.data != "random")
