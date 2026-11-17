@@ -125,6 +125,11 @@ jobs:
       # workflows without a rocm-libraries-side translation step.
       # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      # TEMPORARY: hipBLASLt gfx950 presubmit trial. Remove once TheRock#8985
+      # lands the formal mechanism for per-family presubmit test selection.
+      # Unrelated to the retired run_all_tests/test_type outputs above: this
+      # one is still consumed by the external_repo payload passed to setup.
+      family_overrides: ${{ steps.family-override.outputs.family_overrides }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -233,6 +238,13 @@ jobs:
       # subproject's configure fingerprint, and stage reuse does not key on
       # flags (TheRock#3399), so a per-PR value would churn fingerprints and
       # let baselines built with the opposite value look reusable.
+      #
+      # family_overrides interpolates unquoted, as a JSON object rather than a
+      # string, so its `|| '{}'` fallback is load-bearing: an undeclared or
+      # skipped upstream output yields "" and emits `"family_overrides": ,`,
+      # which fails JSON parsing in TheRock's configure_multi_arch_ci.py.
+      # Note comments cannot go inside the block scalar below -- they would
+      # become literal text in the JSON.
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -242,7 +254,7 @@ jobs:
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
-          "family_overrides": ${{ needs.configure.outputs.family_overrides }},
+          "family_overrides": ${{ needs.configure.outputs.family_overrides || '{}' }},
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
