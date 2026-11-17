@@ -7,7 +7,7 @@
 in-process pipeline that turns AMDGPU LLVM IR text into a running
 kernel.
 
-Layered modules (bottom-up). The first five run torch-free -- the
+Layered modules (bottom-up). The first six run torch-free -- the
 hip-only core; ``torch_interop`` and ``launcher`` are the torch-aware
 edge:
 
@@ -28,10 +28,15 @@ edge:
                       minimum for `hipModuleLoadData`,
                       `hipModuleLaunchKernel`, `hipMalloc`,
                       `hipMemcpy{H2D,D2H}`, `hipFree`, `hipEvent*`.
-                      Owns ``Runtime._pending_args``, the per-stream
+                      Adds device selection and directed peer setup. Owns
+                      ``Runtime._pending_args``, the per-device/stream
                       keep-alive queue that fixes the
                       `HIP_LAUNCH_PARAM_BUFFER_POINTER` arg-buffer
                       lifetime race.
+
+  - ``peer``        : scoped directed peer mappings using HIP. Preflights
+                      capabilities, preserves borrowed mappings, and drains
+                      participating devices before owned-mapping teardown.
 
   - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
                       `pack_args_kernelparams`) for the AMDGPU kernarg
@@ -84,7 +89,14 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
-from .hip_module import HipError, Runtime
+from .hip_module import (
+    HipError,
+    Runtime,
+    can_access_peer,
+    device_scope,
+    get_device,
+    set_device,
+)
 from .launcher import (
     DeviceMem,
     KernelLauncher,
@@ -99,6 +111,7 @@ from .launcher import (
     wait_stream_and_release,
 )
 from .packing import pack_args
+from .peer import peer_access_scope
 from .torch_interop import (
     TorchLaunchSummary,
     empty_workspace,
@@ -119,12 +132,17 @@ __all__ = [
     "TorchLaunchSummary",
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
+    "can_access_peer",
+    "device_scope",
     "empty_workspace",
+    "get_device",
     "launch_torch_kernel",
     "no_fence",
     "pack_args",
+    "peer_access_scope",
     "release_retained_for_stream",
     "resolve_stream",
+    "set_device",
     "synchronize_and_release",
     "time_launches",
     "wait_stream_and_release",

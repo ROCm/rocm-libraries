@@ -9,23 +9,26 @@ comgr produced from our LLVM IR and runs the kernel via
 no `<hip/hip_runtime.h>` parsing — the same code-object path AMDGPU
 runtimes use for any pre-built fatbin or HSACO blob.
 
-We expose only what the GEMM kernel needs:
-- `Runtime()` opens the library and caches function pointers.
-- `Runtime.alloc(nbytes)` / `Runtime.free(ptr)` / `Runtime.memcpy(...)`.
-- `Runtime.load_module(blob)` returns a `Module` with `get_function`.
-- `Module.launch(fn, grid, block, args_bytes)` issues a launch.
-- `Runtime.event()` / `Event.record()` / `Event.elapsed_to(other)` for timing.
+The wrapper stays torch-free and resolves HIP lazily:
+- `get_device()` / `set_device()` / `device_scope()` select a host-thread device.
+- `can_access_peer()` and Runtime peer methods establish directed access.
+- `Runtime.alloc/free` and host/device copies operate on the current device.
+- `Runtime.load_module()` records device ownership on modules and functions.
+- `Runtime.launch()` retains arguments per device/stream until completion.
+- `Runtime.event()` records event ownership and disallows cross-device timing.
 """
 
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from operator import index
+from typing import Any, ClassVar
 
 from ._ctypes_bind import _LazyFn
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
-
 
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
 HIP_LAUNCH_PARAM_BUFFER_SIZE = ctypes.c_void_p(2)
@@ -68,7 +71,7 @@ def _load_lib() -> ctypes.CDLL:
 # import rocke before importing torch (or vice versa) and still end
 # up sharing torch's bundled HIP runtime instead of double-loading the
 # system one.
-_hip: Optional[ctypes.CDLL] = None
+_hip: ctypes.CDLL | None = None
 
 
 def _resolve_hip() -> ctypes.CDLL:
@@ -88,6 +91,13 @@ _hipInit = _b("hipInit", ctypes.c_uint)
 _hipSetDevice = _b("hipSetDevice", ctypes.c_int)
 _hipGetDevice = _b("hipGetDevice", ctypes.POINTER(ctypes.c_int))
 _hipGetDeviceCount = _b("hipGetDeviceCount", ctypes.POINTER(ctypes.c_int))
+_hipDeviceCanAccessPeer = _b(
+    "hipDeviceCanAccessPeer", ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int
+)
+_hipDeviceEnablePeerAccess = _b(
+    "hipDeviceEnablePeerAccess", ctypes.c_int, ctypes.c_uint
+)
+_hipDeviceDisablePeerAccess = _b("hipDeviceDisablePeerAccess", ctypes.c_int)
 _hipModuleLoadData = _b(
     "hipModuleLoadData", ctypes.POINTER(_HipModuleHandle), ctypes.c_void_p
 )
@@ -137,6 +147,8 @@ _hipEventElapsedTime = _b(
 # pulled from a header) so the runtime stays standard-library-only.
 HIP_SUCCESS = 0
 HIP_ERROR_NOT_READY = 600
+HIP_ERROR_PEER_ACCESS_ALREADY_ENABLED = 704
+HIP_ERROR_PEER_ACCESS_NOT_ENABLED = 705
 
 
 def _check(s: int, where: str) -> None:
@@ -150,7 +162,7 @@ _hip_inited = False
 # ROCm releases (and the props symbol was versioned to ``...R0600`` in ROCm 6.x), so
 # we keep the raw bytes and let each query read the field it needs rather than mirror
 # the struct. See get_device_arch (gcnArchName) / get_device_name (name).
-_device_props_cache: Dict[int, Optional[bytes]] = {}
+_device_props_cache: dict[int, bytes | None] = {}
 
 
 def _ensure_hip_init() -> None:
@@ -176,7 +188,7 @@ def _ensure_hip_init() -> None:
     _hip_inited = True
 
 
-def _device_props(device: int = 0) -> Optional[bytes]:
+def _device_props(device: int = 0) -> bytes | None:
     """Raw ``hipDeviceProp_t`` bytes for a HIP device, or None if unavailable.
 
     Best-effort and **side-effect-free**: this is a *query*, not a context bind, so
@@ -210,7 +222,7 @@ def _device_props(device: int = 0) -> Optional[bytes]:
     return None
 
 
-def get_device_arch(device: int = 0) -> Optional[str]:
+def get_device_arch(device: int = 0) -> str | None:
     """Best-effort gfx string of a HIP device (e.g. ``"gfx942"``).
 
     Mirrors the ``Name`` field ``rocminfo`` prints for a GPU agent. Returns ``None``
@@ -233,7 +245,7 @@ def get_device_arch(device: int = 0) -> Optional[str]:
     return m.group(0).decode("ascii") if m else None
 
 
-def get_device_name(device: int = 0) -> Optional[str]:
+def get_device_name(device: int = 0) -> str | None:
     """Marketing name of a HIP device — the string ``rocminfo`` labels "Marketing Name".
 
     Reads ``hipDeviceProp_t.name`` — the ``char name[256]`` at struct offset 0, which
@@ -265,31 +277,116 @@ def get_device_count() -> int:
     return int(n.value) if rc == 0 else 0
 
 
+def _device_ordinal(device: int) -> int:
+    if isinstance(device, bool):
+        raise TypeError("device ordinal must be a non-negative integer, not bool")
+    ordinal = index(device)
+    if not 0 <= ordinal <= 0x7FFFFFFF:
+        raise ValueError(
+            f"device ordinal must fit a non-negative HIP int, got {ordinal}"
+        )
+    return ordinal
+
+
+def get_device() -> int:
+    """Current HIP device for this host thread; unlike discovery, errors propagate."""
+    _ensure_hip_init()
+    device = ctypes.c_int(-1)
+    _check(_hipGetDevice(ctypes.byref(device)), "hipGetDevice")
+    return int(device.value)
+
+
+def set_device(device: int) -> None:
+    """Select a visible HIP ordinal on this host thread, without importing torch."""
+    ordinal = _device_ordinal(device)
+    _ensure_hip_init()
+    _check(_hipSetDevice(ordinal), f"hipSetDevice({ordinal})")
+
+
+@contextmanager
+def device_scope(device: int) -> Iterator[None]:
+    """Temporarily select a device, restoring the caller's selection on exit.
+
+    HIP selection is host-thread-local. This scope does not synchronize devices
+    or establish any ordering between their streams.
+    """
+    ordinal = _device_ordinal(device)
+    previous = get_device()
+    try:
+        if ordinal != previous:
+            set_device(ordinal)
+        yield
+    finally:
+        if get_device() != previous:
+            set_device(previous)
+
+
+@contextmanager
+def _resource_device_scope(device: int | None) -> Iterator[None]:
+    if device is None:
+        yield
+    else:
+        with device_scope(device):
+            yield
+
+
+def can_access_peer(device: int, peer_device: int) -> bool:
+    """Query directed peer capability, not mapping state or execution correctness.
+
+    A successful query returning False is distinct from a HIP failure. No device
+    selection is changed, and no peer mapping is enabled by this function.
+    """
+    ordinal = _device_ordinal(device)
+    peer = _device_ordinal(peer_device)
+    capable = ctypes.c_int(0)
+    _check(
+        _hipDeviceCanAccessPeer(ctypes.byref(capable), ordinal, peer),
+        f"hipDeviceCanAccessPeer({ordinal}, {peer})",
+    )
+    return bool(capable.value)
+
+
 @dataclass
 class Module:
+    """Loaded code owned by a device; callers must drain uses before unloading."""
+
     handle: _HipModuleHandle
+    device: int | None = None
 
     def get_function(self, name: str) -> _HipFunctionHandle:
-        fn = _HipFunctionHandle()
-        _check(
-            _hipModuleGetFunction(ctypes.byref(fn), self.handle, name.encode("utf-8")),
-            f"hipModuleGetFunction({name})",
-        )
+        with _resource_device_scope(self.device):
+            fn = _HipFunctionHandle()
+            _check(
+                _hipModuleGetFunction(
+                    ctypes.byref(fn), self.handle, name.encode("utf-8")
+                ),
+                f"hipModuleGetFunction({name})",
+            )
+        fn._device = self.device
         return fn
 
     def unload(self) -> None:
-        _check(_hipModuleUnload(self.handle), "hipModuleUnload")
+        with _resource_device_scope(self.device):
+            _check(_hipModuleUnload(self.handle), "hipModuleUnload")
 
 
 @dataclass
 class Event:
+    """A completion event with its creation device, when created through Runtime."""
+
     handle: _HipEventHandle
+    device: int | None = None
 
     def record(self, stream: int = 0) -> None:
+        if self.device is not None and get_device() != self.device:
+            raise HipError(
+                f"event belongs to device {self.device}; select it before recording"
+            )
         _check(_hipEventRecord(self.handle, ctypes.c_void_p(stream)), "hipEventRecord")
 
     def synchronize(self) -> None:
-        _check(_hipEventSynchronize(self.handle), "hipEventSynchronize")
+        with _resource_device_scope(self.device):
+            _check(_hipEventSynchronize(self.handle), "hipEventSynchronize")
 
     def query(self) -> bool:
         """Non-blocking poll: return True iff the recorded work has completed.
@@ -299,7 +396,8 @@ class Event:
         :meth:`Runtime._reap_completed` to drop bucket entries whose
         kernels have finished without blocking.
         """
-        s = _hipEventQuery(self.handle)
+        with _resource_device_scope(self.device):
+            s = _hipEventQuery(self.handle)
         if s == HIP_SUCCESS:
             return True
         if s == HIP_ERROR_NOT_READY:
@@ -307,20 +405,36 @@ class Event:
         _check(s, "hipEventQuery")
         return False  # unreachable
 
-    def elapsed_to(self, end: "Event") -> float:
+    def elapsed_to(self, end: Event) -> float:
+        if (
+            self.device is not None
+            and end.device is not None
+            and self.device != end.device
+        ):
+            raise ValueError("elapsed timing requires events from the same device")
         ms = ctypes.c_float(0)
-        _check(
-            _hipEventElapsedTime(ctypes.byref(ms), self.handle, end.handle),
-            "hipEventElapsedTime",
-        )
+        with _resource_device_scope(self.device):
+            _check(
+                _hipEventElapsedTime(ctypes.byref(ms), self.handle, end.handle),
+                "hipEventElapsedTime",
+            )
         return float(ms.value)
 
     def destroy(self) -> None:
-        _check(_hipEventDestroy(self.handle), "hipEventDestroy")
+        with _resource_device_scope(self.device):
+            _check(_hipEventDestroy(self.handle), "hipEventDestroy")
 
 
 class Runtime:
-    # Per-stream FIFO of ``(refs_tuple, completion_event_or_None)``
+    """HIP operations on the current device, with device-scoped launch retention.
+
+    Load a module per device and keep raw allocations alive across all peer
+    users. Drains affect only the selected device. Host orchestration must
+    serialize bookkeeping for a given device/stream; selecting a different
+    device does not wait for prior work.
+    """
+
+    # Per-device/stream FIFO of ``(refs_tuple, completion_event_or_None)``
     # entries: a backend-agnostic, stream-scoped **lifetime manager**.
     # Every async launch appends exactly one entry holding the ctypes
     # objects that launch enqueued; a caller may merge additional objects
@@ -376,10 +490,42 @@ class Runtime:
     # observes a half-finished kernel. The Python analogue is
     # :meth:`_reap_completed` (eager non-blocking drain) and
     # :meth:`wait_stream` (event-blocking drain per stream).
-    _pending_args: "Dict[int, List[Tuple[Tuple[Any, ...], Optional[Event]]]]" = {}
+    # Stream handles, particularly null stream 0, are not globally unique across
+    # devices. A device drain must not release another device's in-flight buffers.
+    _pending_args: ClassVar[
+        dict[tuple[int, int], list[tuple[tuple[Any, ...], Event | None]]]
+    ] = {}
+
+    def enable_peer_access(self, peer_device: int) -> bool:
+        """Enable current-device access to a peer; return whether we created it.
+
+        An existing mapping is preserved and reported as False. Other HIP errors
+        propagate. The caller must retain source allocations through all peer uses.
+        """
+        peer = _device_ordinal(peer_device)
+        _ensure_hip_init()
+        status = _hipDeviceEnablePeerAccess(peer, 0)
+        if status == HIP_ERROR_PEER_ACCESS_ALREADY_ENABLED:
+            return False
+        _check(status, f"hipDeviceEnablePeerAccess({peer})")
+        return True
+
+    def disable_peer_access(self, peer_device: int) -> bool:
+        """Disable current-device access after all users are drained.
+
+        Return False if no mapping exists; propagate all other HIP errors. This
+        method does not synchronize pending work on either device.
+        """
+        peer = _device_ordinal(peer_device)
+        _ensure_hip_init()
+        status = _hipDeviceDisablePeerAccess(peer)
+        if status == HIP_ERROR_PEER_ACCESS_NOT_ENABLED:
+            return False
+        _check(status, f"hipDeviceDisablePeerAccess({peer})")
+        return True
 
     def load_module(self, blob: bytes) -> Module:
-        _ensure_hip_init()
+        device = get_device()
         buf = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
         handle = _HipModuleHandle()
         _check(
@@ -387,7 +533,7 @@ class Runtime:
             "hipModuleLoadData",
         )
         # Hold the buffer to keep memory alive.
-        m = Module(handle)
+        m = Module(handle, device=device)
         m._blob = buf  # type: ignore[attr-defined]
         return m
 
@@ -414,7 +560,7 @@ class Runtime:
     def memset(self, ptr: int, value: int, nbytes: int) -> None:
         _check(_hipMemset(ctypes.c_void_p(ptr), value, nbytes), "hipMemset")
 
-    def _reap_completed(self, stream: int) -> None:
+    def _reap_completed(self, stream: int, *, device: int | None = None) -> None:
         """Drop bucket entries whose completion events have fired.
 
         Non-blocking. Walks the FIFO from the head, destroying each
@@ -424,8 +570,8 @@ class Runtime:
         queue is pending), or at the first entry with ``event is None``
         (a non-fenced legacy retain, only droppable by :meth:`sync`).
         """
-        s = int(stream)
-        bucket = self._pending_args.get(s)
+        key = (get_device() if device is None else device, int(stream))
+        bucket = self._pending_args.get(key)
         if not bucket:
             return
         while bucket:
@@ -435,7 +581,7 @@ class Runtime:
             evt.destroy()
             bucket.pop(0)
         if not bucket:
-            self._pending_args.pop(s, None)
+            self._pending_args.pop(key, None)
 
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.
@@ -467,8 +613,9 @@ class Runtime:
         the bucket.
         """
         s = int(stream)
+        key = (get_device(), s)
         self.stream_sync(s)
-        bucket = self._pending_args.pop(s, None)
+        bucket = self._pending_args.pop(key, None)
         if not bucket:
             return
         for _refs, evt in bucket:
@@ -476,7 +623,7 @@ class Runtime:
                 evt.destroy()
 
     def sync(self) -> None:
-        """Device-wide drain: ``hipDeviceSynchronize`` + release everything.
+        """Drain the current device and release only its retained resources.
 
         Use :meth:`wait_stream` instead when the caller knows the
         target stream; this method is the broad hammer for benchmark
@@ -484,12 +631,15 @@ class Runtime:
         between independent lanes (e.g. Triton 2D -> CK 2D -> Triton 3D
         -> CK 3D in the parity harness).
         """
+        device = get_device()
         _check(_hipDeviceSynchronize(), "hipDeviceSynchronize")
-        for stream_id in list(self._pending_args.keys()):
-            for _refs, evt in self._pending_args[stream_id]:
+        for key in list(self._pending_args):
+            if key[0] != device:
+                continue
+            bucket = self._pending_args.pop(key)
+            for _refs, evt in bucket:
                 if evt is not None:
                     evt.destroy()
-        self._pending_args.clear()
 
     def release_pending_for_stream(self, stream: int) -> None:
         """Drop refs held for ``stream`` after the caller has ensured
@@ -501,8 +651,8 @@ class Runtime:
         callers that did their own sync via a different mechanism and
         only need the bookkeeping cleanup.
         """
-        s = int(stream)
-        bucket = self._pending_args.pop(s, None)
+        key = (get_device(), int(stream))
+        bucket = self._pending_args.pop(key, None)
         if not bucket:
             return
         for _refs, evt in bucket:
@@ -513,7 +663,7 @@ class Runtime:
         """Keep ``objects`` alive until the most-recent launch on
         ``stream`` completes.
 
-        Attaches to the head bucket entry so the retained objects
+        Attaches to the most-recent bucket entry so the retained objects
         share the launch's HIP completion event. If there is no
         prior launch on ``stream``, parks the refs into a new entry
         with ``event=None`` (which only :meth:`sync` will release).
@@ -528,8 +678,8 @@ class Runtime:
         )
         if not keep:
             return
-        s = int(stream)
-        bucket = self._pending_args.setdefault(s, [])
+        key = (get_device(), int(stream))
+        bucket = self._pending_args.setdefault(key, [])
         if bucket:
             refs, evt = bucket[-1]
             bucket[-1] = (refs + keep, evt)
@@ -537,21 +687,51 @@ class Runtime:
             bucket.append((keep, None))
 
     def event(self) -> Event:
+        device = get_device()
         h = _HipEventHandle()
         _check(_hipEventCreate(ctypes.byref(h)), "hipEventCreate")
-        return Event(h)
+        return Event(h, device=device)
+
+    @staticmethod
+    def _launch_key(fn: _HipFunctionHandle, stream: int) -> tuple[int, int]:
+        device = get_device()
+        owner = getattr(fn, "_device", None)
+        if owner is not None and owner != device:
+            raise HipError(
+                f"function belongs to device {owner}, current device is {device}; "
+                "load a module per device and select its owner before launching"
+            )
+        return device, int(stream)
+
+    def _retain_launch(
+        self, key: tuple[int, int], refs: tuple[Any, ...], record_event: bool
+    ) -> Event | None:
+        # Retain before creating/recording an event: either operation can fail
+        # after the kernel was enqueued. A later successful drain is still needed.
+        bucket = self._pending_args.setdefault(key, [])
+        bucket.append((refs, None))
+        if not record_event:
+            return None
+        event = self.event()
+        try:
+            event.record(stream=key[1])
+        except BaseException:
+            event.destroy()
+            raise
+        bucket[-1] = (refs, event)
+        return event
 
     def launch(
         self,
         fn: _HipFunctionHandle,
-        grid: Tuple[int, int, int],
-        block: Tuple[int, int, int],
+        grid: tuple[int, int, int],
+        block: tuple[int, int, int],
         args_packed: bytes,
         *,
         shared_bytes: int = 0,
         stream: int = 0,
         record_event: bool = False,
-    ) -> "Optional[Event]":
+    ) -> Event | None:
         """Issue one kernel launch on ``stream`` (fire-and-forget).
 
         For *synchronous* launches that the host wants to fence on
@@ -577,10 +757,10 @@ class Runtime:
         than batch-wide stream drains. Costs ~1 us per launch on
         ROCm 7.
         """
-        s = int(stream)
-        # Eagerly reap any prior launches on this stream that have
-        # already completed. Keeps the bucket bounded in steady state.
-        self._reap_completed(s)
+        key = self._launch_key(fn, stream)
+        s = key[1]
+        # Eagerly reap only this device's stream.
+        self._reap_completed(s, device=key[0])
 
         # Build the HIP "extra" array: [BUFFER_POINTER, &args, BUFFER_SIZE, &size, END].
         args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
@@ -609,91 +789,47 @@ class Runtime:
             "hipModuleLaunchKernel",
         )
 
-        evt: Optional[Event] = None
-        if record_event:
-            evt = self.event()
-            evt.record(stream=s)
-
-        # Hold refs (args_buf MUST outlive the kernel for the "extra"
-        # path) alongside the completion event. ``retain_for_stream``
-        # appends tensors to the same entry.
-        bucket = self._pending_args.setdefault(s, [])
-        bucket.append(((args_buf, size_buf, extra), evt))
-        return evt
+        return self._retain_launch(key, (args_buf, size_buf, extra), record_event)
 
     def launch_blocking(
         self,
         fn: _HipFunctionHandle,
-        grid: Tuple[int, int, int],
-        block: Tuple[int, int, int],
+        grid: tuple[int, int, int],
+        block: tuple[int, int, int],
         args_packed: bytes,
         *,
         shared_bytes: int = 0,
         stream: int = 0,
     ) -> None:
-        """Synchronous launch: enqueue, then ``hipStreamSynchronize``.
+        """Enqueue and drain the current device's stream, without creating events.
 
-        This is the fast path for the default ``LaunchConfig.fence=True``
-        contract. Unlike :meth:`launch`, no HIP event is created /
-        recorded / destroyed -- a single ``hipStreamSynchronize`` is
-        sufficient to (a) wait for the kernel and (b) guarantee the
-        GPU command processor has finished reading the packed-args
-        buffer. By the time this method returns, the args buffer can
-        be safely freed by the Python frame's normal cleanup; no
-        :attr:`_pending_args` bookkeeping is needed for the launch.
-
-        Empirical cost on ROCm 7 / MI355X: ~0.3 us per call vs
-        ~43 us for the event-based fence. Mirrors CK Tile's
-        ``launch_kernel`` post-amble (``hipStreamSynchronize(stream_id_)``).
+        A successful stream drain releases the packed arguments and any earlier
+        retained resources. If synchronization fails after enqueue, references
+        remain retained until a later successful drain instead of being freed
+        while device work may still be using them.
         """
-        s = int(stream)
-        # Eagerly reap any prior async launches that have completed.
-        # Cheap (~0.1 us when the bucket is empty); keeps the bucket
-        # from growing if the caller mixes fenced and unfenced launches.
-        self._reap_completed(s)
-
-        args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
-        size_buf = ctypes.c_size_t(len(args_packed))
-        extra = (ctypes.c_void_p * 5)(
-            HIP_LAUNCH_PARAM_BUFFER_POINTER,
-            ctypes.cast(args_buf, ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_BUFFER_SIZE,
-            ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_END,
+        self.launch(
+            fn,
+            grid,
+            block,
+            args_packed,
+            shared_bytes=shared_bytes,
+            stream=stream,
+            record_event=False,
         )
-        _check(
-            _hipModuleLaunchKernel(
-                fn,
-                ctypes.c_uint(grid[0]),
-                ctypes.c_uint(grid[1]),
-                ctypes.c_uint(grid[2]),
-                ctypes.c_uint(block[0]),
-                ctypes.c_uint(block[1]),
-                ctypes.c_uint(block[2]),
-                ctypes.c_uint(shared_bytes),
-                ctypes.c_void_p(s),
-                None,
-                extra,
-            ),
-            "hipModuleLaunchKernel",
-        )
-        # Single ``hipStreamSynchronize`` is both the kernel-completion
-        # wait and the args-buffer-drain barrier. After it returns,
-        # ``args_buf``/``size_buf``/``extra`` can be dropped by Python's
-        # frame cleanup -- the GPU is no longer reading them.
-        _check(_hipStreamSynchronize(ctypes.c_void_p(s)), "hipStreamSynchronize")
+        self.wait_stream(stream)
 
     def launch_kernelparams(
         self,
         fn: _HipFunctionHandle,
-        grid: Tuple[int, int, int],
-        block: Tuple[int, int, int],
+        grid: tuple[int, int, int],
+        block: tuple[int, int, int],
         ctypes_args: list,
         *,
         shared_bytes: int = 0,
         stream: int = 0,
         record_event: bool = True,
-    ) -> "Optional[Event]":
+    ) -> Event | None:
         """Launch via the ``kernelParams`` path (an array of pointers to
         each parameter scalar) instead of the ``extra`` packed-buffer
         path. CUDA/HIP semantics guarantee ``kernelParams`` are *copied*
@@ -711,8 +847,9 @@ class Runtime:
         params array in :attr:`_pending_args`. The retained objects
         are released by :meth:`_reap_completed` once the event fires.
         """
-        s = int(stream)
-        self._reap_completed(s)
+        key = self._launch_key(fn, stream)
+        s = key[1]
+        self._reap_completed(s, device=key[0])
 
         n = len(ctypes_args)
         # Build the void* params[] array. Keep both the per-arg
@@ -742,14 +879,4 @@ class Runtime:
             "hipModuleLaunchKernel(kernelParams)",
         )
 
-        evt: Optional[Event] = None
-        if record_event:
-            evt = self.event()
-            evt.record(stream=s)
-
-        # Belt-and-suspenders: keep keep_alive + params alive until the
-        # completion event has fired, even though the driver should
-        # have copied each parameter at enqueue.
-        bucket = self._pending_args.setdefault(s, [])
-        bucket.append(((tuple(keep_alive), params), evt))
-        return evt
+        return self._retain_launch(key, (tuple(keep_alive), params), record_event)

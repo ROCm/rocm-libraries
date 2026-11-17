@@ -99,6 +99,7 @@ New to the DSL? Read in this order:
 36. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
 37. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
 38. [`reference/glossary.md`](./reference/glossary.md)
+39. [`development/distributed_tile_gemm_poc.md`](./development/distributed_tile_gemm_poc.md) — proposed single-node peer-tile gather/GEMM/scatter plan using the existing COMGR + HIP stack
 
 ## One-Screen Summary
 
