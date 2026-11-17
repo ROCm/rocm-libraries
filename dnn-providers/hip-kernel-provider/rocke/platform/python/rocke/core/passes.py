@@ -20,9 +20,8 @@ from .ir import (
     Region,
     Type,
     Value,
-    _binary_arity_error,
     _int_cmp_error,
-    _operand_types_op_error,
+    _operand_rules_error,
 )
 
 
@@ -248,10 +247,10 @@ def _try_fold(op: Op) -> Optional[int]:
         # The marker is its first operand; a runtime end (operand 1) does not
         # stop a constant marked value from folding.
         return constant_int(op.operands[0])
-    if _binary_arity_error(op) or _operand_types_op_error(op):
-        # A binary op or compare without two operands and one result, or with
-        # operands of two types, is left for the verifier and the lowerings to
-        # refuse, not folded.
+    if _operand_rules_error(op) is not None:
+        # An op that breaks an operand rule (a binary op or compare without two
+        # operands and one result, say, or with operands of two types) is left
+        # for the verifier and the lowerings to refuse, not folded.
         return None
     ints = [constant_int(v) for v in op.operands]
     if any(v is None for v in ints):

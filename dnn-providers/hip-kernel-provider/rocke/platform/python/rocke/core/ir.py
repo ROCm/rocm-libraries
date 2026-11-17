@@ -781,6 +781,27 @@ def _integer_element_op_error(op: Op) -> str | None:
     return _integer_element_error(op.name, op.operands[0].type)
 
 
+def _operand_rules_error(op: Op) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of a built op that breaks one of
+    the shared operand rules (arity, integer element, operand types), or None,
+    with the rules applied in one order.
+
+    The arity rule comes first (:func:`_binary_arity_error`; a
+    ``ValueError``), as the other rules read the operands it counts; then the
+    integer-element rule (:func:`_integer_element_op_error`) and the operand
+    rule (:func:`_operand_types_op_error`), each a ``TypeError``, in that order,
+    as IRBuilder checks them. Every lowering raises it before it lowers an op,
+    for IR that did not come through IRBuilder, and the constant folder does
+    not fold an op it refuses. The C++ engine's ``rocke_i_operand_rules_error``
+    returns the matching status and text.
+    """
+    arity_error = _binary_arity_error(op)
+    if arity_error:
+        return ValueError(arity_error)
+    operand_error = _integer_element_op_error(op) or _operand_types_op_error(op)
+    return TypeError(operand_error) if operand_error else None
+
+
 def _vector_cmp_error(
     attrs: Mapping[str, Any], lhs_type: Type, rhs_type: Type
 ) -> ValueError | TypeError | None:
@@ -4863,18 +4884,14 @@ class IRBuilder:
         (``smax``, ``smin``) refuse an unsigned element type, and the bitwise
         ops and shifts (:data:`_INTEGER_ELEMENT_OPS`) one that is not an integer
         or ``i1`` (``TypeError``); then a second operand of another type is a
-        ``TypeError`` (:func:`_operand_types_error`)."""
+        ``TypeError`` (:func:`_operand_types_error`). The rules every binary op
+        shares are :meth:`_binary_op`'s, which builds the op."""
         vector_error = _vector_operand_error(f"vector.{op_name}", a.type)
         if vector_error:
             raise TypeError(vector_error)
         if op_name in ("smax", "smin"):
             _refuse_unsigned(f"vector_{op_name}", a.type)
-        if f"vector.{op_name}" in _INTEGER_ELEMENT_OPS:
-            _refuse_non_integer(f"vector.{op_name}", a.type)
-        _refuse_operand_types(f"vector.{op_name}", (a, b))
-        return self._op(
-            f"vector.{op_name}", [a, b], [a.type], result_name_hint=f"v{op_name}"
-        ).result
+        return self._binary_op(f"vector.{op_name}", a, b, f"v{op_name}")
 
     def vector_add(self, a: Value, b: Value) -> Value:
         return self.vector_binary("add", a, b)

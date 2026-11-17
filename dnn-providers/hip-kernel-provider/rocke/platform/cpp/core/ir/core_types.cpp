@@ -1427,6 +1427,20 @@ const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, si
         rocke_opcode_name(op->opcode), op->operands[0]->type, buf, cap);
 }
 
+rocke_status_t rocke_i_operand_rules_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(rocke_i_binary_arity_op_error(op, buf, cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_i_integer_element_op_error(op, buf, cap)
+       || rocke_i_operand_types_op_error(op, buf, cap))
+    {
+        return ROCKE_ERR_TYPE;
+    }
+    return ROCKE_OK;
+}
+
 void rocke_i_refuse_non_integer(const char* op_name, const rocke_type_t* operand_type)
 {
     char err[ROCKE_ERR_MSG_CAP];
