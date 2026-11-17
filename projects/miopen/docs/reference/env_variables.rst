@@ -779,8 +779,8 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
         | Opts out of the gfx942/gfx950 FP16/BF16 large-tensor (in_depth >= 3 and in_width >= 256)
         | hard-coded override for 3D ConvHipImplicitGemmGroupFwdXdlops, so selection uses the AI
         | heuristic instead of the hard-coded config.
-      - | 0: Hard-coded override active (default)
-        | 1: Skip the override and use the AI heuristic
+      - | 0: Skip the override and use the AI heuristic
+        | unset or 1: Hard-coded override active (default)
 
     * - | ``MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS``
         | Controls 3D ConvHipImplicitGemmBwdXdlops solution.

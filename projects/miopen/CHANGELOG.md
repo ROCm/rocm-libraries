@@ -101,7 +101,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   falls through to the solver's non-AI heuristic. The two-tower models for the grouped CK
   implicit-GEMM solvers (2D and 3D; forward, backward-data, backward-weights) are refreshed on
   current tuning data. Set `MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB=1` to disable the table
-  and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=1`
+  and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=0`
   to skip the pre-existing 3D forward large-tensor hard-coded override and use the AI heuristic.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
