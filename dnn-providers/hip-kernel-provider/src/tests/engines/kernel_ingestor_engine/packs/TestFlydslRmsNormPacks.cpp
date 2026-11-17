@@ -131,10 +131,10 @@ TEST(TestFlydslRmsNormPacks, UnderstandsRuntimeEpsilonGraphsButNotAlignedOnes)
 {
     const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
 
-    const auto& runtimeEpsilon
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, true, false, false, false);
-    const auto& aligned
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, false, false, true, false);
+    const auto& runtimeEpsilon = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        false, true, false, false, false, false);
+    const auto& aligned = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        false, false, false, true, false, false);
     EXPECT_FALSE(set.engine.sdkVersion < runtimeEpsilon) << set.engine.sdkVersion.str();
     EXPECT_TRUE(set.engine.sdkVersion < aligned) << set.engine.sdkVersion.str();
 }

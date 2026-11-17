@@ -780,6 +780,26 @@ static void _op_math_exp2_fast(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "exp2_fast", "amdgcn.exp2.f32", "amdgcn.exp2.f32");
 }
+/* Python _op_math_ldexp -> llvm.ldexp.f32.i32 (one v_ldexp_f32). */
+static void _op_math_ldexp(rocke_lower_t* L, const rocke_op_t* op)
+{
+    char err[256];
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    if(const char* error = rocke_i_ldexp_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
+    rocke_ll_need(L, "ldexp.f32.i32");
+    rocke_ll_emitf(L,
+                   "  %s = call float @llvm.ldexp.f32.i32(float %s, i32 %s)",
+                   op->results[0]->name,
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
+}
 /* Python _op_math_log2. */
 static void _op_math_log2(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -997,6 +1017,7 @@ void rocke_ll_register_arith(void)
 
     rocke_ll_set_handler(ROCKE_OP_MATH_EXP2, _op_math_exp2);
     rocke_ll_set_handler(ROCKE_OP_MATH_EXP2_FAST, _op_math_exp2_fast);
+    rocke_ll_set_handler(ROCKE_OP_MATH_LDEXP, _op_math_ldexp);
     rocke_ll_set_handler(ROCKE_OP_MATH_LOG2, _op_math_log2);
     rocke_ll_set_handler(ROCKE_OP_MATH_RCP, _op_math_rcp);
     rocke_ll_set_handler(ROCKE_OP_MATH_RCP_FAST, _op_math_rcp_fast);
