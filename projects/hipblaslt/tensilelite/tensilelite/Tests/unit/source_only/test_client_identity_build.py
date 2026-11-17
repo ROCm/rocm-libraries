@@ -207,7 +207,9 @@ def test_identity_tracks_commit_after_packed_ref_configure(project):
     assert _query(build) == current
 
 
-def test_installed_identity_tests_run_after_relocation_and_detect_mismatch(project, tmp_path):
+def test_installed_identity_tests_run_after_relocation_and_detect_mismatch(
+    project, tmp_path
+):
     src, build = project
     cmake = _copy_build_cmake(tmp_path)
     _configure(src, build, cmake=cmake)
@@ -218,7 +220,15 @@ def test_installed_identity_tests_run_after_relocation_and_detect_mismatch(proje
     _build(build, cmake)
     _run("ctest", "--test-dir", str(build), "--output-on-failure")
     install = tmp_path / "install"
-    _run(cmake, "--install", str(build), "--prefix", str(install), "--component", "tests")
+    _run(
+        cmake,
+        "--install",
+        str(build),
+        "--prefix",
+        str(install),
+        "--component",
+        "tests",
+    )
     relocated = tmp_path / "relocated"
     install.rename(relocated)
     shutil.rmtree(src)
@@ -284,7 +294,9 @@ def test_canonical_wheel_and_client_stay_paired_through_incremental_builds(proje
         "--destination",
         str(src / "tensilelite"),
     )
-    shutil.copyfile(_ROOT / "cmake/TensileLiteWheel.cmake", src / "cmake/TensileLiteWheel.cmake")
+    shutil.copyfile(
+        _ROOT / "cmake/TensileLiteWheel.cmake", src / "cmake/TensileLiteWheel.cmake"
+    )
     cmake = src / "CMakeLists.txt"
     cmake.write_text(cmake.read_text() + """
 include(cmake/TensileLiteWheel.cmake)
@@ -313,8 +325,13 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
         revision = _query(build)
         assert revision == _current(src)
         assert publication["metadata"]["source_revision"] == revision
-        assert publication["metadata"]["distribution_version"] == _query(build, "--version")
-        assert wheel.name == "tensilelite-" + _query(build, "--version") + "-py3-none-any.whl"
+        assert publication["metadata"]["distribution_version"] == _query(
+            build, "--version"
+        )
+        assert (
+            wheel.name
+            == "tensilelite-" + _query(build, "--version") + "-py3-none-any.whl"
+        )
         assert list(manifest.parent.glob("*.whl")) == [wheel]
         with zipfile.ZipFile(wheel) as archive:
             stamp = archive.read("tensilelite/_build_info.py").decode()
@@ -325,7 +342,10 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
         return revision
 
     clean = build_and_check()
-    before = manifest.stat().st_mtime_ns, (build / "tensilelite-client").stat().st_mtime_ns
+    before = (
+        manifest.stat().st_mtime_ns,
+        (build / "tensilelite-client").stat().st_mtime_ns,
+    )
     build_and_check()
     assert (
         manifest.stat().st_mtime_ns,
@@ -339,6 +359,10 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
     source.write_text(original + "\n# second edit\n")
     assert build_and_check() != first
     source.write_text(original)
+    assert build_and_check() == clean
+    # A manifest alone must not make a deleted dynamic wheel look up to date.
+    publication = json.loads(manifest.read_text())
+    (manifest.parent / publication["wheel"]).unlink()
     assert build_and_check() == clean
     # A commit outside the package must change its stamp and version too.
     (src / "other-component.txt").write_text("new commit outside tensilelite\n")
@@ -359,4 +383,7 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
     assert list((unpacked / "wheels").glob("*.whl"))
     assert (unpacked / "_tensilelite_client_binding.py").is_file()
     assert (unpacked / "tensilelite_configure_client.py").is_file()
-    assert _git(src, "rev-parse", "HEAD") in (unpacked / "tensilelite/_build_info.py").read_text()
+    assert (
+        _git(src, "rev-parse", "HEAD")
+        in (unpacked / "tensilelite/_build_info.py").read_text()
+    )
