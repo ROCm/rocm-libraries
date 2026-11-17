@@ -141,9 +141,10 @@ namespace TensileLite
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
         X_MACRO(SKTilesAndSplit) \
-        /* Packed batch dimension divisors */ \
-        X_MACRO(MagicNumberSize) \
-        X_MACRO(MagicShiftSize) \
+        X_MACRO(MagicNumberSizeAlg1) \
+        X_MACRO(MagicShiftSizeAlg1) \
+        X_MACRO(MagicNumberSizeAlg2) \
+        X_MACRO(MagicShiftSizeAlg2) \
         /* Epilogue control args */ \
         X_MACRO(BiasType) \
         X_MACRO(StrideBias) \
@@ -1627,7 +1628,6 @@ namespace TensileLite
 
         uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
         std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
