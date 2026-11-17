@@ -349,8 +349,8 @@ def test_the_shipped_ranker_was_trained_on_the_shipped_catalog(arch):
         f"{tool.product_engine(arch)}'s ranker(s) {ranker} were trained on catalog "
         f"{trained}, but its shards in {artifacts} are now {shipped}. The loader would "
         f"keep using the stale model silently: retrain on the new catalog (hipdnn-uhd "
-        f"skill) and record the new fingerprint (tools/catalog_fingerprint.py's "
-        f"catalog_fingerprint over every shard's kernelDescriptors) in "
+        f"skill) and record the new fingerprint (tools/catalog_fingerprint.py "
+        f"{artifacts}/*.kdp.json) in "
         f"_TRAINED_CATALOG_SHA256, or remove the binding and record None."
     )
 
