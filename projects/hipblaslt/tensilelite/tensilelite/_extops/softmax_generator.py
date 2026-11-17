@@ -478,9 +478,7 @@ class SoftmaxKernelGenerator:
                     module.add(ri.VCmpLtU32(VCC(), vgpr(reduction_col_reg_idx), sgpr(n_reg_idx)))
                     module.add(self.SAndBX(EXEC(), sgpr(cmp_res_reg_idx, self.laneSGPRCount), VCC()))
                     module.add(ri.VAddU32(vgpr(r_reg_idx), hex(cmp_byte_rel_offset), vgpr(l_reg_idx)))
-                    module.add(self.lds_sum(l_reg_idx, r_reg_idx, sync=False))
-                module.add(ri.SWaitCnt(dscnt=0))
-                module.add(ri.SBarrier())
+                    module.add(self.lds_sum(l_reg_idx, r_reg_idx))
 
             self.vgpr_pool.checkIn(reduction_col_reg_idx)
 
@@ -521,9 +519,7 @@ class SoftmaxKernelGenerator:
                     module.add(ri.VCmpLtU32(VCC(), vgpr(reduction_col_reg_idx), sgpr(n_reg_idx)))
                     module.add(self.SAndBX(EXEC(), sgpr(cmp_res_reg_idx, self.laneSGPRCount), VCC()))
                     module.add(ri.VAddU32(vgpr(r_reg_idx), hex(cmp_byte_rel_offset), vgpr(l_reg_idx)))
-                    module.add(self.lds_max(l_reg_idx, r_reg_idx, sync=False))
-                module.add(ri.SWaitCnt(dscnt=0))
-                module.add(ri.SBarrier())
+                    module.add(self.lds_max(l_reg_idx, r_reg_idx))
 
             self.vgpr_pool.checkIn(reduction_col_reg_idx)
 
