@@ -833,6 +833,17 @@ if(ROCKE_INSTALL_TESTS)
              "  LABELS \"ckc\\;python\\;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
+      # check_backend_access_width.py compiles a few copy kernels through COMGR
+      # and reads their disassembly. A host module that does that is kept out of
+      # ordinary test discovery (TESTING.md, section 5.0.1), so this entry names
+      # the file. The provider categories tier it as standard: it guards
+      # performance, not correctness.
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_tiling_backend_width_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}/check_backend_access_width.py\" ${_rocke_tiling_pytest_options})\n"
+             "set_tests_properties(rocke_tiling_backend_width_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;standard\"\n"
+             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  TIMEOUT 120)\n")
     endif()
 
     # Library suites enrol themselves: library/tests/ctest_lists.cmake appends
