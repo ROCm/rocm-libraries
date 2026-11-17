@@ -734,26 +734,30 @@ def _tensile_scale_pad(vector_width: int) -> LdsPad:
     return LdsPad(_MXS_PAD_BYTES, _MXS_BLOCK_BYTES)
 
 
-def _bank_spread_pad(row_bytes: int) -> LdsPad:
-    """16 B after every ``p`` rows of ``row_bytes``, ``p`` the row count after
-    which a row's first bank repeats (64 banks of 4 B). Each pad moves the
-    next ``p`` rows by one 16 B read, so the 16 rows of a lane half start on
-    different banks. FP6 rows (96 B per 128 K) take it: their padded blocks
-    are not a power of two, so TDM writes them in iterate mode."""
+def _bank_spread_pad(row_bytes: int, lane_rows: int) -> LdsPad:
+    """The 16 lanes of a lane half read rows ``lane_rows`` apart (RowMaps):
+    16 B after every ``p`` such lane steps, ``p`` the steps after which a
+    lane's first bank repeats (64 banks of 4 B). Each pad moves the next
+    ``p`` lanes by one 16 B read, so the 16 lanes start on different banks.
+    FP6 rows (96 B per 128 K) take it: their padded blocks are not a power of
+    two, so TDM writes them in iterate mode."""
+    step = lane_rows * row_bytes
     banks = _BANK_CYCLE_BYTES // 4
-    rows = banks // gcd(row_bytes // 4, banks)
-    return LdsPad(_DATA_PAD_BYTES, rows * row_bytes)
+    steps = banks // gcd(step // 4, banks)
+    return LdsPad(_DATA_PAD_BYTES, steps * step)
 
 
 def derived_lds_pads(spec: MxGemmSpec) -> dict[str, LdsPad]:
     """TensileLite's padding with its A/B relabeled to rocKE B/A and
     VectorWidth taken as the operand's wave repeat, as in the benchmark
     solution (MIWaveTile [8, 4], VectorWidthA 8, VectorWidthB 4). FP6 data
-    takes :func:`_bank_spread_pad` instead."""
+    takes :func:`_bank_spread_pad` instead, its lanes ``wave_repeat_m`` A rows
+    and ``n_group`` B rows apart."""
     k_bytes = spec.k_bytes(spec.tile_k)
     rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
     if spec.elem_bits == 6:
-        a_pad = b_pad = _bank_spread_pad(k_bytes)
+        a_pad = _bank_spread_pad(k_bytes, rm)
+        b_pad = _bank_spread_pad(k_bytes, spec.n_group)
     else:
         a_pad = LdsPad(_DATA_PAD_BYTES, _tensile_data_block(k_bytes, rm))
         b_pad = LdsPad(_DATA_PAD_BYTES, _tensile_data_block(k_bytes, rn))

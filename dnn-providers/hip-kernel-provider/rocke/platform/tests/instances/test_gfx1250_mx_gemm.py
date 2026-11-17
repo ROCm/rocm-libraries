@@ -683,13 +683,13 @@ class MxGemmSpecTest(unittest.TestCase):
 
     def test_panel_layout(self):
         """A panel slot holds four 32-row components of 384 B rows (16 B
-        after every 2 rows) and then their scales; every row and scale word
+        after every 4 rows) and then their scales; every row and scale word
         of the panel has its own offset inside the slot."""
         spec = _spec6(*_MAF_MED[0], cluster_dim=(4, 4, 1), **_PANELS, half_plr="none")
         layout = spec.lds_layout
         self.assertEqual(layout.a, layout.b)
         self.assertEqual(layout.a.rows, 32)
-        self.assertEqual((layout.a.iterate_rows, layout.a.iterate_stride), (2, 784))
+        self.assertEqual((layout.a.iterate_rows, layout.a.iterate_stride), (4, 1552))
         data_end = 4 * layout.a.stride
         self.assertEqual(layout.a_scale.base, data_end)
         rows = [layout.row_offset(IntOps, "a", row) for row in range(128)]
@@ -1008,12 +1008,13 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertEqual(pads["a_scale"], LdsPad())
         self.assertEqual(_spec(*_BENCH).lds_bytes, 282624)
 
-    def test_fp6_rows_take_a_pad_every_bank_cycle_of_rows(self):
-        """FP6 rows (96 B per 128 K) take 16 B after every 8, 4, 8 or 2 rows,
-        the rows after which a row's first bank repeats; the blocks are no
-        power of two, so they are TDM iterate mode. A power-of-two block
-        that cuts a row stays rejected; "no pad" stays valid."""
-        for tile_k, rows in ((128, 8), (256, 4), (384, 8), (512, 2)):
+    def test_fp6_rows_take_a_pad_every_bank_cycle_of_lanes(self):
+        """FP6 rows (96 B per 128 K) take 16 B after every 8, 4, 8 or 4 rows:
+        a lane half's lanes read rows 4 apart (the wave repeat) here, and the
+        pad comes where a lane's first bank repeats. The blocks are no power
+        of two, so they are TDM iterate mode. A power-of-two block that cuts a
+        row stays rejected; "no pad" stays valid."""
+        for tile_k, rows in ((128, 8), (256, 4), (384, 8), (512, 4)):
             spec = _spec6(tile_m=128, tile_n=128, tile_k=tile_k)
             row_bytes = spec.k_bytes(tile_k)
             with self.subTest(tile_k=tile_k):
@@ -1024,20 +1025,44 @@ class MxGemmSpecTest(unittest.TestCase):
                     op = spec.lds_layout.operand(name)
                     self.assertEqual(op.iterate_rows, rows)
                     self.assertEqual(op.iterate_stride, rows * row_bytes + 16)
-                # Row r of a lane half starts at bank (r * row words + pad
-                # words) mod 64: 16 rows, 16 different 16 B bank groups.
-                op = spec.lds_layout.a
-                starts = {
-                    spec.lds_layout.row_offset(IntOps(), "a", r) // 4 % 64
-                    for r in range(16)
-                }
-                self.assertEqual(len(starts), 16)
-                self.assertTrue(all(s % 4 == 0 for s in starts))
         self.assertIsNone(validate(_spec6(a_lds_pad=LdsPad(), b_lds_pad=LdsPad())))
         self.assertIsNone(validate(_spec6(a_lds_pad=LdsPad(32, 1536))))
         for pad in (LdsPad(16, 512), LdsPad(16, 1000), LdsPad(16, 192 * 3)):
             with self.subTest(pad=pad):
                 self.assertIsNotNone(validate(_spec6(b_lds_pad=pad)))
+
+    def test_fp6_pads_put_a_lane_halfs_rows_on_every_bank_group(self):
+        """The 16 lanes of a lane half read rows wave_repeat_m (A) or n_group
+        (B) apart, at every repeat: under the derived pads they start on 16
+        different 16 B bank groups (64 banks of 4 B)."""
+        for fields in (
+            {"tile_m": 128, "tile_n": 256, "tile_k": 512},
+            {"tile_k": 256},
+            {"tile_k": 384},
+            {"tile_m": 128, "tile_n": 128, "tile_k": 512},
+            {"tile_m": 256, "tile_n": 128, "tile_k": 512},
+            {"tile_m": 64, "tile_n": 64, "tile_k": 512},
+            {"tile_m": 256, "tile_n": 16, "tile_k": 512, "wave_group": (4, 1)},
+            {**_PAIRS, "half_plr": "b", "tile_k": 256},
+        ):
+            spec = _spec6(**{**_DIRECT, **fields})
+            self.assertIsNone(validate(spec))
+            for name, repeats, stride in (
+                ("a", spec.wave_repeat_m, spec.wave_repeat_m),
+                ("b", spec.wave_repeat_n, spec.n_group),
+            ):
+                for repeat in range(repeats):
+                    group, j = divmod(repeat, stride)
+                    starts = {
+                        spec.lds_layout.row_offset(
+                            IntOps(), name, (group * 16 + lane) * stride + j
+                        )
+                        // 16
+                        % 16
+                        for lane in range(16)
+                    }
+                    with self.subTest(kernel=spec.kernel_name(), op=name, rep=repeat):
+                        self.assertEqual(len(starts), 16)
 
     def test_kernel_name_encodes_non_default_tuning(self):
         base = _spec().kernel_name()
