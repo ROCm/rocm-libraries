@@ -28,9 +28,15 @@
 
 _rocsparse_csrmv_nnzsplit_info::~_rocsparse_csrmv_nnzsplit_info()
 {
-    // hipFree of a hipMallocAsync buffer needs a device synchronize. Warn only:
-    // this runs from a destructor, including when clear() could not free.
-    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+    // clear() already freed the buffer and reset the pointer in the normal path.
+    if(this->id_buffer == nullptr)
+    {
+        return;
+    }
+
+    // hipFree of a hipMallocAsync buffer needs a device synchronize, as in the adaptive
+    // info. Warn only: this runs from a destructor, including when clear() could not free.
+    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->id_buffer));
     this->id_buffer = nullptr;
 }
