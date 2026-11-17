@@ -66,14 +66,11 @@ Not every row is dispatched:
 - **Group (varlen) rows (`mode = 1`):** vendored but not dispatched. The engine
   declines group mode, so it serves batch-mode rows (`mode = 0`) only.
 - **hd256 rows (gfx950):** vendored but not dispatched. Every hd256 row is a
-  group row, and the engine declines head dims above 128 on gfx950 except
-  D_qk = 192 with D_v = 128.
-- **hd64 and hd192 x hd192 batch rows (gfx950):** vendored but not
-  dispatched. AITER's gfx950 gate (`can_impl_fmha_v3_bwd_gfx950`) sends these
-  head dims to CK, and `isBatchShapeSupported` declines them too. The hd192
-  dq_convert and dq_shuffle rows are used: D_qk = 192 with D_v = 128 keys the
-  post stage on hdim_q 192. The hd192 odo rows are not used, because odo keys
-  on padded hdim_v (128).
+  group row, and the engine declines head dims above 192 on both archs.
+- **hd192 odo rows (gfx950) for D_qk = 192 with D_v = 128:** odo keys on
+  padded hdim_v (128), so these graphs run the hd128 odo row; the hd192 odo
+  rows serve D_qk = D_v = 192. The hd192 dq_convert and dq_shuffle rows serve
+  both: the post stage keys on hdim_q 192.
 
 ## Verified Kernel Matrix
 
@@ -86,9 +83,11 @@ follows AITER's choice of kernel (the gate in `aiter/ops/mha.py` and
   Otherwise the engine takes a `pssk = 1` row.
 - When no row has exactly the requested `pssk` and `pddv`, the engine takes the
   smallest qualifying (`pssk`, `pddv`); AITER takes whichever its map yields last.
-- The engine serves two cases AITER sends to CK: Sq ≤ 16, and gfx942 bands with
-  left bound 0 and right bound 0 or unbounded
-  ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
+- The engine serves three kinds of graphs AITER's Python layer sends to CK:
+  Sq ≤ 16; gfx942 bands with left bound 0 and right bound 0 or unbounded; and
+  on gfx950 the hd64 and 128 < D ≤ 192 (D_qk = D_v) head dims, whose rows are
+  the gfx942 kernels rebuilt (`_recompile`) and which AITER's C++ `mha_bwd()`
+  runs ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
 
 A dispatch whose kernel has been checked on a GPU against the CPU backward
 reference, at the head dims it runs, is **verified**.
@@ -114,10 +113,14 @@ those rows by (`pssk`, `pddv`), accumulator and mask.
 | gfx942 | fp16 | 64 x 64 | (1, 0) A32, 0-2; (0, 0) A16, 0-1 |
 | gfx942 | fp16 | 128 x 128 | (1, 1) A32, 0-3; (0, 0) A32, 0-1; (0, 0) A16, 0-1 |
 | gfx942 | fp16 | 192 x 192 | (1, 1) A32, 0-2 |
+| gfx950 | bf16 | 64 x 64 | (1, 0) A32, 0-2; (0, 0) A16, 0-1 |
 | gfx950 | bf16 | 128 x 128 | (1, 1) A16 and A32, 0-4 |
 | gfx950 | bf16 | 192 x 128 | (1, 1) A16 and A32, 0-2 |
+| gfx950 | bf16 | 192 x 192 | (1, 1) A32, 0-2 |
+| gfx950 | fp16 | 64 x 64 | (1, 0) A32, 0-2; (0, 0) A16, 0-1 |
 | gfx950 | fp16 | 128 x 128 | (1, 1) A16 and A32, 0-4 |
 | gfx950 | fp16 | 192 x 128 | (1, 1) A16 and A32, 0-2 |
+| gfx950 | fp16 | 192 x 192 | (1, 1) A32, 0-2 |
 
 The GPU runs are `IntegrationGpuSdpaBwdBf16` and `IntegrationGpuSdpaBwdFp16`
 (instances `Smoke` and `Comprehensive`), which passed on MI300X (gfx942) and
@@ -125,8 +128,10 @@ MI355X (gfx950) in PR #15484. Each row in the table is selected by at least one
 of those cases at the row's own head dims.
 
 The gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV,
-although their object names end in `_pssk`. The bf16 rows are the RTNE ones:
-the engine never selects the RTNA or RTZ rows.
+although their object names end in `_pssk`. Among rounding-specific bf16 rows
+(every gfx942 one, and the gfx950 hd64 and hd192 x hd192 ones) the engine
+selects the RTNE row, never the RTNA or RTZ one. AITER deprecates RTNA and
+RTZ on gfx950.
 
 Every other configuration the engine accepts is unverified, which means any
 padded head dim. That includes the gfx942 hd128 A16 rows with `pddv = 1`

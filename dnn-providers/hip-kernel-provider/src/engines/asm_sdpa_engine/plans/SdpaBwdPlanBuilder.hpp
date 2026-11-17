@@ -103,16 +103,18 @@ struct HeadDims
 // to 64, 128 or 192; gfx950 (192, 128) and every other pair stay as they are.
 HeadDims paddedHeadDims(const std::string& archId, int hdimQ, int hdimV);
 
-// False for batch-mode head dims that AITER v0.1.29 does not send to the ASM
-// backward on archId (aiter/ops/mha.py _flash_attn_backward and
-// mha_bwd.cu fmha_v3_bwd()): D % 8 != 0 on either tensor; on gfx942 anything
-// but 64 <= D <= 192 with D_qk == D_v; on gfx950 anything but
-// 64 < D <= 128 with D_qk == D_v, or D_qk = 192 with D_v = 128.
+// False for batch-mode head dims no ASM backward kernel serves on archId
+// (AITER v0.1.29 mha_bwd.cu fmha_v3_bwd() and the rows it ships): D % 8 != 0
+// on either tensor, and anything but 64 <= D <= 192 with D_qk == D_v, or on
+// gfx950 D_qk = 192 with D_v = 128. On gfx950 this serves hd64 and
+// 128 < D <= 192 with D_qk == D_v, which AITER's Python gate
+// (aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950()) sends to CK as a routing
+// choice although its C++ mha_bwd() runs them.
 bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t headDimV);
 
-// False for a batch-mode sliding window (MaskType::SLIDING_WINDOW) that AITER
-// v0.1.29 sends to CK on archId: gfx950 serves windows for D_qk <= 128 and
-// gfx942 for 64 < D_qk <= 128 (aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950()
+// False for a batch-mode sliding window (MaskType::SLIDING_WINDOW) that no
+// ASM kernel serves on archId: both archs ship window rows at hd128 only, so
+// windows need 64 < D_qk <= 128 (aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950()
 // and can_impl_fmha_v3_bwd() psskddv()). Any band the engine classifies as a
 // window counts, including one that keeps only the diagonal.
 bool isBatchWindowSupported(const std::string& archId, int64_t headDimQk);

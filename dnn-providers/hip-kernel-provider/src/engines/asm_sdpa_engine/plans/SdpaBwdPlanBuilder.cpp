@@ -427,17 +427,21 @@ struct VerifiedKernel
     int hdimQ;
     int hdimV;
 };
-constexpr std::array<VerifiedKernel, 10> K_VERIFIED_KERNELS{{
+constexpr std::array<VerifiedKernel, 14> K_VERIFIED_KERNELS{{
     {"gfx942", "bf16", 64, 64},
     {"gfx942", "bf16", 128, 128},
     {"gfx942", "bf16", 192, 192},
     {"gfx942", "fp16", 64, 64},
     {"gfx942", "fp16", 128, 128},
     {"gfx942", "fp16", 192, 192},
+    {"gfx950", "bf16", 64, 64},
     {"gfx950", "bf16", 128, 128},
     {"gfx950", "bf16", 192, 128},
+    {"gfx950", "bf16", 192, 192},
+    {"gfx950", "fp16", 64, 64},
     {"gfx950", "fp16", 128, 128},
     {"gfx950", "fp16", 192, 128},
+    {"gfx950", "fp16", 192, 192},
 }};
 
 // bwd_dispatch::isVerifiedDispatch() for the dqdkdv row already resolved for
@@ -704,40 +708,37 @@ bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t
     {
         return false;
     }
-    if(archId == "gfx942")
+    // gfx942: aiter/ops/mha.py can_impl_fmha_v3_bwd() (:2729-2731), `hdim_q ==
+    // hdim_v` and `hdim_q >= 64 and hdim_q <= 192`. gfx950 ships hd64 and
+    // hd192 rows for the same range (the gfx942 kernels rebuilt, `_recompile`),
+    // and AITER's C++ entry point mha_bwd() runs them (fmha_v3_bwd() has no
+    // head-dim gate besides `% 8`); only its Python gate
+    // can_impl_fmha_v3_bwd_gfx950() (:2851-2854) sends them to CK, as a routing
+    // choice. gfx950 also serves D_qk = 192 with D_v = 128.
+    if(!isSupportedArch(archId))
     {
-        // aiter/ops/mha.py can_impl_fmha_v3_bwd() (:2729-2731): `hdim_q ==
-        // hdim_v` and `hdim_q >= 64 and hdim_q <= 192`.
-        return headDimQk == headDimV && headDimQk >= 64 && headDimQk <= 192;
+        return false;
     }
-    if(archId == "gfx950")
+    if(headDimQk == headDimV && headDimQk >= 64 && headDimQk <= 192)
     {
-        // aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950() (:2851-2854):
-        // `(hdim_q > 64 and hdim_q <= 128 and hdim_q == hdim_v) or (hdim_q == 192
-        // and hdim_v == 128)`. gfx950 hd64 and hd192 x hd192 rows ship but go to CK.
-        return (headDimQk > 64 && headDimQk <= 128 && headDimQk == headDimV)
-               || (headDimQk == 192 && headDimV == 128);
+        return true;
     }
-    return false;
+    return archId == "gfx950" && headDimQk == 192 && headDimV == 128;
 }
 
 bool isBatchWindowSupported(const std::string& archId, int64_t headDimQk)
 {
-    if(archId == "gfx950")
-    {
-        // aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950() (:2855-2856): "sliding
-        // window kernels are hd128 only", `not swa or hdim_q <= 128`, where any
-        // window counts (:2829-2830, "a left size of 0 is a window too").
-        return headDimQk <= 128;
-    }
-    // aiter/ops/mha.py can_impl_fmha_v3_bwd() serves windows through psskddv()
-    // for 64 < D <= 128 only (:2718). Its window test (:2604, `swa =
-    // (window_size_left > 0) or (window_size_right > 0)`) does not count a
-    // window with left bound 0 and right bound 0 or -1, which then falls out of
-    // every family. That is a classification artifact, not a kernel limit: the
-    // engine classifies the band itself, and the gfx942 window kernel serves it
-    // like any other window.
-    return headDimQk > 64 && headDimQk <= 128;
+    // Both archs ship window rows at hd128 only, which serve 64 < D <= 128
+    // (paddedHeadDims): aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950()
+    // (:2855-2856), "sliding window kernels are hd128 only", where any window
+    // counts (:2829-2830, "a left size of 0 is a window too"), and on gfx942
+    // can_impl_fmha_v3_bwd() psskddv() (:2718). The gfx942 window test (:2604,
+    // `swa = (window_size_left > 0) or (window_size_right > 0)`) does not count
+    // a window with left bound 0 and right bound 0 or -1, which then falls out
+    // of every family. That is a classification artifact, not a kernel limit:
+    // the engine classifies the band itself, and the gfx942 window kernel
+    // serves it like any other window.
+    return isSupportedArch(archId) && headDimQk > 64 && headDimQk <= 128;
 }
 
 bool psskOffStridesMatch(const BhsStrides& q,
@@ -1248,8 +1249,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
     auto headDimQk = static_cast<int>(qTensor->dims()->Get(3));
     auto headDimV = static_cast<int>(vTensor->dims()->Get(3));
 
-    // Head dims AITER does not send to the ASM kernels on this arch, including
-    // the ones the registry has rows for (see bwd_dispatch::isBatchShapeSupported).
+    // Head dims no ASM kernel on this arch serves (see
+    // bwd_dispatch::isBatchShapeSupported).
     HIP_KERNEL_RETURN_FALSE_IF(
         !bwd_dispatch::isBatchShapeSupported(deviceString, headDimQk, headDimV),
         deviceString + " backward does not serve D_qk = " + std::to_string(headDimQk)

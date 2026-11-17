@@ -240,21 +240,19 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         GTEST_SKIP();
     }
 
-    const bool isGfx942 = deviceString() == "gfx942";
-
     const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
         // Valid backward graph: BF16, HD=128, FP32 stats, no masking. Its head dims
         // are in the verified kernel matrix on gfx942 and gfx950.
         {GraphTest{createSdpaBwdGraph(), "Valid BF16 HD128 backward"}, true},
 
-        // HD=64: gfx942 serves it with the (pssk = 1, pddv = 0) rows; AITER sends
-        // gfx950 hd64 to CK, so gfx950 declines it.
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "Head dimension 64"}, isGfx942},
+        // HD=64: both archs serve it with the (pssk = 1, pddv = 0) rows, gfx950
+        // with the gfx942 kernels rebuilt for it, although AITER's Python gate
+        // sends gfx950 hd64 to CK.
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "Head dimension 64"}, true},
 
-        // HD=192 BF16: registry-supported and dispatched on gfx942, where its head
-        // dims are in the verified kernel matrix; isApplicable accepts. AITER sends
-        // gfx950 hd192x192 to CK, so gfx950 declines it.
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, isGfx942},
+        // HD=192 BF16: registry-supported and dispatched on both archs, where its
+        // head dims are in the verified kernel matrix; isApplicable accepts.
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, true},
 
         // FP16 HD128: registry-supported and dispatched; its head dims are in the
         // verified kernel matrix on gfx942 and gfx950. isApplicable accepts.
@@ -1140,8 +1138,8 @@ TEST(TestSdpaBwdRegistryLookup, FallbackPicksTheSmallestRowAboveTheRequest)
     EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_PSSK_ONLY);
 }
 
-// gfx950 serves only psskddv rows on its ASM path; the (192, 128) request is
-// unpadded (pddv = 0) and resolves the (1, 1) row above it.
+// The gfx950 hd128 and 192 x 128 rows are all psskddv; the (192, 128) request
+// is unpadded (pddv = 0) and resolves the (1, 1) row above it.
 TEST(TestSdpaBwdRegistryLookup, Gfx950ResolvesThePsskddvRows)
 {
     for(const auto& request : {withSeqLens(makeRequest("bf16", 128, 128), 512, 512),
@@ -1185,7 +1183,8 @@ std::string describe(const VerifiedCase& c)
 // Every (arch, dtype, head dims) key of the Verified Kernel Matrix, through rows
 // that the IntegrationGpuSdpaBwd{Bf16,Fp16} Smoke and Comprehensive cases ran
 // and passed at the row's own head dims, including the gfx942 rows that are not
-// psskddv (hd64 (1, 0), and the (0, 0) A16 and A32 rows).
+// psskddv (hd64 (1, 0), and the (0, 0) A16 and A32 rows), and the gfx950 hd64
+// and 192 x 192 rows, the gfx942 kernels rebuilt for gfx950.
 TEST(TestSdpaBwdVerifiedDispatch, RowsRunAtTheirOwnHeadDimsAreVerified)
 {
     const std::vector<VerifiedCase> cases{
@@ -1204,6 +1203,12 @@ TEST(TestSdpaBwdVerifiedDispatch, RowsRunAtTheirOwnHeadDimsAreVerified)
         {"gfx950", makeRequest("fp16", 128, 128, MASK_SLIDING_WINDOW), K_PSSK_PDDV},
         {"gfx950", withA16(makeRequest("bf16", 192, 128, MASK_TOP_LEFT_CAUSAL)), K_PSSK_PDDV},
         {"gfx950", makeRequest("fp16", 192, 128, MASK_BOTTOM_RIGHT_CAUSAL), K_PSSK_PDDV},
+        {"gfx950", makeRequest("bf16", 64, 64, MASK_BOTTOM_RIGHT_CAUSAL), K_PSSK_ONLY},
+        {"gfx950",
+         withA16(withSeqLens(makeRequest("fp16", 64, 64, MASK_TOP_LEFT_CAUSAL), 128, 128)),
+         K_UNPADDED},
+        {"gfx950", makeRequest("bf16", 192, 192, MASK_TOP_LEFT_CAUSAL), K_PSSK_PDDV},
+        {"gfx950", makeRequest("fp16", 192, 192), K_PSSK_PDDV},
     };
     for(const auto& c : cases)
     {
@@ -1215,9 +1220,8 @@ TEST(TestSdpaBwdVerifiedDispatch, RowsRunAtTheirOwnHeadDimsAreVerified)
 
 // A padded head dim is unverified even when the row it runs is verified at its
 // own head dims. The gfx942 hd128 A16 pddv = 1 rows serve only padded head
-// dims, so they are never verified. Rows the engine never dispatches (gfx950
-// hd64 and 192 x 192, which isApplicable declines) are unverified too.
-TEST(TestSdpaBwdVerifiedDispatch, PaddedAndUndispatchedRowsAreUnverified)
+// dims, so they are never verified.
+TEST(TestSdpaBwdVerifiedDispatch, PaddedHeadDimsAreUnverified)
 {
     const std::vector<VerifiedCase> cases{
         {"gfx942", makeRequest("bf16", 96, 96), K_PSSK_PDDV},
@@ -1225,8 +1229,7 @@ TEST(TestSdpaBwdVerifiedDispatch, PaddedAndUndispatchedRowsAreUnverified)
         {"gfx942", withA16(withSeqLens(makeRequest("bf16", 72, 72), 128, 128)), {0, 1}},
         {"gfx942", withA16(makeRequest("fp16", 96, 96, MASK_TOP_LEFT_CAUSAL)), {0, 1}},
         {"gfx950", makeRequest("bf16", 96, 96), K_PSSK_PDDV},
-        {"gfx950", makeRequest("bf16", 64, 64), K_PSSK_ONLY},
-        {"gfx950", makeRequest("bf16", 192, 192), K_PSSK_PDDV},
+        {"gfx950", makeRequest("bf16", 136, 136), K_PSSK_PDDV},
     };
     for(const auto& c : cases)
     {
@@ -1860,7 +1863,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 }
 
 // =============================================================================
-// Head dims AITER v0.1.29 sends to the ASM kernels
+// Head dims the ASM kernels serve in batch mode
 // =============================================================================
 
 namespace
@@ -1873,18 +1876,19 @@ struct HeadDimCase
     bool gfx950;
 };
 
-// gfx942: 64 <= D <= 192, D % 8 == 0, D_qk == D_v (mha.py can_impl_fmha_v3_bwd).
-// gfx950: 64 < D <= 128 with D_qk == D_v, or D_qk = 192 with D_v = 128
-// (can_impl_fmha_v3_bwd_gfx950); its hd64 and hd192 x hd192 rows go to CK.
+// gfx942 and gfx950: 64 <= D <= 192, D % 8 == 0, D_qk == D_v (mha.py
+// can_impl_fmha_v3_bwd; on gfx950 the C++ mha_bwd() path, since the Python gate
+// can_impl_fmha_v3_bwd_gfx950 sends hd64 and 128 < D <= 192 to CK). gfx950 also
+// serves D_qk = 192 with D_v = 128.
 const std::vector<HeadDimCase> K_HEAD_DIM_CASES = {
     {56, 56, false, false},
-    {64, 64, true, false},
+    {64, 64, true, true},
     {72, 72, true, true},
     {96, 96, true, true},
     {100, 100, false, false},
     {128, 128, true, true},
-    {136, 136, true, false},
-    {192, 192, true, false},
+    {136, 136, true, true},
+    {192, 192, true, true},
     {200, 200, false, false},
     {192, 128, false, true},
     {128, 64, false, false},
@@ -1904,7 +1908,7 @@ TEST(TestSdpaBwdBatchShape, HeadDimsPerArch)
 
 // End to end: every head dim the arch serves also resolves all three kernels
 // (padded dims included), and the others are declined.
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableServesTheHeadDimsAiterSendsToAsm)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableServesTheBatchHeadDims)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -3032,12 +3036,12 @@ TEST(TestSdpaBwdBatchWindow, WindowRulesPerArch)
 {
     using bwd_dispatch::isBatchWindowSupported;
 
-    // gfx950: windows need D_qk <= 128.
+    // Both archs: windows need 64 < D_qk <= 128 (the hd128 window rows).
+    EXPECT_FALSE(isBatchWindowSupported("gfx950", 64));
     EXPECT_TRUE(isBatchWindowSupported("gfx950", 72));
     EXPECT_TRUE(isBatchWindowSupported("gfx950", 128));
     EXPECT_FALSE(isBatchWindowSupported("gfx950", 192));
 
-    // gfx942: windows need 64 < D_qk <= 128.
     EXPECT_FALSE(isBatchWindowSupported("gfx942", 64));
     EXPECT_TRUE(isBatchWindowSupported("gfx942", 72));
     EXPECT_TRUE(isBatchWindowSupported("gfx942", 128));
@@ -3546,10 +3550,11 @@ struct AccumulatorKnobCase
     std::vector<std::string> gfx950Values;
 };
 
-// Graphs a32 serves on gfx942. Every gfx942 a16 row is pssk = 0 at
+// Graphs a32 serves on both archs. Every gfx942 a16 row is pssk = 0 at
 // D_qk = D_v <= 128 and writes dQ with Q's strides, so a16 serves only the
-// first there. The gfx950 a16 kernels serve every graph a32 serves; gfx950
-// does not serve D = 192 x 192.
+// unpadded-sequence, packed graphs there. The gfx950 a16 kernels serve every
+// graph a32 serves at D = 128; gfx950 hd64 has the gfx942 a16 rows rebuilt,
+// and neither arch ships a16 rows for D = 192 x 192.
 std::vector<AccumulatorKnobCase> accumulatorKnobCases()
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -3578,7 +3583,9 @@ std::vector<AccumulatorKnobCase> accumulatorKnobCases()
                      a32Only,
                      both});
     cases.push_back({createSdpaBwdGraph({1, 2, 200, 128}), "S_kv % 64 != 0", a32Only, both});
-    cases.push_back({createSdpaBwdGraph({1, 2, 256, 192}), "D = 192", a32Only, {}});
+    cases.push_back({createSdpaBwdGraph({1, 2, 256, 192}), "D = 192", a32Only, a32Only});
+    cases.push_back(
+        {createSdpaBwdGraph({1, 2, 256, 64}), "S_q == S_kv == 256, D = 64", both, both});
     cases.push_back({withLayouts(createSdpaBwdGraph(qDims), {{"dq", paddedRows, {}}}),
                      "dQ rows padded, Q packed",
                      a32Only,

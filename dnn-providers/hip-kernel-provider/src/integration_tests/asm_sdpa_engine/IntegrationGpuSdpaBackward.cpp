@@ -141,9 +141,11 @@ struct SdpaBwdTestCase
     std::optional<float> absoluteTolerance;
 };
 
-// gfx942 serves 64 <= D <= 192 with D_qk == D_v; gfx950 serves 64 < D <= 128
-// with D_qk == D_v, and D_qk = 192 with D_v = 128 (AITER v0.1.29 aiter/ops/mha.py
-// can_impl_fmha_v3_bwd and can_impl_fmha_v3_bwd_gfx950).
+// Both archs serve 64 <= D <= 192 with D_qk == D_v; gfx950 also serves
+// D_qk = 192 with D_v = 128. On gfx950 the hd64 and hd192 rows are the gfx942
+// kernels rebuilt (`_recompile`), which AITER v0.1.29 runs through its C++
+// mha_bwd() although its Python gate (aiter/ops/mha.py
+// can_impl_fmha_v3_bwd_gfx950) sends them to CK.
 const std::vector<std::string> K_GFX942_ONLY = {"gfx942"};
 const std::vector<std::string> K_GFX950_ONLY = {"gfx950"};
 
@@ -182,16 +184,12 @@ std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
         // [B, S, H, D] falls back to the psskddv kernel.
         SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).withBshdDo().onlyOn(K_GFX942_ONLY),
-        // gfx942 hd64 top-left causal with S_q != S_kv (hd64 dq_convert), and the
-        // gfx942 A16 causal rows at hd64 (S_q == S_kv, a multiple of 64).
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, true)
-            .onlyOn(K_GFX942_ONLY),
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}, std::nullopt, -1, 0, true)
-            .withA16()
-            .onlyOn(K_GFX942_ONLY),
-        // gfx942 hd192 bottom-right causal with S_q != S_kv (hd192 dq_convert).
-        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, false)
-            .onlyOn(K_GFX942_ONLY),
+        // hd64 top-left causal with S_q != S_kv (hd64 dq_convert), and the A16
+        // causal rows at hd64 (S_q == S_kv, a multiple of 64).
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, true),
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}, std::nullopt, -1, 0, true).withA16(),
+        // hd192 bottom-right causal with S_q != S_kv (hd192 dq_convert).
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, false),
         // gfx950 A16: top-left sliding window (mask=3) and D_qk = 192 with D_v = 128
         // top-left causal (hd192 dq_shuffle).
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, 64, 64, true)
@@ -241,17 +239,19 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
             .withNonPackedLayouts(),
         // Head dims other than 128. Padded ones (72, 96, 136) run the next
         // registry head dim's kernel with the graph's head dim in the kernargs.
-        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).onlyOn(K_GFX942_ONLY),
-        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 512, 64}, std::nullopt, -1, 0, false)
-            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 512, 64}, std::nullopt, -1, 0, false),
         SdpaBwdTestCase({1, 2, 256, 72}, {1, 2, 256, 72}),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, -1, 0, true),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, 64, 64, false),
-        SdpaBwdTestCase({1, 2, 256, 136}, {1, 2, 256, 136}).onlyOn(K_GFX942_ONLY),
-        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}).onlyOn(K_GFX942_ONLY),
-        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true)
-            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 136}, {1, 2, 256, 136}),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true),
+        // S_q = 1 on the hd64 and hd192 rows, which gfx950 runs as the gfx942
+        // kernels rebuilt; atol as in the other S_q = 1 cases.
+        SdpaBwdTestCase({1, 2, 1, 64}, {1, 2, 256, 64}).withAbsoluteTolerance(1e-2f),
+        SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192}).withAbsoluteTolerance(1e-2f),
         // D_qk = 192 with D_v = 128: the hd128 odo, the 192 x 128 dqdkdv and the
         // hd192 dq_convert kernels.
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 128}).onlyOn(K_GFX950_ONLY),
@@ -267,7 +267,8 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         // The a16 accumulator. gfx942 ships only A16 rows without sequence
         // padding (S_q == S_kv, S_kv % 64 == 0, packed strides) for D <= 128,
         // no mask or causal, and writes dQ directly; a bottom-right causal mask
-        // runs the top-left kernel (AITER mha_bwd.cu:374-377).
+        // runs the top-left kernel (AITER mha_bwd.cu:374-377). gfx950 hd64 has
+        // the same rows rebuilt, without the bottom-right remap.
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}).withA16().onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}).withA16().onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, -1, 0, true)
@@ -276,7 +277,7 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, -1, 0, false)
             .withA16()
             .onlyOn(K_GFX942_ONLY),
-        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).withA16().onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).withA16(),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, -1, 0, true)
             .withA16()
             .onlyOn(K_GFX942_ONLY),
