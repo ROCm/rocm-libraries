@@ -1128,7 +1128,14 @@ def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
     assert not (tmp_path / "model" / "heuristic.uhd.json").exists()
 
 
-def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
+def _opaque_model(
+    root,
+    *,
+    identity=NEW,
+    revision="aiter-fwd-1",
+    declared=NEW,
+    signature=OPAQUE_SIGNATURE,
+):
     """A model for an engine with no UED, trained against a selector revision only.
 
     `declared` is the provider's declared id (binding.uhd_id), or None.
@@ -1140,8 +1147,8 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
         "name": "model",
         "adapter": "tree_data",
         "objective": "max",
-        "features_signature": list(OPAQUE_SIGNATURE),
-        "features_hash": _hash(OPAQUE_SIGNATURE),
+        "features_signature": list(signature),
+        "features_hash": _hash(signature),
         "trained_against": provenance,
         "score": {"metric": "tflops", "calibrated": True, "transform": "identity"},
         "tree_data": {"artifact": "model.bin"},
@@ -1159,7 +1166,7 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
             "binding": binding,
         },
     )
-    (root / "model.bin").write_bytes(_weights(signature=OPAQUE_SIGNATURE))
+    (root / "model.bin").write_bytes(_weights(signature=signature))
     return root
 
 
@@ -1185,6 +1192,44 @@ def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
     assert (installed / "model.bin").read_bytes() == _weights(
         signature=OPAQUE_SIGNATURE
     )
+
+
+def test_an_opaque_model_reading_an_optional_feature_bare_is_refused_before_any_write(
+    tmp_path,
+):
+    """RFC 0019 §6.2 holds for an engine with no UED too: the unguarded scale would leave a
+    graph without it unscorable, while the unknown work a tflops model reads bare is not.
+    """
+    tree = _tree(tmp_path / "tree")
+    scale = "$graph.nodes[0].attn_scale_value"
+    target = {"role": "predict_engine", "arch": "gfx950"}
+    model = _opaque_model(tmp_path / "model", signature=(scale, "$graph.flops"))
+    before = _files(tmp_path)
+    with pytest.raises(
+        PromoteError, match=r"attn_scale_value.*value_or_default"
+    ) as refusal:
+        build_plan(model, tree, "ASM_SDPA_ENGINE", **target)
+    assert "graph.flops" not in str(refusal.value)
+    assert _files(tmp_path) == before
+
+    # The refusals the plan makes itself come first, as for an engine with a UED.
+    undeclared = _opaque_model(
+        tmp_path / "undeclared", declared=None, signature=(scale, "$graph.flops")
+    )
+    with pytest.raises(PromoteError, match="--uhd-id tflops="):
+        build_plan(undeclared, tree, "ASM_SDPA_ENGINE", **target)
+
+    guarded = (
+        {"value_or_default": [scale, 1.0]},
+        "$graph.flops",
+    )
+    plan = build_plan(
+        _opaque_model(tmp_path / "guarded", signature=guarded),
+        tree,
+        "ASM_SDPA_ENGINE",
+        **target,
+    )
+    assert plan.ued_path is None
 
 
 def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):

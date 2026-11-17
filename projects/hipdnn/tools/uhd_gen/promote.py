@@ -301,6 +301,23 @@ def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
     return []
 
 
+def _require_scorable(descriptor, descriptor_path, feature_evaluator):
+    """RFC 0019 §6.2: refuse a model that reads bare a feature a valid graph may leave
+    unbound, since the engine could not score such a graph and would lose its estimate or
+    ranking there."""
+    if not descriptor.get("features_signature"):
+        return
+    try:
+        require_safe_signature(
+            descriptor["features_signature"],
+            _score_metric(descriptor),
+            str(descriptor_path),
+            feature_evaluator,
+        )
+    except ValueError as error:
+        raise PromoteError(str(error)) from error
+
+
 def _opaque_plan(
     descriptor_path,
     descriptor,
@@ -835,6 +852,8 @@ def _build_plan(
             uhd_ids,
             manifest,
         )
+        # After every refusal the plan itself makes, as for an engine with a UED.
+        _require_scorable(descriptor, descriptor_path, feature_evaluator)
         opaque.warnings.extend(gate_warnings)
         return opaque
     ued_path, original_ued = select_engine(index, engine)
@@ -966,19 +985,8 @@ def _build_plan(
         raise PromoteError(
             "explicit knob removal requires training provenance for the intended revised UED; retrain first"
         )
-    if descriptor.get("features_signature"):
-        # RFC 0019 §6.2, after every refusal the runtime would make itself: a model it
-        # loads but that reads bare a feature a valid graph may leave unbound cannot
-        # score that graph, so the engine loses its estimate or ranking there.
-        try:
-            require_safe_signature(
-                descriptor["features_signature"],
-                _score_metric(descriptor),
-                str(descriptor_path),
-                feature_evaluator,
-            )
-        except ValueError as error:
-            raise PromoteError(str(error)) from error
+    # After every refusal the runtime would make itself (see _require_scorable).
+    _require_scorable(descriptor, descriptor_path, feature_evaluator)
 
     target = (ued_path.resolve(), _role_key(role, slot), arch)
     # Every binding except the ones this promotion replaces, including other metrics here.
