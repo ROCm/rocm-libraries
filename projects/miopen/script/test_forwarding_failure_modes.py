@@ -18,12 +18,14 @@ the loader's search path. MIOpen handles the fake the same way as a missing back
 ctest sets MIOPEN_FAILURE_PROBE (the probe) and MIOPEN_FAKE_HIPDNN_BACKEND (the fake's
 directory). Without them every case is skipped.
 
-Two cases use a second backend instead, from MIOPEN_REENTRANT_HIPDNN_BACKEND: hipDNN
+Three cases use a second backend instead, from MIOPEN_REENTRANT_HIPDNN_BACKEND: hipDNN
 accepts it, and its hipdnnDestroy calls miopenDestroy. One checks that miopenDestroy does
-not hang when destroying its hipDNN handle re-enters it. The other makes the backend
-fail to set a stream, and checks that the forwarded call that destroys the hipDNN handle
-it just created does not hang either. Both need a GPU, because the backend creates an
-MIOpen handle, and are skipped without one.
+not hang when destroying its hipDNN handle re-enters it. One makes the backend fail to
+set a stream, and checks that the forwarded call that destroys the hipDNN handle it just
+created does not hang either. One exits with a forwarded handle still alive, and checks
+that MIOpen destroys nothing at exit, where the re-entry would find MIOpen's handle map
+torn down. All need a GPU, because the backend creates an MIOpen handle, and are skipped
+without one.
 
 Uses unittest rather than pytest, like the other wrapper script tests, because nothing
 installs pytest on a machine that builds MIOpen.
@@ -317,6 +319,30 @@ class ForwardingFailureModesTest(unittest.TestCase):
         self.assertEqual(
             run.lines_starting(DESTROYED_MARKER),
             [f"{DESTROYED_MARKER}{SUCCESS}"] * 2,
+            run.stderr,
+        )
+
+    def test_exit_destroys_no_hipdnn_handle_a_live_miopen_handle_holds(self):
+        if self.reentrant_backend is None:
+            self.skipTest(f"set {REENTRANT_BACKEND_ENV}")
+        # run_probe fails a run that crashes at exit, as it fails any nonzero exit.
+        run = self.run_probe(
+            ["exit_after_forward"],
+            FORWARDING_ON,
+            backend=self.reentrant_backend,
+            timeout=60,
+        )
+        if run.statuses("create") != [SUCCESS]:
+            self.skipTest(f"miopenCreate failed, so no GPU\n{run.stderr}")
+        self.assertEqual(len(run.statuses("forward_with_handle")), 1, run.stderr)
+        # Only the availability check's hipDNN handle is destroyed. The one the
+        # forwarded call gave the probe's handle is left to the operating system: a
+        # second marker means exit destroyed it, re-entering miopenDestroy while
+        # MIOpen's handle map was being torn down. The destroy case above shows the
+        # same call does give the handle one, so one marker is not a vacuous pass.
+        self.assertEqual(
+            run.lines_starting(DESTROYED_MARKER),
+            [f"{DESTROYED_MARKER}{SUCCESS}"],
             run.stderr,
         )
 

@@ -24,6 +24,8 @@
 //                      call also sets that stream on the hipDNN handle. Prints the
 //                      hipStreamCreate result as stream_create first, and stops
 //                      after it if it failed.
+//  exit_after_forward  destroy_after_forward without the miopenDestroy, so the
+//                      handle and its hipDNN handle are still alive at exit
 //  batchnorm          batchnorm forward training, forward inference with
 //                      estimates, and backward; prints bn_train, bn_infer and
 //                      bn_backward statuses
@@ -101,6 +103,16 @@ miopenStatus_t ConvForward(const ConvProblem& p, miopenHandle_t handle = nullptr
                                     nullptr,
                                     nullptr,
                                     0);
+}
+
+void ExitAfterForward(const ConvProblem& p)
+{
+    miopenHandle_t handle        = nullptr;
+    const miopenStatus_t created = miopenCreate(&handle);
+    std::printf("create=%d\n", static_cast<int>(created));
+    if(created == miopenStatusSuccess)
+        std::printf("forward_with_handle=%d\n", static_cast<int>(ConvForward(p, handle)));
+    std::fflush(stdout);
 }
 
 void DestroyAfterForward(const ConvProblem& p, bool onStream)
@@ -234,6 +246,12 @@ int main(int argc, char** argv)
             if(!ensureProblem())
                 return false;
             DestroyAfterForward(problem, step == "destroy_after_forward_on_stream");
+        }
+        else if(step == "exit_after_forward")
+        {
+            if(!ensureProblem())
+                return false;
+            ExitAfterForward(problem);
         }
         else if(step == "batchnorm")
         {
