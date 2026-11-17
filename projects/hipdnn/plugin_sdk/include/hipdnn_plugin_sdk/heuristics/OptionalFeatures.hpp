@@ -400,7 +400,7 @@ inline void collectUnguardedReads(const nlohmann::json& node,
 /// operand visitor) and the work features.
 inline const std::vector<OptionalFeature>& optionalFeatures()
 {
-    static const std::vector<OptionalFeature> features = [] {
+    static const std::vector<OptionalFeature> s_features = [] {
         std::vector<OptionalFeature> result;
         for(const auto& operand : hipdnn_flatbuffers_sdk::data_objects::node_operands::OPERANDS)
         {
@@ -426,7 +426,7 @@ inline const std::vector<OptionalFeature>& optionalFeatures()
         }
         return result;
     }();
-    return features;
+    return s_features;
 }
 
 /// The optional feature family published @p name (with or without `$`) belongs to, or
