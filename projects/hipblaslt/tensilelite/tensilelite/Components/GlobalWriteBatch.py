@@ -23,7 +23,7 @@
 from ..ExecutionPolicy import isPersistent
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData
+  DPPModifiers, SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicPkAddBF16, GlobalLoadB32, GlobalStoreB32, SLoadB128, \
@@ -66,6 +66,13 @@ from math import ceil, log2, gcd
 # v_permlane32_swap x2` with a two-`v_permlane16_swap` shuffle on eligible gfx950
 # paired dwordx4 stores. This changes the cross-lane assembly AND the per-lane store
 # row address. Orphan/scalar stores use a separate, already LDS-free path.
+def storeCachelineAlignEnabled(kernel) -> bool:
+    """Master switch for the store cacheline align: two paired bf16 stores that are the two halves
+    of the same 128B lines are blended so each store writes full lines."""
+    import os
+    return bool(os.environ.get("DPP_STORE_CACHELINE_ALIGN"))
+
+
 def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     """Whether this store emission uses the ``v_permlane16_swap`` shuffle.
 
@@ -4356,12 +4363,12 @@ class GlobalWriteBatchWriter:
 
     def packF32pair(dst, src0, src1, comment):
       """Pack two f32 VGPRs into one dword of two 16bit values."""
-      module.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
+      module.add(VCvtPkF32to16(dst=dst, src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
 
-    packF32pair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
-    packF32pair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
-    packF32pair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
-    packF32pair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
+    packF32pair(self._vPackReg(vPack, 0), vc(sumIdx0, 0), vc(sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
+    packF32pair(self._vPackReg(vPack, 1), vc(sumIdx0, 2), vc(sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
+    packF32pair(self._vPackReg(vPack, 2), vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
+    packF32pair(self._vPackReg(vPack, 3), vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
 
     # Compute the adjusted D address into vgprAddrScratch (overlapping the
     # ds_bpermute on the fallback path).  addrDVgpr holds the M-byte offset
@@ -4389,7 +4396,7 @@ class GlobalWriteBatchWriter:
     if not getattr(self, "_permlane16Active", False):
       module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
       for k in range(4):
-        module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
+        module.add(DSBPermuteB32(dst=self._vPackReg(vPack, k), src0=vgpr(vPermAddr), src1=self._vPackReg(vPack, k),
                                  comment=f"perm dword {k}"))
 
     # The ds_bpermute has ~88 cycles of LDS latency.  Overlap SALU/VALU work here:
@@ -4454,7 +4461,7 @@ class GlobalWriteBatchWriter:
     """NonTemporalD for the fused store's D writes."""
     return int(self.kernel["NonTemporalD"])
 
-  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False, vPackOverride=None) -> Module:
+  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False, vPackOverride=None, emitStore: bool = True) -> Module:
     """Phase 2 (consume) of the paired dwordx4 store — see _emit16bitSubtilePairedStore.
 
     Emits, with NO s_barrier:
@@ -4496,8 +4503,8 @@ class GlobalWriteBatchWriter:
     # to drain; two v_permlane16_swap assemble the eight rows directly.
     if getattr(self, "_permlane16Active", False):
       module.addComment1("v_permlane16_swap_b32: cross-lane assembly (no ds_bpermute)")
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
+      module.add(VPermlane16SwapB32(dst=self._vPackReg(vPack, 0), src=self._vPackReg(vPack, 2), comment="swap dwords 0↔2"))
+      module.add(VPermlane16SwapB32(dst=self._vPackReg(vPack, 1), src=self._vPackReg(vPack, 3), comment="swap dwords 1↔3"))
     else:
       if pending_lgkm is None:
         module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
@@ -4506,8 +4513,13 @@ class GlobalWriteBatchWriter:
         module.add(SWaitCnt(dscnt=dscnt, comment=f"wait for this pair's 4 ds_bpermute (lgkmcnt={dscnt})"))
 
       module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
+      module.add(VPermlane32SwapB32(dst=self._vPackReg(vPack, 0), src=self._vPackReg(vPack, 2), comment="swap dwords 0↔2"))
+      module.add(VPermlane32SwapB32(dst=self._vPackReg(vPack, 1), src=self._vPackReg(vPack, 3), comment="swap dwords 1↔3"))
+
+    if not emitStore:
+      # Store cacheline align: the caller blends this quad with its line partner and issues the stores.
+      assert not useAlign8, "prepare-only Phase2 is for the mask-free paths"
+      return module
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self._pairedStoreMaskSgpr, self.laneSGPRC), "apply exec mask"))
@@ -4515,7 +4527,7 @@ class GlobalWriteBatchWriter:
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
     _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
     module.add(BufferStoreB128(
-      src=vgpr(vPack, 4),
+      src=self._vPackReg(vPack, 0, 4),
       vaddr=vgpr(vAddrScratch),
       saddr=sgpr("SrdD", 4),
       soffset=_soff,
@@ -4652,6 +4664,74 @@ class GlobalWriteBatchWriter:
       return
     self.parentWriter.states.subtileStoreStageHighWater = stage
     module.add(Module(f"PlsinStageBoundary{stage}"))
+
+  def _vPackReg(self, vPack, k, n=1):
+    """Pack-quad register k (width n). vPack is a physical base (the pack quad or ring), or
+    ('c', base) for ValuC+base: the store cacheline align packs the second pair of a line in place
+    into that pair's own accumulator staging registers, which are dead once it is packed."""
+    if isinstance(vPack, tuple):
+      return vgpr("ValuC+" + str(vPack[1] + k), n)
+    return vgpr(vPack + k, n)
+
+  def _cachelineAlignLineStartParity(self) -> int:
+    """Pair-in-column index parity (0/1) of the pair holding the FIRST half of a 128B line.
+    Fixed 0: correct for every wave when MIWaveTile[0] % 4 == 0."""
+    return 0
+
+  def _cachelineAlignStoreNow(self, module, addrCalc, tt0, forceSlc, vPack, vAddr, tag):
+    ntd = self._epilogueNtd()
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
+    module.add(BufferStoreB128(
+      src=self._vPackReg(vPack, 0, 4), vaddr=vgpr(vAddr), saddr=sgpr("SrdD", 4), soffset=_soff,
+      mubuf=MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset * bpeDest // bpeCurr,
+                           glc=bool(ntd & 0x1), slc=bool((ntd & 0x2) or forceSlc), nt=bool(ntd & 0x4)),
+      comment=f"16bit paired dwordx4 store ({tag}) tt0={tt0},{tt0+1}"))
+    if _soffTmp is not None:
+      self._epilogScratchFree(_soffTmp)
+
+  def _emitCachelineAlignBlendAndStores(self, module, addrCalcA, tt0A, forceSlc, H, X, W, marker, rebuildMask):
+    """In-place DPP blend of two permlaned pack quads and the two full-line stores.
+    H = pair A's quad (m-rows 0-31 of the line), X = pair B's quad (m-rows 32-63), W = a
+    scratch vgpr name, T = vgprCachelineAlignTmp, address = vgprAddrScratch (only read).
+    A paired store fills half of each 128B line; afterwards X holds the odd n-columns
+    (stored first) and H the even n-columns, each a full line per lane pair:
+      even lanes take A, odd lanes take B; the odd-column store shifts A down one lane.
+    DPP is only legal on v_cndmask src0 with the select in VCC, and a cross-lane DPP read
+    of an exec-inactive lane is wrong on gfx950, so EXEC must be full at the call site.
+    rebuildMask: re-derive VCC before the second store (the staged store cuts a scheduler
+    unit there, so nothing but H may be carried across)."""
+    T = self.cvtVgprStruct.vgprCachelineAlignTmp
+    addr = self.cvtVgprStruct.vgprAddrScratch
+    if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
+      module.add(SNop(waitState=marker, comment=f"STORE_CACHELINE_ALIGN_MARK={marker}"))
+    module.add(VAndB32(dst=vgpr(T), src0=1, src1=vgpr("Serial"), comment="lane parity"))
+    module.add(VCmpEQU32(dst=VCC(), src0=vgpr(T), src1=0, comment="VCC = even lanes"))
+    for k in range(4):
+      rA = self._vPackReg(H, k)
+      rB = self._vPackReg(X, k)
+      module.add(VMovB32(dst=vgpr(T), src=rA, dpp=DPPModifiers(quad_perm=[1,1,3,3]),
+                         comment=f"align d{k}: save A odd n-cols into even lanes"))
+      module.add(VCndMaskB32(dst=rA, src0=rB, src1=rA, src2=VCC(), dpp=DPPModifiers(quad_perm=[0,0,2,2]),
+                             comment=f"align d{k}: store1 even<-A odd<-B[0,0,2,2]"))
+      module.add(VCndMaskB32(dst=rB, src0=rB, src1=vgpr(T), src2=VCC(),
+                             comment=f"align d{k}: store2 even<-A[1,1,3,3] odd<-B"))
+    module.add(VAddU32(dst=vgpr(W), src0=vgpr(addr), src1=hex(64), comment="addr + 64B"))
+    module.add(VMovB32(dst=vgpr(T), src=vgpr(addr), dpp=DPPModifiers(quad_perm=[1,1,3,3]),
+                       comment="align voff2: addr perm [1,1,3,3]"))
+    module.add(VCndMaskB32(dst=vgpr(T), src0=vgpr(W), src1=vgpr(T), src2=VCC(),
+                           comment="align voff2: even<-perm addr, odd<-addr+64"))
+    self._cachelineAlignStoreNow(module, addrCalcA, tt0A, forceSlc, X, T, "align store 2")
+    if rebuildMask:
+      module.add(VAndB32(dst=vgpr(T), src0=1, src1=vgpr("Serial"), comment="lane parity"))
+      module.add(VCmpEQU32(dst=VCC(), src0=vgpr(T), src1=0, comment="VCC = even lanes"))
+    module.add(VMovB32(dst=vgpr(T), src=vgpr(addr), dpp=DPPModifiers(quad_perm=[0,0,2,2]),
+                       comment="align voff1: addr perm [0,0,2,2]"))
+    module.add(VAddU32(dst=vgpr(T), src0=vgpr(T), src1=hex(64), comment="align voff1: perm addr + 64B"))
+    module.add(VCndMaskB32(dst=vgpr(T), src0=vgpr(T), src1=vgpr(addr), src2=VCC(),
+                           comment="align voff1: even<-addr, odd<-perm addr+64"))
+    self._cachelineAlignStoreNow(module, addrCalcA, tt0A, forceSlc, H, T, "align store 1")
 
   def _pairPackQuad(self) -> int:
     """Base vgpr of the 4-dword pack quad this paired store uses.
