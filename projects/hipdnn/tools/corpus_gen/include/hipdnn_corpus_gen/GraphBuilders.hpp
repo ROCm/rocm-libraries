@@ -80,11 +80,6 @@ inline flatbuffers::Offset<fb::TensorAttributes> addTensor(flatbuffers::FlatBuff
         valueType = fb::TensorValue::Float32Value;
         value = builder.CreateStruct(scalar).Union();
     }
-    flatbuffers::Optional<int64_t> raggedOffsetUid = flatbuffers::nullopt;
-    if(tensor.raggedOffsetUid.has_value())
-    {
-        raggedOffsetUid = *tensor.raggedOffsetUid;
-    }
     return fb::CreateTensorAttributesDirect(builder,
                                             tensor.uid,
                                             tensor.name.c_str(),
@@ -95,7 +90,7 @@ inline flatbuffers::Offset<fb::TensorAttributes> addTensor(flatbuffers::FlatBuff
                                             valueType,
                                             value,
                                             tensor.runtimePassByValue,
-                                            raggedOffsetUid,
+                                            tensor.raggedOffsetUid,
                                             /*alignment=*/16,
                                             tensor.raggedOffsetMultiplier);
 }

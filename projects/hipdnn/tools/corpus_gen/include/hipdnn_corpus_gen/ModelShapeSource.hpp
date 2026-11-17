@@ -95,9 +95,10 @@ inline std::vector<std::string> csvFields(const std::string& line)
 ///
 /// Every declared parameter must be present and readable; a partial point is refused rather
 /// than defaulted, since a default would pass off an unrecorded shape as recorded. The one
-/// exception is a parameter the file has no column for at all and the operation answers with a
-/// `kernel_catalog` constant: the file predates the parameter (`form`, added after the shape
-/// files existed), and the constant is the operation's own answer for a source without it.
+/// exception is `form`, which the shape files predate: a file with no `form` column at all
+/// reads as the `plain` form, the graph every earlier file described. Any other parameter a
+/// file lacks (a misspelled `q.alignment`, say) is refused, whatever the operation's
+/// `kernel_catalog` says of it, and so is a `form` column left empty in a row.
 inline bool pointFromColumns(const OperationMetadata& metadata,
                              const std::map<std::string, std::string>& values,
                              const std::set<std::string>& columns,
@@ -110,11 +111,13 @@ inline bool pointFromColumns(const OperationMetadata& metadata,
         const auto found = values.find(parameter.name);
         if(found == values.end() || found->second.empty())
         {
-            const auto constant = metadata.kernelCatalog.constants.find(parameter.name);
-            if(columns.count(parameter.name) == 0
-               && constant != metadata.kernelCatalog.constants.end())
+            const auto isPlainDefault
+                = parameter.name == "form" && columns.count(parameter.name) == 0
+                  && std::find(parameter.values.begin(), parameter.values.end(), "plain")
+                         != parameter.values.end();
+            if(isPlainDefault)
             {
-                point[parameter.name] = constant->second;
+                point[parameter.name] = std::string("plain");
                 continue;
             }
             problem = "no value for '" + parameter.name + "'";

@@ -50,14 +50,19 @@ private:
     std::filesystem::path _root;
 };
 
-OperationMetadata shippedSdpa()
+OperationMetadata shippedOperation(const std::string& name)
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
+    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/" + name + ".opmeta.json";
     std::ifstream file(path);
     EXPECT_TRUE(file.is_open()) << path;
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
     return parsed.ok() ? *parsed.metadata : OperationMetadata{};
+}
+
+OperationMetadata shippedSdpa()
+{
+    return shippedOperation("sdpa_fwd");
 }
 
 /// A complete header in the spelling the miner emits, and one complete row.
@@ -104,10 +109,10 @@ TEST(TestModelShapeSource, AColumnWithoutTheQueryPrefixStillReads)
     EXPECT_NE(entries.front().origin.find("row 1"), std::string::npos) << entries.front().origin;
 }
 
-// A file mined before `form` existed has no column for it; the operation's kernel_catalog
-// constant answers, as it does for a descriptor pack. A present column left empty is still a
-// row that failed to record its form.
-TEST(TestModelShapeSource, AFilePredatingAParameterTakesTheOperationsConstantForIt)
+// A file mined before `form` existed has no column for it and reads as the plain form, for the
+// backward operation as for the forward one. A present column left empty is still a row that
+// failed to record its form.
+TEST(TestModelShapeSource, AFilePredatingTheFormColumnReadsAsPlain)
 {
     const TempTree tree("predates");
     const auto metadata = shippedSdpa();
@@ -120,12 +125,49 @@ TEST(TestModelShapeSource, AFilePredatingAParameterTakesTheOperationsConstantFor
     ASSERT_EQ(entries.size(), 1u);
     EXPECT_EQ(entries.front().point.at("form"), ParameterValue{std::string("plain")});
 
+    // sdpa_bwd declares no kernel_catalog, so nothing but the form rule can answer for it.
+    const auto backward = shippedOperation("sdpa_bwd");
+    const std::string oldBackward
+        = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
+          "q.is_causal,q.alignment,q.dtype\n"
+          "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,bf16\n";
+    const auto backwardEntries
+        = readModelShapes(backward, tree.write("old_bwd.csv", oldBackward), report);
+    ASSERT_EQ(backwardEntries.size(), 1u) << report.firstProblem;
+    EXPECT_EQ(backwardEntries.front().point.at("form"), ParameterValue{std::string("plain")});
+
     const std::string empty
         = kHeader
           + std::string("llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16,\n");
     EXPECT_TRUE(readModelShapes(metadata, tree.write("empty.csv", empty), report).empty());
     EXPECT_EQ(report.unusable, 1);
     EXPECT_NE(report.firstProblem.find("form"), std::string::npos) << report.firstProblem;
+}
+
+// Only `form` is exempt: a file with no (or a misspelled) `q.alignment` or `q.generate_stats`
+// column would otherwise read as top_left / no stats, passing off an unrecorded shape as recorded.
+TEST(TestModelShapeSource, AFileMissingAnyOtherParameterColumnIsRefused)
+{
+    const TempTree tree("missing_column");
+    const auto metadata = shippedSdpa();
+    ModelShapeReport report;
+
+    const std::string noAlignment
+        = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
+          "q.is_causal,q.generate_stats,q.dtype,q.form\n"
+          "llama3-70b prefill,1,64,8,4096,4096,128,true,false,bf16,plain\n";
+    EXPECT_TRUE(
+        readModelShapes(metadata, tree.write("no_alignment.csv", noAlignment), report).empty());
+    EXPECT_EQ(report.unusable, 1);
+    EXPECT_NE(report.firstProblem.find("alignment"), std::string::npos) << report.firstProblem;
+
+    const std::string noStats
+        = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,"
+          "q.head_dim,q.is_causal,q.alignment,q.dtype,q.form\n"
+          "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,bf16,plain\n";
+    EXPECT_TRUE(readModelShapes(metadata, tree.write("no_stats.csv", noStats), report).empty());
+    EXPECT_EQ(report.unusable, 1);
+    EXPECT_NE(report.firstProblem.find("generate_stats"), std::string::npos) << report.firstProblem;
 }
 
 TEST(TestModelShapeSource, ARowNamingAnotherOperationIsSkippedRatherThanCountedUnusable)
