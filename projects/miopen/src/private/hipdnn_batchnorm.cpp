@@ -470,13 +470,12 @@ std::string CheckSupported(const BnProblem& problem)
         return reason;
     if(!std::all_of(tensors.begin(), tensors.end(), IsPacked))
         return "hipDNN batchnorm supports only packed tensors";
-    // CheckProblem has limited every type to one a MIOpen solver accepts.
+    // The parameter checks and CheckProblem have already given every data tensor
+    // the type of x.
     for(size_t index : {kIdxY, kIdxDx})
     {
         if(index >= tensors.size())
             continue;
-        if(tensors[index].dataType != x.dataType)
-            return "hipDNN batchnorm needs every data tensor in the same type";
         if(tensors[index].dims != x.dims || tensors[index].strides != x.strides)
             return "hipDNN batchnorm needs every data tensor in the same shape and layout";
     }

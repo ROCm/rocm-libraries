@@ -28,7 +28,7 @@ namespace hipdnn {
 //   dy, scale or dx is null on backward.
 // - miopenStatusBadParm when a descriptor does not match x. Like MIOpen, the
 //   wrapper compares the rank of y (or dy), scale, bias and the statistics with
-//   x, but not the rank of dx.
+//   x, but not the rank of dx, and the data type of y with x (or of dx with dy).
 // - miopenStatusBadParm for non-default alpha or beta on backward, and on
 //   inference with both estimates. Inference without them runs training, so it
 //   returns training's status.
@@ -69,7 +69,7 @@ namespace hipdnn {
 // - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP on spatial
 //   backward, the only call that both accepts and applies one. A null
 //   activation descriptor means no activation, as it does in MIOpen.
-// - Tensors that are not packed, data tensors of different types or shapes, or
+// - Tensors that are not packed, data tensors of different shapes, or
 //   scale, bias or statistics not shaped {1, C, 1, ...} ({1, C, H, W, ...} in
 //   per-activation mode). MIOpen reshapes a 5-D x to 4-D, so a non-packed 5-D x
 //   is declined here, not rejected with miopenStatusBadParm.
