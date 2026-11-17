@@ -1099,9 +1099,7 @@ class RegTransposeTileLoader:
         c0 = b.const_i32(0)
         units = []
         for e in range(self.units_per_thread):
-            row, col = self._unit_row_col(
-                b, tid, e, c_kc, c_vec, c_k_run, clamp=True
-            )
+            row, col = self._unit_row_col(b, tid, e, c_kc, c_vec, c_k_run, clamp=True)
             run = run_descriptor(b, row, col) if run_descriptor is not None else None
             offs = []
             for j in range(REGT_K_RUN):

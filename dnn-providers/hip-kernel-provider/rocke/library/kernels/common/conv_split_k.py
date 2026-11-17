@@ -264,10 +264,7 @@ def _gfx12_rdna_wgrad_split_policy(arch: str) -> WgradSplitPolicy:
 
 
 _WGRAD_SPLIT_POLICY.update(
-    {
-        arch: _gfx12_rdna_wgrad_split_policy(arch)
-        for arch in _GFX12_RDNA_ARCHS
-    }
+    {arch: _gfx12_rdna_wgrad_split_policy(arch) for arch in _GFX12_RDNA_ARCHS}
 )
 
 # Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).

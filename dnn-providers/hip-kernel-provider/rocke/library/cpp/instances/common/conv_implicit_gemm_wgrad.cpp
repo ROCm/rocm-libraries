@@ -4953,30 +4953,30 @@ static void wgrad_rtp_fetch(rocke_conv_build_ctx_t* ctx,
     mb->run_fn = ctx->b_run_fn;
     mb->run_user = ctx->run_user;
     mb->tile_ok = tile_ok;
-    rocke_reg_transpose_tile_loader_load_global(b,
-                                                &ctx->a_regt_loader,
-                                                ctx->tid,
-                                                wgrad_rtp_masked_desc,
-                                                ma,
-                                                ctx->a_rsrc,
-                                                /*masked=*/true,
-                                                ma->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
-                                                ma,
-                                                guard && rocke_reg_transpose_tile_loader_guard_applies(
-                                                             &ctx->a_regt_loader),
-                                                &out->a);
-    rocke_reg_transpose_tile_loader_load_global(b,
-                                                &ctx->b_regt_loader,
-                                                ctx->tid,
-                                                wgrad_rtp_masked_desc,
-                                                mb,
-                                                ctx->b_rsrc,
-                                                /*masked=*/true,
-                                                mb->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
-                                                mb,
-                                                guard && rocke_reg_transpose_tile_loader_guard_applies(
-                                                             &ctx->b_regt_loader),
-                                                &out->b);
+    rocke_reg_transpose_tile_loader_load_global(
+        b,
+        &ctx->a_regt_loader,
+        ctx->tid,
+        wgrad_rtp_masked_desc,
+        ma,
+        ctx->a_rsrc,
+        /*masked=*/true,
+        ma->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
+        ma,
+        guard && rocke_reg_transpose_tile_loader_guard_applies(&ctx->a_regt_loader),
+        &out->a);
+    rocke_reg_transpose_tile_loader_load_global(
+        b,
+        &ctx->b_regt_loader,
+        ctx->tid,
+        wgrad_rtp_masked_desc,
+        mb,
+        ctx->b_rsrc,
+        /*masked=*/true,
+        mb->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
+        mb,
+        guard && rocke_reg_transpose_tile_loader_guard_applies(&ctx->b_regt_loader),
+        &out->b);
 }
 
 /* Python _store(staged). */
