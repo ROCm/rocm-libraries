@@ -68,7 +68,7 @@ thread_pool::thread_pool()
     while(thread_count-- > 1);
 }
 
-thread_pool::~thread_pool()
+void thread_pool::shutdown()
 {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -76,7 +76,8 @@ thread_pool::~thread_pool()
     }
     m_cond.notify_all();
     for(auto& thread : m_threads)
-        thread.join();
+        if(thread.joinable())
+            thread.join();
 }
 
 void thread_pool::submit(std::function<void()> func, std::promise<void> promise)
@@ -208,7 +209,10 @@ void hipblaslt_test_sigaction()
 
 static const unsigned test_timeout = [] {
     // Number of seconds each test is allowed to take before all testing is killed.
-    constexpr unsigned TEST_TIMEOUT = 600;
+    // 1200 s (was 600 s): on MI300A the ROCM31016 store-extent FindAllAlgo case
+    // (about 150 to 190 s when healthy) hit the old limit in math-ci precheckin; see ROCM-33774.
+    // HIPBLASLT_TEST_TIMEOUT overrides this.
+    constexpr unsigned TEST_TIMEOUT = 1200;
     unsigned           timeout;
     const char*        env = getenv("HIPBLASLT_TEST_TIMEOUT");
     return env && sscanf(env, "%u", &timeout) == 1 ? timeout : TEST_TIMEOUT;
@@ -490,12 +494,13 @@ TEST(aux_handle_test, set_uniform_summation_order_default_matches_device)
     ASSERT_EQ(hipGetDevice(&device), hipSuccess);
     ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
     const std::string arch = props.gcnArchName;
-    const bool        rdna
-        = arch.find("gfx11") != std::string::npos || arch.find("gfx120") != std::string::npos;
+    const bool        default_off = arch.find("gfx11") != std::string::npos
+                             || arch.find("gfx120") != std::string::npos
+                             || arch.find("gfx942") != std::string::npos;
 
     int32_t value = -42;
     ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(value, rdna ? 0 : 1) << arch;
+    ASSERT_EQ(value, default_off ? 0 : 1) << arch;
 
     ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }

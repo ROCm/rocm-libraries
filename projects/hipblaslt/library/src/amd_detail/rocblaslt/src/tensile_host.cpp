@@ -34,11 +34,13 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "alpha_mode_logging.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
-#include "rocblaslt_arch_revision.hpp"
+#include "mx_scale_format.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
+#include "get_all_search_type_for_test.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -60,6 +62,7 @@
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 #include <Tensile/FusedA2AKernArg.hpp>
 #endif
+#include <Tensile/LongPath.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
@@ -727,6 +730,20 @@ namespace
         }
     }
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    TensileLite::FusedA2A toTensileFusedA2A(RocblasltFusedEpilogueInfo::Mode mode)
+    {
+        switch(mode)
+        {
+        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+            return TensileLite::FusedA2A::GemmA2A;
+        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+            break;
+        }
+        return TensileLite::FusedA2A::Disabled;
+    }
+#endif
+
     /// Shared scale-mode mapping for problem construction and updates.
     inline void setTensileScaleAB(const RocblasltContractionProblem&   prob,
                                   TensileLite::ContractionProblemGemm& tensileProblem)
@@ -1153,13 +1170,22 @@ namespace
         return 0;
     }
 
+    // MXScaleFormat id of HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT, the only
+    // layout that sets it.
+    constexpr int kMXScaleFormatHostPreSwizzle128x4
+        = static_cast<int>(TensileLite::MXScaleFormat::HostPreSwizzle128x4);
+
     inline int benchScaleAFormat(const TensileLite::ContractionProblemGemm& problem)
     {
+        if(problem.mxBlockA() && problem.mxScaleFormat() == kMXScaleFormatHostPreSwizzle128x4)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
         return benchScaleFormat(problem.mxTypeA(), problem.mxBlockA(), problem.useScaleAB());
     }
 
     inline int benchScaleBFormat(const TensileLite::ContractionProblemGemm& problem)
     {
+        if(problem.mxBlockB() && problem.mxScaleFormat() == kMXScaleFormatHostPreSwizzle128x4)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
         return benchScaleFormat(problem.mxTypeB(), problem.mxBlockB(), problem.useScaleAB());
     }
     /// True on the W4A16 group-scale path.
@@ -1300,7 +1326,7 @@ namespace
             problem.useScaleCD() ? "--scaleD" : "",
             problem.swizzleTensorA() ? "--swizzleA" : "",
             problem.swizzleTensorB() ? "--swizzleB" : "",
-            problem.useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
+            rocblaslt::benchAlphaFlag(problem),
             problem.useGradient() ? "--gradient" : "",
             problem.useE() ? "--use_e" : "",
             problem.useBias() ? "--bias_vector" : "",
@@ -1426,7 +1452,9 @@ namespace
                     "swizzleB",
                     problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
-                    problem.useScaleAlphaVec() ? "true" : "false",
+                    rocblaslt::logVectorAlpha(problem) ? "true" : "false",
+                    "device_scalar_alpha",
+                    problem.getParams().deviceScalarAlpha() ? "true" : "false",
                     "gradient",
                     problem.useGradient() ? "true" : "false",
                     "use_e",
@@ -1543,7 +1571,9 @@ namespace
                     "swizzleB",
                     problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
-                    problem.useScaleAlphaVec() ? "true" : "false",
+                    rocblaslt::logVectorAlpha(problem) ? "true" : "false",
+                    "device_scalar_alpha",
+                    problem.getParams().deviceScalarAlpha() ? "true" : "false",
                     "gradient",
                     problem.useGradient() ? "true" : "false",
                     "use_e",
@@ -1667,7 +1697,7 @@ namespace
             problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             problem.gemms[0].swizzleTensorA() ? "--swizzleA" : "",
             problem.gemms[0].swizzleTensorB() ? "--swizzleB" : "",
-            problem.gemms[0].useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
+            rocblaslt::benchAlphaFlag(problem.gemms[0]),
             problem.gemms[0].useGradient() ? "--gradient" : "",
             problem.gemms[0].useE() ? "--use_e" : "",
             problem.gemms[0].useBias() ? "--bias_vector" : "",
@@ -1827,7 +1857,9 @@ namespace
             "swizzleB",
             problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
-            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            rocblaslt::logVectorAlpha(problem.gemms[0]) ? "true" : "false",
+            "device_scalar_alpha",
+            problem.gemms[0].getParams().deviceScalarAlpha() ? "true" : "false",
             "gradient",
             problem.gemms[0].useGradient() ? "true" : "false",
             "use_e",
@@ -1973,7 +2005,9 @@ namespace
             "swizzleB",
             problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
-            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            rocblaslt::logVectorAlpha(problem.gemms[0]) ? "true" : "false",
+            "device_scalar_alpha",
+            problem.gemms[0].getParams().deviceScalarAlpha() ? "true" : "false",
             "gradient",
             problem.gemms[0].useGradient() ? "true" : "false",
             "use_e",
@@ -2052,6 +2086,18 @@ namespace
     bool hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat format)
     {
         return format != RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
+    }
+
+    // MXScaleFormat id (tensilelite Contractions.py) that the caller's scale layout
+    // requires of a solution; 0 for the layouts selection does not tell apart.
+    int hostMXScaleFormat(const RocblasltContractionProblem& prob)
+    {
+        return (prob.scaleAType
+                    == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+                || prob.scaleBType
+                       == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                   ? kMXScaleFormatHostPreSwizzle128x4
+                   : 0;
     }
 
     // The adaptive launch's occupancy probe target; none outside one.
@@ -2305,6 +2351,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2355,6 +2402,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2398,10 +2446,9 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }
@@ -2436,16 +2483,19 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
           rocblaslt::setHostMXScaleA(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
                                      padMXScaleTensorFreeDim,
                                      hostMXScalesArePacked(prob.scaleAType));
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
           rocblaslt::setHostMXScaleB(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
@@ -2644,9 +2694,13 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            // The problem is reused: drop an MX block left by an earlier call.
+            if(tensileProblem.mxBlockA() != 0)
+                tensileProblem.setMXScaleA(rocisa::DataType::None, 0);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2693,9 +2747,12 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            if(tensileProblem.mxBlockB() != 0)
+                tensileProblem.setMXScaleB(rocisa::DataType::None, 0);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2738,12 +2795,17 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
+        }
+        else
+        {
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::Disabled);
+            tensileProblem.setFusedA2AExtent(0);
+            tensileProblem.setWorld(1);
         }
 #endif
 
@@ -2788,16 +2850,19 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
 	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
 	    rocblaslt::setHostMXScaleA(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
 	                               padMXScaleTensorFreeDim,
 	                               hostMXScalesArePacked(prob.scaleAType));
 	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
 	    rocblaslt::setHostMXScaleB(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
@@ -2895,6 +2960,7 @@ namespace
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -2923,6 +2989,7 @@ namespace
 
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -3045,8 +3112,7 @@ namespace
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         // Device-side fused-A2A operands.
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
-           && fusedInfo.hasA2APrefix)
+        if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
             inputs.fusedA2ACounter = prob.Synchronizer;
             inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
@@ -3357,43 +3423,20 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). The mapping filenames carry `processor`, the name the runtime
-                // reports for this device -- which is the compiler target the kernels in
-                // it were built for, including gfx1250-strict. The subdir is revisioned:
-                // an A0 part reporting gfx1250 loads library/gfx1250v0/, with no fallback.
+                // builds). Both the subdir and the mapping filenames carry `processor`,
+                // the name the runtime reports for this device -- which is the compiler
+                // target the kernels in it were built for, including a silicon-revision
+                // variant such as gfx1250-strict.
                 {
-                    int asicRevision = -1;
-                    if(processor == "gfx1250")
-                    {
-                        hipDeviceProp_t deviceProperties;
-                        HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceId));
-                        asicRevision = deviceProperties.asicRevision;
-                    }
-                    const auto libArch      = rocblaslt_revisioned_arch_name(processor, asicRevision);
-                    auto processor_path     = path / libArch;
+                    auto processor_path     = path / processor;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
-                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
-                       || std::filesystem::exists(mapping_yaml))
+                    if(std::filesystem::exists(TensileLite::longPathSafe(mapping_msgpack.string()))
+                       || std::filesystem::exists(
+                           TensileLite::longPathSafe(mapping_msgpack_gz.string()))
+                       || std::filesystem::exists(TensileLite::longPathSafe(mapping_yaml.string())))
                     {
-                        path = std::move(processor_path);
-                    }
-                    else if(libArch != processor)
-                    {
-                        auto master = processor_path / ("TensileLibrary_" + processor);
-                        if(!std::filesystem::exists(master.string() + ".dat")
-                           && !std::filesystem::exists(master.string() + ".dat.zlib")
-                           && !std::filesystem::exists(master.string() + ".yaml"))
-                            std::cerr << "\nrocblaslt error: " << processor
-                                      << " device with asicRevision 0 (A0) needs the " << libArch
-                                      << " GEMM library, but " << processor_path
-                                      << " holds no Tensile library. Build with the "
-                                      << libArch << " subtree (the default for -a " << processor
-                                      << "), or run with HSA_DISABLE_GFX12_STRICT=0 and a "
-                                      << processor << "-strict build. Not falling back to "
-                                      << (path / processor)
-                                      << ": its kernels give wrong results on A0." << std::endl;
                         path = std::move(processor_path);
                     }
                 }
@@ -3411,7 +3454,8 @@ namespace
             if(!lazyLoad)
             {
                 bool no_match = true;
-                for(const auto& entry : std::filesystem::directory_iterator(path))
+                for(const auto& entry :
+                    std::filesystem::directory_iterator(TensileLite::longPathSafe(path.string())))
                 {
                     auto filename = entry.path().filename();
                     if(codeObjectTargets(filename, processor))
@@ -3468,8 +3512,9 @@ namespace
                             = path / (std::string("TensileLibrary_") + processor + ".dat");
                     }
                 }
-                if(!std::filesystem::exists(tensileLibPath)
-                   && !std::filesystem::exists(tensileLibPath.string() + ".zlib"))
+                if(!std::filesystem::exists(TensileLite::longPathSafe(tensileLibPath.string()))
+                   && !std::filesystem::exists(
+                       TensileLite::longPathSafe(tensileLibPath.string() + ".zlib")))
                 {
                     std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
                               << " (or .zlib variant): " << strerror(errno) << std::endl;
@@ -3629,11 +3674,13 @@ struct AdaptiveReselectionKey
     int                                 taggedSolution = -1;
     uint32_t                            queryHint      = 0;
     size_t                              rankWorkspace  = 0;
+    rocblaslt_mx_scale_need             mxScaleNeed    = rocblaslt_mx_scale_need::Any;
 
     bool operator==(const AdaptiveReselectionKey& o) const
     {
         return taggedSolution == o.taggedSolution && queryHint == o.queryHint
-               && rankWorkspace == o.rankWorkspace && launchProblem == o.launchProblem;
+               && rankWorkspace == o.rankWorkspace && mxScaleNeed == o.mxScaleNeed
+               && launchProblem == o.launchProblem;
     }
 };
 
@@ -3688,6 +3735,8 @@ struct TensileDataGemm
     TensileLite::ContractionInputs             inputs;
     std::vector<TensileLite::KernelInvocation> kernels;
     int                                        algoIndex = std::numeric_limits<int>::max();
+    // Written with problem, from the same RocblasltContractionProblem.
+    rocblaslt_mx_scale_need mxScaleNeed = rocblaslt_mx_scale_need::Any;
 
     // Built from the RocblasltContractionProblem this object was created from,
     // by the same builder the C API uses, so both APIs look up the same key.
@@ -3708,7 +3757,121 @@ struct TensileDataGroupedGemm
     std::shared_ptr<void>                      hipHostMemory;
     size_t                                     hipHostMemorySize;
     bool                                       useUserArgs = false;
+    // Combined over every group's scale types by groupedGemmCreate.
+    rocblaslt_mx_scale_need mxScaleNeed = rocblaslt_mx_scale_need::Any;
 };
+
+inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm const& problem,
+                                          TensileLite::ContractionSolution const&    solution);
+
+namespace
+{
+    void updateTensileData(const RocblasltContractionProblem& prob, TensileDataGemm& data)
+    {
+        updateTensileProblem(prob, data.problem);
+        data.mxScaleNeed = rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType);
+    }
+
+    // Puts back everything updateTensileData writes, on every exit.
+    class TensileDataRestore
+    {
+    public:
+        explicit TensileDataRestore(TensileDataGemm& data)
+            : m_data(data)
+            , m_problem(data.problem)
+            , m_mxScaleNeed(data.mxScaleNeed)
+        {
+        }
+
+        ~TensileDataRestore()
+        {
+            m_data.problem     = std::move(m_problem);
+            m_data.mxScaleNeed = m_mxScaleNeed;
+        }
+
+        TensileDataRestore(const TensileDataRestore&)            = delete;
+        TensileDataRestore& operator=(const TensileDataRestore&) = delete;
+
+    private:
+        TensileDataGemm&                    m_data;
+        TensileLite::ContractionProblemGemm m_problem;
+        rocblaslt_mx_scale_need             m_mxScaleNeed;
+    };
+
+    // One kernel runs every group, so it must suit all of their scale types.
+    rocblaslt_mx_scale_need
+        groupedMxScaleNeed(const std::vector<RocblasltContractionProblem>& probs)
+    {
+        auto need = rocblaslt_mx_scale_need::Any;
+        for(const auto& prob : probs)
+            need = rocblaslt_mx_scale_need_combine(
+                need, rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType));
+        return need;
+    }
+
+    bool mxScaleLayoutFits(rocblaslt_mx_scale_need need, const TensileLite::ContractionSolution& s)
+    {
+        return need == rocblaslt_mx_scale_need::Any
+               || rocblaslt_mx_scale_layout_ok(need, s.problemType.mxScaleFormat);
+    }
+
+    // The refusal every support check and launch path returns for a kernel
+    // whose MX scale layout the scale modes cannot use.
+    rocblaslt_status checkMxScaleLayout(const char*                             caller,
+                                        rocblaslt_mx_scale_need                 need,
+                                        const TensileLite::ContractionSolution& solution)
+    {
+        if(mxScaleLayoutFits(need, solution))
+            return rocblaslt_status_success;
+        log_error(caller, rocblaslt_mx_scale_mismatch_message(need));
+        return rocblaslt_status_invalid_value;
+    }
+
+    // An algo index can name a solution of the other kind, grouped or not, whose
+    // kernel takes different arguments.
+    rocblaslt_status checkGroupedGemmMatch(const char*                             caller,
+                                           bool                                    grouped,
+                                           const TensileLite::ContractionSolution& solution)
+    {
+        if(solution.problemType.groupedGemm == grouped)
+            return rocblaslt_status_success;
+        log_error(caller,
+                  grouped ? "the algo's solution is not a grouped GEMM solution"
+                          : "the algo's solution is a grouped GEMM solution");
+        return rocblaslt_status_invalid_value;
+    }
+
+    // A hand-written kernel may rely on its problem predicates to stay inside the
+    // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
+    // addresses, so an algo for one is refused once the problem it runs no longer
+    // satisfies them or is a pointer-array batch. Generated kernels and the grouped
+    // path keep their existing launch checks.
+    rocblaslt_status checkHandwrittenKernelPredicates(
+        const char*                                caller,
+        const TensileLite::ContractionProblemGemm& problem,
+        const TensileLite::ContractionSolution&    solution)
+    {
+        if(isCustomKernelForPointerArray(problem, solution))
+        {
+            log_error(caller, "custom kernels do not support batch_mode=POINTER_ARRAY");
+            return rocblaslt_status_invalid_value;
+        }
+        if(solution.customKernel.name.empty() || solution.customKernel.generated
+           || (*solution.problemPredicate)(problem))
+            return rocblaslt_status_success;
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "Software match: " << solution.description();
+            solution.problemPredicate->debugEval(problem, msg);
+            log_info(caller, msg.str());
+        }
+        log_error(caller,
+                  "the algo's solution does not support this problem; query an algo for "
+                  "this problem instead");
+        return rocblaslt_status_invalid_value;
+    }
+}
 
 namespace
 {
@@ -3992,6 +4155,13 @@ void initTensileGemmData(rocblaslt_handle       handle,
 
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Do not use rocRoller for a fused all-to-all
+    RocblasltFusedEpilogueInfo fusedInfo;
+    if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
+        return false;
+#endif
+
     // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
     bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
     bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
@@ -4007,6 +4177,14 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     bool isFp8A = (prob.a_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
     bool isFp8B = (prob.b_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
     if(isFp8A && isFp8B && isShuffledScale)
+        return false;
+
+    // Nor for FP6 A + FP6 B with scales shuffled in 128-row by 4-K-block tiles
+    bool isScale128x4
+        = (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+           && prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT);
+    if(isFp6Datatype(prob.a_type) && isFp6Datatype(prob.b_type) && isScale128x4)
         return false;
 
     return handle->useRocRoller == 1
@@ -4859,7 +5037,7 @@ namespace
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo info;
-        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info) && info.hasA2APrefix;
+        return rocblaslt_resolve_fused_a2a(prob, info);
 #else
         static_cast<void>(prob);
         return false;
@@ -4882,6 +5060,8 @@ namespace
                                                      std::shared_ptr<void>              gemmData)
     {
         std::vector<int> indexes;
+        if(gemmData)
+            updateTensileData(prob, *std::static_pointer_cast<TensileDataGemm>(gemmData));
         if(TuningPolicy::allKernels())
         {
             std::vector<rocblaslt_matmul_heuristic_result> all;
@@ -4906,12 +5086,19 @@ namespace
         std::vector<rocblaslt_matmul_heuristic_result> ranked(cap);
         int                                            returned = 0;
         RocblasltContractionProblem                    probe    = prob;
-        const bool                                     found
-            = getBestSolutions(
-                  probe, handle, gemmData, cap, ranked.data(), &returned, prob.workspaceSize)
-              == rocblaslt_status_success;
+
+        bool       layoutRuledOut = false;
+        const bool found          = getBestSolutions(probe,
+                                                     handle,
+                                                     gemmData,
+                                                     cap,
+                                                     ranked.data(),
+                                                     &returned,
+                                                     prob.workspaceSize,
+                                                     &layoutRuledOut)
+                                    == rocblaslt_status_success;
         const bool toppedUp
-            = returned < cap
+            = returned < cap && !layoutRuledOut
               && topUpWithSizeIndependentSolutions(
                   handle, probe, gemmData, ranked.data(), &returned, cap, prob.workspaceSize);
         if(!found && !toppedUp)
@@ -5737,8 +5924,11 @@ namespace
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         // Ranked with the workspace limit the query used, which hipblasLtMatmul
         // clamps the caller's workspace to.
-        AdaptiveReselectionKey key{
-            data->problem, *(const int*)algo->data, queryHint, algo->max_workspace_bytes};
+        AdaptiveReselectionKey key{data->problem,
+                                   *(const int*)algo->data,
+                                   queryHint,
+                                   algo->max_workspace_bytes,
+                                   data->mxScaleNeed};
 
         const AdaptiveReselection* choice = data->adaptiveReselections.find(key);
         if(!choice)
@@ -5855,7 +6045,32 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
         }
-        updateTensileProblem(prob, data->problem);
+        updateTensileData(prob, *data);
+
+        // The solution at the index looked up last, so an index that re-selection
+        // and tuning leave alone is looked up once.
+        int                                               knownIndex = -1;
+        std::shared_ptr<TensileLite::ContractionSolution> known;
+        auto                                              solutionAt = [&](int index) {
+            if(!known || index != knownIndex)
+            {
+                known      = library->getSolutionByIndex(data->problem, *hardware, index);
+                knownIndex = index;
+            }
+            return known;
+        };
+
+        // Before re-selection, tuning or logging act on it. The index they settle
+        // on is checked again below, before the launch state is written.
+        if(data->mxScaleNeed != rocblaslt_mx_scale_need::Any)
+        {
+            if(auto chosen = solutionAt(*(int*)algo->data))
+            {
+                if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *chosen);
+                   st != rocblaslt_status_success)
+                    return st;
+            }
+        }
 
         // A re-selected solution runs through a copy of the caller's algo with
         // its index replaced; the caller's algo stays as queried.
@@ -6191,7 +6406,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // data->problem from whatever it is handed, so after benchmarking it
             // describes the scratch problem, whose D and possibly C point
             // elsewhere. That also resets the hint a re-selection pinned.
-            updateTensileProblem(prob, data->problem);
+            updateTensileData(prob, *data);
             if(atQueryHint >= 0)
                 data->problem.setParams().setSmCountTarget(atQueryHint);
         }
@@ -6200,6 +6415,16 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             launchIndex = servedIndex >= 0 ? servedIndex : tunedIndex;
         if(launchIndex >= 0)
             solutionIndex = &launchIndex;
+
+        if(data->mxScaleNeed != rocblaslt_mx_scale_need::Any)
+        {
+            if(auto chosen = solutionAt(*solutionIndex))
+            {
+                if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *chosen);
+                   st != rocblaslt_status_success)
+                    return st;
+            }
+        }
 
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
@@ -6210,7 +6435,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // never coincide in one kernel, so a single pointer serves both and the
         // choice is made here, where the solution is finally known.
         {
-            auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            auto picked = solutionAt(*solutionIndex);
             if(picked)
                 data->inputs.Synchronizer
                     = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
@@ -6262,9 +6487,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   false);
         }
 
-        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        auto solution = solutionAt(*solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
+        if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+           st != rocblaslt_status_success)
+            return st;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -6331,6 +6559,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                         << std::endl;
                     log_info(__func__, msg.str());
                 }
+            }
+
+            if(callerSuppliedAlgo)
+            {
+                if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+                   st != rocblaslt_status_success)
+                    return st;
             }
 
             // Build the inputs here rather than inline, so the flag pointer can
@@ -6443,7 +6678,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
-            updateTensileProblem(problem, data->problem);
+            updateTensileData(problem, *data);
             data->inputs         = GetTensileInputs(problem);
             data->enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
             if(cacheTuningKey)
@@ -6455,6 +6690,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             data.problem        = ConstructTensileProblem(problem);
             data.inputs         = GetTensileInputs(problem);
             data.enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data.mxScaleNeed = rocblaslt_mx_scale_need_for(problem.scaleAType, problem.scaleBType);
             if(cacheTuningKey)
                 data.tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
 
@@ -6518,6 +6754,7 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
                     enableEpilogue = true;
             }
             data->enableEpilogue = enableEpilogue;
+            data->mxScaleNeed    = groupedMxScaleNeed(probs);
         }
         else
         {
@@ -6544,6 +6781,7 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
                     enableEpilogue = true;
             }
             data.enableEpilogue = enableEpilogue;
+            data.mxScaleNeed    = groupedMxScaleNeed(probs);
 
             gemmData
                 = std::static_pointer_cast<void>(std::make_shared<TensileDataGroupedGemm>(data));
@@ -6607,13 +6845,19 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
 
-            data->algoIndex = *solutionIndex;
-            auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
             if(!solution)
             {
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+               st != rocblaslt_status_success)
+                return st;
+            if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
+               st != rocblaslt_status_success)
+                return st;
+            data->algoIndex = *solutionIndex;
 
             if(data->problem.getParams().uniformSummationOrder() == 1)
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
@@ -6658,6 +6902,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "workspace size is less than the solution requires");
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+               st != rocblaslt_status_success)
+                return st;
 
             // The object API learns its stream here, not at create time, and the
             // flag pointer is baked into the kernel arguments by solve() just
@@ -6681,7 +6928,6 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
 
-            data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
             if(!solution || !solution->deviceScalarAlphaSupported(data->problem.gemms))
@@ -6689,6 +6935,13 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, true, *solution);
+               st != rocblaslt_status_success)
+                return st;
+            if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
+               st != rocblaslt_status_success)
+                return st;
+            data->algoIndex = *solutionIndex;
 
             if(!data->problem.gemms.empty()
                && data->problem.gemms[0].getParams().uniformSummationOrder() == 1)
@@ -6768,6 +7021,14 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               "Device scalar alpha with device user args requires GSU=1.");
                     return rocblaslt_status_invalid_value;
                 }
+            }
+
+            // Clustered StreamK rejects grouped GEMM by throwing from workspace
+            // sizing. Report that as an unsupported solution instead.
+            if(solution->usesStreamKSpatialCluster())
+            {
+                log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
+                return rocblaslt_status_invalid_value;
             }
 
             // User-args workspace holds no host args, only per-problem workspaces.
@@ -7344,7 +7605,9 @@ inline auto getSolutions(
     const std::shared_ptr<TensileLite::Hardware>& hardware,
     TensileLite::ContractionProblemGemm&          tensile_prob,
     bool                                          enableEpilogue,
-    const int&                                    requestedAlgoCount)
+    const int&                                    requestedAlgoCount,
+    rocblaslt_mx_scale_need                       mxScaleNeed,
+    bool*                                         layoutRuledOut = nullptr)
 {
     // Cached from TENSILE_DB at first use; off by default, so the whole
     // diagnostic costs one predictable branch per lookup.
@@ -7353,28 +7616,31 @@ inline auto getSolutions(
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+    // Library logic can rank a custom kernel ahead of the kernels it replaces,
+    // and ranks kernels of every MX scale layout together. Drop the ones this
+    // problem cannot run and widen the search, so the caller still gets up to
+    // requestedAlgoCount solutions it can.
+    bool layoutDropped = false;
+    auto drop          = [&](auto const& s) {
+        if(isCustomKernelForPointerArray(tensile_prob, *s))
+            return true;
+        if(mxScaleLayoutFits(mxScaleNeed, *s))
+            return false;
+        layoutDropped = true;
+        return true;
+    };
+    TensileLite::SolutionVector<TensileLite::ContractionSolution> solutions;
+    if(mxScaleNeed != rocblaslt_mx_scale_need::Conflict)
+        solutions = rocblaslt_find_top_kept(
+            [&](int count) { return library->findTopSolutions(tensile_prob, *hardware, count); },
+            requestedAlgoCount,
+            drop);
 
-    // Library logic can rank a custom kernel ahead of the kernels it replaces. For
-    // a pointer-array problem drop it and widen the search, so the caller still
-    // gets up to requestedAlgoCount solutions that can run it.
-    for(int request = requestedAlgoCount;;)
-    {
-        size_t const found = solutions.size();
-        solutions.erase(std::remove_if(solutions.begin(),
-                                       solutions.end(),
-                                       [&](auto const& solution) {
-                                           return isCustomKernelForPointerArray(tensile_prob,
-                                                                                *solution);
-                                       }),
-                        solutions.end());
-        size_t const dropped = found - solutions.size();
-        if(dropped == 0 || solutions.size() >= static_cast<size_t>(requestedAlgoCount)
-           || found < static_cast<size_t>(request))
-            break;
-        request += static_cast<int>(dropped);
-        solutions = library->findTopSolutions(tensile_prob, *hardware, request);
-    }
+    if(solutions.empty() && layoutDropped)
+        log_info(__func__, rocblaslt_mx_scale_mismatch_message(mxScaleNeed));
+    if(layoutRuledOut)
+        *layoutRuledOut = solutions.empty()
+                          && (layoutDropped || mxScaleNeed == rocblaslt_mx_scale_need::Conflict);
 
     if(reportEmpty && solutions.empty())
         reportNoSolutionFound(tensile_prob);
@@ -7402,20 +7668,30 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     }
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
+    updateTensileData(prob, *data);
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    auto solutions = getSolutions(prob,
+                                  library,
+                                  hardware,
+                                  data->problem,
+                                  enableEpilogue,
+                                  requestedAlgoCount,
+                                  data->mxScaleNeed);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no solutions found, try to fallback");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
-        solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+        solutions = getSolutions(prob,
+                                 library,
+                                 hardware,
+                                 data->problem,
+                                 enableEpilogue,
+                                 requestedAlgoCount,
+                                 data->mxScaleNeed);
     }
 
     return solutions;
@@ -7484,6 +7760,7 @@ static rocblaslt_status
     rocblaslt_status     status = rankRocRollerSelectedTiles(prob, ranked);
     if(status != rocblaslt_status_success)
         return status;
+    const auto needed = rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType);
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
@@ -7517,6 +7794,8 @@ static rocblaslt_status
                     continue;
                 if(!matchesRocRollerSelectedKernel(entry.second->KernelName(), prob, tile)
                    && !matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
+                    continue;
+                if(!mxScaleLayoutFits(needed, *entry.second))
                     continue;
 
                 // A name match does not establish eligibility: for example, a
@@ -7556,9 +7835,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes)
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool*                              layoutRuledOut)
 {
     *returnAlgoCount = 0;
+    if(layoutRuledOut)
+        *layoutRuledOut = false;
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(handle,
@@ -7590,21 +7872,39 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     }
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
+    updateTensileData(prob, *data);
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    bool ruledOut  = false;
+    auto solutions = getSolutions(prob,
+                                  library,
+                                  hardware,
+                                  data->problem,
+                                  enableEpilogue,
+                                  requestedAlgoCount,
+                                  data->mxScaleNeed,
+                                  &ruledOut);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no xf32 solutions found, try to fallback fp32");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
-        solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+        bool fallbackRuledOut = false;
+
+        solutions = getSolutions(prob,
+                                 library,
+                                 hardware,
+                                 data->problem,
+                                 enableEpilogue,
+                                 requestedAlgoCount,
+                                 data->mxScaleNeed,
+                                 &fallbackRuledOut);
+        ruledOut  = solutions.empty() && (ruledOut || fallbackRuledOut);
     }
+    if(layoutRuledOut)
+        *layoutRuledOut = ruledOut;
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
     memset(heuristicResultsArray, 0, sizeof(rocblaslt_matmul_heuristic_result) * algoCount);
@@ -7631,12 +7931,30 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     return rocblaslt_status_success;
 }
 
+namespace
+{
+    std::atomic<int> g_lastGetAllSearchType{-1};
+}
+
+extern "C" HIPBLASLT_EXPORT void rocblaslt_testing_reset_last_get_all_search_type_for_test()
+{
+    g_lastGetAllSearchType.store(-1, std::memory_order_relaxed);
+}
+
+extern "C" HIPBLASLT_EXPORT int rocblaslt_testing_last_get_all_search_type_for_test()
+{
+    return g_lastGetAllSearchType.load(std::memory_order_relaxed);
+}
+
 template <typename MyProblem>
 rocblaslt_status getAllSolutions(MyProblem&                                      prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 rocblaslt_mx_scale_need                         mxScaleNeed,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
+    g_lastGetAllSearchType.store(static_cast<int>(searchType), std::memory_order_relaxed);
     log_api(__func__, "Entering function");
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -7660,13 +7978,11 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
     {
-        solutions = library->findAllSolutions(
-            prob, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+        solutions = library->findAllSolutions(prob, *hardware, searchType);
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
-        solutions = library->findAllSolutionsGroupedGemm(
-            prob.gemms, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+        solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
     }
     log_api(__func__, "Found hardware solutions: ", solutions.size());
 
@@ -7676,14 +7992,12 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         prob.setF32XdlMathOp(rocisa::DataType::Float);
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
-            solutions = library->findAllSolutions(
-                prob, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+            solutions = library->findAllSolutions(prob, *hardware, searchType);
         }
         else if constexpr(std::is_same<MyProblem,
                                        TensileLite::ContractionProblemGroupedGemm>::value)
         {
-            solutions = library->findAllSolutionsGroupedGemm(
-                prob.gemms, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+            solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
         }
     }
 
@@ -7705,6 +8019,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     int duplicated_counts = 0;
     for(auto solution : orderedSolutions)
     {
+        if(!mxScaleLayoutFits(mxScaleNeed, *solution))
+            continue;
         // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
@@ -7759,7 +8075,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 rocblaslt_status getAllSolutions(RocblasltContractionProblem&                    prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
@@ -7779,13 +8096,19 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
     }
 #endif
     auto tensile_prob = ConstructTensileProblem(prob);
-    return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
+    return getAllSolutions(tensile_prob,
+                           handle,
+                           heuristicResults,
+                           maxWorkSpaceBytes,
+                           rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType),
+                           searchType);
 }
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
     TensileLite::ContractionProblemGroupedGemm tensile_probs;
     for(int i = 0; i < probs.size(); i++)
@@ -7793,26 +8116,42 @@ rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&      
         tensile_probs.gemms.push_back(ConstructTensileProblem(probs[i]));
         tensile_probs.gemms[i].setGroupedGemm(true);
     }
-    return getAllSolutions(tensile_probs, handle, heuristicResults, maxWorkSpaceBytes);
+    return getAllSolutions(tensile_probs,
+                           handle,
+                           heuristicResults,
+                           maxWorkSpaceBytes,
+                           groupedMxScaleNeed(probs),
+                           searchType);
 }
 
 rocblaslt_status getAllSolutions(std::shared_ptr<void>                           gemmData,
                                  rocblaslt_handle                                handle,
                                  rocblaslt::RocGemmType                          gemmType,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
     rocblaslt_status status = rocblaslt_status_success;
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        status                                = getAllSolutions(data->problem,
+                                                                handle,
+                                                                heuristicResults,
+                                                                maxWorkSpaceBytes,
+                                                                data->mxScaleNeed,
+                                                                searchType);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
         std::shared_ptr<TensileDataGroupedGemm> data
             = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        status = getAllSolutions(data->problem,
+                                 handle,
+                                 heuristicResults,
+                                 maxWorkSpaceBytes,
+                                 data->mxScaleNeed,
+                                 searchType);
     }
     else
     {
@@ -7898,12 +8237,13 @@ rocblaslt_status
 }
 
 template <typename MyProblem, typename Inputs, typename Tuning>
-rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
-                                     MyProblem&             tensile_prob,
-                                     Inputs&                inputs,
-                                     rocblaslt_matmul_algo* algo,
-                                     const Tuning*          tuning,
-                                     size_t*                workspaceSizeInBytes)
+rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
+                                     MyProblem&              tensile_prob,
+                                     Inputs&                 inputs,
+                                     rocblaslt_matmul_algo*  algo,
+                                     const Tuning*           tuning,
+                                     size_t*                 workspaceSizeInBytes,
+                                     rocblaslt_mx_scale_need mxScaleNeed)
 {
     GemmMasterLibraryPtr                   library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -7936,6 +8276,10 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             log_error(__func__, msg.str());
             return rocblaslt_status_invalid_value;
         }
+
+        if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
+           st != rocblaslt_status_success)
+            return st;
 
         if(isCustomKernelForPointerArray(tensile_prob, *solution))
         {
@@ -8039,9 +8383,28 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             log_error(__func__, msg.str());
             return rocblaslt_status_invalid_value;
         }
+        // Only grouped solutions run grouped problems. Rejecting the rest here skips the
+        // workspace sizing below, which walks every group for each candidate solution.
+        if(!solution->problemType.groupedGemm || !(*solution->hardwarePredicate)(*hardware))
+        {
+            log_error(__func__, "Solution is not supported");
+            return rocblaslt_status_invalid_value;
+        }
+        if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
+           st != rocblaslt_status_success)
+            return st;
         if(!solution->deviceScalarAlphaSupported(tensile_prob.gemms))
         {
             log_error(__func__, "Unsupported or mixed grouped device scalar alpha modes.");
+            return rocblaslt_status_invalid_value;
+        }
+        // Workspace sizing for a clustered StreamK solution throws on a grouped
+        // problem. That rejection has to stay a skipped candidate: the throw
+        // would escape this search and fail the heuristic, including solutions
+        // already found.
+        if(solution->usesStreamKSpatialCluster())
+        {
+            log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
             return rocblaslt_status_invalid_value;
         }
 
@@ -8151,9 +8514,15 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
 #endif
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
+    updateTensileData(prob, *data);
     rocblaslt::RocTuningV2* tuning = nullptr;
-    return isSolutionSupported(handle, data->problem, prob, algo, tuning, workspaceSizeInBytes);
+    return isSolutionSupported(handle,
+                               data->problem,
+                               prob,
+                               algo,
+                               tuning,
+                               workspaceSizeInBytes,
+                               rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType));
 }
 
 rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                   handle,
@@ -8171,21 +8540,9 @@ rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                 
 #endif
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    auto                             savedProblem = data->problem;
-    RocblasltContractionProblem      probe        = prob;
-
-    try
-    {
-        const rocblaslt_status status
-            = isSolutionSupported(handle, probe, gemmData, algo, workspaceSizeInBytes);
-        data->problem = std::move(savedProblem);
-        return status;
-    }
-    catch(...)
-    {
-        data->problem = std::move(savedProblem);
-        throw;
-    }
+    TensileDataRestore               restore(*data);
+    RocblasltContractionProblem      probe = prob;
+    return isSolutionSupported(handle, probe, gemmData, algo, workspaceSizeInBytes);
 }
 
 rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   handle,
@@ -8200,7 +8557,7 @@ rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   h
 #endif
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
+    updateTensileData(prob, *data);
 
     // All that the check below sets on the problem.
     const auto params    = data->problem.getParams();
@@ -8214,8 +8571,14 @@ rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   h
     rocblaslt::RocTuningV2*     tuning = nullptr;
     try
     {
-        const rocblaslt_status status = isSolutionSupported(
-            handle, data->problem, inputs, algo, tuning, workspaceSizeInBytes);
+        const rocblaslt_status status
+            = isSolutionSupported(handle,
+                                  data->problem,
+                                  inputs,
+                                  algo,
+                                  tuning,
+                                  workspaceSizeInBytes,
+                                  rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType));
         restore();
         return status;
     }
@@ -8284,8 +8647,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
 
             setRestrictions<T>(data->problem, a, b);
 
-            return isSolutionSupported(
-                handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+            return isSolutionSupported(handle,
+                                       data->problem,
+                                       data->inputs,
+                                       &algo,
+                                       tuning,
+                                       &workspaceSizeInBytes,
+                                       data->mxScaleNeed);
         };
 
         return dispatchByComputeType(data->problem.computeType(), checkSupportForTypeTag);
@@ -8327,8 +8695,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                 setRestrictions<T>(prob, a, b);
             }
 
-            return isSolutionSupported(
-                handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+            return isSolutionSupported(handle,
+                                       data->problem,
+                                       data->inputs,
+                                       &algo,
+                                       tuning,
+                                       &workspaceSizeInBytes,
+                                       data->mxScaleNeed);
         };
 
         return dispatchByComputeType(dt, checkGroupedSupportForTypeTag);
@@ -8341,9 +8714,12 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   std::shared_ptr<void>  gemmData,
                                   const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
-                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
+                                  bool*                                           layoutRuledOut)
 {
     log_api(__func__, "Entering function");
+    if(layoutRuledOut)
+        *layoutRuledOut = false;
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
@@ -8362,24 +8738,34 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         data->problem.setWorkspaceSize(workspaceBytes);
+        bool ruledOut  = false;
         auto solutions = getSolutions(data->inputs,
                                       library,
                                       hardware,
                                       data->problem,
                                       data->enableEpilogue,
-                                      requestedAlgoCount);
+                                      requestedAlgoCount,
+                                      data->mxScaleNeed,
+                                      &ruledOut);
 
         // when there is no solution for xfloat32, fallback comput_type to fp32
         if(solutions.size() == 0 && data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
         {
             data->problem.setF32XdlMathOp(rocisa::DataType::Float);
+            bool fallbackRuledOut = false;
+
             solutions = getSolutions(data->inputs,
                                      library,
                                      hardware,
                                      data->problem,
                                      data->enableEpilogue,
-                                     requestedAlgoCount);
+                                     requestedAlgoCount,
+                                     data->mxScaleNeed,
+                                     &fallbackRuledOut);
+            ruledOut  = solutions.empty() && (ruledOut || fallbackRuledOut);
         }
+        if(layoutRuledOut)
+            *layoutRuledOut = ruledOut;
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
         int  returnAlgoCount = 0;
@@ -8420,8 +8806,28 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                 data->problem.gemms[i].setGroupedGemm(true);
         }
 
-        auto solutions = library->findTopSolutionsGroupedGemm(
-            data->problem.gemms, *hardware, requestedAlgoCount);
+        bool layoutDropped = false;
+        auto drop          = [&](auto const& s) {
+            if(mxScaleLayoutFits(data->mxScaleNeed, *s))
+                return false;
+            layoutDropped = true;
+            return true;
+        };
+        TensileLite::SolutionVector<TensileLite::ContractionSolution> solutions;
+        if(data->mxScaleNeed != rocblaslt_mx_scale_need::Conflict)
+            solutions = rocblaslt_find_top_kept(
+                [&](int count) {
+                    return library->findTopSolutionsGroupedGemm(
+                        data->problem.gemms, *hardware, count);
+                },
+                requestedAlgoCount,
+                drop);
+        if(solutions.empty() && layoutDropped)
+            log_info(__func__, rocblaslt_mx_scale_mismatch_message(data->mxScaleNeed));
+        if(layoutRuledOut)
+            *layoutRuledOut
+                = solutions.empty()
+                  && (layoutDropped || data->mxScaleNeed == rocblaslt_mx_scale_need::Conflict);
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
         int  returnAlgoCount = 0;

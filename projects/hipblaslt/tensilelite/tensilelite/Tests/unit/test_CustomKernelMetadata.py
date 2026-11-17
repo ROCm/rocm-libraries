@@ -32,7 +32,7 @@ import yaml
 
 import tensilelite
 import tensilelite.CustomKernels as ck_mod
-import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+import tensilelite.logic.handle_custom_kernel as hck_mod
 from tensilelite.resources import custom_kernel_text
 from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
@@ -281,6 +281,30 @@ def test_get_custom_kernel_config_preserves_size_multiple_predicate(tmp_path):
 
     assert config["AssertFree0ElementMultiple"] == 256
     assert config["AssertFree1ElementMultiple"] == 256
+
+
+@pytest.mark.parametrize("layout", [None, "Auto"])
+def test_get_custom_kernel_config_requires_mx_scale_layout(tmp_path, layout):
+    lines = ["InternalSupportParams:", "  KernArgsVersion: 0"]
+    if layout:
+        lines.append(f"MXScaleFormat: {layout}")
+    lines += ["ProblemType: {MXBlockA: 32, MXBlockB: 32}", "MatrixInstruction: [16, 16, 16, 1]"]
+    write_kernel(tmp_path / "mx_kernel.s", "\n".join(lines))
+
+    with pytest.raises(RuntimeError, match="MXScaleFormat"):
+        getCustomKernelConfig("mx_kernel", {}, str(tmp_path))
+
+
+def test_get_custom_kernel_config_keeps_declared_mx_scale_layout(tmp_path):
+    write_kernel(tmp_path / "mx_kernel.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          MXScaleFormat: HostPreSwizzle
+          ProblemType: {MXBlockA: 32, MXBlockB: 32}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+
+    assert getCustomKernelConfig("mx_kernel", {}, str(tmp_path))["MXScaleFormat"] == "HostPreSwizzle"
 
 
 def test_get_custom_kernel_config_rejects_bad_predicate_value(tmp_path):
@@ -1578,7 +1602,7 @@ def test_skinny_tn_range_logic(rel, dataType, kernels):
     The BF16 file must also share the placeholder of the shipped plain-GEMM
     Equality file beside it. That is a fact about two corpus files, so
     ``TensileLogic --check-all`` checks it
-    (``ValidCorpusConsistency.find_range_sibling_violations``), not this test."""
+    (``valid_corpus_consistency.find_range_sibling_violations``), not this test."""
     with open(require_logic_file(rel)) as f:
         doc = yaml.safe_load(f)
     assert doc["LibraryType"] == "Range"

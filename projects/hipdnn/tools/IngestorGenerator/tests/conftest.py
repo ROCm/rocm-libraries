@@ -88,14 +88,3 @@ def template_dir():
 @pytest.fixture
 def generator(template_dir):
     return IngestorGenerator(template_dir)
-
-
-@pytest.fixture
-def all_config_names():
-    return [
-        "scale_add.yaml",
-        "binary_ops.yaml",
-        "gfx950_attention_dense.yaml",
-        "gfx1151_wmma_attention.yaml",
-        "gfx1151_wmma_attention_decode.yaml",
-    ]

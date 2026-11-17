@@ -759,8 +759,45 @@ static void test_every_table_entry()
     }
 }
 
+static void test_all_forms_reject_before_lowerer_state_changes()
+{
+    const rocke_matrix_call_t* calls[] = {&k_fp8_wmma, &k_padded, &k_even_halves};
+    const char* ids[] = {"wmma_gfx1250_f32_16x16x64_fp8_fp8", "example", "wmma_f16_16x16x16_f16"};
+    const char* targets[] = {"gfx1250", "gfx950", "gfx1151"};
+    for(int form = 0; form < 3; ++form)
+        for(int role = 0; role < 4; ++role)
+            for(auto flavor : k_flavors)
+            {
+                Lowerer lw(targets[form], flavor);
+                const auto* source = form == 2 ? rocke_f16() : rocke_i32();
+                const auto* acc = form == 2 ? rocke_f16() : rocke_f32();
+                const rocke_type_t* types[] = {lw.vec(source,
+                                                      form == 2   ? 16
+                                                      : form == 1 ? 4
+                                                                  : 8),
+                                               lw.vec(source, form == 2 ? 16 : 8),
+                                               lw.vec(acc, form == 1 ? 4 : 8),
+                                               lw.vec(acc, form == 1 ? 4 : 8)};
+                types[role] = lw.vec(rocke_i32(), 1);
+                MmaOp op(types[0], types[1], types[2], types[3]);
+                const auto needs = lw.L.needs.len;
+                const auto decls = lw.L.dyn_decls.len;
+                const auto temp = lw.L.tmp_counter;
+                const auto lines = lw.lines();
+                CHECK(!error_of([&] {
+                           rocke_ll_emit_matrix_call(&lw.L, &op.op, ids[form], calls[form]);
+                       }).empty(),
+                      "malformed form must reject");
+                CHECK(lw.L.needs.len == needs && lw.L.dyn_decls.len == decls,
+                      "preflight must not record declarations or needs");
+                CHECK(lw.L.tmp_counter == temp && lw.lines() == lines,
+                      "preflight must not emit IR or allocate temporary names");
+            }
+}
+
 int main()
 {
+    test_all_forms_reject_before_lowerer_state_changes();
     test_the_declaration_spells_each_flavors_register_type();
     test_a_derived_declaration_equals_the_hand_written_one();
     test_the_call_and_its_declaration_take_the_same_types();

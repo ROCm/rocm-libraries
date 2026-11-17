@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <iostream>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -12,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "core/Container.hpp"
+#include "core/GraphSchema.hpp"
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
@@ -19,6 +22,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -31,6 +35,7 @@
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 #ifdef HIPDNN_ENGINE_FLYDSL
 #include "tests/engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
 #endif
 #endif
 
@@ -218,12 +223,25 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
 
-    // The schema id is what a state exposes of the set it was built from, so a slot
-    // serving another set's state shows up only between sets whose schemas differ.
-    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    // The schema ids are what a state exposes of the set it was built from (one per kernel
+    // slot of a slotted engine), so a slot serving another set's state shows up only
+    // between sets whose schemas differ.
+    const auto schemaIdsOfSet = [](const hipdnn_plugin_sdk::ingestor::DescriptorSet& set) {
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+        if(set.slots.empty())
+        {
+            ids.push_back(set.schema.id);
+        }
+        for(const auto& slot : set.slots)
+        {
+            ids.push_back(slot.schema.id);
+        }
+        return ids;
+    };
+    std::set<std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId>> schemaIds;
     for(const auto& set : sets)
     {
-        schemaIds.insert(set.schema.id);
+        schemaIds.insert(schemaIdsOfSet(set));
     }
     ASSERT_GE(schemaIds.size(), 2U)
         << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
@@ -233,7 +251,13 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
         const auto state = discoveredSharedState(set.engine.id);
         ASSERT_NE(state.get(), nullptr)
             << "no shared state for descriptor set '" << set.engine.name << "'";
-        EXPECT_EQ(state->slots().front().schema.id, set.schema.id)
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> stateIds;
+        stateIds.reserve(state->slots().size());
+        for(const auto& slot : state->slots())
+        {
+            stateIds.push_back(slot.schema.id);
+        }
+        EXPECT_EQ(stateIds, schemaIdsOfSet(set))
             << "the id of '" << set.engine.name << "' serves the state of another set";
         // Shared, not rebuilt or handed out once: a second lookup is the same object.
         EXPECT_EQ(discoveredSharedState(set.engine.id).get(), state.get())
@@ -414,6 +438,56 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
+// The provider's schema guard's opt-in list (GraphSchema.hpp): the built-in engines claim graph
+// schema 1.4.0 (each of them gates ragged tensors, declared alignments and offset multipliers),
+// and the six FlyDSL SDPA forward engines claim 1.6.0, the SDK's newest, and the two FlyDSL SDPA
+// backward engines claim 1.4.0 (their UEDs' sdk_version; their matchers reviewed against every field
+// up to it, and a backward graph never carries cu_seq_len). So does the RDNA WMMA prefill engine,
+// whose matcher gates paged K/V, ragged Q / O and their offset multipliers, and every declared
+// alignment. The gfx950 rocKE conv dgrad engine
+// claims 1.3.0: its graph matcher gates alignment (multiples of 16 bytes) and declines ragged
+// tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged, aligned and
+// multiplier graphs never reach it. Opting an engine in is an edit here, reviewed with that
+// engine's matchers.
+TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
+{
+    const std::map<std::string, std::string> optedIn{
+        {"hipkernel:Gfx950ConvDgradAot", "1.3.0"},
+        {"hipkernel:Gfx1151WmmaAttention", "1.4.0"},
+        {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.4.0"},
+        {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},
+        {std::string(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME), "1.4.0"},
+        {"hipkernel:flydsl_sdpa_rdna", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_rdna_decode", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_aiw", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_cdna", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_cdna_dualwave", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_cdna_decode", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_bwd_merged", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_bwd_split", "1.4.0"}};
+    Container container;
+    auto& manager = container.getEngineManager();
+    const auto baseline = providerBaselineGraphSchema();
+    for(const auto engineId : manager.getAllEngineIds())
+    {
+        const char* name = nullptr;
+        ASSERT_EQ(Container::getEngineName(engineId, &name), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        const auto declared = manager.maxGraphSchema(engineId);
+        std::cout << "[ schema   ] " << name << " " << declared.str() << "\n";
+        const auto opted = optedIn.find(name);
+        if(opted != optedIn.end())
+        {
+            EXPECT_EQ(declared.str(), opted->second) << name;
+        }
+        else
+        {
+            EXPECT_FALSE(baseline < declared)
+                << name << " claims graph schema " << declared.str()
+                << " past the provider baseline without being on the opt-in list";
+        }
+    }
+}
+
 TEST(TestContainer, GetEngineManagerReturnsValidReference)
 {
     Container container;
@@ -535,3 +609,77 @@ TEST(TestContainer, GetAllEngineIds)
             << "engine '" << name << "' is missing from the engine manager";
     }
 }
+
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+// The provider at engine plugin API 1.6.0 with its schema guard (core/GraphSchema.hpp): a packed
+// (THD) SDPA graph, schema 1.4.0 through its ragged offset multipliers, reaches the FlyDSL SDPA
+// engines, which opted in, and no other engine claims it.
+TEST(TestContainer, RoutesAPackedSdpaGraphOnlyToTheFlydslEngines)
+{
+    SKIP_IF_NO_DEVICES();
+    using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+    SdpaGraphSpec spec;
+    setPacked(spec, {128, 37}, {100, 128});
+    const auto buffer = buildFlydslSdpaRdnaGraph(spec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        buffer.GetBufferPointer(), buffer.GetSize());
+    ASSERT_EQ(graphSchemaFloor(graph).str(), "1.4.0");
+    Handle handle;
+    Container container;
+    const auto applicable = container.getEngineManager().getApplicableEngineIds(handle, graph);
+    bool rdna = false;
+    for(const auto engineId : applicable)
+    {
+        const char* name = nullptr;
+        ASSERT_EQ(Container::getEngineName(engineId, &name), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        EXPECT_EQ(std::string_view(name).rfind("hipkernel:flydsl_sdpa", 0), 0U)
+            << name << " claims a graph past its schema";
+        rdna = rdna || std::string_view(name) == FLYDSL_SDPA_RDNA.engineName;
+    }
+    // The RDNA prefill objects serve packed sequences on every gfx11 device this build ships.
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) == 0
+       && findLoadedSet(FLYDSL_SDPA_RDNA.engineName) != nullptr)
+    {
+        EXPECT_TRUE(rdna) << "the RDNA prefill engine declined a packed graph it serves";
+    }
+}
+#endif
+
+#ifdef HIPDNN_ENGINE_ASM_SDPA
+// The schema guard passes the ASM engine the ragged graphs it serves (AITER group mode):
+// ragged Q/K/V/O raise the graph's floor to 1.4.0, the schema the engine declares.
+TEST(TestContainer, RoutesARaggedSdpaGraphToTheAsmEngine)
+{
+    SKIP_IF_NO_DEVICES();
+    Handle handle;
+    const auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP() << "the ASM group-mode kernels ship for gfx942 and gfx950 only";
+    }
+    const std::vector<int64_t> dims{4, 8, 256, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
+    auto ragged = hipdnn_test_sdk::utilities::sdpa::withRaggedTensors(
+        hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+            dims,
+            strides,
+            dims,
+            strides,
+            dims,
+            strides,
+            dims,
+            strides,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
+        {"q", "k", "v", "o"});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper raggedGraph(
+        ragged.GetBufferPointer(), ragged.GetSize());
+    ASSERT_EQ(graphSchemaFloor(raggedGraph).str(), "1.4.0");
+
+    Container container;
+    auto& manager = container.getEngineManager();
+    const auto ids = manager.getApplicableEngineIds(handle, raggedGraph);
+    EXPECT_NE(std::find(ids.begin(), ids.end(), asm_sdpa_engine::AsmSdpaEngine::staticId()),
+              ids.end());
+}
+#endif
