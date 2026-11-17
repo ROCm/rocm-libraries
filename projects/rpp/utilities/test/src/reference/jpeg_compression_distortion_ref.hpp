@@ -88,6 +88,11 @@ Notes
   Q is rounded and clamped to an 8-bit integer as baseline JPEG requires
   (T.81 B.2.4.1).
 
+  RPP scales the table by a float factor (50/quality, 2 - quality/50)
+  instead of the truncated integer percentage above, so at some qualities
+  (e.g. q13, q85) some entries of Q differ from this model by 1 or 2. The
+  two agree at q10, q50 and q90.
+
   The intermediate YCbCr samples are kept continuous rather than re-quantized
   to 8 bits before the DCT; the header does not specify this.
 */
