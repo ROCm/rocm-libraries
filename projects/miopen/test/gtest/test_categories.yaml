@@ -721,13 +721,6 @@ exclude_gpu:
       # Forward Inference GRU verification failed at gru_test.cpp:1985/2224/2473 for 3 of these 8 bias-enabled cases in
       # PR #13107 run 39358709264 (attempt 2); the same cases passed on the other attempt and in run 39480689944.
       - "Full/GPU_GRU_Base_FP16.TestFloat16/batchSize_17_seqLength_23_inVecLen_13_hiddenSize_67_*biasMode_1_*"
-      # Hang in a multiprocess phase ("Waiting for test processes...") until the ctest/step timeout on Windows gfx1151
-      # (ALMIOPEN-3129, issue #14874): 6 hangs on 5 hosts since 10-31 - develop nightlies 41179300934 (RamDb) and 41283494663
-      # (RamDb, and PlainTextDb on 3 attempts), TheRock PR #9680 run 41405101044 (PlainTextDb). MultiFileDb_AllTests spawns
-      # no processes and keeps running. Linux gfx115X already excludes CPU_PerfDb_NONE.* (ALMIOPEN-2964). Remove when
-      # ALMIOPEN-3129 closes.
-      - "CPU_PerfDb_NONE.RamDb_AllTests"
-      - "CPU_PerfDb_NONE.PlainTextDb_AllTests"
     labels:
       - "quick"
       - "standard"
