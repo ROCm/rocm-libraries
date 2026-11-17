@@ -38,6 +38,31 @@ Error inferYFromX8x8(const std::vector<int64_t>& window,
     return error;
 }
 
+// Pre-validates x = {1, 3, 8, 8} and y = {1, 3, 4, 4} with the given resample parameters.
+Error preValidateX8x8(const std::vector<int64_t>& window,
+                      const std::vector<int64_t>& stride,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 8, 8});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({1, 3, 4, 4});
+    attr.set_y(yTensor);
+
+    attr.set_pre_padding(prePadding);
+    attr.set_post_padding(postPadding);
+    attr.set_window(window);
+    attr.set_stride(stride);
+
+    const GraphAttributes graphAttributes;
+    const ResampleFwdNode node(std::move(attr), graphAttributes);
+    return node.pre_validate_node();
+}
+
 } // namespace
 
 TEST(TestResampleFwdNode, ResampleFwdProperties)
@@ -396,6 +421,101 @@ TEST(TestResampleFwdNode, PreValidateRejectsWindowLargerThanPaddedInputWithYSet)
 
     error = preValidateWithWindow({9, 9});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsZeroWindowValue)
+{
+    auto error = preValidateX8x8({1, 2}, {2, 2}, {0, 0}, {0, 0});
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+
+    error = preValidateX8x8({0, 2}, {2, 2}, {0, 0}, {0, 0});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsNegativePadding)
+{
+    auto error = preValidateX8x8({2, 2}, {2, 2}, {0, 0}, {0, 0});
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+
+    error = preValidateX8x8({2, 2}, {2, 2}, {-1, 0}, {0, 0});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+
+    error = preValidateX8x8({2, 2}, {2, 2}, {0, 0}, {0, -1});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsPaddingCountMismatch)
+{
+    auto error = preValidateX8x8({2, 2}, {2, 2}, {0, 0, 0}, {0, 0});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+
+    error = preValidateX8x8({2, 2}, {2, 2}, {0, 0}, {0, 0, 0});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsStrideCountMismatch)
+{
+    auto error = preValidateX8x8({2, 2}, {2, 2, 2}, {0, 0}, {0, 0});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestResampleFwdNode, InferRejectsXWithoutDims)
+{
+    ResampleFwdAttributes attr;
+    attr.set_x(std::make_shared<TensorAttributes>());
+    auto yTensor = std::make_shared<TensorAttributes>();
+    attr.set_y(yTensor);
+
+    attr.set_pre_padding(std::vector<int64_t>{0, 0});
+    attr.set_post_padding(std::vector<int64_t>{0, 0});
+    attr.set_stride(std::vector<int64_t>{2, 2});
+    attr.set_window(std::vector<int64_t>{2, 2});
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(yTensor->get_dim().empty());
+}
+
+TEST(TestResampleFwdNode, InferRejectsXRankBelowThree)
+{
+    // No resample parameters are set: the rank check must reject x before they are read
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 32});
+    attr.set_x(xTensor);
+    auto yTensor = std::make_shared<TensorAttributes>();
+    attr.set_y(yTensor);
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(yTensor->get_dim().empty());
+}
+
+TEST(TestResampleFwdNode, InferRejectsEmptyPrePadding)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 8, 8});
+    attr.set_x(xTensor);
+    auto yTensor = std::make_shared<TensorAttributes>();
+    attr.set_y(yTensor);
+
+    attr.set_post_padding(std::vector<int64_t>{0, 0});
+    attr.set_stride(std::vector<int64_t>{2, 2});
+    attr.set_window(std::vector<int64_t>{2, 2});
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(yTensor->get_dim().empty());
 }
 
 TEST(TestResampleFwdNode, InferStride)

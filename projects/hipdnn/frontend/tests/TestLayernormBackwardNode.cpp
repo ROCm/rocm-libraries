@@ -841,50 +841,16 @@ TEST(TestLayernormBackwardNode, PreValidateNodeTooLargeNormalizedDimCount)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestLayernormBackwardNode, PreValidateNodeMismatchingOnePadded)
+TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsOnePaddedScaleWithBatchOnlyStats)
 {
-    LayernormBackwardAttributes attrs;
-
-    // Mismatch between dy and x
-    auto dyTensor = std::make_shared<TensorAttributes>();
-    dyTensor->set_dim({16, 64, 32, 32});
-    dyTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_dy(dyTensor);
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({16, 64, 32, 32});
-    xTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_x(xTensor);
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 32, 32});
-    scaleTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_scale(scaleTensor);
-    auto meanTensor = std::make_shared<TensorAttributes>();
-    meanTensor->set_dim({16});
-    meanTensor->set_stride({1});
-    attrs.set_mean(meanTensor);
-    auto invVarianceTensor = std::make_shared<TensorAttributes>();
-    invVarianceTensor->set_dim({16});
-    invVarianceTensor->set_stride({1});
-    attrs.set_inv_variance(invVarianceTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
-    dxTensor->set_dim({16, 64, 32, 32});
-    dxTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_dx(dxTensor);
-    auto dscaleTensor = std::make_shared<TensorAttributes>();
-    dscaleTensor->set_dim({1, 64, 32, 32});
-    dscaleTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_dscale(dscaleTensor);
-    auto dbiasTensor = std::make_shared<TensorAttributes>();
-    dbiasTensor->set_dim({1, 64, 32, 32});
-    dbiasTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_dbias(dbiasTensor);
+    auto attrs = createShapedAttributes({16, 64, 32, 32}, {1, 64, 32, 32}, {16});
     attrs.set_normalized_dim_count(3);
 
     const GraphAttributes graphAttributes;
     const LayernormBackwardNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
 TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedBatchDims)
@@ -1025,50 +991,27 @@ TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedBatchDimsLength)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedNormalizedDimsLength)
+TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsRankReducedScaleWithOnePaddedStats)
 {
-    LayernormBackwardAttributes attrs;
-
-    // Mismatch between dy and x
-    auto dyTensor = std::make_shared<TensorAttributes>();
-    dyTensor->set_dim({16, 64, 32, 32});
-    dyTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_dy(dyTensor);
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({16, 64, 32, 32});
-    xTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_x(xTensor);
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({64, 32, 32});
-    scaleTensor->set_stride({1024, 32, 1});
-    attrs.set_scale(scaleTensor);
-    auto meanTensor = std::make_shared<TensorAttributes>();
-    meanTensor->set_dim({16, 1, 1, 1});
-    meanTensor->set_stride({1, 1, 1, 1});
-    attrs.set_mean(meanTensor);
-    auto invVarianceTensor = std::make_shared<TensorAttributes>();
-    invVarianceTensor->set_dim({16, 1, 1, 1});
-    invVarianceTensor->set_stride({1, 1, 1, 1});
-    attrs.set_inv_variance(invVarianceTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
-    dxTensor->set_dim({16, 64, 32, 32});
-    dxTensor->set_stride({65536, 1024, 32, 1});
-    attrs.set_dx(dxTensor);
-    auto dscaleTensor = std::make_shared<TensorAttributes>();
-    dscaleTensor->set_dim({64, 32, 32});
-    dscaleTensor->set_stride({1024, 32, 1});
-    attrs.set_dscale(dscaleTensor);
-    auto dbiasTensor = std::make_shared<TensorAttributes>();
-    dbiasTensor->set_dim({64, 32, 32});
-    dbiasTensor->set_stride({1024, 32, 1});
-    attrs.set_dbias(dbiasTensor);
+    auto attrs = createShapedAttributes({16, 64, 32, 32}, {64, 32, 32}, {16, 1, 1, 1});
     attrs.set_normalized_dim_count(3);
 
     const GraphAttributes graphAttributes;
     const LayernormBackwardNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeRejectsStatsRankAboveX)
+{
+    // x [N, C, H, W] with scale [C, H, W]: statistics have rank 1 or 4
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(
+        createShapedAttributes({16, 64, 32, 32}, {64, 32, 32}, {16, 1, 1, 1, 1}), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
 }
 
 TEST(TestLayernormBackwardNode, PreValidateNodeRejectsStatsBatchMismatchWithoutCount)
@@ -1111,6 +1054,20 @@ TEST(TestLayernormBackwardNode, PreValidateNodeRejectsAllOnesScaleOnNonUnitX)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeRejectsNormalizedDimCountConflictingWithScale)
+{
+    // A count of 1 leaves the scale's non-1 channel dim before the normalized dims
+    auto attrs = createShapedAttributes({4, 8, 1, 1}, {1, 8, 1, 1}, {4, 1, 1, 1});
+    attrs.set_normalized_dim_count(1);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
+    EXPECT_NE(error.err_msg.find("normalized_dim_count 1"), std::string::npos) << error.err_msg;
 }
 
 TEST(TestLayernormBackwardNode, NormalizedDimCountSpansUnitDimsAfterFirstNormalizedDim)

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
@@ -135,4 +136,40 @@ TEST(TestGraphLayernormBackward, RevalidateAcceptsUnitDimAfterFirstNormalizedDim
     // build_operation_graph validates again with the normalized dim count inferred above
     validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST(TestGraphLayernormBackward, ValidateAcceptsForwardStatsWithRankReducedScale)
+{
+    // x [B, S, D] with scale [D]: the forward node infers mean and inv_variance [B, S, 1]
+    Graph graph;
+    graph.set_compute_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = makeFloatTensor({2, 4, 8}, {32, 8, 1});
+    auto scale = makeFloatTensor({8}, {1});
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_value(1e-5f);
+
+    LayernormAttributes forwardAttributes;
+    forwardAttributes.set_name("LayernormForward");
+    forwardAttributes.set_forward_phase(NormFwdPhase::TRAINING);
+    forwardAttributes.set_epsilon(epsilon);
+    auto [y, mean, invVariance]
+        = graph.layernorm(x, scale, makeFloatTensor({8}, {1}), forwardAttributes);
+    y->set_output(true);
+
+    LayernormBackwardAttributes backwardAttributes;
+    backwardAttributes.set_name("LayernormBackward");
+    backwardAttributes.set_saved_mean_and_inv_variance(mean, invVariance);
+    backwardAttributes.set_epsilon(makeFloatTensor({1}, {1}));
+    auto [dx, dscale, dbias] = graph.layernorm_backward(
+        makeFloatTensor({2, 4, 8}, {32, 8, 1}), x, scale, backwardAttributes);
+    dx->set_output(true);
+    dscale->set_output(true);
+    dbias->set_output(true);
+
+    auto validationResult = graph.validate();
+    ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{2, 4, 1}));
 }

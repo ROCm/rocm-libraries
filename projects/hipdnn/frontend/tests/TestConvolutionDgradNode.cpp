@@ -1120,6 +1120,38 @@ TEST(TestConvolutionDgradNode, PreValidateZeroWeightInputChannelIsRejected)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestConvolutionDgradNode, PreValidateZeroDyChannelIsRejected)
+{
+    ConvDgradAttributes convAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 0, 32, 32});
+    dyTensor->set_stride({1024, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    // Weight output channels match dy; 0 % groups passes the group divisibility check
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim({0, 32, 3, 3});
+    wTensor->set_stride({288, 9, 3, 1});
+    convAttributes.set_w(wTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dx(dxTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
 TEST(TestConvolutionDgradNode, InferGroupedConvStrideInferenceNchwLayout)
 {
     ConvDgradAttributes convAttributes;

@@ -274,6 +274,62 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsZeroStride)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestResampleBwdNode, PreValidateNodeRejectsZeroWindowValue)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_window({0, 3});
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeRejectsNegativePadding)
+{
+    auto preValidateWithPadding
+        = [](const std::vector<int64_t>& prePadding, const std::vector<int64_t>& postPadding) {
+              auto attrs = createValidAttributes();
+              attrs.set_pre_padding(prePadding);
+              attrs.set_post_padding(postPadding);
+
+              const GraphAttributes graphAttributes;
+              const ResampleBwdNode node(std::move(attrs), graphAttributes);
+              return node.pre_validate_node();
+          };
+
+    auto error = preValidateWithPadding({-1, 1}, {1, 1});
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+
+    error = preValidateWithPadding({1, 1}, {1, -1});
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeRejectsWindowLargerThanPaddedDx)
+{
+    auto preValidateWithWindow = [](const std::vector<int64_t>& window) {
+        auto attrs = createValidAttributes();
+        attrs.get_dy()->set_dim({1, 3, 1, 1});
+        attrs.get_dx()->set_dim({1, 3, 8, 8});
+        attrs.set_pre_padding({0, 0});
+        attrs.set_post_padding({0, 0});
+        attrs.set_stride({2, 2});
+        attrs.set_window(window);
+
+        const GraphAttributes graphAttributes;
+        const ResampleBwdNode node(std::move(attrs), graphAttributes);
+        return node.pre_validate_node();
+    };
+
+    // A window equal to the padded dx extent fits exactly once
+    auto error = preValidateWithWindow({8, 8});
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+
+    error = preValidateWithWindow({9, 9});
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
 // --- InferPropertiesNode ---
 
 TEST(TestResampleBwdNode, InferPropertiesNode)

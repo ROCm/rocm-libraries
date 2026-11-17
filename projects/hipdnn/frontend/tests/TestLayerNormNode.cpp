@@ -921,6 +921,24 @@ TEST(TestLayerNormNode, PreValidateFailsRankReducedScaleStatsMissingBatchDim)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
 }
 
+TEST(TestLayerNormNode, PreValidateFailsStatsRankAboveX)
+{
+    // x [B, S, D] with scale [D]: statistics have rank 2 or 3
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({2, 5, 7}, {7}, {2, 5, 1, 1}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsStatsRankBetweenBatchDimsAndX)
+{
+    // x [N, C, H, W] with scale [1, C, H, W]: statistics have rank 1 or 4
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({4, 6, 8, 8}, {1, 6, 8, 8}, {4, 1, 1}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
 TEST(TestLayerNormNode, PreValidateFailsNormalizedDimCountOutOfRange)
 {
     const GraphAttributes graphAttrs;
@@ -932,6 +950,19 @@ TEST(TestLayerNormNode, PreValidateFailsNormalizedDimCountOutOfRange)
         auto err = node.pre_validate_node();
         EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << "count " << count;
     }
+}
+
+TEST(TestLayerNormNode, PreValidateFailsNormalizedDimCountConflictingWithScale)
+{
+    // A count of 1 leaves the scale's non-1 channel dim before the normalized dims
+    auto attrs = makeShapedAttrs({4, 8, 1, 1}, {1, 8, 1, 1});
+    attrs.set_normalized_dim_count(1);
+
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("normalized_dim_count 1"), std::string::npos) << err.err_msg;
 }
 
 TEST(TestLayerNormNode, InferPropertiesRankReducedScaleInfersStatsPerRow)

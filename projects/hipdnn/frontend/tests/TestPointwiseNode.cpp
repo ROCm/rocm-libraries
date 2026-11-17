@@ -881,6 +881,44 @@ TEST(TestPointwiseNode, InferBroadcastExpandsUnitDimForVirtualOutput)
     EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 }
 
+TEST(TestPointwiseNode, InferVirtualOutputStridePutsExtraLeadingAxisOutermost)
+{
+    PointwiseAttributes attributes;
+    attributes.set_input_0(std::make_shared<TensorAttributes>());
+    attributes.set_input_1(std::make_shared<TensorAttributes>());
+    attributes.set_output_0(std::make_shared<TensorAttributes>());
+    attributes.set_mode(PointwiseMode::ADD);
+
+    // Column-major IN_0 of lower rank than the output; no input matches the output shape
+    attributes.get_input_0()
+        ->set_uid(1)
+        .set_name("InputTensor0")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 3})
+        .set_stride({1, 2});
+    attributes.get_input_1()
+        ->set_uid(2)
+        .set_name("InputTensor1")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({4, 1, 1})
+        .set_stride({1, 1, 1});
+
+    auto outputTensor = attributes.get_output_0();
+    outputTensor->set_uid(3)
+        .set_name("OutputTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_is_virtual(true);
+
+    const GraphAttributes graphAttributes;
+    PointwiseNode node(std::move(attributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
+    EXPECT_EQ(outputTensor->get_dim(), (std::vector<int64_t>{4, 2, 3}));
+    // The trailing axes keep IN_0's column-major order; the leading axis is outermost
+    EXPECT_EQ(outputTensor->get_stride(), (std::vector<int64_t>{6, 1, 2}));
+}
+
 TEST(TestPointwiseNode, InferBroadcastStrideFailsForNonVirtualOutputMatchingNoInput)
 {
     PointwiseAttributes attributes;
@@ -1004,4 +1042,66 @@ TEST_F(TestPointwiseNodeCreateOperation, IdentityWithTwoInputsLeavesSurplusInput
     EXPECT_EQ(tensorDescs.size(), 2u);
     EXPECT_EQ(operations.size(), 1u);
     EXPECT_NE(node.attributes.get_input_1(), nullptr);
+}
+
+TEST_F(TestPointwiseNodeCreateOperation, AddWithThreeInputsLeavesSurplusInputOut)
+{
+    using ::testing::_;
+    using ::testing::AnyNumber;
+
+    PointwiseAttributes attributes;
+    attributes.set_input_0(std::make_shared<TensorAttributes>());
+    attributes.set_input_1(std::make_shared<TensorAttributes>());
+    attributes.set_input_2(std::make_shared<TensorAttributes>());
+    attributes.set_output_0(std::make_shared<TensorAttributes>());
+    attributes.set_mode(PointwiseMode::ADD);
+    attributes.set_compute_data_type(DataType::FLOAT);
+
+    attributes.get_input_0()
+        ->set_uid(1)
+        .set_name("InputTensor0")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 3, 4})
+        .set_stride({12, 4, 1});
+    attributes.get_input_1()
+        ->set_uid(2)
+        .set_name("InputTensor1")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 3, 4})
+        .set_stride({12, 4, 1});
+    attributes.get_input_2()
+        ->set_uid(3)
+        .set_name("InputTensor2")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 3, 4})
+        .set_stride({12, 4, 1});
+    attributes.get_output_0()
+        ->set_uid(4)
+        .set_name("OutputTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 3, 4})
+        .set_stride({12, 4, 1});
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT, _, _, _))
+        .Times(1);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, _, _, _))
+        .Times(0);
+
+    const GraphAttributes graphAttributes;
+    const PointwiseNode node(std::move(attributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
+
+    std::unordered_map<int64_t, hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> operations;
+    error = node.create_operation(tensorDescs, operations);
+
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    EXPECT_EQ(tensorDescs.size(), 3u);
+    EXPECT_EQ(operations.size(), 1u);
+    EXPECT_NE(node.attributes.get_input_2(), nullptr);
 }

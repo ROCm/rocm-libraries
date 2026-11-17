@@ -65,8 +65,8 @@ public:
         //
         // Outputs:
         // - Y: normalized output (same shape as X)
-        // - Mean: computed mean per sample (optional, shape: batch dims only)
-        // - InvVariance: inverse standard deviation (optional, shape: batch dims only)
+        // - Mean: computed mean per sample (optional, shape: batch dims, then optional 1s)
+        // - InvVariance: inverse standard deviation (optional, shape: as Mean)
         // ====================================================================
 
         // SECTION 1: Validate Forward Phase
@@ -125,7 +125,7 @@ public:
 
         // SECTION 6: Validate Scale, Bias and Statistics Against the Normalized Dims of X
         // Scale and bias hold the last k dims of x, optionally preceded by 1s; mean and
-        // inv_variance hold the first n - k (batch) dims of x, optionally followed by 1s.
+        // inv_variance hold the first n - k (batch) dims of x, optionally followed by k 1s.
         int64_t normalizedDimCount = 0;
         HIPDNN_CHECK_ERROR(
             detail::deriveLayernormNormalizedDimCount(x->get_dim(),

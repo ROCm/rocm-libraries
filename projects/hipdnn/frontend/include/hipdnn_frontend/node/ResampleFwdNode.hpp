@@ -78,8 +78,13 @@ public:
             {
                 for(size_t i = 0; i < windowVec.size(); ++i)
                 {
-                    HIPDNN_CHECK_ERROR(detail::validateResampleWindowFitsPaddedInput(
-                        xDims[i + 2], prePadding[i], postPadding[i], windowVec[i], i));
+                    HIPDNN_CHECK_ERROR(
+                        detail::validateResampleWindowFitsPaddedInput("ResampleFwdNode",
+                                                                      xDims[i + 2],
+                                                                      prePadding[i],
+                                                                      postPadding[i],
+                                                                      windowVec[i],
+                                                                      i));
                 }
             }
         }
@@ -154,7 +159,7 @@ public:
                 auto strideVal = strideVec[spatialIdx];
                 auto windowVal = windowVec[spatialIdx];
                 HIPDNN_CHECK_ERROR(detail::validateResampleWindowFitsPaddedInput(
-                    inputSize, prePad, postPad, windowVal, spatialIdx));
+                    "ResampleFwdNode", inputSize, prePad, postPad, windowVal, spatialIdx));
 
                 yDims[i] = (inputSize + prePad + postPad - windowVal) / strideVal + 1;
             }

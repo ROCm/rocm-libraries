@@ -108,7 +108,7 @@ public:
         }
 
         // Scale holds the last k dims of x, optionally preceded by 1s; mean and inv_variance
-        // hold the first n - k (batch) dims of x, optionally followed by 1s.
+        // hold the first n - k (batch) dims of x, optionally followed by k 1s.
         int64_t normalizedDimCount = 0;
         HIPDNN_CHECK_ERROR(
             detail::deriveLayernormNormalizedDimCount(xDims,
@@ -123,31 +123,12 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(
             attributes.get_inv_variance(), xDims, normalizedDimCount, "Inverse variance tensor"));
 
-        // A one-padded (full-rank) scale pairs with one-padded statistics; a scale without the
-        // batch dims holds exactly k dims and pairs with statistics of exactly n - k dims.
-        const auto batchDimCount = static_cast<int64_t>(xDims.size()) - normalizedDimCount;
-        const auto scaleOnePadded = scaleDims.size() == xDims.size();
-        HIPDNN_RETURN_IF_TRUE(
-            !scaleOnePadded && static_cast<int64_t>(scaleDims.size()) != normalizedDimCount,
-            ErrorCode::INVALID_VALUE,
-            "LayernormBackwardNode requires that scale (input) conforms to the specified "
-            "normalized_dim_count");
-        if(attributes.get_mean() != nullptr && !attributes.get_mean()->get_dim().empty())
-        {
-            const auto meanOnePadded = attributes.get_mean()->get_dim().size() == xDims.size();
-            HIPDNN_RETURN_IF_TRUE(
-                meanOnePadded ^ scaleOnePadded,
-                ErrorCode::INVALID_VALUE,
-                "LayernormBackwardNode requires that both mean (input) and scale (input) are "
-                "one-padded or that both mean (input) and scale (input) are not one-padded");
-            HIPDNN_RETURN_IF_TRUE(
-                !meanOnePadded
-                    && static_cast<int64_t>(attributes.get_mean()->get_dim().size())
-                           != batchDimCount,
-                ErrorCode::INVALID_VALUE,
-                "LayernormBackwardNode requires that mean (input) conforms to the specified "
-                "normalized_dim_count");
-        }
+        // A scale without the batch dims holds exactly k dims.
+        HIPDNN_RETURN_IF_TRUE(scaleDims.size() != xDims.size()
+                                  && static_cast<int64_t>(scaleDims.size()) != normalizedDimCount,
+                              ErrorCode::INVALID_VALUE,
+                              "LayernormBackwardNode requires that scale (input) conforms to the "
+                              "specified normalized_dim_count");
 
         return {};
     }

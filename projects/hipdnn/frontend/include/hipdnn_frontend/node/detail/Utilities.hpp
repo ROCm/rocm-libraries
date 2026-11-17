@@ -549,7 +549,8 @@ inline Error deriveLayernormNormalizedDimCount(const std::vector<int64_t>& xDims
 
 // Validates a LayerNorm scale-shaped tensor (scale, bias and their gradients): its last
 // normalizedDimCount dims equal the last normalizedDimCount dims of x, and any dims before
-// them are 1. normalizedDimCount must be in [1, rank of x].
+// them are 1. A normalizedDimCount that leaves a non-1 dim before the normalized dims conflicts
+// with the tensor's shape and is rejected. normalizedDimCount must be in [1, rank of x].
 // Only validates if tensor dimensions are already set.
 inline Error validateLayernormAffineIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                           const std::vector<int64_t>& xDims,
@@ -585,22 +586,28 @@ inline Error validateLayernormAffineIfSet(const std::shared_ptr<graph::TensorAtt
                                 + std::to_string(dims[leadingCount + i]));
     }
 
-    for(size_t i = 0; i < leadingCount; ++i)
+    const auto leadingEnd = dims.begin() + static_cast<std::ptrdiff_t>(leadingCount);
+    if(std::any_of(dims.begin(), leadingEnd, [](int64_t dim) { return dim != 1; }))
     {
-        HIPDNN_RETURN_IF_NE(
-            dims[i],
-            1,
-            ErrorCode::INVALID_VALUE,
-            getTensorNameForError(tensor, fallbackName) + " dimension at index " + std::to_string(i)
-                + " must be 1 (before the normalized dims), got " + std::to_string(dims[i]));
+        std::string dimsText;
+        for(const auto dim : dims)
+        {
+            dimsText += dimsText.empty() ? "[" : ",";
+            dimsText += std::to_string(dim);
+        }
+        dimsText += "]";
+        return {ErrorCode::INVALID_VALUE,
+                "normalized_dim_count " + std::to_string(count) + " does not match "
+                    + getTensorNameForError(tensor, fallbackName) + " dims " + dimsText
+                    + ": the dims before the last " + std::to_string(count) + " must be 1"};
     }
 
     return {ErrorCode::OK, ""};
 }
 
-// Validates a LayerNorm statistics tensor (mean, inv_variance): its first
-// rank(x) - normalizedDimCount dims equal the batch dims of x, and any dims after them are 1.
-// normalizedDimCount must be in [1, rank of x].
+// Validates a LayerNorm statistics tensor (mean, inv_variance): its rank is
+// rank(x) - normalizedDimCount or rank(x), its first rank(x) - normalizedDimCount dims equal the
+// batch dims of x, and any dims after them are 1. normalizedDimCount must be in [1, rank of x].
 // Only validates if tensor dimensions are already set.
 inline Error validateLayernormStatsIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                          const std::vector<int64_t>& xDims,
@@ -615,12 +622,12 @@ inline Error validateLayernormStatsIfSet(const std::shared_ptr<graph::TensorAttr
     const auto& dims = tensor->get_dim();
     const size_t batchCount = xDims.size() - static_cast<size_t>(normalizedDimCount);
 
-    HIPDNN_RETURN_IF_LT(dims.size(),
-                        batchCount,
-                        ErrorCode::INVALID_VALUE,
-                        getTensorNameForError(tensor, fallbackName) + " must have at least "
-                            + std::to_string(batchCount) + " dimensions (batch dims of x), got "
-                            + std::to_string(dims.size()));
+    HIPDNN_RETURN_IF_TRUE(dims.size() != batchCount && dims.size() != xDims.size(),
+                          ErrorCode::INVALID_VALUE,
+                          getTensorNameForError(tensor, fallbackName) + " rank must be "
+                              + std::to_string(batchCount) + " (batch dims of x) or "
+                              + std::to_string(xDims.size()) + " (rank of x), got "
+                              + std::to_string(dims.size()));
 
     for(size_t i = 0; i < dims.size(); ++i)
     {
