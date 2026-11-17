@@ -124,6 +124,13 @@ using BindScratchFn   = std::function<void(VariantPack&, void*)>;
 // it are multiples of this.
 constexpr size_t kScratchAlignment = 256;
 
+// `bytes` rounded up to a multiple of kScratchAlignment: where the next buffer
+// starts if it is to stay aligned as the scratch start is.
+inline size_t AlignScratch(size_t bytes)
+{
+    return (bytes + kScratchAlignment - 1) / kScratchAlignment * kScratchAlignment;
+}
+
 // Device scratch for graph outputs the caller has no buffer for. RunCachedGraph
 // carves `bytes` from the handle's buffer and passes their start, aligned to
 // kScratchAlignment, to `bind`, which adds the scratch pointers to the variant

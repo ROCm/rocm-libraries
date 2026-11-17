@@ -35,6 +35,9 @@ struct TensorInfo
 // miopenStatusSuccess, or miopenStatusInvalidValue when a getter fails.
 miopenStatus_t ReadTensor(miopenTensorDescriptor_t desc, TensorInfo& out);
 
+// The bytes of one element, or 0 for a type MIOpen does not define.
+size_t TypeSize(miopenDataType_t type);
+
 // Reads the mode alone and discards the descriptor's alpha, beta and gamma.
 // Only the fused convolution path calls it, and that path accepts RELU only,
 // which uses none of them. Batchnorm reads the coefficients itself.
@@ -57,6 +60,13 @@ void AppendTensor(std::vector<int64_t>& out, const TensorInfo& tensor);
 
 std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
 MakeTensor(const TensorInfo& info, hipdnn_frontend::DataType dataType, int64_t uid);
+
+// Gives a node's result the shape, type and uid of a graph output. False when
+// the node was not built.
+bool MarkOutput(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensor,
+                const TensorInfo& info,
+                hipdnn_frontend::DataType dataType,
+                int64_t uid);
 
 } // namespace hipdnn
 } // namespace wrapper

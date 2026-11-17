@@ -602,21 +602,6 @@ std::shared_ptr<fe::graph::TensorAttributes> MakeScalar(fe::graph::Graph& graph,
     return graph.tensor(fe::graph::TensorAttributes(value));
 }
 
-bool MarkOutput(const std::shared_ptr<fe::graph::TensorAttributes>& tensor,
-                const TensorInfo& info,
-                fe::DataType dataType,
-                int64_t uid)
-{
-    if(tensor == nullptr)
-        return false;
-    tensor->set_dim(info.dims)
-        .set_stride(info.strides)
-        .set_data_type(dataType)
-        .set_uid(uid)
-        .set_output(true);
-    return true;
-}
-
 // Marks the batchnorm result as y. With an activation the result becomes an
 // intermediate, and the activation's result takes y's place.
 bool MarkResult(const BnProblem& problem,
@@ -793,20 +778,8 @@ size_t ElementCount(const TensorInfo& info)
 // The graphs keep every statistic in FLOAT.
 size_t FloatBytes(const TensorInfo& info) { return ElementCount(info) * sizeof(float); }
 
-// The bytes of a packed data tensor. CheckProblem has limited its type to
-// FLOAT, HALF or BFLOAT16.
-size_t DataBytes(const TensorInfo& info)
-{
-    const bool twoBytes = info.dataType == miopenHalf || info.dataType == miopenBFloat16;
-    return ElementCount(info) * (twoBytes ? 2 : 4);
-}
-
-// Where the next scratch buffer starts after `bytes`, keeping each one aligned
-// as the scratch start is.
-size_t AlignScratch(size_t bytes)
-{
-    return (bytes + kScratchAlignment - 1) / kScratchAlignment * kScratchAlignment;
-}
+// The bytes of a packed data tensor.
+size_t DataBytes(const TensorInfo& info) { return ElementCount(info) * TypeSize(info.dataType); }
 
 // The training graph always produces the saved statistics. When the caller
 // wants none, they go to scratch instead and are dropped.

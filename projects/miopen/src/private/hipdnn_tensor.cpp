@@ -13,8 +13,6 @@ namespace hipdnn {
 
 namespace fe = hipdnn_frontend;
 
-namespace {
-
 size_t TypeSize(miopenDataType_t type)
 {
     switch(type)
@@ -31,8 +29,6 @@ size_t TypeSize(miopenDataType_t type)
     }
     return 0;
 }
-
-} // namespace
 
 // miopenGetTensorDescriptor fills caller-provided int arrays, so the size query
 // has to come first.
@@ -139,6 +135,21 @@ MakeTensor(const TensorInfo& info, fe::DataType dataType, int64_t uid)
                                         .set_stride(info.strides)
                                         .set_data_type(dataType)
                                         .set_uid(uid));
+}
+
+bool MarkOutput(const std::shared_ptr<fe::graph::TensorAttributes>& tensor,
+                const TensorInfo& info,
+                fe::DataType dataType,
+                int64_t uid)
+{
+    if(tensor == nullptr)
+        return false;
+    tensor->set_dim(info.dims)
+        .set_stride(info.strides)
+        .set_data_type(dataType)
+        .set_uid(uid)
+        .set_output(true);
+    return true;
 }
 
 } // namespace hipdnn

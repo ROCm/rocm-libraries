@@ -340,8 +340,7 @@ miopenStatus_t RunGraphs(HandleState& state,
     if(scratchBytes > 0)
     {
         // The scratch follows the graph's workspace in the handle's buffer.
-        const size_t offset =
-            (needed + kScratchAlignment - 1) / kScratchAlignment * kScratchAlignment;
+        const size_t offset = AlignScratch(needed);
         if(!state.EnsureWorkspace(offset + scratchBytes))
             return RecordFailure(miopenStatusAllocFailed, "hipDNN scratch allocation failed");
         workspace = state.workspace;

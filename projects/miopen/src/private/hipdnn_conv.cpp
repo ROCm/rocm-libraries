@@ -253,12 +253,7 @@ bool PopulateGraph(const ConvProblem& problem, fe::graph::Graph& graph)
         out = graph.pointwise(out, activationAttributes);
     }
 
-    out->set_dim(outInfo.dims)
-        .set_stride(outInfo.strides)
-        .set_data_type(types[2])
-        .set_uid(kUidOut)
-        .set_output(true);
-    return true;
+    return MarkOutput(out, outInfo, types[2], kUidOut);
 }
 
 miopenStatus_t RunProblem(miopenHandle_t handle,
