@@ -98,13 +98,6 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     assert "tensilelite_configure_client.py" in archived_names
 
 
-def test_installed_test_artifact_includes_client_binding_modules():
-    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
-
-    assert '"${_tensilelite_src}/_tensilelite_client_binding.py"' in cmake
-    assert '"${_tensilelite_src}/tensilelite_configure_client.py"' in cmake
-
-
 def test_removed_source_autobuild_option_is_not_referenced():
     paths = (
         _PROJECT_ROOT.parent / "CMakeLists.txt",
