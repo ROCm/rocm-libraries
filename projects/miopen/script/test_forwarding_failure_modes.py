@@ -10,7 +10,8 @@ and HIPDNN_* variable removed and only the case's own set.
 
 hipDNN is made unusable with a fake backend that has the real backend's file name and no
 version, so hipDNN loads it and then refuses it. Every case points hipDNN at it, so none
-can reach a real backend. A missing backend cannot be simulated: when the override
+can reach a real backend; a hipDNN frontend that predates HIPDNN_BACKEND_LIBRARY_PATH
+ignores it and loads the real one, so the cases fail if the fake never loads. A missing backend cannot be simulated: when the override
 directory has none, hipDNN falls back to the real one next to the MIOpen library, then to
 the loader's search path. MIOpen handles the fake the same way as a missing backend.
 
@@ -91,7 +92,26 @@ class ForwardingFailureModesTest(unittest.TestCase):
             Path(reentrant_backend).resolve() if reentrant_backend else None
         )
 
+    # Set once a run shows hipDNN loading the fake, so the check runs once per process.
+    fake_backend_loads = False
+
+    def require_fake_backend(self):
+        if ForwardingFailureModesTest.fake_backend_loads:
+            return
+        run = self.run_probe(["conv_forward"], FORWARDING_ON, backend=self.fake_backend)
+        if not run.loaded_fake_backend():
+            # Otherwise the cases reach the real backend and fail one by one, each
+            # for a reason that hides this one.
+            self.fail(
+                f"hipDNN never loaded the fake backend in {self.fake_backend}: MIOpen was "
+                "built against a hipDNN frontend that ignores HIPDNN_BACKEND_LIBRARY_PATH"
+                f"\nstderr:\n{run.stderr}"
+            )
+        ForwardingFailureModesTest.fake_backend_loads = True
+
     def run_probe(self, steps, env=None, backend=None, timeout=120):
+        if backend is None:
+            self.require_fake_backend()
         clean = {
             name: value
             for name, value in os.environ.items()
