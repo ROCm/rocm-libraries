@@ -176,7 +176,7 @@ namespace convut
         {
             EXPECT_EQ(hipFree(m_ptr), hipSuccess);
         }
-        DevBuf(const DevBuf&) = delete;
+        DevBuf(const DevBuf&)            = delete;
         DevBuf& operator=(const DevBuf&) = delete;
 
         T* get() const
@@ -217,7 +217,7 @@ namespace convut
                 EXPECT_EQ(DESTROY(m_h), st_ok);
             }
         }
-        Owned(const Owned&) = delete;
+        Owned(const Owned&)            = delete;
         Owned& operator=(const Owned&) = delete;
 
         H* operator&()
@@ -337,10 +337,10 @@ namespace convut
     template <typename T>
     T make_special(bool nan)
     {
-        using R = std::conditional_t<
-            std::is_same_v<T, float> || std::is_same_v<T, rocsparse_float_complex>,
-            float,
-            double>;
+        using R   = std::conditional_t<std::is_same_v<T, float>
+                                           || std::is_same_v<T, rocsparse_float_complex>,
+                                       float,
+                                       double>;
         const R v = nan ? std::numeric_limits<R>::quiet_NaN() : std::numeric_limits<R>::infinity();
         if constexpr(is_complex_v<T>)
             return T(v, 1);
