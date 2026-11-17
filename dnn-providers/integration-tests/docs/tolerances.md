@@ -931,7 +931,7 @@ own direction, their own `lambda` and `c`, and a float `lambda`. An engine's
 |---|---|---|---|
 | forward | 0, 4 (the engine may set `c`) | 12, 1 | 0, 1 |
 | backward data | 13, 4 | 12, 1 | 6, 1 |
-| backward weights | 13, 4 | 36, 1 | 21, 1 |
+| backward weights | 15, 4 | 22 + 1.5 `K^(1/4)`, 1 | 13 + 0.5 `K^(1/4)`, 1 |
 
 Derived and fitted. As for forward, the factor 2 on `eps * |ref|`, the form
 `sqrt(K) * u32` of the summation term and `c` = 1 for half and bfloat16 are
@@ -940,7 +940,11 @@ theory (below). Every backward `lambda` is fitted to MIOpen: the smallest
 value that leaves a headroom of at least 1.5 on the calibration data, with `c`
 held at its value. Each one traces to particular solvers (see "Which backward
 solvers need lambda"), and none of them is a law of the arithmetic: a solver
-that sums the `K` products in float and rounds once needs none.
+that sums the `K` products in float and rounds once needs none. The
+backward-weights half and bfloat16 `lambda` grows as `K^(1/4)` because the
+split-K kernels that set it split longer reductions into more parts; the
+two coefficients are fitted together, to a headroom of 1.5 on the fit and on
+the validation data, with the smallest band at `K` = 1,152.
 
 A backward activation fused behind a dgrad (`RELU_BWD`, `SIGMOID_BWD`,
 `TANH_BWD`, `SOFTPLUS_BWD`, `ELU_BWD`, `SWISH_BWD`, `GELU_BWD`,
@@ -965,8 +969,11 @@ At a typical output (`|ref|` = `sigma`, inputs uniform in [-1, 1], `K` =
 | backward data | half | 0.022 | 1.6 | 0.014 |
 | backward data | bfloat16 | 0.022 | 10.1 | 0.063 |
 | backward weights | float | 2.18e-4 | 0.344 | 1.8e-5 |
-| backward weights | half | 0.218 | 1.6 | 0.037 |
-| backward weights | bfloat16 | 0.218 | 10.1 | 0.18 |
+| backward weights | half | 0.218 | 1.6 | 0.032 |
+| backward weights | bfloat16 | 0.218 | 10.1 | 0.14 |
+
+The backward-weights half band is 0.026 of `sigma` at `K` = 16, 0.047 at
+65,536 and 0.079 at 2 million; bfloat16 is 0.125, 0.18 and 0.27.
 
 Where the dynamic band is wider than the per-op default (float backward data,
 bfloat16 backward data), the default fails correct output; see the
@@ -981,10 +988,11 @@ dw the shape of w; calibration bundles not in the tree) together with the
 backward-weights bundles in the tree, at all four levels, on an MI325X and
 MI308X (gfx942). Each output was compared with the harness reference and
 with a float64 recomputation from the same inputs, over every element. The
-fit used 3 input seeds, the validation 2 more. Not in the data: outputs above
-4 M elements (219 backward-data and 219 backward-weights cases, among them
-every case with `K` above 186,624 and 262,144; they were graded pass or fail
-in the harness runs below, all passed, and have no headroom), the
+fit used 3 input seeds, the validation 2 more, and the backward-weights
+outputs above 4 M elements (219 cases, `K` up to 2.8 million) a sixth. Not in
+the data: backward-data outputs above 4 M elements (219 cases, among them
+every case with `K` above 186,624; they were graded pass or fail in the
+harness runs below, all passed, and have no headroom), the
 mixed-type class `F20` (MIOpen faults on it on gfx942: ALMIOPEN-3302), and
 the constant-fill class `F21const` (both operands 1.0), which takes the per-op
 default.
@@ -1002,15 +1010,15 @@ or overflow).
 | backward data | float | 2,163 / 1,442 | 856 | 0 | 1.54 / 2.05 | 4.8 |
 | backward data | half | 2,307 / 1,538 | 170 | 0 | 1.53 / 1.78 | 6.4 |
 | backward data | bfloat16 | 2,058 / 1,372 | 211 | 0 | 1.97 / 1.57 | 4.8 |
-| backward weights | float | 2,313 / 1,542 | 256 | 0 | 1.57 / 2.24 | 5.6 |
-| backward weights | half | 2,460 / 1,640 | 31 | 0 | 1.52 / 2.17 | 9.8 |
-| backward weights | bfloat16 | 2,196 / 1,464 | 359 | 0 | 1.53 / 1.85 | 16 |
+| backward weights | float | 2,487 / 1,716 | 447 | 0 | 1.55 / 1.69 | 5.5 |
+| backward weights | half | 2,775 / 1,955 | 155 | 0 | 1.53 / 1.64 | 8.3 |
+| backward weights | bfloat16 | 2,364 / 1,632 | 425 | 0 | 1.53 / 1.66 | 14 |
 
 Headroom here is exact for every analysed output: the smallest factor by which
 the whole band `atol + rtol * |ref_i|` could shrink, over every element of the
 output, before the output fails. As for forward, a fixed constant is a fixed
 number of standard deviations per element, so the chance that a correct output
-fails grows with its element count; the data covers 16 to 4.2 M elements.
+fails grows with its element count; the data covers 16 to 22 M elements.
 
 ### Which backward solvers need lambda
 
@@ -1023,31 +1031,35 @@ output attributed). The largest need, and the solvers that set it:
 |---|---|---|---|
 | backward data, half | 7.7 (12) | `ConvWinoRageRxS<2-3>`, `ConvBinWinogradRxSf2x3` (Winograd; falls with `K`: 7.7 up to `K` = 64, 4.4 above) | 3.4 (naive direct, near-zero outputs) |
 | backward data, bfloat16 | 2.3 (6) | `ConvHipImplicitGemmGroupBwdXdlops` (CK, split-K) | 1.7 |
-| backward weights, half | 21.6 (36) | `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC` (fp16 atomic split-K), `ConvHipImplicitGemm3DGroupWrwXdlops` (CK split-K, 10.0) | 5.6 (`GemmWrwUniversal`) |
-| backward weights, bfloat16 | 11.5 (21) | `ConvHipImplicitGemm3DGroupWrwXdlops`, `ConvHipImplicitGemmGroupWrwXdlops` (CK split-K) | 4.9 (`GemmWrw1x1_stride1`) |
+| backward weights, half | 21.6 at `K` = 8,192, 43.3 at 1.6 million (36.3 and 75.4) | `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC` (fp16 atomic split-K), `ConvHipImplicitGemm3DGroupWrwXdlops` (CK split-K, 10.0) | 5.6 (`GemmWrwUniversal`) |
+| backward weights, bfloat16 | 11.5 at `K` = 65,536, 14.1 at 524,288 (21.0 and 26.4) | `ConvHipImplicitGemm3DGroupWrwXdlops`, `ConvHipImplicitGemmGroupWrwXdlops` (CK split-K) | 4.9 (`GemmWrw1x1_stride1`) |
 | backward data, float | 5.8 at `c` = 4 (13) | Winograd (`ConvBinWinogradRxSf2x3g1`, `Sf3x2`) at `K` = 2 to 12 | none needed |
-| backward weights, float | 5.0 at `c` = 4 (13) | Winograd (`ConvBinWinogradRxSf2x3g1`) at `K` = 2 | none needed |
+| backward weights, float | 8.8 at `c` = 4 (15) | Winograd (`ConvBinWinogradRxSf2x3`, `Sf2x3g1`) at `K` = 1 to 2 | none needed |
 
 The backward-weights half and bfloat16 need is not that of a half running
 sum, which grows as `sqrt(K)`. It comes from split-K kernels that add their
 partial results in the output type in a non-deterministic order: two
 identical runs differ in 62 to 73 % of the elements, the error's rms equals
 that of an io-type running sum over `G` = 8 to 128 partials (the split count
-the MIOpen log shows) and not over `K`, and it grows with `K` only while the
-split count grows (overall about `K^0.3` at p90), then stays flat. The same
+the MIOpen log shows) and not over `K`. Longer reductions get more partials,
+so the need grows with `K`: its largest value per range of `K` rises about as
+`K^(1/4)`, from 9 below `K` = 4,096 to 22 near 8,192, 26 near 1 million and
+43 at 1.6 million, where one correct output of a single run, of 7,168
+elements, fell outside a flat `lambda` of 36. The same
 kernels on an fp32 workspace (the assembly solver for bfloat16, and for half
 when its split is not packed) need about 0. This is a kernel that does not
-honour the float compute type; ALMIOPEN-3380 tracks it, and the `lambda` of
-36 and 21 is what the tolerance pays for it until it is fixed. Its size
+honour the float compute type; ALMIOPEN-3380 tracks it, and the growing
+`lambda` is what the tolerance pays for it until it is fixed. Its size
 depends on the GPU: the split count follows the CU count, and the largest
-need, 21.6, is from an MI325X (16.6 on an MI308X).
+needs are from an MI325X. Beyond `K` of 2.8 million the growth is an
+extrapolation.
 
 The float `lambda` exists for Winograd at the shortest reductions, where 2 or
 3 products of a correct output differ from the reference by up to 10
 `sqrt(K) * u32 * sigma`: a Winograd solver does not sum the `K` products.
 Every other solver family needs a negative `lambda` at `c` = 4. Covering
-Winograd with `c` alone would take `c` of about 12 (backward data) and 14
-(backward weights), three times wider at large `K`.
+Winograd with `c` alone would take `c` of about 12 (backward data) and 22
+(backward weights), three to five times wider at large `K`.
 
 ### Backward summation coefficient against the theory and float64
 
@@ -1115,16 +1127,16 @@ price of failing correct outputs (table above):
 | backward data, bfloat16 | accumulator in the io type | 65 % | 14 % |
 | backward weights, float | one batch sample / one dy row missing | 99 % / 99 % | 99 % / 99 % |
 | backward weights, float | inputs rounded to tf32 / to bfloat16 | 98 % / 99 % | 99 % / 99 % |
-| backward weights, half | one batch sample / one dy row missing | 98 % / 96 % | 99 % / 98 % |
-| backward weights, half | accumulator in the io type | 0 % | 0 % |
-| backward weights, bfloat16 | one batch sample / one dy row missing | 99 % / 98 % | 99 % / 91 % |
-| backward weights, bfloat16 | accumulator in the io type | 46 % | 0 % |
+| backward weights, half | one batch sample / one dy row missing | 98 % / 97 % | 99 % / 99 % |
+| backward weights, half | accumulator in the io type | 1 % | 0 % |
+| backward weights, bfloat16 | one batch sample / one dy row missing | 99 % / 98 % | 99 % / 94 % |
+| backward weights, bfloat16 | accumulator in the io type | 47 % | 0 % |
 
 An accumulator in the io type is what the `lambda` of half and of bfloat16
 backward weights allows for, so it is not detected there: that is the cost of
 the split-K kernels of ALMIOPEN-3380. With a bfloat16 backward-weights
-`lambda` of 21, one missing product of a 1,152-product sum is not detected
-either; a missing batch sample or row of `dy` still is.
+`lambda` of about 16 at `K` = 1,152, one missing product of a 1,152-product
+sum is not detected either; a missing batch sample or row of `dy` still is.
 
 ### When an engine needs more
 

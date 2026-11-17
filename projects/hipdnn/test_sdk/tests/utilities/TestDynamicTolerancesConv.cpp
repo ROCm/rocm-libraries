@@ -1879,12 +1879,18 @@ struct OutputCase
     }
 };
 
-// The calibrated lambda and c of each backward case, written out here so that a change of the
-// constants in the header shows as a failing test.
+// The calibrated lambda (lambda0 + perQuarticRootK * K^(1/4)) and c of each backward case, written
+// out here so that a change of the constants in the header shows as a failing test.
 struct Allowances
 {
-    double lambda;
+    double lambda0;
+    double perQuarticRootK;
     double c;
+
+    double lambdaAt(uint64_t k) const
+    {
+        return lambda0 + perQuarticRootK * std::sqrt(std::sqrt(static_cast<double>(k)));
+    }
 };
 
 template <typename Case>
@@ -1894,15 +1900,15 @@ constexpr Allowances calibratedAllowances()
     constexpr bool IS_WRW = Case::DIRECTION == ConvDirection::WRW;
     if constexpr(std::is_same_v<T, float>)
     {
-        return {13.0, 4.0};
+        return {IS_WRW ? 15.0 : 13.0, 0.0, 4.0};
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        return {IS_WRW ? 36.0 : 12.0, 1.0};
+        return IS_WRW ? Allowances{22.0, 1.5, 1.0} : Allowances{12.0, 0.0, 1.0};
     }
     else
     {
-        return {IS_WRW ? 21.0 : 6.0, 1.0};
+        return IS_WRW ? Allowances{13.0, 0.5, 1.0} : Allowances{6.0, 0.0, 1.0};
     }
 }
 
@@ -1980,7 +1986,7 @@ TYPED_TEST(ConvBackwardOutputToleranceFixture, ConstantsAtAFixedScale)
     const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
     const double summation = allowances.c * 12.0 * std::ldexp(1.0, -24);
     const double expectedRtol = 2.0 * eps + (std::is_same_v<T, float> ? summation : 0.0);
-    const double expectedAtol = (summation + allowances.lambda * eps) * 4.0 + minNormal;
+    const double expectedAtol = (summation + allowances.lambdaAt(144) * eps) * 4.0 + minNormal;
     EXPECT_NEAR(tol.rtol, expectedRtol, 1e-12 * expectedRtol);
     EXPECT_NEAR(tol.atol, expectedAtol, 1e-9 * expectedAtol);
 }
@@ -2028,8 +2034,9 @@ class ConvBackwardSingleTermToleranceFixture : public ::testing::Test
 {
 };
 
-// Every backward case but bfloat16 wrw: its lambda of 21, which MIOpen's split-K reductions need,
-// is about 2 at this scale and hides a single product of up to 1 (tolerances.md, limits).
+// Every backward case but bfloat16 wrw: its lambda, which MIOpen's split-K reductions need (about
+// 16 at K = 1152), is about 1.4 at this scale and hides a single product of up to 1 (tolerances.md,
+// limits).
 using ConvBackwardSingleTermCases = ::testing::Types<OutputCase<ConvDirection::DGRAD, float>,
                                                      OutputCase<ConvDirection::DGRAD, half>,
                                                      OutputCase<ConvDirection::DGRAD, bfloat16>,
@@ -2076,40 +2083,61 @@ TYPED_TEST_SUITE(ConvBackwardLowPrecisionToleranceFixture, ConvBackwardLowPrecis
 namespace
 {
 
-// The largest lambda each 16-bit backward case was measured to need near zero, in eps * sigma
-// (tolerances.md, "Which backward solvers need lambda"), with the solvers that set it: Winograd
-// for backward data half, CK grouped backward data with split-K for bfloat16, and the split-K
-// backward-weights kernels that add partial results in the output type for both wrw types.
+// The largest lambda each 16-bit backward case was measured to need near zero, in eps * sigma,
+// at the reduction length where it was measured (tolerances.md, "Which backward solvers need
+// lambda"), with the solvers that set it: Winograd for backward data half, CK grouped backward
+// data with split-K for bfloat16, and the split-K backward-weights kernels that add partial
+// results in the output type for both wrw types, whose need grows with K.
+struct MeasuredNeed
+{
+    uint64_t k;
+    double lambda;
+};
+
 template <typename Case>
-constexpr double measuredLambda()
+std::vector<MeasuredNeed> measuredNeeds()
 {
     using T = typename Case::OutputType;
     if constexpr(Case::DIRECTION == ConvDirection::DGRAD)
     {
-        return std::is_same_v<T, half> ? 7.71 : 2.33;
+        return std::is_same_v<T, half> ? std::vector<MeasuredNeed>{{2, 7.71}}
+                                       : std::vector<MeasuredNeed>{{1568, 2.33}};
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return {{8192, 21.62}, {1638400, 43.33}, {2765952, 36.45}};
     }
     else
     {
-        return std::is_same_v<T, half> ? 21.62 : 11.53;
+        return {{65536, 11.53}, {524288, 14.10}};
     }
 }
 
 } // namespace
 
 // lambda is the allowance for intermediates kept in the output type. Near zero the band is that
-// allowance: the largest measured error passes, an error just below lambda * eps * sigma passes,
-// and one half an eps * sigma above it fails. K = 144 and mean squares 1/3 give sigma = 4.
+// allowance: at each reduction length where a largest error was measured, that error passes, an
+// error just below lambda * eps * sigma passes, and one half an eps * sigma above it fails. Mean
+// squares 1/3 give sigma = sqrt(K) / 3.
 TYPED_TEST(ConvBackwardLowPrecisionToleranceFixture, AllowanceCoversTheLargestMeasuredError)
 {
     using T = typename TypeParam::OutputType;
-    const auto tol = TypeParam::tolerance(UNIFORM_144);
-    const auto lambda = calibratedAllowances<TypeParam>().lambda;
-    const double epsSigma = static_cast<double>(std::numeric_limits<T>::epsilon()) * 4.0;
-    for(const double sign : {1.0, -1.0})
+    const auto allowances = calibratedAllowances<TypeParam>();
+    for(const auto& need : measuredNeeds<TypeParam>())
     {
-        EXPECT_TRUE(withinTolerance<T>(sign * measuredLambda<TypeParam>() * epsSigma, 0.0, tol));
-        EXPECT_TRUE(withinTolerance<T>(sign * (lambda - 0.1) * epsSigma, 0.0, tol));
-        EXPECT_FALSE(withinTolerance<T>(sign * (lambda + 0.5) * epsSigma, 0.0, tol));
+        const auto tol = TypeParam::tolerance(DotScale{need.k, 1.0 / 3.0, 1.0 / 3.0});
+        const double lambda = allowances.lambdaAt(need.k);
+        const double epsSigma = static_cast<double>(std::numeric_limits<T>::epsilon())
+                                * std::sqrt(static_cast<double>(need.k)) / 3.0;
+        for(const double sign : {1.0, -1.0})
+        {
+            EXPECT_TRUE(withinTolerance<T>(sign * need.lambda * epsSigma, 0.0, tol))
+                << "K=" << need.k;
+            EXPECT_TRUE(withinTolerance<T>(sign * (lambda - 0.1) * epsSigma, 0.0, tol))
+                << "K=" << need.k;
+            EXPECT_FALSE(withinTolerance<T>(sign * (lambda + 0.5) * epsSigma, 0.0, tol))
+                << "K=" << need.k;
+        }
     }
 }
 
