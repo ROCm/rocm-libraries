@@ -56,9 +56,13 @@ namespace std
 
 namespace fs = std::filesystem;
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
 // get program_invocation_name
 #include <errno.h>
+#include <limits.h>
+#include <unistd.h>
 #endif
 
 TEST(rocfft_UnitTest, plan_description)
@@ -369,7 +373,7 @@ TEST(rocfft_UnitTest, log_levels)
 #ifdef _WIN32
         static const char* log_output = "NUL";
 #else
-        static const char* log_output   = "/dev/null";
+        static const char* log_output = "/dev/null";
 #endif
         EnvironmentSetTemp log_trace_path("ROCFFT_LOG_TRACE_PATH", log_output);
         EnvironmentSetTemp log_bench_path("ROCFFT_LOG_BENCH_PATH", log_output);
@@ -969,23 +973,35 @@ TEST(rocfft_UnitTest, rtc_cache_null)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+static fs::path amdclangpp_exe()
+{
+    // look relative to current exe
+#ifdef _WIN32
+    char current_exe[MAX_PATH];
+    if(GetModuleFileNameA(nullptr, current_exe, MAX_PATH) == MAX_PATH)
+        return {};
+    static const char* amdclang_name = "amdclang++.exe";
+#else
+    char current_exe[PATH_MAX];
+    auto err = readlink("/proc/self/exe", current_exe, PATH_MAX);
+    if(err == -1 || err == PATH_MAX)
+        return {};
+    static const char* amdclang_name = "amdclang++";
+#endif
+
+    return fs::path{current_exe}.parent_path() / ".." / "lib" / "llvm" / "bin" / amdclang_name;
+}
+
 TEST(rocfft_UnitTest, rtc_test_harness)
 {
+    SKIP_ON_QUICK_TESTS();
     PROB_SKIP_UNITTEST();
 
     try
     {
-        // check that hipcc is available since this test requires it
-        //
-        // NOTE: using system() for launching subprocesses for simplicity
-        // and portability
-#ifdef _WIN32
-        static const char* test_command = "amdclang++ --version > NUL";
-#else
-        static const char* test_command = "amdclang++ --version > /dev/null";
-#endif
-        if(std::system(test_command) != 0)
-            GTEST_SKIP();
+        auto compiler = amdclangpp_exe();
+        if(!fs::exists(compiler))
+            GTEST_SKIP() << "amdclang++ not found";
 
         rocfft_cleanup();
 
@@ -1096,12 +1112,15 @@ TEST(rocfft_UnitTest, rtc_test_harness)
             for(i = 0; i < files.size(); ++i)
             {
 #ifdef _WIN32
-                const std::string command
-                    = "amdclang++ -x hip -c -std=c++20 -o NUL " + files[i].first;
+                // Windows headers need to be told to not break std::min
+                const auto command = compiler.string() + " -DNOMINMAX -x hip -c -std=c++20 -o NUL "
+                                     + files[i].first;
 #else
-                const std::string command
-                    = "amdclang++ -x hip -c -std=c++20 -o /dev/null " + files[i].first;
+                const auto command
+                    = compiler.string() + " -x hip -c -std=c++20 -o /dev/null " + files[i].first;
 #endif
+                // NOTE: using system() for launching subprocesses for simplicity
+                // and portability
                 files[i].second = std::system(command.c_str());
             }
 
