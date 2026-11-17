@@ -288,7 +288,7 @@ class CompactSolution(Mapping):
         return hash(self._nameFull + (self.get("codeObjectFile") or "") + deviceNames)
 
     def __eq__(self, other):
-        if not isinstance(other, (CompactSolution, Solution)):
+        if not isinstance(other, CompactSolution):
             return False
         if str(self) != str(other):
             return False

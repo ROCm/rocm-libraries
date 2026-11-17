@@ -110,6 +110,8 @@ def test_hash_and_eq_follow_solution_semantics(parsed):
     assert hash(compact) == hash(real) == hash(other)
     assert compact == other
     assert len(dict.fromkeys([compact, other])) == 1
+    assert (real == compact) == (compact == real)
+    assert len(dict.fromkeys([real, compact])) == len(dict.fromkeys([compact, real]))
     other["codeObjectFile"] = "somewhere"
     assert hash(other) != hash(
         compact
