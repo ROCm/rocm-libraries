@@ -756,9 +756,12 @@ endif()
 # The fast path does not support Int8 inputs yet (isFastPathEligible rejects
 # them), so these run on the slow path only.
 #
-# The slow path accumulates the float-alpha types (I8_*_S) in float per K
-# element, which is exact only while |sum| < 2^24 (#15764). Keep K small enough:
-# F16_SIZES has K = 151, so |sum| <= 151 * 128^2 ~= 2.5M.
+# The slow reference reduces in integers before converting once to the
+# alpha/beta type (#15765). Float precision no longer limits K. The large-K
+# cases allow sums above 2^24; the golden still requires the completed sum and
+# integer epilogue intermediates to fit Int32. Output-range constraints below
+# also apply. Dedicated ReferenceInt8Accumulation gtests check exact boundary
+# values and modulo 2^32 reduction with a signed Int32 interpretation.
 #
 # Each entry: NAME;typeCD;typeAlpha;alpha;beta;alpha for ScaleAB. Alphas keep D
 # in range: Half output below 65504, no int32 overflow (the golden throws on
@@ -778,12 +781,16 @@ foreach(COMBO
     list(GET COMBO 3 ALPHA)
     list(GET COMBO 4 BETA)
     list(GET COMBO 5 SCALEAB_ALPHA)
-    set(I8_ARGS ${F16_SIZES} --type i8 --typeCD ${TYPE_CD} --typeAlpha ${TYPE_ALPHA} --validate)
+    set(I8_ARGS ${F32_SIZES} --type i8 --typeCD ${TYPE_CD} --typeAlpha ${TYPE_ALPHA} --validate)
 
     foreach(TRANS NN TN NT TT)
         get_trans_flags(${TRANS} TFLAGS)
         add_cpu_gemm_test(slow_${NAME}_${TRANS}
             ARGS ${I8_ARGS} ${TFLAGS} --alpha ${ALPHA}
+        )
+        add_cpu_gemm_test(slow_${NAME}_LargeK_${TRANS}
+            ARGS -M 3 -N 5 -K 1044 --type i8 --typeCD ${TYPE_CD}
+                --typeAlpha ${TYPE_ALPHA} ${TFLAGS} --alpha ${ALPHA} --validate
         )
     endforeach()
     add_cpu_gemm_test(slow_${NAME}_Beta

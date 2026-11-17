@@ -117,8 +117,9 @@ namespace
     // I8_I8_I32 and I8_I32_I32 use TypeAlpha = int32_t. I8_I32_S,
     // I8_I8_S, I8_H_S and I8_B_S use TypeAlpha = float. The int64_t dot
     // product lets the oracle detect overflow before the TypeAlpha cast.
-    // The current float-alpha slow reference instead accumulates in float
-    // (#15764); #15765 supplies the separate integer-reduction fix.
+    // The slow reference also reduces in integers, interpreting its 32-bit
+    // result as signed Int32 before converting once to TypeAlpha (#15765).
+    // The oracle rejects sums outside Int32 rather than validating wrapping.
     //
     // An int32_t epilogue is computed in int64_t and every intermediate is
     // checked against the int32_t range: the reference computes it in int32_t,
