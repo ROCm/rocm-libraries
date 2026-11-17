@@ -67,10 +67,9 @@ from math import ceil, log2, gcd
 # paired dwordx4 stores. This changes the cross-lane assembly AND the per-lane store
 # row address. Orphan/scalar stores use a separate, already LDS-free path.
 def storeFoldEnabled(kernel) -> bool:
-    """Master switch for the DPP store fold: two paired bf16 stores that are the two halves
-    of the same 128B lines are blended so each store writes full lines."""
-    import os
-    return bool(os.environ.get("DPP_STORE_FOLD"))
+    """The DPPStoreFold solution parameter: two paired 16-bit stores that are the two
+    halves of the same 128B lines are blended so each store writes full lines."""
+    return bool(kernel.get("DPPStoreFold", False))
 
 
 def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
