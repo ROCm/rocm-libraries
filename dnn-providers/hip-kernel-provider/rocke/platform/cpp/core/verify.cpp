@@ -262,38 +262,6 @@ static void
 
 /* ---- per-opcode contract sets ---- */
 
-static int is_binary_same_type(rocke_opcode_t o)
-{
-    switch(o)
-    {
-    case ROCKE_OP_ARITH_ADD:
-    case ROCKE_OP_ARITH_SUB:
-    case ROCKE_OP_ARITH_MUL:
-    case ROCKE_OP_ARITH_DIV:
-    case ROCKE_OP_ARITH_MOD:
-    case ROCKE_OP_ARITH_FADD:
-    case ROCKE_OP_ARITH_FSUB:
-    case ROCKE_OP_ARITH_FMUL:
-    case ROCKE_OP_ARITH_FDIV:
-    case ROCKE_OP_ARITH_FMAX:
-    case ROCKE_OP_ARITH_FMIN:
-    case ROCKE_OP_ARITH_AND:
-    case ROCKE_OP_ARITH_OR:
-    case ROCKE_OP_ARITH_SMAX:
-    case ROCKE_OP_ARITH_SMIN:
-    case ROCKE_OP_ARITH_XOR:
-    case ROCKE_OP_ARITH_SHL:
-    case ROCKE_OP_ARITH_LSHR:
-    case ROCKE_OP_VECTOR_AND:
-    case ROCKE_OP_VECTOR_OR:
-    case ROCKE_OP_VECTOR_SHL:
-    case ROCKE_OP_VECTOR_LSHR:
-        return 1;
-    default:
-        return 0;
-    }
-}
-
 static int is_unary_same_type(rocke_opcode_t o)
 {
     switch(o)
@@ -428,7 +396,7 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         v_errf(v, op, "%s", tf32_error);
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
-    if(is_binary_same_type(o))
+    if(rocke_i_is_same_type_binary_op(o))
     {
         if(op->num_operands != 2 || op->num_results != 1)
         {
@@ -441,11 +409,11 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
             return;
         }
         const rocke_type_t* a = op->operands[0]->type;
-        const rocke_type_t* b = op->operands[1]->type;
         const rocke_type_t* r = op->results[0]->type;
-        if(!rocke_type_eq(a, b))
+        char operand_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
         {
-            v_errf(v, op, "%s: operand types differ (%s vs %s)", name, tn(a), tn(b));
+            v_errf(v, op, "%s", operand_error);
         }
         if(!rocke_type_eq(r, a))
         {
@@ -463,13 +431,9 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         /* LLVM's bitwise ops and shifts take integers only: a float operand
          * lowers to IR the compiler rejects. */
         char integer_buf[ROCKE_ERR_MSG_CAP];
-        const char* integer_error
-            = rocke_i_is_integer_element_op(o)
-                  ? rocke_i_integer_element_error(name, a, integer_buf, sizeof integer_buf)
-                  : NULL;
-        if(integer_error)
+        if(rocke_i_integer_element_op_error(op, integer_buf, sizeof integer_buf))
         {
-            v_errf(v, op, "%s", integer_error);
+            v_errf(v, op, "%s", integer_buf);
         }
     }
     else if(is_unary_same_type(o))
@@ -493,6 +457,11 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    tn(op->results[0]->type),
                    tn(op->operands[0]->type));
         }
+        char integer_buf[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_integer_element_op_error(op, integer_buf, sizeof integer_buf))
+        {
+            v_errf(v, op, "%s", integer_buf);
+        }
         if(o == ROCKE_OP_MATH_TANH && strcmp(tn(op->operands[0]->type), "f32") != 0)
         {
             v_errf(v, op, "math.tanh requires f32 operand, got %s", tn(op->operands[0]->type));
@@ -507,18 +476,15 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         }
         const rocke_type_t* a = op->operands[0]->type;
         const rocke_type_t* b = op->operands[1]->type;
-        if(!rocke_type_eq(a, b))
-        {
-            v_errf(v, op, "%s: comparison operand types differ (%s vs %s)", name, tn(a), tn(b));
-        }
         if(strcmp(tn(op->results[0]->type), "i1") != 0)
         {
             v_errf(v, op, "%s: result must be i1, got %s", name, tn(op->results[0]->type));
         }
         char cmp_buf[ROCKE_ERR_MSG_CAP];
         const rocke_status_t cmp_status
-            = o == ROCKE_OP_ARITH_CMP ? rocke_i_cmp_error(&op->attrs, a, cmp_buf, sizeof cmp_buf)
-                                      : rocke_i_fcmp_error(&op->attrs, a, cmp_buf, sizeof cmp_buf);
+            = o == ROCKE_OP_ARITH_CMP
+                  ? rocke_i_cmp_error(&op->attrs, a, b, cmp_buf, sizeof cmp_buf)
+                  : rocke_i_fcmp_error(&op->attrs, a, b, cmp_buf, sizeof cmp_buf);
         if(cmp_status != ROCKE_OK)
         {
             v_errf(v, op, "%s", cmp_buf);
@@ -569,10 +535,15 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     }
     else if(o == ROCKE_OP_VECTOR_CMP)
     {
+        if(op->num_operands != 2 || op->num_results != 1)
+        {
+            v_errf(v, op, "%s: expected 2 operands / 1 result", name);
+            return;
+        }
         char cmp_buf[ROCKE_ERR_MSG_CAP];
-        if(op->num_operands > 0
-           && rocke_i_vector_cmp_error(&op->attrs, op->operands[0]->type, cmp_buf, sizeof cmp_buf)
-                  != ROCKE_OK)
+        if(rocke_i_vector_cmp_error(
+               &op->attrs, op->operands[0]->type, op->operands[1]->type, cmp_buf, sizeof cmp_buf)
+           != ROCKE_OK)
         {
             v_errf(v, op, "%s", cmp_buf);
         }

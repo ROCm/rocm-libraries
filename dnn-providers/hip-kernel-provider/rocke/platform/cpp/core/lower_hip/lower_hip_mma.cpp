@@ -1662,14 +1662,14 @@ static rocke_status_t rocke_h_op_vector_max(rocke_h_lowerer_t* lw, const rocke_o
 static rocke_status_t rocke_h_op_vector_cmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
     char cmp_buf[ROCKE_ERR_MSG_CAP];
     const rocke_status_t cmp_status
-        = rocke_i_vector_cmp_error(&op->attrs, a->type, cmp_buf, sizeof cmp_buf);
+        = rocke_i_vector_cmp_error(&op->attrs, a->type, b->type, cmp_buf, sizeof cmp_buf);
     if(cmp_status != ROCKE_OK)
     {
         return rocke_h_fail(lw, cmp_status, "%s", cmp_buf);
     }
-    const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
     const char* res_t = rocke_h_type_to_hip(lw, r->type);
     const char* nice = rocke_h_name(lw, r);

@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 from rocke.core.ir import (
+    F16,
     F32,
     I1,
     I8,
@@ -253,78 +254,103 @@ _INTEGER_FCMP_ERROR = (
 _FLOAT_VECTOR_CMP_ERROR = (
     "vector.cmp failed - element type='{}', expected an integer or i1 type"
 )
+# A compare whose second operand has another type than its first; formatted
+# with the second operand's type, then the first's.
+_MIXED_OPERANDS_ERROR = (
+    "{op} failed - second operand type='{{}}', expected the first operand's "
+    "type '{{}}'"
+)
+_MIXED_CMP_ERROR = _MIXED_OPERANDS_ERROR.format(op="arith.cmp")
+_MIXED_FCMP_ERROR = _MIXED_OPERANDS_ERROR.format(op="arith.fcmp")
+_MIXED_VECTOR_CMP_ERROR = _MIXED_OPERANDS_ERROR.format(op="vector.cmp")
 # A compare's pred attr that is absent, as serialized IR can leave it.
 _ABSENT = object()
 
-# (op, pred attr, operand type, refusal type, the refusal): the IR rule's type
-# and text. An ``arith.cmp`` pred is required and checked first (``ult``
-# takes i32 or i64 operands), then its operands must be integers or i1 (a
-# TypeError); ``vector.cmp`` takes the signed orderings and equality only, on
-# integer or i1 lanes; ``arith.fcmp`` requires its ordered predicates or
-# ``ord`` / ``uno``, on f16, bf16, f32 or f64 operands.
+# (op, pred attr, the two operand types, refusal type, the refusal): the IR
+# rule's type and text. An ``arith.cmp`` pred is required and checked first
+# (``ult`` takes i32 or i64 operands), then its operands must have one type,
+# an integer or i1 (a TypeError); ``vector.cmp`` takes the signed orderings and
+# equality only, on two vectors of one type with integer or i1 lanes;
+# ``arith.fcmp`` requires its ordered predicates or ``ord`` / ``uno``, on two
+# operands of one type, f16, bf16, f32 or f64.
 _REFUSED_COMPARES = [
     (
         "arith.cmp",
         "ult",
-        F32,
+        (F32, F32),
         ValueError,
         "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32",
     ),
     (
         "arith.cmp",
         "ult",
-        I8,
+        (I8, I8),
         ValueError,
         "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8",
     ),
-    ("arith.cmp", "ugt", I32, ValueError, "arith.cmp: unknown pred 'ugt'"),
-    ("arith.cmp", 1, I32, ValueError, "arith.cmp: pred must be a string"),
+    ("arith.cmp", "ugt", (I32, I32), ValueError, "arith.cmp: unknown pred 'ugt'"),
+    ("arith.cmp", 1, (I32, I32), ValueError, "arith.cmp: pred must be a string"),
     (
         "arith.cmp",
         _ABSENT,
-        I32,
+        (I32, I32),
         ValueError,
         "op 'arith.cmp' missing required attr 'pred'",
     ),
-    ("arith.cmp", "lt", F32, TypeError, _FLOAT_CMP_ERROR.format("f32")),
+    ("arith.cmp", "lt", (I32, I64), TypeError, _MIXED_CMP_ERROR.format("i64", "i32")),
+    ("arith.cmp", "lt", (F32, F32), TypeError, _FLOAT_CMP_ERROR.format("f32")),
     (
         "arith.cmp",
         "eq",
-        PtrType(I32, "global"),
+        (PtrType(I32, "global"), PtrType(I32, "global")),
         TypeError,
         _FLOAT_CMP_ERROR.format("ptr<i32,global>"),
     ),
     (
         "vector.cmp",
         "ult",
-        VectorType(I32, 2),
+        (VectorType(I32, 2), VectorType(I32, 2)),
         ValueError,
         "vector.cmp: unknown pred 'ult'",
     ),
     (
         "vector.cmp",
         1,
-        VectorType(I32, 2),
+        (VectorType(I32, 2), VectorType(I32, 2)),
         ValueError,
         "vector.cmp: pred must be a string",
     ),
     (
         "vector.cmp",
         "lt",
-        VectorType(F32, 2),
+        (VectorType(I32, 2), VectorType(I16, 2)),
+        TypeError,
+        _MIXED_VECTOR_CMP_ERROR.format("vec<i16x2>", "vec<i32x2>"),
+    ),
+    (
+        "vector.cmp",
+        "lt",
+        (VectorType(F32, 2), VectorType(F32, 2)),
         TypeError,
         _FLOAT_VECTOR_CMP_ERROR.format("f32"),
     ),
-    ("arith.fcmp", "lt", F32, ValueError, "arith.fcmp: unknown pred 'lt'"),
-    ("arith.fcmp", 1, F32, ValueError, "arith.fcmp: pred must be a string"),
+    ("arith.fcmp", "lt", (F32, F32), ValueError, "arith.fcmp: unknown pred 'lt'"),
+    ("arith.fcmp", 1, (F32, F32), ValueError, "arith.fcmp: pred must be a string"),
     (
         "arith.fcmp",
         _ABSENT,
-        F32,
+        (F32, F32),
         ValueError,
         "op 'arith.fcmp' missing required attr 'pred'",
     ),
-    ("arith.fcmp", "olt", I32, TypeError, _INTEGER_FCMP_ERROR.format("i32")),
+    (
+        "arith.fcmp",
+        "olt",
+        (F32, F16),
+        TypeError,
+        _MIXED_FCMP_ERROR.format("f16", "f32"),
+    ),
+    ("arith.fcmp", "olt", (I32, I32), TypeError, _INTEGER_FCMP_ERROR.format("i32")),
 ]
 _REFUSED_COMPARE_IDS = [
     "cmp_ult_f32",
@@ -332,61 +358,67 @@ _REFUSED_COMPARE_IDS = [
     "cmp_unknown",
     "cmp_not_a_string",
     "cmp_absent",
+    "cmp_lt_i32_i64",
     "cmp_lt_f32",
     "cmp_eq_ptr",
     "vector_cmp_ult",
     "vector_cmp_not_a_string",
+    "vector_cmp_i32_i16",
     "vector_cmp_f32",
     "fcmp_unknown",
     "fcmp_not_a_string",
     "fcmp_absent",
+    "fcmp_f32_f16",
     "fcmp_i32",
 ]
 
 
-def _compare_kernel(op_name: str, pred: object, operand_type: Type) -> KernelDef:
-    """A kernel holding one raw ``op_name`` compare of a parameter with itself,
-    whose pred attr is ``pred`` (none when it is ``_ABSENT``)."""
+def _compare_kernel(
+    op_name: str, pred: object, operand_types: tuple[Type, Type]
+) -> KernelDef:
+    """A kernel holding one raw ``op_name`` compare of two parameters of
+    ``operand_types``, whose pred attr is ``pred`` (none when it is
+    ``_ABSENT``)."""
     b = IRBuilder("refused_compare")
-    a = b.param("a", operand_type)
+    lhs_type, rhs_type = operand_types
+    lhs = b.param("lhs", lhs_type)
+    rhs = b.param("rhs", rhs_type)
     result_type = (
-        VectorType(I1, operand_type.count)
-        if isinstance(operand_type, VectorType)
-        else I1
+        VectorType(I1, lhs_type.count) if isinstance(lhs_type, VectorType) else I1
     )
     attrs = {} if pred is _ABSENT else {"pred": pred}
-    b._op(op_name, [a, a], [result_type], attrs=attrs)
+    b._op(op_name, [lhs, rhs], [result_type], attrs=attrs)
     b.ret()
     return b.kernel
 
 
 @pytest.mark.parametrize(
-    "op_name,pred,operand_type,error_type,message",
+    "op_name,pred,operand_types,error_type,message",
     _REFUSED_COMPARES,
     ids=_REFUSED_COMPARE_IDS,
 )
 def test_verifier_refuses_a_compare_the_ir_rule_refuses(
     op_name: str,
     pred: object,
-    operand_type: Type,
+    operand_types: tuple[Type, Type],
     error_type: type[Exception],
     message: str,
 ) -> None:
     """The verifier reports the IR rule's text, and nothing else, for each
     case. The C++ verifier reports the same texts (the ctest)."""
-    assert _errors(_compare_kernel(op_name, pred, operand_type)) == [message]
+    assert _errors(_compare_kernel(op_name, pred, operand_types)) == [message]
 
 
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
-    "op_name,pred,operand_type,error_type,message",
+    "op_name,pred,operand_types,error_type,message",
     _REFUSED_COMPARES,
     ids=_REFUSED_COMPARE_IDS,
 )
 def test_both_lowerings_refuse_a_compare_the_ir_rule_refuses(
     op_name: str,
     pred: object,
-    operand_type: Type,
+    operand_types: tuple[Type, Type],
     error_type: type[Exception],
     message: str,
     engine: str,
@@ -396,11 +428,12 @@ def test_both_lowerings_refuse_a_compare_the_ir_rule_refuses(
     (``ValueError`` / ``ROCKE_ERR_VALUE`` for a pred, ``TypeError`` /
     ``ROCKE_ERR_TYPE`` for an operand) in the verifier's words: a float or
     pointer ``arith.cmp`` or float ``vector.cmp`` is not lowered to an integer
-    compare, an integer ``arith.fcmp`` not to a float one, and an absent,
+    compare, an integer ``arith.fcmp`` not to a float one, operands of two
+    types not at the first one's type, and an absent,
     unknown or non-string pred is neither read as a default nor passed
     through. The ctest repeats these cases for the C++ engine without the
     binding."""
-    kernel = _compare_kernel(op_name, pred, operand_type)
+    kernel = _compare_kernel(op_name, pred, operand_types)
     for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
         assert_rejects(
             kernel, "gfx942", engine=engine, error_type=error_type, message=message
@@ -462,6 +495,48 @@ def test_compare_builders_refuse_what_the_ir_rule_refuses(
     assert type(error.value) is error_type
     assert str(error.value) == message
     assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize(
+    "lhs_type,rhs_type,build,message",
+    [
+        (
+            I32,
+            I64,
+            lambda b, lhs, rhs: b.cmp_lt(lhs, rhs),
+            _MIXED_CMP_ERROR.format("i64", "i32"),
+        ),
+        (
+            F32,
+            F16,
+            lambda b, lhs, rhs: b.fcmp("olt", lhs, rhs),
+            _MIXED_FCMP_ERROR.format("f16", "f32"),
+        ),
+        (
+            VectorType(I32, 2),
+            VectorType(I32, 4),
+            lambda b, lhs, rhs: b.vector_cmp("lt", lhs, rhs),
+            _MIXED_VECTOR_CMP_ERROR.format("vec<i32x4>", "vec<i32x2>"),
+        ),
+    ],
+    ids=["cmp_lt_i32_i64", "fcmp_f32_f16", "vector_cmp_2_4_lanes"],
+)
+def test_compare_builders_refuse_operands_of_different_types(
+    lhs_type: Type,
+    rhs_type: Type,
+    build: Callable[[IRBuilder, Value, Value], Value],
+    message: str,
+) -> None:
+    """A compare lowers both operands at the first one's type, so the builders
+    refuse a second operand of another type with the IR rule's ``TypeError``
+    and text, and add no op; the ctest checks the C API builders."""
+    b = IRBuilder("mixed_compare_builder")
+    lhs = b.param("lhs", lhs_type)
+    rhs = b.param("rhs", rhs_type)
+    with pytest.raises(TypeError) as error:
+        build(b, lhs, rhs)
+    assert str(error.value) == message
+    assert b.kernel.body.ops == []
 
 
 @pytest.mark.parametrize("int_type", [I1, I8, U8, I16, I32, I64], ids=lambda t: t.name)
@@ -608,6 +683,30 @@ def test_a_compare_the_ir_rule_refuses_is_not_folded(pred):
         op for op in b.kernel.body.ops if op.name == "memref.global_store_typed"
     ]
     assert store.operands[2].op.name == "arith.cmp"
+
+
+@pytest.mark.parametrize(
+    "op_name,result_type,attrs",
+    [("arith.cmp", I1, {"pred": "lt"}), ("arith.add", I32, {})],
+    ids=["cmp", "add"],
+)
+def test_a_binary_op_of_different_types_is_not_folded(op_name, result_type, attrs):
+    """An op of an i32 and an i64 constant breaks the operand rule, so the
+    folder leaves it for the verifier and the lowerings to refuse instead of
+    folding it into a constant that hides it. The ctest checks the C++ folder
+    with the same cases."""
+    b = IRBuilder("fold_mixed_operand_types")
+    out = b.param("out", PtrType(result_type, "global"))
+    value = b._op(
+        op_name, [b.const_i32(1), b.const_i64(2)], [result_type], attrs=attrs
+    ).result
+    b.store(value, out)
+    b.ret()
+    optimize_kernel(b.kernel)
+    (store,) = [
+        op for op in b.kernel.body.ops if op.name == "memref.global_store_typed"
+    ]
+    assert store.operands[2].op.name == op_name
 
 
 def _store_one(name, out_type, compute):

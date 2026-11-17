@@ -116,8 +116,12 @@ rocke_op_t* rocke_i_op0(rocke_ir_builder_t* b,
                         int num_operands,
                         const rocke_attr_map_t* attrs);
 
-/* Convenience: build a same-result-type binary op `(a, b) -> a->type`, the
- * dominant arith/vector pattern. Validates a/b non-NULL on a live builder. */
+/* Build one same-type binary op (rocke_i_is_same_type_binary_op) `(a, b) ->
+ * a->type`, the dominant arith pattern (Python IRBuilder._binary_op). Validates
+ * a/b non-NULL on a live builder, then throws ckc::TypeError for a bitwise op
+ * or shift whose operands are not integers or i1
+ * (rocke_i_integer_element_error) and for operands of different types
+ * (rocke_i_operand_types_error), checked in that order. */
 rocke_value_t* rocke_i_binop(rocke_ir_builder_t* b,
                              rocke_opcode_t opcode,
                              rocke_value_t* a,
@@ -638,34 +642,78 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap);
 
+/* Python core/ir.py::_untyped_value_message: whether value `index` of `what`
+ * ("scf.for result", say) has a missing `type` (NULL, or with no name); when it
+ * does, its refusal is written into `buf`. The builders and parsers of both
+ * engines type every value, but a raw value (rocke_i_value_named given no type)
+ * or the result of a raw op (rocke_i_op given no result types) has none, so the
+ * loop rule, the if/else rule and the operand rule check each value with this
+ * before they read its type's name, and report it as ROCKE_ERR_TYPE (Python's
+ * TypeError). */
+bool rocke_i_untyped_value_message(const rocke_type_t* type,
+                                   const char* what,
+                                   int index,
+                                   const char* expected,
+                                   char* buf,
+                                   size_t cap);
+
+/* Mirrors ir._operand_types_error: the error for an `op_name` op whose second
+ * operand, of type `rhs_type`, does not have its first operand's type,
+ * `lhs_type`, or NULL when they agree; an operand with no type is refused
+ * first (rocke_i_untyped_value_message). The binary ops and the compares lower
+ * both operands at the first one's type, so the callers refuse it as
+ * ROCKE_ERR_TYPE. A returned error is written to `buf`. */
+const char* rocke_i_operand_types_error(const char* op_name,
+                                        const rocke_type_t* lhs_type,
+                                        const rocke_type_t* rhs_type,
+                                        char* buf,
+                                        size_t cap);
+
+/* Mirrors ir._SAME_TYPE_BINARY_OPS: whether `opcode` is a binary op whose two
+ * operands and result have one type. */
+bool rocke_i_is_same_type_binary_op(rocke_opcode_t opcode);
+
+/* Mirrors ir._operand_types_op_error: rocke_i_operand_types_error for a built
+ * op that rocke_i_is_same_type_binary_op admits, with two operands, or NULL.
+ * The verifier reports it and every lowering refuses it as ROCKE_ERR_TYPE
+ * before it lowers an op, for IR that did not come through the builders. */
+const char* rocke_i_operand_types_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* Mirrors ir._int_cmp_error, which returns the exception whose status this
  * returns: ROCKE_OK, or the refusal's status with its text written into `buf`.
- * rocke_i_cmp_pred_error's refusal is ROCKE_ERR_VALUE; operands that are not
- * integers or i1 are ROCKE_ERR_TYPE. */
+ * rocke_i_cmp_pred_error's refusal is ROCKE_ERR_VALUE; operands of different
+ * types (rocke_i_operand_types_error), or that are not integers or i1, are
+ * ROCKE_ERR_TYPE. */
 rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
-                                 const rocke_type_t* operand_type,
+                                 const rocke_type_t* lhs_type,
+                                 const rocke_type_t* rhs_type,
                                  char* buf,
                                  size_t cap);
 
 /* Mirrors ir._vector_cmp_error, as rocke_i_cmp_error: a "pred" attr that is
- * present but not one of lt, le, gt, ge, eq, ne is ROCKE_ERR_VALUE; lanes that
- * are not integers or i1 (rocke_i_integer_element_error) are ROCKE_ERR_TYPE. */
+ * present but not one of lt, le, gt, ge, eq, ne is ROCKE_ERR_VALUE; operands
+ * of different types (rocke_i_operand_types_error), or whose lanes are not
+ * integers or i1 (rocke_i_integer_element_error), are ROCKE_ERR_TYPE. */
 rocke_status_t rocke_i_vector_cmp_error(const rocke_attr_map_t* attrs,
-                                        const rocke_type_t* operand_type,
+                                        const rocke_type_t* lhs_type,
+                                        const rocke_type_t* rhs_type,
                                         char* buf,
                                         size_t cap);
 
 /* Mirrors ir._fcmp_error, as rocke_i_cmp_error: a "pred" attr that is absent or
- * not one of ir._FCMP_PREDICATES is ROCKE_ERR_VALUE; operands that are not
- * f16, bf16, f32 or f64 are ROCKE_ERR_TYPE. */
+ * not one of ir._FCMP_PREDICATES is ROCKE_ERR_VALUE; operands of different
+ * types (rocke_i_operand_types_error), or that are not f16, bf16, f32 or f64,
+ * are ROCKE_ERR_TYPE. */
 rocke_status_t rocke_i_fcmp_error(const rocke_attr_map_t* attrs,
-                                  const rocke_type_t* operand_type,
+                                  const rocke_type_t* lhs_type,
+                                  const rocke_type_t* rhs_type,
                                   char* buf,
                                   size_t cap);
 
 /* Mirrors ir._INTEGER_ELEMENT_OPS: whether `opcode` is a bitwise op or shift
- * (arith.and / or / xor / shl / lshr, vector.and / or / shl / lshr), which LLVM
- * defines on integers only. */
+ * (arith.and / or / xor / not / shl / lshr, vector.and / or / shl / lshr),
+ * which LLVM defines on integers only (arith.not lowers to an xor with all
+ * ones). */
 bool rocke_i_is_integer_element_op(rocke_opcode_t opcode);
 
 /* Mirrors ir._integer_element_error: the error for `op_name`, one of the ops
@@ -678,11 +726,11 @@ const char* rocke_i_integer_element_error(const char* op_name,
                                           char* buf,
                                           size_t cap);
 
-/* Mirrors ir._refuse_non_integer_op: rocke_i_integer_element_error for a built
- * op that is one of the ops rocke_i_is_integer_element_op admits, on its first
- * operand, or NULL. Every lowering checks it before it lowers an op, for IR
- * that did not come through the builders; the callers refuse it as
- * ROCKE_ERR_TYPE. */
+/* Mirrors ir._integer_element_op_error: rocke_i_integer_element_error for a
+ * built op that is one of the ops rocke_i_is_integer_element_op admits, on its
+ * first operand, or NULL. The verifier reports it and every lowering refuses
+ * it as ROCKE_ERR_TYPE before it lowers an op, for IR that did not come
+ * through the builders. */
 const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Mirrors ir._refuse_non_integer: throw ckc::TypeError with

@@ -7,18 +7,19 @@
  *
  * Run with no argument it checks, through the C API: the LLVM and HIP text of
  * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
- * through the unsigned type of the operand's own width) and its refusal of a
- * non-integer operand, the builders' and the verifier's integer-element rule
- * for the bitwise ops and shifts (an integer or i1 element) and lshr's shift
- * amount of the value's type (texts identical to the Python engine's), the
- * verifier's, LLVM's and HIP's refusals of a compare the IR rule refuses (an
- * arith.cmp pred or operand type, a vector.cmp or arith.fcmp pred), the
- * builders' operand-type and compare refusals, the verifier's acceptance of
- * the new attrs and its refusals of bad marker attrs (texts identical to the
- * Python verifier), and the constant folder (unsigned compare at the operand
- * width; constants read at their width; a marker on a constant folds to the
- * constant; signed div / mod rounded toward zero, undefined ones left
- * unfolded), and the verifier's i32 / i64 rule for the nuw and ult forms.
+ * through the unsigned type of the operand's own width), the builders', the
+ * verifier's and the lowerings' integer-element rule for the bitwise ops,
+ * arith.not and the shifts (an integer or i1 element) and operand rule for the
+ * same-type binary ops (two operands of one type; texts identical to the
+ * Python engine's), the verifier's, LLVM's and HIP's refusals of a compare the
+ * IR rule refuses (a pred, operands of two types, or an operand type the
+ * compare does not take), the builders' operand-type and compare refusals,
+ * the verifier's acceptance of the new attrs and its refusals of bad marker
+ * attrs (texts identical to the Python verifier), and the constant folder
+ * (unsigned compare at the operand width; constants read at their width; a
+ * marker on a constant folds to the constant; signed div / mod rounded toward
+ * zero, undefined ones and ops of two operand types left unfolded), and the
+ * verifier's i32 / i64 rule for the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -185,18 +186,20 @@ void case_hip_text()
     rocke_ir_builder_free(&b);
 }
 
-/* One `opcode` (a bitwise op or shift) of a `value_type` parameter and an
- * `amount_type` parameter, built directly: the builders refuse a non-integer
- * operand (and a mismatched lshr shift amount), and hand-assembled or
- * deserialized IR can still reach the verifier and the lowerings. */
-void build_binary_past_the_builder(rocke_ir_builder_t* b,
-                                   rocke_opcode_t opcode,
-                                   const rocke_type_t* value_type,
-                                   const rocke_type_t* amount_type)
+/* One `opcode` of a `value_type` parameter and, unless `amount_type` is NULL
+ * (a unary op), an `amount_type` parameter, of `value_type`, built directly:
+ * the builders refuse a non-integer operand of a bitwise op or shift, and
+ * operands of different types, and hand-assembled or deserialized IR can still
+ * reach the verifier and the lowerings. */
+void build_op_past_the_builder(rocke_ir_builder_t* b,
+                               rocke_opcode_t opcode,
+                               const rocke_type_t* value_type,
+                               const rocke_type_t* amount_type)
 {
-    rocke_value_t* operands[2] = {rocke_b_param(b, "value", value_type, nullptr),
-                                  rocke_b_param(b, "amount", amount_type, nullptr)};
-    rocke_i_op1(b, opcode, operands, 2, value_type, nullptr, "binary");
+    rocke_value_t* operands[2] = {rocke_b_param(b, "value", value_type, nullptr), nullptr};
+    if(amount_type)
+        operands[1] = rocke_b_param(b, "amount", amount_type, nullptr);
+    rocke_i_op1(b, opcode, operands, amount_type ? 2 : 1, value_type, nullptr, "op");
     rocke_b_ret(b);
 }
 
@@ -256,34 +259,62 @@ void expect_builder_type_error(Build build, const std::string& want)
     rocke_ir_builder_free(&b);
 }
 
-/* A two-operand builder entry point of the C API. */
+/* A two-operand and a one-operand builder entry point of the C API. */
 using binary_builder_t = rocke_value_t* (*)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*);
+using unary_builder_t = rocke_value_t* (*)(rocke_ir_builder_t*, rocke_value_t*);
 
 /* Every op whose element type must be an integer or i1, with the builder entry
- * point that makes it; mirrors test_lshr.py's _INTEGER_ELEMENT_BUILDERS. */
+ * point that makes it (binary, or unary for arith.not); mirrors
+ * test_lshr.py's _INTEGER_ELEMENT_BUILDERS. */
 struct IntegerElementOp
 {
     rocke_opcode_t opcode;
-    binary_builder_t build;
+    binary_builder_t build_binary;
+    unary_builder_t build_unary;
     bool vector;
 };
 
 const IntegerElementOp k_integer_element_ops[] = {
-    {ROCKE_OP_ARITH_AND, rocke_b_land, false},
-    {ROCKE_OP_ARITH_OR, rocke_b_lor, false},
-    {ROCKE_OP_ARITH_XOR, rocke_b_xor, false},
-    {ROCKE_OP_ARITH_SHL, rocke_b_shl, false},
-    {ROCKE_OP_ARITH_LSHR, rocke_b_lshr, false},
-    {ROCKE_OP_VECTOR_AND, rocke_b_vector_and, true},
-    {ROCKE_OP_VECTOR_OR, rocke_b_vector_or, true},
-    {ROCKE_OP_VECTOR_SHL, rocke_b_vector_shl, true},
-    {ROCKE_OP_VECTOR_LSHR, rocke_b_vector_lshr, true},
+    {ROCKE_OP_ARITH_AND, rocke_b_land, nullptr, false},
+    {ROCKE_OP_ARITH_OR, rocke_b_lor, nullptr, false},
+    {ROCKE_OP_ARITH_XOR, rocke_b_xor, nullptr, false},
+    {ROCKE_OP_ARITH_NOT, nullptr, rocke_b_lnot, false},
+    {ROCKE_OP_ARITH_SHL, rocke_b_shl, nullptr, false},
+    {ROCKE_OP_ARITH_LSHR, rocke_b_lshr, nullptr, false},
+    {ROCKE_OP_VECTOR_AND, rocke_b_vector_and, nullptr, true},
+    {ROCKE_OP_VECTOR_OR, rocke_b_vector_or, nullptr, true},
+    {ROCKE_OP_VECTOR_SHL, rocke_b_vector_shl, nullptr, true},
+    {ROCKE_OP_VECTOR_LSHR, rocke_b_vector_lshr, nullptr, true},
 };
 
-/* LLVM's bitwise ops and shifts take integers only: the builders refuse an f32
- * operand and accept an i1 one, scalar or lane by lane. lshr also takes two
- * integers of one width, so its builder refuses a shift amount of another
- * type. */
+/* `op` built by its builder entry point on `value` (as both operands of a
+ * binary op). */
+rocke_value_t* build_integer_element_op(rocke_ir_builder_t* b,
+                                        const IntegerElementOp& op,
+                                        rocke_value_t* value)
+{
+    return op.build_binary ? op.build_binary(b, value, value) : op.build_unary(b, value);
+}
+
+/* `op` of `element` (two lanes of it for a vector op), and of a second operand
+ * of that type for a binary op, built past the builders. */
+void build_integer_element_op_past_the_builder(rocke_ir_builder_t* b,
+                                               const IntegerElementOp& op,
+                                               const rocke_type_t* element)
+{
+    const rocke_type_t* type = op.vector ? rocke_vector_type(b, element, 2) : element;
+    build_op_past_the_builder(b, op.opcode, type, op.build_binary ? type : nullptr);
+}
+
+std::string integer_element_message(rocke_opcode_t opcode)
+{
+    return std::string(rocke_opcode_name(opcode))
+           + " failed - element type='f32', expected an integer or i1 type";
+}
+
+/* LLVM's bitwise ops and shifts take integers only (arith.not lowers to an
+ * xor): the builders refuse an f32 operand and accept an i1 one, scalar or
+ * lane by lane. */
 void case_integer_element_builder_rule()
 {
     for(const IntegerElementOp& op : k_integer_element_ops)
@@ -292,17 +323,15 @@ void case_integer_element_builder_rule()
             [&](rocke_ir_builder_t* b) {
                 const rocke_type_t* type
                     = op.vector ? rocke_vector_type(b, rocke_f32(), 2) : rocke_f32();
-                rocke_value_t* a = rocke_b_param(b, "a", type, nullptr);
-                op.build(b, a, a);
+                build_integer_element_op(b, op, rocke_b_param(b, "a", type, nullptr));
             },
-            std::string(rocke_opcode_name(op.opcode))
-                + " failed - element type='f32', expected an integer or i1 type");
+            integer_element_message(op.opcode));
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_i1");
         const rocke_type_t* flag_type
             = op.vector ? rocke_vector_type(&b, rocke_i1(), 2) : rocke_i1();
         rocke_value_t* flag = rocke_b_param(&b, "flag", flag_type, nullptr);
-        EXPECT(op.build(&b, flag, flag) != nullptr,
+        EXPECT(build_integer_element_op(&b, op, flag) != nullptr,
                std::string("an i1 ") + rocke_opcode_name(op.opcode) + " is built");
         rocke_b_ret(&b);
         const std::string errors = verify_errors(&b);
@@ -311,89 +340,46 @@ void case_integer_element_builder_rule()
                    + errors);
         rocke_ir_builder_free(&b);
     }
-    expect_builder_type_error(
-        [](rocke_ir_builder_t* b) {
-            rocke_value_t* a = rocke_b_param(b, "a", rocke_i64(), nullptr);
-            rocke_value_t* s = rocke_b_param(b, "s", rocke_i32(), nullptr);
-            rocke_b_lshr(b, a, s);
-        },
-        "arith.lshr failed - shift amount type='i32', expected the shifted value's type 'i64'");
-}
-
-/* The verifier errors for one `opcode` of a `value_type` and an `amount_type`
- * operand written past the builders. */
-std::string verify_past_the_builder(rocke_opcode_t opcode,
-                                    bool vector,
-                                    const rocke_type_t* value_element,
-                                    const rocke_type_t* amount_element)
-{
-    rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_verify");
-    const rocke_type_t* value_type
-        = vector ? rocke_vector_type(&b, value_element, 2) : value_element;
-    const rocke_type_t* amount_type
-        = vector ? rocke_vector_type(&b, amount_element, 2) : amount_element;
-    build_binary_past_the_builder(&b, opcode, value_type, amount_type);
-    const std::string errors = verify_errors(&b);
-    rocke_ir_builder_free(&b);
-    return errors;
 }
 
 /* IR written past the builders still meets the rule: the verifier reports an
- * f32 bitwise op or shift, scalar or lane by lane, and operands of different
- * types, with the Python verifier's texts. */
+ * f32 bitwise op or shift, scalar or lane by lane, with the Python verifier's
+ * text. */
 void case_integer_element_verifier_rule()
 {
     for(const IntegerElementOp& op : k_integer_element_ops)
     {
-        const std::string want = std::string(rocke_opcode_name(op.opcode))
-                                 + " failed - element type='f32', expected an integer or i1 type\n";
-        const std::string errors
-            = verify_past_the_builder(op.opcode, op.vector, rocke_f32(), rocke_f32());
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_verify");
+        build_integer_element_op_past_the_builder(&b, op, rocke_f32());
+        const std::string want = integer_element_message(op.opcode) + "\n";
+        const std::string errors = verify_errors(&b);
         EXPECT(errors == want, "want '" + want + "', got '" + errors + "'");
+        rocke_ir_builder_free(&b);
     }
-    struct MismatchCase
-    {
-        rocke_opcode_t opcode;
-        bool vector;
-        const rocke_type_t* value_element;
-        const rocke_type_t* amount_element;
-        const char* want;
-    };
-    const MismatchCase cases[] = {
-        {ROCKE_OP_ARITH_LSHR,
-         false,
-         rocke_i64(),
-         rocke_i32(),
-         "arith.lshr: operand types differ (i64 vs i32)"},
-        {ROCKE_OP_VECTOR_LSHR,
-         true,
-         rocke_i32(),
-         rocke_i16(),
-         "vector.lshr: operand types differ (vec<i32x2> vs vec<i16x2>)"},
-        {ROCKE_OP_VECTOR_SHL,
-         true,
-         rocke_i32(),
-         rocke_i16(),
-         "vector.shl: operand types differ (vec<i32x2> vs vec<i16x2>)"},
-        {ROCKE_OP_VECTOR_AND,
-         true,
-         rocke_i32(),
-         rocke_i16(),
-         "vector.and: operand types differ (vec<i32x2> vs vec<i16x2>)"},
-        {ROCKE_OP_VECTOR_OR,
-         true,
-         rocke_i32(),
-         rocke_i16(),
-         "vector.or: operand types differ (vec<i32x2> vs vec<i16x2>)"},
-    };
-    for(const MismatchCase& c : cases)
-    {
-        const std::string errors
-            = verify_past_the_builder(c.opcode, c.vector, c.value_element, c.amount_element);
-        EXPECT(errors == std::string(c.want) + "\n",
-               std::string("want '") + c.want + "', got '" + errors + "'");
-    }
+}
+
+/* The status and message of b's kernel lowered to LLVM and to HIP, as
+ * "LLVM: status N 'text'" and "HIP: status N 'text'". */
+std::string lowering_refusals(rocke_ir_builder_t* b)
+{
+    std::string llvm;
+    std::string llvm_error;
+    const rocke_status_t llvm_status = lower_llvm_status(b, &llvm, &llvm_error);
+    std::string hip;
+    const rocke_status_t hip_status = lower_hip_status(b, &hip);
+    const char* hip_error = rocke_ir_builder_error(b);
+    return "LLVM: status " + std::to_string((int)llvm_status) + " '" + llvm_error
+           + "'; HIP: status " + std::to_string((int)hip_status) + " '"
+           + (hip_error ? hip_error : "") + "'";
+}
+
+/* lowering_refusals' text for both lowerings refusing with `status` and
+ * `message`. */
+std::string both_lowerings_refuse(rocke_status_t status, const std::string& message)
+{
+    const std::string refusal = "status " + std::to_string((int)status) + " '" + message + "'";
+    return "LLVM: " + refusal + "; HIP: " + refusal;
 }
 
 /* IR written past the builders reaches the lowerings without the verifier:
@@ -406,24 +392,158 @@ void case_integer_element_lowering_rule()
     {
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_lower");
-        const rocke_type_t* type = op.vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
-        build_binary_past_the_builder(&b, op.opcode, type, type);
-        const std::string want = std::string(rocke_opcode_name(op.opcode))
-                                 + " failed - element type='f32', expected an integer or i1 type";
-        std::string llvm;
-        std::string llvm_error;
-        const rocke_status_t llvm_status = lower_llvm_status(&b, &llvm, &llvm_error);
-        EXPECT(llvm_status == ROCKE_ERR_TYPE && llvm_error == want,
-               "LLVM: want '" + want + "', got status " + std::to_string((int)llvm_status) + " '"
-                   + llvm_error + "'");
-        std::string hip;
-        const rocke_status_t hip_status = lower_hip_status(&b, &hip);
-        const char* hip_error = rocke_ir_builder_error(&b);
-        EXPECT(hip_status == ROCKE_ERR_TYPE && hip_error && want == hip_error,
-               "HIP: want '" + want + "', got status " + std::to_string((int)hip_status) + " '"
-                   + (hip_error ? hip_error : "") + "'");
+        build_integer_element_op_past_the_builder(&b, op, rocke_f32());
+        const std::string want
+            = both_lowerings_refuse(ROCKE_ERR_TYPE, integer_element_message(op.opcode));
+        const std::string got = lowering_refusals(&b);
+        EXPECT(got == want, "want " + want + ", got " + got);
         rocke_ir_builder_free(&b);
     }
+}
+
+/* Every same-type binary op (rocke_i_is_same_type_binary_op), with the builder
+ * entry point that makes it and two operand types that differ; mirrors
+ * test_lshr.py's _MIXED_TYPE_OPERANDS. umax and umin have no entry point here:
+ * their builders take only two operands of one unsigned type and refuse
+ * anything else with that rule's own text. */
+struct MixedOperandsCase
+{
+    rocke_opcode_t opcode;
+    binary_builder_t build; /* nullptr: not checked through a builder */
+    const rocke_type_t* lhs_element;
+    int lhs_lanes; /* 0 for a scalar */
+    const rocke_type_t* rhs_element;
+    int rhs_lanes;
+};
+
+const rocke_type_t* lanes_of(rocke_ir_builder_t* b, const rocke_type_t* element, int lanes)
+{
+    return lanes ? rocke_vector_type(b, element, lanes) : element;
+}
+
+/* The operand rule's text for `opcode` of `lhs_type` and `rhs_type`. */
+std::string operand_types_message(rocke_opcode_t opcode,
+                                  const rocke_type_t* lhs_type,
+                                  const rocke_type_t* rhs_type)
+{
+    return std::string(rocke_opcode_name(opcode)) + " failed - second operand type='"
+           + rhs_type->name + "', expected the first operand's type '" + lhs_type->name + "'";
+}
+
+/* The builders, the verifier and the LLVM and HIP lowerings refuse a binary op
+ * whose operands differ in type, scalar or lane by lane, with ROCKE_ERR_TYPE
+ * and one text: the lowerings emit both operands at the first one's type. */
+void case_mixed_operand_types()
+{
+    const MixedOperandsCase cases[] = {
+        {ROCKE_OP_ARITH_ADD, rocke_b_add, rocke_i32(), 0, rocke_i64(), 0},
+        {ROCKE_OP_ARITH_SUB, rocke_b_sub, rocke_i64(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_MUL, rocke_b_mul, rocke_i64(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_DIV, rocke_b_div, rocke_i32(), 0, rocke_i16(), 0},
+        {ROCKE_OP_ARITH_MOD, rocke_b_mod, rocke_i32(), 0, rocke_i64(), 0},
+        {ROCKE_OP_ARITH_FADD, rocke_b_fadd, rocke_f32(), 0, rocke_f16(), 0},
+        {ROCKE_OP_ARITH_FSUB, rocke_b_fsub, rocke_f16(), 0, rocke_f32(), 0},
+        {ROCKE_OP_ARITH_FMUL, rocke_b_fmul, rocke_f32(), 0, rocke_f16(), 0},
+        {ROCKE_OP_ARITH_FDIV, rocke_b_fdiv, rocke_f32(), 0, rocke_f16(), 0},
+        {ROCKE_OP_ARITH_FMAX, rocke_b_fmax, rocke_f16(), 0, rocke_f32(), 0},
+        {ROCKE_OP_ARITH_FMIN, rocke_b_fmin, rocke_f32(), 0, rocke_f16(), 0},
+        {ROCKE_OP_ARITH_AND, rocke_b_land, rocke_i32(), 0, rocke_i16(), 0},
+        {ROCKE_OP_ARITH_OR, rocke_b_lor, rocke_i1(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_XOR, rocke_b_xor, rocke_i32(), 0, rocke_i64(), 0},
+        {ROCKE_OP_ARITH_SHL, rocke_b_shl, rocke_i32(), 0, rocke_i64(), 0},
+        {ROCKE_OP_ARITH_LSHR, rocke_b_lshr, rocke_i64(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_SMAX, rocke_b_smax, rocke_i32(), 0, rocke_i64(), 0},
+        {ROCKE_OP_ARITH_SMIN, rocke_b_smin, rocke_i64(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_UMAX, nullptr, rocke_u8(), 0, rocke_i32(), 0},
+        {ROCKE_OP_ARITH_UMIN, nullptr, rocke_u8(), 0, rocke_i32(), 0},
+        {ROCKE_OP_VECTOR_ADD, rocke_b_vector_add, rocke_i32(), 2, rocke_i32(), 4},
+        {ROCKE_OP_VECTOR_SUB, rocke_b_vector_sub, rocke_i32(), 2, rocke_i16(), 2},
+        {ROCKE_OP_VECTOR_MUL, rocke_b_vector_mul, rocke_f32(), 2, rocke_f16(), 2},
+        {ROCKE_OP_VECTOR_AND, rocke_b_vector_and, rocke_i32(), 2, rocke_i32(), 4},
+        {ROCKE_OP_VECTOR_OR, rocke_b_vector_or, rocke_i32(), 2, rocke_i16(), 2},
+        {ROCKE_OP_VECTOR_SHL, rocke_b_vector_shl, rocke_i32(), 2, rocke_i16(), 2},
+        {ROCKE_OP_VECTOR_LSHR, rocke_b_vector_lshr, rocke_i32(), 2, rocke_i16(), 2},
+        {ROCKE_OP_VECTOR_SMAX, rocke_b_vector_smax, rocke_i32(), 2, rocke_i32(), 4},
+        {ROCKE_OP_VECTOR_SMIN, rocke_b_vector_smin, rocke_i16(), 2, rocke_i32(), 2},
+        {ROCKE_OP_VECTOR_MAX, rocke_b_vector_max, rocke_f32(), 2, rocke_f32(), 4},
+    };
+    int covered = 0;
+    for(int opcode = ROCKE_OP_INVALID + 1; opcode < ROCKE_OP__COUNT; ++opcode)
+        covered += rocke_i_is_same_type_binary_op((rocke_opcode_t)opcode) ? 1 : 0;
+    EXPECT(covered == (int)(sizeof cases / sizeof cases[0]),
+           "one case per same-type binary op: " + std::to_string(covered) + " ops");
+    for(const MixedOperandsCase& c : cases)
+    {
+        EXPECT(rocke_i_is_same_type_binary_op(c.opcode),
+               std::string(rocke_opcode_name(c.opcode)) + " is a same-type binary op");
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_mixed_operands");
+        rocke_value_t* operands[2]
+            = {rocke_b_param(&b, "lhs", lanes_of(&b, c.lhs_element, c.lhs_lanes), nullptr),
+               rocke_b_param(&b, "rhs", lanes_of(&b, c.rhs_element, c.rhs_lanes), nullptr)};
+        const std::string want
+            = operand_types_message(c.opcode, operands[0]->type, operands[1]->type);
+        if(c.build)
+            expect_builder_type_error(
+                [&](rocke_ir_builder_t* builder) {
+                    c.build(
+                        builder,
+                        rocke_b_param(
+                            builder, "lhs", lanes_of(builder, c.lhs_element, c.lhs_lanes), nullptr),
+                        rocke_b_param(builder,
+                                      "rhs",
+                                      lanes_of(builder, c.rhs_element, c.rhs_lanes),
+                                      nullptr));
+                },
+                want);
+        rocke_i_op1(&b, c.opcode, operands, 2, operands[0]->type, nullptr, "mixed");
+        rocke_b_ret(&b);
+        const std::string errors = verify_errors(&b);
+        EXPECT(errors == want + "\n", "verifier: want '" + want + "', got '" + errors + "'");
+        const std::string lowered_want = both_lowerings_refuse(ROCKE_ERR_TYPE, want);
+        const std::string lowered = lowering_refusals(&b);
+        EXPECT(lowered == lowered_want, "want " + lowered_want + ", got " + lowered);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* A raw value (rocke_i_value_named given no type) has no type: the operand rule
+ * refuses it as ROCKE_ERR_TYPE naming the operand, before it reads any type's
+ * name, with the Python builder's text (test_lshr.py). */
+void case_builder_refuses_an_operand_with_no_type()
+{
+    for(int untyped_index : {0, 1})
+    {
+        expect_builder_type_error(
+            [untyped_index](rocke_ir_builder_t* b) {
+                rocke_value_t* typed = rocke_b_param(b, "typed", rocke_i32(), nullptr);
+                rocke_value_t* untyped = rocke_i_value_named(b, "%untyped", nullptr);
+                if(untyped_index == 0)
+                    rocke_b_add(b, untyped, typed);
+                else
+                    rocke_b_add(b, typed, untyped);
+            },
+            "arith.add operand " + std::to_string(untyped_index)
+                + " failed - type=None, expected an IR type");
+    }
+}
+
+/* A lane-wise op takes vectors: its builder refuses a scalar first operand by
+ * its type, ROCKE_ERR_TYPE, with the Python builder's text. */
+void case_vector_builders_refuse_a_scalar_first_operand()
+{
+    expect_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* scalar = rocke_b_param(b, "scalar", rocke_i32(), nullptr);
+            rocke_b_vector_and(b, scalar, scalar);
+        },
+        "vector.and failed - first operand type='i32', expected a vector type");
+    expect_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* scalar = rocke_b_param(b, "scalar", rocke_i32(), nullptr);
+            rocke_b_vector_cmp(b, "lt", scalar, scalar);
+        },
+        "vector.cmp failed - first operand type='i32', expected a vector type");
 }
 
 void expect_builder_refusal(bool add, const rocke_type_t* ta, const rocke_type_t* tb)
@@ -601,9 +721,13 @@ enum class CompareOperand
 {
     i8,
     i32,
+    i64,
+    f16,
     f32,
     ptr_i32,
+    vec_i16x2,
     vec_i32x2,
+    vec_i32x4,
     vec_f32x2
 };
 
@@ -615,12 +739,20 @@ const rocke_type_t* compare_operand_type(rocke_ir_builder_t* b, CompareOperand o
         return rocke_i8();
     case CompareOperand::i32:
         return rocke_i32();
+    case CompareOperand::i64:
+        return rocke_i64();
+    case CompareOperand::f16:
+        return rocke_f16();
     case CompareOperand::f32:
         return rocke_f32();
     case CompareOperand::ptr_i32:
         return rocke_ptr_type(b, rocke_i32(), "global");
+    case CompareOperand::vec_i16x2:
+        return rocke_vector_type(b, rocke_i16(), 2);
     case CompareOperand::vec_i32x2:
         return rocke_vector_type(b, rocke_i32(), 2);
+    case CompareOperand::vec_i32x4:
+        return rocke_vector_type(b, rocke_i32(), 4);
     case CompareOperand::vec_f32x2:
         return rocke_vector_type(b, rocke_f32(), 2);
     }
@@ -634,19 +766,21 @@ const char* const kAbsentPred = "(absent)";
 /* The verifier and the LLVM and HIP lowerings refuse a compare the IR rule
  * refuses, all in the rule's words, the lowerings with the rule's status: an
  * arith.cmp pred is required and checked first ("ult" takes i32 or i64
- * operands), then its operands must be integers or i1 (a float or pointer one
- * is not lowered to an integer compare: ROCKE_ERR_TYPE); vector.cmp takes the
- * signed orderings and equality only, on integer or i1 lanes; arith.fcmp
- * requires its own predicates, on f16, bf16, f32 or f64 operands; an unknown
- * or non-string pred is neither read as a default nor passed through. The
- * same cases and texts as test_unsigned_int_ops.py. */
+ * operands), then its operands must have one type, an integer or i1 (operands
+ * of two types, or a float or pointer one, are not lowered to an integer
+ * compare: ROCKE_ERR_TYPE); vector.cmp takes the signed orderings and equality
+ * only, on two vectors of one type with integer or i1 lanes; arith.fcmp
+ * requires its own predicates, on two f16, bf16, f32 or f64 operands of one
+ * type; an unknown or non-string pred is neither read as a default nor passed
+ * through. The same cases and texts as test_unsigned_int_ops.py. */
 void case_compares_refused_by_the_ir_rule()
 {
     struct CompareCase
     {
         rocke_opcode_t opcode;
         const char* pred; /* nullptr: the int attr 1; kAbsentPred: no attr */
-        CompareOperand operand;
+        CompareOperand lhs;
+        CompareOperand rhs;
         rocke_status_t status;
         const char* want;
     };
@@ -654,30 +788,42 @@ void case_compares_refused_by_the_ir_rule()
         {ROCKE_OP_ARITH_CMP,
          "ult",
          CompareOperand::f32,
+         CompareOperand::f32,
          ROCKE_ERR_VALUE,
          "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"},
         {ROCKE_OP_ARITH_CMP,
          "ult",
+         CompareOperand::i8,
          CompareOperand::i8,
          ROCKE_ERR_VALUE,
          "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"},
         {ROCKE_OP_ARITH_CMP,
          "ugt",
          CompareOperand::i32,
+         CompareOperand::i32,
          ROCKE_ERR_VALUE,
          "arith.cmp: unknown pred 'ugt'"},
         {ROCKE_OP_ARITH_CMP,
          nullptr,
+         CompareOperand::i32,
          CompareOperand::i32,
          ROCKE_ERR_VALUE,
          "arith.cmp: pred must be a string"},
         {ROCKE_OP_ARITH_CMP,
          kAbsentPred,
          CompareOperand::i32,
+         CompareOperand::i32,
          ROCKE_ERR_VALUE,
          "op 'arith.cmp' missing required attr 'pred'"},
         {ROCKE_OP_ARITH_CMP,
          "lt",
+         CompareOperand::i32,
+         CompareOperand::i64,
+         ROCKE_ERR_TYPE,
+         "arith.cmp failed - second operand type='i64', expected the first operand's type 'i32'"},
+        {ROCKE_OP_ARITH_CMP,
+         "lt",
+         CompareOperand::f32,
          CompareOperand::f32,
          ROCKE_ERR_TYPE,
          "arith.cmp failed - operand type='f32', expected an integer or i1 type (compare "
@@ -685,41 +831,63 @@ void case_compares_refused_by_the_ir_rule()
         {ROCKE_OP_ARITH_CMP,
          "eq",
          CompareOperand::ptr_i32,
+         CompareOperand::ptr_i32,
          ROCKE_ERR_TYPE,
          "arith.cmp failed - operand type='ptr<i32,global>', expected an integer or i1 type "
          "(compare floats with fcmp)"},
         {ROCKE_OP_VECTOR_CMP,
          "ult",
          CompareOperand::vec_i32x2,
+         CompareOperand::vec_i32x2,
          ROCKE_ERR_VALUE,
          "vector.cmp: unknown pred 'ult'"},
         {ROCKE_OP_VECTOR_CMP,
          nullptr,
          CompareOperand::vec_i32x2,
+         CompareOperand::vec_i32x2,
          ROCKE_ERR_VALUE,
          "vector.cmp: pred must be a string"},
         {ROCKE_OP_VECTOR_CMP,
          "lt",
+         CompareOperand::vec_i32x2,
+         CompareOperand::vec_i16x2,
+         ROCKE_ERR_TYPE,
+         "vector.cmp failed - second operand type='vec<i16x2>', expected the first operand's "
+         "type 'vec<i32x2>'"},
+        {ROCKE_OP_VECTOR_CMP,
+         "lt",
+         CompareOperand::vec_f32x2,
          CompareOperand::vec_f32x2,
          ROCKE_ERR_TYPE,
          "vector.cmp failed - element type='f32', expected an integer or i1 type"},
         {ROCKE_OP_ARITH_FCMP,
          "lt",
          CompareOperand::f32,
+         CompareOperand::f32,
          ROCKE_ERR_VALUE,
          "arith.fcmp: unknown pred 'lt'"},
         {ROCKE_OP_ARITH_FCMP,
          nullptr,
+         CompareOperand::f32,
          CompareOperand::f32,
          ROCKE_ERR_VALUE,
          "arith.fcmp: pred must be a string"},
         {ROCKE_OP_ARITH_FCMP,
          kAbsentPred,
          CompareOperand::f32,
+         CompareOperand::f32,
          ROCKE_ERR_VALUE,
          "op 'arith.fcmp' missing required attr 'pred'"},
         {ROCKE_OP_ARITH_FCMP,
          "olt",
+         CompareOperand::f32,
+         CompareOperand::f16,
+         ROCKE_ERR_TYPE,
+         "arith.fcmp failed - second operand type='f16', expected the first operand's type "
+         "'f32'"},
+        {ROCKE_OP_ARITH_FCMP,
+         "olt",
+         CompareOperand::i32,
          CompareOperand::i32,
          ROCKE_ERR_TYPE,
          "arith.fcmp failed - operand type='i32', expected f16, bf16, f32 or f64 (compare "
@@ -732,9 +900,10 @@ void case_compares_refused_by_the_ir_rule()
     {
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "refused_compare");
-        const rocke_type_t* type = compare_operand_type(&b, c.operand);
-        rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
-        rocke_value_t* operands[2] = {a, a};
+        const rocke_type_t* type = compare_operand_type(&b, c.lhs);
+        rocke_value_t* operands[2]
+            = {rocke_b_param(&b, "lhs", type, nullptr),
+               rocke_b_param(&b, "rhs", compare_operand_type(&b, c.rhs), nullptr)};
         rocke_attr_map_t attrs = rocke_i_attrs(&b);
         if(!c.pred)
         {
@@ -782,7 +951,10 @@ void case_compare_builders_refuse_what_the_ir_rule_refuses()
         fcmp,
         fcmp_of_integers,
         vector_cmp,
-        vector_cmp_of_floats
+        vector_cmp_of_floats,
+        cmp_of_i32_and_i64,
+        fcmp_of_f32_and_f16,
+        vector_cmp_of_2_and_4_lanes
     };
     const struct
     {
@@ -807,6 +979,17 @@ void case_compare_builders_refuse_what_the_ir_rule_refuses()
         {Builder::vector_cmp_of_floats,
          ROCKE_ERR_TYPE,
          "vector.cmp failed - element type='f32', expected an integer or i1 type"},
+        {Builder::cmp_of_i32_and_i64,
+         ROCKE_ERR_TYPE,
+         "arith.cmp failed - second operand type='i64', expected the first operand's type 'i32'"},
+        {Builder::fcmp_of_f32_and_f16,
+         ROCKE_ERR_TYPE,
+         "arith.fcmp failed - second operand type='f16', expected the first operand's type "
+         "'f32'"},
+        {Builder::vector_cmp_of_2_and_4_lanes,
+         ROCKE_ERR_TYPE,
+         "vector.cmp failed - second operand type='vec<i32x4>', expected the first operand's "
+         "type 'vec<i32x2>'"},
     };
     for(const auto& c : cases)
     {
@@ -816,6 +999,9 @@ void case_compare_builders_refuse_what_the_ir_rule_refuses()
         rocke_value_t* i = rocke_b_param(&b, "i", rocke_i32(), nullptr);
         rocke_value_t* v = rocke_b_param(&b, "v", rocke_vector_type(&b, rocke_i32(), 2), nullptr);
         rocke_value_t* fv = rocke_b_param(&b, "fv", rocke_vector_type(&b, rocke_f32(), 2), nullptr);
+        rocke_value_t* wide = rocke_b_param(&b, "wide", rocke_i64(), nullptr);
+        rocke_value_t* half = rocke_b_param(&b, "half", rocke_f16(), nullptr);
+        rocke_value_t* v4 = rocke_b_param(&b, "v4", rocke_vector_type(&b, rocke_i32(), 4), nullptr);
         bool refused = false;
         std::string got;
         try
@@ -840,6 +1026,15 @@ void case_compare_builders_refuse_what_the_ir_rule_refuses()
                 break;
             case Builder::vector_cmp_of_floats:
                 r = rocke_b_vector_cmp(&b, "lt", fv, fv);
+                break;
+            case Builder::cmp_of_i32_and_i64:
+                r = rocke_b_cmp_lt(&b, i, wide);
+                break;
+            case Builder::fcmp_of_f32_and_f16:
+                r = rocke_b_fcmp(&b, "olt", f, half);
+                break;
+            case Builder::vector_cmp_of_2_and_4_lanes:
+                r = rocke_b_vector_cmp(&b, "lt", v, v4);
                 break;
             }
             const char* error = rocke_ir_builder_error(&b);
@@ -923,6 +1118,29 @@ void case_constant_folding()
         int64_t folded = -2;
         EXPECT(!folded_store_value(&b, &folded),
                std::string("a compare with pred ") + pred + " was folded");
+        rocke_ir_builder_free(&b);
+    }
+
+    /* An op of an i32 and an i64 constant breaks the operand rule, so it is not
+     * folded into a constant that hides it. The same cases as
+     * test_a_binary_op_of_different_types_is_not_folded. */
+    for(rocke_opcode_t opcode : {ROCKE_OP_ARITH_CMP, ROCKE_OP_ARITH_ADD})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_fold_mixed");
+        const bool compare = opcode == ROCKE_OP_ARITH_CMP;
+        const rocke_type_t* result_type = compare ? rocke_i1() : rocke_i32();
+        rocke_value_t* out
+            = rocke_b_param(&b, "out", rocke_ptr_type(&b, result_type, "global"), nullptr);
+        rocke_value_t* operands[2] = {rocke_b_const_i32(&b, 1), rocke_b_const_i64(&b, 2)};
+        rocke_attr_map_t attrs = rocke_i_attrs(&b);
+        if(compare)
+            rocke_attr_set_str(&b, &attrs, "pred", "lt");
+        rocke_value_t* value = rocke_i_op1(&b, opcode, operands, 2, result_type, &attrs, "mixed");
+        rocke_b_global_store(&b, out, rocke_b_const_i32(&b, 0), value, 1);
+        int64_t folded = -2;
+        EXPECT(!folded_store_value(&b, &folded),
+               std::string("a mixed-type ") + rocke_opcode_name(opcode) + " was folded");
         rocke_ir_builder_free(&b);
     }
 
@@ -1103,6 +1321,9 @@ int main(int argc, char** argv)
     case_integer_element_builder_rule();
     case_integer_element_verifier_rule();
     case_integer_element_lowering_rule();
+    case_mixed_operand_types();
+    case_builder_refuses_an_operand_with_no_type();
+    case_vector_builders_refuse_a_scalar_first_operand();
     case_compares_refused_by_the_ir_rule();
     case_compare_builders_refuse_what_the_ir_rule_refuses();
     case_builder_refusals();

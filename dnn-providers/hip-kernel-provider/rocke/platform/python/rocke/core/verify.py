@@ -46,7 +46,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
-    _INTEGER_ELEMENT_OPS,
+    _SAME_TYPE_BINARY_OPS,
     _ORPHAN_YIELD_ERROR,
     _assume_range_errors,
     param_fact_errors,
@@ -57,9 +57,10 @@ from .ir import (
     _fcmp_error,
     _int_add_wrap_error,
     _int_cmp_error,
-    _integer_element_error,
+    _integer_element_op_error,
     _is_flag_ptr,
     _missing_attr_message,
+    _operand_types_op_error,
     _first_reused_loop_name,
     _orphan_yield,
     _reused_loop_name_message,
@@ -109,32 +110,6 @@ class Diagnostic:
 # --------------------------------------------------------------------------
 # Per-opcode contracts
 # --------------------------------------------------------------------------
-
-# Binary arith / vector ops: 2 operands, 1 result, all same type.
-_BINARY_SAME_TYPE = {
-    "arith.add",
-    "arith.sub",
-    "arith.mul",
-    "arith.div",
-    "arith.mod",
-    "arith.fadd",
-    "arith.fsub",
-    "arith.fmul",
-    "arith.fdiv",
-    "arith.fmax",
-    "arith.fmin",
-    "arith.and",
-    "arith.or",
-    "arith.smax",
-    "arith.smin",
-    "arith.xor",
-    "arith.shl",
-    "arith.lshr",
-    "vector.and",
-    "vector.or",
-    "vector.shl",
-    "vector.lshr",
-}
 
 # Unary same-type ops.
 _UNARY_SAME_TYPE = {
@@ -360,7 +335,7 @@ class _Verifier:
         if error:
             self.err(error, op)
         name = op.name
-        if name in _BINARY_SAME_TYPE:
+        if name in _SAME_TYPE_BINARY_OPS:
             if len(op.operands) != 2 or len(op.results) != 1:
                 self.err(
                     f"{name}: expected 2 operands / 1 result, got "
@@ -368,13 +343,11 @@ class _Verifier:
                     op,
                 )
                 return
-            a, b = op.operands
+            a = op.operands[0]
             r = op.results[0]
-            if a.type != b.type:
-                self.err(
-                    f"{name}: operand types differ ({a.type.name} vs {b.type.name})",
-                    op,
-                )
+            operand_types_error = _operand_types_op_error(op)
+            if operand_types_error:
+                self.err(operand_types_error, op)
             if r.type != a.type:
                 self.err(
                     f"{name}: result type {r.type.name} != operand type {a.type.name}",
@@ -384,10 +357,9 @@ class _Verifier:
                 wrap_error = _int_add_wrap_error(op.attrs, a.type.name)
                 if wrap_error:
                     self.err(wrap_error, op)
-            if name in _INTEGER_ELEMENT_OPS:
-                integer_error = _integer_element_error(name, a.type)
-                if integer_error:
-                    self.err(integer_error, op)
+            integer_error = _integer_element_op_error(op)
+            if integer_error:
+                self.err(integer_error, op)
         elif name in _UNARY_SAME_TYPE:
             if len(op.operands) != 1 or len(op.results) != 1:
                 self.err(
@@ -402,6 +374,9 @@ class _Verifier:
                     f"operand type {op.operands[0].type.name}",
                     op,
                 )
+            integer_error = _integer_element_op_error(op)
+            if integer_error:
+                self.err(integer_error, op)
             if name == "math.tanh" and op.operands[0].type.name != "f32":
                 self.err(
                     f"math.tanh requires f32 operand, got "
@@ -413,20 +388,14 @@ class _Verifier:
                 self.err(f"{name}: expected 2 operands / 1 result", op)
                 return
             a, b = op.operands
-            if a.type != b.type:
-                self.err(
-                    f"{name}: comparison operand types differ "
-                    f"({a.type.name} vs {b.type.name})",
-                    op,
-                )
             if op.results[0].type.name != "i1":
                 self.err(
                     f"{name}: result must be i1, got {op.results[0].type.name}", op
                 )
             cmp_refusal = (
-                _int_cmp_error(op.attrs, a.type)
+                _int_cmp_error(op.attrs, a.type, b.type)
                 if name == "arith.cmp"
-                else _fcmp_error(op.attrs, a.type)
+                else _fcmp_error(op.attrs, a.type, b.type)
             )
             if cmp_refusal:
                 self.err(str(cmp_refusal), op)
@@ -460,11 +429,11 @@ class _Verifier:
                     op,
                 )
         elif name == "vector.cmp":
-            cmp_refusal = (
-                _vector_cmp_error(op.attrs, op.operands[0].type)
-                if op.operands
-                else None
-            )
+            if len(op.operands) != 2 or len(op.results) != 1:
+                self.err(f"{name}: expected 2 operands / 1 result", op)
+                return
+            a, b = op.operands
+            cmp_refusal = _vector_cmp_error(op.attrs, a.type, b.type)
             if cmp_refusal:
                 self.err(str(cmp_refusal), op)
         elif name == "vector.extract":

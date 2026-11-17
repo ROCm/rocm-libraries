@@ -338,8 +338,8 @@ static void _op_vector_cmp(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
     char cmp_buf[ROCKE_ERR_MSG_CAP];
-    const rocke_status_t cmp_status
-        = rocke_i_vector_cmp_error(&op->attrs, op->operands[0]->type, cmp_buf, sizeof cmp_buf);
+    const rocke_status_t cmp_status = rocke_i_vector_cmp_error(
+        &op->attrs, op->operands[0]->type, op->operands[1]->type, cmp_buf, sizeof cmp_buf);
     if(cmp_status != ROCKE_OK)
     {
         rocke_ll_fail(L, cmp_status, "%s", cmp_buf);

@@ -531,6 +531,11 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
     /* Every foldable op takes 1..3 operands; a different arity cannot be one. */
     if(op->num_operands < 1 || op->num_operands > 3)
         return false;
+    /* A binary op whose operands differ in type is left for the verifier and the
+     * lowerings to refuse, not folded. */
+    char operand_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
+        return false;
     /* Python: ints = [_const_int(v) for v in op.operands]; if any None -> skip */
     for(i = 0; i < op->num_operands; i++)
     {
@@ -608,7 +613,11 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
         /* A compare the IR rule refuses (an absent or unknown pred, say) is left
          * for the verifier and the lowerings to refuse, not folded. */
         char cmp_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_cmp_error(&op->attrs, op->operands[0]->type, cmp_error, sizeof cmp_error)
+        if(rocke_i_cmp_error(&op->attrs,
+                             op->operands[0]->type,
+                             op->operands[1]->type,
+                             cmp_error,
+                             sizeof cmp_error)
            != ROCKE_OK)
             return false;
         pred = rocke_attr_get_str(&op->attrs, "pred");

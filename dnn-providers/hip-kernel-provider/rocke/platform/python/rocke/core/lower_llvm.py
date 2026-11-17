@@ -49,6 +49,8 @@ from .ir import (
     _fcmp_error,
     _int_add_wrap_error,
     _int_cmp_error,
+    _integer_element_op_error,
+    _operand_types_op_error,
     _scf_for_error,
     _scf_if_error,
     _vector_cmp_error,
@@ -78,7 +80,6 @@ from .ir import (
     _ldexp_op_error,
     _smem_store_vN_op_error,
     _smem_store_vN_f32_op_error,
-    _refuse_non_integer_op,
     _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -2570,7 +2571,9 @@ class _Lowerer:
         named_op_id = named_mma_op_id(op.name)
         if named_op_id is not None:
             self._backend.require_mma_available(named_op_id)
-        _refuse_non_integer_op(op)
+        operand_error = _integer_element_op_error(op) or _operand_types_op_error(op)
+        if operand_error:
+            raise TypeError(operand_error)
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no LLVM lowering for op {op.name!r}")
@@ -2785,7 +2788,7 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        refusal = _int_cmp_error(op.attrs, a.type)
+        refusal = _int_cmp_error(op.attrs, a.type, b.type)
         if refusal:
             raise refusal
         pred = _icmp_predicate(op.attrs["pred"], a.type)
@@ -2796,7 +2799,7 @@ class _Lowerer:
 
     def _op_arith_fcmp(self, op: Op) -> None:
         a, b = op.operands
-        refusal = _fcmp_error(op.attrs, a.type)
+        refusal = _fcmp_error(op.attrs, a.type, b.type)
         if refusal:
             raise refusal
         pred = op.attrs["pred"]
@@ -6927,7 +6930,7 @@ class _Lowerer:
 
     def _op_vector_cmp(self, op: Op) -> None:
         a, b = op.operands
-        refusal = _vector_cmp_error(op.attrs, a.type)
+        refusal = _vector_cmp_error(op.attrs, a.type, b.type)
         if refusal:
             raise refusal
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)

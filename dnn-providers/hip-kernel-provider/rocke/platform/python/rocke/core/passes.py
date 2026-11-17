@@ -14,7 +14,15 @@ import struct
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Tuple
 
-from .ir import KernelDef, Op, Region, Type, Value, _int_cmp_error
+from .ir import (
+    KernelDef,
+    Op,
+    Region,
+    Type,
+    Value,
+    _int_cmp_error,
+    _operand_types_op_error,
+)
 
 
 @dataclass(frozen=True)
@@ -239,6 +247,10 @@ def _try_fold(op: Op) -> Optional[int]:
         # The marker is its first operand; a runtime end (operand 1) does not
         # stop a constant marked value from folding.
         return constant_int(op.operands[0])
+    if _operand_types_op_error(op):
+        # A binary op whose operands differ in type is left for the verifier
+        # and the lowerings to refuse, not folded.
+        return None
     ints = [constant_int(v) for v in op.operands]
     if any(v is None for v in ints):
         return None
@@ -266,7 +278,7 @@ def _try_fold(op: Op) -> Optional[int]:
     if op.name == "arith.cmp":
         # A compare the IR rule refuses (an absent or unknown pred, say) is left
         # for the verifier and the lowerings to refuse, not folded.
-        if _int_cmp_error(op.attrs, op.operands[0].type):
+        if _int_cmp_error(op.attrs, op.operands[0].type, op.operands[1].type):
             return None
         pred = op.attrs["pred"]
         a, b = ints
