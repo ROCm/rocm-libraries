@@ -65,14 +65,20 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCustomLibraryAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestInlineExpressions.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestFeatureExtractor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestKernelFeatureRows.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestLinearDataAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestMlpDataAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestNativeAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestScoreTransform.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTableAdapter.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapterSplitLeaf.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapterScoring.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestSha256.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdAdapters.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestEnginePredictor.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdParser.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdCandidateOrdering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestEngineFeatures.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
@@ -84,10 +90,14 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericTargets.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelDefinition.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelIngestorStateManager.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedStateManager.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedWinnerRecords.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericEngine.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlanBuilder.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestStagedApplicability.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedEngine.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlotProgramBenchmark.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestBenchmarkPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptorLoader.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDeviceKey.cpp>
@@ -97,6 +107,7 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestCompiledGraphPattern.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGraphPatternMatcher.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestUedFixtureParity.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerLineGolden.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestKernelIngestorConcurrency.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:DigitGroupingLocale.cpp>
 )
@@ -132,14 +143,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
     )
 
-    # The committed uhd_gen output TestUhdGeneratedModel loads. Only what the runtime reads;
-    # the training inputs beside it stay in the source tree.
+    # The committed uhd_gen output TestUhdGeneratedModel loads, and the trained_against
+    # conformance corpus TestUhdParser runs. Only what the tests read; the training inputs
+    # beside them stay in the source tree.
     set(_uhd_fixture_subdir "uhd_generated_fixtures")
     set(_uhd_fixture_files
         tile_selector.uhd.json
         model.bin
         dtype_selector/dtype_selector.uhd.json
         dtype_selector/model.bin
+        conformance/trained_against_slots.json
     )
     set(_uhd_fixture_outputs "")
     foreach(_file IN LISTS _uhd_fixture_files)
@@ -168,10 +181,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_uhd_fixtures)
 
+    # The golden winner shard TestWinnerLineGolden decodes. The IngestorGenerator's
+    # variant_reduce tests read the same file from the source tree.
+    set(_winner_golden_subdir "winner_line_golden")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../../tools/cmake/StageFiles.cmake)
+    hipdnn_tools_stage_files(hipdnn_plugin_sdk_test_winner_golden
+        "${HIPDNN_TEST_DATA_DIR}/${_winner_golden_subdir}"
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/IngestorGenerator/tests/fixtures/winner_lines_golden.jsonl"
+        INSTALL_DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_winner_golden_subdir}")
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_winner_golden)
+
     target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
         HIPDNN_TEST_PLUGIN_RELDIR="${HIPDNN_TEST_PLUGIN_RELDIR}"
         HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
-        HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}")
+        HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}"
+        HIPDNN_WINNER_GOLDEN_SUBDIR="${_winner_golden_subdir}")
 endif()
 
 target_link_libraries(
@@ -219,32 +243,36 @@ endif()
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# TestUedFixtureParity loads the UED fixtures and schema from share/hipdnn_plugin_sdk next to
-# the binary's bin/ directory. Stage the build tree with the same layout an install produces.
+# TestUedFixtureParity loads the UED fixtures and a copy of the UED schema from
+# share/hipdnn_plugin_sdk/test_fixtures next to the binary's bin/ directory. Stage the build tree
+# with the same layout an install produces. The test reads its own copy of the schema, not the
+# one plugin_sdk installs for authors, so an install of only the test files can run it.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    set(_ued_data_dir "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk")
+    set(_ued_test_fixtures_dir "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures")
     set(_ued_schema "${CMAKE_CURRENT_SOURCE_DIR}/../schemas/universal_engine_descriptor.schema.json")
     file(GLOB _ued_fixtures CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures/*.json")
     # Copy the directory, not each file, so the command line does not grow with the corpus
     # (cmd.exe limits it to 8191 characters on Windows).
     add_custom_command(
-        OUTPUT "${_ued_data_dir}/test_fixtures/ued.stamp"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ued_data_dir}/test_fixtures/ued"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ued_data_dir}/schemas"
+        OUTPUT "${_ued_test_fixtures_dir}/ued.stamp"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ued_test_fixtures_dir}/ued"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ued_test_fixtures_dir}/schemas"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures"
-                "${_ued_data_dir}/test_fixtures/ued"
-        COMMAND ${CMAKE_COMMAND} -E copy "${_ued_schema}" "${_ued_data_dir}/schemas"
-        COMMAND ${CMAKE_COMMAND} -E touch "${_ued_data_dir}/test_fixtures/ued.stamp"
+                "${_ued_test_fixtures_dir}/ued"
+        COMMAND ${CMAKE_COMMAND} -E copy "${_ued_schema}" "${_ued_test_fixtures_dir}/schemas"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_ued_test_fixtures_dir}/ued.stamp"
         DEPENDS ${_ued_fixtures} "${_ued_schema}"
         COMMENT "Staging the UED fixture corpus and schema for hipdnn_plugin_sdk_tests"
         VERBATIM
     )
     add_custom_target(stage_hipdnn_plugin_sdk_ued_fixtures
-        DEPENDS "${_ued_data_dir}/test_fixtures/ued.stamp"
+        DEPENDS "${_ued_test_fixtures_dir}/ued.stamp"
         COMMENT "UED fixture corpus and schema for hipdnn_plugin_sdk_tests")
     add_dependencies(hipdnn_plugin_sdk_tests stage_hipdnn_plugin_sdk_ued_fixtures)
     install(FILES ${_ued_fixtures}
             DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures/ued)
+    install(FILES "${_ued_schema}"
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures/schemas)
 endif()
 
 # The installed CTestTestfile.cmake does not carry this, so an installed test on a runner

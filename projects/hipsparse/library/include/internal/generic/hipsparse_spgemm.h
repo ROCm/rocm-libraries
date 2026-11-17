@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,26 +28,27 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpGEMM_createDescr creates a sparse matrix sparse matrix product descriptor. It should be
 *  destroyed at the end using \ref hipsparseSpGEMM_destroyDescr().
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_createDescr(hipsparseSpGEMMDescr_t* descr);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpGEMM_destroyDescr destroys a sparse matrix sparse matrix product descriptor and releases all
 *  resources used by the descriptor.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Work estimation step of the sparse matrix sparse matrix product:
 *  \f[
@@ -71,13 +72,13 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[out]
 *  matC             sparse matrix \f$C\f$ descriptor.
 *  @param[in]
@@ -88,6 +89,7 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
 *  bufferSize1      number of bytes of the temporary storage buffer.
+*                   \p bufferSize1 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
@@ -121,7 +123,6 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *                                    spgemmDesc, &bufferSize1, dBuffer1);
 *  \endcode
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          handle,
                                                  hipsparseOperation_t       opA,
@@ -153,6 +154,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
                                                  void*                  externalBuffer1);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Compute step of the sparse matrix sparse matrix product:
 *  \f[
@@ -176,13 +178,13 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[out]
 *  matC             sparse matrix \f$C\f$ descriptor.
 *  @param[in]
@@ -193,6 +195,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
 *  bufferSize2      number of bytes of the temporary storage buffer.
+*                   \p bufferSize2 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer2  temporary storage buffer allocated by the user.
 *
@@ -224,7 +227,6 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *                            spgemmDesc, &bufferSize2, dBuffer2);
 *  \endcode
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
                                           hipsparseOperation_t       opA,
@@ -256,6 +258,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
                                           void*                  externalBuffer2);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Copy step of the sparse matrix sparse matrix product:
 *  \f[
@@ -295,13 +298,13 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[out]
 *  matC             sparse matrix \f$C\f$ descriptor.
 *  @param[in]
@@ -319,7 +322,6 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
                                        hipsparseOperation_t       opA,

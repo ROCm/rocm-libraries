@@ -291,6 +291,20 @@ inline std::vector<int64_t>
     return generateStrides(targetDims, strideOrder);
 }
 
+// True when an axis of extent > 1 has stride 0, so several indices map to one element.
+// The element span can still equal the element count when other axes leave matching gaps.
+inline bool hasBroadcastAxis(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    for(size_t axis = 0; axis < dims.size(); ++axis)
+    {
+        if(dims[axis] > 1 && strides[axis] == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Returns true when the tensor fills a dense, non-overlapping block in some axis order.
 // Strides on size-one axes are ignored. All sizes and all other strides must be positive,
 // and the element count must fit in int64_t. A rank-0 tensor (empty dims) is packed.

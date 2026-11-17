@@ -134,6 +134,7 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForTwoNodeGraph)
 {
     const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
+    EXPECT_CALL(mockGraph, getGraph()).Times(::testing::AnyNumber());
     // nodeWrappers is only used in an all_of check which will pass when it's empty
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));

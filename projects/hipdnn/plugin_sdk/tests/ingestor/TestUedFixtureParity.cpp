@@ -45,8 +45,9 @@
  * match the same plain substring, literally. This test checks the loader's error log for it.
  * A valid fixture carries no `error`.
  *
- * The corpus and schema are staged under `share/hipdnn_plugin_sdk/` beside the test binary's
- * `bin/` directory, in the build tree and in an install alike.
+ * The corpus and a copy of the schema are staged under `share/hipdnn_plugin_sdk/test_fixtures/`
+ * beside the test binary's `bin/` directory, in the build tree and in an install alike. The
+ * copy belongs to the test files, so an install without the development files can run this.
  */
 namespace
 {
@@ -60,15 +61,15 @@ struct UedFixture
     std::filesystem::path path;
 };
 
-std::filesystem::path sharedDataDirectory()
+std::filesystem::path testFixturesDirectory()
 {
     return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / ".." / "share"
-           / "hipdnn_plugin_sdk";
+           / "hipdnn_plugin_sdk" / "test_fixtures";
 }
 
 std::filesystem::path fixtureDirectory()
 {
-    return sharedDataDirectory() / "test_fixtures" / "ued";
+    return testFixturesDirectory() / "ued";
 }
 
 /// Every `*.json` file in the corpus, sorted so the parameter order is stable. Returns an empty
@@ -132,7 +133,8 @@ std::set<std::string> setOf(const std::array<std::string_view, N>& values)
 
 nlohmann::json readSchema()
 {
-    return readJson(sharedDataDirectory() / "schemas" / "universal_engine_descriptor.schema.json");
+    return readJson(testFixturesDirectory() / "schemas"
+                    / "universal_engine_descriptor.schema.json");
 }
 
 /// The schema object describing one `graph_match.nodes` entry.

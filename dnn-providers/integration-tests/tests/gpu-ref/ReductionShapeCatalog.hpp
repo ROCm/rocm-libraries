@@ -36,16 +36,18 @@ inline std::vector<ReductionMode> getReductionModes()
 
 // ===========================================================================
 // Layouts
+// Channel-last variants are omitted (P2): the reduction kernel/launcher index purely by strides, so
+// they duplicate channel-first; see the explicit TestGpuReductionRefChannelLast.* TESTs.
 // ===========================================================================
 
 inline std::vector<TensorLayout> getReduction4DLayouts()
 {
-    return {TensorLayout::NCHW, TensorLayout::NHWC};
+    return {TensorLayout::NCHW};
 }
 
 inline std::vector<TensorLayout> getReduction5DLayouts()
 {
-    return {TensorLayout::NCDHW, TensorLayout::NDHWC};
+    return {TensorLayout::NCDHW};
 }
 
 // ===========================================================================
@@ -119,7 +121,7 @@ inline std::vector<ReductionTestShape> getReductionMedium5DShapes()
 }
 
 // ===========================================================================
-// Large shapes - Full/weekly tier CI execution (Comprehensive / nightly)
+// Large shapes - Comprehensive / nightly tier CI execution (fp32 only)
 // ===========================================================================
 
 inline std::vector<ReductionTestShape> getReductionLarge4DShapes()

@@ -287,7 +287,9 @@
         {"name": "descale_v", "optional": true},
         {"name": "descale_s", "optional": true},
         {"name": "scale_s", "optional": true},
-        {"name": "scale_o", "optional": true}
+        {"name": "scale_o", "optional": true},
+        {"name": "cu_seq_len_q", "optional": true},
+        {"name": "cu_seq_len_kv", "optional": true}
       ],
       "results": [
         {"name": "o", "optional": false},

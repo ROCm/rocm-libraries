@@ -53,6 +53,7 @@ enum class Pipeline : std::uint8_t
     CompAsync,    // Async global->LDS compute pipeline (always double-buffered)
     CompTDMV1,    // Tensor Data Mover compute pipeline v1 (gfx1250 only)
     CompTDMV2,    // Tensor Data Mover compute pipeline v2 (gfx1250 only, 4 waves)
+    CompTDMPC,    // Tensor Data Mover producer/consumer pipeline (gfx1250 only)
     PreShuffleTDM // Weight preshuffle pipeline, Tensor Data Mover (gfx1250 only)
 };
 
@@ -178,6 +179,10 @@ struct KernelKey
         std::uint8_t vector_size_a = 0;
         std::uint8_t vector_size_b = 0;
         std::uint8_t vector_size_c = 0;
+        // comp_tdm_pc ring (GemmPipelineAgBgCrCompTDMProducerConsumerPolicy<NumSlots,
+        // PublishLag>); num_slots = 0 is the policy default <4, 0>
+        std::uint8_t num_slots   = 0;
+        std::uint8_t publish_lag = 0;
 
         // Padding support flags (kPadM, kPadN, kPadK in generated kernels)
         bool pad_m = true; // Support arbitrary M dimensions via padding
@@ -242,7 +247,9 @@ struct KernelKey
                         algorithm.workspace,
                         algorithm.vector_size_a,
                         algorithm.vector_size_b,
-                        algorithm.vector_size_c);
+                        algorithm.vector_size_c,
+                        algorithm.num_slots,
+                        algorithm.publish_lag);
     }
 
     /// Equality comparison
@@ -343,6 +350,7 @@ inline std::string to_string(Pipeline pipeline)
     case Pipeline::CompAsync: return "comp_async";
     case Pipeline::CompTDMV1: return "comp_tdm";
     case Pipeline::CompTDMV2: return "comp_tdm_v2";
+    case Pipeline::CompTDMPC: return "comp_tdm_pc";
     case Pipeline::PreShuffleTDM: return "preshuffle_tdm";
     default: return "unknown";
     }
@@ -377,6 +385,8 @@ inline Pipeline string_to_pipeline(const std::string& str)
         return Pipeline::CompTDMV1;
     if(str == "comp_tdm_v2")
         return Pipeline::CompTDMV2;
+    if(str == "comp_tdm_pc")
+        return Pipeline::CompTDMPC;
     if(str == "preshuffle_tdm")
         return Pipeline::PreShuffleTDM;
     return Pipeline::Mem; // Default
@@ -500,6 +510,10 @@ inline std::string KernelKey::encode_identifier() const
     if(algorithm.vector_size_a || algorithm.vector_size_b || algorithm.vector_size_c)
         oss << "_vec" << unsigned(algorithm.vector_size_a) << "_"
             << unsigned(algorithm.vector_size_b) << "_" << unsigned(algorithm.vector_size_c);
+
+    // Must match pipeline_ring_suffix() in codegen_common.py
+    if(algorithm.num_slots)
+        oss << "_s" << unsigned(algorithm.num_slots) << "l" << unsigned(algorithm.publish_lag);
 
     if(signature.split_k > 1)
         oss << "_splitk" << unsigned(signature.split_k);

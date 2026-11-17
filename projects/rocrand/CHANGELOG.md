@@ -5,6 +5,10 @@ Documentation for rocRAND is available at
 
 ## rocRAND 5.3.0 for ROCm 10.3.0
 
+### Optimized
+
+* Updated auto tuned configs for `gfx950` on all available engines.
+
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.

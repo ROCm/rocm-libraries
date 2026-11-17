@@ -203,8 +203,19 @@ def test_role_and_explicit_default_target_preserve_other_maps(tmp_path):
     model = _model(tmp_path / "model", tree)
     _apply(build_plan(model, tree, role="predict_applicable_kernels", arch="default"))
     expected = copy.deepcopy(original)
-    expected["predict_applicable_kernels"] = {"default": NEW}
+    expected["predict_applicable_kernels"] = {"default": [NEW]}
     assert _read(tree / "engine.ued.json") == expected
+
+
+def test_an_unslotted_engines_ranker_installs_directly_under_the_engines_tree(
+    tmp_path,
+):
+    tree = _tree(tmp_path / "tree")
+    plan = build_plan(_model(tmp_path / "model", tree), tree)
+    _apply(plan)
+    assert plan.destination_descriptor.parent == (
+        tree / "heuristics" / UED / "sort_kernel_catalog" / "gfx942"
+    )
 
 
 @pytest.mark.parametrize(

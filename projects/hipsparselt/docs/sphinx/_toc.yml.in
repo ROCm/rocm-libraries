@@ -22,6 +22,8 @@ subtrees:
     title: Storage formats
   - file: conceptual/mi300-features
     title: Features for the Instinct MI300 series
+  - file: conceptual/gate-residual
+    title: Gate residual epilogue
 
 - caption: How to
   entries:

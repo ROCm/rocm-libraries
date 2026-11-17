@@ -15,7 +15,9 @@
     - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
+  - [Reporting Numerical Notes](#reporting-numerical-notes)
   - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
+  - [Upgrading Kernel Ingestor Integrations](#upgrading-kernel-ingestor-integrations)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [How to Test Plugins](#how-to-test-plugins)
@@ -91,7 +93,7 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
-- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
+- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. hipDNN never asks a plugin to serialize an execution context that it created from saved bytes, so a plugin need not support saving a restored context. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
 
 ## Engine IDs
 
@@ -434,6 +436,15 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 
 3. **Remove only during major version updates** to maintain backward compatibility.
 
+### Reporting Numerical Notes
+
+An engine reports numerical notes through the `numerical_notes` list of its `EngineDetails` (values from `<hipdnn_plugin_sdk/NumericalNote.h>`, see [RFC 0025](./rfcs/0025_NumericalNotes.md)). A plugin that does not set the field is reported `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC`, so deterministic selection skips its engines. A UED declares notes by the ten lowercase cuDNN names; see [RFC 0020](./rfcs/0020_UniversalEngineDescriptor.md) §9.
+
+- **Claim determinism with an explicit empty list.** Create the details with `CreateEngineDetails` or `CreateEngineDetailsDirect` and pass an empty vector. An empty list is a claim that no numerical note applies to the engine; make it only when a test proves bitwise-reproducible results across repeated runs of the same plan and inputs. Do not build the details with `EngineDetailsT::Pack`, which drops an empty list and so turns the claim into an absent field.
+- **List the notes that apply.** An engine that is not deterministic lists `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC` and any precision note that applies.
+- **Omit the field when no test proves determinism.** Every engine defaults to `NONDETERMINISTIC`: results are not guaranteed bitwise reproducible.
+- **Make the claim per engine ID.** Notes describe the engine for the finalized graph passed to `GetEngineDetails`, not a plan or a knob setting.
+
 ### Saving Execution Plans from Ingestor Engines
 
 A provider that builds plans with the generic kernel ingestor can let users save and load them. The plugin SDK supplies the pieces each dispatch handler needs; the provider supplies the payload format and the three plugin hooks. To support saving:
@@ -448,8 +459,90 @@ A provider that builds plans with the generic kernel ingestor can let users save
   Keep the handler of the old version registered while plans saved with that version must load.
 - **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
 - **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
-- **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must have a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
+- **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must be a single-launch kernel with a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
+- **Report SUPPORTS_GRAPH_CAPTURE only for a capture-safe engine.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE` only when `execute` only enqueues work on the handle's stream, with default settings (benchmarking off), including on the first execute of a plan. `execute` must not synchronize the host, wait on an event, allocate or free memory, call a synchronous memcpy, read device memory on the host, or unload a module. For a kernel ingestor engine, declare the `supports_graph_capture` tag in `behavior_notes` of the descriptor.
 - **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
+
+### Upgrading Kernel Ingestor Integrations
+
+A Universal Engine Descriptor (UED) fills `graph_match` with one of two arms: `native`, a C++ function the provider registers, or `nodes`, a declarative graph pattern ([RFC 0020 §4.3](./rfcs/0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)). Both arms are supported. This section lists what a provider that uses the generic kernel ingestor changes when it upgrades to the hipDNN that adds the `nodes` arm.
+
+#### 1. Read and pass `graph_match` as a `GraphMatch`
+
+`EngineDescriptor::graphMatch` (`hipdnn_plugin_sdk/ingestor/Descriptors.hpp`) holds the UED's `graph_match` as a `GraphMatch` variant:
+
+- `std::monostate`: the UED has no `graph_match`.
+- `NativeGraphMatch{symbol}`: the `native` arm.
+- `std::shared_ptr<const CompiledGraphPattern>`: the `nodes` arm, compiled when the UED is read.
+
+The `std::string EngineDescriptor::graphMatchNativeSymbol` member is removed. To read the native symbol, call `nativeGraphMatchSymbol(engine)`. It returns an empty string when the engine has no `native` arm.
+
+The unslotted and slotted `KernelIngestorStateManager<THandle>` constructors and `makeStateManager<THandle>()` take a `GraphMatch`. Their overloads that take the symbol as a string remain, marked `[[deprecated]]`; an empty string means no `graph_match`. A braced `{}` argument selects the `GraphMatch` overload, which also means no `graph_match`. The deprecated overloads will be removed in a later release.
+
+Before:
+
+```cpp
+const std::string symbol = set.engine.graphMatchNativeSymbol;
+auto manager = makeStateManager<MyHandle>(std::move(set), "my_provider.graph_match");
+```
+
+After:
+
+```cpp
+using namespace hipdnn_plugin_sdk::ingestor;
+
+const std::string symbol = nativeGraphMatchSymbol(set.engine);
+auto manager
+    = makeStateManager<MyHandle>(std::move(set), NativeGraphMatch{"my_provider.graph_match"});
+```
+
+To serve whichever arm the UED declares, copy `set.engine.graphMatch` before you move `set`, then pass the copy. `makeEngine()` does this already. A `native` engine keeps its engine selector revision, so trained heuristic models keep matching it.
+
+#### 2. Remove duplicate JSON keys
+
+The descriptor loader rejects a JSON object that repeats a key, at any depth, in every descriptor file type except the kernel descriptor pack (KDP, `.kdp.json`). The whole file fails to load, and the loader logs an ERROR naming the key and the file (`parseDescriptorDocument()` in `DescriptorLoader.hpp`; the Universal Heuristic Descriptor (UHD) reader, `readUhdDocument()`, refuses repeated keys too). A KDP is read in a single pass that keeps the last occurrence of a repeated key. `hkp_pack` rejects a repeated key in every descriptor it reads, the KDP included.
+
+#### 3. Expect the reference native packs to decline malformed graphs
+
+The hip-kernel-provider's pointwise and convolution native graph matches publish their bindings through `publishTensor()` and `publishGraph()` (`hipdnn_plugin_sdk/ingestor/BindingPublication.hpp`). They decline a graph, so the engine reports no support, when any of these holds:
+
+- A pointwise float attribute (`relu_lower_clip`, `relu_upper_clip`, `relu_lower_clip_slope`, `swish_beta`, `elu_alpha` or `softplus_beta`) is NaN or infinite.
+- A stored scalar tensor value is not finite once rounded to a 32-bit float.
+- An enum value has no name: an operand data type, the node's compute data type, the pointwise mode or the convolution mode.
+- An operand has an extent of zero or less, or its element count overflows `int64_t`.
+- A convolution operand has an extent greater than `INT_MAX`.
+
+#### 4. Check callers of `isTensorPacked()` and of INT8 scalar reads
+
+`isTensorPacked()` (`hipdnn_data_sdk/utilities/ShapeUtilities.hpp`) returns true only when the tensor fills a dense, non-overlapping block in some axis order. It returns false when:
+
+- Any extent is zero or negative.
+- An axis with more than one element has a zero or negative stride.
+- Two elements share an offset, even when the span equals the element count (for example dims `{2, 2, 2}` with strides `{1, 1, 5}`).
+- The element count overflows `int64_t`.
+
+Strides on size-one axes are ignored, and a rank-0 tensor is packed.
+
+An INT8 scalar's stored byte is read as a signed `int8_t`, so the stored byte `0xFF` reads as `-1`, not `255`. This applies to `extractValueFromTensorValue()` and `extractFiniteFloatFromTensorValue()` in `hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp`.
+
+#### 5. Check your descriptors before you upgrade
+
+Run `hkp_pack` over each authored descriptor root. It applies the duplicate-key rule above, and it resolves any `nodes` pattern against the op-schema registry. See [Op-schema registry for `graph_match.nodes`](../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#op-schema-registry-for-graph_matchnodes) for the registry options.
+
+```bash
+cd dnn-providers/hip-kernel-provider/descriptor-packaging
+python3 tools/hkp_pack.py \
+    --source-root <authored root> \
+    --out-root /tmp/hkp-check/out \
+    --inter-root /tmp/hkp-check/inter \
+    --arches gfx942 \
+    --hipcc /opt/rocm/bin/hipcc \
+    --generic-targets-json ../../../projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json \
+    --kpack-python-dir <directory containing rocm_kpack> \
+    --source-label upgrade-check
+```
+
+For a runtime descriptor tree that is already packed, run `hipdnn_validate_descriptors <root>` from a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`. It loads the tree with the new loader rules.
 
 ## Plugin Architecture
 

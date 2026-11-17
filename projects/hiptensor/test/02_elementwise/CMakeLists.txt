@@ -23,22 +23,31 @@
  # THE SOFTWARE.
  #
  ###############################################################################
+ add_hiptensor_test_objects(hiptensor_elementwise_resource_objects
+     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_resource.cpp)
+ add_hiptensor_test_objects(hiptensor_elementwise_permute_test_objects
+     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_test.cpp)
+ add_hiptensor_test_objects(hiptensor_elementwise_binary_op_test_objects
+     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_binary_op_test.cpp)
+ add_hiptensor_test_objects(hiptensor_elementwise_trinary_op_test_objects
+     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_trinary_op_test.cpp)
+
  set(PermutationCommonSources
      ${HIPTENSOR_COMMON_TEST_SOURCES}
-     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_resource.cpp
-     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_test.cpp
+     $<TARGET_OBJECTS:hiptensor_elementwise_resource_objects>
+     $<TARGET_OBJECTS:hiptensor_elementwise_permute_test_objects>
      )
 
  set(ElementwiseBinaryOpCommonSources
      ${HIPTENSOR_COMMON_TEST_SOURCES}
-     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_resource.cpp
-     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_binary_op_test.cpp
+     $<TARGET_OBJECTS:hiptensor_elementwise_resource_objects>
+     $<TARGET_OBJECTS:hiptensor_elementwise_binary_op_test_objects>
      )
 
  set(ElementwiseTrinaryOpCommonSources
      ${HIPTENSOR_COMMON_TEST_SOURCES}
-     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_resource.cpp
-     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_trinary_op_test.cpp
+     $<TARGET_OBJECTS:hiptensor_elementwise_resource_objects>
+     $<TARGET_OBJECTS:hiptensor_elementwise_trinary_op_test_objects>
      )
 
 #  tests

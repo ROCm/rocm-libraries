@@ -19,8 +19,9 @@ One `*.opmeta.json` per operation under `projects/hipdnn/tools/corpus_gen/operat
 | elementwise / other | `pointwise`, `pointwise_unary`, `reduction`, `resample_fwd`, `resample_bwd` |
 
 Pick the operation whose graph the engine accepts: for a descriptor engine, its UED's graph
-matcher (`graph_match.native`, plus any `scope: graph` UMD); for an opaque engine, its plan
-builders. The engine name is not evidence: the example `hkp_example:tiled_attention` UED
+matcher (`graph_match`, either a `native` symbol or a `nodes` pattern, plus any `scope: graph`
+UMD); for an opaque engine, its plan builders. The engine name is not evidence: the example
+`hkp_example:tiled_attention` UED
 (`dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE/gfx942_tiled_attention/`)
 has `graph_match` `hipkernel.pointwise.graph_match` and its UMD matches
 `hipkernel.pointwise.add_match`, so it serves `pointwise` graphs (two operands, identical

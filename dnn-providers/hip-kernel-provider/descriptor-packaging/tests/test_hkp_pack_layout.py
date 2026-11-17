@@ -27,10 +27,11 @@ import pytest
 from pack_helpers import _restem_uuid_ids
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
-from hkp_pack.graph_pattern import OP_SCHEMA_REGISTRY_ENV
+from hkp_pack.graph_pattern import DEFAULT_OP_SCHEMA_REGISTRY, OP_SCHEMA_REGISTRY_ENV
 from hkp_pack.hip_compile import hip_variant_key
 from hkp_pack import pipeline
 from hkp_pack.pipeline import (
+    UNPULLED_RECORD,
     ArchResult,
     _agreement_inputs,
     compile_intermediate,
@@ -1383,10 +1384,13 @@ def test_ued_sdk_version_accepts_what_the_runtime_parses(
     load_flat_input(root, GENERIC_TARGETS)
 
 
-def _empty_arch_pattern_root(tmp_path, empty_arch_fixture):
-    """The empty-arch fixture, its UED matching by a `nodes` pattern."""
+def _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=False):
+    """The empty-arch fixture, its UED matching by a `nodes` pattern. An `embedded`
+    root compiles nothing, so a full pack needs no hipcc."""
     root = tmp_path / "root"
     folder = _nest(root, "hip", empty_arch_fixture)
+    if embedded:
+        _make_embedded(folder)
     path = folder / "solo.ued.json"
     document = _read(path)
     document["graph_match"] = {
@@ -1442,7 +1446,7 @@ def test_ued_publication_body_keeps_extensions(tmp_path, empty_arch_fixture):
         },
         knobs=[],
         behavior_notes=["runtime_compilation"],
-        numerical_notes=["producer_note"],
+        numerical_notes=["tensor_core"],
         provenance={"producer": "test"},
         _internal=7,
     )
@@ -1592,6 +1596,7 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
         descriptors / "unit/pointwise",
         descriptors / "integration/pointwise",
         descriptors / "archive_fixture",
+        descriptors / "multi_launch",
     ]
     assert any(
         ids(other) for other in others
@@ -2435,6 +2440,130 @@ def test_the_excluded_folder_flag_keeps_a_family_out_of_the_shipped_tree(
     assert not (shipped / "rocKE").exists()
 
 
+_UNPULLED_UHD_ID = "133a8b19-8e34-4f74-86d6-b6495a6483f3"
+
+
+def _root_with_model(tmp_path, fixture, *, pulled=False):
+    """An embedded KDP (so an arch shard ships) beside a model UHD. With `pulled` False
+    the model file was never pulled: only its `.dvc` pointer exists."""
+    root = _embedded_root(tmp_path, fixture, arch=[ARCH])
+    # Bound for ARCH, so the UED reaches the model UHD and it ships when it can.
+    ued_path = root / "pointwise" / "solo.ued.json"
+    ued = _read(ued_path)
+    ued["sort_kernel_catalog"][ARCH] = _UNPULLED_UHD_ID
+    ued_path.write_text(json.dumps(ued, indent=2) + "\n", encoding="utf-8")
+    folder = root / "rocKE" / "bundle"
+    folder.mkdir(parents=True)
+    if pulled:
+        (folder / "model.bin").write_bytes(b"model")
+    else:
+        (folder / "model.bin.dvc").write_text("outs:\n- size: 9\n", encoding="utf-8")
+    (folder / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": _UNPULLED_UHD_ID,
+                "name": "Trained heuristic",
+                "adapter": "tree_data",
+                "features_signature": ["$kernel.tile_m"],
+                "features_hash": "sha256:" + "0" * 16,
+                "trained_against": {"selector_revision": "hkp-2026.09"},
+                "objective": "max",
+                "tree_data": {"artifact": "model.bin"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+@pytest.mark.quick
+def test_the_command_packs_an_unpulled_model_without_it_and_warns(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = _root_with_model(tmp_path, empty_arch_fixture)
+
+    result = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "warning: not shipping UHD heuristic.uhd.json" in result.stdout
+    assert (
+        tmp_path / "out" / ARCH / "pointwise"
+    ).is_dir(), "the premise: a shard ships"
+    assert not list((tmp_path / "out").rglob("model.bin"))
+    shipped_uhds = (tmp_path / "out").rglob("*.uhd.json")
+    assert [p for p in shipped_uhds if _UNPULLED_UHD_ID in p.read_text()] == []
+
+
+@pytest.mark.quick
+def test_the_command_records_the_unpulled_model_in_the_packed_tree(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """The record names the UHD the pack left out, with source-relative paths, so a
+    census can accept its absence only when the pack did it on purpose."""
+    root = _root_with_model(tmp_path, empty_arch_fixture)
+
+    result = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    record = tmp_path / "out" / ARCH / UNPULLED_RECORD
+    assert json.loads(record.read_text(encoding="utf-8")) == {
+        "version": "1.0",
+        "unpulled_models": [
+            {
+                "uhd_id": _UNPULLED_UHD_ID,
+                "uhd": "rocKE/bundle/heuristic.uhd.json",
+                "pointer": "rocKE/bundle/model.bin.dvc",
+            }
+        ],
+    }
+    # Not a `.json`: the loader warns about a .json that names no descriptor type.
+    assert record.suffix != ".json"
+
+
+@pytest.mark.quick
+def test_the_command_writes_no_record_when_the_model_is_pulled(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = _root_with_model(tmp_path, empty_arch_fixture, pulled=True)
+
+    result = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert list((tmp_path / "out").rglob("heuristic.uhd.json")), "the UHD ships"
+    assert list((tmp_path / "out").rglob("model.bin")), "the model ships"
+    assert not list((tmp_path / "out").rglob(UNPULLED_RECORD))
+
+
+@pytest.mark.quick
+def test_the_command_writes_no_record_for_a_root_with_no_model(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = _embedded_root(tmp_path, empty_arch_fixture, arch=[ARCH])
+
+    result = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        tmp_path / "out" / ARCH / "pointwise"
+    ).is_dir(), "the premise: a shard ships"
+    assert not list((tmp_path / "out").rglob(UNPULLED_RECORD))
+
+
+@pytest.mark.quick
+def test_the_require_dvc_flag_fails_the_command_on_an_unpulled_model(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = _root_with_model(tmp_path, empty_arch_fixture)
+
+    result = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir, "--require-dvc")
+
+    assert result.returncode != 0
+    assert "payload source not found: model.bin" in result.stderr
+    assert "dvc pull -r ingestor" in result.stderr
+    assert not list((tmp_path / "out").rglob(UNPULLED_RECORD))
+
+
 @pytest.mark.quick
 def test_the_disabled_kind_flag_leaves_a_rocke_only_root_with_nothing_to_pack(
     tmp_path, rocke_fixture, rocm_kpack_dir
@@ -2466,6 +2595,35 @@ def test_a_misspelled_disabled_kind_fails_the_command_naming_it(
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "rokce" in result.stderr
+
+
+@pytest.mark.quick
+def test_the_registry_flag_wins_over_the_environment_registry(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, monkeypatch
+):
+    """`--op-schema-registry` reaches the UED check and wins over
+    HKP_OP_SCHEMA_REGISTRY. The pattern's opcode resolves exactly when the flag's
+    registry declares it, whatever the environment's registry declares."""
+    root = _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=True)
+    ops = json.loads(DEFAULT_OP_SCHEMA_REGISTRY.read_text(encoding="utf-8"))["ops"]
+    declares = tmp_path / "declares.json"
+    declares.write_text(json.dumps({"ops": {"pointwise": ops["pointwise"]}}))
+    lacks = tmp_path / "lacks.json"
+    lacks.write_text(json.dumps({"ops": {"convolution": ops["convolution"]}}))
+
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(lacks))
+    accepted = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--op-schema-registry", str(declares)
+    )
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+
+    shutil.rmtree(tmp_path / "out", ignore_errors=True)
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(declares))
+    refused = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--op-schema-registry", str(lacks)
+    )
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    assert "opcode 'pointwise' is not in the op-schema registry" in refused.stderr
 
 
 def _separate_kdps_root(tmp_path, fixture):
@@ -2644,6 +2802,32 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
     )
     assert not any("rocKE" in k.path.parts for k in flat.kdps())
     assert flat.kdps()
+
+
+@pytest.mark.quick
+def test_an_excluded_bundle_path_is_never_read(tmp_path, main_fixture):
+    """A `/`-separated entry excludes one bundle (a bundle whose DVC outputs were
+    not pulled, so what git holds of it may name a missing descriptor), matched
+    case-insensitively; a sibling that merely shares its name as a prefix is still
+    read."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    for bundle in ("unpulled", "unpulled2"):
+        folder = root / "rocKE" / bundle
+        folder.mkdir(parents=True)
+        (folder / "broken.kdp.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="malformed"):
+        load_flat_input(
+            root, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE/unpulled",)
+        )
+    (root / "rocKE" / "unpulled2" / "broken.kdp.json").unlink()
+    logged = []
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=logged.append, exclude_folders=("rocke/UNPULLED/",)
+    )
+    assert flat.kdps()
+    assert "excluding folder rocKE/unpulled/" in logged
 
 
 @pytest.mark.quick

@@ -10,11 +10,12 @@ Format (schema 2)::
 
     {
       "schema": 2,
-      "aliases": {"llvm24": "llvm23"},  # lanes sharing an emission profile
+      "aliases": {},              # optional lanes sharing an emission profile
       "ll": {                      # LLVM IR text, one section per LLVM profile
         "llvm20": {"<family>": {"<config index>": "<sha256>", ...}, ...},
         "llvm22": {...},
-        "llvm23": {...}           # llvm24 resolves through aliases
+        "llvm23": {...},
+        "llvm24": {...}
       },
       "ir_canonical": {            # canonical ck.dsl.ir: the same in every flavor
         "<family>": {"<config index>": "<sha256>", ...}
