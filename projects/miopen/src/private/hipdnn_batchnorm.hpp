@@ -83,6 +83,9 @@ namespace hipdnn {
 //   for DB_UPDATE, SEARCH_DB_UPDATE or DB_CLEAN, or under DbUpdate while it asks
 //   for SEARCH, SEARCH_DB_UPDATE or DB_CLEAN. MIOpen lets the handle's policy
 //   win over the variable, and the provider lets the variable win.
+// - The same calls under DbUpdate while MIOPEN_FIND_ENFORCE holds a value MIOpen
+//   cannot parse. MIOpen never reads the variable under DbUpdate, but the
+//   provider would read it and throw. An empty value and "none" run as None.
 // - Under miopenTuningPolicySearch, a problem for which no hipDNN engine has the
 //   benchmarking knob. Any other engine would run the problem untuned.
 // To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.
