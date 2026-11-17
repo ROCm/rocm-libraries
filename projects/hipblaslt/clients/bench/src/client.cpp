@@ -715,7 +715,7 @@ try
         ("partitions",
          value<int>(&partitions_opt)->default_value(1),
          "Run each GEMM as slices on this many devices (device 0 .. partitions-1), one stream each, "
-         "with hipblaslt_ext::PartitionedGemm. The time is the full span, first launch to last "
+         "with hipblaslt_ext::experimental::PartitionedGemm. The time is the full span, first launch to last "
          "partition done. A, B, C and D stay in the device 0 buffers and the other partitions "
          "reach them over peer access. Needs plain GEMM and the heuristic solution selection; "
          "1 = off.")

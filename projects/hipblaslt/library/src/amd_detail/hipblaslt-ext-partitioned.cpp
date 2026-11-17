@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-namespace hipblaslt_ext
+namespace hipblaslt_ext::experimental
 {
     namespace
     {
@@ -1016,4 +1016,4 @@ namespace hipblaslt_ext
     {
         return HIPBLAS_STATUS_NOT_SUPPORTED;
     }
-} // namespace hipblaslt_ext
+} // namespace hipblaslt_ext::experimental

@@ -168,7 +168,7 @@ struct Arguments
     // bytes
     uint8_t devices;
     uint8_t a2a_world;
-    // Run one GEMM as slices on this many devices (hipblaslt_ext::PartitionedGemm); 1 = off.
+    // Run one GEMM as slices on this many devices (hipblaslt_ext::experimental::PartitionedGemm); 1 = off.
     uint8_t partitions;
     // Dimension the slices split: M, N or B (the batch).
     char split_dim;

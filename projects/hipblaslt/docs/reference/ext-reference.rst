@@ -128,13 +128,14 @@ each partition the slice whose pages are on that partition's device, and ``getSl
 ``clients/samples/31_hipblaslt_gemm_partitioned_ext`` for an example and
 ``hipblaslt-bench --partitions`` to benchmark it. This current implementation supports plain GEMM; the device
 user arguments overloads are declared and return ``HIPBLAS_STATUS_NOT_SUPPORTED``.
+The API is in the ``hipblaslt_ext::experimental`` namespace because it is a beta API that can still change.
 
-.. doxygenclass:: hipblaslt_ext::PartitionedGemm
+.. doxygenclass:: hipblaslt_ext::experimental::PartitionedGemm
     :members:
     :protected-members:
     :private-members:
 
-.. doxygenenum:: hipblaslt_ext::SplitDim
+.. doxygenenum:: hipblaslt_ext::experimental::SplitDim
 
 hipBLASLtExt API reference
 ================================

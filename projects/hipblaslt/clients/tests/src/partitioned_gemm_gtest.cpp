@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests for hipblaslt_ext::PartitionedGemm.
+// Tests for hipblaslt_ext::experimental::PartitionedGemm.
 //
 //  pre_checkin_partitioned_gemm_ext  run on any single GPU. The "partitions" are extra handles
 //                                    on device 0, which is enough for the argument checks and
@@ -26,6 +26,8 @@
 #include <vector>
 
 using namespace hipblaslt_ext;
+using hipblaslt_ext::experimental::PartitionedGemm;
+using hipblaslt_ext::experimental::SplitDim;
 
 namespace
 {

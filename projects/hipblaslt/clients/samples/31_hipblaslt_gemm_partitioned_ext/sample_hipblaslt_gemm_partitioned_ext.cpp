@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Runs one GEMM on the partitions of a partitioned GPU (for example DPX) with
-// hipblaslt_ext::PartitionedGemm.
+// hipblaslt_ext::experimental::PartitionedGemm.
 //
 //   - one hipBLASLt handle, stream, workspace and set of matrices per partition (device)
 //   - the problem is the full m x n x k GEMM; it is split along N, so partition i computes
@@ -71,7 +71,7 @@ int main(int argc, char** argv)
     }
 
     // ---- the partitioned GEMM ----
-    hipblaslt_ext::PartitionedGemm gemm(handles,
+    hipblaslt_ext::experimental::PartitionedGemm gemm(handles,
                                         HIPBLAS_OP_N,
                                         HIPBLAS_OP_N,
                                         HIP_R_16F,
@@ -105,7 +105,7 @@ int main(int argc, char** argv)
                                           0,
                                           0,
                                           0,
-                                          hipblaslt_ext::SplitDim::N,
+                                          hipblaslt_ext::experimental::SplitDim::N,
                                           inputs));
 
     // Only algorithms that every partition accepts for its slice come back.
