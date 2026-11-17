@@ -1339,14 +1339,32 @@ class Solution(collections.abc.Mapping):
         and isaInfoMap[state["ISA"]].asmCaps.get("v_dot4c_i32_i8", False)):
       state["UseDotInstruction"] = True
       state["NumDotElements"] = 4
-      state["InnerUnroll"] = 1
-      state["TransposeLDS"] = 2
-      state["VectorWidthA"] = state["VectorWidthB"] = 1
+      # The dot4 path reuses the dot2 local read: one dot4 group per inner
+      # unroll step, and a scalar global read.  Only a single step is supported
+      # today.  Reject explicit geometry the path cannot honour instead of
+      # silently rewriting tuned parameters.  The remaining dot constraints
+      # (TransposeLDS, VectorWidth and the scalar LocalReadVectorWidth) are
+      # enforced by the dot derivation and validation below.
+      if state["InnerUnroll"] != 1:
+        reject(state, printRejectionReason,
+               "int8 dot4 requires InnerUnroll = 1, got %u" % state["InnerUnroll"])
+        return
+      dotReadWidth = state["NumDotElements"] * state["InnerUnroll"]
+      for tc in ("A", "B"):
+        if state[f"LocalReadVectorWidth{tc}"] not in [-1, dotReadWidth]:
+          reject(state, printRejectionReason,
+                 "int8 dot4 requires LocalReadVectorWidth%s = %u, got %u"
+                 % (tc, dotReadWidth, state[f"LocalReadVectorWidth{tc}"]))
+          return
+      if state["GlobalReadVectorWidthA"] not in [-1, 1] \
+          or state["GlobalReadVectorWidthB"] not in [-1, 1]:
+        reject(state, printRejectionReason,
+               "int8 dot4 requires GlobalReadVectorWidthA/B = 1, got %d/%d"
+               % (state["GlobalReadVectorWidthA"], state["GlobalReadVectorWidthB"]))
+        return
       state["GlobalReadVectorWidthA"] = state["GlobalReadVectorWidthB"] = 1
-      state["LocalReadVectorWidth"] = 4
-      state["LocalReadVectorWidthA"] = state["LocalReadVectorWidthB"] = 4
-      state["LocalRead2A"] = state["LocalRead2B"] = False
-      state["LocalWrite2A"] = state["LocalWrite2B"] = False
+      # LocalRead2/LocalWrite2 are legacy logic-file keys with no TensileLite
+      # reader, so leave whatever the logic file recorded rather than rewriting it.
     if not state["UseDotInstruction"] and state["WaveSplitK"]:
       reject(state, "WaveSplitK currently only support dot2 kernel.")
       return
