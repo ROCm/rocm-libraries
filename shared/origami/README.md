@@ -79,6 +79,8 @@ print(f"Best latency: {best_result.latency}")
 print(f"Best config: MT=({best_result.config.mt.m}, {best_result.config.mt.n}, {best_result.config.mt.k})")
 ```
 
+NN mode, `rank_options_t`, and the model loader are C++ only for now; the Python `rank_configs` takes only the analytical `model` argument.
+
 ### C++ API
 
 ```cpp
