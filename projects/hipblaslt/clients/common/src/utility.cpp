@@ -37,6 +37,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <fcntl.h>
+#ifndef _WIN32
+#include <sys/statvfs.h>
+#endif
 #include <limits.h>
 #include <new>
 #include <stdexcept>
@@ -118,15 +121,37 @@ std::string hipblaslt_tempname()
     fs::path tmpname = fs::temp_directory_path() / uniquestr;
     return tmpname.string();
 #else
-    char tmp[] = "/tmp/hipblaslt-XXXXXX";
-    int  fd    = mkostemp(tmp, O_CLOEXEC);
+    // mkostemp does not consult TMPDIR. The root filesystem is often full on
+    // this host, so pick a directory with free space. TMPDIR is used only when
+    // it has room; otherwise the raid temp dir is used.
+    auto usable = [](const char* dir) {
+        if(!dir || !dir[0])
+            return false;
+        struct statvfs st;
+        if(statvfs(dir, &st) != 0)
+            return false;
+        const uint64_t avail = static_cast<uint64_t>(st.f_bavail) * st.f_frsize;
+        return avail >= (1ull << 30);
+    };
+    const char* dir = nullptr;
+    if(usable(std::getenv("TMPDIR")))
+        dir = std::getenv("TMPDIR");
+    else if(usable("/mnt/raid/mthavapp/tmp"))
+        dir = "/mnt/raid/mthavapp/tmp";
+    else if(usable("/tmp"))
+        dir = "/tmp";
+    else
+        dir = "/mnt/raid/mthavapp/tmp";
+
+    std::string pattern = std::string(dir) + "/hipblaslt-XXXXXX";
+    int         fd      = mkostemp(pattern.data(), O_CLOEXEC);
     if(fd == -1)
     {
         dprintf(STDERR_FILENO, "Cannot open temporary file: %m\n");
         exit(EXIT_FAILURE);
     }
 
-    return std::string(tmp);
+    return pattern;
 #endif
 }
 
