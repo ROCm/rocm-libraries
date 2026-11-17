@@ -54,6 +54,8 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
+from kernels.common._spec_checks import require_bool
+
 # Re-exported, never redeclared: the tiled kernel specs name their band by these
 # ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
 from kernels.common.attention_mask_type import AttentionMaskType
@@ -432,7 +434,10 @@ def _request_errors(
             "runtime_head_dims must be a bool, got "
             f"{type(req.runtime_head_dims).__name__}"
         )
-    for field in QUERY_SIDE_OPTIONS:
+    # Checked before any candidate coerces them: bool("false") is True, so a
+    # string flag would select an fp8 kernel, and bool(None) is False, so a
+    # missing encoding would pass as OCP instead of being refused.
+    for field in (*QUERY_SIDE_OPTIONS, "use_fp8", "fp8_fnuz"):
         value = getattr(req, field)
         if type(value) is not bool:
             errors.append(f"{field} must be a bool, got {type(value).__name__}")
@@ -904,10 +909,7 @@ class AttentionSpec:
     def __post_init__(self) -> None:
         # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
         # (1, "yes") would silently produce an LSE identity: refuse it instead.
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
 
     def identity(self) -> dict:
         """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
@@ -1137,17 +1139,26 @@ class AttentionTuningSpec:
         return (64 * int(self.kernel_spec.num_warps), 1, 1)
 
     def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
-        """Specialize i32/i64 paged addressing once the physical cache is known.
+        """Retarget a paged spec to the physical cache once it is known.
 
-        Addressing width is a runtime specialization, not a configuration: it
-        changes :meth:`identity` (a different binary) but never ``tuning_id``,
+        Unified paths pick i32/i64 K/V addressing from it; dense paged bakes the
+        cache extent itself as its K/V buffer bound, so each cache size is its own
+        binary. Either way this is a runtime specialization, not a configuration:
+        it changes :meth:`identity` (a different binary) but never ``tuning_id``,
         so an id recorded after binding still replays from the request.
         """
         count = int(num_kv_blocks)
         if count < 0:
             raise ValueError("num_kv_blocks must be non-negative")
         if self.path == "dense":
-            return self  # contiguous K/V: nothing to retarget
+            if not self.kernel_spec.paged:
+                return self  # contiguous K/V: nothing to retarget
+            # The paged kernel bakes the cache extent as its K/V buffer bound.
+            return replace(
+                self,
+                kernel_spec=replace(self.kernel_spec, num_kv_blocks=count),
+                num_kv_blocks=count,
+            )
         kernel_spec = self.kernel_spec
         if not hasattr(kernel_spec, "use_i64_kv_addr"):
             return replace(self, num_kv_blocks=count)

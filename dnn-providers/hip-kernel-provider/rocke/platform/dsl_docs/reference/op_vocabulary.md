@@ -50,12 +50,18 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | Op name        | Builder      | LLVM intrinsic                  |
 |----------------|--------------|---------------------------------|
 | `math.exp2`    | `exp2`       | `llvm.exp2.f32`                 |
+| `math.ldexp`   | `ldexp`      | `llvm.ldexp.f32.i32` (`v_ldexp_f32`); HIP `__builtin_ldexpf` |
 | `math.sqrt`    | `sqrt`       | `llvm.sqrt.f32`                 |
 | `math.rsqrt`   | `rsqrt`      | `llvm.amdgcn.rsq.f32`           |
 | `math.tanh`    | `tanh`       | piecewise f32 expansion: OCML polynomial for `abs(x) < 0.625`, otherwise `exp2` + reciprocal; bitwise sign restoration |
 | `math.rcp`     | `rcp`        | `1.0 / v` (hardware reciprocal) |
 
 `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings. `exp2_fast` rejects f64 in the LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only f32: the builder rejects any other operand type. `rcp` accepts f64, and `fabs` accepts f64 (`llvm.fabs.f64`, HIP `fabs`).
+
+`ldexp(value, exponent)` is `value * 2^exponent` rounded once, for an f32 value and any i32
+exponent: the power of two is never formed as a float, so a product that `value * exp2(e)` would
+overflow or flush (the factor alone leaves the f32 range) comes out right, and a product beyond the
+f32 range gives the infinity or zero of its sign. Any other operand types are refused.
 
 `clamp_f32(v, lo, hi)` is `fmin(hi, fmax(lo, v))` — folds to `v_med3_f32`.
 

@@ -1846,7 +1846,7 @@ static void h_lower_if_else_branch(rocke_h_lowerer_t* lw,
 }
 
 /* def _op_scf_if_else(self, op):
- *     yields = [_if_else_branch_yield(op, branch) for branch in range(2)]
+ *     then_yield, else_yield = _if_else_yields(op)
  *     for result in op.results:
  *         self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
  *     self._emit(f"if({_name(cond)}) {{"); then branch
@@ -1856,15 +1856,13 @@ static void h_lower_if_else_branch(rocke_h_lowerer_t* lw,
  * each branch assigns them. */
 static rocke_status_t rocke_h_op_scf_if_else(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const rocke_op_t* yields[2] = {NULL, NULL};
-    int branch, i;
-    for(branch = 0; branch < 2; branch++)
+    const rocke_op_t* yields[2];
+    char err[ROCKE_ERR_MSG_CAP];
+    int i;
+    const rocke_status_t status = rocke_i_if_else_yields(op, yields, err, sizeof(err));
+    if(status != ROCKE_OK)
     {
-        char err[ROCKE_ERR_MSG_CAP];
-        if(!rocke_i_if_else_branch_yield(op, branch, &yields[branch], err, sizeof(err)))
-        {
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", err);
-        }
+        return rocke_h_fail(lw, status, "%s", err);
     }
     for(i = 0; i < op->num_results; i++)
     {
@@ -1940,16 +1938,16 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
         return lw->status;
     }
     {
-        char descriptor_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        char loop_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
         {
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", descriptor_error);
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", loop_error);
         }
     }
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
 
     iter_meta = rocke_attr_get(&op->attrs, "iter_args");
-    if(iter_meta && iter_meta->kind == ROCKE_ATTR_LIST)
+    if(rocke_i_attr_is_list(iter_meta))
     {
         items = iter_meta->u.list.items;
         meta_n = iter_meta->u.list.count;
@@ -2019,10 +2017,8 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
 
 /* def _op_scf_yield(self, op):
  *     parent_for = _find_enclosing_for(self.kernel.body, op)
- *     if parent_for is None: raise RuntimeError("scf.yield without enclosing scf.for")
- *     meta = parent_for.attrs.get("iter_args", [])
- *     if len(op.operands) != len(meta):
- *         raise RuntimeError(f"scf.yield: {len(op.operands)} values vs {len(meta)} iter_args")
+ *     if parent_for is None: raise ValueError(_ORPHAN_YIELD_ERROR)
+ *     meta = parent_for.attrs.get("iter_args", [])  # one entry per yielded value
  *     for m, v in zip(meta, op.operands):
  *         self._emit(f"{m['name'][1:]} = {_name(v)};")
  *
@@ -2092,19 +2088,16 @@ static rocke_status_t rocke_h_op_scf_yield(rocke_h_lowerer_t* lw, const rocke_op
     parent_for = h_find_enclosing_for(lw->kernel->body, op);
     if(!parent_for)
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "scf.yield without enclosing scf.for");
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", ROCKE_ORPHAN_YIELD_ERROR);
     }
     meta = rocke_attr_get(&parent_for->attrs, "iter_args");
-    if(meta && meta->kind == ROCKE_ATTR_LIST)
+    if(rocke_i_attr_is_list(meta))
     {
         items = meta->u.list.items;
         meta_n = meta->u.list.count;
     }
-    if(op->num_operands != meta_n)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "scf.yield: %d values vs %d iter_args", op->num_operands, meta_n);
-    }
+    /* rocke_i_scf_for_error has checked that this yield ends the loop body and
+     * gives one value per iter_args entry. */
     for(i = 0; i < meta_n; i++)
     {
         const char* mname = rocke_attr_get_str(items[i], "name");
