@@ -3745,22 +3745,23 @@ rocblas_status rocblas_internal_trsm_launcher(rocblas_handle    handle,
     {
         // left
         // B is essentially a vector (x, in trsv). Don't need ldb, can use 1 for incx.
-        rocblas_internal_trsv_substitution_template<DIM_X, T>(handle,
-                                                              uplo,
-                                                              transA,
-                                                              diag,
-                                                              m,
-                                                              A,
-                                                              offset_A,
-                                                              lda,
-                                                              stride_A,
-                                                              alpha,
-                                                              B,
-                                                              offset_B,
-                                                              1,
-                                                              stride_B,
-                                                              batch_count,
-                                                              (rocblas_int*)w_x_temp);
+        RETURN_IF_ROCBLAS_ERROR(
+            (rocblas_internal_trsv_substitution_template<DIM_X, T>(handle,
+                                                                   uplo,
+                                                                   transA,
+                                                                   diag,
+                                                                   m,
+                                                                   A,
+                                                                   offset_A,
+                                                                   lda,
+                                                                   stride_A,
+                                                                   alpha,
+                                                                   B,
+                                                                   offset_B,
+                                                                   1,
+                                                                   stride_B,
+                                                                   batch_count,
+                                                                   (rocblas_int*)w_x_temp)));
     }
     else
     {
