@@ -6,7 +6,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
-* [Numerics] Fixed statistics-mode argument handling, global launch dimensions, and minimum/maximum reductions for positive-only, negative-only, zero, infinity, and BF16 subnormal inputs.
+* [Numerics] Fixed statistics-mode argument handling, global launch dimensions, and
+  minimum/maximum reductions for positive-only, negative-only, zero, infinity, and BF16
+  subnormal inputs. Bound the grid-stride reduction to eight blocks per hardware compute unit
+  to limit contention on the statistics atomics.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
