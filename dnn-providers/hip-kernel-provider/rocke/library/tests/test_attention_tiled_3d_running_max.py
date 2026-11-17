@@ -29,9 +29,10 @@ as the Python ones for these specs.
 
 from __future__ import annotations
 
+import importlib
 import math
 import os
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
@@ -42,6 +43,7 @@ from dispatch.attention.tuning_specs import (
     make_explicit_attention_3d_specs,
 )
 from kernels.common import attention_unified as au
+from kernels.common.attention_split_kv_reduce import reduce_max_segments
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.hip_module import Runtime, get_device_arch, get_device_num_cus
@@ -334,6 +336,38 @@ def test_decode_sink(gpu):
     sinks = np.full(NUM_QUERY_HEADS, 100.0, np.float32)
     out = _attention(problem, arch, q, k, v, tuning_spec=spec, sinks=sinks)
     _assert_close(out, _reference(q, k, v, sinks))
+
+
+# The (segment, reduce) pair hkp_pack ships: the module predicate gates it, and
+# its reduce half is the shared split-KV reduce predicate
+# (``supports_split_kv_reduce``, via the arch's ``supports_tiled_reduce_spec``).
+# The launch runs exactly that pair, so the numeric check covers what the
+# predicate admits; the same reduce one segment past the arch's LDS cap, or
+# with heads that do not group evenly, is refused.
+@pytest.mark.gpu
+@pytest.mark.parametrize("num_segments", [2, 4, 8], ids=["seg2", "seg4", "seg8"])
+def test_shipped_module_pair_numeric(gpu, num_segments):
+    arch, num_cus = gpu
+    module = importlib.import_module(f"kernels.{arch}.attention_tiled_3d")
+    kv_len = 4096
+    problem = _problem(num_cus, q_len=1, kv_len=kv_len)
+    spec = _explicit_spec(problem, arch, num_segments)
+    segment, reduce = spec.kernel_spec, spec.reduce_spec
+    assert reduce == module.reduce_spec_for(segment)
+    assert module.supports_tiled_reduce_spec(reduce, arch=arch) == (True, "supported")
+    ok, why = module.supports_unified_attention_3d_tiled_module(segment, arch=arch)
+    assert ok, why
+
+    over_cap = replace(reduce, num_segments=reduce_max_segments(arch) + 1)
+    ok, why = module.supports_tiled_reduce_spec(over_cap, arch=arch)
+    assert not ok and "LDS" in why, why
+    ungrouped = replace(reduce, num_query_heads=12, num_kv_heads=8)
+    ok, why = module.supports_tiled_reduce_spec(ungrouped, arch=arch)
+    assert not ok and "divisible" in why, why
+
+    q, k, v = _decode_inputs(kv_len, hot=9.0)
+    out = _attention(problem, arch, q, k, v, tuning_spec=spec)
+    _assert_close(out, _reference(q, k, v))
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
