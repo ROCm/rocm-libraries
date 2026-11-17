@@ -1250,8 +1250,9 @@ endif()
 
 # Every DLL/EXE target defined here needs hipblaslt_add_version_resource (above) unless it
 # is not installed to bin/: samples go to libexec/, the Python extension installs under
-# lib/hipblaslt/rocisa, and the TensileLite client and test tools are not shipped there.
+# lib/hipblaslt/rocisa, the TensileLite client and test tools are not shipped there, and
+# hipblaslt-c-headers-check is only built.
 rocm_libraries_check_version_resources(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     EXCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/clients/samples"
-    EXCLUDE _rocisa tensilelite-client cpu-gemm-driver tensilelite-tests)
+    EXCLUDE _rocisa tensilelite-client cpu-gemm-driver tensilelite-tests hipblaslt-c-headers-check)
