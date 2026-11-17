@@ -5051,9 +5051,10 @@ static void wgrad_emit_kloop_regt_prefetch(rocke_conv_build_ctx_t* ctx)
         rocke_conv_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, for_op.iter_vars, num_accs, new_accs);
         rocke_b_sched_barrier(b, 0);
-        /* sync_lds_only would still drain the prefetch on gfx12 RDNA, where
-         * the wait-count pass waits for every counter in front of an s_barrier
-         * it emits; the helper emits the barrier itself there. */
+        /* sync_lds_only may still drain the prefetch on gfx12 RDNA, where the
+         * wait-count pass can wait for every counter in front of an s_barrier
+         * it emits (compiler-dependent); the helper emits the barrier itself
+         * there. */
         rocke_lds_barrier_keep_vmem(b, ctx->arch);
         wgrad_rtp_store(ctx, t);
         rocke_lds_barrier_keep_vmem(b, ctx->arch);
