@@ -243,6 +243,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if not state.get("LDSTrStoreShuffle", 0):
       requiredParametersTemp.discard("LDSTrStoreShuffle")
 
+    # Existing logic files carry LocalDotLayout=1; keep their full names unchanged.
+    if state.get("LocalDotLayout", 1) == 1:
+      requiredParametersTemp.discard("LocalDotLayout")
+
     # PostLoopStoreInNll changes codegen only when it is ON, and
     # assignPostLoopStoreInNll resolves it independently of isMxf4SubtilePath -- an
     # NT/NN/TT fp4 subtile kernel can carry it ON while isMxf4SubtilePath is False, and
