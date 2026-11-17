@@ -98,6 +98,10 @@ struct ordered_block_id
         *id = static_cast<id_type>(0);
     }
 
+    /// Synchronizes before the threads read the id from \p storage, but not after.
+    /// \p storage must therefore stay untouched until all threads have returned: do not
+    /// alias it (e.g. in a union) with shared memory that is written before the next
+    /// syncthreads(). Use block_id_wrapper<T, true>::get() if the storage is reused.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     id_type get(unsigned int tid, storage_type& storage)
     {

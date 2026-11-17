@@ -666,9 +666,11 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
                                                      stream));
 
         // Create ordered block id.
+        // Use the wrapper: its get() synchronizes again after reading the id, so the kernel may
+        // reuse the shared memory that holds the id.
         common::device_ptr<unsigned int> ordered_bid_storage(1);
-        auto                             ordered_bid
-            = rocprim::detail::ordered_block_id<unsigned int>::create(ordered_bid_storage.get());
+        auto ordered_bid = rocprim::detail::block_id_wrapper<unsigned int, true>::create(
+            ordered_bid_storage.get());
 
         // Call the provided function with either scan_state or scan_state_with_sleep based on
         // the value of use_sleep
