@@ -2,6 +2,10 @@
 ``engine.trained_catalog_sha256.<arch>`` when a ranker is trained on it.
 
     python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
+
+A bundle whose catalog is sharded over several KDPs, one ranker serving them all (the
+dgrad AOT bundles), passes every shard: the fingerprint is that of their kernels
+together.
 """
 
 from __future__ import annotations
@@ -34,9 +38,16 @@ def catalog_fingerprint(kdp: dict) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("kdp", type=Path, help="the KDP the ranker was trained on")
+    parser.add_argument(
+        "kdp", type=Path, nargs="+", help="the KDP(s) the ranker was trained on"
+    )
     args = parser.parse_args(argv)
-    print(catalog_fingerprint(json.loads(args.kdp.read_text())))
+    kernels = [
+        kernel
+        for path in args.kdp
+        for kernel in json.loads(path.read_text()).get("kernelDescriptors", [])
+    ]
+    print(catalog_fingerprint({"kernelDescriptors": kernels}))
     return 0
 
 

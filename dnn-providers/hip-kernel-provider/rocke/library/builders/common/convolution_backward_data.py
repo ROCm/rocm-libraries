@@ -2040,7 +2040,7 @@ def _require_packaged_flavor(target: ConvDgradAotTarget) -> None:
 
 
 def _build_conv_dgrad_aot(spec: ConvDgradAotSpec, arch: str) -> KernelDef:
-    """Build an instance of either engine.
+    """Build an instance of its target's engine.
 
     Dispatches on the family as the sweeps do: implicit GEMM through
     ``build_implicit_gemm_conv_dgrad`` (``kernel_sweep.build_kernel``), the direct
