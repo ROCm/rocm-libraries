@@ -1336,13 +1336,17 @@ namespace
             expect_bell(fit + 1, 4, 1, 4, nullptr, nullptr, st_size);
             expect_bell(fit, 4, 1, 4, g_dummy, g_dummy, st_ok);
 
-            expect_bell(k_max, 1, 2, 1, nullptr, g_dummy, st_ptr);
-            expect_bell(k_max, 1, 2, 1, g_dummy, nullptr, st_ptr);
-            expect_bell(k_max, 1, 2, 1, g_dummy, g_dummy, st_ok);
+            // ell_cols must be a whole number of blocks, so this width is rejected
+            // before the pointer checks.
+            expect_bell(k_max, 1, 2, 1, nullptr, g_dummy, st_size);
+            expect_bell(k_max, 1, 2, 1, g_dummy, nullptr, st_size);
+            expect_bell(k_max, 1, 2, 1, g_dummy, g_dummy, st_size);
 
+            // rows * ell_cols still fits, and the block-row count is large enough
+            // that the old rows + block_dim - 1 expression overflowed.
             Spmat d;
             ASSERT_EQ(rocsparse_create_bell_descr(
-                          &d, k_max, 1, dir_r, 2, 1, g_dummy, g_dummy, i32, base0, f32),
+                          &d, k_max / 2, 1, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
                       st_ok);
             EXPECT_EQ(rocsparse_bell_set_pointers(d, nullptr, g_dummy), st_ptr);
             EXPECT_EQ(rocsparse_bell_set_pointers(d, g_dummy, nullptr), st_ptr);
@@ -1477,14 +1481,15 @@ namespace
         EXPECT_EQ(rebuilt_val.read(), (std::vector<float>{1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0}));
         EXPECT_EQ(rocsparse_destroy_dnmat_descr(dense), st_ok);
 
-        // mb = ceil(INT64_MAX / 2) and 8 * mb does not fit in size_t.
+        // mb = ceil((INT64_MAX/2) / 2) and 8 * mb does not fit in size_t.
+        // ell_cols is 2 so the width is a whole number of blocks and rows * ell_cols fits.
         Spmat huge;
         ASSERT_EQ(rocsparse_create_bell_descr(
-                      &huge, k_max, 1, dir_r, 2, 1, g_dummy, g_dummy, i32, base0, f32),
+                      &huge, k_max / 2, 1, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
                   st_ok);
         rocsparse_dnmat_descr huge_dense = nullptr;
         ASSERT_EQ(rocsparse_create_dnmat_descr(
-                      &huge_dense, k_max, 1, k_max, g_dummy, f32, rocsparse_order_column),
+                      &huge_dense, k_max / 2, 1, k_max / 2, g_dummy, f32, rocsparse_order_column),
                   st_ok);
         size_t huge_buffer = 7;
         EXPECT_EQ(rocsparse_dense_to_sparse(handle,
