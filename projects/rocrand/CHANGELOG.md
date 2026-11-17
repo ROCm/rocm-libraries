@@ -12,6 +12,8 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
+* Fixed generate calls captured in a HIP graph returning the same values on every launch of the graph for the Philox, ThreeFry, Sobol (including scrambled), and MT19937 generators. These generators now keep their position in device memory, so every launch continues the sequence like consecutive eager calls.
+* Fixed launching a HIP graph that captured a generate call after the generator was re-initialized (for example, after `rocrand_set_seed`), which read freed memory for the XORWOW, MRG31k3p, MRG32k3a, and LFSR113 generators. Re-initialization now reuses the generator's device memory.
 
 
 ## rocRAND 5.2.0 for ROCm 10.2.0

@@ -177,7 +177,19 @@ Using rocRAND in HIP Graphs
 
 rocRAND supports capturing the random number generation with HIP Graphs.
 However, the construction, initialization, and cleanup of the generator objects must take place
-outside of the recorded section. See the following example (error handling is omitted for brevity):
+outside of the recorded section.
+
+Each launch of a graph continues the sequence of the generator from where the previous launch or
+direct generate call stopped, so launching a graph that captured a generate call several times
+produces new values every time, as consecutive direct calls do. For the Philox, ThreeFry, Sobol
+(including scrambled), and MT19937 generators, the values produced by successive launches are
+exactly the values that the same sequence of direct calls would produce.
+
+A generator that is re-initialized after the capture, for example after changing its seed or
+offset, keeps the memory that the graph uses, and later launches of the graph continue from the
+re-initialized state.
+
+See the following example (error handling is omitted for brevity):
 
 .. literalinclude:: ../../test/hipgraphs_doc_sample.hpp
     :language: c++

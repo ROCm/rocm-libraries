@@ -29,6 +29,7 @@
 #include "common.hpp"
 #include "config_types.hpp"
 #include "distributions.hpp"
+#include "generator_state.hpp"
 #include "generator_type.hpp"
 #include "system.hpp"
 #include "utils/cpp_utils.hpp"
@@ -323,6 +324,7 @@ public:
             return ROCRAND_STATUS_SUCCESS;
         }
 
+        const unsigned int prev_engines_size = m_engines_size;
         hipError_t error
             = get_least_common_grid_size<ConfigProvider>(m_stream, m_order, m_engines_size);
         if(error != hipSuccess)
@@ -339,11 +341,10 @@ public:
 
         m_start_engine_id = m_offset % m_engines_size;
 
-        if(m_engines != nullptr)
-        {
-            system_type::free(m_engines);
-        }
-        rocrand_status status = system_type::alloc(&m_engines, m_engines_size);
+        rocrand_status status = reuse_or_allocate<system_type>(m_stream,
+                                                               m_engines,
+                                                               prev_engines_size,
+                                                               m_engines_size);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;

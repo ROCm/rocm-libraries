@@ -62,6 +62,7 @@
 #include "common.hpp"
 #include "config_types.hpp"
 #include "distributions.hpp"
+#include "generator_state.hpp"
 #include "generator_type.hpp"
 #include "system.hpp"
 #include "utils/cpp_utils.hpp"
@@ -405,7 +406,6 @@ public:
 
     void reset() override final
     {
-        free_engines();
         m_engines_initialized = false;
     }
 
@@ -476,14 +476,18 @@ public:
         {
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
-        m_engines_size = config.blocks;
+        const unsigned int prev_engines_size = m_engines_size;
+        m_engines_size                       = config.blocks;
 
         if(m_engines_size > mtgpdc_params_11213_num)
         {
             return ROCRAND_STATUS_ALLOCATION_FAILED;
         }
 
-        rocrand_status status = system_type::alloc(&m_engines, m_engines_size);
+        rocrand_status status = reuse_or_allocate<system_type>(m_stream,
+                                                               m_engines,
+                                                               prev_engines_size,
+                                                               m_engines_size);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;

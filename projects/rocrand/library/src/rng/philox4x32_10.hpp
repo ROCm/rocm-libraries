@@ -60,6 +60,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "common.hpp"
 #include "config_types.hpp"
 #include "distributions.hpp"
+#include "generator_state.hpp"
 #include "generator_type.hpp"
 #include "system.hpp"
 #include "utils/cpp_utils.hpp"
@@ -117,11 +118,14 @@ struct generate_philox
                          dim3                        thread_idx,
                          dim3                        grid_dim,
                          dim3                        block_dim,
-                         philox4x32_10_device_engine engine,
+                         generator_state_access<philox4x32_10_device_engine, discard_engine>
+                             engine_state,
                          T* __restrict__ data,
                          const size_t n,
                          Distribution distribution)
     {
+        philox4x32_10_device_engine engine = engine_state.load();
+
         constexpr unsigned int input_width  = Distribution::input_width;
         constexpr unsigned int output_width = Distribution::output_width;
 
@@ -237,6 +241,8 @@ struct generate_philox
                 }
             }
         }
+
+        engine_state.advance(thread_idx, grid_dim);
     }
 };
 
@@ -320,9 +326,13 @@ public:
         if(m_engines_initialized)
             return ROCRAND_STATUS_SUCCESS;
 
-        m_engine = engine_type{m_seed, 0, m_offset};
+        rocrand_status status = m_engine.store(m_stream, engine_type{m_seed, 0, m_offset});
+        if(status != ROCRAND_STATUS_SUCCESS)
+        {
+            return status;
+        }
 
-        rocrand_status status = m_poisson.init();
+        status = m_poisson.init();
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
@@ -359,6 +369,12 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
+        // Generating data_size values will use this many distributions
+        const auto num_applied_generators = (data_size + Distribution::output_width - 1)
+                                            / Distribution::output_width
+                                            * Distribution::input_width;
+        const auto engine_state = m_engine.access(discard_engine{num_applied_generators});
+
         auto launch_with_lds = [&](auto possible_lds_usage)
         {
             return dynamic_dispatch(m_order,
@@ -373,7 +389,7 @@ public:
                                                         dim3(config.threads),
                                                         0,
                                                         m_stream,
-                                                        m_engine,
+                                                        engine_state,
                                                         data,
                                                         data_size,
                                                         distribution);
@@ -398,14 +414,9 @@ public:
             return status;
         }
 
-        // Generating data_size values will use this many distributions
-        const auto num_applied_generators = (data_size + Distribution::output_width - 1)
-                                            / Distribution::output_width
-                                            * Distribution::input_width;
-
-        m_engine.discard(num_applied_generators);
-
-        return ROCRAND_STATUS_SUCCESS;
+        return m_engine.update(target_arch,
+                               m_stream,
+                               discard_engine{num_applied_generators});
     }
 
     rocrand_status generate(unsigned long long* data, size_t data_size)
@@ -462,8 +473,10 @@ public:
     }
 
 private:
-    bool        m_engines_initialized = false;
-    engine_type m_engine;
+    bool m_engines_initialized = false;
+    // The position is kept in memory of the system so a generate call captured in a HIP graph
+    // continues from it on every launch.
+    generator_state<system_type, engine_type> m_engine;
 
     unsigned long long m_seed;
 

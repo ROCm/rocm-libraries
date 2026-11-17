@@ -24,6 +24,7 @@
 #include "common.hpp"
 #include "config_types.hpp"
 #include "distributions.hpp"
+#include "generator_state.hpp"
 #include "generator_type.hpp"
 #include "system.hpp"
 #include "utils/cpp_utils.hpp"
@@ -87,7 +88,7 @@ struct generate_sobol_host
                          const size_t,
                          const Constant*,
                          const Constant*,
-                         const unsigned int,
+                         generator_state_access<unsigned long long, advance_offset>,
                          Distribution)
     {}
 };
@@ -100,12 +101,12 @@ template<unsigned int OutputPerThread,
          class Distribution,
          int block_size>
 ROCRAND_INTERNAL_KERNEL __launch_bounds__(block_size)
-void generate_sobol_kernel(T*                       data,
-                           const size_t             n,
-                           const Constant*          direction_vectors,
-                           const Constant*          scramble_constants,
-                           const unsigned long long offset,
-                           Distribution             distribution)
+void generate_sobol_kernel(T*              data,
+                           const size_t    n,
+                           const Constant* direction_vectors,
+                           const Constant* scramble_constants,
+                           generator_state_access<unsigned long long, advance_offset> offset_state,
+                           Distribution                                              distribution)
 #else
 template<unsigned int OutputPerThread,
          bool         Scrambled,
@@ -115,8 +116,12 @@ template<unsigned int OutputPerThread,
          class Distribution,
          int block_size>
 ROCRAND_INTERNAL_KERNEL __launch_bounds__(block_size)
-void generate_sobol_kernel(
-    T*, const size_t, const Constant*, const Constant*, const unsigned long long, Distribution)
+void generate_sobol_kernel(T*,
+                           const size_t,
+                           const Constant*,
+                           const Constant*,
+                           generator_state_access<unsigned long long, advance_offset>,
+                           Distribution)
 {}
 
 template<unsigned int OutputPerThread,
@@ -136,8 +141,8 @@ struct generate_sobol_host
                          const size_t             n,
                          const Constant*          direction_vectors,
                          const Constant*          scramble_constants,
-                         const unsigned long long offset,
-                         Distribution             distribution)
+                         generator_state_access<unsigned long long, advance_offset> offset_state,
+                         Distribution distribution)
 #endif
 {
 #ifdef __HIP_DEVICE_COMPILE__
@@ -148,6 +153,7 @@ struct generate_sobol_host
 #endif
     constexpr unsigned int output_per_thread  = OutputPerThread;
     constexpr bool         use_shared_vectors = Engine::uses_shared_vectors();
+    const unsigned long long offset           = offset_state.load();
     using vec_type                            = aligned_vec_type<T, output_per_thread>;
 
     const unsigned int dimension = block_idx.y;
@@ -268,6 +274,8 @@ struct generate_sobol_host
             }
         }
     }
+
+    offset_state.advance(thread_idx, grid_dim);
 }
 #ifndef __HIP_DEVICE_COMPILE__
 };
@@ -647,8 +655,12 @@ public:
             return status;
         }
 
-        m_current_offset = m_offset;
-        m_initialized    = true;
+        status = m_current_offset.store(m_stream, m_offset);
+        if(status != ROCRAND_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        m_initialized = true;
 
         return ROCRAND_STATUS_SUCCESS;
     }
@@ -701,6 +713,15 @@ public:
         const uint32_t blocks_x = next_power2((blocks + m_dimensions - 1) / m_dimensions);
         const uint32_t blocks_y = m_dimensions;
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
+        const auto offset_state = m_current_offset.access(advance_offset{size});
+
         // Bypass the generalized launching mechanism for host and device, as it would introduce a level of
         //   indirection for the device (the __global__ function calls a __device__ function). This causes
         //   a difference in the generated assembly, in turn causing a regression for the scrambled generators
@@ -719,7 +740,7 @@ public:
                     size,
                     m_direction_vectors,
                     m_scramble_constants,
-                    m_current_offset,
+                    offset_state,
                     distribution);
             if(hipGetLastError() != hipSuccess)
             {
@@ -729,13 +750,6 @@ public:
         else
         {
             using block_size_provider = static_block_size_config_provider<threads>;
-
-            host::target_arch target_arch;
-            hipError_t        result = host::get_device_arch(m_stream, target_arch);
-            if(result != hipSuccess)
-            {
-                return ROCRAND_STATUS_INTERNAL_ERROR;
-            }
 
             status = system_type::template launch<generate_sobol_host<output_per_thread,
                                                                       Scrambled,
@@ -752,7 +766,7 @@ public:
                                                                        size,
                                                                        m_direction_vectors,
                                                                        m_scramble_constants,
-                                                                       m_current_offset,
+                                                                       offset_state,
                                                                        distribution);
             if(status != ROCRAND_STATUS_SUCCESS)
             {
@@ -760,9 +774,7 @@ public:
             }
         }
 
-        m_current_offset += size;
-
-        return ROCRAND_STATUS_SUCCESS;
+        return m_current_offset.update(target_arch, m_stream, advance_offset{size});
     }
 
     template<class T>
@@ -814,7 +826,9 @@ private:
 
     bool                 m_initialized        = false;
     unsigned int         m_dimensions         = 1;
-    unsigned long long   m_current_offset     = 0;
+    // The offset is kept in memory of the system so a generate call captured in a HIP graph
+    // continues from it on every launch.
+    generator_state<system_type, unsigned long long> m_current_offset;
     const constant_type* m_direction_vectors  = nullptr;
     const constant_type* m_scramble_constants = nullptr;
 
