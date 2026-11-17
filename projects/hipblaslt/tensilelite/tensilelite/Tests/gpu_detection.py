@@ -158,3 +158,86 @@ def get_available_device_tags() -> list[str]:
         rocminfo = _tool(_ROCMINFO_RELPATHS)
         output = _run([rocminfo]) if rocminfo else None
     return device_tags_from_rocminfo(output) if output else []
+
+
+# ---------------------------------------------------------------------------------------------
+# DPX: one physical GPU split into partitions that each show up as a HIP device
+# ---------------------------------------------------------------------------------------------
+#
+# The partitions of one GPU share the PCI domain, bus and device number and differ only in the PCI
+# function (0001:01:00.0 and 0001:01:00.1 on a DPX gfx1250). Two separate GPUs never share them, so
+# this tells DPX from two SPX cards, which cannot reach each other's memory. The KFD topology has
+# the same information without loading HIP: ``location_id`` is ``bus << 8 | device << 3 | function``.
+
+_KFD_NODES = "/sys/class/kfd/kfd/topology/nodes"
+
+
+def _kfd_properties(path):
+    """The ``name value`` lines of one KFD node's ``properties`` file as a dict of ints."""
+    props = {}
+    try:
+        with open(os.path.join(path, "properties")) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) == 2:
+                    try:
+                        props[parts[0]] = int(parts[1])
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return props
+
+
+def kfd_gpu_nodes(nodes_dir=_KFD_NODES):
+    """``(domain, location_id)`` of every GPU node, in node order (the order HIP numbers them)."""
+    try:
+        names = sorted(os.listdir(nodes_dir), key=lambda n: int(n) if n.isdigit() else -1)
+    except OSError:
+        return []
+    gpus = []
+    for name in names:
+        props = _kfd_properties(os.path.join(nodes_dir, name))
+        if props.get("simd_count", 0) > 0:  # CPU nodes have none
+            gpus.append((props.get("domain", 0), props.get("location_id", 0)))
+    return gpus
+
+
+def _visible(nodes, environ):
+    """The nodes the process can use, after ROCR_VISIBLE_DEVICES and HIP_VISIBLE_DEVICES.
+
+    Both are lists of indexes here. A list of UUIDs cannot be matched to a node without HIP, so
+    it makes the answer "none": a skipped test is better than a test on the wrong devices.
+    """
+    for name in ("ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES"):
+        value = environ.get(name)
+        if value is None:
+            continue
+        tokens = [t.strip() for t in value.split(",") if t.strip()]
+        if not all(t.isdigit() for t in tokens):
+            return []
+        nodes = [nodes[int(t)] for t in tokens if int(t) < len(nodes)]
+    return nodes
+
+
+def dpx_pairs(nodes_dir=_KFD_NODES, environ=None):
+    """The visible HIP device pairs that are the two partitions of one GPU.
+
+    A pair is two devices with the same PCI domain, bus and device and different functions, on a
+    GPU that has exactly two visible partitions (DPX; four or eight partitions are another mode).
+    The result is a list of ``(i, j)`` HIP device indexes, ``i < j``.
+    """
+    nodes = _visible(kfd_gpu_nodes(nodes_dir), os.environ if environ is None else environ)
+    groups = {}
+    for index, (domain, location) in enumerate(nodes):
+        groups.setdefault((domain, location >> 3), []).append((location & 7, index))
+    pairs = []
+    for members in groups.values():
+        if len(members) == 2 and members[0][0] != members[1][0]:
+            pairs.append(tuple(sorted(index for _, index in members)))
+    return sorted(pairs)
+
+
+def has_dpx(nodes_dir=_KFD_NODES, environ=None):
+    """Whether a GPU in DPX mode is visible to this process."""
+    return bool(dpx_pairs(nodes_dir, environ))
