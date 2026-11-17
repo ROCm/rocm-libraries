@@ -648,6 +648,15 @@ namespace rocsparse
 
         case rocsparse_format_bell:
         {
+            // The product addresses whole blocks. A partial last block row or
+            // column is a valid descriptor, but this routine would drop that
+            // row and read past B, so reject it before any stage runs.
+            if(mat_A->block_dim <= 0 || (mat_A->rows % mat_A->block_dim) != 0
+               || (mat_A->cols % mat_A->block_dim) != 0 || (mat_C->rows % mat_A->block_dim) != 0)
+            {
+                return rocsparse_status_invalid_size;
+            }
+
             rocsparse_bellmm_alg bellmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2bellmm_alg(alg, bellmm_alg)));
 

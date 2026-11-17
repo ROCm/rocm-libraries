@@ -262,6 +262,8 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat_A, \p mat_B, \p mat_C, \p beta, or
 *               \p buffer_size pointer is invalid.
+*  \retval      rocsparse_status_invalid_size for a blocked ELL \p mat_A whose rows
+*               or columns, or \p mat_C's rows, are not a multiple of the block size.
 *  \retval      rocsparse_status_not_implemented \p trans_A, \p trans_B, \p compute_type, or \p alg is
 *               currently not supported.
 *  \par Example
