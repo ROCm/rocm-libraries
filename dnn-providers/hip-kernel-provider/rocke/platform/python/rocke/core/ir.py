@@ -563,7 +563,7 @@ def _operand_types_error(op_name: str, operand_types: Sequence[Type]) -> str | N
     ``icmp i32``, ``lshr i64`` and so on), so an i32 and an i64 would lower to
     IR the compiler rejects. The builders refuse it as a ``TypeError``, and the
     verifier reports it and every lowering refuses it for IR that did not come
-    through them: the same-type binary ops through
+    through them: the same-type binary ops and the lane-wise FMA through
     :func:`_operand_types_op_error`, the compares through their rules
     (:func:`_int_cmp_error`, :func:`_vector_cmp_error`, :func:`_fcmp_error`).
     The rule refuses an operand with no type, with
@@ -688,13 +688,26 @@ _SAME_TYPE_BINARY_OPS = frozenset(
 )
 
 
+def _same_type_operand_count(op_name: str) -> int | None:
+    """How many operands, all of one type, an ``op_name`` op takes: two for
+    one of :data:`_SAME_TYPE_BINARY_OPS`, three for the lane-wise FMA
+    (``vector.fma``), or None for any other op. The C++ engine's twin is
+    ``rocke_i_same_type_operand_count``."""
+    if op_name in _SAME_TYPE_BINARY_OPS:
+        return 2
+    if op_name == "vector.fma":
+        return 3
+    return None
+
+
 def _operand_types_op_error(op: Op) -> str | None:
-    """:func:`_operand_types_error` for a built op that is one of
-    :data:`_SAME_TYPE_BINARY_OPS` with two operands, or None. The verifier
-    reports it and every lowering refuses it as a ``TypeError`` before it
-    lowers an op, for IR that did not come through IRBuilder (C++ engine:
-    ``rocke_i_operand_types_op_error``)."""
-    if op.name not in _SAME_TYPE_BINARY_OPS or len(op.operands) != 2:
+    """:func:`_operand_types_error` for a built op that takes operands of one
+    type (:func:`_same_type_operand_count`), with that many operands, or None.
+    The verifier reports it and every lowering refuses it as a ``TypeError``
+    before it lowers an op, for IR that did not come through IRBuilder (C++
+    engine: ``rocke_i_operand_types_op_error``)."""
+    operand_count = _same_type_operand_count(op.name)
+    if operand_count is None or len(op.operands) != operand_count:
         return None
     return _operand_types_error(op.name, [operand.type for operand in op.operands])
 
@@ -704,20 +717,22 @@ def _operand_types_op_error(op: Op) -> str | None:
 _COMPARE_OPS = frozenset({"arith.cmp", "arith.fcmp", "vector.cmp"})
 
 
-def _binary_arity_error(op: Op) -> str | None:
-    """The error for a built op that is one of :data:`_SAME_TYPE_BINARY_OPS`
-    or :data:`_COMPARE_OPS` without exactly two operands and one result, or
-    None. The verifier reports it, and every lowering and the constant folder
-    check it before they read the second operand, for IR that did not come
-    through IRBuilder (a ``ValueError``; C++ engine:
-    ``rocke_i_binary_arity_op_error``, same text)."""
-    if op.name not in _SAME_TYPE_BINARY_OPS and op.name not in _COMPARE_OPS:
+def _operand_arity_op_error(op: Op) -> str | None:
+    """The error for a built op that takes operands of one type
+    (:func:`_same_type_operand_count`), or is one of :data:`_COMPARE_OPS`
+    (two operands), without that many operands and one result, or None. The
+    verifier reports it, and every lowering and the constant folder check it
+    before they read an operand it counts, for IR that did not come through
+    IRBuilder (a ``ValueError``; C++ engine: ``rocke_i_operand_arity_op_error``,
+    same text)."""
+    expected = 2 if op.name in _COMPARE_OPS else _same_type_operand_count(op.name)
+    if expected is None:
         return None
-    if len(op.operands) == 2 and len(op.results) == 1:
+    if len(op.operands) == expected and len(op.results) == 1:
         return None
     return (
         f"{op.name} failed - operands / results={len(op.operands)} / "
-        f"{len(op.results)}, expected 2 / 1"
+        f"{len(op.results)}, expected {expected} / 1"
     )
 
 
@@ -786,7 +801,7 @@ def _operand_rules_error(op: Op) -> ValueError | TypeError | None:
     the shared operand rules (arity, integer element, operand types), or None,
     with the rules applied in one order.
 
-    The arity rule comes first (:func:`_binary_arity_error`; a
+    The arity rule comes first (:func:`_operand_arity_op_error`; a
     ``ValueError``), as the other rules read the operands it counts; then the
     integer-element rule (:func:`_integer_element_op_error`) and the operand
     rule (:func:`_operand_types_op_error`), each a ``TypeError``, in that order,
@@ -795,7 +810,7 @@ def _operand_rules_error(op: Op) -> ValueError | TypeError | None:
     not fold an op it refuses. The C++ engine's ``rocke_i_operand_rules_error``
     returns the matching status and text.
     """
-    arity_error = _binary_arity_error(op)
+    arity_error = _operand_arity_op_error(op)
     if arity_error:
         return ValueError(arity_error)
     operand_error = _integer_element_op_error(op) or _operand_types_op_error(op)
@@ -4932,7 +4947,9 @@ class IRBuilder:
         semantics on a separate ``vector.mul`` + ``vector.add`` pair. A first
         operand that is not a vector, or operands of more than one type, is a
         ``TypeError`` (:func:`_vector_operand_error`,
-        :func:`_operand_types_error`).
+        :func:`_operand_types_error`). For IR that did not come through it,
+        the verifier reports operands of more than one type, or other than
+        three, and every lowering refuses them (:func:`_operand_rules_error`).
         """
         vector_error = _vector_operand_error("vector.fma", a.type)
         if vector_error:

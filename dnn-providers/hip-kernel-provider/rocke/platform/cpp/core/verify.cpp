@@ -397,20 +397,20 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
     char arity_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_binary_arity_op_error(op, arity_error, sizeof arity_error))
+    if(rocke_i_operand_arity_op_error(op, arity_error, sizeof arity_error))
     {
         v_errf(v, op, "%s", arity_error);
         return;
+    }
+    char operand_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
+    {
+        v_errf(v, op, "%s", operand_error);
     }
     if(rocke_i_is_same_type_binary_op(o))
     {
         const rocke_type_t* a = op->operands[0]->type;
         const rocke_type_t* r = op->results[0]->type;
-        char operand_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_operand_types_op_error(op, operand_error, sizeof operand_error))
-        {
-            v_errf(v, op, "%s", operand_error);
-        }
         if(!rocke_type_eq(r, a))
         {
             v_errf(v, op, "%s: result type %s != operand type %s", name, tn(r), tn(a));

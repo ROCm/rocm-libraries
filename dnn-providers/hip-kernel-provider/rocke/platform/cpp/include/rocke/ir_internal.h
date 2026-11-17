@@ -685,22 +685,29 @@ const char* rocke_i_vector_operand_error(const char* op_name,
  * operands and result have one type. */
 bool rocke_i_is_same_type_binary_op(rocke_opcode_t opcode);
 
+/* Mirrors ir._same_type_operand_count: how many operands, all of one type, an
+ * `opcode` op takes: 2 for an op rocke_i_is_same_type_binary_op admits, 3 for
+ * the lane-wise FMA (vector.fma), or 0 for any other op. */
+int rocke_i_same_type_operand_count(rocke_opcode_t opcode);
+
 /* Mirrors ir._operand_types_op_error: rocke_i_operand_types_error for a built
- * op that rocke_i_is_same_type_binary_op admits, with two operands, or NULL.
- * The verifier reports it and every lowering refuses it as ROCKE_ERR_TYPE
- * before it lowers an op, for IR that did not come through the builders. */
+ * op that takes operands of one type (rocke_i_same_type_operand_count), with
+ * that many operands, or NULL. The verifier reports it and every lowering
+ * refuses it as ROCKE_ERR_TYPE before it lowers an op, for IR that did not
+ * come through the builders. */
 const char* rocke_i_operand_types_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Mirrors ir._COMPARE_OPS: whether `opcode` is arith.cmp, arith.fcmp or
  * vector.cmp. */
 bool rocke_i_is_compare_op(rocke_opcode_t opcode);
 
-/* Mirrors ir._binary_arity_error: the error for a built op that
- * rocke_i_is_same_type_binary_op or rocke_i_is_compare_op admits without
- * exactly two operands and one result, or NULL. The verifier reports it, and
- * every lowering (ROCKE_ERR_VALUE) and the constant folder check it before
- * they read the second operand. A returned error is written to `buf`. */
-const char* rocke_i_binary_arity_op_error(const rocke_op_t* op, char* buf, size_t cap);
+/* Mirrors ir._operand_arity_error: the error for a built op that takes
+ * operands of one type (rocke_i_same_type_operand_count), or that
+ * rocke_i_is_compare_op admits (two operands), without that many operands and
+ * one result, or NULL. The verifier reports it, and every lowering
+ * (ROCKE_ERR_VALUE) and the constant folder check it before they read an
+ * operand it counts. A returned error is written to `buf`. */
+const char* rocke_i_operand_arity_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Mirrors ir._int_cmp_error, which returns the exception whose status this
  * returns: ROCKE_OK, or the refusal's status with its text written into `buf`.
@@ -759,7 +766,7 @@ const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, si
 /* Mirrors ir._operand_rules_error, which returns the exception whose status
  * this returns: ROCKE_OK, or the refusal's status with its text written into
  * `buf`, with the shared operand rules (arity, integer element, operand types)
- * applied in one order. The arity rule (rocke_i_binary_arity_op_error,
+ * applied in one order. The arity rule (rocke_i_operand_arity_op_error,
  * ROCKE_ERR_VALUE) comes first, as the other rules read the operands it
  * counts; then the integer-element rule (rocke_i_integer_element_op_error) and
  * the operand rule (rocke_i_operand_types_op_error), each ROCKE_ERR_TYPE, as

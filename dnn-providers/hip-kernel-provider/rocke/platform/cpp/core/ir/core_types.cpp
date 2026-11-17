@@ -1131,6 +1131,22 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
 
 /* ir._OPERAND_ORDINALS: the ordinal names of an op's operands. */
 static const char* const k_operand_ordinals[] = {"first", "second", "third"};
+/* How many operands the operand rule names: it refuses more before it reads a
+ * type, so its callers collect at most this many types. */
+static constexpr int k_num_operand_ordinals
+    = (int)(sizeof k_operand_ordinals / sizeof k_operand_ordinals[0]);
+
+/* The types of the first `num_operands` of `operands`, at most
+ * k_num_operand_ordinals of them, into `operand_types`. */
+static void collect_operand_types(const rocke_value_t* const* operands,
+                                  int num_operands,
+                                  const rocke_type_t* operand_types[k_num_operand_ordinals])
+{
+    for(int index = 0; index < num_operands && index < k_num_operand_ordinals; ++index)
+    {
+        operand_types[index] = operands[index]->type;
+    }
+}
 
 const char* rocke_i_operand_types_error(const char* op_name,
                                         const rocke_type_t* const* operand_types,
@@ -1138,15 +1154,14 @@ const char* rocke_i_operand_types_error(const char* op_name,
                                         char* buf,
                                         size_t cap)
 {
-    const int num_ordinals = (int)(sizeof k_operand_ordinals / sizeof k_operand_ordinals[0]);
-    if(num_operands > num_ordinals)
+    if(num_operands > k_num_operand_ordinals)
     {
         snprintf(buf,
                  cap,
                  "%s operand rule failed - operands=%d, expected at most %d",
                  op_name,
                  num_operands,
-                 num_ordinals);
+                 k_num_operand_ordinals);
         return buf;
     }
     char what[ROCKE_ERR_MSG_CAP];
@@ -1180,12 +1195,8 @@ void rocke_i_refuse_operand_types(rocke_ir_builder_t* b,
                                   const rocke_value_t* const* operands,
                                   int num_operands)
 {
-    /* The rule refuses more operands than it names before it reads a type. */
-    const rocke_type_t* operand_types[3] = {NULL, NULL, NULL};
-    for(int index = 0; index < num_operands && index < 3; ++index)
-    {
-        operand_types[index] = operands[index]->type;
-    }
+    const rocke_type_t* operand_types[k_num_operand_ordinals] = {};
+    collect_operand_types(operands, num_operands, operand_types);
     char error[ROCKE_ERR_MSG_CAP];
     if(rocke_i_operand_types_error(op_name, operand_types, num_operands, error, sizeof error))
     {
@@ -1217,22 +1228,25 @@ bool rocke_i_is_compare_op(rocke_opcode_t opcode)
            || opcode == ROCKE_OP_VECTOR_CMP;
 }
 
-const char* rocke_i_binary_arity_op_error(const rocke_op_t* op, char* buf, size_t cap)
+const char* rocke_i_operand_arity_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
-    if(!rocke_i_is_same_type_binary_op(op->opcode) && !rocke_i_is_compare_op(op->opcode))
+    const int expected
+        = rocke_i_is_compare_op(op->opcode) ? 2 : rocke_i_same_type_operand_count(op->opcode);
+    if(expected == 0)
     {
         return NULL;
     }
-    if(op->num_operands == 2 && op->num_results == 1)
+    if(op->num_operands == expected && op->num_results == 1)
     {
         return NULL;
     }
     snprintf(buf,
              cap,
-             "%s failed - operands / results=%d / %d, expected 2 / 1",
+             "%s failed - operands / results=%d / %d, expected %d / 1",
              rocke_opcode_name(op->opcode),
              op->num_operands,
-             op->num_results);
+             op->num_results,
+             expected);
     return buf;
 }
 
@@ -1276,14 +1290,26 @@ bool rocke_i_is_same_type_binary_op(rocke_opcode_t opcode)
     }
 }
 
+int rocke_i_same_type_operand_count(rocke_opcode_t opcode)
+{
+    if(rocke_i_is_same_type_binary_op(opcode))
+    {
+        return 2;
+    }
+    return opcode == ROCKE_OP_VECTOR_FMA ? 3 : 0;
+}
+
 const char* rocke_i_operand_types_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
-    if(!rocke_i_is_same_type_binary_op(op->opcode) || op->num_operands != 2)
+    const int operand_count = rocke_i_same_type_operand_count(op->opcode);
+    if(operand_count == 0 || op->num_operands != operand_count)
     {
         return NULL;
     }
-    const rocke_type_t* const operand_types[2] = {op->operands[0]->type, op->operands[1]->type};
-    return rocke_i_operand_types_error(rocke_opcode_name(op->opcode), operand_types, 2, buf, cap);
+    const rocke_type_t* operand_types[k_num_operand_ordinals] = {};
+    collect_operand_types(op->operands, operand_count, operand_types);
+    return rocke_i_operand_types_error(
+        rocke_opcode_name(op->opcode), operand_types, operand_count, buf, cap);
 }
 
 rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
@@ -1429,7 +1455,7 @@ const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, si
 
 rocke_status_t rocke_i_operand_rules_error(const rocke_op_t* op, char* buf, size_t cap)
 {
-    if(rocke_i_binary_arity_op_error(op, buf, cap))
+    if(rocke_i_operand_arity_op_error(op, buf, cap))
     {
         return ROCKE_ERR_VALUE;
     }
