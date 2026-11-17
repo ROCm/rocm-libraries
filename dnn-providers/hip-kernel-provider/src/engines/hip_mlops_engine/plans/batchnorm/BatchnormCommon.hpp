@@ -255,10 +255,9 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
         //    be large enough
-        //  - if C / vectorsize is odd, intermediate results are stored in N dimension splitting
+        //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
         //    float values in group of 2 bytes. N must be large enough
-        if((!problem.useFp32()
-            && ((problem.channels() / vectorsize) % 2 != 0 && lastZocalsize < stashValues))
+        if((!problem.useFp32() && (problem.channels() % 2 != 0 && lastZocalsize < stashValues))
            || ((lastYlocalsize < stashValues) && (lastZocalsize < stashValues)))
         {
             return false;
@@ -335,8 +334,7 @@ inline int getStashMethod(const ProblemDescription& problem,
                           unsigned int stashValues,
                           size_t ylocalsize,
                           size_t zlocalsize,
-                          size_t batchElements,
-                          size_t vectorsize)
+                          size_t batchElements)
 {
     // See `BatchnormFunctions.hpp` for stash implementation of different methods
     int stashMethod = 0;
@@ -352,10 +350,8 @@ inline int getStashMethod(const ProblemDescription& problem,
     {
         stashMethod = 1;
     }
-    // Must match the parity test in getStashIndex (BatchnormFunctions.hpp): the kernel works on
-    // C / vectorsize vectorized channels, so the stash layout depends on that count, not on C.
-    if(problem.isLayoutChannelLast() && !problem.useFp32Stash()
-       && (problem.channels() / vectorsize) % 2 != 0 && lastZlocalsize >= stashValues)
+    if(problem.isLayoutChannelLast() && !problem.useFp32Stash() && problem.channels() % 2 != 0
+       && lastZlocalsize >= stashValues)
     {
         stashMethod = 2;
     }
