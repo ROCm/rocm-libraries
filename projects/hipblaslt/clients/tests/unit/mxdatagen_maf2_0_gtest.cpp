@@ -91,7 +91,9 @@ namespace
         EXPECT_NEAR(sum / g.scales.size(), 126.5, 0.5);
     }
 
-    // FP4 with a UE4M3 or UE5M3 scale takes |N(0.34375, 0.08)| scales, rounded once.
+    // FP4 with a UE4M3 or UE5M3 scale takes |N(0.34375, 0.08)| scales, rounded once. With 3
+    // mantissa bits the rounding steps near the mean are 2^-5 and 2^-6, which keeps the standard
+    // deviation near 0.08 and spreads the scales over many codes; a constant scale fails both.
     TEST(HostUnitMXDataGenMaf2_0, smoke_fp4_ue4m3_ue5m3_scales_are_normal)
     {
         struct ScaleFormat
@@ -107,14 +109,20 @@ namespace
         {
             SCOPED_TRACE("scale type " + std::to_string(f.type));
             const auto g = generate(static_cast<hipDataType>(HIP_R_4F_E2M1), f.type, 16, "maf2_0");
-            double     sum = 0;
+            double     sum = 0, sumSq = 0;
+            std::set<uint8_t> distinct;
             for(uint8_t s : g.scales)
             {
                 const double v = decodeScale(s, f.exponentBits);
                 ASSERT_LT(v, 1.0) << int(s);
                 sum += v;
+                sumSq += v * v;
+                distinct.insert(s);
             }
-            EXPECT_NEAR(sum / g.scales.size(), 0.34375, 0.02);
+            const double mean = sum / g.scales.size();
+            EXPECT_NEAR(mean, 0.34375, 0.02);
+            EXPECT_NEAR(std::sqrt(sumSq / g.scales.size() - mean * mean), 0.08, 0.015);
+            EXPECT_GE(distinct.size(), 8u);
         }
     }
 
