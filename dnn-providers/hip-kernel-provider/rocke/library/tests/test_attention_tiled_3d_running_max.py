@@ -131,6 +131,23 @@ def _decode_inputs(kv_len, hot, hot_token=0):
     return q, _bf16(k), _bf16(v)
 
 
+def _uniform_ramp_inputs(kv_len):
+    """Decode inputs with every key's logit alike (K all zero: each of ``kv_len``
+    keys gets the same 1/kv_len softmax weight) and V a ramp from -4 to 4 across
+    the token axis, so the correct output is the ramp's mean, 0. A reduce that
+    drops, zeroes or mis-weights any one segment's partial sum then averages a
+    different sub-range of a monotonic signal, which is detectably not 0 (every
+    one-of-{2,4,8}-segments drop or zero-out case clears this test's tolerance
+    several times over). A single dominant key, as ``_decode_inputs``'s ``hot``
+    is, leaves most segments carrying negligible weight, so dropping one of
+    them would barely move the output and this check would not catch it."""
+    q = np.ones((1, NUM_QUERY_HEADS, HEAD_SIZE), np.float32)
+    k = np.zeros((NUM_KV_HEADS, kv_len, HEAD_SIZE), np.float32)
+    ramp = np.linspace(-4.0, 4.0, kv_len, dtype=np.float32)
+    v = np.broadcast_to(ramp[None, :, None], (NUM_KV_HEADS, kv_len, HEAD_SIZE)).copy()
+    return q, _bf16(k), _bf16(v)
+
+
 def _device(array):
     """A device copy of ``array``."""
     array = np.ascontiguousarray(array)
@@ -365,7 +382,7 @@ def test_shipped_module_pair_numeric(gpu, num_segments):
     ok, why = module.supports_tiled_reduce_spec(ungrouped, arch=arch)
     assert not ok and "divisible" in why, why
 
-    q, k, v = _decode_inputs(kv_len, hot=9.0)
+    q, k, v = _uniform_ramp_inputs(kv_len)
     out = _attention(problem, arch, q, k, v, tuning_spec=spec)
     _assert_close(out, _reference(q, k, v))
 
