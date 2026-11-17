@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "origami/streamk.hpp"
+
+#include <array>
+
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
@@ -386,7 +389,7 @@ size_t grid_k_split_aware(const problem_t& problem,
     size_t virt_cu_count = cu_count;
     if (config.occupancy > 1) virt_cu_count *= config.occupancy;
 
-    const std::vector<double> tile_fractions = {
+    constexpr std::array<double, 6> tile_fractions = {
         0.0, 1.0 / 2.0, 1.0 / 8.0, 1.0 / 5.0, 1.0 / 4.0, 1.0 / 3.0};
     // When virt_cu_count is greater than tiles, min_even_tiles is 0 which enforces partial tiles.
     const size_t min_even_tiles = std::max<size_t>(1, tiles / virt_cu_count);
@@ -431,7 +434,7 @@ size_t grid_k_split_aware(const problem_t& problem,
       const size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
       sk_grid                = tiles * maxSplits;
     } else {
-      const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
+      constexpr std::array<size_t, 8> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
       for (size_t frac : tile_fractions) {
         const size_t splitGrid  = tiles * frac;
         const size_t itersPerCU = iters_per_tile / frac;
