@@ -126,6 +126,10 @@ __device__ void block_sync_lds_direct_load()
     // Wait on async traffic to conclude, then sync the workgroup so that everyone sees the values
     // in LDS.
     wait_asyncmark();
+    // Inline assembly is used so wait asyncnct needs to be called explicitly on gfx1250
+#if defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#endif
     block_sync_lds();
 #else
 #if defined(__gfx125__)
