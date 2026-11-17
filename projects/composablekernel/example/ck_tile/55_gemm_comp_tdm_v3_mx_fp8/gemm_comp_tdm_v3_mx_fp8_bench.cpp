@@ -81,11 +81,12 @@ using CLayout        = RowMajor;
 constexpr int kScale = 32; // K elements per scale
 
 #if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH) || defined(CK_EX55_A_ROW_PREFETCH) || \
-    defined(CK_EX55_MX_SCALE_LDS) || defined(CK_EX55_MX_SCALE_WIDE)
+    defined(CK_EX55_MX_SCALE_LDS) || defined(CK_EX55_MX_SCALE_WIDE) || defined(CK_EX55_REFILL)
 // EXPERIMENT: -DCK_EX55_MX_SCALE_PREFETCH_DEPTH=N sets the pipeline's MX scale prefetch depth;
 // -DCK_EX55_A_ROW_PREFETCH=1 sets kStreamARowPrefetch; -DCK_EX55_MX_SCALE_LDS=1 sets kMxScaleLds
 // (and the host lays the scales out for it, see swizzle_scales_for_lds); -DCK_EX55_MX_SCALE_WIDE=1
-// sets kMxScaleWide (the same layout, global 128-bit loads).
+// sets kMxScaleWide (the same layout, global 128-bit loads); -DCK_EX55_REFILL=1 (2) sets
+// RefillPoint::AfterArrive (AfterFirstRow).
 struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 {
 #if defined(CK_EX55_MX_SCALE_LDS)
@@ -93,6 +94,13 @@ struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 #endif
 #if defined(CK_EX55_MX_SCALE_WIDE)
     [[maybe_unused]] static constexpr bool kMxScaleWide = CK_EX55_MX_SCALE_WIDE != 0;
+#endif
+#if defined(CK_EX55_REFILL)
+    [[maybe_unused]] static constexpr RefillPoint kRefillPoint =
+        CK_EX55_REFILL == 2 ? RefillPoint::AfterFirstRow : RefillPoint::AfterArrive;
+#endif
+#if defined(CK_EX55_REFILL_ROW)
+    [[maybe_unused]] static constexpr ck_tile::index_t kRefillAfterRow = CK_EX55_REFILL_ROW;
 #endif
 #if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH)
     [[maybe_unused]] static constexpr ck_tile::index_t kMxScalePrefetchDepth =
@@ -407,8 +415,19 @@ HostOperand make_operand(ck_tile::index_t rows,
     return true;
 }
 
+// EXPERIMENT: -DCK_EX_SLICE=i -DCK_EX_NSLICES=n keep only the instances whose type hash is i mod n
+// (the others are not instantiated), so a full build can be split into n parallel compiles.
+template <typename T>
+constexpr unsigned ex_type_hash()
+{
+    unsigned h = 2166136261u;
+    for(const char* c = __PRETTY_FUNCTION__; *c != 0; ++c)
+        h = (h ^ static_cast<unsigned char>(*c)) * 16777619u;
+    return h;
+}
+
 template <typename Inst>
-int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
+int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
 {
     using Kernel    = typename Inst::Kernel;
     using CDataType = typename Inst::CDataType;
@@ -766,9 +785,44 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     return 0;
 }
 
+template <typename Inst>
+int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
+{
+#if defined(CK_EX_SLICE)
+    if constexpr(ex_type_hash<Inst>() % CK_EX_NSLICES != CK_EX_SLICE)
+    {
+        ck_tile::ignore = arg;
+        ck_tile::ignore = bench_name;
+        return 2;
+    }
+    else
+#endif
+        return run_impl<Inst>(arg, bench_name);
+}
+
 template <bool TdmEpi, typename CDataType>
 int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
 {
+#if defined(CK_EX55_FOCUS)
+    // EXPERIMENT: -DCK_EX55_FOCUS builds only the B0 focus instances (a few-minute build instead of
+    // every tile): 256x256x256, warps 2x2, 16x16x128 warp tile, cluster 2x1 or 4x1, 8x4 placement,
+    // tdm epilogue.
+    if constexpr(TdmEpi)
+    {
+        const std::string cluster = arg.get_str("cluster");
+        if(arg.get_str("tile") == "256x256x256" && arg.get_str("warps") == "2x2" &&
+           arg.get_str("wt") == "16" && arg.get_str("place") == "8x4" &&
+           (cluster == "2x1" || cluster == "4x1"))
+            return cluster == "4x1"
+                       ? run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 4, 1, 8, 4>>(arg,
+                                                                                               name)
+                       : run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 2, 1, 8, 4>>(
+                             arg, name);
+    }
+    std::printf("CK_EX55_FOCUS build: only -tile=256x256x256 -warps=2x2 -wt=16 -cluster=2x1|4x1 "
+                "-place=8x4 -epilogue=tdm\n");
+    return 2;
+#else
     const std::string tile    = arg.get_str("tile");
     const std::string cluster = arg.get_str("cluster");
     // EXPERIMENT (B0 8 PF): 256x256x256 with 4 fat waves (warps 2x2x1, 128x128 per wave).
@@ -874,6 +928,7 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
                 "16x512x256, 16x256x256, 16x128x256, 16x64x256)\n",
                 tile.c_str());
     return 2;
+#endif
 }
 
 // EXPERIMENT: -DCK_EX55_BF16_TDM_ONLY builds only the bf16-C, tdm-epilogue instances (about a

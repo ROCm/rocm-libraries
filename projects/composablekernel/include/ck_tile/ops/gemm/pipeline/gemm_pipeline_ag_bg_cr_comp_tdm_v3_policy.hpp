@@ -49,6 +49,10 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
         AfterFirstRow
     };
     static constexpr RefillPoint kRefillPoint = RefillPoint::TopOfNextTile;
+    /// AfterFirstRow only: the A row of the last K sub-tile after whose WMMAs the issuers wait and
+    /// refill (0: the first row). A later row frees the registers of the rows already multiplied
+    /// before the refill, at the cost of fewer WMMAs overlapping the refill.
+    static constexpr index_t kRefillAfterRow = 0;
 
     /// Split barrier with A read one warp-GEMM row at a time: true issues the LDS reads of row
     /// r + 1 before the WMMAs of row r (one more A row of registers), so a row's reads overlap the

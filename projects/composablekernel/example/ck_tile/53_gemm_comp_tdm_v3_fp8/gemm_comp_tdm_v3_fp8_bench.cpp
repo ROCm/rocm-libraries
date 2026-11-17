@@ -89,6 +89,9 @@ struct Ex53Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 #if defined(CK_EX53_A_ROW_PREFETCH)
     [[maybe_unused]] static constexpr bool kStreamARowPrefetch = CK_EX53_A_ROW_PREFETCH != 0;
 #endif
+#if defined(CK_EX53_REFILL_ROW)
+    [[maybe_unused]] static constexpr ck_tile::index_t kRefillAfterRow = CK_EX53_REFILL_ROW;
+#endif
     template <ck_tile::MultiCastDirection Direction, typename Problem>
     CK_TILE_DEVICE static uint16_t GetTDMWorkgroupMask(dim3 block_id_in_cluster)
     {
@@ -433,8 +436,19 @@ double tflops(const Problem3& p, double ms)
     return 2.0 * p.M * p.N * static_cast<double>(p.K) / (ms * 1e-3) / 1e12;
 }
 
+// EXPERIMENT: -DCK_EX_SLICE=i -DCK_EX_NSLICES=n keep only the instances whose type hash is i mod n
+// (the others are not instantiated), so a full build can be split into n parallel compiles.
+template <typename T>
+constexpr unsigned ex_type_hash()
+{
+    unsigned h = 2166136261u;
+    for(const char* c = __PRETTY_FUNCTION__; *c != 0; ++c)
+        h = (h ^ static_cast<unsigned char>(*c)) * 16777619u;
+    return h;
+}
+
 template <typename Inst>
-int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
+int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
 {
     using Kernel = typename Inst::Kernel;
     const Problem3 p{arg.get_int("m"), arg.get_int("n"), arg.get_int("k")};
@@ -725,10 +739,45 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     return 0;
 }
 
+template <typename Inst>
+int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
+{
+#if defined(CK_EX_SLICE)
+    if constexpr(ex_type_hash<Inst>() % CK_EX_NSLICES != CK_EX_SLICE)
+    {
+        ck_tile::ignore = arg;
+        ck_tile::ignore = bench_name;
+        return 2;
+    }
+    else
+#endif
+        return run_impl<Inst>(arg, bench_name);
+}
+
 // Run time -> instance. Each (tile, epilogue) is one compiled kernel.
 template <bool TdmEpi>
 int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
 {
+#if defined(CK_EX53_FOCUS)
+    // EXPERIMENT: -DCK_EX53_FOCUS builds only the B0 focus instances (a few-minute build instead of
+    // every tile): 256x256x256, warps 2x2, 16x16x128 warp tile, cluster 2x1 or 4x1, 8x4 placement,
+    // tdm epilogue.
+    if constexpr(TdmEpi)
+    {
+        const std::string cluster = arg.get_str("cluster");
+        if(arg.get_str("tile") == "256x256x256" && arg.get_str("warps") == "2x2" &&
+           arg.get_str("wt") == "16" && arg.get_str("place") == "8x4" &&
+           (cluster == "2x1" || cluster == "4x1"))
+            return cluster == "4x1"
+                       ? run<Instance<256, 256, 256, 2, 2, 16, 16, 128, TdmEpi, 4, 1, 8, 4>>(arg,
+                                                                                             name)
+                       : run<Instance<256, 256, 256, 2, 2, 16, 16, 128, TdmEpi, 2, 1, 8, 4>>(arg,
+                                                                                             name);
+    }
+    std::printf("CK_EX53_FOCUS build: only -tile=256x256x256 -warps=2x2 -wt=16 -cluster=2x1|4x1 "
+                "-place=8x4 -epilogue=tdm\n");
+    return 2;
+#else
     const std::string tile    = arg.get_str("tile");
     const std::string cluster = arg.get_str("cluster");
     // EXPERIMENT (B0 8 PF): 256x256x256 with 4 fat waves (warps 2x2x1, 128x128 per wave).
@@ -811,6 +860,7 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
                 "16x512x256, 16x256x256, 16x128x256, 16x64x256)\n",
                 tile.c_str());
     return 2;
+#endif
 }
 
 int dispatch(const ck_tile::ArgParser& arg)

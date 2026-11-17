@@ -179,6 +179,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         // M extent of one warp-GEMM row of A: BlockGemm orders M as (MIterPerWarp, MWarp), so row
         // r is the contiguous block rows [r, r + 1) * a_row_m
         static constexpr index_t a_row_m = MPerBlock / BlockGemm::MIterPerWarp;
+        // a refill row past the last row would never refill (and the next wait would hang)
+        static_assert(!kRefillAfterFirstRow || Policy::kRefillAfterRow < BlockGemm::MIterPerWarp,
+                      "kRefillAfterRow must name an A row of the warp tile");
 
         // Distribution of one warp-GEMM row of one K sub-tile of A: BlockGemm's A distribution
         // with MIterPerWarp = 1.
@@ -531,6 +534,27 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             const ScaleAWindowTmp& a;
             const ScaleBWindowTmp& b;
         };
+
+        // Early refill (AfterArrive, AfterFirstRow): the operand registers that stay live across
+        // the issuers' wait-and-refill branch, pinned as 32-bit words right before the arrive (when
+        // every LDS read of the stage has completed anyway). An 8-bit vector is not a legal
+        // register type, so a value of that type live across a basic-block boundary is unpacked to
+        // 16-bit lanes on one side and repacked on the other (v_perm / v_lshlrev_b16 / v_bitop3_b16
+        // per 16 bytes); as an int32x4 it crosses the branch unchanged.
+        template <typename Tile>
+        CK_TILE_DEVICE static void PinAsDwords(Tile& t)
+        {
+            auto& buf                = t.get_thread_buffer();
+            constexpr index_t kBytes = static_cast<index_t>(sizeof(buf));
+            static_assert(kBytes % 16 == 0, "operand tiles are a whole number of 16-byte chunks");
+            char* bytes = reinterpret_cast<char*>(&buf);
+            static_for<0, kBytes / 16, 1>{}([&](auto q) {
+                int32x4_t v;
+                __builtin_memcpy(&v, bytes + 16 * q.value, sizeof(v));
+                asm volatile("" : "+v"(v));
+                __builtin_memcpy(bytes + 16 * q.value, &v, sizeof(v));
+            });
+        }
 
         // C += A * B for NumRows warp-GEMM rows of one K sub-tile: A row ARow + j of
         // a_block_tensor updates C row CRow + j. This is the hot loop of
@@ -1076,6 +1100,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             // AfterFirstRow, last sub-tile: read B and every A row, arrive, run
                             // row 0, then after_first_row() (the issuers' wait and refill), then
                             // the remaining rows.
+                            // fenced before the reads too: unfenced, the scheduler hoists them to
+                            // the top of the K tile, over the first sub-tile's data, and spills
+                            __builtin_amdgcn_sched_barrier(0);
                             auto b_window = b_lds_gemm_windows[s];
                             move_tile_window(b_window,
                                              is_b_load_tr_v
@@ -1100,13 +1127,25 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                     return a_row_tile;
                                 },
                                 number<BlockGemm::MIterPerWarp>{});
+                            // only what crosses the refill branch: B and the rows multiplied
+                            // after the refill (an asm operand sits in the low VGPR bank, so
+                            // pinning more than that crowds it)
+                            static_for<Policy::kRefillAfterRow + 1, BlockGemm::MIterPerWarp, 1>{}(
+                                [&](auto r) { PinAsDwords(a_rows(r)); });
+                            PinAsDwords(b_block_tile);
+                            // fenced: unfenced, the scheduler spreads the reads, the arrive and
+                            // the refill across the rows' WMMAs, and the 16x16 tiles spill
+                            __builtin_amdgcn_sched_barrier(0);
                             arrive();
+                            __builtin_amdgcn_sched_barrier(0);
                             static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto r) {
                                 BlockGemmRows<r.value, 0, 1, i.value>(
                                     c_block_tile, a_rows[r], b_block_tile, stage_scales);
-                                if constexpr(r.value == 0)
+                                if constexpr(r.value == Policy::kRefillAfterRow)
                                 {
+                                    __builtin_amdgcn_sched_barrier(0);
                                     after_first_row();
+                                    __builtin_amdgcn_sched_barrier(0);
                                 }
                             });
                         }
@@ -1151,6 +1190,12 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                         a_nxt = load_a_row(number<r.value + 1>{});
                                         if constexpr(is_last_sub_tile && r.value + 2 == R)
                                         {
+                                            if constexpr(kRefillAfterArrive)
+                                            {
+                                                PinAsDwords(a_cur);
+                                                PinAsDwords(a_nxt);
+                                                PinAsDwords(b_block_tile);
+                                            }
                                             arrive();
                                         }
                                     }
