@@ -4,6 +4,7 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <hipblaslt/hipblaslt.h>
 
 namespace hipblaslt_ext::experimental::jit::detail
 {
@@ -13,7 +14,8 @@ namespace hipblaslt_ext::experimental::jit::detail
 namespace hipblaslt_jit
 {
     // The TensileLite problem hipBLASLt solves for a rocBLASLt GEMM.
-    TensileLite::ContractionProblemGemm RocblasltToTensileContractionProblemGemm(
+    // Exported so a test can read runtime alpha without launching.
+    HIPBLASLT_EXPORT TensileLite::ContractionProblemGemm RocblasltToTensileContractionProblemGemm(
         const hipblaslt_ext::experimental::jit::detail::GemmRequest& request);
 
     // A single strided batched GEMM in TensileLite's canonical index form.
