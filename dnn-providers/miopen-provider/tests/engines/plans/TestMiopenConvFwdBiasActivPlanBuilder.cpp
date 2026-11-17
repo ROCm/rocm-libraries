@@ -2,6 +2,7 @@
 /* SPDX-License-Identifier:  MIT */
 
 #include "MiopenApi.hpp"
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -649,6 +650,36 @@ static std::vector<ConvolutionBiasActivationTestParam> testParams()
               "Invalid Half, the bias is Float and the first add operand",
               {},
               true},
+        // The bias data type is compared with the input, not with the weights: with a Half input
+        // and Float weights, a Float bias (the data type of the weights) is not applicable.
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::HALF,
+              {{TypeKey::W, DataType::FLOAT},
+               {TypeKey::BIAS, DataType::FLOAT},
+               {TypeKey::BIAS_COMPUTE, DataType::FLOAT},
+               {TypeKey::Y_CONV, DataType::FLOAT},
+               {TypeKey::Y_BIAS, DataType::FLOAT}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid Half input and Float weights, the bias is Float"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::HALF,
+              {{TypeKey::W, DataType::FLOAT},
+               {TypeKey::BIAS, DataType::FLOAT},
+               {TypeKey::BIAS_COMPUTE, DataType::FLOAT},
+               {TypeKey::Y_CONV, DataType::FLOAT},
+               {TypeKey::Y_BIAS, DataType::FLOAT}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid Half input and Float weights, the bias is Float and the first add operand",
+              {},
+              true},
         Param{FusedOp::CBA,
               validConvTestCase4d(),
               TensorLayout::NCHW,
@@ -1025,6 +1056,48 @@ flatbuffers::FlatBufferBuilder cbaGraphWithFinalOutputLayoutMismatch()
                          });
 }
 
+// The convolution and bias intermediates and the bias are float, the input and output are half:
+// the graph the node checks let through up to the bias data type rule.
+flatbuffers::FlatBufferBuilder cbaGraphWithFloatBiasOnHalfGraph()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    auto builder = mutateGraph(createValidConvFwdBiasActivGraph(),
+                               [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                                   for(auto& tensor : graph.tensors)
+                                   {
+                                       tensor->data_type = DataType::HALF;
+                                   }
+                               });
+    for(const char* name : {"bias", "y_conv", "y_bias"})
+    {
+        builder = editCbaTensor(
+            builder, name, [](hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& t) {
+                t.data_type = DataType::FLOAT;
+            });
+    }
+    return builder;
+}
+
+struct GraphWithDeclinedTensors
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const char* reason;
+};
+
+// Graphs that pass the node-level checks of isApplicable and are declined by the tensor checks,
+// with the decline reason of each.
+std::vector<GraphWithDeclinedTensors> graphsWithDeclinedTensors()
+{
+    std::vector<GraphWithDeclinedTensors> graphs;
+    graphs.push_back(
+        {cbaGraphWithFloatBiasOnHalfGraph(),
+         "Bias tensor data type FLOAT must equal the convolution input data type HALF"});
+    graphs.push_back({cbaGraphWithFinalOutputLayoutMismatch(),
+                      "Fused convolution output must be packed in the same layout as the input"});
+    return graphs;
+}
+
 } // namespace
 
 TEST(TestMiopenConvFwdBiasActivPlanBuilderGraphApplicability, AcceptsLegalGraphs)
@@ -1064,4 +1137,40 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableDeclinesFinalOutputLay
     const auto builder = cbaGraphWithFinalOutputLayoutMismatch();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+// getMaxWorkspaceSize and buildPlan are reachable without isApplicable, so each must refuse a graph
+// whose tensors the tensor checks decline, with their reason, before any MIOpen work.
+TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForGraphWithDeclinedTensors)
+{
+    const HipdnnMiopenSettings settings;
+
+    for(const auto& declined : graphsWithDeclinedTensors())
+    {
+        SCOPED_TRACE(declined.reason);
+        const GraphWrapper graph(declined.builder.GetBufferPointer(), declined.builder.GetSize());
+        ASSERT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+
+        EXPECT_THAT([&]() { _planBuilder.getMaxWorkspaceSize(*_dummyHandle, graph, settings); },
+                    ::testing::ThrowsMessage<hipdnn_plugin_sdk::HipdnnPluginException>(
+                        ::testing::HasSubstr(declined.reason)));
+    }
+}
+
+TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForGraphWithDeclinedTensors)
+{
+    const MockEngineConfig mockConfig;
+
+    for(const auto& declined : graphsWithDeclinedTensors())
+    {
+        SCOPED_TRACE(declined.reason);
+        const GraphWrapper graph(declined.builder.GetBufferPointer(), declined.builder.GetSize());
+        ASSERT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+
+        HipdnnMiopenContext ctx;
+        EXPECT_THAT([&]() { _planBuilder.buildPlan(*_dummyHandle, graph, mockConfig, ctx); },
+                    ::testing::ThrowsMessage<hipdnn_plugin_sdk::HipdnnPluginException>(
+                        ::testing::HasSubstr(declined.reason)));
+        EXPECT_FALSE(ctx.hasValidPlan());
+    }
 }
