@@ -249,6 +249,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
 
     // P for gemm_1: the scaled convert divides by its power-of-two scale, so this stores
     // kPScale * P (the forward FP8 pipeline's MakePForGemm1), then the policy's in-lane repack.
+    // The rounding is round-to-nearest-even whatever CK_TILE_FLOAT_TO_FP8_DEFAULT a build sets:
+    // the accuracy contract's u_P assumes it.
     template <typename Gemm1, typename PComputeTensor>
     CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute)
     {
@@ -259,8 +261,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
             fp32x8_t v;
             static_for<0, kVec, 1>{}(
                 [&](auto e) { v[e()] = p_compute.get_thread_buffer()[number<i * kVec + e>{}]; });
-            p_src.get_thread_buffer().template set_as<fp8x8_t>(i,
-                                                               fp32x8_to_fp8x8(v, 1.0f / kPScale));
+            p_src.get_thread_buffer().template set_as<fp8x8_t>(
+                i, fp32x8_to_fp8x8<fp8_rounding_mode::standard>(v, 1.0f / kPScale));
         });
         return Policy::template RepackPForGemm1<Problem, Gemm1>(p_src);
     }
@@ -628,7 +630,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
 
                 // Between the WMMAs: K row group 0 of the next tile.
                 Policy::template RunPvStage<Geometry::kPvStages - 1, Mode, KRead>(
-                    k_su0_tile, bases.next_k, emit_wmma);
+                    k_su0_tile, bases, emit_wmma);
                 AccumulateQuantizedMass<PvBlockGemm>(
                     p_tile, l, pv_output_scale_m0, pv_output_scale_m1);
             };
@@ -641,7 +643,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
                                               make_k_su_window(k_lds_read_ptr));
                 __builtin_amdgcn_sched_barrier(0);
 
-                // Reuse the V LDS buffer only after the preceding reads have completed.
+                // Reuse of the V LDS buffer: every V(i - 1) read fed a PV(i - 1) WMMA issued before
+                // this point, so none is pending. The barrier's count leaves the next K tile's
+                // reads (issued in the PV stage) in flight; it counts reads, while s_wait_dscnt
+                // counts DS instructions and the compiler pairs the reads, so the reuse rests on
+                // the consuming WMMAs, not on the count.
                 block_sync_lds<k_lds_insts>();
                 // V is prefetched one iteration before its consumer.
                 move_tile_window(v_dram_window, {kN0, 0});
@@ -665,13 +671,13 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
                     {
                         KSuTile k_su_tile_next;
                         Policy::template RunQkStage<decltype(i_su)::value, Mode, KRead>(
-                            gemm_0_su, s_acc_su, q_tile, k_su_tile, k_su_tile_next, bases.k);
+                            gemm_0_su, s_acc_su, q_tile, k_su_tile, k_su_tile_next, bases);
                         k_su_tile = k_su_tile_next;
                     }
                     else
                     {
                         Policy::template RunQkStage<Geometry::kQkStages - 1, Mode, VRead>(
-                            gemm_0_su, s_acc_su, q_tile, k_su_tile, v_tile, bases.v);
+                            gemm_0_su, s_acc_su, q_tile, k_su_tile, v_tile, bases);
                     }
                     set_slice_tile(
                         s_acc,
@@ -787,7 +793,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
                 s_wait_asynccnt<0>();
                 // The K tile issued in the previous iteration must be complete; only the V tile
                 // issued after it may stay in flight. The barrier below then publishes that K
-                // tile to every wave.
+                // tile to every wave. The K buffer the transfer below overwrites has no read
+                // pending: every K(i) read fed a QK WMMA issued before this point. The barrier's
+                // count leaves the V tile's reads (issued in the last QK stage) in flight; it
+                // counts reads, not the paired DS instructions, so the reuse rests on those WMMAs.
                 s_wait_tensorcnt<PagedTransfer::kVPrefetchTensorCount>();
                 block_sync_lds<v_lds_insts>();
                 // The K transfer here feeds iteration i+2, beyond the already prefetched K1.

@@ -24,10 +24,11 @@ namespace detail {
 //    scatters, fills the same registers (the FP8 form of FmhaTdmVecVRead).
 // A b128 read of a whole chunk would pair keys 16 k0 + [0, 16) with the WMMA's 16 k0 + 8 h + [0, 8)
 // and mis-pair the operands. Every read of a window is a compile-time byte offset from one
-// per-lane base (the lane's access 0), the same in every lane (checked below), so a window needs
-// one pinned base. The offsets are taken at the tile origin, so they hold for windows whose origin
-// is a whole number of row groups (32 keys of the K tile, 16 of the V tile) at column 0, as the
-// QK stage windows and the V window are.
+// per-lane base (the lane's access 0), the same in every lane, so a window needs one pinned base.
+// ValidateLanes checks this at compile time for the 32 lanes of warp 0 and for lane 0 of the other
+// warps; the operand-layout device test checks every lane of every warp. The offsets are taken at
+// the tile origin, so they hold for windows whose origin is a whole number of row groups (32 keys
+// of the K tile, 16 of the V tile) at column 0, as the QK stage windows and the V window are.
 
 // Lane ownership of the elements a read leaves in the lanes: the window's distribution, or, for a
 // transposed read, the transposed (output) distribution, which only a transposed read window has.
@@ -45,6 +46,10 @@ struct FmhaBatchPrefillFp8PageTileOwner<TileWindow, true>
             remove_cvref_t<typename TileWindow::Base::DataType>>::TransposedDstrEncode{}))>;
 };
 
+// Bytes of one operand read (ds_load_b64 of 8 FP8 elements): half of a 16-byte chunk of the
+// vectorized layout.
+inline constexpr index_t kFmhaBatchPrefillFp8ReadBytes = 8;
+
 template <typename TileWindow, bool Transposed>
 struct FmhaBatchPrefillFp8PageTileRead
 {
@@ -58,15 +63,13 @@ struct FmhaBatchPrefillFp8PageTileRead
     using OwnerDistribution =
         typename FmhaBatchPrefillFp8PageTileOwner<TileWindow, Transposed>::type;
 
-    static constexpr index_t kReadBytes = 8;
+    static constexpr index_t kReadBytes = kFmhaBatchPrefillFp8ReadBytes;
     static constexpr index_t kNumAccess = TileWindow::NumAccessPerCoord;
     static constexpr index_t kElements  = Traits::ScalarPerVector;
     static_assert(sizeof(DataType) == 1 && Traits::PackedSize == 1 && kElements == kReadBytes &&
                       sizeof(VectorType) == kReadBytes,
                   "an FP8 page-tile operand read is one 8-element ds_load_b64");
     static_assert(Descriptor::is_static(), "the read offsets come from a static LDS descriptor");
-    // Every read of a window is one base and a constant offset.
-    static constexpr index_t kNumBases = 1;
 
     // Y index, in OwnerDistribution, of element J of access IAccess.
     template <index_t IAccess, index_t J>
@@ -120,9 +123,10 @@ struct FmhaBatchPrefillFp8PageTileRead
                static_cast<index_t>(sizeof(DataType));
     }
 
-    // In every lane: the access's 8 elements are adjacent and 8-byte aligned (one ds_load_b64), and
-    // the access is LaneZeroDelta bytes from the lane's access 0. The operand is replicated over
-    // the warps: warps 1-3 read what warp 0 reads.
+    // In each of warp 0's 32 lanes: the access's 8 elements are adjacent and 8-byte aligned (one
+    // ds_load_b64), and the access is LaneZeroDelta bytes from the lane's access 0. The operand is
+    // replicated over the warps: lane 0 of warps 1-3 reads what lane 0 of warp 0 reads. (The 4
+    // warps and 32 lanes are the geometry gate's kWaves and the wave32 width.)
     template <index_t IAccess, index_t... J>
     CK_TILE_HOST_DEVICE static constexpr bool ValidateLanes(std::integer_sequence<index_t, J...>)
     {
@@ -250,24 +254,24 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     // Read by the page-tile kernel for the window's TDM issue.
     static constexpr bool kDrainLdsBeforeTdmIssue = Options::kDrainLdsBeforeTdmIssue;
 
+    using QDataType = typename Geometry::QDataType;
     using KDataType = typename Geometry::KDataType;
     using VDataType = typename Geometry::VDataType;
-    // x of the vectorized layout: 16 FP8 elements per 16-byte vector (the problem's kVectorSize).
-    static constexpr index_t kVectorSize    = 16 / sizeof(KDataType);
+    // x of the vectorized layout is the problem's kVectorSize (one 16-byte chunk); the policy
+    // requires a chunk to be two operand reads (IsSupportedProblem).
     static constexpr index_t kLdsRows       = Geometry::kN;
     static constexpr index_t kKValidWidth   = Geometry::kHeadDimQK;
     static constexpr index_t kVLogicalWidth = Geometry::kDv;
     // Rows of the window's K box (a wave slice, FmhaBatchPrefillPageTileTraits::kFragmentRows for
     // P >= 64): the K tile is [N/kKGroupRows][D/x][kKGroupRows][x].
     static constexpr index_t kKGroupRows = 32;
-    static_assert(kLdsRows % kKGroupRows == 0 && kLdsRows % kVectorSize == 0 &&
-                  kKValidWidth % kVectorSize == 0);
+    static_assert(kLdsRows % kKGroupRows == 0);
 
     // Arena: K0, K1, V0, V1 back to back, unpadded (one wave-wide b64 read covers 16 adjacent
     // chunks, 256 contiguous bytes: each of the 64 banks once). Q is staged in V1.
     static constexpr index_t kKFootprintBytes  = kLdsRows * kKValidWidth * sizeof(KDataType);
     static constexpr index_t kVFootprintBytes  = kLdsRows * kVLogicalWidth * sizeof(VDataType);
-    static constexpr index_t kQFootprintBytes  = Geometry::kM * kKValidWidth;
+    static constexpr index_t kQFootprintBytes  = Geometry::kM * kKValidWidth * sizeof(QDataType);
     static constexpr index_t kV1FootprintBytes = max(kVFootprintBytes, kQFootprintBytes);
     static constexpr index_t kLdsOffsetK0      = 0;
     static constexpr index_t kLdsOffsetK1      = kLdsOffsetK0 + kKFootprintBytes;
@@ -285,8 +289,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
 
     // Problems whose data path this policy implements: the FP8 geometry above (FP8 Q / K / V / P,
     // fp32 accumulation, one wave layout for both GEMMs, a full-head K load), the vectorized KV
-    // layout with x = 16, pages of 64 tokens or more (one 32-row K box per wave slice), no bias
-    // and no sink. The scope of the first instances (D64, P64, PERTENSOR, ...) is the pipeline's.
+    // layout whose chunk (the problem's kVectorSize elements, 16 bytes) is two operand reads and
+    // divides the tile, pages of 64 tokens or more (one 32-row K box per wave slice), no bias and
+    // no sink. The scope of the first instances (D64, P64, PERTENSOR, ...) is the pipeline's.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool IsSupportedProblem()
     {
@@ -305,7 +310,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
                Shape::kK0 == Geometry::kHeadDimQK && Shape::kSubQKHeaddim == Geometry::kHeadDimQK &&
                Shape::IsVLayoutRowMajor && Shape::NumWarps == Geometry::kWaves && is_wave32 &&
                detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-               Problem::kVectorSize == kVectorSize && Problem::kPageBlockSize >= 64 &&
+               Problem::kVectorSize * sizeof(KDataType) ==
+                   2 * detail::kFmhaBatchPrefillFp8ReadBytes &&
+               kLdsRows % Problem::kVectorSize == 0 && kKValidWidth % Problem::kVectorSize == 0 &&
+               Problem::kPageBlockSize >= 64 &&
                Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !Problem::kHasSink;
     }
 
@@ -357,7 +365,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
                                                      Geometry::kHeadDimQK>::kFragmentRows ==
                           kKGroupRows,
                       "the K tile groups the rows of one window box");
-        constexpr index_t kX   = kVectorSize;
+        constexpr index_t kX   = Problem::kVectorSize;
         constexpr index_t kG   = kKGroupRows;
         constexpr auto grouped = make_naive_tensor_descriptor(
             make_tuple(
@@ -381,7 +389,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsBlockDescriptor()
     {
         static_assert(IsSupportedProblem<Problem>());
-        constexpr index_t kX   = kVectorSize;
+        constexpr index_t kX   = Problem::kVectorSize;
         constexpr auto grouped = make_naive_tensor_descriptor(
             make_tuple(number<kLdsRows / kX>{}, number<kX>{}, number<kVLogicalWidth>{}),
             make_tuple(number<kX * kVLogicalWidth>{}, number<1>{}, number<kX>{}),
@@ -471,7 +479,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
-    // K operand of one QK stage, read from the K tile with FmhaBatchPrefillFp8PageTileRead.
+    // K operand of one QK stage, read from the K tile with FmhaBatchPrefillFp8PageTileRead (as
+    // BlockFmhaPipelineQRKSVSTdmSchedFp8Policy::MakeKSuRegTileDistribution).
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKSuRegTileDistribution()
     {
@@ -610,7 +619,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         return Tuning::template GetPvTailDsCount<Stage>();
     }
 
-    // Stage tail waits as the forward FP8 policy's: a count past the DS counter field still waits.
+    // Stage tail waits, with the tail counts above, copied from BlockFmhaPipelineQRKSVSTdmSchedFp8
+    // Policy: a count past the DS counter field still waits. The counts are b64 reads, while
+    // s_wait_dscnt counts DS instructions and the compiler pairs these reads into
+    // ds_load_2addr(_stride64)_b64 (O13), so a wait admits up to twice as many reads. Buffer reuse
+    // does not rest on these counts: every read of a buffer that a TDM transfer overwrites feeds a
+    // WMMA issued before the barrier that precedes the transfer (the pipeline's Begin and NextK).
     template <index_t Stage>
     CK_TILE_DEVICE static void WaitQkStageTail()
     {
@@ -895,10 +909,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     }
 
     // QK stage Stage of a tile: its WMMAs in the placement's rows, the reads of the next stage's
-    // operand between them through Read from base (stages before the last: K row group Stage + 1,
-    // a constant offset from row group 0; the last stage: the V tile), and the guard's points.
-    // Adapted from BlockFmhaPipelineQRKSVSTdmSchedPolicy::RunQkScheduledStage (no lead read, no
-    // k-major reads, FP8 reads); the kept K slices follow the (n, k, m) WMMA order.
+    // operand between them through Read from the tile's bases (stages before the last: K row group
+    // Stage + 1, a constant offset from row group 0 of bases.k; the last stage: the V tile from
+    // bases.v), and the guard's points. Adapted from BlockFmhaPipelineQRKSVSTdmSchedPolicy::
+    // RunQkScheduledStage (no lead read, no k-major reads, FP8 reads); the kept K slices follow
+    // the (n, k, m) WMMA order.
     template <index_t Stage,
               typename Mode,
               typename Read,
@@ -912,7 +927,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
                                           const ABlockTensor& a_block_tensor,
                                           const BBlockTensor& b_block_tensor,
                                           NextBBlockTensor& next_b_block_tensor,
-                                          uint32_t base)
+                                          const TileBases& bases)
     {
         using Problem          = typename Mode::SelectedProblem;
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
@@ -923,6 +938,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         static_assert(Read::kNumAccess ==
                       (kReadsV ? Geometry::kVStageLoadCount : Geometry::kKSuLoadCount));
         static_assert(!Mode::SelectedPolicy::kLeadFirstLoad);
+        // The read offsets of FmhaBatchPrefillFp8PageTileRead hold for whole K row groups only.
+        static_assert(Geometry::kQkSuColumns % kKGroupRows == 0,
+                      "a QK stage reads whole row groups of the K tile");
+        const uint32_t base = kReadsV ? bases.v : bases.k;
         // Byte offset of K row group Stage + 1 (the next stage's keys) from row group 0.
         constexpr index_t kOffset = [] {
             if constexpr(kReadsV)
@@ -986,17 +1005,18 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     }
 
     // The PV stage of a tile: the WMMAs of the pipeline's emitter (which applies the guard's kept
-    // rows, RAW fence and kept P chunks), the reads of the next K tile's row group 0 from base
-    // between them, and the full drains of the grouped-drain points. The output rescale is fused
-    // into the softmax, so the rows emit none. Adapted from BlockFmhaPipelineQRKSVSTdmSchedPolicy::
-    // RunPvScheduledStageWithWmma (one stage, no lead read, FP8 reads).
+    // rows, RAW fence and kept P chunks), the reads of the next K tile's row group 0 from
+    // bases.next_k between them, and the full drains of the grouped-drain points. The output
+    // rescale is fused into the softmax, so the rows emit none. Adapted from
+    // BlockFmhaPipelineQRKSVSTdmSchedPolicy::RunPvScheduledStageWithWmma (one stage, no lead read,
+    // FP8 reads).
     template <index_t Stage,
               typename Mode,
               typename Read,
               typename NextKTensor,
               typename WmmaEmitter>
     CK_TILE_DEVICE static void
-    RunPvStage(NextKTensor& next_k_tensor, uint32_t base, WmmaEmitter& emit_wmma)
+    RunPvStage(NextKTensor& next_k_tensor, const TileBases& bases, WmmaEmitter& emit_wmma)
     {
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
         using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
@@ -1004,7 +1024,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         static_assert(Stage == SelectedSchedule::kNumPvStages - 1 &&
                       Read::kNumAccess == Geometry::kKSuLoadCount);
         static_assert(!Mode::SelectedPolicy::kLeadFirstLoad);
-        auto emit_token = [&](auto kind, auto access) {
+        const uint32_t base = bases.next_k;
+        auto emit_token     = [&](auto kind, auto access) {
             static_assert(decltype(kind)::value == Kind::KRead);
             Read::template Load<decltype(access)::value>(next_k_tensor, base);
         };
@@ -1038,8 +1059,8 @@ using FmhaBatchPrefillFp8PageTileGeometryFor = FmhaTdmSchedGeometryFor<Problem>;
 
 // Code-generation options of the FP8 page tile: the M128 page tile's scalar row clamp 1 and the
 // WMMA operand guard (the vectorized KV layout requires it); the LDS drain before the TDM issue
-// stays off as in the BF16 M128 tile (no FP8 evidence yet). QkKOuter, KReadKMajor and
-// RowMaxMaximum have no FP8 implementation.
+// stays off as in the BF16 M128 tile (the FP8 race screen found no whole-tile event with it off).
+// QkKOuter, KReadKMajor and RowMaxMaximum have no FP8 implementation.
 using FmhaBatchPrefillFp8PageTileOptions =
     FmhaTdmSchedTuningOptions<false, false, false, 1, true, false>;
 

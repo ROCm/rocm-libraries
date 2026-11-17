@@ -32,7 +32,8 @@ namespace ck_tile {
 // kernel reads one element and cannot check the count), D64/V64, P64, vLLM block table, M128,
 // no mask or a window as above, no sink tokens or logits, bias, soft cap or LSE. The FP8
 // instances are validated on gfx1250 only; they also compile for gfx1251, where the FP8 converts
-// are software conversions (float8_ext.hpp). Build with
+// are software conversions (float8_ext.hpp), and would be emitted for gfx1250-strict, which the
+// current compiler does not target. Neither target is validated. Build with
 // the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
 // -fgpu-flush-denormals-to-zero) and one page-tile instance per translation unit, as generated: the
 // generated code depends on what shares the unit, and the measured code is that of such units (a
@@ -124,6 +125,11 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     // the other instances.
     static constexpr bool kPerTensorDescales =
         Base::QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR;
+    // The descales this kernel applies: none, or per tensor without sink logits (the sink logit is
+    // divided by scale_s before the q * k fold). Other scale modes are not implemented here.
+    static_assert(Base::QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
+                      (kPerTensorDescales && !kHasSink),
+                  "the page-tile kernel applies no descales, or per-tensor descales without sink");
     static constexpr index_t kBlockPerCu = Base::kBlockPerCu;
     static constexpr index_t kBlockSize  = Base::kBlockSize;
 
@@ -274,11 +280,13 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                             static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) * kargs.hdim_v,
                     "page stride smaller than one vectorized page-head");
             constexpr index_t kVec = FmhaPipeline::kVectorSize;
-            require(kargs.batch_stride_k % kVec == 0 && kargs.batch_stride_v % kVec == 0 &&
-                        kargs.nhead_stride_k % kVec == 0 && kargs.nhead_stride_v % kVec == 0,
-                    ("vectorized K/V page or head stride not a multiple of " +
-                     std::to_string(kVec) + " elements")
-                        .c_str());
+            // The message is formed only on refusal (CheckLaunch runs before every launch).
+            if(kargs.batch_stride_k % kVec != 0 || kargs.batch_stride_v % kVec != 0 ||
+               kargs.nhead_stride_k % kVec != 0 || kargs.nhead_stride_v % kVec != 0)
+                require(false,
+                        ("vectorized K/V page or head stride not a multiple of " +
+                         std::to_string(kVec) + " elements")
+                            .c_str());
         }
         else
         {
