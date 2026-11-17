@@ -2691,8 +2691,9 @@ static rocke_value_t* wgrad_dw_addr(rocke_ir_builder_t* b,
     return off;
 }
 
-/* Pointwise dW addr: flat offset = k_out * wg_N + n_wg, always valid.
- * Python: def dw_addr(b_, m_val, n_val): return b_.add(b_.mul(m_val, _c_N), n_val), 1 */
+/* Pointwise dW addr: flat offset = k_out * wg_N + n_wg, with no validity
+ * predicate (NULL) beyond the store bounds.
+ * Python: def dw_addr(b_, m_val, n_val): return b_.add(b_.mul(m_val, _c_N), n_val), None */
 static rocke_value_t* wgrad_dw_addr_pointwise(rocke_ir_builder_t* b,
                                               rocke_value_t* m_global,
                                               rocke_value_t* n_global,
@@ -2702,7 +2703,7 @@ static rocke_value_t* wgrad_dw_addr_pointwise(rocke_ir_builder_t* b,
     rocke_value_t* c_N = (rocke_value_t*)user;
     rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_global, c_N), n_global);
     if(out_valid)
-        *out_valid = rocke_b_const_i32(b, 1);
+        *out_valid = NULL;
     return off;
 }
 
