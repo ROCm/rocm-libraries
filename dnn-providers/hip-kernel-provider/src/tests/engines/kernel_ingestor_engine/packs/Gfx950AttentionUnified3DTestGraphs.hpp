@@ -185,28 +185,17 @@ inline std::vector<KernelArgument> pythonSegmentAbi()
         = [](const char* name) { return KernelArgument{"global_buffer", POINTER_BYTES, 0, name}; };
     const auto scalar
         = [](const char* name) { return KernelArgument{"by_value", SCALAR_BYTES, 0, name}; };
-    return {buffer("segm_output_ptr"),
-            buffer("segm_max_ptr"),
-            buffer("segm_expsum_ptr"),
-            buffer("query_ptr"),
-            buffer("key_cache_ptr"),
-            buffer("value_cache_ptr"),
-            buffer("sink_ptr"),
-            buffer("block_tables_ptr"),
-            buffer("seq_lens_ptr"),
-            buffer("alibi_slopes_ptr"),
-            buffer("qq_bias_ptr"),
-            buffer("query_start_len_ptr"),
-            scalar("scale"),
-            scalar("k_scale"),
-            scalar("v_scale"),
-            scalar("softcap"),
-            scalar("num_seqs"),
-            scalar("block_table_stride"),
-            scalar("qq_bias_stride_0"),
-            scalar("num_query_heads"),
-            scalar("num_kv_heads"),
-            scalar("sliding_window")};
+    return {buffer("segm_output_ptr"), buffer("segm_max_ptr"),
+            buffer("segm_expsum_ptr"), buffer("query_ptr"),
+            buffer("key_cache_ptr"),   buffer("value_cache_ptr"),
+            buffer("sink_ptr"),        buffer("block_tables_ptr"),
+            buffer("seq_lens_ptr"),    buffer("alibi_slopes_ptr"),
+            buffer("qq_bias_ptr"),     buffer("query_start_len_ptr"),
+            scalar("scale"),           scalar("k_scale"),
+            scalar("v_scale"),         scalar("softcap"),
+            scalar("num_seqs"),        scalar("block_table_stride"),
+            scalar("qq_bias_stride0"), scalar("num_query_heads"),
+            scalar("num_kv_heads"),    scalar("sliding_window")};
 }
 
 /// The reduce-kernel ABI: 5 pointers and the query head count.

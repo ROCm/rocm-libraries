@@ -570,7 +570,7 @@ def build_dgrad_pp_mfma(spec: DgradPpMfmaSpec, *, arch: str = "gfx950") -> Kerne
             c0,
             n_pairs,
             c1,
-            [(f"acc{my_rank}_{i}", zero) for i in range(n_acc)],
+            [(f"acc{my_rank}_i{i}", zero) for i in range(n_acc)],
             iv_name=f"pair{my_rank}",
             elide_trailing_barrier=False,
         )

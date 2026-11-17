@@ -29,6 +29,7 @@
 #include <string>
 
 #include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 
 namespace
@@ -48,6 +49,20 @@ void check(bool ok, const std::string& what)
         fprintf(stderr, "FAIL: %s\n", what.c_str());
         ++g_failures;
     }
+}
+
+/* `kernel` lowered by the C++ engine for gfx942; "" (and a failure, labelled
+ * `name`) when it does not lower. */
+std::string lower(const rocke_kernel_def_t* kernel, const std::string& name)
+{
+    char* text = NULL;
+    char err[ROCKE_ERR_MSG_CAP] = {0};
+    const rocke_status_t status = rocke_lower_kernel_to_llvm_ex(
+        kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx942", &text, err, sizeof err);
+    check(status == ROCKE_OK, name + ": lowering failed: " + err);
+    std::string lowered = text ? text : "";
+    free(text);
+    return lowered;
 }
 
 /* A kernel with params Y and Z (both i32 pointers) and the lane id. */
@@ -123,24 +138,39 @@ struct Kernel
         rocke_b_region_leave(&b);
     }
 
-    /* Store `result` to Z[lane], end the kernel and lower it. */
-    std::string finish_and_lower(rocke_value_t* result)
+    /* Store `result` to Z[lane] and end the kernel; false (and a failure)
+     * when the build failed. */
+    bool finish(rocke_value_t* result)
     {
         rocke_b_global_store(&b, z, lane, result, 1);
         rocke_b_ret(&b);
         if(!rocke_ir_builder_ok(&b))
         {
             check(false, name + ": build failed: " + rocke_ir_builder_error(&b));
+            return false;
+        }
+        return true;
+    }
+
+    /* Store `result` to Z[lane], end the kernel and lower it. */
+    std::string finish_and_lower(rocke_value_t* result)
+    {
+        return finish(result) ? lower(rocke_ir_builder_kernel(&b), name) : "";
+    }
+
+    /* Store `result` to Z[lane], end the kernel and serialize it. */
+    std::string finish_and_serialize(rocke_value_t* result)
+    {
+        if(!finish(result))
+        {
             return "";
         }
         char* text = NULL;
-        char err[ROCKE_ERR_MSG_CAP] = {0};
-        const rocke_status_t status = rocke_lower_kernel_to_llvm_ex(
-            rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx942", &text, err, sizeof err);
-        check(status == ROCKE_OK, name + ": lowering failed: " + err);
-        std::string lowered = text ? text : "";
+        check(rocke_ir_serialize(rocke_ir_builder_kernel(&b), &text) == ROCKE_OK,
+              name + ": serialization failed");
+        std::string serialized = text ? text : "";
         free(text);
-        return lowered;
+        return serialized;
     }
 };
 
@@ -285,28 +315,41 @@ std::string unrolled_loop_in_unrolled_loop()
     return k.finish_and_lower(loop.op->results[0]);
 }
 
-/* Two rolled scf.for loops one after the other, both with induction variable
- * j; the first carries a value named `first_carried`, the second one named s. */
-std::string rolled_loops_side_by_side(const std::string& first_carried)
+/* Two rolled scf.for loops one after the other in `k`, both with induction
+ * variable j; the first carries a value named `first_carried`, the second one
+ * named s. Returns the second loop's result. */
+rocke_value_t* rolled_loops_side_by_side(Kernel& k, const char* first_carried)
 {
-    Kernel k("rolled_loops_side_by_side");
     rocke_value_t* carried = k.lane;
-    for(const std::string& name : {first_carried, std::string("s")})
+    for(const char* name : {first_carried, "s"})
     {
-        rocke_for_t loop = k.loop(carried, k.c(2), "j", name.c_str(), /*unroll=*/false);
+        rocke_for_t loop = k.loop(carried, k.c(2), "j", name, /*unroll=*/false);
         k.body(loop, [&](rocke_value_t* j, rocke_value_t* s) { return rocke_b_add(&k.b, s, j); });
         carried = loop.op->results[0];
     }
-    return k.finish_and_lower(carried);
+    return carried;
 }
 
 /* When two loops share their names, the second renames its values and carries
  * %s.for.header.<n>. In this kernel the first loop gives its own carried value
- * that name, so the second loop's renamed name is taken too. */
+ * that name, so the second loop's renamed name is taken too. The builder
+ * refuses a value name that is not an identifier, so the first loop is built
+ * with a placeholder name and the renamed name is put in its serialized IR:
+ * serialized IR is the way such a name reaches the lowering. */
 std::string loop_named_like_a_renamed_loop_value()
 {
     static const std::regex renamed_carried(R"(%(s\.for\.header\.[0-9]+) = phi)");
-    const std::string plain = rolled_loops_side_by_side("s");
+    static const std::regex placeholder(R"(%first\b)");
+    std::string plain;
+    std::string serialized;
+    {
+        Kernel k("rolled_loops_side_by_side_plain");
+        plain = k.finish_and_lower(rolled_loops_side_by_side(k, "s"));
+    }
+    {
+        Kernel k("rolled_loops_side_by_side_placeholder");
+        serialized = k.finish_and_serialize(rolled_loops_side_by_side(k, "first"));
+    }
     std::smatch renamed;
     if(!std::regex_search(plain, renamed, renamed_carried))
     {
@@ -315,7 +358,29 @@ std::string loop_named_like_a_renamed_loop_value()
               "carried value");
         return "";
     }
-    return rolled_loops_side_by_side(renamed[1].str());
+    const std::string edited = std::regex_replace(serialized, placeholder, "%" + renamed[1].str());
+    check(edited != serialized,
+          "loop_named_like_a_renamed_loop_value: the serialized IR has no %first to rename");
+    rocke_ir_builder_t parsed;
+    if(rocke_ir_builder_init(&parsed, "parsed") != ROCKE_OK)
+    {
+        check(false, "loop_named_like_a_renamed_loop_value: builder init failed");
+        return "";
+    }
+    rocke_kernel_def_t* kernel = NULL;
+    std::string lowered;
+    if(rocke_ir_parse(edited.c_str(), &parsed, &kernel) == ROCKE_OK && kernel)
+    {
+        lowered = lower(kernel, "loop_named_like_a_renamed_loop_value");
+    }
+    else
+    {
+        check(false,
+              std::string("loop_named_like_a_renamed_loop_value: parse failed: ")
+                  + rocke_ir_builder_error(&parsed));
+    }
+    rocke_ir_builder_free(&parsed);
+    return lowered;
 }
 
 /* The names `text` defines and reads, by sigil ('%' local, '@' global). A name

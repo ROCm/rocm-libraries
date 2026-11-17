@@ -733,7 +733,7 @@ rocke_kernel_def_t*
             rocke_b_s_barrier_bare(b); /* rank 1 runs one barrier behind */
         }
         rocke_b_sched_barrier(b, 0);
-        std::string prefix = "acc" + std::to_string(my_rank) + "_";
+        std::string prefix = "acc" + std::to_string(my_rank) + "_i";
         std::string iv = "pair" + std::to_string(my_rank);
         std::vector<V> accs = e.for_iter(c0,
                                          n_pairs,

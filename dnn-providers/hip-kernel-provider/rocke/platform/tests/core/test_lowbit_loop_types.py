@@ -121,7 +121,7 @@ class TestLowbitLoopTypes(unittest.TestCase):
         self.assertRegex(
             llvm,
             re.compile(
-                r"^  %add\d+ = add nsw i16 %carry_i16, %carry_i16$", re.MULTILINE
+                r"^  %add_\d+ = add nsw i16 %carry_i16, %carry_i16$", re.MULTILINE
             ),
         )
 

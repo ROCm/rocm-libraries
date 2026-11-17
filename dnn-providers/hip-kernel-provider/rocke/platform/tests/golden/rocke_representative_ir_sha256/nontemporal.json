@@ -5,18 +5,18 @@
       "cases": {
         "nontemporal/gfx942/copy_bf16x8": {
           "arch": "gfx942",
-          "bytes": 1028,
+          "bytes": 1035,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx942",
-          "sha256": "407897722560c530e84051b3109c845c7c6c7d61d072adfd54de670de3dbc62e",
+          "sha256": "f2793362267a652acc710fa8b069cff86378f98a9891cf3d595dde62b1be46e0",
           "status": "ok"
         },
         "nontemporal/gfx950/copy_bf16x8": {
           "arch": "gfx950",
-          "bytes": 1028,
+          "bytes": 1035,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx950",
-          "sha256": "a5decd14eda561f53e16f1a59a6ded1af6c2c61296c79ddd307ef718d8d1131e",
+          "sha256": "48b6645ade527f6ee240344aebbc4d2e75cf3409dc47860d16ef1aafc26a9d17",
           "status": "ok"
         }
       },
@@ -26,18 +26,18 @@
       "cases": {
         "nontemporal/gfx942/copy_bf16x8": {
           "arch": "gfx942",
-          "bytes": 1035,
+          "bytes": 1042,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx942",
-          "sha256": "882627f650e27816c6e8dc6c6d20488f7a7b328cd537cf4b65464a6b78f2b0ad",
+          "sha256": "a907efe09e609294886a344312f27bf1c465c7dbb89b5be8130a3a3ca5de37ca",
           "status": "ok"
         },
         "nontemporal/gfx950/copy_bf16x8": {
           "arch": "gfx950",
-          "bytes": 1035,
+          "bytes": 1042,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx950",
-          "sha256": "6f72ea631a752d64195a2e64a3dbc39b1c6764ad3fa190b8ea49e2346379dca2",
+          "sha256": "1e56662f7a058b4d950a78bd1f4c99d8de896922032d38f21bfe4901d656af23",
           "status": "ok"
         }
       },
@@ -47,18 +47,18 @@
       "cases": {
         "nontemporal/gfx942/copy_bf16x8": {
           "arch": "gfx942",
-          "bytes": 1099,
+          "bytes": 1106,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx942",
-          "sha256": "e936a413c8618372745ec628d70965a729dd850ec26e33433c4bb241c3795ac5",
+          "sha256": "436b67cc47594bab1f3acca49cf5373f7fb688f680dd577afbb1cd540f32b3fa",
           "status": "ok"
         },
         "nontemporal/gfx950/copy_bf16x8": {
           "arch": "gfx950",
-          "bytes": 1099,
+          "bytes": 1106,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx950",
-          "sha256": "84b0fb5a8a92a0abec1e550febe86cbefe306b413ecdef02f3f04a6883d5a4fb",
+          "sha256": "c304f18ed58d6192a567e39480af99dbbc5095c92e4c90ce2825fbc1ec92c27b",
           "status": "ok"
         }
       },
@@ -68,18 +68,18 @@
       "cases": {
         "nontemporal/gfx942/copy_bf16x8": {
           "arch": "gfx942",
-          "bytes": 1099,
+          "bytes": 1106,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx942",
-          "sha256": "e936a413c8618372745ec628d70965a729dd850ec26e33433c4bb241c3795ac5",
+          "sha256": "436b67cc47594bab1f3acca49cf5373f7fb688f680dd577afbb1cd540f32b3fa",
           "status": "ok"
         },
         "nontemporal/gfx950/copy_bf16x8": {
           "arch": "gfx950",
-          "bytes": 1099,
+          "bytes": 1106,
           "family": "nontemporal",
           "kernel_name": "irhash_nontemporal_copy_gfx950",
-          "sha256": "84b0fb5a8a92a0abec1e550febe86cbefe306b413ecdef02f3f04a6883d5a4fb",
+          "sha256": "c304f18ed58d6192a567e39480af99dbbc5095c92e4c90ce2825fbc1ec92c27b",
           "status": "ok"
         }
       },

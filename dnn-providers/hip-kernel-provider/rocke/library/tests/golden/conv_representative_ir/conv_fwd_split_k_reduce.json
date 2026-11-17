@@ -5,18 +5,18 @@
       "cases": {
         "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
           "arch": "gfx1250",
-          "bytes": 3339,
+          "bytes": 3396,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
-          "sha256": "9f5d2e0e9448f4b577f054434b9f1ef1d23bc2f3ea573b6e034515f862199af2",
+          "sha256": "dc26f0e33627ade1c300ccd97d32774f8386a548f1b7408fea60bf5c32b6584a",
           "status": "ok"
         },
         "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
           "arch": "gfx1250",
-          "bytes": 2802,
+          "bytes": 2877,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
-          "sha256": "e58fd98cfb623117fc877b644243ba385014a8deb4af1f1b56df2d5f5fe1bfa9",
+          "sha256": "be82b5a6b716d1183f1a2102e2e710384160ca20a345b8df3c6a59a219ce192d",
           "status": "ok"
         }
       },
@@ -26,18 +26,18 @@
       "cases": {
         "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
           "arch": "gfx1250",
-          "bytes": 3346,
+          "bytes": 3403,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
-          "sha256": "1224e46c4cc351f7d63cdf21cbbfb446eaec8e64fe5460148da7bb543ac2e689",
+          "sha256": "2133a678f30b9d6d152ece8c813edaaa3951a93e01bbebf1dfe4150fb1d6b0c8",
           "status": "ok"
         },
         "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
           "arch": "gfx1250",
-          "bytes": 2809,
+          "bytes": 2884,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
-          "sha256": "d3f6b4e3314c207f3cc441e6e1015d340e5a77e0fc48fc2bbc31d53edbf3be75",
+          "sha256": "216a19102f8a06d316194158993e75c4eeb034fbee1af287b9e4982e8ec50eb6",
           "status": "ok"
         }
       },
@@ -47,18 +47,18 @@
       "cases": {
         "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
           "arch": "gfx1250",
-          "bytes": 3410,
+          "bytes": 3467,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
-          "sha256": "e6b13e9985e7fcd3aa641ba3fc078d40c6e38f3b92edc8f4c64ac86067dff3dc",
+          "sha256": "dd40f22abe6adfc613f1c40386f0dcab0e64d60e40082466c83b5a848f5187cc",
           "status": "ok"
         },
         "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
           "arch": "gfx1250",
-          "bytes": 2873,
+          "bytes": 2948,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
-          "sha256": "333a82f4dd3088e68945d7206f6346ee2c15aace62611f2ba1e74354be4cd0e4",
+          "sha256": "6a079f32cd0ffdfbe9b1f7a9bdcfc3a3a7b1f206984476699372813c9a8c213f",
           "status": "ok"
         }
       },
@@ -68,18 +68,18 @@
       "cases": {
         "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
           "arch": "gfx1250",
-          "bytes": 3410,
+          "bytes": 3467,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
-          "sha256": "e6b13e9985e7fcd3aa641ba3fc078d40c6e38f3b92edc8f4c64ac86067dff3dc",
+          "sha256": "dd40f22abe6adfc613f1c40386f0dcab0e64d60e40082466c83b5a848f5187cc",
           "status": "ok"
         },
         "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
           "arch": "gfx1250",
-          "bytes": 2873,
+          "bytes": 2948,
           "family": "conv_fwd_split_k_reduce",
           "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
-          "sha256": "333a82f4dd3088e68945d7206f6346ee2c15aace62611f2ba1e74354be4cd0e4",
+          "sha256": "6a079f32cd0ffdfbe9b1f7a9bdcfc3a3a7b1f206984476699372813c9a8c213f",
           "status": "ok"
         }
       },

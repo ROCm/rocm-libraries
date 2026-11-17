@@ -41,21 +41,21 @@
 
 /* The decoder's LLVM lines, as the Python test pins them. */
 static const char* const k_expected_llvm
-    = "  %zx3 = zext i8 %gl2 to i32\n"
-      "  %eq5 = icmp eq i32 %zx3, 255\n"
-      "  %sitof6 = sitofp i32 %zx3 to float\n"
-      "  %fsub8 = fsub float %sitof6, 0x405FC00000000000\n"
-      "  %exp29 = call float @llvm.exp2.f32(float %fsub8)\n"
-      "  %sel11 = select i1 %eq5, float 0x7FF8000000000000, float %exp29\n";
+    = "  %zx_3 = zext i8 %gl_2 to i32\n"
+      "  %eq_5 = icmp eq i32 %zx_3, 255\n"
+      "  %sitof_6 = sitofp i32 %zx_3 to float\n"
+      "  %fsub_8 = fsub float %sitof_6, 0x405FC00000000000\n"
+      "  %exp2_9 = call float @llvm.exp2.f32(float %fsub_8)\n"
+      "  %sel_11 = select i1 %eq_5, float 0x7FF8000000000000, float %exp2_9\n";
 
-static const char* const k_expected_hip_byte_read = " int zx3 = (int)(uint8_t)gl2;\n"
-                                                    " int c4 = 255;\n"
-                                                    " bool eq5 = zx3 == c4;\n"
-                                                    " float sitof6 = (float)zx3;\n";
+static const char* const k_expected_hip_byte_read = " int zx_3 = (int)(uint8_t)gl_2;\n"
+                                                    " int c_4 = 255;\n"
+                                                    " bool eq_5 = zx_3 == c_4;\n"
+                                                    " float sitof_6 = (float)zx_3;\n";
 
-static const char* const k_expected_hip_nan_select = " float exp29 = exp2f(fsub8);\n"
-                                                     " float c10 = ((float)NAN);\n"
-                                                     " float sel11 = eq5 ? c10 : exp29;\n";
+static const char* const k_expected_hip_nan_select = " float exp2_9 = exp2f(fsub_8);\n"
+                                                     " float c_10 = ((float)NAN);\n"
+                                                     " float sel_11 = eq_5 ? c_10 : exp2_9;\n";
 
 /* Out[tid] = decode_mx_scale_e8m0(Codes[tid]) */
 static void build_decode_kernel(rocke_ir_builder_t* b)
