@@ -243,6 +243,92 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
 }
 
 // ============================================================================
+// operandTranspose / requireRowMajorOutput
+// ============================================================================
+
+namespace
+{
+// Builds a FLOAT tensor with the given dims and strides and keeps the builder alive.
+struct TensorHolder
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attrs = nullptr;
+
+    TensorHolder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+    {
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            1,
+            "t",
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            &strides,
+            &dims));
+        attrs = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
+            builder.GetBufferPointer());
+    }
+};
+} // namespace
+
+TEST(TestHipblasltUtils, OperandTransposeFollowsMatrixOrder)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+        hipblasOperation_t expected;
+    };
+
+    const std::vector<Row> rows = {
+        {{4, 8}, {8, 1}, HIPBLAS_OP_N},
+        {{4, 8}, {1, 4}, HIPBLAS_OP_T},
+        // A [M, 1] operand with column-style strides is row-major: its size-1 stride is ignored.
+        {{4, 1}, {1, 4}, HIPBLAS_OP_N},
+        // A [1, K] operand whose strides are neither 1 is column-major by its size-1 dim.
+        {{1, 6}, {99, 100}, HIPBLAS_OP_T},
+    };
+
+    for(const auto& row : rows)
+    {
+        const TensorHolder holder(row.dims, row.strides);
+        EXPECT_EQ(
+            operandTranspose(hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper(
+                holder.attrs)),
+            row.expected)
+            << "dims " << row.dims[0] << "x" << row.dims[1] << " strides " << row.strides[0] << ","
+            << row.strides[1];
+    }
+}
+
+TEST(TestHipblasltUtils, OperandTransposeThrowsOnUnsupportedLayout)
+{
+    const TensorHolder holder({4, 8}, {16, 2});
+    EXPECT_THROW(
+        operandTranspose(
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper(holder.attrs)),
+        hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestHipblasltUtils, RequireRowMajorOutputAcceptsOnlyRowMajor)
+{
+    using hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper;
+
+    const TensorHolder rowMajor({4, 8}, {8, 1});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(rowMajor.attrs)));
+
+    // A [M, 1] output is row-major whatever stride its size-1 dim carries.
+    const TensorHolder singleColumn({4, 1}, {1, 4});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(singleColumn.attrs)));
+
+    const TensorHolder columnMajor({4, 8}, {1, 4});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(columnMajor.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+
+    const TensorHolder unsupported({4, 8}, {16, 2});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(unsupported.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
 // FindTensorAttributes
 // ============================================================================
 

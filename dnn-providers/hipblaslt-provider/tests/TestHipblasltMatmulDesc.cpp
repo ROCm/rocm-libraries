@@ -117,8 +117,10 @@ TEST(TestHipblasltMatmulDesc, CloneIsIndependentOfOriginal)
 }
 
 // clone() reproduces the epilogue and the bias data type; dropping either would
-// silently run the clone without its fused bias or activation. hipBLASLt does not
-// read back the activation arguments, so execute-path GPU tests cover those.
+// silently run the clone without its fused bias or activation. The activation
+// arguments cannot be read back from the descriptor; their replay is covered by the GPU test
+// IntegrationGpuMatmulApplicability.ClampedReluFusedOutputMatchesReference, which executes a
+// ReLU clamp with non-zero lower and upper clips through execute()'s clone.
 TEST(TestHipblasltMatmulDesc, CloneReproducesEpilogueConfiguration)
 {
     HipblasltMatmulDesc desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);

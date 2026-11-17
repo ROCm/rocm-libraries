@@ -139,6 +139,34 @@ MatrixOrder matrixOrder(const std::vector<int64_t>& dims, const std::vector<int6
     return MatrixOrder::UNSUPPORTED;
 }
 
+hipblasOperation_t operandTranspose(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
+{
+    const auto order = matrixOrder(tensor.dims(), tensor.strides());
+    if(order == MatrixOrder::ROW_MAJOR)
+    {
+        return HIPBLAS_OP_N;
+    }
+    if(order == MatrixOrder::COLUMN_MAJOR)
+    {
+        return HIPBLAS_OP_T;
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported stride for input matrix: " + tensor.name());
+}
+
+void requireRowMajorOutput(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
+{
+    if(matrixOrder(tensor.dims(), tensor.strides()) != MatrixOrder::ROW_MAJOR)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported output layout: hipBLASLt engine requires a row-major output matrix: "
+                + tensor.name());
+    }
+}
+
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
 {
     return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3

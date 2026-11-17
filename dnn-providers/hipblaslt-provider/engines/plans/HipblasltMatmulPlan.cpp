@@ -33,19 +33,7 @@ inline int64_t getBatchCount(const std::vector<int64_t>& dims)
 hipblasOperation_t MatmulParams::getTrans(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
 {
-    const auto order = hipblaslt_utils::matrixOrder(t.dims(), t.strides());
-    // Row-major: dims are swapped in layout, no additional transpose
-    if(order == hipblaslt_utils::MatrixOrder::ROW_MAJOR)
-    {
-        return HIPBLAS_OP_N;
-    }
-    // Column-major: dims not swapped, need transpose
-    if(order == hipblaslt_utils::MatrixOrder::COLUMN_MAJOR)
-    {
-        return HIPBLAS_OP_T;
-    }
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported stride for input matrix: " + t.name());
+    return hipblaslt_utils::operandTranspose(t);
 }
 
 hipblasComputeType_t MatmulParams::getComputeDataType(
@@ -100,12 +88,7 @@ MatmulParams::MatmulParams(
         outputUid = biasAttr->out_0_tensor_uid();
     }
     const auto tOut = hipblaslt_utils::findTensorAttributes(tensorMap, outputUid);
-    PLUGIN_THROW_IF_FALSE(hipblaslt_utils::matrixOrder(tOut.dims(), tOut.strides())
-                              == hipblaslt_utils::MatrixOrder::ROW_MAJOR,
-                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                          "Unsupported output layout: hipBLASLt engine requires a row-major "
-                          "output matrix: "
-                              + tOut.name());
+    hipblaslt_utils::requireRowMajorOutput(tOut);
     _matrixLayoutC = HipblasltMatrixLayout(tOut);
 
     const auto& aDims = tA.dims();

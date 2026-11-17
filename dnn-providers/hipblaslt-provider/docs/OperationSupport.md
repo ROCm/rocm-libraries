@@ -23,6 +23,7 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 - Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1)
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
 - Fused intermediate data types: the matmul output when a bias or activation follows, and the bias output when an activation follows, must be FP32 or the final output's data type. hipBLASLt runs the epilogue on the FP32 accumulator and rounds once to the output type, so a narrower intermediate cannot be honored and the engine declines the graph.
+    - Residual: an intermediate equal to the final output type is accepted, so an FP16 graph whose FP16 intermediate would overflow returns the FP32-accumulated value instead of inf. BF16 intermediates cannot overflow (FP32 exponent range), so for them only rounding differs.
 - ReLU parameters (`RELU_FWD`): an unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope.
     - Standard ReLU: no upper clip and a lower clip of 0 (or unset)
     - Clamp: `relu_upper_clip` set; the lower bound is `relu_lower_clip`, or 0 if unset (so ReLU6 needs only the upper clip)

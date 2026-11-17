@@ -208,6 +208,30 @@ TEST(TestMatmulParams, ColumnMajor)
     EXPECT_NO_THROW(MatmulParams(*attrs, graph.getTensorMap()));
 }
 
+// With K == 1, A [M, 1] and B [1, N] carry strides that no stride-1 rule accepts.
+TEST(TestMatmulParams, AcceptsSizeOneKOperandsWithNonCanonicalStrides)
+{
+    std::vector<int64_t> const cDims = {4, 5};
+    std::vector<int64_t> const cStrides = {5, 1};
+
+    {
+        // A [M, 1] with column-style strides.
+        auto builder = createValidMatmulGraph({4, 1}, {1, 4}, {1, 5}, {5, 1}, cDims, cStrides);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+        ASSERT_NE(attrs, nullptr);
+        EXPECT_NO_THROW(MatmulParams(*attrs, graph.getTensorMap()));
+    }
+    {
+        // B [1, N] with strides that are neither 1.
+        auto builder = createValidMatmulGraph({4, 1}, {1, 1}, {1, 5}, {99, 100}, cDims, cStrides);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+        ASSERT_NE(attrs, nullptr);
+        EXPECT_NO_THROW(MatmulParams(*attrs, graph.getTensorMap()));
+    }
+}
+
 namespace
 {
 // Rewrites the strides of the tensor at `index` in the graph's tensor list to {1, rows}

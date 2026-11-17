@@ -10,7 +10,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <random>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -26,8 +25,11 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "utils/GpuTestUtils.hpp"
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace test_gpu_utils;
 
 namespace
 {
@@ -40,32 +42,6 @@ constexpr int NUM_HANDLE_THREADS = 8;
 constexpr int NUM_HANDLE_ITERATIONS = 40;
 constexpr float TOLERANCE = 2e-4f;
 
-constexpr int64_t UID_A = 1;
-constexpr int64_t UID_B = 2;
-constexpr int64_t UID_BIAS = 3;
-constexpr int64_t UID_C = 4;
-
-struct HipFreeDeleter
-{
-    void operator()(void* ptr) const
-    {
-        // Best-effort release; a failed free cannot be acted on here.
-        std::ignore = hipFree(ptr);
-    }
-};
-
-using DevicePtr = std::unique_ptr<void, HipFreeDeleter>;
-
-DevicePtr deviceAlloc(size_t bytes)
-{
-    void* ptr = nullptr;
-    if(hipMalloc(&ptr, bytes) != hipSuccess)
-    {
-        return nullptr;
-    }
-    return DevicePtr(ptr);
-}
-
 // Per-thread host data: distinct inputs per thread so that a GEMM reading another
 // thread's buffers or bias produces a value that differs from its own reference.
 struct ThreadProblem
@@ -75,18 +51,6 @@ struct ThreadProblem
     std::vector<float> bias;
     std::vector<float> reference;
 };
-
-std::vector<float> randomUniform(size_t count, unsigned seed)
-{
-    std::mt19937 gen(seed);
-    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-    std::vector<float> values(count);
-    for(auto& v : values)
-    {
-        v = dist(gen);
-    }
-    return values;
-}
 
 ThreadProblem makeProblem(int threadIndex, bool withBias)
 {
@@ -382,10 +346,7 @@ TEST_F(IntegrationGpuMatmulConcurrency, SharedGraphAcrossThreadsWithOwnHandles)
 {
     Graph graph;
     const auto declined = buildGraph(graph, false);
-    if(!declined.empty())
-    {
-        GTEST_SKIP() << "hipBLASLt engine declined the matmul graph at " << declined;
-    }
+    ASSERT_TRUE(declined.empty()) << "hipBLASLt engine declined the matmul graph at " << declined;
 
     FailureRecorder failures;
     runSharedGraph(graph, false, failures);
@@ -399,10 +360,8 @@ TEST_F(IntegrationGpuMatmulConcurrency, SharedFusedBiasGraphWithDistinctBiasBuff
 {
     Graph graph;
     const auto declined = buildGraph(graph, true);
-    if(!declined.empty())
-    {
-        GTEST_SKIP() << "hipBLASLt engine declined the matmul+bias graph at " << declined;
-    }
+    ASSERT_TRUE(declined.empty()) << "hipBLASLt engine declined the matmul+bias graph at "
+                                  << declined;
 
     FailureRecorder failures;
     runSharedGraph(graph, true, failures);
@@ -410,7 +369,11 @@ TEST_F(IntegrationGpuMatmulConcurrency, SharedFusedBiasGraphWithDistinctBiasBuff
     EXPECT_EQ(failures.count(), 0) << "first failure: " << failures.first();
 }
 
-// ThreadSanitizer builds turn this into the race check for the plugin's shared container.
+// Concurrent handle creation must succeed on every thread. Without ThreadSanitizer this proves
+// only that: the plugin's unsynchronized weak_ptr read is undefined behavior that only TSAN
+// observes, and the earlier double-checked creation under the lock could not produce two
+// containers, so no deterministic assertion tells the fixed and unfixed code apart. A TSAN
+// build turns this into the race check for the plugin's shared container.
 TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentHandleCreateDestroy)
 {
     std::atomic<int> failures{0};

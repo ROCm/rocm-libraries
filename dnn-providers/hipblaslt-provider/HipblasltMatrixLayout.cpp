@@ -25,8 +25,7 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
     // (orientation per hipblaslt_utils::matrixOrder, which ignores the stride of
     // a size-1 dim):
     // - Column-major matrix: use the dimensions and the strides as-is since
-    //   hipBLASLt expects column-major layout. A size-1 column count has no
-    //   column stride, so ld is the row count.
+    //   hipBLASLt expects column-major layout.
     // - Row-major matrix: swap the dimensions and the strides. A size-1 row
     //   count has no row stride, so ld is the column count of the row-major matrix.
     uint64_t rows;
@@ -43,7 +42,7 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
     {
         rows = static_cast<uint64_t>(dims[rank - 2]);
         cols = static_cast<uint64_t>(dims[rank - 1]);
-        ld = (dims[rank - 1] == 1) ? dims[rank - 2] : strides[rank - 1]; // column stride
+        ld = strides[rank - 1]; // column stride
     }
     else
     {

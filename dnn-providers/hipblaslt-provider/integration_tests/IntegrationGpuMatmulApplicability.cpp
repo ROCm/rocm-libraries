@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
-#include <random>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -25,54 +24,19 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "utils/GpuTestUtils.hpp"
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace test_gpu_utils;
 
 namespace
 {
-
-constexpr int64_t UID_A = 1;
-constexpr int64_t UID_B = 2;
-constexpr int64_t UID_BIAS = 3;
-constexpr int64_t UID_C = 4;
 
 constexpr float FP32_TOLERANCE = 2e-4f;
 constexpr float FP16_TOLERANCE = 3e-2f;
 constexpr float GUARD_VALUE = 12288.0f;
 constexpr size_t GUARD_ELEMENTS = 16;
-
-struct HipFreeDeleter
-{
-    void operator()(void* ptr) const
-    {
-        // Best-effort release; a failed free cannot be acted on here.
-        std::ignore = hipFree(ptr);
-    }
-};
-
-using DevicePtr = std::unique_ptr<void, HipFreeDeleter>;
-
-DevicePtr deviceAlloc(size_t bytes)
-{
-    void* ptr = nullptr;
-    if(hipMalloc(&ptr, bytes) != hipSuccess)
-    {
-        return nullptr;
-    }
-    return DevicePtr(ptr);
-}
-
-std::vector<float> randomUniform(size_t count, unsigned seed)
-{
-    std::mt19937 gen(seed);
-    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-    std::vector<float> values(count);
-    for(auto& v : values)
-    {
-        v = dist(gen);
-    }
-    return values;
-}
 
 size_t elementSize(DataType type)
 {
@@ -124,7 +88,7 @@ std::vector<float> rounded(const std::vector<float>& values, DataType type)
 }
 
 // One matmul, optionally followed by a bias ADD and a RELU_FWD, described by the dtype of every
-// tensor and the strides of the matmul output.
+// tensor, the strides of A, B and the matmul output, and the ReLU clip bounds.
 struct MatmulCase
 {
     int64_t m = 8;
@@ -132,6 +96,9 @@ struct MatmulCase
     int64_t n = 12;
     DataType ioType = DataType::FLOAT;
     DataType intermediateType = DataType::FLOAT;
+    // Strides of the A and B operands; empty means row-major.
+    std::vector<int64_t> aStrides;
+    std::vector<int64_t> bStrides;
     // Strides of the matmul output; empty lets the frontend infer them.
     std::vector<int64_t> cStrides;
     // Data type of the matmul output when a bias or activation follows.
@@ -140,6 +107,9 @@ struct MatmulCase
     // Data type of the bias output when an activation follows.
     DataType biasOutType = DataType::FLOAT;
     bool withRelu = false;
+    // Clip bounds of the RELU_FWD; unset leaves the attribute unset.
+    std::optional<float> reluLowerClip;
+    std::optional<float> reluUpperClip;
     DataType finalType = DataType::FLOAT;
 };
 
@@ -176,10 +146,14 @@ protected:
 
         const std::vector<int64_t> aDims = {c.m, c.k};
         const std::vector<int64_t> bDims = {c.k, c.n};
+        const std::vector<int64_t> aStrides
+            = c.aStrides.empty() ? std::vector<int64_t>{c.k, 1} : c.aStrides;
+        const std::vector<int64_t> bStrides
+            = c.bStrides.empty() ? std::vector<int64_t>{c.n, 1} : c.bStrides;
         auto a = std::make_shared<TensorAttributes>(
-            makeTensorAttributes("a", c.ioType, aDims, {c.k, 1}).set_uid(UID_A));
+            makeTensorAttributes("a", c.ioType, aDims, aStrides).set_uid(UID_A));
         auto b = std::make_shared<TensorAttributes>(
-            makeTensorAttributes("b", c.ioType, bDims, {c.n, 1}).set_uid(UID_B));
+            makeTensorAttributes("b", c.ioType, bDims, bStrides).set_uid(UID_B));
 
         auto out = graph.matmul(a, b, MatmulAttributes());
         const bool fused = c.withBias || c.withRelu;
@@ -204,6 +178,14 @@ protected:
         {
             PointwiseAttributes reluAttrs;
             reluAttrs.set_mode(PointwiseMode::RELU_FWD);
+            if(c.reluLowerClip.has_value())
+            {
+                reluAttrs.set_relu_lower_clip(*c.reluLowerClip);
+            }
+            if(c.reluUpperClip.has_value())
+            {
+                reluAttrs.set_relu_upper_clip(*c.reluUpperClip);
+            }
             out = graph.pointwise(out, reluAttrs);
             out->set_data_type(c.finalType);
         }
@@ -280,7 +262,10 @@ protected:
                 }
                 if(c.withRelu)
                 {
-                    acc = std::max(acc, 0.0f);
+                    acc = c.reluUpperClip.has_value()
+                              ? std::min(std::max(acc, c.reluLowerClip.value_or(0.0f)),
+                                         *c.reluUpperClip)
+                              : std::max(acc, 0.0f);
                 }
                 reference[i * n + j] = acc;
             }
@@ -461,4 +446,35 @@ TEST_F(IntegrationGpuMatmulApplicability, FloatFusedIntermediateWithHalfOutputMa
     c.withBias = true;
     c.finalType = DataType::HALF;
     expectMatchesReference(c, FP16_TOLERANCE);
+}
+
+// A size-1 dimension's stride is arbitrary; A [8,1] with strides [1,8] is a contiguous column, so
+// the operand is row-major with K == 1.
+// Fails if the operand transpose is derived from the raw stride of the size-1 dimension.
+TEST_F(IntegrationGpuMatmulApplicability, OperandWithUnitDimNonCanonicalStrideMatchesReference)
+{
+    MatmulCase c;
+    c.m = 8;
+    c.k = 1;
+    c.n = 12;
+    c.aStrides = {1, 8};
+    c.bStrides = {12, 1};
+    c.cStrides = {12, 1};
+    expectMatchesReference(c, FP32_TOLERANCE);
+}
+
+// A clamp with a non-zero lower bound maps to the clamp epilogue with both activation arguments.
+// The inputs are uniform in [-1,1) over K = 32, so results fall below -0.25 and above 0.5.
+// Fails if the lower or upper bound is not applied to the executed plan (e.g. lost when the
+// plan is cloned).
+TEST_F(IntegrationGpuMatmulApplicability, ClampedReluFusedOutputMatchesReference)
+{
+    MatmulCase c;
+    c.m = 16;
+    c.k = 32;
+    c.n = 16;
+    c.withRelu = true;
+    c.reluLowerClip = -0.25f;
+    c.reluUpperClip = 0.5f;
+    expectMatchesReference(c, FP32_TOLERANCE);
 }

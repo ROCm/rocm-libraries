@@ -114,6 +114,15 @@ enum class MatrixOrder
 
 MatrixOrder matrixOrder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
 
+// hipBLASLt transpose op for an input matrix: row-major -> HIPBLAS_OP_N,
+// column-major -> HIPBLAS_OP_T. Throws BAD_PARAM for any other layout.
+hipblasOperation_t operandTranspose(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
+
+// Throws BAD_PARAM unless the output matrix is row-major.
+void requireRowMajorOutput(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
+
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
 bool isTypeFp6Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
