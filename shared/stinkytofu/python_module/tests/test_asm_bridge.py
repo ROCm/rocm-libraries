@@ -356,6 +356,12 @@ def test_emit_asm_supports_t00_descriptor_aliases_and_scalar_vcc_forms():
 def test_emit_asm_supports_fmha_softcap_and_dropout_vector_ops(target):
     # v_tanh_f32 (attention logit softcap); v_xor_b32 and v_perm_b32 (Philox dropout RNG and its byte transpose).
     # Both gfx1250 steppings share the instruction set; gfx1250-strict is the toolchain name of gfx1250v0.
+    try:
+        _raw_emit_asm(target, 32, [])
+    except ValueError as error:
+        if "unsupported architecture" not in str(error):
+            raise
+        pytest.skip(f"{target} is not built (see STINKYTOFU_ARCHS_TO_BUILD)")
     assembly = emit_asm(
         target,
         32,
