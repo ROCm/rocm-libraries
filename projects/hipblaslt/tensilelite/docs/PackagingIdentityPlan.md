@@ -983,6 +983,11 @@ Where the implementation went beyond or differs from section 1.2:
   this batch has no actual native HIP/client build or GPU numerical result.
   The independent GPT-6.1-Sol verification found no remaining actionable issue
   after repairing a forced-off StinkyTofu regression.
+  The existing source-only GPU-target tests were adapted to the selected-root
+  detection/compiler interfaces while retaining feature-stripping assertions;
+  the owner task/target suite passed 51 cases. Final stack source/binding/runtime
+  validation passed 565 cases with one optional installed-artifact-root check
+  skipped. It does not cover the separate #15580 installed binding fixture issue.
 
 ---
 
