@@ -7760,29 +7760,8 @@ namespace TensileLite
         // makeArgs, using the FINAL (post-fallback) grid and reduction.
         if(isDynamic)
         {
-            AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
-            int           overrideT = pAMDGPU ? pAMDGPU->skTiles : -1;
-            int           overrideS = pAMDGPU ? pAMDGPU->skSplit : -1;
-            uint32_t      skTiles   = 0;
-            uint32_t      skSplit   = 2;
-            if(overrideT > -1)
-                skTiles = static_cast<uint32_t>(overrideT);
-            if(overrideS > -1)
-                skSplit = static_cast<uint32_t>(overrideS);
-            const uint32_t kGran = static_cast<uint32_t>(skKGranularity());
-            const uint32_t paddedIters
-                = static_cast<uint32_t>(StreamK::paddedItersPerTile(itersPerTile, kGran));
-            uint32_t skItersPerWI
-                = kGran * CeilDivide(CeilDivide(paddedIters, skSplit), kGran);
-            skSplit = CeilDivide(paddedIters, skItersPerWI);
-
-            StreamK::Dynamic::KernelArguments dynamicStreamkArgs;
-            dynamicStreamkArgs.tiles      = skTiles;
-            dynamicStreamkArgs.split      = skSplit;
-            dynamicStreamkArgs.itersPerWI = skItersPerWI;
-            dynamicStreamkArgs.totalItems
-                = static_cast<uint32_t>((tiles - skTiles) + size_t{skTiles} * skSplit);
-            d.slots.words  = dynamicStreamkArgs;
+            d.slots.words
+                = StreamK::Dynamic::items(hardware, tiles, itersPerTile, skKGranularity());
         }
         else if(reduction == origami::reduction_t::parallel && tiles > 0)
         {
