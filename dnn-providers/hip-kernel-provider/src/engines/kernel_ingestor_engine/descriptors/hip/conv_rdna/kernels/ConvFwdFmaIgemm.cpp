@@ -123,10 +123,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     const int nb_per_g = (Kg + TILE_N - 1) / TILE_N;
     const int g = blockIdx.y / nb_per_g;
     const int k0 = (blockIdx.y % nb_per_g) * TILE_N;
-    const long M = static_cast<long>(N) * Do * Ho * Wo;
-    const long m0 = static_cast<long>(blockIdx.x) * TILE_M;
-    const long sp_in = static_cast<long>(Di) * Hi * Wi;
-    const long sp_out = static_cast<long>(Do) * Ho * Wo;
+    // Offsets are long long: long is 32 bits in HIP device code built on Windows.
+    const long long M = static_cast<long long>(N) * Do * Ho * Wo;
+    const long long m0 = static_cast<long long>(blockIdx.x) * TILE_M;
+    const long long sp_in = static_cast<long long>(Di) * Hi * Wi;
+    const long long sp_out = static_cast<long long>(Do) * Ho * Wo;
     const int taps = Z * Y * X;
 
     // A row (output position) staged by this thread. NCDHW: consecutive threads take consecutive
@@ -139,12 +140,12 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     const int a_row = tid % TILE_M;
     const int a_col = (tid / TILE_M) * LOAD_A;
 #endif
-    const long am = m0 + a_row;
+    const long long am = m0 + a_row;
     const bool am_ok = am < M;
     int an = 0, aod = 0, aoh = 0, aow = 0;
     if(am_ok)
     {
-        long t = am;
+        long long t = am;
         aow = static_cast<int>(t % Wo);
         t /= Wo;
         aoh = static_cast<int>(t % Ho);
@@ -156,11 +157,13 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     const int hi0 = aoh * sh - ph;
     const int wi0 = aow * sw - pw;
 #if CONV_CHANNELS_LAST
-    const data_t* in_n = in + static_cast<long>(an) * sp_in * C + static_cast<long>(g) * Cg;
-    const long in_cstride = 1;
+    const data_t* in_n
+        = in + static_cast<long long>(an) * sp_in * C + static_cast<long long>(g) * Cg;
+    const long long in_cstride = 1;
 #else
-    const data_t* in_n = in + (static_cast<long>(an) * C + static_cast<long>(g) * Cg) * sp_in;
-    const long in_cstride = sp_in;
+    const data_t* in_n
+        = in + (static_cast<long long>(an) * C + static_cast<long long>(g) * Cg) * sp_in;
+    const long long in_cstride = sp_in;
 #endif
 
     // B row (output channel) staged by this thread.
@@ -170,11 +173,12 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     const bool bk_ok = bk < Kg;
     // Both weight layouts hold taps * Cg values per output channel; they differ only inside it.
     const data_t* wei_k
-        = wei + (static_cast<long>(g) * Kg + (bk_ok ? bk : 0)) * static_cast<long>(taps) * Cg;
+        = wei
+          + (static_cast<long long>(g) * Kg + (bk_ok ? bk : 0)) * static_cast<long long>(taps) * Cg;
 #if CONV_WEI_KCZYX
-    const long wei_cstride = taps;
+    const long long wei_cstride = taps;
 #else
-    const long wei_cstride = 1;
+    const long long wei_cstride = 1;
 #endif
 
     // Register tile owned by this thread, strided by TILE / MICRO so that each store instruction
@@ -213,7 +217,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         const bool a_ok = am_ok && di >= 0 && di < Di && hi >= 0 && hi < Hi && wi >= 0 && wi < Wi;
         // Out-of-range rows read the clamped offset 0 and are replaced by 0 with a select, so
         // the loads do not branch.
-        const long a_sp = a_ok ? (static_cast<long>(di) * Hi + hi) * Wi + wi : 0;
+        const long long a_sp = a_ok ? (static_cast<long long>(di) * Hi + hi) * Wi + wi : 0;
 #if CONV_CHANNELS_LAST
         const data_t* a_ptr = in_n + a_sp * C;
 #else
@@ -222,7 +226,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
 #if CONV_WEI_KCZYX
         const data_t* b_ptr = wei_k + tap;
 #else
-        const data_t* b_ptr = wei_k + static_cast<long>(tap) * Cg;
+        const data_t* b_ptr = wei_k + static_cast<long long>(tap) * Cg;
 #endif
         if(c0 + TILE_C <= Cg)
         {
@@ -286,16 +290,16 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
 
     for(int i = 0; i < MICRO_M; ++i)
     {
-        const long m = m0 + tm + i * (TILE_M / MICRO_M);
+        const long long m = m0 + tm + i * (TILE_M / MICRO_M);
         if(m >= M)
             continue;
 #if CONV_CHANNELS_LAST
-        data_t* out_m = out + m * K + static_cast<long>(g) * Kg;
-        const long out_kstride = 1;
+        data_t* out_m = out + m * K + static_cast<long long>(g) * Kg;
+        const long long out_kstride = 1;
 #else
-        const long n = m / sp_out;
-        data_t* out_m = out + (n * K + static_cast<long>(g) * Kg) * sp_out + (m - n * sp_out);
-        const long out_kstride = sp_out;
+        const long long n = m / sp_out;
+        data_t* out_m = out + (n * K + static_cast<long long>(g) * Kg) * sp_out + (m - n * sp_out);
+        const long long out_kstride = sp_out;
 #endif
         for(int j = 0; j < MICRO_N; ++j)
         {
