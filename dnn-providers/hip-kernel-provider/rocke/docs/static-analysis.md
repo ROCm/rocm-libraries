@@ -14,16 +14,28 @@ what to do about the most common findings. The examples are real output for
 
 ## Running the checks
 
-They run as pre-push hooks from the repo-root `.pre-commit-config.yaml`
-(`rocke-radon`, `rocke-pyright`, `rocke-vulture`) on the rocke `.py` files a
-push changes. CI does not run these hooks. Enable once per clone:
+They run as opt-in pre-push hooks (`rocke-radon`, `rocke-pyright`,
+`rocke-vulture`) on the rocke `.py` files a push changes. The hooks are defined in
+their own config, `tools/static_analysis/pre-commit-config.yaml`, not in the
+repository's `.pre-commit-config.yaml`, so nothing changes for anyone who does not
+enable them. CI does not run these hooks. Enable once per clone, from the
+repository root:
 
 ```bash
-pre-commit install --hook-type pre-push --install-hooks
+cfg=dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/pre-commit-config.yaml
+pre-commit install --hook-type pre-push --allow-missing-config -c "$cfg"
 ```
 
-Three things to know before you do:
+Things to know before you do:
 
+- This config needs pre-commit 3.2.0 or newer: older versions call the stage
+  `push` and reject the file with "Expected one of ... but got: 'pre-push'" (fix:
+  `pip install -U pre-commit`). The repository's own config does not need it.
+- Only these three hooks run at push time, because `-c` points the installed hook
+  at this config; the repo's other hooks (black, bandit and so on) do not run, and
+  there is nothing to download. `--allow-missing-config` lets a push through, with
+  a message, from a checkout that does not have the file (another branch, a sparse
+  checkout); without it that push fails.
 - The three rocke hooks use the first of `python` and `python3` on `PATH` that is
   Python 3.10 or newer, and never install anything. Missing or broken analyzers
   print a message and do not fail the hook, and neither does a missing Python: the
@@ -34,12 +46,6 @@ Three things to know before you do:
   Linux installs have only `python3` until a virtual environment is active, and
   the analyzers usually live in that environment, so activate it before you push
   to get the reports.
-- The config sets no default stages, so this also runs the repo's other hooks
-  (black, the whitespace fixers, bandit and so on) on the pushed files at push
-  time, and those *can* fail a push. The three rocke checks cannot.
-- Those other hooks need their repositories downloaded. `--install-hooks` does
-  that now, so a network problem shows up as a failed install. Without it the
-  first push does the download, and a push with no network access fails.
 
 Optionally install the analyzers ahead of time in your development environment,
 then keep that environment active when pushing:
@@ -53,10 +59,11 @@ The version check also prepares Pyright's runtime before a push. Installing thes
 tools is optional and separate from the hooks, so setup failures cannot block a
 push. Pyright uses packages already available in your environment for import types.
 
-Run them by hand. For chosen files, go through pre-commit:
+Run them by hand. For chosen files, go through pre-commit (with `cfg` set as
+above):
 
 ```bash
-pre-commit run rocke-radon --hook-stage pre-push --files <paths>
+pre-commit run rocke-radon --hook-stage pre-push -c "$cfg" --files <paths>
 ```
 
 For all of rocke, call the wrapper with no paths, from the repository root:
@@ -72,16 +79,16 @@ splits a long file list into several runs to stay under the operating system's
 command-line limit, each printing its own partial report, and vulture rescans all
 of rocke every time.
 
-To see all three reports for a whole branch without installing the pre-push hook
-(this also runs the repo's other hooks):
+To see all three reports for a whole branch without installing the pre-push hook:
 
 ```bash
-pre-commit run --hook-stage pre-push --from-ref origin/develop --to-ref HEAD
+pre-commit run --hook-stage pre-push -c "$cfg" --from-ref origin/develop --to-ref HEAD
 ```
 
 | Setting | Where |
 |---|---|
 | which files are checked | no paths: every tracked `.py` under rocke (`git ls-files`), no list to maintain; pyright also skips hidden directories and `node_modules` |
+| hook definitions and stages | `rocke/tools/static_analysis/pre-commit-config.yaml` |
 | pyright rules and import roots | `rocke/tools/static_analysis/pyrightconfig.json` |
 | radon report thresholds, vulture confidence | top of `rocke/tools/static_analysis/static_analysis_checks.py` |
 | Suggested tool versions | `rocke/tools/static_analysis/requirements.txt` |

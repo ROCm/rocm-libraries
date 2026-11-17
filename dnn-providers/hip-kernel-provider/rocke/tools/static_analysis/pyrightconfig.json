@@ -1,6 +1,6 @@
 // pyright settings for ALL rocke Python.
 // ADVISORY ONLY: run by static_analysis_checks.py (next to this file) as a
-// NON-BLOCKING pre-push hook (repo-root .pre-commit-config.yaml). Findings are
+// NON-BLOCKING pre-push hook (pre-commit-config.yaml, next to it). Findings are
 // reported, never enforced.
 // Kept out of a rocke-level pyproject.toml: pytest would adopt that file as its
 // rootdir when tools/run_checks.py runs pytest from rocke/.
