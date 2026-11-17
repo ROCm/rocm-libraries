@@ -35,29 +35,11 @@ namespace vectors = hip_kernel_provider::kernel_ingestor_engine::gfx942_dgrad_te
 namespace catalog = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_catalog;
 
 using catalog::describe;
+using catalog::problem;
 
 const std::vector<catalog::Entry>& entries(const std::string& dtype)
 {
     return catalog::catalog(dtype, dgrad::GFX942);
-}
-
-bool isMfma(const catalog::Entry& entry)
-{
-    const auto& variant = entry.text("direct_variant");
-    return variant == "grouped_dgrad_mfma" || variant == "dgrad_mfma_rtc";
-}
-
-dgrad::Problem problem(int64_t n,
-                       int64_t c,
-                       int64_t k,
-                       int64_t hi,
-                       int64_t wi,
-                       int64_t filter,
-                       int64_t stride,
-                       int64_t pad,
-                       int64_t groups = 1)
-{
-    return dgrad::Problem{n, c, k, hi, wi, filter, filter, stride, stride, pad, pad, 1, 1, groups};
 }
 
 TEST(TestGfx942ConvDgradGeometry, EveryCatalogInstanceParses)
@@ -273,7 +255,8 @@ TEST(TestGfx942ConvDgradGeometry, OnlyTheMfmaPlansDependOnTheLdsBudget)
             const bool served = row.served[i] == '1';
             EXPECT_TRUE(servedWider || !served)
                 << entry.text("instance_id") << " on " << describe(p);
-            EXPECT_TRUE(served == servedWider || isMfma(entry))
+            EXPECT_TRUE(served == servedWider
+                        || dgrad::isMfmaVariant(entry.instance->direct->variant))
                 << entry.text("direct_variant") << " " << entry.text("instance_id") << " on "
                 << describe(p);
         }

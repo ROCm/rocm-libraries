@@ -31,6 +31,7 @@ namespace vectors = hip_kernel_provider::kernel_ingestor_engine::gfx1250_dgrad_t
 namespace catalog = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_catalog;
 
 using catalog::describe;
+using catalog::problem;
 
 const std::vector<catalog::Entry>& entries(const std::string& dtype)
 {
@@ -43,19 +44,6 @@ const catalog::Entry& firstOf(const std::string& variant)
         "fp16",
         [&](const catalog::Entry& e) { return e.text("direct_variant") == variant; },
         dgrad::GFX1250);
-}
-
-dgrad::Problem problem(int64_t n,
-                       int64_t c,
-                       int64_t k,
-                       int64_t hi,
-                       int64_t wi,
-                       int64_t filter,
-                       int64_t stride,
-                       int64_t pad,
-                       int64_t groups = 1)
-{
-    return dgrad::Problem{n, c, k, hi, wi, filter, filter, stride, stride, pad, pad, 1, 1, groups};
 }
 
 TEST(TestGfx1250ConvDgradGeometry, EveryCatalogInstanceParses)

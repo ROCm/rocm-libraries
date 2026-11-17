@@ -162,6 +162,20 @@ inline const Entry& firstEntry(const std::string& dtype,
     return *it;
 }
 
+/// A square problem: one @p filter, @p stride and @p pad on both axes, no dilation.
+inline dgrad::Problem problem(int64_t n,
+                              int64_t c,
+                              int64_t k,
+                              int64_t hi,
+                              int64_t wi,
+                              int64_t filter,
+                              int64_t stride,
+                              int64_t pad,
+                              int64_t groups = 1)
+{
+    return dgrad::Problem{n, c, k, hi, wi, filter, filter, stride, stride, pad, pad, 1, 1, groups};
+}
+
 inline dgrad::Problem toProblem(const vectors::ProblemValues& v)
 {
     return dgrad::Problem{

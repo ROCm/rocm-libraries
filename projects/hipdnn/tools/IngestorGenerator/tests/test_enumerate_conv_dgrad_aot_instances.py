@@ -41,11 +41,10 @@ def catalog():
     return tool.read_rocke_catalog("dgrad", "gfx950")
 
 
-@pytest.fixture(scope="module")
-def committed():
-    """The committed per-dtype instance lists."""
+def _committed(arch):
+    """The committed per-dtype instance lists of ``arch``."""
     paths = {
-        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch="gfx950", dtype=dtype)
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch=arch, dtype=dtype)
         for dtype in tool.DTYPES
     }
     missing = sorted(str(p) for p in paths.values() if not p.exists())
@@ -55,6 +54,12 @@ def committed():
             f"{_CONFIGS}: {missing}"
         )
     return {dtype: json.loads(path.read_text()) for dtype, path in paths.items()}
+
+
+@pytest.fixture(scope="module")
+def committed():
+    """The committed per-dtype instance lists."""
+    return _committed("gfx950")
 
 
 def _label(identity):
@@ -195,17 +200,7 @@ def test_committed_instance_lists_are_what_the_tool_enumerates(
 @pytest.fixture(scope="module")
 def committed_gfx1250():
     """The committed gfx1250 per-dtype instance lists."""
-    paths = {
-        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch="gfx1250", dtype=dtype)
-        for dtype in tool.DTYPES
-    }
-    missing = sorted(str(p) for p in paths.values() if not p.exists())
-    if missing:
-        pytest.skip(
-            "DVC-tracked instance list(s) not pulled, run `dvc pull` in "
-            f"{_CONFIGS}: {missing}"
-        )
-    return {dtype: json.loads(path.read_text()) for dtype, path in paths.items()}
+    return _committed("gfx1250")
 
 
 def test_the_gfx1250_lists_are_rockes_gfx1250_catalog(committed_gfx1250):
@@ -239,17 +234,7 @@ def test_committed_gfx1250_lists_are_what_the_tool_enumerates(
 @pytest.fixture(scope="module")
 def committed_gfx942():
     """The committed gfx942 per-dtype instance lists."""
-    paths = {
-        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch="gfx942", dtype=dtype)
-        for dtype in tool.DTYPES
-    }
-    missing = sorted(str(p) for p in paths.values() if not p.exists())
-    if missing:
-        pytest.skip(
-            "DVC-tracked instance list(s) not pulled, run `dvc pull` in "
-            f"{_CONFIGS}: {missing}"
-        )
-    return {dtype: json.loads(path.read_text()) for dtype, path in paths.items()}
+    return _committed("gfx942")
 
 
 def test_the_gfx942_lists_are_rockes_gfx942_catalog_and_its_helpers(committed_gfx942):

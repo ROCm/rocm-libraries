@@ -4,7 +4,7 @@
 """The gfx1250-only cases of the shipped hipkernel:Gfx1250ConvDgradAot bundle and its
 catalog, made by tools/make_conv_dgrad_aot_config.py --arch gfx1250. What every dgrad
 engine shares is test_make_conv_dgrad_aot_config.py's, run for gfx1250 too; these
-reuse its loaders."""
+reuse its loaders and fixtures."""
 
 import collections
 import json
@@ -22,25 +22,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import make_conv_dgrad_aot_config as tool  # noqa: E402
 import test_make_conv_dgrad_aot_config as shared  # noqa: E402
 
+# The shared module's fixtures, bound to this engine by the ``arch`` below.
+from test_make_conv_dgrad_aot_config import (  # noqa: E402, F401
+    _rocke_on_path,
+    identities,
+    specs,
+)
+
 _ARCH = "gfx1250"
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _rocke_on_path():
-    before = list(sys.path)
-    tool._bind_rocke(shared._ROCKE)
-    yield
-    sys.path[:] = before
-
-
 @pytest.fixture(scope="module")
-def identities():
-    return list(shared.load_identities(_ARCH))
-
-
-@pytest.fixture(scope="module")
-def specs():
-    return list(shared.load_specs(_ARCH))
+def arch():
+    return _ARCH
 
 
 def test_the_catalog_is_109_kernels_per_dtype(specs):
