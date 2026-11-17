@@ -11,13 +11,43 @@
     "$kernel.use_transposed_qk_32x32",
     "$gfx950_attention_unified_2d.mask_type",
     "$gfx950_attention_unified_2d.scale_bits",
-    "$graph.arithmetic_intensity",
-    "$graph.flops",
-    "$graph.flops_by_type.SdpaAttributes",
-    "$graph.logical_bytes",
-    "$graph.nodes[0].attn_scale_value",
+    {
+      "value_or_default": [
+        "$graph.arithmetic_intensity",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.flops",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.flops_by_type.SdpaAttributes",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.logical_bytes",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_scale_value",
+        1.0
+      ]
+    },
     "$graph.nodes[0].diagonal_alignment",
-    "$graph.nodes[0].flops",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].flops",
+        -1
+      ]
+    },
     "$graph.nodes[0].k.data_type",
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
@@ -87,7 +117,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:b286118c4fc0cefe",
+  "features_hash": "sha256:525191f09044ff4a",
   "trained_against": {
     "ued": {
       "id": "800f4c70-d2e0-4a34-ab93-08fb527e2d82",
@@ -113,6 +143,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "d101c1b0587ef290c4ca248d3bdeebe690a1466bbea63a78aa35b02d8892e903"
+    "hash": "caade187b8891027999f54ebe991171f90f59b40dbf9b28fd975f582355cc27c"
   }
 }

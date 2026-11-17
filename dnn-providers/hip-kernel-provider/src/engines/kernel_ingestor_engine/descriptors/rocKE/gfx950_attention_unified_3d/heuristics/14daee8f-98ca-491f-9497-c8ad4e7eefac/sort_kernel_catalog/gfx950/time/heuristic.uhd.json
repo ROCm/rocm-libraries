@@ -7,11 +7,36 @@
     "$device.memory_clock_rate",
     "$device.peak_memory_bandwidth",
     "$kernel.num_segments",
-    "$graph.arithmetic_intensity",
-    "$graph.flops",
-    "$graph.flops_by_type.SdpaAttributes",
-    "$graph.logical_bytes",
-    "$graph.nodes[0].flops",
+    {
+      "value_or_default": [
+        "$graph.arithmetic_intensity",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.flops",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.flops_by_type.SdpaAttributes",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.logical_bytes",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].flops",
+        -1
+      ]
+    },
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
     "$graph.nodes[0].k.dims[2]",
@@ -53,7 +78,7 @@
     "$graph.tensors[3].strides[0]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:96b614da07c2a8b8",
+  "features_hash": "sha256:46bca9c8faf17b22",
   "trained_against": {
     "ued": {
       "id": "14daee8f-98ca-491f-9497-c8ad4e7eefac",
@@ -79,6 +104,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "b142f5b85df55372b4f8fc8f7dda2d91c1c555c17266c8af9629e638495dfcba"
+    "hash": "0bf18f7e7f983270eb377a0f22d143be2ea1109d2eb7526d3d173b832633aa8c"
   }
 }
