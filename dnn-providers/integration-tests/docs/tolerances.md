@@ -1138,6 +1138,26 @@ the split-K kernels of ALMIOPEN-3380. With a bfloat16 backward-weights
 `lambda` of about 16 at `K` = 1,152, one missing product of a 1,152-product
 sum is not detected either; a missing batch sample or row of `dy` still is.
 
+### Harness runs, backward
+
+The bundle harness with these constants and the MIOpen engine on an MI308X
+(gfx942), every level, three input seeds (the bundles' own, one of the
+validation seeds and one new seed), the classes `X3` and `F20` left out:
+
+| Bundles | Direction | Cases run (3 seeds) | Passed | Failed |
+|---|---|---|---|---|
+| test plans | backward data | 7,632 | 7,367 | 265 |
+| test plans | backward weights | 8,049 | 7,815 | 234 |
+| in the tree (`*_Convolution*`) | all | 1,280 | 1,280 | 0 |
+
+Every backward failure is an output MIOpen computes wrongly, the same cases on
+every seed: the classes `F15`, `F16plane`, `F16chan` and `F16fast` (values of
+1e4 to 1e38, infinities, NaNs, wrong signs or doubled values), and two
+`F21large` backward-weights outputs that overflow to infinity where the
+reference is just under the largest value of the type. With the earlier flat
+half `lambda` of 36 one more output failed, on one seed: the `K` = 1.6
+million case of "Which backward solvers need lambda".
+
 ### When an engine needs more
 
 The model describes float accumulation and, for half, io-precision
