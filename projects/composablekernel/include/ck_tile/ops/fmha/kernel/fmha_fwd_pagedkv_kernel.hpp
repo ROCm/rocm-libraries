@@ -891,8 +891,8 @@ struct FmhaFwdPagedKVKernel
         FmhaFwdWorkgroupFeatures features{};
         // The head-stride guard avoids the single-head BSHD false positive.
         features.is_bhsd = kargs.stride_q == kargs.hdim_q && kargs.nhead_stride_q > kargs.hdim_q;
-        // uniform_lengths stays false, so the XCD orders are never taken: paged KV always
-        // passes per-batch key lengths (seqlen_k_ptr).
+        // uniform_lengths is left false, unlike FmhaFwdKernel: key lengths may differ per batch
+        // (seqlen_k_ptr), so the XCD orders stay off.
         // square_causal compares against the max seqlen_k; it only picks an order.
         if constexpr(kHasMask)
             features.square_causal = kargs.seqlen_q == kargs.seqlen_k &&
