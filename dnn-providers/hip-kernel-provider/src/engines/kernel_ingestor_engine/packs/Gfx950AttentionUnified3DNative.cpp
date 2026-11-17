@@ -182,15 +182,23 @@ MaskType decodeMaskKey(MaskType mask)
     return mask == MaskType::NO_MASK ? MaskType::BOTTOM_RIGHT_CAUSAL : mask;
 }
 
-constexpr unified_attention::BoundTokenNames TOKEN_NAMES{Q_TOKEN,
-                                                         K_TOKEN,
-                                                         V_TOKEN,
-                                                         O_TOKEN,
-                                                         MASK_TOKEN,
-                                                         SLIDING_WINDOW_TOKEN,
-                                                         SCALE_BITS_TOKEN,
-                                                         STATS_TOKEN,
-                                                         "gfx950 attention_unified_3d"};
+/// The engine's bound-token names, field by field.
+constexpr unified_attention::BoundTokenNames tokenNames()
+{
+    unified_attention::BoundTokenNames names;
+    names.q = Q_TOKEN;
+    names.k = K_TOKEN;
+    names.v = V_TOKEN;
+    names.o = O_TOKEN;
+    names.maskType = MASK_TOKEN;
+    names.slidingWindow = SLIDING_WINDOW_TOKEN;
+    names.scaleBits = SCALE_BITS_TOKEN;
+    names.stats = STATS_TOKEN;
+    names.dispatchLabel = "gfx950 attention_unified_3d";
+    return names;
+}
+
+constexpr unified_attention::BoundTokenNames TOKEN_NAMES = tokenNames();
 
 /**
  * @brief Graph-scoped applicability for the whole engine.
@@ -254,8 +262,11 @@ std::optional<BoundTokens> gfx950AttentionUnified3DGraphMatches(const MatchConte
         return std::nullopt;
     }
 
-    const auto matched = unified_attention::matchAttributes(
-        context, *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);
+    const auto matched = unified_attention::matchAttributes(context,
+                                                            *operands->attributes,
+                                                            problem,
+                                                            GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME,
+                                                            GFX950_UNIFIED_ATTENTION_TRAITS);
     if(!matched.has_value())
     {
         return std::nullopt;

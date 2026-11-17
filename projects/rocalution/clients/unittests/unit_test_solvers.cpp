@@ -38,6 +38,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -1850,6 +1851,132 @@ TYPED_TEST(solvers, gmres_and_fgmres_switch_to_the_euclidean_norm)
     }
 }
 
+#ifdef SUPPORT_COMPLEX
+namespace
+{
+    // nonsymmetric with an imaginary part on every entry, so that the residuals are complex
+    template <typename T>
+    Csr<T> complex_nonsymmetric(int n)
+    {
+        using R              = real_t<T>;
+        const Csr<double> re = nonsymmetric<double>(n);
+        Csr<T>            A(n);
+        for(int i = 0; i < n; ++i)
+        {
+            for(auto k = re.row_offset[i]; k < re.row_offset[i + 1]; ++k)
+            {
+                const int j = re.col[k];
+                A.add(j,
+                      T(static_cast<R>(re.val[k]), static_cast<R>(0.5 * ((i + 2 * j) % 4) - 0.75)));
+            }
+            A.end_row();
+        }
+        return A;
+    }
+
+    template <typename T>
+    Vec<T> complex_rhs(int n)
+    {
+        Vec<T> b(n);
+        for(int i = 0; i < n; ++i)
+        {
+            b[i] = from_int<T>(i % 7 - 3);
+        }
+        return b;
+    }
+
+    // The solvers on complex systems. The real-only references above, such as dot and
+    // norm_of_type, are not used: the checks compute the residual b - A x directly.
+    template <typename P>
+    class complex_solvers : public solvers<P>
+    {
+    };
+}
+
+TYPED_TEST_SUITE(complex_solvers, WithBackends<ComplexTypes>, TypedName);
+
+// The L1 and Linf residual norms of a complex solve are the sum and the largest of the moduli
+// |r_i|, which the solvers compute with Asum and Amax
+TYPED_TEST(complex_solvers, current_residual_is_measured_in_the_chosen_norm)
+{
+    using T          = typename TypeParam::value_type;
+    const int    n   = 12;
+    const Csr<T> ref = complex_nonsymmetric<T>(n);
+    const Vec<T> b   = complex_rhs<T>(n);
+    auto         A   = this->make(ref);
+
+    for(int type : {1, 3})
+    {
+        SCOPED_TRACE("norm " + std::to_string(type));
+        BiCGStab<T> solver;
+        solver.Init(0.0, 0.0, 1e8, 2);
+        solver.SetResidualNorm(type);
+        set_up(solver, method<BiCGStab<T>>("BiCGStab"), *A, nullptr);
+
+        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
+        EXPECT_EQ(out.iterations, 2);
+        EXPECT_EQ(out.status, 4);
+
+        std::vector<double> moduli(n);
+        for(int i = 0; i < n; ++i)
+        {
+            std::complex<double> r(b[i]);
+            for(auto k = ref.row_offset[i]; k < ref.row_offset[i + 1]; ++k)
+            {
+                r -= std::complex<double>(ref.val[k]) * std::complex<double>(out.x[ref.col[k]]);
+            }
+            moduli[i] = std::abs(r);
+        }
+        const auto    largest = std::max_element(moduli.begin(), moduli.end());
+        const int64_t index   = largest - moduli.begin();
+        const double  expected
+            = type == 1 ? std::accumulate(moduli.begin(), moduli.end(), 0.0) : *largest;
+        // The solver updates its residual by a recurrence, which drifts from b - A x by a few
+        // roundings in T of |A| |x|: about 1e-15 of the residual in double, 4e-6 in float
+        EXPECT_NEAR(out.residual, expected, scaled_tol<T>(1e-12) * expected);
+
+        if(type == 3)
+        {
+            // The largest modulus is unique, so that rounding does not move its index
+            ASSERT_IN_LOOP(std::count_if(moduli.begin(),
+                                         moduli.end(),
+                                         [&](double m) { return m >= 0.99 * *largest; })
+                           == 1);
+            EXPECT_EQ(solver.GetAmaxResidualIndex(), index);
+        }
+    }
+}
+
+// QMRCGStab also uses the norm in its iteration, not only in the stopping test
+TYPED_TEST(complex_solvers, converge_with_the_l1_and_linf_residual_norms)
+{
+    using T          = typename TypeParam::value_type;
+    const int    n   = 12;
+    const Csr<T> ref = complex_nonsymmetric<T>(n);
+    const Vec<T> b   = complex_rhs<T>(n);
+    const double rel = loose_tol<T>(1e-10);
+    auto         A   = this->make(ref);
+
+    for(const Method<T>& m : {method<BiCGStab<T>>("BiCGStab"), method<QMRCGStab<T>>("QMRCGStab")})
+    {
+        for(int type : {1, 3})
+        {
+            SCOPED_TRACE(m.name + ", norm " + std::to_string(type));
+            auto solver = m.make();
+            solver->Init(0.0, rel, 1e8, 100);
+            solver->SetResidualNorm(type);
+            set_up(*solver, m, *A, nullptr);
+
+            const Outcome<T> out = solve(*solver, *A, b, Vec<T>(n, 0));
+            EXPECT_EQ(out.status, 2);
+            // In both norms |b - A x|_i <= rel |b|_1 = 28.5 rel, up to the drift of the
+            // updated residual
+            expect_all_near(ref.apply(out.x), b, 100 * rel);
+        }
+    }
+}
+#endif
+
 TYPED_TEST(solvers, residual_history_file_holds_the_residuals_of_the_last_solve)
 {
     using T                     = typename TypeParam::value_type;
@@ -3016,26 +3143,99 @@ TYPED_TEST(solvers, fixed_point_needs_a_preconditioner)
 
 TYPED_TEST(solvers, chebyshev_converges_with_bounds_of_the_spectrum)
 {
+    using T        = typename TypeParam::value_type;
+    const Vec<T> b = rhs<T>(8);
+
+    // Gershgorin bounds of A and of D^-1 A, for A scaled by s. The iteration does not
+    // depend on the scale of the operator.
+    for(double s : {1e-2, 1.0, 1e2})
+    {
+        const Csr<T> ref = transformed(spd<T>(8), [s](int, int, T v) { return T(s) * v; });
+        auto         A   = this->make(ref);
+        for(bool precond : {false, true})
+        {
+            SCOPED_TRACE(std::string(precond ? "with Jacobi" : "without preconditioner")
+                         + ", scale " + std::to_string(s));
+            Jacobi<T>    jacobi;
+            Chebyshev<T> solver;
+            solver.Set(precond ? 1.0 / 3.0 : s, precond ? 5.0 / 3.0 : 10.0 * s);
+            solver.Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
+            set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, precond ? &jacobi : nullptr);
+
+            const Outcome<T> out = solve(solver, *A, b, Vec<T>(8, 0));
+            EXPECT_EQ(out.status, 2);
+            expect_near(
+                out.x,
+                dense_solve(dense(ref), b),
+                solution_tol(dense(ref), b, Vec<T>(8, 0), solver_tol<T>(1e-12), 2, precond));
+        }
+    }
+}
+
+TYPED_TEST(solvers, chebyshev_replaces_a_lower_bound_that_is_not_positive)
+{
     using T          = typename TypeParam::value_type;
     const Csr<T> ref = spd<T>(8);
+    const Vec<T> D   = dense(ref);
     const Vec<T> b   = rhs<T>(8);
+    const Vec<T> x0  = start<T>(8);
     auto         A   = this->make(ref);
 
-    // Gershgorin bounds of A and of D^-1 A
-    for(bool precond : {false, true})
+    // Also with the bounds swapped
+    for(const auto& [lambda_min, lambda_max] : {std::make_pair(0.0, 10.0),
+                                                std::make_pair(-1.0, 10.0),
+                                                std::make_pair(10.0, 0.0),
+                                                std::make_pair(10.0, -1.0)})
     {
-        SCOPED_TRACE(precond ? "with Jacobi" : "without preconditioner");
-        Jacobi<T>    jacobi;
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
         Chebyshev<T> solver;
-        solver.Set(precond ? 1.0 / 3.0 : 1.0, precond ? 5.0 / 3.0 : 10.0);
-        solver.Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
-        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, precond ? &jacobi : nullptr);
+        solver.Set(lambda_min, lambda_max);
+        solver.Init(0.0, 0.0, 1e8, 4);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
 
-        const Outcome<T> out = solve(solver, *A, b, Vec<T>(8, 0));
-        EXPECT_EQ(out.status, 2);
+        const Outcome<T> out = solve(solver, *A, b, x0);
+        EXPECT_EQ(out.iterations, 4);
         expect_near(out.x,
-                    dense_solve(dense(ref), b),
-                    solution_tol(dense(ref), b, Vec<T>(8, 0), solver_tol<T>(1e-12), 2, precond));
+                    chebyshev_iterate(D, b, x0, 4, identity<T>, 10.0 / 30.0, 10.0),
+                    loose_tol<T>(1e-10));
+    }
+
+    // The bounds of LocalMatrix::Gershgorin() for a negative definite matrix
+    const Csr<T> neg = transformed(ref, [](int, int, T v) { return -v; });
+    auto         N   = this->make(neg);
+    for(const auto& [lambda_min, lambda_max] :
+        {std::make_pair(-10.0, 0.0), std::make_pair(0.0, -10.0)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        Chebyshev<T> solver;
+        solver.Set(lambda_min, lambda_max);
+        solver.Init(0.0, 0.0, 1e8, 4);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *N, nullptr);
+
+        const Outcome<T> out = solve(solver, *N, b, x0);
+        EXPECT_EQ(out.iterations, 4);
+        expect_near(out.x,
+                    chebyshev_iterate(dense(neg), b, x0, 4, identity<T>, -10.0, -10.0 / 30.0),
+                    loose_tol<T>(1e-10));
+    }
+}
+
+TYPED_TEST(solvers, chebyshev_rejects_bounds_that_are_not_finite_or_whose_segment_contains_0)
+{
+    using T          = typename TypeParam::value_type;
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    // (0, 0) are the bounds of LocalMatrix::Gershgorin() for a matrix of zeros
+    for(const auto& [lambda_min, lambda_max] : {std::make_pair(0.0, 0.0),
+                                                std::make_pair(nan, 10.0),
+                                                std::make_pair(1.0, nan),
+                                                std::make_pair(1.0, inf),
+                                                std::make_pair(-inf, inf)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        Chebyshev<T> solver;
+        EXPECT_FATAL_ERROR(solver.Set(lambda_min, lambda_max), "chebyshev\\.cpp");
     }
 }
 
@@ -3080,8 +3280,6 @@ TYPED_TEST(solvers, chebyshev_iterates_follow_the_chebyshev_recurrence)
         }
     }
 
-    KNOWN_BUG("the recurrence starts with alpha = 2 / d instead of 1 / d and continues with "
-              "alpha = 1 / (d - beta) instead of 1 / (d - beta / alpha)");
     for(const Case& c : cases)
     {
         SCOPED_TRACE(c.name);
@@ -3638,3 +3836,109 @@ TYPED_TEST(solvers_stencil, clear_and_set_grid_resize_the_laplace_stencil)
     L.Apply(*x, y.get());
     EXPECT_EQ(values_of(*y), (Vec<T>{4 - 2 - 3, 8 - 1 - 4, 12 - 1 - 4, 16 - 2 - 3}));
 }
+
+// The library instantiates the complex solvers only with SUPPORT_COMPLEX
+#ifdef SUPPORT_COMPLEX
+namespace
+{
+    template <typename P>
+    class solvers_complex : public TypedBackendTest<P>
+    {
+    };
+
+    using ComplexTypes = testing::Types<cfloat, cdouble>;
+
+    // Chebyshev with the bounds lambda_min and lambda_max reaches a relative residual of
+    // 1e-5 on the diagonal system with the eigenvalues lambda. The error is then at most
+    // 1e-5 |b| / min |lambda|, below 1e-4 for the systems of the tests.
+    template <typename T>
+    void expect_chebyshev_solves_diagonal(Backend       backend,
+                                          const Vec<T>& lambda,
+                                          T             lambda_min,
+                                          T             lambda_max)
+    {
+        using R     = real_t<T>;
+        const int n = static_cast<int>(lambda.size());
+        Csr<T>    ref(n);
+        Vec<T>    b(n), x(n);
+        for(int i = 0; i < n; ++i)
+        {
+            ref.add(i, lambda[i]);
+            ref.end_row();
+            b[i] = T(1, static_cast<R>(i % 3));
+            x[i] = b[i] / lambda[i];
+        }
+        auto A = make_local_matrix(backend, ref);
+
+        Chebyshev<T> solver;
+        solver.Set(lambda_min, lambda_max);
+        solver.Init(0.0, 1e-5, 1e8, 100);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
+
+        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
+        EXPECT_EQ(out.status, 2);
+        for(int i = 0; i < n; ++i)
+        {
+            EXPECT_LT(std::abs(out.x[i] - x[i]), 1e-4) << "i = " << i;
+        }
+    }
+}
+
+TYPED_TEST_SUITE(solvers_complex, HostOnly<ComplexTypes>, TypedName);
+
+TYPED_TEST(solvers_complex, chebyshev_replaces_real_bounds_of_complex_type)
+{
+    using T = typename TypeParam::value_type;
+    using R = real_t<T>;
+
+    // Bounds such as those of LocalMatrix::Gershgorin() for a Hermitian matrix, also
+    // swapped. Without the replacement, the iteration does not converge.
+    Vec<T> lambda;
+    for(int i = 1; i <= 10; ++i)
+    {
+        lambda.push_back(static_cast<R>(i));
+    }
+    for(const auto& [lambda_min, lambda_max] :
+        {std::make_pair(0.0, 10.0), std::make_pair(10.0, -1.0)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        expect_chebyshev_solves_diagonal(TypeParam::backend,
+                                         lambda,
+                                         T(static_cast<R>(lambda_min)),
+                                         T(static_cast<R>(lambda_max)));
+    }
+}
+
+TYPED_TEST(solvers_complex, chebyshev_keeps_complex_bounds_whose_segment_does_not_contain_0)
+{
+    using T = typename TypeParam::value_type;
+    using R = real_t<T>;
+
+    // Eigenvalues on the segment from -0.1+2i to 4+2i, whose real parts have both signs.
+    // With lambda_min replaced by lambda_max / 30, the iteration diverges.
+    const T   lambda_min(static_cast<R>(-0.1), static_cast<R>(2));
+    const T   lambda_max(static_cast<R>(4), static_cast<R>(2));
+    const int n = 16;
+    Vec<T>    lambda;
+    for(int i = 0; i < n; ++i)
+    {
+        lambda.push_back(lambda_min
+                         + (lambda_max - lambda_min) * static_cast<R>(i) / static_cast<R>(n - 1));
+    }
+    expect_chebyshev_solves_diagonal(TypeParam::backend, lambda, lambda_min, lambda_max);
+}
+
+TYPED_TEST(solvers_complex, chebyshev_rejects_complex_bounds_whose_segment_contains_0)
+{
+    using T = typename TypeParam::value_type;
+    using R = real_t<T>;
+
+    // The segment from -1+i to 2-2i passes through 0, the one from 0 to 1+i ends there
+    const T      a(static_cast<R>(-1), static_cast<R>(1));
+    const T      b(static_cast<R>(2), static_cast<R>(-2));
+    const T      c(static_cast<R>(1), static_cast<R>(1));
+    Chebyshev<T> solver;
+    EXPECT_FATAL_ERROR(solver.Set(a, b), "chebyshev\\.cpp");
+    EXPECT_FATAL_ERROR(solver.Set(T(0), c), "chebyshev\\.cpp");
+}
+#endif
