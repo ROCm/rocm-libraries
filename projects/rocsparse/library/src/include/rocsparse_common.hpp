@@ -42,6 +42,34 @@
 #endif
 #endif
 
+// Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire and
+// release fences therefore invalidate and write back the whole L2. Kernels that hand results from
+// one row to another through done flags exchange these results with device scope atomic loads and
+// stores (sc1) instead, which are coherent across the XCD L2s. This is correct only if every such
+// result is written and read through the done row helpers (rocsparse::load_done_row_data and the
+// others), and it relies on the gfx9 wait counters: stores are counted in vmcnt (and lgkmcnt for
+// flat stores), so waiting for all counters to reach zero completes them. Newer architectures count
+// stores separately and must not be added here without changing the waits. See the GFX942 memory
+// model in the LLVM AMDGPUUsage documentation.
+//
+// Native targets use the preprocessor, so the macro is 0 or 1 and older compilers keep working.
+// SPIR-V is compiled once for all processors and defers the choice to finalization with
+// __builtin_amdgcn_processor_is. Use the macro only as an if condition: the finalizer then removes
+// the branch for other processors, and that branch may contain s_waitcnt, which gfx1250 and later
+// cannot compile.
+#if defined(__SPIRV__) && defined(__HIP_DEVICE_COMPILE__)
+#if !__has_builtin(__builtin_amdgcn_processor_is)
+#error "SPIR-V builds of rocSPARSE need a compiler with __builtin_amdgcn_processor_is"
+#endif
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2                                                \
+    (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
+     || __builtin_amdgcn_processor_is("gfx9-4-generic"))
+#elif defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2 1
+#else
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2 0
+#endif
+
 // clang-format off
 // ELL indexing macros
 #define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
@@ -2860,26 +2888,11 @@ namespace rocsparse
         return local_done;
     }
 
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
-    // Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire
-    // and release fences therefore invalidate and write back the whole L2. Kernels that hand
-    // results from one row to another through done flags exchange these results with device scope
-    // atomic loads and stores (sc1) instead, which are coherent across the XCD L2s. This is
-    // correct only if every such result is written and read through the done row helpers below,
-    // and it relies on the gfx9 wait counters: stores are counted in vmcnt (and lgkmcnt for flat
-    // stores), so waiting for all counters to reach zero completes them. Newer architectures count
-    // stores separately and must not be added here without changing the waits. See the GFX942
-    // memory model in the LLVM AMDGPUUsage documentation.
-    static constexpr bool has_noncoherent_xcd_l2 = true;
-#else
-    static constexpr bool has_noncoherent_xcd_l2 = false;
-#endif
-
     // Waits until all stores of the calling wavefront have completed. Only valid where
-    // has_noncoherent_xcd_l2 is true, because s_waitcnt 0 covers the stores only with the gfx9 wait
-    // counters. The builtin has side effects, which the compiler treats as reading and writing all
-    // memory, so memory operations stay on their side of it. The workgroup release fence makes
-    // this ordering explicit and emits no cache maintenance.
+    // ROCSPARSE_HAS_NONCOHERENT_XCD_L2 is true, because s_waitcnt 0 covers the stores only with the
+    // gfx9 wait counters. The builtin has side effects, which the compiler treats as reading and
+    // writing all memory, so memory operations stay on their side of it. The workgroup release
+    // fence makes this ordering explicit and emits no cache maintenance.
     __device__ __forceinline__ void wait_store_completion()
     {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
@@ -2895,7 +2908,7 @@ namespace rocsparse
     // rocSPARSE does not use).
     __device__ __forceinline__ void acquire_done_rows()
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
         }
@@ -2909,7 +2922,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T load_done_row_data(const T* ptr)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             return rocsparse::atomic_load(ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
@@ -2923,7 +2936,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ void store_done_row_data(T* ptr, T val)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
@@ -2938,7 +2951,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ void store_done_row_result(T* ptr, T val)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::store_done_row_data(ptr, val);
         }
@@ -2952,7 +2965,7 @@ namespace rocsparse
     // wavefronts of the workgroup may set the done flag after a following __syncthreads().
     __device__ __forceinline__ void release_done_row_data()
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             // The stores are device scope already, they only have to complete.
             rocsparse::wait_store_completion();
@@ -2969,7 +2982,7 @@ namespace rocsparse
     // row that has seen the flag.
     __device__ __forceinline__ void set_done_flag(int32_t* ptr, int32_t val)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::wait_store_completion();
             rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);

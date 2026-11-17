@@ -38,7 +38,6 @@ import re
 import numpy as np
 import pytest
 from rocke.core.backend import lower_block_scale_gemm
-from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers import compile_kernel
 from rocke.instances.common.block_scale_gemm import (
     BlockScaleGemmSpec,
@@ -46,7 +45,7 @@ from rocke.instances.common.block_scale_gemm import (
     block_scale_gemm_signature,
     build_block_scale_gemm,
 )
-from rocke.tests.engines import all_engines_backend
+from rocke.tests.engines import lower_spec_with_all_engines
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.tests.llvm_ir import KernelIR
 
@@ -59,17 +58,14 @@ _GEMM_TOLERANCE = 7e-2
 
 
 def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
-    """The kernel's LLVM IR for ``spec`` on ``arch``.
-
-    With the C++ engine importable, each engine's builder builds the kernel
-    from the spec, both kernels are lowered (the Python builder's by the
-    default lowerer, which is the C++ one unless ``ROCKE_BACKEND`` names
-    another), and the two texts must be the same byte for byte
-    (``BackendMismatch`` otherwise); without it, the Python builder's kernel,
-    lowered by the Python lowerer (``ROCKE_BACKEND=both`` raises instead)."""
-    if all_engines_backend() == "both":
-        return lower_block_scale_gemm(spec, arch=arch, backend="both").llvm_text
-    return lower_kernel_to_llvm(build_block_scale_gemm(spec, arch=arch), arch=arch)
+    """The kernel's LLVM IR for ``spec`` on ``arch`` from every engine
+    (``lower_spec_with_all_engines``)."""
+    return lower_spec_with_all_engines(
+        spec,
+        arch,
+        build_kernel=build_block_scale_gemm,
+        lower_spec=lower_block_scale_gemm,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -82,41 +78,11 @@ def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
 # ---------------------------------------------------------------------------
 
 _STORE = re.compile(r"^\s*store \w+ (%[\w.]+), ptr addrspace\(1\) (%[\w.]+)")
-_BUFFER_LOAD = "llvm.amdgcn.raw.ptr.buffer.load"
-_BUFFER_RESOURCE = "llvm.amdgcn.make.buffer.rsrc"
-_LOOP_BOUND = re.compile(r"icmp slt i32 (%[\w.]+), (\d+)$")
 
 
 class _KernelIR(KernelIR):
     """The block-scaled GEMM's LLVM IR, with the queries this check makes of
     it."""
-
-    def call_named(self, callee: str) -> str:
-        """The value defined by the one call of ``callee``."""
-        (name,) = [
-            n
-            for n, text in self.definitions.items()
-            if text.startswith("call ") and self.callee(text) == callee
-        ]
-        return name
-
-    def loop_counter(self, phi: str) -> tuple:
-        """(counter, first value, end) of the loop whose header defines the
-        accumulator ``phi``: the header's one i32 phi, the value it starts
-        with and the bound of its ``icmp slt``."""
-        header = self.block_of[phi]
-        (counter,) = [
-            n
-            for n, text in self.definitions.items()
-            if self.block_of[n] == header and text.startswith("phi i32 ")
-        ]
-        first, _ = self.incoming(counter)
-        (end,) = [
-            int(m.group(2))
-            for m in map(_LOOP_BOUND.search, self.definitions.values())
-            if m and m.group(1) == counter
-        ]
-        return counter, int(first), end
 
     def accumulated_terms(self, value: str) -> tuple:
         """Walk the chain ``acc = fadd(acc, term)`` back from ``value`` to the
@@ -146,8 +112,10 @@ class _KernelIR(KernelIR):
                 continue
             seen.add((current, lane))
             op = self.opcode(current)
-            if op in ("load", _BUFFER_LOAD) or (
-                op == "extractelement" and self.vector_load_element(current)
+            if (
+                op == "load"
+                or self.is_buffer_load(current)
+                or (op == "extractelement" and self.vector_load_element(current))
             ):
                 found.add(current)
             elif op == "insertelement":
@@ -164,7 +132,7 @@ class _KernelIR(KernelIR):
         element of a vector buffer load; ``None`` otherwise."""
         vector, index = self.operands(name)
         vector = self.copied(vector)
-        if self.opcode(vector) == _BUFFER_LOAD and index.isdigit():
+        if self.is_buffer_load(vector) and index.isdigit():
             return vector, int(index)
         return None
 
@@ -187,43 +155,14 @@ class _KernelIR(KernelIR):
             (address,) = [v for v in self.operands(load) if v.startswith("%")]
             param, offset = self.address_offset(address)
             return param, self.evaluate(offset, inputs)
-        resource, lane_offset, scalar_offset, _ = self.operands(load)
-        assert self.opcode(resource).startswith(_BUFFER_RESOURCE), resource
+        param, lane_offset, scalar_offset = self.buffer_load_access(load)
         byte = (
             self.evaluate(lane_offset, inputs)
             + self.evaluate(scalar_offset, inputs)
             + 4 * element
         )
         assert (np.asarray(byte) % 4 == 0).all(), byte
-        return self.operands(resource)[0], byte // 4
-
-    def evaluate(self, name: str, inputs: dict):
-        """Evaluate an i32 value with numpy, given values for the work-item
-        ids and the loop counter it reads. Every value here is a
-        non-negative index, so ``sdiv`` / ``srem`` are floor division and
-        remainder; an instruction this does not know fails the test."""
-        if not name.startswith("%"):
-            return np.int64(name)
-        if name in inputs:
-            return inputs[name]
-        op = self.opcode(name)
-        args = [self.evaluate(v, inputs) for v in self.operands(name)]
-        if op in ("sext", "zext", "trunc"):
-            return args[0]
-        if op == "add":
-            return args[0] + args[1]
-        if op == "sub":
-            return args[0] - args[1]
-        if op == "mul":
-            return args[0] * args[1]
-        if op == "shl":
-            return args[0] << args[1]
-        if op == "or":
-            return args[0] | args[1]
-        if op in ("sdiv", "srem"):
-            assert (np.asarray(args[0]) >= 0).all() and args[1] > 0
-            return args[0] // args[1] if op == "sdiv" else args[0] % args[1]
-        raise AssertionError(f"not modelled: {self.definitions[name]}")
+        return param, byte // 4
 
 
 _HOST_TARGETS = [
