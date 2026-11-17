@@ -61,7 +61,7 @@ import functools
 import hashlib
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import ClassVar
 
@@ -1076,35 +1076,18 @@ class ConvFwdAotTarget:
     pipelines: tuple[str, ...]
     direct_algorithms: dict
     direct_knobs: dict
+    #: ``(variant, knobs) -> fields`` of a direct identity's knobs.
+    fields_from_knobs: Callable[[str, dict], dict]
+    #: ``(identity, variant) -> fields`` of the extra recorded channel counts.
+    recorded_fields: Callable[[KernelIdentity, str], dict]
+    #: The value each field after the implicit-GEMM ones holds where unused.
+    family_defaults: dict
 
     def algorithm_of_variant(self, variant: str) -> str:
         for algorithm, value in self.direct_algorithms.items():
             if value == variant:
                 return algorithm
         raise KeyError(variant)
-
-
-TARGETS = {
-    "gfx950": ConvFwdAotTarget(
-        arch="gfx950",
-        engine="hipkernel:Gfx950ConvFwdAot",
-        wave_size=_DIRECT_WAVE_SIZE,
-        llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR,
-        pipelines=_AOT_PIPELINES,
-        direct_algorithms=AOT_DIRECT_ALGORITHMS,
-        direct_knobs=AOT_DIRECT_KNOBS,
-    ),
-    "gfx1250": ConvFwdAotTarget(
-        arch="gfx1250",
-        engine="hipkernel:Gfx1250ConvFwdAot",
-        wave_size=32,
-        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx1250"],
-        # wavelet adds load waves to the workgroup (spec_launch_block_size).
-        pipelines=("mem", "wavelet"),
-        direct_algorithms=GFX1250_DIRECT_ALGORITHMS,
-        direct_knobs=GFX1250_DIRECT_KNOBS,
-    ),
-}
 
 
 def aot_direct_grouped_block_h() -> int:
@@ -1120,8 +1103,15 @@ def aot_direct_fields_from_knobs(variant: str, knobs: dict, arch: str = _ARCH) -
     optional knobs may be absent), or a constant knob holds another value. On
     gfx1250 every knob is optional (:func:`_gfx1250_fields_from_knobs`).
     """
-    if arch != _ARCH:
-        return _gfx1250_fields_from_knobs(variant, knobs)
+    target = TARGETS.get(arch)
+    if target is None:
+        raise ValueError(f"no forward AOT engine for arch {arch!r}")
+    return target.fields_from_knobs(variant, knobs)
+
+
+def _gfx950_fields_from_knobs(variant: str, knobs: dict) -> dict:
+    """gfx950's knob contract: exactly the variant's keys (see
+    :func:`aot_direct_fields_from_knobs`)."""
     mapping = AOT_DIRECT_KNOBS[variant]
     constants = _AOT_DIRECT_CONSTANT_KNOBS.get(variant, {})
     optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(variant, {})
@@ -1176,6 +1166,55 @@ def _gfx1250_fields_from_knobs(variant: str, knobs: dict) -> dict:
     return values
 
 
+def _gfx950_recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+    """The channel counts (and row tile) gfx950's grouped and windowed variants record."""
+    if variant == DIRECT_VARIANT_GROUPED:
+        return {
+            "cpg": identity.cpg,
+            "kpg": identity.kpg,
+            "block_h": aot_direct_grouped_block_h(),
+        }
+    if variant == DIRECT_VARIANT_WIN:
+        return {"cpg": identity.cpg, "kpg": identity.kpg}
+    return {}
+
+
+def _gfx1250_recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+    """The channel counts gfx1250's capped variants record."""
+    if variant in _GFX1250_RECORDED_CAPS:
+        return {"cpg": identity.cpg, "kpg": identity.kpg}
+    return {}
+
+
+TARGETS = {
+    "gfx950": ConvFwdAotTarget(
+        arch="gfx950",
+        engine="hipkernel:Gfx950ConvFwdAot",
+        wave_size=_DIRECT_WAVE_SIZE,
+        llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR,
+        pipelines=_AOT_PIPELINES,
+        direct_algorithms=AOT_DIRECT_ALGORITHMS,
+        direct_knobs=AOT_DIRECT_KNOBS,
+        fields_from_knobs=_gfx950_fields_from_knobs,
+        recorded_fields=_gfx950_recorded_fields,
+        family_defaults=_AOT_FAMILY_DEFAULTS,
+    ),
+    "gfx1250": ConvFwdAotTarget(
+        arch="gfx1250",
+        engine="hipkernel:Gfx1250ConvFwdAot",
+        wave_size=32,
+        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx1250"],
+        # wavelet adds load waves to the workgroup (spec_launch_block_size).
+        pipelines=("mem", "wavelet"),
+        direct_algorithms=GFX1250_DIRECT_ALGORITHMS,
+        direct_knobs=GFX1250_DIRECT_KNOBS,
+        fields_from_knobs=_gfx1250_fields_from_knobs,
+        recorded_fields=_gfx1250_recorded_fields,
+        family_defaults={**_AOT_FAMILY_DEFAULTS, **_GFX1250_KNOB_DEFAULTS},
+    ),
+}
+
+
 def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
     """The direct fields of the instance packaged from a forward direct identity.
 
@@ -1208,15 +1247,7 @@ def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
         "dilation_w": identity.dilation_w,
     }
     fields_.update(aot_direct_fields_from_knobs(variant, knobs, target.arch))
-    if target.arch != _ARCH:
-        if variant in _GFX1250_RECORDED_CAPS:
-            fields_.update(cpg=identity.cpg, kpg=identity.kpg)
-    elif variant == DIRECT_VARIANT_GROUPED:
-        fields_.update(
-            cpg=identity.cpg, kpg=identity.kpg, block_h=aot_direct_grouped_block_h()
-        )
-    elif variant == DIRECT_VARIANT_WIN:
-        fields_.update(cpg=identity.cpg, kpg=identity.kpg)
+    fields_.update(target.recorded_fields(identity, variant))
     return fields_
 
 
@@ -1246,6 +1277,10 @@ class ConvFwdAotSpec:
     """
 
     TARGET: ClassVar[ConvFwdAotTarget]
+
+    def _target_direct_knobs(self) -> dict:
+        """The target's spelling of :meth:`direct_knobs`."""
+        raise NotImplementedError
 
     def direct_contract_error(self) -> str:
         """The target's direct-instance contract beyond the shared checks; "" when
@@ -1450,33 +1485,7 @@ class ConvFwdAotSpec:
         :func:`aot_direct_fields_from_knobs`."""
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct knobs")
-        if self.TARGET.arch != _ARCH:
-            return {
-                key: (
-                    getattr(self, name) == _GFX1250_TRUE
-                    if name in _GFX1250_BOOL_FIELDS
-                    else getattr(self, name)
-                )
-                for key, name in GFX1250_DIRECT_KNOBS[self.direct_variant].items()
-                if getattr(self, name) != _GFX1250_ABSENT[name]
-            }
-        knobs = {}
-        for key, field_name in AOT_DIRECT_KNOBS[self.direct_variant].items():
-            value = getattr(self, field_name)
-            if field_name in _AOT_DIRECT_BOOL_KNOBS:
-                value = bool(value)
-            elif (
-                field_name in _AOT_DIRECT_NONE_KNOBS
-                and value == _AOT_DIRECT_NONE_KNOBS[field_name]
-            ):
-                value = None
-            knobs[key] = value
-        knobs.update(_AOT_DIRECT_CONSTANT_KNOBS.get(self.direct_variant, {}))
-        optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(self.direct_variant, {})
-        for key, (field_name, default) in optional.items():
-            if getattr(self, field_name) != default:
-                knobs[key] = getattr(self, field_name)
-        return knobs
+        return self._target_direct_knobs()
 
     def rocke_direct_spec(self, problem: _direct.DirectConvProblem):
         """The rocKE kernel spec of this direct instance on ``problem``, as
@@ -1689,6 +1698,26 @@ class Gfx950ConvFwdAotSpec(ConvFwdAotSpec):
 
     TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx950"]
 
+    def _target_direct_knobs(self) -> dict:
+        """gfx950: every knob the variant states, constants included."""
+        knobs = {}
+        for key, field_name in AOT_DIRECT_KNOBS[self.direct_variant].items():
+            value = getattr(self, field_name)
+            if field_name in _AOT_DIRECT_BOOL_KNOBS:
+                value = bool(value)
+            elif (
+                field_name in _AOT_DIRECT_NONE_KNOBS
+                and value == _AOT_DIRECT_NONE_KNOBS[field_name]
+            ):
+                value = None
+            knobs[key] = value
+        knobs.update(_AOT_DIRECT_CONSTANT_KNOBS.get(self.direct_variant, {}))
+        optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(self.direct_variant, {})
+        for key, (field_name, default) in optional.items():
+            if getattr(self, field_name) != default:
+                knobs[key] = getattr(self, field_name)
+        return knobs
+
     def direct_contract_error(self) -> str:
         """gfx950's direct contract (:func:`_gfx950_direct_contract_error`)."""
         return _gfx950_direct_contract_error(self)
@@ -1714,6 +1743,18 @@ class Gfx1250ConvFwdAotSpec(ConvFwdAotSpec):
     """
 
     TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx1250"]
+
+    def _target_direct_knobs(self) -> dict:
+        """gfx1250: each knob its variant uses that is not absent."""
+        return {
+            key: (
+                getattr(self, name) == _GFX1250_TRUE
+                if name in _GFX1250_BOOL_FIELDS
+                else getattr(self, name)
+            )
+            for key, name in GFX1250_DIRECT_KNOBS[self.direct_variant].items()
+            if getattr(self, name) != _GFX1250_ABSENT[name]
+        }
 
     def direct_contract_error(self) -> str:
         """gfx1250's direct contract: every knob is optional
@@ -1882,9 +1923,7 @@ def _family_defaults(target: ConvFwdAotTarget) -> dict:
     """The value each field after the implicit-GEMM ones holds where an instance
     does not use it: :data:`_AOT_FAMILY_DEFAULTS`, and on gfx1250 also its
     pipelines' knobs at their absent values."""
-    if target.arch == _ARCH:
-        return _AOT_FAMILY_DEFAULTS
-    return {**_AOT_FAMILY_DEFAULTS, **_GFX1250_KNOB_DEFAULTS}
+    return target.family_defaults
 
 
 def _gfx1250_direct_knob_error(spec: ConvFwdAotSpec) -> str:
