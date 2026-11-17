@@ -45,30 +45,6 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 # Module-scoped toolchain fixtures (real gfx1250 caps + assembler).
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def gfx1250_iim():
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     """Assign process-global parameters for gfx1250; restore after module."""
     from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
@@ -315,10 +291,13 @@ def test_halfplr_rejects_use_subtile_impl(
 
 
 # ---------------------------------------------------------------------------
-# Guard 4: HalfPLR + TDMFuse=1 at a divergent pair. The increment mask rides
-# in the module the single-buffered fill relocation moves.
+# HalfPLR + TDMFuse=1 at a divergent pair: TDMFuse=1 sets no limit of its own any
+# more (the single-buffered fill relocation leaves HalfPLR's last-trip masks at the
+# head of the early fill set), but this persistent shape stays refused by the
+# divergent-LDS rule: the two groups' LDS strides differ, so the persistent tail
+# cannot normalize LDS to buffer 0.
 # ---------------------------------------------------------------------------
-def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
+def test_halfplr_tdmfuse1_divergent_pair_is_refused_only_by_the_persistent_lds_rule(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
     sol, out = _derive(
@@ -343,7 +322,8 @@ def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
         },
     )
     assert sol.get("Valid") is False
-    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out
+    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" not in out, out
+    assert "the persistent tail cannot normalize LDS to buffer 0" in out, out
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +379,7 @@ def test_halfplr_rejects_explicit_wide_local_read(
 # with the local-read width capped.
 #
 # Regression test for the IndexError crash reproduced from
-# ``Tensile/Tests/common/ductile/gfx1250/f32_tt_batched.yaml`` (DataType=S /
+# ``tensilelite/Tests/common/ductile/gfx1250/f32_tt_batched.yaml`` (DataType=S /
 # F32, TT, HalfPLR=[0,1,2,3], LDSTrInst=True but enableLDSTr can never be True
 # for a 4-byte MacDataType -- isLDSTrEnabled has no arm for numBytes > 2).
 # getHalfPLRGroups() only exposes a 2-element sliding window of HalfPLR's 3

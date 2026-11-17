@@ -71,6 +71,10 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 .. note::
     f16 represents equivalent support for both _Float16 and __half types.
 
+.. note::
+    For element-wise operations (permutation, binary, and trinary), all tensors share one data
+    type, and the compute type is the type of the alpha, beta, and gamma scalars.
+
 .. tabularcolumns::
    |C|C|C|C|
 
@@ -102,8 +106,8 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / f16          |  gfx9 gfx11 gfx12   | Rank2 - Rank6       |
 | Element-wise        +------------------------------+                     |                     |
-| Permutation         |     f16 / f16 / f32          |                     |                     |
-|                     +------------------------------+                     |                     |
+| (Permutation,       |     f16 / f16 / f32          |                     |                     |
+| binary, trinary)    +------------------------------+                     |                     |
 |                     |     bf16 / bf16 / bf16       |                     |                     |
 |                     +------------------------------+                     |                     |
 |                     |     bf16 / bf16 / f32        |                     |                     |
@@ -111,12 +115,6 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+---------------------+                     |
 |                     |     f64 / f64 / f64          |  gfx90a+ gfx1250    |                     |
-+---------------------+------------------------------+---------------------+---------------------+
-|                     |     f16 / f16 / \-           |  gfx9 gfx11 gfx12   | Rank2 - Rank6       |
-| Element-wise        +------------------------------+                     |                     |
-| Operations          |     f16 / f32 / \-           |                     |                     |
-|                     +------------------------------+                     |                     |
-|                     |     f32 / f32 / \-           |                     |                     |
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / f16          |  gfx9 gfx11 gfx12   | Rank1 - Rank6       |
 | Reduction           +------------------------------+                     |                     |

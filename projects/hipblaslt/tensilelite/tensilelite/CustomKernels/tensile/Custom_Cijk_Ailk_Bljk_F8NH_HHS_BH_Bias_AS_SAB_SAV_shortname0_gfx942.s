@@ -879,7 +879,8 @@ Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_AS_SAB_SAV_shortname0_gfx942:
 .long 0x7E3A14F9, 0x0006155A
 .long 0x7E3E14F9, 0x0006155B
 .long 0xD3CD801C, 0x04721D20
-.long 0xBF8C0F78
+// s_waitcnt vmcnt(8) lgkmcnt(0): v[34:35] from the preceding ds_read_b64 is read below.
+.long 0xBF8C0078
 .long 0x7EAC7142
 .long 0xE0541000, 0x480C4226
 .long 0x7EB4ACF9, 0x0004064A

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "bindings.hpp"
+#include "cudnn_compat.hpp"
 #include "dlpack_adapter.hpp"
 
 #include <hipdnn_frontend/Graph.hpp>
@@ -50,22 +51,6 @@ using namespace hipdnn_frontend;
 namespace
 {
 
-// Unwraps the optional handle taken by the engine-name-reporting bindings. Python cannot
-// overload, so where C++ offers a handle-taking form alongside a handle-free one those
-// bindings take a single trailing handle defaulting to None. None yields a null handle,
-// which Graph resolves from the built-in registry.
-hipdnnHandle_t optionalRawHandle(const nb::object& handle)
-{
-    if(handle.is_none())
-    {
-        return nullptr;
-    }
-
-    auto handlePtr = handle.attr("get")();
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
-}
-
 // Shared body for the autotune() binding. variant_pack keys may be tensor UIDs or
 // tensors, and values take the same kinds as execute(), so the conversion happens
 // here, while the GIL is still held.
@@ -82,8 +67,7 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
     auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-    void* workspacePtr
-        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
+    void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     // Benchmarking touches no Python object: config/settings are native types, and
     // AutotuneConfig::rankingFn (the one field that could call back into Python) is
@@ -133,8 +117,7 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
     auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-    void* workspacePtr
-        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
+    void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     // Same rationale as autotunePy: benchmarking touches no Python object, so the GIL
     // can be released for the duration of what may be a minutes-long call.
@@ -160,12 +143,105 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     return {results, outcome};
 }
 
+// Shared bodies for bindings that are registered twice: once with hipDNN's
+// parameter name and once more, after every existing overload, with cuDNN's.
+Error executePlanAtIndexPy(const graph::Graph& g,
+                           const nb::object& handle,
+                           const nb::dict& variantPack,
+                           const nb::object& workspace,
+                           int64_t planIndex)
+{
+    auto handlePtr = handle.attr("get")();
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    void* workspacePtr = hipdnn_python::workspacePointer(workspace);
+
+    return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
+}
+
+int64_t workspaceSizePlanAtIndexPy(const graph::Graph& g, int64_t planIndex)
+{
+    int64_t size = 0;
+    const auto err = g.get_workspace_size_plan_at_index(planIndex, size);
+    if(err.is_bad())
+    {
+        throw std::runtime_error("Failed to get workspace size for plan: " + err.get_message());
+    }
+    return size;
+}
+
+std::string planNameAtIndexPy(const graph::Graph& g, int64_t planIndex, const nb::object& handle)
+{
+    std::string name;
+    const auto err
+        = g.get_plan_name_at_index(hipdnn_python::rawHandleOrNull(handle), planIndex, name);
+    if(err.is_bad())
+    {
+        throw std::runtime_error("Failed to get plan name: " + err.get_message());
+    }
+    return name;
+}
+
+std::shared_ptr<graph::TensorAttributes> tensorLikePy(nb::handle tensor, const std::string& name)
+{
+    if(nb::isinstance<graph::TensorAttributes>(tensor))
+    {
+        return graph::Graph::tensor_like(nb::cast<std::shared_ptr<graph::TensorAttributes>>(tensor),
+                                         name);
+    }
+    return hipdnn_python::tensorAttributesFromDlpack(tensor, name);
+}
+
+// cuDNN's pygraph.tensor(). reordering_type is a cuDNN feature hipDNN tensors do
+// not have, so it accepts only None.
+std::shared_ptr<graph::TensorAttributes>
+    cudnnTensorPy(const std::vector<int64_t>& dim,
+                  const std::vector<int64_t>& stride,
+                  nb::handle dataType,
+                  bool isVirtual,
+                  bool isPassByValue,
+                  const std::shared_ptr<graph::TensorAttributes>& raggedOffset,
+                  nb::handle reorderingType,
+                  const std::string& name,
+                  int64_t uid)
+{
+    hipdnn_python::requireNone(reorderingType, "reordering_type");
+
+    const auto type = hipdnn_python::dataTypeFromObject(dataType);
+    if(!type)
+    {
+        throw nb::type_error("data_type must be a hipdnn.DataType or a torch/numpy dtype");
+    }
+
+    auto tensor = std::make_shared<graph::TensorAttributes>();
+    tensor->set_dim(dim)
+        .set_stride(stride)
+        .set_data_type(*type)
+        .set_is_virtual(isVirtual)
+        .set_is_pass_by_value(isPassByValue)
+        .set_ragged_offset(raggedOffset)
+        .set_name(name);
+    if(uid != -1)
+    {
+        tensor->set_uid(uid);
+    }
+    return tensor;
+}
+
+template <typename T>
+std::shared_ptr<graph::TensorAttributes> tensorScalar(T value, graph::ScalarType scalarType)
+{
+    return graph::Graph::tensor(value, scalarType);
+}
+
 } // namespace
 
 void graphBindings(nb::module_& m)
 {
-    nb::class_<graph::Graph>(m, "Graph")
-        .def(nb::init<>())
+    nb::class_<graph::Graph> graphClass(m, "Graph");
+    graphClass.def(nb::init<>())
         .def("validate", &graph::Graph::validate)
         .def("checkNoDuplicateTensorIds", &graph::Graph::checkNoDuplicateTensorIds)
         .def("topologicallySortGraph", &graph::Graph::topologicallySortGraph)
@@ -245,6 +321,29 @@ void graphBindings(nb::module_& m)
             },
             nb::arg("engine_id"),
             "Get behavior notes for an engine applicable to the built operation graph.")
+        .def(
+            "get_numerical_notes_for_engine",
+            [](graph::Graph& g, int64_t engineId) {
+                std::vector<NumericalNote> notes;
+                auto err = g.get_numerical_notes_for_engine(engineId, notes);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get numerical notes for engine: "
+                                             + err.get_message());
+                }
+                std::vector<NumericalNote> knownNotes;
+                knownNotes.reserve(notes.size());
+                for(auto note : notes)
+                {
+                    if(isKnownNumericalNote(note))
+                    {
+                        knownNotes.push_back(note);
+                    }
+                }
+                return knownNotes;
+            },
+            nb::arg("engine_id"),
+            "Get numerical notes for an engine applicable to the built operation graph.")
         .def("check_support", &graph::Graph::check_support)
         .def("build_plans",
              &graph::Graph::build_plans,
@@ -282,9 +381,7 @@ void graphBindings(nb::module_& m)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
                 auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-                void* workspacePtr = workspace.is_none()
-                                         ? nullptr
-                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+                void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
                 return g.execute(rawHandle, cppVariantPack, workspacePtr);
             },
@@ -308,9 +405,7 @@ void graphBindings(nb::module_& m)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
                 auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-                void* workspacePtr = workspace.is_none()
-                                         ? nullptr
-                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+                void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
                 ExecutionTiming timing;
                 Error err;
@@ -347,7 +442,7 @@ void graphBindings(nb::module_& m)
             "get_plan_name",
             [](const graph::Graph& g, const nb::object& handle) {
                 std::string name;
-                const auto err = g.get_plan_name(optionalRawHandle(handle), name);
+                const auto err = g.get_plan_name(hipdnn_python::rawHandleOrNull(handle), name);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get plan name: " + err.get_message());
@@ -359,65 +454,29 @@ void graphBindings(nb::module_& m)
             "handle the graph was built with to name plugin-supplied engines; without it "
             "only the built-in registry is consulted and such engines report a hex ID. "
             "Raises RuntimeError when no plan is active.")
-        .def(
-            "execute_plan_at_index",
-            [](const graph::Graph& g,
-               const nb::object& handle,
-               const nb::dict& variantPack,
-               const nb::object& workspace,
-               int64_t planIndex) {
-                auto handlePtr = handle.attr("get")();
-                // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
-
-                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-                void* workspacePtr = workspace.is_none()
-                                         ? nullptr
-                                         : hipdnn_python::toDataPointer(workspace, "workspace");
-
-                return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
-            },
-            nb::arg("handle"),
-            nb::arg("variant_pack"),
-            nb::arg("workspace"),
-            nb::arg("plan_index"),
-            "Execute one compiled plan without making it active. Returns an Error whose "
-            "is_bad() is set for an out-of-bounds, barred or uncompiled plan, so a manual "
-            "tuning loop can skip it and continue. variant_pack and workspace accept the "
-            "same keys and values as execute().")
-        .def(
-            "get_workspace_size_plan_at_index",
-            [](const graph::Graph& g, int64_t planIndex) {
-                int64_t size = 0;
-                const auto err = g.get_workspace_size_plan_at_index(planIndex, size);
-                if(err.is_bad())
-                {
-                    throw std::runtime_error("Failed to get workspace size for plan: "
-                                             + err.get_message());
-                }
-                return size;
-            },
-            nb::arg("plan_index"),
-            "Workspace size cached for one compiled plan. Raises RuntimeError for an "
-            "out-of-bounds index; the C++ overload that reports -1 instead is not bound "
-            "separately, since the exception already separates that case from a zero size.")
-        .def(
-            "get_plan_name_at_index",
-            [](const graph::Graph& g, int64_t planIndex, const nb::object& handle) {
-                std::string name;
-                const auto err
-                    = g.get_plan_name_at_index(optionalRawHandle(handle), planIndex, name);
-                if(err.is_bad())
-                {
-                    throw std::runtime_error("Failed to get plan name: " + err.get_message());
-                }
-                return name;
-            },
-            nb::arg("plan_index"),
-            nb::arg("handle") = nb::none(),
-            "Engine name backing one compiled plan. Pass the handle the graph was built "
-            "with to name plugin-supplied engines; without it only the built-in registry "
-            "is consulted and such engines report a hex ID.")
+        .def("execute_plan_at_index",
+             &executePlanAtIndexPy,
+             nb::arg("handle"),
+             nb::arg("variant_pack"),
+             nb::arg("workspace"),
+             nb::arg("plan_index"),
+             "Execute one compiled plan without making it active. Returns an Error whose "
+             "is_bad() is set for an out-of-bounds, barred or uncompiled plan, so a manual "
+             "tuning loop can skip it and continue. variant_pack and workspace accept the "
+             "same keys and values as execute().")
+        .def("get_workspace_size_plan_at_index",
+             &workspaceSizePlanAtIndexPy,
+             nb::arg("plan_index"),
+             "Workspace size cached for one compiled plan. Raises RuntimeError for an "
+             "out-of-bounds index; the C++ overload that reports -1 instead is not bound "
+             "separately, since the exception already separates that case from a zero size.")
+        .def("get_plan_name_at_index",
+             &planNameAtIndexPy,
+             nb::arg("plan_index"),
+             nb::arg("handle") = nb::none(),
+             "Engine name backing one compiled plan. Pass the handle the graph was built "
+             "with to name plugin-supplied engines; without it only the built-in registry "
+             "is consulted and such engines report a hex ID.")
         .def("build_plan_at_index",
              &graph::Graph::build_plan_at_index,
              nb::arg("plan_index"),
@@ -426,11 +485,10 @@ void graphBindings(nb::module_& m)
              "out-of-bounds, barred or invalid plan.")
         .def(
             "get_engine_configs",
-            [](graph::Graph& g,
-               const std::vector<HeuristicMode>& modes,
-               const nb::object& handle) {
+            [](graph::Graph& g, const std::vector<HeuristicMode>& modes, const nb::object& handle) {
                 std::vector<EngineConfigInfo> configs;
-                const auto err = g.get_engine_configs(optionalRawHandle(handle), configs, modes);
+                const auto err
+                    = g.get_engine_configs(hipdnn_python::rawHandleOrNull(handle), configs, modes);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get engine configs: " + err.get_message());
@@ -541,8 +599,10 @@ void graphBindings(nb::module_& m)
              "with get_estimated_max_workspace_size(); omit it for the compiled-plan path "
              "built with build_plans(BuildPlanPolicy.ALL), sized with "
              "get_autotune_workspace_size(). The winning plan is left active, so a "
-             "following execute() uses it, and get_plan_name() reports it. Raises "
-             "RuntimeError if autotuning fails.\n"
+             "following execute() uses it, and get_plan_name() reports it. The winning "
+             "plan executes last and the call waits for it, so the caller's buffers hold "
+             "its output unless the graph writes one of its own inputs. Raises "
+             "RuntimeError if autotuning fails, including a failure of that final run.\n"
              "The two C++ overloads taking a trailing userImpl pointer are not bound: that "
              "argument exists for cuDNN signature compatibility and is ignored, so calling "
              "this method covers them.")
@@ -605,7 +665,10 @@ void graphBindings(nb::module_& m)
              "The cached order is keyed on this graph's serialized content and the "
              "handle's device. Returns a (results, cache_write_outcome) tuple: the "
              "per-engine AutotuneResult list and the AutotuneCacheWriteOutcome reporting "
-             "whether that write happened. Raises RuntimeError if the sweep fails.")
+             "whether that write happened. The winning plan executes last and the call "
+             "waits for it, so the caller's buffers hold its output unless the graph writes "
+             "one of its own inputs. Raises RuntimeError if the sweep fails, including a "
+             "failure of that final run.")
         .def("set_name", &graph::Graph::set_name, nb::rv_policy::reference_internal)
         .def("set_compute_data_type",
              &graph::Graph::set_compute_data_type,
@@ -614,8 +677,18 @@ void graphBindings(nb::module_& m)
              &graph::Graph::set_intermediate_data_type,
              nb::rv_policy::reference_internal)
         .def("set_io_data_type", &graph::Graph::set_io_data_type, nb::rv_policy::reference_internal)
-        .def("batchnorm", &graph::Graph::batchnorm)
-        .def("batchnorm_backward", &graph::Graph::batchnorm_backward)
+        .def("batchnorm",
+             &graph::Graph::batchnorm,
+             nb::arg("x"),
+             nb::arg("scale"),
+             nb::arg("bias"),
+             nb::arg("attributes"))
+        .def("batchnorm_backward",
+             &graph::Graph::batchnorm_backward,
+             nb::arg("dy"),
+             nb::arg("x"),
+             nb::arg("scale"),
+             nb::arg("attributes"))
         .def("batchnorm_inference",
              &graph::Graph::batchnorm_inference,
              nb::arg("x"),
@@ -627,121 +700,209 @@ void graphBindings(nb::module_& m)
         .def(
             "pointwise",
             nb::overload_cast<std::shared_ptr<graph::TensorAttributes>, graph::PointwiseAttributes>(
-                &graph::Graph::pointwise))
+                &graph::Graph::pointwise),
+            nb::arg("in0"),
+            nb::arg("attributes"))
         .def("pointwise",
              nb::overload_cast<std::shared_ptr<graph::TensorAttributes>,
                                std::shared_ptr<graph::TensorAttributes>,
-                               graph::PointwiseAttributes>(&graph::Graph::pointwise))
+                               graph::PointwiseAttributes>(&graph::Graph::pointwise),
+             nb::arg("in0"),
+             nb::arg("in1"),
+             nb::arg("attributes"))
         .def("pointwise",
              nb::overload_cast<std::shared_ptr<graph::TensorAttributes>,
                                std::shared_ptr<graph::TensorAttributes>,
                                std::shared_ptr<graph::TensorAttributes>,
-                               graph::PointwiseAttributes>(&graph::Graph::pointwise))
-        .def("conv_fprop", &graph::Graph::conv_fprop)
-        .def("matmul", &graph::Graph::matmul)
-        .def("conv_dgrad", &graph::Graph::conv_dgrad)
-        .def("conv_wgrad", &graph::Graph::conv_wgrad)
-        .def("batchnorm_inference_variance_ext", &graph::Graph::batchnorm_inference_variance_ext)
-        .def("layernorm",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> x,
-                std::shared_ptr<graph::TensorAttributes> scale,
-                std::shared_ptr<graph::TensorAttributes> bias,
-                graph::LayernormAttributes attributes) {
-                 const auto outputs = graph.layernorm(
-                     std::move(x), std::move(scale), std::move(bias), std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
-             })
-        .def("layernorm_backward",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> dy,
-                std::shared_ptr<graph::TensorAttributes> x,
-                std::shared_ptr<graph::TensorAttributes> scale,
-                graph::LayernormBackwardAttributes attributes) {
-                 const auto outputs = graph.layernorm_backward(
-                     std::move(dy), std::move(x), std::move(scale), std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
-             })
-        .def("rmsnorm",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> x,
-                std::shared_ptr<graph::TensorAttributes> scale,
-                graph::RMSNormAttributes attributes) {
-                 const auto outputs
-                     = graph.rmsnorm(std::move(x), std::move(scale), std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1]);
-             })
-        .def("rmsnorm_backward",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> dy,
-                std::shared_ptr<graph::TensorAttributes> x,
-                std::shared_ptr<graph::TensorAttributes> scale,
-                std::shared_ptr<graph::TensorAttributes> invRms,
-                graph::RMSNormBackwardAttributes attributes) {
-                 const auto outputs = graph.rmsnorm_backward(std::move(dy),
-                                                             std::move(x),
-                                                             std::move(scale),
-                                                             std::move(invRms),
-                                                             std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
-             })
-        .def("block_scale_dequantize", &graph::Graph::block_scale_dequantize)
-        .def("block_scale_quantize",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> x,
-                graph::BlockScaleQuantizeAttributes attributes) {
-                 const auto outputs
-                     = graph.block_scale_quantize(std::move(x), std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1]);
-             })
+                               graph::PointwiseAttributes>(&graph::Graph::pointwise),
+             nb::arg("in0"),
+             nb::arg("in1"),
+             nb::arg("in2"),
+             nb::arg("attributes"))
+        .def("conv_fprop",
+             &graph::Graph::conv_fprop,
+             nb::arg("x"),
+             nb::arg("w"),
+             nb::arg("attributes"))
+        .def("matmul", &graph::Graph::matmul, nb::arg("a"), nb::arg("b"), nb::arg("attributes"))
+        .def("conv_dgrad",
+             &graph::Graph::conv_dgrad,
+             nb::arg("dy"),
+             nb::arg("w"),
+             nb::arg("attributes"))
+        .def("conv_wgrad",
+             &graph::Graph::conv_wgrad,
+             nb::arg("dy"),
+             nb::arg("x"),
+             nb::arg("attributes"))
+        .def("batchnorm_inference_variance_ext",
+             &graph::Graph::batchnorm_inference_variance_ext,
+             nb::arg("x"),
+             nb::arg("mean"),
+             nb::arg("variance"),
+             nb::arg("scale"),
+             nb::arg("bias"),
+             nb::arg("epsilon"),
+             nb::arg("attributes"))
+        .def(
+            "layernorm",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> x,
+               std::shared_ptr<graph::TensorAttributes> scale,
+               std::shared_ptr<graph::TensorAttributes> bias,
+               graph::LayernormAttributes attributes) {
+                const auto outputs = graph.layernorm(
+                    std::move(x), std::move(scale), std::move(bias), std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+            },
+            nb::arg("x"),
+            nb::arg("scale"),
+            nb::arg("bias"),
+            nb::arg("attributes"))
+        .def(
+            "layernorm_backward",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> dy,
+               std::shared_ptr<graph::TensorAttributes> x,
+               std::shared_ptr<graph::TensorAttributes> scale,
+               graph::LayernormBackwardAttributes attributes) {
+                const auto outputs = graph.layernorm_backward(
+                    std::move(dy), std::move(x), std::move(scale), std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+            },
+            nb::arg("dy"),
+            nb::arg("x"),
+            nb::arg("scale"),
+            nb::arg("attributes"))
+        .def(
+            "rmsnorm",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> x,
+               std::shared_ptr<graph::TensorAttributes> scale,
+               graph::RMSNormAttributes attributes) {
+                const auto outputs
+                    = graph.rmsnorm(std::move(x), std::move(scale), std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1]);
+            },
+            nb::arg("x"),
+            nb::arg("scale"),
+            nb::arg("attributes"))
+        .def(
+            "rmsnorm_backward",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> dy,
+               std::shared_ptr<graph::TensorAttributes> x,
+               std::shared_ptr<graph::TensorAttributes> scale,
+               std::shared_ptr<graph::TensorAttributes> invRms,
+               graph::RMSNormBackwardAttributes attributes) {
+                const auto outputs = graph.rmsnorm_backward(std::move(dy),
+                                                            std::move(x),
+                                                            std::move(scale),
+                                                            std::move(invRms),
+                                                            std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+            },
+            nb::arg("dy"),
+            nb::arg("x"),
+            nb::arg("scale"),
+            nb::arg("inv_rms"),
+            nb::arg("attributes"))
+        .def("block_scale_dequantize",
+             &graph::Graph::block_scale_dequantize,
+             nb::arg("x"),
+             nb::arg("scale"),
+             nb::arg("attributes"))
+        .def(
+            "block_scale_quantize",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> x,
+               graph::BlockScaleQuantizeAttributes attributes) {
+                const auto outputs
+                    = graph.block_scale_quantize(std::move(x), std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1]);
+            },
+            nb::arg("x"),
+            nb::arg("attributes"))
         .def(
             "reduction",
             nb::overload_cast<std::shared_ptr<graph::TensorAttributes>, graph::ReductionAttributes>(
-                &graph::Graph::reduction))
+                &graph::Graph::reduction),
+            nb::arg("x"),
+            nb::arg("attributes"))
         .def("reduction",
              nb::overload_cast<std::shared_ptr<graph::TensorAttributes>,
                                std::shared_ptr<graph::TensorAttributes>,
-                               graph::ReductionAttributes>(&graph::Graph::reduction))
-        .def("moe_grouped_matmul", &graph::Graph::moe_grouped_matmul)
-        .def("custom_op", &graph::Graph::custom_op)
+                               graph::ReductionAttributes>(&graph::Graph::reduction),
+             nb::arg("x"),
+             nb::arg("y"),
+             nb::arg("attributes"))
+        .def("moe_grouped_matmul",
+             &graph::Graph::moe_grouped_matmul,
+             nb::arg("token"),
+             nb::arg("weight"),
+             nb::arg("first_token_offset"),
+             nb::arg("token_index"),
+             nb::arg("token_ks"),
+             nb::arg("attributes"))
+        .def("custom_op",
+             &graph::Graph::custom_op,
+             nb::arg("inputs"),
+             nb::arg("num_outputs"),
+             nb::arg("attributes"))
 #ifdef HIPDNN_ENABLE_SDPA
-        .def("sdpa",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> q,
-                std::shared_ptr<graph::TensorAttributes> k,
-                std::shared_ptr<graph::TensorAttributes> v,
-                graph::SdpaAttributes attributes) {
-                 const auto outputs
-                     = graph.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1]);
-             })
-        .def("sdpa_backward",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> q,
-                std::shared_ptr<graph::TensorAttributes> k,
-                std::shared_ptr<graph::TensorAttributes> v,
-                std::shared_ptr<graph::TensorAttributes> o,
-                std::shared_ptr<graph::TensorAttributes> dO,
-                std::shared_ptr<graph::TensorAttributes> stats,
-                graph::SdpaBackwardAttributes attributes) {
-                 const auto outputs = graph.sdpa_backward(std::move(q),
-                                                          std::move(k),
-                                                          std::move(v),
-                                                          std::move(o),
-                                                          std::move(dO),
-                                                          std::move(stats),
-                                                          std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
-             })
+        .def(
+            "sdpa",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> q,
+               std::shared_ptr<graph::TensorAttributes> k,
+               std::shared_ptr<graph::TensorAttributes> v,
+               graph::SdpaAttributes attributes) {
+                const auto outputs
+                    = graph.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1]);
+            },
+            nb::arg("q"),
+            nb::arg("k"),
+            nb::arg("v"),
+            nb::arg("attributes"))
+        .def(
+            "sdpa_backward",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> q,
+               std::shared_ptr<graph::TensorAttributes> k,
+               std::shared_ptr<graph::TensorAttributes> v,
+               std::shared_ptr<graph::TensorAttributes> o,
+               std::shared_ptr<graph::TensorAttributes> dO,
+               std::shared_ptr<graph::TensorAttributes> stats,
+               graph::SdpaBackwardAttributes attributes) {
+                const auto outputs = graph.sdpa_backward(std::move(q),
+                                                         std::move(k),
+                                                         std::move(v),
+                                                         std::move(o),
+                                                         std::move(dO),
+                                                         std::move(stats),
+                                                         std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+            },
+            nb::arg("q"),
+            nb::arg("k"),
+            nb::arg("v"),
+            nb::arg("o"),
+            nb::arg("dO"),
+            nb::arg("stats"),
+            nb::arg("attributes"))
 #endif
-        .def("resample",
-             [](graph::Graph& graph,
-                std::shared_ptr<graph::TensorAttributes> x,
-                graph::ResampleFwdAttributes attributes) {
-                 const auto outputs = graph.resample(std::move(x), std::move(attributes));
-                 return nb::make_tuple(outputs[0], outputs[1]);
-             })
-        .def("resample_fwd", &graph::Graph::resample_fwd)
+        .def(
+            "resample",
+            [](graph::Graph& graph,
+               std::shared_ptr<graph::TensorAttributes> x,
+               graph::ResampleFwdAttributes attributes) {
+                const auto outputs = graph.resample(std::move(x), std::move(attributes));
+                return nb::make_tuple(outputs[0], outputs[1]);
+            },
+            nb::arg("x"),
+            nb::arg("attributes"))
+        .def("resample_fwd", &graph::Graph::resample_fwd, nb::arg("x"), nb::arg("attributes"))
         .def("resample_bwd",
              &graph::Graph::resample_bwd,
              nb::arg("dy"),
@@ -784,19 +945,24 @@ void graphBindings(nb::module_& m)
                     nb::rv_policy::reference)
         .def_static(
             "tensor_like",
-            [](nb::handle tensor, const std::string& name) {
-                if(nb::isinstance<graph::TensorAttributes>(tensor))
-                {
-                    return graph::Graph::tensor_like(
-                        nb::cast<std::shared_ptr<graph::TensorAttributes>>(tensor), name);
-                }
-                return hipdnn_python::tensorAttributesFromDlpack(tensor, name);
-            },
+            &tensorLikePy,
             nb::arg("tensor"),
             nb::arg("name") = "",
             "Create a tensor with the metadata of a hipdnn Tensor or a __dlpack__ producer. "
             "A host (cpu) producer becomes a runtime pass-by-value tensor "
             "whose value is passed to execute() as a host tensor.")
+        .def_static("tensor_scalar",
+                    &tensorScalar<float>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"),
+                    "Create a pass-by-value scalar tensor. scalar_type selects a compile-time "
+                    "constant or a runtime parameter with a default value.")
+        .def_static(
+            "tensor_scalar", &tensorScalar<double>, nb::arg("value"), nb::arg("scalar_type"))
+        .def_static(
+            "tensor_scalar", &tensorScalar<int32_t>, nb::arg("value"), nb::arg("scalar_type"))
+        .def_static(
+            "tensor_scalar", &tensorScalar<int64_t>, nb::arg("value"), nb::arg("scalar_type"))
         .def(
             "to_json",
             [](graph::Graph& g) {
@@ -844,9 +1010,7 @@ void graphBindings(nb::module_& m)
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
-                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
-                const std::vector<uint8_t> vec(ptr, ptr + data.size());
-                return g.deserialize(rawHandle, vec);
+                return g.deserialize(rawHandle, hipdnn_python::bytesToVector(data));
             },
             nb::arg("handle"),
             nb::arg("data"),
@@ -855,14 +1019,59 @@ void graphBindings(nb::module_& m)
         .def(
             "from_binary",
             [](graph::Graph& g, const nb::bytes& data) {
-                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
-                const std::vector<uint8_t> vec(ptr, ptr + data.size());
-                return g.deserialize(vec);
+                return g.deserialize(hipdnn_python::bytesToVector(data));
             },
             nb::arg("data"),
             "Deserialize graph structure from binary without a handle.\n"
             "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
             "Call build_operation_graph(handle) after to finalize for execution.");
+
+    // cuDNN spellings and call shapes. Each is registered after every existing
+    // overload of its name, and either repeats that overload with only the
+    // keyword renamed or requires arguments the existing overload cannot take,
+    // so calls that work today keep resolving to the existing overload.
+    graphClass
+        .def("execute_plan_at_index",
+             &executePlanAtIndexPy,
+             nb::arg("handle"),
+             nb::arg("variant_pack"),
+             nb::arg("workspace"),
+             nb::arg("index"),
+             "execute_plan_at_index() with cuDNN's parameter name for the plan index.")
+        .def("get_workspace_size_plan_at_index",
+             &workspaceSizePlanAtIndexPy,
+             nb::arg("index"),
+             "get_workspace_size_plan_at_index() with cuDNN's parameter name.")
+        .def("get_plan_name_at_index",
+             &planNameAtIndexPy,
+             nb::arg("index"),
+             nb::arg("handle") = nb::none(),
+             "get_plan_name_at_index() with cuDNN's parameter name.")
+        .def("build_plan_at_index",
+             &graph::Graph::build_plan_at_index,
+             nb::arg("index"),
+             "build_plan_at_index() with cuDNN's parameter name.")
+        .def_static("tensor",
+                    &cudnnTensorPy,
+                    nb::arg("dim"),
+                    nb::arg("stride"),
+                    nb::arg("data_type") = DataType::NOT_SET,
+                    nb::arg("is_virtual") = false,
+                    nb::arg("is_pass_by_value") = false,
+                    nb::arg("ragged_offset").none() = nb::none(),
+                    nb::arg("reordering_type") = nb::none(),
+                    nb::arg("name") = "",
+                    nb::arg("uid") = -1,
+                    "Create a tensor the way cudnn.pygraph.tensor() does. data_type takes a "
+                    "hipdnn.DataType or a torch/numpy dtype; uid=-1 leaves the UID unset.")
+        .def_static("tensor_like",
+                    &tensorLikePy,
+                    nb::arg("input"),
+                    nb::arg("name") = "",
+                    "tensor_like() with cuDNN's parameter name.");
+
+    graphKwargsBindings(graphClass);
+    pointwiseBindings(graphClass);
 
     // Private test hook: resolves a variant-pack value exactly as execute() does.
     m.def(

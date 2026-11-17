@@ -35,13 +35,25 @@ import argparse
 import dataclasses
 import itertools
 import os
+import struct
 import sys
 from dataclasses import dataclass
 from typing import List
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
-from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg
+from benchmarks.common import batched_timing, conv_fill
+from benchmarks.common.case_results import (
+    RUNNERS_UP,
+    ResultsWriter,
+    add_results_arg,
+    add_skip_measured_arg,
+    measured_keys,
+    same_results_file,
+)
+from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
+from benchmarks.common.module_cache import add_module_cache_arg
+from benchmarks.common.tf32_verify import rank_verified, tf32_implies_verify
 from builders.common.conv_reference import conv_reference as _conv_reference
 from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
 from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
@@ -55,7 +67,6 @@ from kernels.conv.direct_aot_jobs import (
     BLOCK_Q as _BLOCK_Q,
     DGRAD_BLOCK_H as _DGRAD_BLOCK_H,
     DGRAD_BLOCK_Q as _DGRAD_BLOCK_Q,
-    DGRAD_WAVES as _DGRAD_WAVES,
     DOUBLE_BUFFER as _DOUBLE_BUFFER,
     DW_BLOCK_W_DGRAD as _DW_BLOCK_W_DGRAD,
     DW_BLOCK_W_FWD as _DW_BLOCK_W_FWD,
@@ -66,7 +77,12 @@ from kernels.conv.direct_aot_jobs import (
     DW_TILED_UNROLL as _DW_TILED_UNROLL,
     DW_COL_BLOCK_H as _DW_COL_BLOCK_H,
     DW_COL_BLOCK_W as _DW_COL_BLOCK_W,
+    GROUPED_FOLD_K32 as _GROUPED_FOLD_K32,
+    dgrad_waves,
+    direct_storage_dtype,
+    tf32_narrow_reason,
 )
+from benchmarks.common.direct_kernel_sweep import _image_bytes, direct_verify_tol
 
 # The non-grouped (groups == 1) geometry sweep lives next to the kernel, in
 # ``kernels.common.conv_direct_nongrouped.nongrouped_specs``, because the useful
@@ -122,12 +138,39 @@ class DepthwiseResult:
 # ---------------------------------------------------------------------------
 
 
+def _torch_dtype_of(torch, dtype: str):
+    """Host tensor dtype of a direct problem's tensors: fp32 for fp32 and tf32
+    (TF32 is fp32 storage with a math mode). ``torch`` is the caller's module:
+    every caller already imports it for the host reference tensors, so this
+    helper adds no import of its own."""
+    return {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[direct_storage_dtype(dtype)]
+
+
+def _abi_dtype(dtype: str) -> str:
+    """The dtype a direct kernel's launch signature is spelled in (storage)."""
+    return direct_storage_dtype(dtype)
+
+
+def _rank_verified(results: list, tflops, passed) -> list:
+    """``results`` by TFLOPS, without the kernels that failed ``--verify``.
+
+    The rule is :func:`tf32_verify.rank_verified`'s, shared with the
+    implicit-GEMM driver. ``tflops`` / ``passed`` read a result.
+    """
+    return rank_verified(results, tflops, passed)[0]
+
+
 # ---------------------------------------------------------------------------
 # MIOpen driver command parser
 # ---------------------------------------------------------------------------
 
 _MIOPEN_DTYPE_MAP = {
-    "conv": "fp32",  # rejected — fp32 not supported
+    # fp32 tensors; ``-M 0`` (MIOpen's "TF32 if possible" math type) is "tf32".
+    "conv": "fp32",
     "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
@@ -139,9 +182,12 @@ def parse_miopen_cmd_direct(cmd: str):
     """Parse a MIOpenDriver command string into a ``DirectConvProblem``.
 
     Supports 2-D NHWC forward (F=1), dgrad (F=2) and wgrad (F=4) convolutions.
-    Raises ``ValueError`` for unsupported cases.
-    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``, ``"bf16"``, or
-    ``"fp32"`` and ``forw`` is the raw MIOpen ``-F`` value.
+    Raises ``ValueError`` for unsupported cases (int8, 3-D, NCHW).
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
+    ``"fp32"`` or ``"tf32"`` and ``forw`` is the raw MIOpen ``-F`` value. The
+    plain fp32 driver (``conv``/``convfp32``) is ``"fp32"``, or ``"tf32"`` with
+    ``-M 0`` (MIOpen's "use TF32 if possible" math type); ``-M`` has no effect
+    on the 16-bit drivers, which MIOpen never runs as TF32.
 
     Note: ``DirectConvProblem`` requires ``cpg == kpg`` and cpg must be either
     1 (depthwise) or a positive multiple of 4 (grouped).
@@ -168,17 +214,15 @@ def parse_miopen_cmd_direct(cmd: str):
             f"(expected one of: {list(_MIOPEN_DTYPE_MAP)})"
         )
     dtype = _MIOPEN_DTYPE_MAP[driver_kw]
-    if dtype == "fp32":
-        raise ValueError(
-            f"fp32 ({driver_kw!r}) is not supported by this benchmark; "
-            f"use convfp16 or convbfp16"
-        )
     if driver_kw == "convint8":
         raise ValueError(
-            "convint8 is not supported by this benchmark; " "use convfp16 or convbfp16"
+            "convint8 is not supported by this benchmark; "
+            "use conv, convfp16 or convbfp16"
         )
 
-    sub = argparse.ArgumentParser(add_help=False)
+    # No abbreviations: ``-i 10`` (iterations) would otherwise match
+    # ``-in_layout``.
+    sub = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     sub.add_argument("-n", "--n", dest="N", type=int, default=1)
     sub.add_argument("-c", "--c", dest="C", type=int, default=1)
     sub.add_argument("-H", "--H", dest="Hi", type=int, default=1)
@@ -195,14 +239,26 @@ def parse_miopen_cmd_direct(cmd: str):
     sub.add_argument("-g", "--g", dest="groups", type=int, default=1)
     sub.add_argument("-F", "--F", dest="forw", type=int, default=1)
     sub.add_argument(
-        "-in_layout", "--in_layout", dest="in_layout", type=str, default="NHWC"
+        "-I", "-in_layout", "--in_layout", dest="in_layout", type=str, default="NHWC"
     )
+    # 0 = TF32 if possible, 1 = IEEE (MIOpenDriver's default).
+    sub.add_argument("-M", "--math_type", dest="math_type", type=int, default=1)
     sub.add_argument("-m", "--m", dest="_mode", type=str, default="conv")
     sub.add_argument("-t", "--t", dest="_time", type=int, default=0)
     sub.add_argument("-V", "--V", dest="_verify", type=int, default=1)
+    # Consumed so that ``-i 10`` is not read as an abbreviated ``-in_layout``.
+    sub.add_argument("-i", "--iter", dest="_iter", type=int, default=10)
     sub.add_argument("-_", "--_", dest="_spatial_dim", type=int, default=2)
 
     miopen_args, _ = sub.parse_known_args(tokens[driver_idx + 1 :])
+
+    if dtype == "fp32" and miopen_args.math_type == 0:
+        dtype = "tf32"
+    if miopen_args._spatial_dim != 2:
+        raise ValueError(
+            f"-_ {miopen_args._spatial_dim}: direct conv computes 2-D "
+            f"convolutions only"
+        )
 
     layout = miopen_args.in_layout.upper()
     if layout not in ("NHWC", "NWC"):
@@ -239,23 +295,52 @@ def parse_miopen_cmd_direct(cmd: str):
         )
 
     dilated = miopen_args.dH != 1 or miopen_args.dW != 1
-    # Dilated: the non-grouped forward kernel and the WMMA dgrad.
+    # Dilated: direct_nongrouped, direct_fwd_wmma, direct_fwd_tapouter_wmma
+    # (forward) and direct_dgrad_wmma compute one; this benchmark takes
+    # ungrouped forward and dgrad problems.
     if dilated and (miopen_args.forw not in (1, 2) or groups != 1):
         raise ValueError(
-            f"direct conv computes a dilated convolution only forward / dgrad and "
-            f"ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
+            f"the direct conv benchmark runs a dilated convolution only forward / "
+            f"dgrad and ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
             f"-F {miopen_args.forw}, -g {groups})"
         )
 
-    # The direct kernels take one stride and one padding for both axes;
-    # substituting the H value for W would run, and report, another problem.
+    # The direct kernels take one stride for both axes (a 1-D conv's row
+    # stride aside, below); substituting the H value for W would run, and
+    # report, another problem.
     sH = miopen_args.sH
-    if miopen_args.sH != miopen_args.sW:
+    # A 1-D conv (H = 1, a 1 x R filter, no row padding) has one output row
+    # whatever its row stride: its column stride is the problem's stride.
+    one_d = miopen_args.Hi == 1 and miopen_args.Y == 1 and miopen_args.pH == 0
+    if one_d and miopen_args.sH != miopen_args.sW and miopen_args.sH == 1:
+        sH = miopen_args.sW
+    elif miopen_args.sH != miopen_args.sW:
         raise ValueError(
             f"direct conv takes one stride for both axes "
             f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
-    if miopen_args.pH != miopen_args.pW:
+    # A stride-1 depthwise dgrad (the rotated-filter tiled kernel), an
+    # ungrouped stride-1 forward (the small-K WMMA kernel), an ungrouped 1-D
+    # strided forward (poly_view) and an ungrouped stride-1 1 x R forward,
+    # dilated or not (direct_fwd_wmma), are the problems a direct kernel
+    # computes with per-axis padding: the shapes of PER_AXIS_PAD_VARIANTS
+    # (kernels.conv.direct_variants), which the cache selection checks per
+    # variant. Every other problem keeps one padding for both axes.
+    pad_w_ok = (
+        (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1)
+        or (
+            miopen_args.forw == 1 and groups == 1 and (sH == 1 or one_d) and not dilated
+        )
+        or (
+            miopen_args.forw == 1
+            and groups == 1
+            and sH == 1
+            and miopen_args.Y == 1
+            and miopen_args.pH == 0
+            and miopen_args.dH == 1
+        )
+    )
+    if miopen_args.pH != miopen_args.pW and not pad_w_ok:
         raise ValueError(
             f"direct conv takes one padding for both axes "
             f"(got -p {miopen_args.pH} -q {miopen_args.pW})"
@@ -273,8 +358,9 @@ def parse_miopen_cmd_direct(cmd: str):
         KH=miopen_args.Y,
         KW=miopen_args.X,
         PAD=miopen_args.pH,
+        pad_w=-1 if miopen_args.pW == miopen_args.pH else miopen_args.pW,
         stride=sH,
-        dtype=dtype if dtype in ("fp16", "bf16") else "fp16",
+        dtype=dtype,
         dil_h=miopen_args.dH,
         dil_w=miopen_args.dW,
     )
@@ -350,7 +436,13 @@ def _verify_kernel(
     kernel_name: str,
     dump_fail: "str | None",
     u8,
+    ref_floor: float = 1.0,
+    tol: float = 5e-2,
 ) -> "tuple[bool, bool]":
+    """Launch once and compare against ``ref_out``: max|out - ref| over
+    max|ref| floored at ``ref_floor`` (:func:`conv_fill.ref_floor`), against
+    the problem dtype's bound ``tol`` (:func:`direct_kernel_sweep.direct_verify_tol`).
+    """
     import torch
 
     from rocke.runtime.launcher import LaunchConfig
@@ -363,9 +455,8 @@ def _verify_kernel(
 
     out_f32 = out_cpu.float().cuda()
     abs_diff = out_f32.sub(ref_out).abs()
-    ref_scale = ref_out.abs().max().clamp(min=1.0)
+    ref_scale = ref_out.abs().max().clamp(min=ref_floor)
     rel_err = float(abs_diff.max() / ref_scale)
-    tol = 5e-2
     status = "PASS" if rel_err < tol else f"FAIL(rel_err={rel_err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
 
@@ -436,7 +527,7 @@ class _DirectConvProblemAdapter:
         self.sH = p.stride
         self.sW = p.stride
         self.pH = p.PAD
-        self.pW = p.PAD
+        self.pW = p.PAD_W
         self.dH = p.dil_h
         self.dW = p.dil_w
         self.groups = p.groups
@@ -573,17 +664,18 @@ def _run_depthwise_sweep(
     # All three variants take fp16 and bf16 -- preload and spatial off
     # problem.dtype, col off DirectDepthwiseColSpec.dtype -- so every dtype
     # sweeps the full bake-off rather than a subset of the variants.
-    _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+    _torch_dtype = _torch_dtype_of(torch, dtype)
 
     torch.manual_seed(42)
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    A_t, B_t = conv_fill.fwd_operands(
+        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, 1), dtype, _torch_dtype
+    )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype)
+    sig = conv_direct_args_signature(_abi_dtype(dtype))
     _direct_args = ConvArgs.from_problem(p)
 
     # For the spatial layout block_w is derived from block_waves internally,
@@ -629,10 +721,9 @@ def _run_depthwise_sweep(
         flush=True,
     )
 
-    n_skipped = 0
-    pending = []
-    for combo in combos:
-        variant, block_h, block_w, block_waves, unroll_rows = combo
+    def _candidate(variant, block_h, block_w, block_waves, unroll_rows):
+        """``(spec, ok, build)`` of one depthwise combo; a variant with no
+        kernel for this dtype (fp32/tf32) may raise ``ValueError``."""
         if variant == "tiled":
             spec = DirectDepthwiseTiledSpec(
                 problem=p,
@@ -678,8 +769,14 @@ def _run_depthwise_sweep(
             build = build_direct_depthwise
         # A spilling row-streaming kernel takes minutes to build and is left to
         # the output-stationary kernel (as in the AOT grid).
-        if variant in ("preload", "spatial"):
-            ok = ok and depthwise_stream_register_reason(spec) is None
+        if ok and variant in ("preload", "spatial"):
+            ok = depthwise_stream_register_reason(spec) is None
+        return spec, ok, build
+
+    n_skipped = 0
+    pending = []
+    for combo in combos:
+        spec, ok, build = _candidate(*combo)
         if not ok:
             n_skipped += 1
             continue
@@ -764,6 +861,8 @@ def _run_depthwise_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                ref_floor=conv_fill.ref_floor(),
+                tol=direct_verify_tol(dtype, arch),
             )
             if stopped:
                 rt.free(A_dev)
@@ -825,7 +924,10 @@ def _run_depthwise_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results = _rank_verified(results, lambda r: r.tflops, lambda r: r.passed)
+    if not results:
+        print("No depthwise configuration passed verify.", file=sys.stderr)
+        return 1, []
     _print_depthwise_results(results, args.top, arch, p, args.verify, dtype=dtype)
     return 0, results
 
@@ -860,20 +962,22 @@ def _run_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
-        -1.0, 1.0
+    _torch_dtype = _torch_dtype_of(torch, dtype)
+    A_t, B_t = conv_fill.fwd_operands(
+        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
     )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype)
+    sig = conv_direct_args_signature(_abi_dtype(dtype))
     _direct_args = ConvArgs.from_problem(p)
 
-    combos = list(itertools.product(_BLOCK_Q, _BLOCK_GROUPS, _DOUBLE_BUFFER))
+    # fp32 storage (fp32/tf32) also sweeps the K-32 fold, as the AOT grid
+    # does; the 16-bit sweep keeps the kernel's default (no fold).
+    _folds = _GROUPED_FOLD_K32 if direct_storage_dtype(dtype) == "fp32" else (False,)
+    combos = list(itertools.product(_BLOCK_Q, _BLOCK_GROUPS, _DOUBLE_BUFFER, _folds))
 
     if args.sample is not None:
         total = len(combos)
@@ -893,13 +997,17 @@ def _run_sweep(
     n_skipped = 0
     pending = []
     for combo in combos:
-        block_q, block_groups, double_buffer = combo
+        block_q, block_groups, double_buffer, fold_k32 = combo
+        if tf32_narrow_reason("direct_grouped", p, {"fold_k32": fold_k32}, arch):
+            n_skipped += 1
+            continue
         spec = DirectConvSpec(
             problem=p,
             name="rocke_bench_direct_conv",
             block_q=block_q,
             block_groups=block_groups,
             double_buffer=double_buffer,
+            **({"fold_k32": True} if fold_k32 else {}),
         )
         ok, _ = is_valid_spec(spec, arch=arch)
         if not ok:
@@ -938,7 +1046,7 @@ def _run_sweep(
     _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, kernel in pending:
-        block_q, block_groups, double_buffer = combo
+        block_q, block_groups, double_buffer, _ = combo
         artifact = artifact_map[kernel.name]
 
         try:
@@ -983,6 +1091,8 @@ def _run_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                ref_floor=conv_fill.ref_floor(),
+                tol=direct_verify_tol(dtype, arch),
             )
             if stopped:
                 rt.free(A_dev)
@@ -1021,7 +1131,7 @@ def _run_sweep(
         )
         print(
             f"[{n_run:4d}] bq={block_q:3d} bg={block_groups:3d} "
-            f"db={double_buffer}  "
+            f"db={double_buffer}{' k32' if spec.fold_k32 else ''}  "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -1038,7 +1148,10 @@ def _run_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results = _rank_verified(results, lambda r: r.tflops, lambda r: r.passed)
+    if not results:
+        print("No configuration passed verify.", file=sys.stderr)
+        return 1, []
     _print_results(results, args.top, arch, p, args.verify, dtype=dtype)
     return 0, results
 
@@ -1082,19 +1195,24 @@ def _run_nongrouped_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
-        -1.0, 1.0
+    _torch_dtype = _torch_dtype_of(torch, dtype)
+    A_t, B_t = conv_fill.fwd_operands(
+        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
     )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype)
+    sig = conv_direct_args_signature(_abi_dtype(dtype))
 
     specs = nongrouped_specs(p, arch=arch, name="rocke_bench_direct_conv_nongrouped")
+    # TF32 on an emulated arch: drop narrow atoms a wide one covers.
+    specs = [
+        sp
+        for sp in specs
+        if not tf32_narrow_reason("direct_nongrouped", p, {"atom": sp.atom}, arch)
+    ]
     if args.sample is not None:
         total = len(specs)
         specs = _sample_combos(specs, args.sample, args.seed)
@@ -1155,7 +1273,7 @@ def _run_nongrouped_sweep(
     )
 
     results: List[NonGroupedResult] = []
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop(args.early_stop, args.early_stop_after, timing=args.timing)
     n_run = 0
     for spec, kernel in pending:
         artifact = artifact_map.get(kernel.name)
@@ -1197,6 +1315,8 @@ def _run_nongrouped_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                ref_floor=conv_fill.ref_floor(),
+                tol=direct_verify_tol(dtype, arch),
             )
             if stopped:
                 rt.free(A_dev)
@@ -1247,7 +1367,10 @@ def _run_nongrouped_sweep(
         print("No valid configurations found.", file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results = _rank_verified(results, lambda r: r.tflops, lambda r: r.passed)
+    if not results:
+        print("No non-grouped configuration passed verify.", file=sys.stderr)
+        return 1, []
     top_n = min(args.top, len(results))
     width = 110
     print(f"\n{'='*width}")
@@ -1291,6 +1414,7 @@ def _run_wgrad_sweep(
     """Benchmark the direct wgrad kernel."""
     import torch
 
+    from rocke.core.arch import ArchTarget
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -1304,7 +1428,7 @@ def _run_wgrad_sweep(
     p = problem
     # dY and X carry the problem dtype; dW is fp32 either way -- the
     # split-K reduction lands through fp32 global atomics.
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    _torch_dtype = _torch_dtype_of(torch, dtype)
 
     torch.manual_seed(42)
     X_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
@@ -1317,7 +1441,7 @@ def _run_wgrad_sweep(
     flop = float(p.flops)
 
     # Direct conv is AOT: the whole shape travels as kernargs; D is fp32 dW.
-    sig_wg = conv_direct_args_signature(dtype, direction="wgrad")
+    sig_wg = conv_direct_args_signature(_abi_dtype(dtype), direction="wgrad")
     _direct_args = ConvArgs.from_problem(p, direction="wgrad")
 
     # (waves_k, waves_c, waves_q). waves_c > 1 is what lets one block cover the
@@ -1342,12 +1466,15 @@ def _run_wgrad_sweep(
     _WAVES = sorted({w for w in _WAVES if w[1] <= n_c_tiles_1})
     _HPB = [30, 60, 120]
     _MK = [32]
+    # wave64 MFMA on gfx950, wave32 WMMA on gfx1250: the block-size cap and the
+    # spec both follow the arch.
+    _wave = ArchTarget.from_gfx(arch).wave_size
     combos = [
         (wk, wc, wq, hpb, mk)
         for wk, wc, wq in _WAVES
         for hpb in _HPB
         for mk in _MK
-        if wk * wc <= 16 and wk * wc * wq * 64 <= 1024
+        if wk * wc <= 16 and wk * wc * wq * _wave <= 1024
     ]
 
     print(
@@ -1358,6 +1485,9 @@ def _run_wgrad_sweep(
     n_skipped = 0
     pending = []
     for waves_k, waves_c, waves_q, hpb, mk in combos:
+        if tf32_narrow_reason("direct_wgrad", p, {"mfma_k": mk}, arch):
+            n_skipped += 1
+            continue
         spec = DirectConvWgradSpec(
             problem=p,
             name="rocke_bench_direct_wgrad",
@@ -1366,6 +1496,7 @@ def _run_wgrad_sweep(
             waves_q=waves_q,
             ho_per_block=hpb,
             mfma_k=mk,
+            wave_size=_wave,
         )
         ok, _ = is_valid_wgrad_spec(spec, arch=arch)
         if not ok:
@@ -1450,7 +1581,7 @@ def _run_wgrad_sweep(
             abs_diff = (dW_cpu.float() - dW_ref_t.float()).abs()
             ref_scale = dW_ref_t.float().abs().max().clamp(min=1.0)
             rel_err = float(abs_diff.max() / ref_scale)
-            tol = 5e-2
+            tol = direct_verify_tol(dtype, arch)
             kernel_passed = rel_err < tol
             status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
             print(f"  verify {artifact.kernel_name}: {status}", flush=True)
@@ -1488,6 +1619,7 @@ def _run_wgrad_sweep(
                 "gbps": gbps,
                 "passed": kernel_passed,
                 "n_blocks": n_blocks,
+                "kernel_name": artifact.kernel_name,
             }
         )
         n_run += 1
@@ -1508,7 +1640,10 @@ def _run_wgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r["tflops"], reverse=True)
+    results = _rank_verified(results, lambda r: r["tflops"], lambda r: r["passed"])
+    if not results:
+        print("No wgrad configuration passed verify.", file=sys.stderr)
+        return 1, []
     best = results[0]
     passed_str = (
         f"  {'PASS' if best['passed'] else 'FAIL'}"
@@ -1518,6 +1653,12 @@ def _run_wgrad_sweep(
     print(
         f"\nBest wgrad: wk={best['wk']} wc={best['wc']} wq={best['wq']} hpb={best['hpb']} mk={best['mk']}  "
         f"blocks={best['n_blocks']}  {best['tflops']:.1f} TFLOPS  {best['ms']:.3f} ms{passed_str}",
+        flush=True,
+    )
+    # The line benchmark_conv_compare.py reads ("Best: <tflops> TFLOPS — <name>"),
+    # which the detailed line above does not match.
+    print(
+        f"Best: {best['tflops']:.1f} TFLOPS — {best['kernel_name']}  {best['ms']:.3f} ms",
         flush=True,
     )
     return 0, results
@@ -1583,7 +1724,7 @@ def _run_dgrad_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    _torch_dtype = _torch_dtype_of(torch, dtype)
     dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
     )
@@ -1595,9 +1736,9 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype, direction="dgrad")
+    sig = conv_direct_args_signature(_abi_dtype(dtype), direction="dgrad")
     _direct_args = ConvArgs.from_problem(p, direction="dgrad")
-    fprop_sig = conv_direct_args_signature(dtype)
+    fprop_sig = conv_direct_args_signature(_abi_dtype(dtype))
 
     is_depthwise = p.cpg == 1
 
@@ -1668,7 +1809,7 @@ def _run_dgrad_sweep(
             pending = []
             for block_q, block_groups in combos:
                 for block_h in _DGRAD_BLOCK_H:
-                    for waves_q, waves_k, use_rk, use_pg, use_k32 in _DGRAD_WAVES:
+                    for waves_q, waves_k, use_rk, use_pg, use_k32 in dgrad_waves(dtype):
                         if block_q // waves_q < 16:
                             n_skipped += 1
                             continue
@@ -1684,6 +1825,23 @@ def _run_dgrad_sweep(
                         if N_KA == 0 or N_KA % waves_k != 0:
                             n_skipped += 1
                             continue
+                        if tf32_narrow_reason(
+                            "direct_grouped_dgrad_mfma",
+                            p,
+                            dict(
+                                block_q=block_q,
+                                waves_q=waves_q,
+                                waves_k=waves_k,
+                                runtime_k_loop=use_rk,
+                                persistent_grid=use_pg,
+                                fold_k32=use_k32,
+                            ),
+                            arch,
+                        ):
+                            n_skipped += 1
+                            continue
+                        from dataclasses import replace as dc_replace
+
                         fprop_spec = make_dgrad_fprop_spec(
                             p,
                             block_q=block_q,
@@ -1694,8 +1852,6 @@ def _run_dgrad_sweep(
                             runtime_k_loop=use_rk,
                             persistent_grid=use_pg,
                         )
-                        from dataclasses import replace as dc_replace
-
                         if use_k32:
                             fprop_spec = dc_replace(fprop_spec, fold_k32=True)
                         ok, _ = is_valid_fprop_spec(fprop_spec, arch=arch)
@@ -1899,12 +2055,11 @@ def _run_dgrad_sweep(
         # For 3-kernel MFMA pipeline: load transpose1 and reorganize launchers.
         t1_launcher = t2_launcher = None
         if is_mfma_pair:
-            _wt_sig = [
-                {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-                {"name": "D", "type": "ptr<f16, global>", "size_bytes": 8},
-                {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-                {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-            ]
+            from kernels.common.conv_abi import (
+                conv_direct_transform_signature as _transform_signature,
+            )
+
+            _wt_sig = _transform_signature(dtype)
             kt1_art = artifact_map.get(kt[0].name)
             kt2_art = artifact_map.get(kt[1].name)
             if kt1_art is None or kt2_art is None:
@@ -2009,7 +2164,7 @@ def _run_dgrad_sweep(
                     ref_f32 = ref_out.float().cpu()
                     abs_diff = (out_f32 - ref_f32).abs()
                     rel_err = float(abs_diff.max() / ref_f32.abs().max().clamp(min=1.0))
-                    tol = 5e-2
+                    tol = direct_verify_tol(dtype, arch)
                     kernel_passed = rel_err < tol
                     status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
                     print(f"  verify {artifact.kernel_name}: {status}", flush=True)
@@ -2027,6 +2182,7 @@ def _run_dgrad_sweep(
                     kernel_name=artifact.kernel_name,
                     dump_fail=args.dump_fail,
                     u8=u8,
+                    tol=direct_verify_tol(dtype, arch),
                 )
                 if stopped:
                     rt.free(dY_dev)
@@ -2095,7 +2251,10 @@ def _run_dgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r["tflops"], reverse=True)
+    results = _rank_verified(results, lambda r: r["tflops"], lambda r: r["passed"])
+    if not results:
+        print("No dgrad configuration passed verify.", file=sys.stderr)
+        return 1, []
     best = results[0]
     passed_str = (
         f"  {'PASS' if best['passed'] else 'FAIL'}"
@@ -2171,6 +2330,243 @@ def _no_plan_reason(rejected: list, dtype: str, variants: "frozenset[str]") -> s
     )
 
 
+def _measure_plans(
+    *,
+    args,
+    plans,
+    modules,
+    rt,
+    ptrs,
+    sizes,
+    inputs,
+    out_name,
+    Out_t,
+    ref_out,
+    flop,
+    bytes_xfer,
+    stop,
+    u8,
+    chunks,
+    per_chunk,
+    ref_floor: float = 1.0,
+    tol,
+):
+    """Time every plan of one case. Returns ``(results, rc)``.
+
+    ``results`` holds one ``(TFLOPS, GB/s, ms, passed, label)`` row per plan
+    that ran; ``rc`` is 1 when a plan failed verification against ``tol``
+    (:func:`direct_kernel_sweep.direct_verify_tol`). A plan is bound
+    here rather than by the caller because every plan of a case reads and
+    writes the same buffers: ``ptrs`` / ``sizes`` are the case's, shared.
+
+    ``--fast-rank`` swaps the per-plan protocol (warmup plus timed loop, each
+    its own device drain) for :func:`_fast_rank_plans`. Everything else about
+    the case -- the rows, the ranked table, the record file -- is unchanged.
+
+    ``modules`` is the run's loaded-binary cache: a plan's binaries are
+    shape-generic, so a step's module is loaded on the first case that uses
+    it and every later case binds against the same one.
+
+    ``ref_floor`` floors the reference peak of the verify error
+    (:func:`conv_fill.ref_floor` of the case's direction).
+    """
+    import torch
+    from benchmarks.common.direct_kernel_sweep import launch_values
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError
+    from rocke.runtime.launcher import LaunchConfig
+
+    results: list = []
+    rc = 0
+    n_plans = len(plans)
+    width = len(str(n_plans))
+
+    def bind(plan):
+        """The plan's launch, or ``None`` if a step cannot be loaded."""
+        try:
+            launches = [
+                (
+                    modules.launcher(
+                        hsaco_path=st.hsaco_path,
+                        kernel_name=st.kernel_name,
+                        signature=st.signature,
+                    ),
+                    launch_values(
+                        st, *_chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i)
+                    ),
+                    LaunchConfig(grid=st.grid, block=st.block, stream=0),
+                )
+                for i, chunk_plan in enumerate(per_chunk[plan.label])
+                for st in chunk_plan.steps
+            ]
+        except HipError as e:
+            print(f"  [skip] {plan.label}: {e}", flush=True)
+            return None
+
+        # Each step packed once: a timed loop that packs per launch times the
+        # host, not a short kernel. A kernarg past its packed width (a byte
+        # extent over 2^31 on an i32 field) skips the plan, not the sweep.
+        try:
+            bound = [
+                launcher.bind(values, config=cfg) for launcher, values, cfg in launches
+            ]
+        except struct.error as e:
+            print(f"  [skip] {plan.label}: kernarg does not fit ({e})", flush=True)
+            return None
+
+        def run(bound=bound):
+            for launch in bound:
+                launch()
+
+        return run
+
+    def verify(plan, run) -> bool:
+        """Peak-normalised rel-err of one plan against the case's reference."""
+        nonlocal rc
+
+        rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+        # Two-stage wgrad scratch accumulates too: zeroed again for the
+        # verified launch, as the target is.
+        for name in plan.zeroed:
+            rt.memset(ptrs[name], 0, sizes[name])
+        run()
+        synchronize_and_release(0)
+        out_cpu = torch.empty_like(Out_t)
+        rt.memcpy_d2h(u8(out_cpu), ptrs[out_name], Out_t.nbytes)
+        ref_f32 = ref_out.float().cpu()
+        rel_err = float(
+            (out_cpu.float() - ref_f32).abs().max()
+            / ref_f32.abs().max().clamp(min=ref_floor)
+        )
+        passed = rel_err < tol
+        if not passed:
+            rc = 1
+            print(f"  verify {plan.label}: FAIL(rel_err={rel_err:.2e})", flush=True)
+        return passed
+
+    def row(ms, passed, label, idx) -> None:
+        """Print one measured plan's status line, and rank it unless it failed.
+
+        A plan that failed verification is still printed (its FAIL belongs in
+        the log), but kept out of ``results`` -- the list the ranking and the
+        recorded winner are built from -- so a fast wrong answer cannot become
+        ``Best:``.
+        """
+        tflops = flop / ms / 1e9
+        if passed is not False:
+            results.append((tflops, bytes_xfer / ms / 1e6, ms, passed, label))
+        # One line per measured launch, as the implicit-GEMM sweep prints, so a
+        # long run shows its progress and partial results rather than only the
+        # ranked table at the end.
+        verdict = "" if passed is None else ("  PASS" if passed else "  FAIL")
+        print(
+            f"  [{idx:>{width}}/{n_plans}] "
+            f"{tflops:7.1f} TFLOPS  {ms:8.3f} ms{verdict}  {label}",
+            flush=True,
+        )
+
+    if args.fast_rank:
+        _fast_rank_plans(
+            args=args,
+            plans=plans,
+            bind=bind,
+            verify=verify if ref_out is not None else None,
+            stop=stop,
+            row=row,
+            width=width,
+        )
+        return results, rc
+
+    for plan_idx, plan in enumerate(plans, 1):
+        run = bind(plan)
+        if run is None:
+            continue
+
+        passed = None if ref_out is None else verify(plan, run)
+
+        try:
+            ms = stop.measure(
+                run,
+                warmup=args.warmup,
+                iters=args.iters,
+                stream=0,
+                passed=passed,
+            )
+        except (HipError, RuntimeError) as e:
+            print(f"  [skip] {plan.label}: {e}", flush=True)
+            # time_launches drained before raising, but it does not raise a
+            # failed drain (the launch error is the one it reports). Drain
+            # again so a failed drain ends the sweep here, before the shared
+            # buffers are freed with launches possibly still using them.
+            synchronize_and_release(0)
+            continue
+        if ms is None:
+            stop.report(plan.label)
+            continue
+        synchronize_and_release(0)
+        row(ms, passed, plan.label, plan_idx)
+
+    return results, rc
+
+
+def _fast_rank_plans(*, args, plans, bind, verify, stop, row, width) -> None:
+    """Rank one case's plans with :mod:`benchmarks.common.batched_timing`.
+
+    The probe times every plan with one device drain per chunk instead of
+    three per plan, and keeps only the best ``--fast-rank-finalists``; those
+    are timed again with the full ``--warmup``/``--iters``, so every reported
+    number comes from the same protocol the per-plan path uses. A plan the
+    probe ranked out is reported with its probe time and never measured again.
+
+    Two consequences worth knowing, both of them the point of the flag:
+    ``--verify`` checks the finalists rather than every plan (a plan that is
+    30x off the best is not worth a reference comparison), and the ranked
+    table holds at most ``--fast-rank-finalists`` rows.
+    """
+    from benchmarks.common import batched_timing
+
+    n = len(plans)
+
+    def _on_probe(r) -> None:
+        if r.failed:
+            return
+        print(
+            f"  [{r.index + 1:>{width}}/{n}] probe {r.probe_ms:8.3f} ms  "
+            f"{plans[r.index].label}",
+            flush=True,
+        )
+
+    def _on_finalist(i, run):
+        return None if verify is None else verify(plans[i], run)
+
+    ranked = batched_timing.rank(
+        n,
+        lambda i: bind(plans[i]),
+        warmup=args.warmup,
+        iters=args.iters,
+        probe_warmup=args.fast_rank_warmup,
+        probe_iters=args.fast_rank_iters,
+        finalists=args.fast_rank_finalists,
+        chunk=args.fast_rank_chunk,
+        primer=args.fast_rank_primer,
+        timing=args.timing,
+        on_probe=_on_probe,
+        on_finalist=_on_finalist,
+    )
+    n_probed = sum(1 for r in ranked if r.probe_ms is not None)
+    n_final = sum(1 for r in ranked if r.is_finalist)
+    print(
+        f"  probe: {n_probed}/{n} timed, {n_final} finalist(s) measured in full "
+        f"({args.timing} timing)",
+        flush=True,
+    )
+    for r in ranked:
+        if r.ms is None:
+            continue
+        stop.note(r.ms, passed=r.passed)
+        row(r.ms, r.passed, plans[r.index].label, r.index + 1)
+
+
 def _cache_dispatch(args, arch: str, cases: list) -> int:
     """Handle the two cache modes.
 
@@ -2231,6 +2627,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
             "direct_dgrad_helper",
             "direct_fwd_helper",
             "direct_wgrad",
+            "direct_wgrad_helper",
         ),
     )
     if rc:
@@ -2243,15 +2640,16 @@ _TENSOR_LIMIT = 1 << 31
 
 def _batch_chunks(p, direction: str) -> List[int]:
     """Images per launch: the fewest balanced batch chunks that keep every
-    activation under 2 GiB (``[N]`` when one launch fits, and for wgrad).
+    activation under 2 GiB (``[N]`` when one launch fits). An image is sized
+    in its storage type: fp32 / tf32 images are twice fp16's.
 
     The chunks need not divide N; they differ by at most one image (N=31 that
-    fits 15 images per launch runs as 11 + 10 + 10).
+    fits 15 images per launch runs as 11 + 10 + 10). wgrad reduces over N, so
+    its chunks are not independent launches, but they can accumulate: every
+    chunk adds into the one dW, zeroed once, which only a kernel that adds
+    into dW can do (:func:`_accumulates_dw`).
     """
-    if direction == "wgrad":
-        return [p.N]
-    elem = 2
-    per_image = max(p.H * p.W * p.total_c, p.Ho * p.Wo * p.total_k) * elem
+    per_image = max(_image_bytes(p))
     per_launch = (_TENSOR_LIMIT - 1) // per_image
     if p.N <= per_launch or per_launch < 1:
         return [p.N]
@@ -2267,7 +2665,9 @@ def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
         return ptrs, sizes
     ptrs, sizes = dict(ptrs), dict(sizes)
     n_total, n0 = sum(chunks), sum(chunks[:i])
-    for name in [n for n in inputs if n != "w"] + [out_name]:
+    # wgrad's dW has no batch: every chunk adds into the whole of it.
+    batched = [out_name] if out_name != "dw" else []
+    for name in [n for n in inputs if n != "w"] + batched:
         per_image = sizes[name] // n_total
         ptrs[name] = ptrs[name] + n0 * per_image
         sizes[name] = chunks[i] * per_image
@@ -2302,6 +2702,31 @@ def _chunk_plans(plan_fn, p, chunks):
     return plans, rejected, per_chunk
 
 
+def _accumulates_dw(plan) -> bool:
+    """A one-step wgrad plan with no scratch: its kernel adds its tiles into
+    the zeroed fp32 dW (atomics), so its launches over batch chunks sum. A fold
+    or reduce step, or a scratch slab, writes dW instead."""
+    return len(plan.steps) == 1 and not plan.workspaces and not plan.zeroed
+
+
+def _wgrad_chunk_plans(plans, rejected, per_chunk, chunks):
+    """``(plans, rejected)`` for a wgrad problem run as ``chunks``: past one
+    chunk, only the plans whose every chunk accumulates into dW."""
+    if len(chunks) == 1:
+        return plans, rejected
+    keep = [pl for pl in plans if all(map(_accumulates_dw, per_chunk[pl.label]))]
+    rejected = list(rejected) + [
+        (
+            pl.identity,
+            f"a wgrad batch run as {len(chunks)} chunks needs a kernel that "
+            f"accumulates into dW",
+        )
+        for pl in plans
+        if pl not in keep
+    ]
+    return keep, rejected
+
+
 def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     """Benchmark every cached kernel that can run each case. Nothing is compiled.
 
@@ -2312,17 +2737,36 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     import torch
 
-    from benchmarks.common.direct_kernel_sweep import direct_plans, launch_values
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import HipError, Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from benchmarks.common.direct_kernel_sweep import direct_plans
+    from benchmarks.common.module_cache import ModuleCache
+    from rocke.runtime.hip_module import Runtime
 
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
+    # The binaries are shape-generic, so their modules outlive a case.
+    modules = ModuleCache(args.module_cache_bytes)
+    # --skip-measured: cases a previous run of this sweep already recorded,
+    # timed the way this run times them. Read before opening --results below:
+    # when the two flags name the same file, the writer must not truncate it
+    # out from under this read.
+    done = measured_keys(args.skip_measured, "direct", args.timing)
+    # One row per case, for the comparison driver and the shard runner to
+    # merge. Does nothing without --results.
+    results_out = ResultsWriter(
+        args.results,
+        "direct",
+        args.timing,
+        append=same_results_file(args.results, args.skip_measured),
+    )
+    n_skipped = 0
+
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     variants = _cache_variants(args)
+    # --kernels-file: only the cached kernels named there (labels as the
+    # results print them, with or without the direction prefix)
+    kernel_map = conv_fill.load_kernels_file(getattr(args, "kernels_file", None))
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
         if dtype not in DIRECT_DTYPES:
@@ -2331,8 +2775,13 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 f"{'/'.join(DIRECT_DTYPES)} (got {dtype})"
             )
             continue
-        torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
+        torch_dt = _torch_dtype_of(torch, dtype)
         for direction in directions or (case_direction,):
+            if case_key(p, dtype, direction) in done:
+                # Counted, not printed: resuming a few thousand cases would
+                # otherwise open with a few thousand lines of nothing.
+                n_skipped += 1
+                continue
             # A problem whose tensors pass the kernels' 2 GiB (i32 offset)
             # limit runs as balanced batch chunks, each launch on its slice.
             chunks = _batch_chunks(p, direction)
@@ -2343,6 +2792,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 p,
                 chunks,
             )
+            if direction == "wgrad":
+                plans, rejected = _wgrad_chunk_plans(plans, rejected, per_chunk, chunks)
+            if kernel_map is not None:
+                keep = conv_fill.kernels_for(kernel_map, case_key(p, dtype, direction))
+                plans = [pl for pl in plans if pl.identity.label() in keep]
             if not plans:
                 why = _no_plan_reason(rejected, dtype, variants)
                 print(
@@ -2370,13 +2824,15 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 out_name = "dw"
                 Out_t = torch.zeros(*w_shape, dtype=torch.float32)
             else:
-                W_t = torch.empty(*w_shape, dtype=torch_dt).uniform_(-1, 1)
+                W_t = torch.empty(*w_shape, dtype=torch_dt)
                 if direction == "fwd":
                     in_name, out_name = "x", "y"
-                    In_t = torch.empty(*x_shape, dtype=torch_dt).uniform_(-1, 1)
+                    conv_fill.fill_w(W_t, dtype)
+                    In_t = conv_fill.fill_x(torch.empty(*x_shape, dtype=torch_dt))
                     Out_t = torch.empty(*y_shape, dtype=torch_dt)
                 else:
                     in_name, out_name = "dy", "dx"
+                    W_t.uniform_(-1, 1)
                     In_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
                     Out_t = torch.empty(*x_shape, dtype=torch_dt)
                 inputs = {in_name: In_t, "w": W_t}
@@ -2409,90 +2865,39 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                         sizes[name] = max(sizes.get(name, 0), nbytes)
             for name in set(sizes) - set(ptrs):
                 ptrs[name] = rt.alloc(sizes[name])
+            # Two-stage wgrad scratch: zeroed like dW (once for timing, again
+            # before each verified run).
+            for name in {n for plan in plans for n in plan.zeroed}:
+                rt.memset(ptrs[name], 0, sizes[name])
 
             flop = float(p.flops)
             bytes_xfer = float(sum(t.nbytes for t in inputs.values()) + Out_t.nbytes)
-            results = []
             _stop = EarlyStop.for_case(args, p, dtype, direction)
-            for plan in plans:
-                try:
-                    launches = [
-                        (
-                            KernelLauncher(
-                                hsaco=st.hsaco_path.read_bytes(),
-                                kernel_name=st.kernel_name,
-                                signature=st.signature,
-                            ),
-                            launch_values(
-                                st,
-                                *_chunk_buffers(
-                                    ptrs, sizes, inputs, out_name, chunks, i
-                                ),
-                            ),
-                            LaunchConfig(grid=st.grid, block=st.block, stream=0),
-                        )
-                        for i, chunk_plan in enumerate(per_chunk[plan.label])
-                        for st in chunk_plan.steps
-                    ]
-                except HipError as e:
-                    print(f"  [skip] {plan.label}: {e}", flush=True)
-                    continue
-
-                # Each step packed once: a timed loop that packs per launch
-                # times the host, not a short kernel.
-                bound = [
-                    launcher.bind(values, config=cfg)
-                    for launcher, values, cfg in launches
-                ]
-
-                def run(bound=bound):
-                    for launch in bound:
-                        launch()
-
-                passed = None
-                if ref_out is not None:
-                    rt.memset(ptrs[out_name], 0, Out_t.nbytes)
-                    run()
-                    synchronize_and_release(0)
-                    out_cpu = torch.empty_like(Out_t)
-                    rt.memcpy_d2h(_u8(out_cpu), ptrs[out_name], Out_t.nbytes)
-                    ref_f32 = ref_out.float().cpu()
-                    rel_err = float(
-                        (out_cpu.float() - ref_f32).abs().max()
-                        / ref_f32.abs().max().clamp(min=1.0)
-                    )
-                    passed = rel_err < 5e-2
-                    if not passed:
-                        overall_rc = 1
-                        print(
-                            f"  verify {plan.label}: FAIL(rel_err={rel_err:.2e})",
-                            flush=True,
-                        )
-
-                try:
-                    ms = _stop.measure(
-                        run,
-                        warmup=args.warmup,
-                        iters=args.iters,
-                        stream=0,
-                        passed=passed,
-                    )
-                except (HipError, RuntimeError) as e:
-                    print(f"  [skip] {plan.label}: {e}", flush=True)
-                    # time_launches drained before raising, but it does not
-                    # raise a failed drain (the launch error is the one it
-                    # reports). Drain again so a failed drain ends the sweep
-                    # here, before the shared buffers below are freed with
-                    # launches possibly still using them.
-                    synchronize_and_release(0)
-                    continue
-                if ms is None:
-                    _stop.report(plan.label)
-                    continue
-                synchronize_and_release(0)
-                results.append(
-                    (flop / ms / 1e9, bytes_xfer / ms / 1e6, ms, passed, plan.label)
-                )
+            results, case_rc = _measure_plans(
+                args=args,
+                plans=plans,
+                modules=modules,
+                rt=rt,
+                ptrs=ptrs,
+                sizes=sizes,
+                inputs=inputs,
+                out_name=out_name,
+                Out_t=Out_t,
+                ref_out=ref_out,
+                flop=flop,
+                bytes_xfer=bytes_xfer,
+                stop=_stop,
+                u8=_u8,
+                chunks=chunks,
+                per_chunk=per_chunk,
+                ref_floor=conv_fill.ref_floor(direction),
+                tol=direct_verify_tol(dtype, arch),
+            )
+            overall_rc = overall_rc or case_rc
+            # Safe only here: _measure_plans has drained the device by the
+            # time it returns, so no launch of this case can still be using a
+            # module end_case unloads.
+            modules.end_case()
 
             for ptr in ptrs.values():
                 rt.free(ptr)
@@ -2502,7 +2907,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     print(f"  {_stop.summary()}", flush=True)
                 overall_rc = overall_rc or 1
                 continue
-            results.sort(key=lambda r: r[0], reverse=True)
+            results = _rank_verified(results, lambda r: r[0], lambda r: r[3])
+            if not results:
+                print("  no cached kernel passed verify", flush=True)
+                overall_rc = overall_rc or 1
+                continue
             print(
                 f"  {'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'verify':>6}  kernel"
             )
@@ -2514,8 +2923,33 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     f"  {rank:>4}  {tflops:>7.1f}  {ms:>8.3f}  {gbps:>7.1f}  {verdict:>6}  {label}"
                 )
             # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
-            tflops, _, ms, _, label = results[0]
+            tflops, gbps, ms, passed, label = results[0]
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
+            results_out.row(
+                key=case_key(p, dtype, direction),
+                case=case_idx,
+                shape=p.short(),
+                dtype=dtype,
+                direction=direction,
+                tflops=tflops,
+                ms=ms,
+                gbps=gbps,
+                kernel=label,
+                candidates=len(plans),
+                passed=passed,
+                # The tail of the ranking just printed, names only.
+                runners_up=[r[-1] for r in results[1 : 1 + RUNNERS_UP]],
+            )
+    results_out.close()
+    if n_skipped:
+        print(
+            f"\n{n_skipped} case(s) skipped: already in {args.skip_measured}",
+            flush=True,
+        )
+    if len(cases) > 1:
+        print(f"\n{modules.summary()}", flush=True)
+        if results_out.n_rows:
+            print(f"{results_out.n_rows} row(s) written to {args.results}", flush=True)
     return overall_rc
 
 
@@ -2563,6 +2997,7 @@ def main() -> int:
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
     add_early_stop_arg(parser)
+    batched_timing.add_timing_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
@@ -2597,6 +3032,88 @@ def main() -> int:
         metavar="PATH",
         dest="dump_fail",
         help="on the first verify FAIL, dump tensors to PATH/ and stop the sweep.",
+    )
+
+    rank_grp = parser.add_argument_group(
+        "Fast ranking (AOT --run-from-cache only)",
+        "Time every cached kernel in batches between two device drains, then "
+        "spend the full --warmup/--iters only on the best few. Replaces "
+        "--early-stop for the run; --early-stop-record still gets the case's "
+        "best time.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank",
+        action="store_true",
+        dest="fast_rank",
+        help="probe every cached kernel with a batched 1+N launch round and "
+        "measure only the finalists in full. --verify then checks the "
+        "finalists rather than every kernel.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-finalists",
+        type=int,
+        default=batched_timing.DEFAULT_FINALISTS,
+        dest="fast_rank_finalists",
+        metavar="N",
+        help=f"kernels carried from the probe into the full-fidelity round "
+        f"(default: {batched_timing.DEFAULT_FINALISTS}). This also caps the "
+        f"ranked table and bounds what stays bound at once.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-chunk",
+        type=int,
+        default=batched_timing.DEFAULT_CHUNK,
+        dest="fast_rank_chunk",
+        metavar="N",
+        help=f"kernels timed between two device drains "
+        f"(default: {batched_timing.DEFAULT_CHUNK})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-warmup",
+        type=int,
+        default=batched_timing.DEFAULT_PROBE_WARMUP,
+        dest="fast_rank_warmup",
+        metavar="N",
+        help=f"probe warmup launches per kernel, covering its cold code object "
+        f"and scratch (default: {batched_timing.DEFAULT_PROBE_WARMUP})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-iters",
+        type=int,
+        default=batched_timing.DEFAULT_PROBE_ITERS,
+        dest="fast_rank_iters",
+        metavar="N",
+        help=f"probe timed launches per kernel "
+        f"(default: {batched_timing.DEFAULT_PROBE_ITERS})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-primer",
+        type=int,
+        default=batched_timing.DEFAULT_PRIMER,
+        dest="fast_rank_primer",
+        metavar="N",
+        help=f"launches issued before the first measured chunk of a case, to "
+        f"bring the device's clocks up so the kernels probed first are not "
+        f"measured at idle clocks (default: {batched_timing.DEFAULT_PRIMER})",
+    )
+
+    add_results_arg(
+        parser.add_argument_group(
+            "Per-case results (AOT --run-from-cache only)",
+            "A machine-readable row per case, which benchmark_conv_compare.py "
+            "merges with the implicit-GEMM sweep's and run_conv_shards.py "
+            "concatenates across cards.",
+        ),
+        merged=False,
+    )
+    add_skip_measured_arg(parser)
+
+    add_module_cache_arg(
+        parser.add_argument_group(
+            "Loaded binaries (AOT --run-from-cache only)",
+            "A cached binary is shape-generic, so its HIP module is loaded "
+            "once per run instead of once per case.",
+        )
     )
 
     miopen_grp = parser.add_argument_group(
@@ -2647,11 +3164,13 @@ def main() -> int:
     )
     conv.add_argument(
         "--dtype",
-        choices=("fp16", "bf16"),
+        choices=("fp16", "bf16", "fp32", "tf32"),
         default=None,
         help="I/O data type when using shape flags (default: fp16; cases from "
-        "--miopen-cmd/--miopen-file carry their own dtype). --compile-all builds "
-        "the cache for every data type unless --dtype names one.",
+        "--miopen-cmd/--miopen-file carry their own dtype). fp32 and tf32 both "
+        "store fp32 tensors; tf32 feeds the MFMA kernels TF32 operands (native "
+        "XF32 on gfx942, BF16x3 on gfx950), fp32 the exact fp32 atoms. "
+        "--compile-all builds the cache for fp16 and bf16 unless --dtype names one.",
     )
 
     cache_grp = parser.add_argument_group(
@@ -2713,11 +3232,46 @@ def main() -> int:
         help="--compile-all only: stop after building this many kernels (smoke tests).",
     )
 
+    conv_fill.add_argument(parser)
+    parser.add_argument(
+        "--kernels-file",
+        default=None,
+        help="--run-from-cache only: run just the cached kernels whose labels the file "
+        "lists (a label without its fwd-/dgrad-/wgrad- prefix names every direction)",
+    )
     args = parser.parse_args()
+    conv_fill.set_mode(args.fill)
+    if args.skip_measured and not args.run_from_cache:
+        print(
+            "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.results and not args.run_from_cache:
+        # The JIT sweep has no cached kernels to name, and its per-case best is
+        # a kernel it just built -- a different artifact. Saying so beats
+        # accepting the flag and writing an empty file.
+        print(
+            "error: --results records an AOT sweep; pass --run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.fast_rank and not args.run_from_cache:
+        # The JIT sweep builds and loads its kernels one at a time, so
+        # batching their launches would save nothing; saying so beats
+        # accepting the flag and ignoring it.
+        print(
+            "error: --fast-rank ranks the kernels of an AOT cache; "
+            "pass --run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
-    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_COMPILE_DTYPES
 
-    args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
+    args.compile_dtypes = (
+        (args.dtype,) if args.dtype is not None else DIRECT_COMPILE_DTYPES
+    )
     if args.dtype is None:
         args.dtype = "fp16"
     # --direction likewise: fwd for shape flags, every cached direction for
@@ -2817,8 +3371,8 @@ def main() -> int:
             args.direction not in ("fwd", "dgrad") or args.groups != 1
         ):
             print(
-                f"error: direct conv computes a dilated convolution only forward / "
-                f"dgrad and ungrouped (got dH={args.dH}, dW={args.dW})",
+                f"error: the direct conv benchmark runs a dilated convolution only "
+                f"forward / dgrad and ungrouped (got dH={args.dH}, dW={args.dW})",
                 file=sys.stderr,
             )
             return 2
@@ -2848,8 +3402,30 @@ def main() -> int:
         )
         cases = [(problem, args.dtype, args.direction)]
 
+    # A TF32 case (--dtype tf32 or a MIOpenDriver ``-M 0`` command) only means
+    # something over verified kernels: a fast kernel that silently computes at
+    # lower precision would otherwise rank.
+    tf32_implies_verify(
+        args, any(c[1] == "tf32" for c in cases), "tf32 cases imply --verify"
+    )
+
     if args.run_from_cache:
         return _cache_dispatch(args, arch, cases)
+
+    # A per-axis padding runs only from the cache, on PER_AXIS_PAD_VARIANTS
+    # (kernels.conv.direct_variants): the sweeps below build kernels with one
+    # padding for both axes.
+    for prob, _, direction in cases:
+        if prob.PAD_W != prob.PAD:
+            print(
+                f"[skip] {prob.short()} dir={direction}: per-axis padding "
+                f"(PAD={prob.PAD}x{prob.PAD_W}) runs only with --run-from-cache",
+                file=sys.stderr,
+            )
+    cases = [c for c in cases if c[0].PAD_W == c[0].PAD]
+    if not cases:
+        print("error: no case left to sweep", file=sys.stderr)
+        return 2
 
     import ctypes
 
@@ -2885,6 +3461,14 @@ def main() -> int:
             print(f"{'#'*72}", flush=True)
 
         cpg = problem.cpg
+        if dtype == "tf32" and cpg == 1 and direction in ("fwd", "dgrad"):
+            # Depthwise has no channel reduction for an MMA: these kernels run
+            # exact fp32 (kernel names carry "f32", not "tf32"), so a tf32
+            # result here is an fp32 result -- no TF32 rounding, no TF32 speedup.
+            print(
+                "[info] depthwise tf32 runs the scalar-FMA kernels in exact fp32",
+                flush=True,
+            )
         if direction == "dgrad":
             rc, _ = _run_dgrad_sweep(problem=problem, dtype=dtype, **_common)
         elif direction == "wgrad":

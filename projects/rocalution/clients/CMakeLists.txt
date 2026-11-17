@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,14 @@ if(NOT TARGET rocalution OR BUILD_CLIENTS_ONLY)
     endif()
   endforeach()
 
+  # OpenMP is a private link, so it is not in INTERFACE_LINK_LIBRARIES.
+  # Follow the installed library, not whether this machine has an OpenMP toolchain.
+  set(SUPPORT_OMP OFF)
+  get_target_property(_rocalution_defs roc::rocalution INTERFACE_COMPILE_DEFINITIONS)
+  if(_rocalution_defs AND "ROCALUTION_WITH_OPENMP" IN_LIST _rocalution_defs)
+    set(SUPPORT_OMP ON)
+  endif()
+
   option(BUILD_CLIENTS_SAMPLES "Build examples." ON)
   option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks." OFF)
   option(BUILD_CLIENTS_TESTS "Build tests." OFF)
@@ -78,4 +86,8 @@ endif()
 if(BUILD_CLIENTS_TESTS)
   enable_testing()
   add_subdirectory(tests)
+  # The unit tests do not build on Windows yet
+  if(NOT WIN32)
+    add_subdirectory(unittests)
+  endif()
 endif()

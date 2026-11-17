@@ -23,6 +23,7 @@
 ################################################################################
 """Decode TensileLite NonTemporal-related parameters into rocisa modifiers."""
 
+from rocisa.container import TENSORModifiers
 from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 
 
@@ -62,6 +63,43 @@ def decodeNonTemporal(
         CacheScope.SCOPE_SYS,
     )[nt_value & 0x3]
     return (False, False, False, scope, temporal_hint, non_volatile)
+
+
+def tdmCacheModifiers(asm_caps, hints, decider=None):
+    """Return ``TENSORModifiers`` for one ``tensor_load_to_lds``, or ``None``.
+
+    ``hints`` holds one ``(nt_value, temporal_hint, non_volatile)`` tuple per
+    tensor the instruction loads.  Wave-separated TDM issues a single
+    instruction for every member of a descriptor set, and its TH/SCOPE/NV bits
+    cannot differ per wave.  ``decider`` lists the positions in ``hints`` of the
+    members that decide them: the hints of the other members are ignored, so the
+    instruction follows the deciders (``None``: every member decides).  Among the
+    deciders a field is kept only when all of them decode to the same value;
+    otherwise it stays at the ISA default.  The defaults (SCOPE_CU, TH_RT, no nv)
+    encode as zero and are left out, so a load without hints is emitted exactly
+    as before.
+    """
+    if not _has_temporal_hint(asm_caps) or not hints:
+        return None
+    if decider is not None:
+        hints = [hints[i] for i in decider]
+        if not hints:
+            return None
+    decoded = [decodeNonTemporal(asm_caps, nt, th, nv)[3:] for nt, th, nv in hints]
+
+    def agreed(values, default):
+        return values[0] if all(v == values[0] for v in values) else default
+
+    scope = agreed([d[0] for d in decoded], CacheScope.SCOPE_NONE)
+    th = agreed([d[1] for d in decoded], TemporalHint.TH_NONE)
+    nv = agreed([d[2] for d in decoded], NonVolatile.NV_NONE)
+    if scope == CacheScope.SCOPE_CU:
+        scope = CacheScope.SCOPE_NONE
+    if th == TemporalHint.TH_RT:
+        th = TemporalHint.TH_NONE
+    if (scope, th, nv) == (CacheScope.SCOPE_NONE, TemporalHint.TH_NONE, NonVolatile.NV_NONE):
+        return None
+    return TENSORModifiers(scope=scope, th=th, nv=nv)
 
 
 def _at_least_device_scope(scope):

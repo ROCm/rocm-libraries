@@ -170,6 +170,21 @@ the cost of one HIP device query per execute. A handle on another device fails w
 ``HIPDNN_STATUS_BAD_PARAM`` before any plugin is called. If the device could not be
 determined when the plan was created, the check is skipped.
 
+The binding exists because a finalized plan holds provider state created on its device:
+kernel modules loaded on that device, MIOpen compiled fusion invokers, and the hipBLASLt
+algorithm chosen on that device. HIP refuses to launch a module from a stream on another
+device, even when both devices have the same architecture. Two devices with identical
+properties therefore cannot share one plan object.
+
+To run a plan on another device, serialize it with
+``hipdnnBackendGetSerializedExecutionPlan_ext()`` (frontend:
+``Graph::serialize_compiled_plan()``) and deserialize it with a handle on the target
+device (``hipdnnBackendCreateAndDeserializeExecutionPlan_ext()``, frontend:
+``Graph::deserialize_compiled_plan()``). The deserialized plan is bound to that device.
+The target device must be able to run the stored plan; the provider checks this when it
+loads the plan. Alternatively, build the plan again from its graph with a handle on the
+target device.
+
 
 Handle destruction (implicit via RAII)
 --------------------------------------
@@ -203,7 +218,7 @@ Handle destruction (implicit via RAII)
             -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
 
 Engine finalization checks applicability, not plugin metadata. The first engine-name,
-knob-info, or behavior-note read fetches and validates ``EngineDetails``; count-only
+knob-info, behavior-note, or numerical-note read fetches and validates ``EngineDetails``; count-only
 queries also trigger this load. Retrieval or validation errors are therefore returned
 by ``hipdnnBackendGetAttribute()``, even after successful finalization. Callers that
 need eager metadata validation can issue a metadata query immediately after finalizing.
@@ -298,7 +313,7 @@ Plugin lifecycle
 1. **Discovery**: ``Plugin.so`` loaded, metadata queried (name, version, type)
 2. **Instance creation**: ``PluginCreate`` and ``GetAllEngineIds`` during handle creation
 3. **Engine selection**: ``GetApplicableEngineIds`` during graph build, plus ``GetPrediction`` for prediction-ranked policies
-4. **Engine details**: ``GetEngineDetails`` on the first engine-name, knob-info, or behavior-note query for an engine
+4. **Engine details**: ``GetEngineDetails`` on the first engine-name, knob-info, behavior-note, or numerical-note query for an engine
 5. **Context creation**: ``CreateExecutionContext`` and ``GetWorkspaceSize`` during plan finalization
 6. **Execution**: ``ExecuteOpGraph``
 7. **Cleanup**: ``DestroyExecutionContext``, ``DestroyEngineDetails``, and ``PluginDestroy``
@@ -339,7 +354,8 @@ Engine descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 - Binds the engine ID to an operation graph; finalization validates applicability.
 - Retrieved from engine config descriptor.
 - Exposes the engine name through the read-only ``HIPDNN_ATTR_ENGINE_NAME_EXT`` attribute (``HIPDNN_TYPE_CHAR``).
-- Loads name, knob-info, and behavior-note metadata on the first corresponding attribute query.
+- Loads name, knob-info, behavior-note, and numerical-note metadata on the first corresponding attribute query.
+- Serves ``HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`` read-only; an engine whose plugin omits the numerical-note list is reported ``HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC``.
 
 Execution plan descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------

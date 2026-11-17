@@ -209,6 +209,28 @@ def build_inline_asm_multi(b):
     b.ret()
 
 
+def build_if_else_results(b):
+    """scf.if_else that yields a value; portable IR refuses to carry it."""
+    C = b.param("C", PtrType(F32, "global"))
+    n = b.param("n", I32)
+    tid = b.thread_id_x()
+    branch = b.scf_if_else(b.cmp_lt(tid, n), result_types=[F32])
+    with branch as (then_ctx, else_ctx):
+        with then_ctx:
+            b.scf_yield(b.const_f32(1.0))
+        with else_ctx:
+            b.scf_yield(b.const_f32(2.0))
+    b.global_store(C, tid, branch.results[0], align=4)
+    b.ret()
+
+
+# Kept out of KERNELS: recording it is refused, not replayed.
+IF_ELSE_RESULTS_MESSAGE = (
+    "portable IR does not support an scf.if_else with results; "
+    "lower the kernel directly"
+)
+
+
 KERNELS = {
     "scalar": build_scalar,
     "memory": build_memory,
@@ -248,6 +270,23 @@ def _count_instrs(prog):
 
 
 class TestRecordingBuilder(unittest.TestCase):
+    def test_refuses_an_if_else_with_results(self):
+        """The recipe's scf_if_else carries no result types, so a recorded
+        result-bearing if/else would replay with its results unbound: the live
+        recorder and both post-hoc walks refuse it instead."""
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        with self.assertRaises(NotImplementedError) as live:
+            build_if_else_results(RecordingIRBuilder("if_else_results"))
+        self.assertEqual(str(live.exception), IF_ELSE_RESULTS_MESSAGE)
+        plain = IRBuilder("if_else_results")
+        build_if_else_results(plain)
+        for walk in (kernel_to_recipe, kerneldef_to_recipe):
+            with self.subTest(walk=walk.__name__):
+                with self.assertRaises(NotImplementedError) as posthoc:
+                    walk(plain.kernel)
+                self.assertEqual(str(posthoc.exception), IF_ELSE_RESULTS_MESSAGE)
+
     def test_non_invasive(self):
         """RecordingIRBuilder must build the IDENTICAL KernelDef as IRBuilder."""
         for name, fn in KERNELS.items():
@@ -452,25 +491,65 @@ class TestIfElseReplay(unittest.TestCase):
         try:
             online.load()
             for name in ("if_else", "if_else_nested", "if_else_in_for"):
-                rb = RecordingIRBuilder(name)
-                KERNELS[name](rb)
-                py = lower_kernel_to_llvm(
-                    rb.kernel, llvm_flavor="llvm20", arch="gfx950"
-                )
-                with self.subTest(kernel=name, path="recipe"):
-                    cbor = recipe_bundle.cbor_encode(rb.recipe())
-                    vm, _ = online.recipe_cbor_to_llvm(cbor, arch="gfx950")
-                    self.assertEqual(vm, py)
-                with self.subTest(kernel=name, path="ir_json"):
-                    text = ir_export.export_kernel_ir_json(rb.kernel)
-                    eng, _ = online.ir_json_to_llvm(text, arch="gfx950")
-                    self.assertEqual(eng, py)
+                for arch in ("gfx942", "gfx950"):
+                    rb = RecordingIRBuilder(name)
+                    KERNELS[name](rb)
+                    py = lower_kernel_to_llvm(
+                        rb.kernel, llvm_flavor="llvm20", arch=arch
+                    )
+                    with self.subTest(kernel=name, arch=arch, path="recipe"):
+                        cbor = recipe_bundle.cbor_encode(rb.recipe())
+                        vm, _ = online.recipe_cbor_to_llvm(cbor, arch=arch)
+                        self.assertEqual(vm, py)
+                    with self.subTest(kernel=name, arch=arch, path="ir_json"):
+                        text = ir_export.export_kernel_ir_json(rb.kernel)
+                        eng, _ = online.ir_json_to_llvm(text, arch=arch)
+                        self.assertEqual(eng, py)
         finally:
             for k, v in saved.items():
                 if v is None:
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+    def test_engine_refuses_an_if_else_with_results(self):
+        """Both C readers refuse an if/else that yields values with the
+        recorder's text: the IR JSON of one (whose results the JSON lists) and
+        a recipe whose scf_if_else lists results (no recorder writes one)."""
+        import os
+
+        from rocke.core import ir_export
+        from rocke.portable_ir.src import online, recipe_bundle
+
+        saved = os.environ.get("ROCKE_ONLINE_LIB")
+        os.environ["ROCKE_ONLINE_LIB"] = _online_lib()
+        try:
+            online.load()
+            plain = IRBuilder("if_else_results")
+            build_if_else_results(plain)
+            for arch in ("gfx942", "gfx950"):
+                with self.subTest(path="ir_json", arch=arch):
+                    text = ir_export.export_kernel_ir_json(plain.kernel)
+                    with self.assertRaises(RuntimeError) as imported:
+                        online.ir_json_to_llvm(text, arch=arch)
+                    self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(imported.exception))
+                with self.subTest(path="recipe", arch=arch):
+                    rb = RecordingIRBuilder("if_else_carry")
+                    build_if_else(rb)
+                    recipe = rb.recipe()
+                    (instr,) = [
+                        i for i in recipe["program"] if i["op"] == "scf_if_else"
+                    ]
+                    instr["results"] = ["if0"]
+                    cbor = recipe_bundle.cbor_encode(recipe)
+                    with self.assertRaises(RuntimeError) as replayed:
+                        online.recipe_cbor_to_llvm(cbor, arch=arch)
+                    self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(replayed.exception))
+        finally:
+            if saved is None:
+                os.environ.pop("ROCKE_ONLINE_LIB", None)
+            else:
+                os.environ["ROCKE_ONLINE_LIB"] = saved
 
 
 def _production_cases():

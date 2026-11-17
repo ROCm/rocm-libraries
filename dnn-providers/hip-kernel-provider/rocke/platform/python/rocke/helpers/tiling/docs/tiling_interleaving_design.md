@@ -56,7 +56,8 @@ One thread's 4×4 patch (rows = M, cols = K) → two register orders, same 16 el
 (`DPT==1`) has nothing to interleave, so its map *is* canonical.
 
 **The physical constraint (why any of this is legal).** Correctness is the **sound MAC** — per-operand
-M/N-fixed *plus* `A.K-dist == B.K-dist` positionally — and M/N placement is free (you choose the constant;
+M/N-fixed *plus* the same K label at every instruction K, in every row of A and column of B (slot for
+slot on every same-format atom) — and M/N placement is free (you choose the constant;
 it merely routes the output). [`mma_is_machinery.md`](./mma_is_machinery.md) is the **SOT for MMA
 soundness** — the full model lives there.
 
@@ -66,8 +67,9 @@ against the interleave reference tables (MFMA/WMMA, CDNA + RDNA).
 **Scope.** One recipe (§6, §8, §9) builds the intra-lane `reorder` tier **cross-lane-free**, by adjusting
 the **static distribution** read from the target's traits. It covers **every dense square atom** — any
 AMDGPU arch (CDNA, and RDNA/gfx11 via operand **replication**, §9), any dtype **including f64** — with no
-special-casing. The **one non-square** catalogue atom (`wmma_f32_32x16x128_f4`) over-subscribes the wave on
-one operand and does **not** interleave under this construction; it is deferred (task #21). Which rows
+special-casing. The **one non-square** catalogue atom (`wmma_f32_32x16x128_f4`) holds two M blocks of A per
+lane in its registers, which this construction does not model, so it does **not** interleave (`InterleavedStyle`
+refuses it by name); it is deferred (task #21). Which rows
 interleave is enumerated and locked by the proof sweep `test_interleave_all_dense.py` — read the census
 there, never copy a count into prose. What varies per instance is **validation depth**: the construction is
 proven cross-lane-free across the whole square catalogue (incl. f64) by that CPU sweep; GPU **bit-exact**
@@ -203,28 +205,34 @@ cross-lane — see §8.)
 K-match. This section derives that **pairwise K-match half**; per-operand soundness holds by construction
 here — the fragments are atom-derived, so each output gets exactly one M on A and one N on B.
 
-The MFMA/WMMA hardware multiply-accumulates: it pairs A-slot-`s` with B-slot-`s`, forms the product,
-and sums over K. The sum is order-independent, so **the K-slot ordering is free** — any bijection `σ`
-is valid provided A holds `A[m, σ(s)]` and B holds `B[σ(s), n]` in the same slot.
+The MFMA/WMMA hardware multiply-accumulates: it multiplies every A row with every B column at each
+instruction K, the K the canonical layouts hold at a position (A-slot-`s` with B-slot-`s` on every
+same-format atom; a mixed-width `f8f6f4` atom places it differently,
+[`mma_is_machinery.md`](./mma_is_machinery.md) condition 3), and sums over K. The sum is
+order-independent, so **the K-slot ordering is free** — any bijection `σ` is valid provided every A
+row holds `A[m, σ(k)]` and every B column `B[σ(k), n]` at instruction K `k`: one `σ` for all rows and
+columns.
 
-- **The cross-operand constraint is `A.K-dist == B.K-dist` positionally** (the sound MAC's K-match half).
-  A and B must agree on which logical K sits in each paired slot. A single MMA-native order is not required.
+- **The cross-operand constraint is one K relabelling shared by A and B** (the sound MAC's K-match
+  half). A and B must agree on which logical K sits at each instruction K, and no row may relabel K
+  differently (swap K 0 and 1 on the odd rows of both, and `C[0,1]` multiplies A's K 0 with B's K 1).
+  A single MMA-native order is not required.
   (Per-operand soundness — M/N fixed per output — is the other half; see the SOT.)
 - **Any A/B pair whose K-dists match positionally is a valid direct MMA** — canonical is not required.
   The incompatible case is a K-distribution **mismatch** between operands, not the interleaving itself.
 - A's M-register order and B's N-register order are free; together they **determine the C output
   layout** (§7).
 
-`mma_pair_k_aligned(a_layout, b_layout)` enforces exactly this: `k_distribution(a) == k_distribution(b)`
-positionally, **compared per atom** — not across the concatenated whole-fragment K-list (§8 for the
-rectangular-tile rationale). Lane ownership
-is guaranteed valid by construction (fragments come from atom-derived descs), so a positional per-atom
-K-match is sufficient.
+`mma_pair_k_aligned(a_layout, b_layout, a_canon=, b_canon=)` enforces exactly this: A and B label every
+instruction K (the K the canonicals hold at a position) with the same K, in every row and column -- slot for
+slot on every same-format atom; see `mma_is_machinery.md` condition 3 for mixed-width `f8f6f4` -- and it needs
+no atom counts (§8 for the rectangular-tile rationale). Lane ownership is guaranteed valid by construction
+(fragments come from atom-derived descs), so this K-match is sufficient.
 
 ### Example — one contraction, 4 K-slots
 
-Focus on the slots that produce a single output element. The hardware multiplies A-slot-`s` by
-B-slot-`s` and sums; the result lands at `C[<A's M>, <B's N>]`.
+Focus on the slots that produce a single output element of a same-format atom. The hardware
+multiplies A-slot-`s` by B-slot-`s` and sums; the result lands at `C[<A's M>, <B's N>]`.
 
 **Acceptable — canonical.** K aligned, M/N plain:
 ```
@@ -267,7 +275,8 @@ between A and B.**
 
 A layout must pass **two INDEPENDENT validity gates** — both must hold, and they check different things:
 
-1. **MMA soundness (§2)** — `A.K-dist == B.K-dist` positionally. A relationship *between* A and B.
+1. **MMA soundness (§2)** — one K relabelling shared by A and B at every instruction K. A relationship
+   *between* A and B.
 2. **Tile-vectorization validity (this section)** — the chosen logical vectorization direction must not
    **contradict** the physical memory stride. A property of *one* tile against *its own* memory layout —
    it has nothing to do with the MMA.
@@ -396,11 +405,13 @@ an axis (the wave64 M=64-into-16-lanes example in §6, "Across the wave").
 ### MMA-acceptability is a *relationship between A and B*, not a property of one fragment
 
 There is no "this fragment is MMA-ready" in isolation. The hardware's only requirement is that the
-**pair** agree on K, position-for-position: acceptability ⇔ A's and B's K-rows are identical slot-for-slot
-(M on A / N on B are free) — worked in full at §2's slot tables.
+**pair** agree on K at every instruction K: acceptability ⇔ every row of A and every column of B hold
+the same K there (slot for slot on a same-format atom; M on A / N on B are free) — worked in full at §2's
+slot tables.
 
 So "make this fragment acceptable" always means "reorder it until its K-row matches its **partner's**".
-`mma_pair_k_aligned(a, b)` compares the two fragments; it never checks either against a canonical.
+`mma_pair_k_aligned(a, b, a_canon=, b_canon=)` compares the two fragments; the canonicals only say which
+instruction K each position holds, and neither fragment is checked against them.
 
 ### A, B, C have different roles
 
@@ -733,7 +744,7 @@ multi-patch (`P>1`) and novel-atom cases are discovered.) These change with ever
 error-prone to transcribe; construct the two states and ask the solver. The optimizer
 (`helpers/tiling/layout_optimizer.py`) wraps this into the two questions a designer actually asks:
 
-- **`evaluate_transform(source, target, *, canon=…, k_partner=…, dtype_bits=…)`** — is there a VALID path
+- **`evaluate_transform(source, target, *, canon=…, k_partner=…, k_partner_canon=…, dtype_bits=…)`** — is there a VALID path
   (an MMA-sound target via `mma_operand_layout_sound` + a transform via `classify_transform`), and what
   does the cheapest edge cost?
 - **`optimize_layout(source, candidates: dict, …)`** — the MINIMIZATION: sweep candidate distributions
@@ -826,13 +837,12 @@ K-distribution (§2). The interleaved layouts we build — custom static tile di
 register order, rectangular per-lane patch) — are **sound for any tile shape**, square or rectangular. A
 per-operand override can force otherwise (author's responsibility; verify K-dists match).
 
-**K-alignment is validated PER ATOM, not per whole fragment.** `mma_pair_k_aligned` (`transforms/observers.py`)
-compares A and B on their **per-atom** K signature, not the concatenated whole-fragment K-list — because the MMA is
-issued per atom, and a rectangular wave tile has `m_iter ≠ n_iter` (A tiles more M-atoms than B tiles
-N-atoms), giving different whole-fragment register counts even when every issued atom pairs the same K. It
-takes the free-dim atom counts (`a_free_atoms`/`b_free_atoms` = m_iter/n_iter) so rectangular tiles like
-64×32×32 build and are bit-exact; the whole-fragment compare would falsely reject them (it only passed
-square `m_iter == n_iter` by coincidence).
+**K-alignment is validated at every instruction K, not slot for slot.** `mma_pair_k_aligned`
+(`transforms/observers.py`) reads, off the wave tile's canonical layouts, which instruction K each A and B
+position holds, and requires both operands to label each instruction K with one K, the same one, in every row
+and column. A rectangular wave tile has `m_iter ≠ n_iter` (A tiles more M-atoms than B tiles N-atoms), so the
+whole-fragment register counts differ even when every issued atom pairs the same K; reading the instruction K
+off the canonicals needs no atom counts, so rectangular tiles like 64×32×32 build and are bit-exact.
 
 ## 9. Encoding requirement — how to build and verify it
 
@@ -882,7 +892,7 @@ wave; that arithmetic is the whole reason the bijection validator passes at rank
 builds a silently wrong lane map — a wrong ANSWER, not an exception.
 
 **Construction.** Four steps. Every *atom* quantity is READ from the traits row (`traits/mma_traits.py`,
-the 128-row catalogue) and never hand-typed; the *wave-tile* factors (`m_sub`, `n_sub`) come from the
+the MMA catalogue) and never hand-typed; the *wave-tile* factors (`m_sub`, `n_sub`) come from the
 chosen tile. A new atom or a new target needs no new table:
 
 1. Read the atom's accumulator shape from the traits row (`traits/mma_traits.py`) — **both free axes**:
@@ -971,7 +981,8 @@ to move the data through the MMA.** It is what §10's cost model optimizes over;
   (K-contiguous or free-dim-contiguous), and **switching between them is a pure in-register reorder** (a
   transpose; §1/§6) — no re-load, no cross-lane.
 - **MMA-ready = K-vectorize both operands** → an A run is *fixed M, K running*, a B run *fixed N, K running*;
-  pairing slot-for-slot is the sound MAC (§2, `mma_is_machinery.md`).
+  pairing them at every instruction K (slot-for-slot on a same-format atom) is the sound
+  MAC (§2, `mma_is_machinery.md`).
 
 ### The five-step recipe
 
@@ -1121,8 +1132,8 @@ separate LDS regions — isolate them (A-only / B-only, store-only / read-only) 
 
 - Interleave reference tables (MFMA/WMMA), CDNA + RDNA: `interleave_idx`, the transforms summary, the
   per-tile A/B grids, and the ACC transform tables.
-- `helpers/tiling/traits/mma_traits.py` — the traits / catalogue registry (128 atom rows); every §9
-  construction quantity is read from here.
+- `helpers/tiling/traits/mma_traits.py` — the traits / catalogue registry (one row per MMA instruction
+  variant); every §9 construction quantity is read from here.
 - `helpers/tiling/transforms/` — `interleave_idx`, `k_distribution`, `classify_transform`,
   `mma_pair_k_aligned`, `derive_c_distribution` (the §9 accumulator ground truth).
 - `helpers/tiling/mma/styles/interleaved.py` — `InterleavedStyle`: the shipped interleaved construction

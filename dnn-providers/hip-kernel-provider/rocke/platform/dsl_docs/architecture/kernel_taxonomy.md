@@ -13,40 +13,9 @@ different authoring rules or separate kinds of kernels.
 
 The checked-in
 [`arch_specs.json`](../../python/rocke/core/arch/data/arch_specs.json) file is
-the source of truth for the `MmaOp` entries available to each exact gfx target.
-The catalog currently contains the following operation IDs.
-
-- **`gfx90a` (wave64)**
-  - f16: `mfma_f32_16x16x16_f16`, `mfma_f32_32x32x8_f16`
-  - bf16: `mfma_f32_16x16x16_bf16`, `mfma_f32_32x32x8_bf16`
-- **`gfx942` (wave64)**
-  - f32: `mfma_f32_16x16x4_f32`, `mfma_f32_32x32x2_f32`
-  - f16: `mfma_f32_16x16x16_f16`, `mfma_f32_32x32x8_f16`
-  - bf16: `mfma_f32_16x16x16_bf16`, `mfma_f32_32x32x8_bf16`
-  - fp8: `mfma_f32_16x16x32_fp8`, `mfma_f32_32x32x16_fp8`
-  - bf8: `mfma_f32_16x16x32_bf8`, `mfma_f32_32x32x16_bf8`
-- **`gfx950` (wave64)**
-  - f32: `mfma_f32_16x16x4_f32`, `mfma_f32_32x32x2_f32`
-  - f16: `mfma_f32_16x16x16_f16`, `mfma_f32_16x16x32_f16`,
-    `mfma_f32_32x32x8_f16`, `mfma_f32_32x32x16_f16`
-  - bf16: `mfma_f32_16x16x16_bf16`, `mfma_f32_16x16x32_bf16`,
-    `mfma_f32_32x32x8_bf16`, `mfma_f32_32x32x16_bf16`
-  - fp8: `mfma_f32_16x16x32_fp8`, `mfma_f32_32x32x16_fp8`
-  - bf8: `mfma_f32_16x16x32_bf8`, `mfma_f32_32x32x16_bf8`
-- **`gfx1151` and `gfx11-generic` (wave32)**
-  - f16: `wmma_f32_16x16x16_f16`
-  - bf16: `wmma_f32_16x16x16_bf16`
-  - integer: `wmma_i32_16x16x16_iu4`, `wmma_i32_16x16x16_iu8`
-- **`gfx1201` and `gfx12-generic` (wave32)**
-  - f16: `wmma_gfx12_f32_16x16x16_f16`
-  - bf16: `wmma_gfx12_f32_16x16x16_bf16`
-- **`gfx1250` (wave32)**
-  - f16: `wmma_gfx1250_f32_16x16x32_f16`
-  - bf16: `wmma_gfx1250_f32_16x16x32_bf16`
-  - fp8/bf8 combinations: `wmma_gfx1250_f32_16x16x64_fp8_fp8`,
-    `wmma_gfx1250_f32_16x16x64_fp8_bf8`,
-    `wmma_gfx1250_f32_16x16x64_bf8_fp8`,
-    `wmma_gfx1250_f32_16x16x64_bf8_bf8`
+the source of truth for the `MmaOp` entries available to each exact gfx target;
+read each target's `mma` list there (or `ArchTarget.from_gfx(gfx).mma.ops`)
+rather than a copy of it.
 
 Catalog presence, builder support, and wave geometry are separate facts. A
 builder must select an operation accepted by its validator and use the layout
@@ -87,6 +56,7 @@ and exact gfx targets.
 | `build_direct_conv_4c` | [L/common/conv_direct_grouped.py](../../../library/kernels/common/conv_direct_grouped.py) | small-channel grouped convolution (fprop; dgrad via `build_direct_4c_dgrad`) | direct `mfma_f32_4x4x4_{f16,bf16}` intrinsic outside `MmaCatalog` | validated exact gfx target |
 | `build_direct_depthwise_dgrad_windowed` | [L/common/conv_direct_grouped.py](../../../library/kernels/common/conv_direct_grouped.py) | depthwise backward-data convolution (stride 1) | scalar FMA or `arith.fdot2` tap pairs; Toeplitz form on `mfma_f32_16x16x32_{f16,bf16}` (gfx950) | owning validator |
 | `build_direct_conv_nongrouped` | [L/common/conv_direct_nongrouped.py](../../../library/kernels/common/conv_direct_nongrouped.py) | non-grouped (`groups == 1`) direct convolution, LDS halo reuse | square `mfma_f32_{32x32x16,32x32x8,16x16x32,16x16x16}` | owning validator |
+| `build_dgrad_pp_mfma` | [L/common/conv_direct_dgrad_pp_mfma.py](../../../library/kernels/common/conv_direct_dgrad_pp_mfma.py) | dense stride-1 dgrad, LDS-DMA staging, two-rank ping-pong, in-kernel transposed weights | `mfma_f32_16x16x32_{f16,bf16}` | owning validator |
 | `build_direct_wgrad_tiled` | [L/common/conv_direct_wgrad_tiled.py](../../../library/kernels/common/conv_direct_wgrad_tiled.py) | direct wgrad, LDS-DMA row pipeline, fp32 atomics | `mfma_f32_16x16x32_{f16,bf16}` | owning validator |
 | `build_dw_wgrad_lds`, `build_dw_wgrad_cols`, `build_dw_wgrad_fold` | [L/common/conv_direct_dw_wgrad.py](../../../library/kernels/common/conv_direct_dw_wgrad.py) | depthwise wgrad into partial slots, and their fold | VALU FMA | owning validator |
 | `build_wgrad_gather` | [L/common/conv_direct_wgrad_gather.py](../../../library/kernels/common/conv_direct_wgrad_gather.py) | dense small-C wgrad into partial slots | `mfma_f32_16x16x32_{f16,bf16}` | owning validator |

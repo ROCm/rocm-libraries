@@ -31,13 +31,16 @@ namespace hipdnn_plugin_sdk::ingestor
 ///        because descriptor sets are drop-in.
 /// @param byMetric DescriptorSet::heuristicsByMetric.
 /// @param unavailable Metric to architecture keys whose named model was refused.
+/// @param reserveWorkspaceTokens The ranker serves a slot of a slotted engine, so `ws.*` tokens
+///        stay out of its features (RFC 0021 §6).
 inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(
     const std::optional<HeuristicDescriptor>& descriptor,
     const std::string& describedBy = {},
     const std::vector<std::string>& knobs = {},
     const std::unordered_set<std::string>& kmdFields = {},
     const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& byMetric = {},
-    const std::map<std::string, std::set<std::string>>& unavailable = {})
+    const std::map<std::string, std::set<std::string>>& unavailable = {},
+    bool reserveWorkspaceTokens = false)
 {
     if(byMetric.empty() && unavailable.empty() && descriptor && descriptor->score.metric.empty())
     {
@@ -62,7 +65,7 @@ inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(
     if(!entries.empty() || !unavailable.empty())
     {
         return UhdKernelHeuristic::makeResolver(
-            entries, describedBy, knobs, kmdFields, unavailable);
+            entries, describedBy, knobs, kmdFields, unavailable, reserveWorkspaceTokens);
     }
     HIPDNN_PLUGIN_LOG_WARN("ingestor: "
                            << (describedBy.empty() ? "engine" : describedBy)

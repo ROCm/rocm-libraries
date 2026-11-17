@@ -470,7 +470,7 @@ def test_instruction_vmax_f16_true16():
     try:
         low = HighBitSel.LOW
 
-        # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
+        # abs() source (the activation-clamp shape from amax_generator.AMaxKernelGenerator.max_per_data).
         inst = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
                        t16(vgpr("Value+0", isAbs=True), low))
         s = str(inst)
@@ -507,3 +507,47 @@ if __name__ == "__main__":
     test_instruction_global_wb()
     test_instruction_global_inv()
     test_instruction_scalar_float()
+
+
+def test_instruction_literal_operands():
+    from rocisa.instruction import VAndOrB32, VPermB32
+
+    insts = [
+        (VAndOrB32(dst=vgpr(1), src0=vgpr(2), src1=sgpr(3), src2="0x64006400"),
+         "v_and_or_b32 v1, v2, s3, 0x64006400"),
+        (VPermB32(dst=vgpr(1), src0=vgpr(2), src1=vgpr(3), src2="0x07060302"),
+         "v_perm_b32 v1, v2, v3, 0x07060302"),
+    ]
+    for inst, text in insts:
+        assert str(inst).startswith(text)
+        assert str(deepcopy(inst)) == str(inst)
+
+
+# Pinned to ISAs with fused v_lshl_or_b32; the lowered v_lshlrev_b32 + v_or_b32
+# path is only reachable on gfx803, whose ISA init would add ~1.5s.
+@pytest.mark.parametrize("isa, wavefront", [((9, 4, 2), 64), ((11, 5, 1), 32)],
+                         ids=["gfx942", "gfx1151"])
+def test_instruction_literal_operand_lshl_or(isa, wavefront):
+    import os
+    import shutil
+    from rocisa.instruction import VLShiftLeftOrB32
+
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    search_path = os.pathsep.join([
+        os.path.join(rocm_path, "bin"),
+        os.path.join(rocm_path, "lib", "llvm", "bin"),
+    ])
+    assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
+    ri = rocisa.rocIsa.getInstance()
+    prev = ri.getKernel()
+    ri.init(isa, assembler, False)
+    ri.setKernel(isa, wavefront)
+    try:
+        if not ri.getAsmCaps().get("HasLshlOr", 0):
+            pytest.skip(f"assembler does not report HasLshlOr for {rocisa.isaToGfx(isa)}")
+        inst = VLShiftLeftOrB32(dst=vgpr(1), shiftHex=16, src0=vgpr(2), src1="0x80008000")
+        lines = [l.split("//")[0].strip() for l in str(inst).splitlines() if l.strip()]
+        assert lines == ["v_lshl_or_b32 v1, v2, 16, 0x80008000"]
+        assert str(deepcopy(inst)) == str(inst)
+    finally:
+        ri.setKernel(tuple(prev.isa), prev.wavefrontSize)

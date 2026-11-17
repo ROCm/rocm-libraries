@@ -162,10 +162,11 @@ def _parse_args(argv):
         action="append",
         default=[],
         metavar="NAME",
-        help="A top-level child folder of the source root that this build does "
-        "not pack (a descriptor family whose build flag is off), matched "
-        "case-insensitively. A name that matches no folder is ignored. "
-        "Repeatable.",
+        help="A folder of the source root that this build does not pack: a "
+        "top-level child (a descriptor family whose build flag is off) or a "
+        "'/'-separated path under the root (a bundle whose DVC files were not "
+        "pulled), matched case-insensitively. A name that matches no folder is "
+        "ignored. Repeatable.",
     )
     p.add_argument(
         "--disable-kind",
@@ -184,6 +185,13 @@ def _parse_args(argv):
         "to the committed projects/hipdnn/flatbuffers_sdk/op_schema_registry.json "
         "of the repository this tool lives in. Read only when a UED carries a "
         "pattern.",
+    )
+    p.add_argument(
+        "--require-dvc",
+        action="store_true",
+        help="A model file that is absent while its `<model>.dvc` pointer exists "
+        "(a `dvc pull` that was not run) is an error. Without it the model's UHD "
+        "is left out of the shipped tree with a warning.",
     )
     return p.parse_args(argv)
 
@@ -205,6 +213,7 @@ def main(argv=None):
         exclude_folders=tuple(args.exclude_folder),
         disabled_kinds=tuple(args.disable_kind),
         op_schema_registry=args.op_schema_registry,
+        require_dvc=args.require_dvc,
     )
     return 0
 

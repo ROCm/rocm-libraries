@@ -38,11 +38,6 @@
  *     stride formula, so the .c ports it inline (rocke__paged_kv_offset).
  *   - apply_softcap_log2 (helpers/activations.py) is used only on the 2D
  *     softcap>0 path; the .c ports it inline (rocke__apply_softcap).
- *   - binary_search_seq_idx (helpers/attention.py) backs the 3D kernel's
- *     seq-idx scan. The 2D kernel uses an inline linear cu_q scan (ported
- *     faithfully); the 3D kernel's binary-search scan body is bounded but
- *     TODO(port): it falls back to the same inline linear scan (numerically
- *     identical seq_idx) until rocke_binary_search_seq_idx is exported.
  */
 #ifndef ROCKE_HELPER_HELPER_ROCKE_INSTANCES_COMMON_ATTENTION_UNIFIED_H
 #define ROCKE_HELPER_HELPER_ROCKE_INSTANCES_COMMON_ATTENTION_UNIFIED_H

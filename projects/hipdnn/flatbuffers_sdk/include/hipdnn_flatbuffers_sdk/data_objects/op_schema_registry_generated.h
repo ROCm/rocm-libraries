@@ -619,7 +619,7 @@ inline constexpr std::array<AttributeSchema, 1> RMSNORM_BWD_ATTRIBUTES = {{
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline constexpr std::array<EdgeSchema, 21> SDPA_OPERANDS = {{
+inline constexpr std::array<EdgeSchema, 23> SDPA_OPERANDS = {{
     {"q", false, &readEdge<&SdpaAttributes::q_tensor_uid>},
     {"k", false, &readEdge<&SdpaAttributes::k_tensor_uid>},
     {"v", false, &readEdge<&SdpaAttributes::v_tensor_uid>},
@@ -641,6 +641,8 @@ inline constexpr std::array<EdgeSchema, 21> SDPA_OPERANDS = {{
     {"descale_s", true, &readEdge<&SdpaAttributes::descale_s_tensor_uid>},
     {"scale_s", true, &readEdge<&SdpaAttributes::scale_s_tensor_uid>},
     {"scale_o", true, &readEdge<&SdpaAttributes::scale_o_tensor_uid>},
+    {"cu_seq_len_q", true, &readEdge<&SdpaAttributes::cu_seq_len_q_tensor_uid>},
+    {"cu_seq_len_kv", true, &readEdge<&SdpaAttributes::cu_seq_len_kv_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 7> SDPA_RESULTS = {{

@@ -102,6 +102,11 @@ rocsparse_status rocsparse_spildlt0_buffer_size(rocsparse_handle            hand
  *  \f]
  *  for each entry found in the lower triangular part of the matrix \f$A\f$.
  *
+ *  \note
+ *  With the numeric boost enabled (\ref rocsparse_spildlt0_input_boost_enable), a pivot \f$D_i\f$ with \f$|D_i|\f$ at most the boost tolerance is replaced by the modulus of the boost value with the sign of \f$D_i\f$ (see \ref rocsparse_spildlt0_set_input).
+ *  The singularity check runs on the pivot before the boost: a pivot with \f$|D_i|\f$ at most the singularity tolerance is reported as \ref rocsparse_singularity_numeric_near even if it is then boosted. A zero pivot is reported only if it is still zero after the boost.
+ *  \ref rocsparse_spilu0 differs here: it does not report a near-singular pivot while its boost is enabled.
+ *
  *  Performing the above operation requires two stages, the stage \ref rocsparse_spildlt0_stage_analysis and the stage \ref rocsparse_spildlt0_stage_compute.
  *  The stage \ref rocsparse_spildlt0_stage_analysis is required to perform the stage \ref rocsparse_spildlt0_stage_compute and only needs to be called once for a given sparse matrix \f$A\f$, while the stage \ref rocsparse_spildlt0_stage_compute can be repeatedly used with different matrices \f$A\f$ that have the same sparsity pattern.
  *
@@ -150,7 +155,7 @@ rocsparse_status rocsparse_spildlt0_buffer_size(rocsparse_handle            hand
  *  \retval rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval rocsparse_status_not_implemented the sparse format is invalid or the preconditioner \p P is not identical to the matrix to factorize \p A.
  *  \retval rocsparse_status_invalid_value the \p spildlt0_stage value is invalid.
- *  \retval rocsparse_status_invalid_pointer \p spildlt0_descr, \p A, \p P, or \p buffer_size_in_bytes pointer is invalid.
+ *  \retval rocsparse_status_invalid_pointer \p spildlt0_descr, \p A, \p P, or \p buffer is null, or \ref rocsparse_spildlt0_stage_compute is called with the numeric boost enabled (\ref rocsparse_spildlt0_input_boost_enable) and without a boost tolerance or value.
  *
  *  \par Example
  *  \snippet example_rocsparse_spildlt0.cpp doc example

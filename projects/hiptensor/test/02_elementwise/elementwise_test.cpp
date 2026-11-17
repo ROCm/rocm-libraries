@@ -59,9 +59,7 @@ namespace hiptensor
     // False = skip test
     bool PermutationTest::checkDevice(hiptensorDataType_t datatype) const
     {
-        return (isF16Supported() && (datatype == HIPTENSOR_R_16F || datatype == HIPTENSOR_R_16BF))
-               || (isF32Supported() && (datatype == HIPTENSOR_R_32F))
-               || (isF64Supported() && (datatype == HIPTENSOR_R_64F));
+        return isElementwiseTypeSupportedOnDevice(datatype);
     }
 
     bool PermutationTest::checkSizes() const
@@ -296,6 +294,12 @@ namespace hiptensor
                       : hiptensor::stridesFromLengths(
                             extentB, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
+            double alphaValue{};
+            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha))
+            {
+                FAIL() << "Unexpected compute data type: " << computeDataType;
+            }
+
             //hiptensorStatus_t err;
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
@@ -350,12 +354,6 @@ namespace hiptensor
             hiptensorPlan_t plan;
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */));
-
-            double alphaValue{};
-            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha))
-            {
-                FAIL() << "Unexpected compute data type: " << computeDataType;
-            }
 
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();
