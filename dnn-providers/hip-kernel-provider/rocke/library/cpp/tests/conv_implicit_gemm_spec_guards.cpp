@@ -80,7 +80,8 @@ void run_refused(const Refused& r)
 
 void ukd_3d(rocke_implicit_gemm_conv_spec_t* s, const char**)
 {
-    s->problem = rocke_conv_problem_make_3d(2, 8, 8, 8, 64, 128, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    s->problem
+        = rocke_conv_problem_make_3d(2, 8, 8, 8, 64, 128, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
     s->uniform_k_decode = true;
 }
 void ukd_group_merge(rocke_implicit_gemm_conv_spec_t* s, const char**)
@@ -233,8 +234,7 @@ int main()
         {85, "split-K forward folds through the cluster: dtype_d must be fp16 or bf16 (got fp32)"},
         /* 91, 95, 100, 105: the RDNA4 forward knobs' rejected parity configs */
         {91, "uniform_k_decode does not support the pointwise fast path"},
-        {95,
-         "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets (got gfx12_cdna)"},
+        {95, "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets (got gfx12_cdna)"},
         {100, "lds_swizzle sets the LDS layout itself (no lds_layout / lds_k_pad)"},
         {105, "group_fast_raster does not support split-K (z carries the slice)"},
     };
@@ -244,7 +244,9 @@ int main()
         {"ukd_3d", ukd_3d, "uniform_k_decode does not support 3-D convolution"},
         {"ukd_group_merge", ukd_group_merge, "uniform_k_decode does not support group_merge"},
         {"rtp2", rtp_two, "regt_prefetch (fwd) must be 0 or 1 (got 2)"},
-        {"rtp_wavelet", rtp_wavelet, "regt_prefetch is the 'mem' pipeline's K loop (got 'wavelet')"},
+        {"rtp_wavelet",
+         rtp_wavelet,
+         "regt_prefetch is the 'mem' pipeline's K loop (got 'wavelet')"},
         {"rtp_split_k_cluster",
          rtp_split_k_cluster,
          "regt_prefetch does not combine with split_k_cluster"},
