@@ -759,8 +759,8 @@ inputs); re-check them when that pin moves.
 
 | CI job | Runs on | Tier | CI shards | Builds rocKE |
 |---|---|---|---|---|
-| `therock-multi-arch-ci.yml` | a pull request or push that touches only `dnn-providers/hip-kernel-provider` | standard | 4 | yes |
-| `therock-multi-arch-ci.yml` | a pull request or push that touches shared CI files or unclassified paths | quick | 1 | yes |
+| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config, hip-kernel-provider among them (alone or with hipDNN) | standard | 4 | yes |
+| `therock-multi-arch-ci.yml` | a manual dispatch, or a pull request or push that touches shared CI files or an unclassified path: the configure step then tests every project | quick | 1 | yes |
 | `therock-multi-arch-ci-nightly.yml` | the nightly schedule | comprehensive | 4 | no |
 | `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | yes; tests the build tree only |
 
@@ -859,8 +859,10 @@ tests of an unshipped family belong in standard. Which contracts count as core
 for each family is part of the domain test strategy, which refines this list.
 State the reason for a quick addition in the pull request.
 
-**standard is the default home of every new test.** Each entry is split over
-the CI shards item by item ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)).
+**standard is the default home of every new test.** Only entries whose command
+starts with `_ROCKE_INSTALLED_PYTEST` are split over the CI shards item by item;
+every other entry runs whole on every CI shard
+([§5.0.2](#502-ci-shards-and-rocke-item-sharding)).
 
 **comprehensive and full** are for explicit resource gates and other
 scheduled-only entries. [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says
@@ -873,9 +875,13 @@ under quick today: every `rocke_pytest_<part>`, `rocke_tiling_pytest`,
 `rocke_tiling_gpu_pytest` and most library entries. A new file under
 `platform/tests`, under the tiling tests, or under
 `library/tests/dispatch/attention/` or `library/tests/sdpa/` joins one of them
-with no edit, so it runs in quick. The exception is
-`platform/tests/instances/differential/`: only its golden check is installed,
-so a new test file there runs only in `tests/run_all.py`.
+with no edit if it is installed and its entry's filters select it, so it runs in
+quick. The `rocke_pytest_<part>` entries deselect `integration`-marked tests,
+which run only in `tests/run_all.py`; tiling `visualization/` tests that use no
+GPU fixture run in the comprehensive `rocke_tiling_visualization_pytest`, which
+no CI job runs today; and only the golden check of
+`platform/tests/instances/differential/` is installed, so a new test file there
+runs only in `tests/run_all.py`.
 `rocke_library_attention_pytest` and `rocke_library_sdpa_pytest` collect the two
 library directories whole. Another library file runs once it is added to an
 entry's file list.
@@ -885,7 +891,9 @@ change adds at most Q3 to quick. Otherwise register a standard entry, modeled on
 
 - start its command as [§5.0.2](#502-ci-shards-and-rocke-item-sharding) requires;
 - list it under `python-standard` in `ROCKE_ENGINE_test_categories_external.yaml`,
-  which gives it the labels of standard and every later tier;
+  which gives it the labels of standard and every later tier; choose a name
+  that no quick pattern matches (`rocke_pytest_*`, `*_reference_unit_pytest`,
+  `*_gpu_gfx<target>_pytest`), or quick runs it too;
 - keep its files out of the quick entries: for `platform/tests`, `list(APPEND)`
   the file to `_ROCKE_PLATFORM_PYTEST_IGNORE_<part>`; for the two library
   directories, add an `--ignore` for the file to its entry in
@@ -905,19 +913,25 @@ change adds at most Q3 to quick. Otherwise register a standard entry, modeled on
 4. Set pytest `--timeout` and CTest `TIMEOUT` from measured time with the
    headroom of S2; make a slow test cheaper rather than raise a limit.
 
-**Measure before you choose.** In `platform/`, the items of a file that take a
-second or more, and its split over 4 CI shards:
+**Measure before you choose.** In `platform/`, the setup, call and teardown
+times of a file's items (`-q` hides those under 5 ms), and its split over 4 CI
+shards:
 
 ```bash
 PYTHONPATH=python python -m pytest tests/dispatch/dispatch_tests/core/test_example_parity.py \
-  --durations=0 --durations-min=1 -q
+  --durations=0 -q
 PYTHONPATH=python ROCKE_TEST_SHARD=1/4 python -m pytest -p rocke.tests.ctest_shard \
   tests/dispatch/dispatch_tests/core/test_example_parity.py --collect-only -q
 ```
 
 Run each shard index from 0 to 3; in `library/`, use
-`PYTHONPATH=../platform/python`. Items that share a shard key run on the same shard, so add their times. After
-the first CI run, check the entry's time and split lines in the CI log.
+`PYTHONPATH=../platform/python`. Sum an item's setup, call and teardown, and
+sum the items that share a shard key, as they run on the same shard. For Q3 and
+S2, time each affected entry whole, before and after the change, from a provider
+install: `ctest --test-dir <install>/bin/hip_kernel_provider -R '^<entry>$'`.
+For G1, time the new golden case alone, at every LLVM flavor the golden entries
+check. After the first CI run, check the entry's time and split lines in the CI
+log.
 
 **Examples.**
 
