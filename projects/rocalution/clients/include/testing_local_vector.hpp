@@ -28,7 +28,12 @@
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
+#include <memory>
 #include <rocalution/rocalution.hpp>
+
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+#include <omp.h>
+#endif
 
 using namespace rocalution;
 
@@ -586,20 +591,20 @@ void testing_copy_from_data(const Arguments& argus)
     // Create a LocalVector and allocate some size
     LocalVector<T> vec = getTestVector<T>(argus.size);
 
-    // Pointer to data
-    T data_ptr[5] = {0, 2, 4, 8, 16};
+    // CopyFromData reads GetSize() elements
+    std::vector<T> data(argus.size);
+    for(int i = 0; i < argus.size; ++i)
+    {
+        data[i] = static_cast<T>(2 * i);
+    }
 
     // Attempt to copy from the data pointer
-    EXPECT_NO_THROW(vec.CopyFromData(data_ptr));
+    EXPECT_NO_THROW(vec.CopyFromData(data.data()));
 
     EXPECT_EQ(vec.GetSize(), argus.size);
-    if(argus.size >= 5)
+    for(int i = 0; i < argus.size; ++i)
     {
-        EXPECT_EQ(vec[0], static_cast<T>(0.0));
-        EXPECT_EQ(vec[1], static_cast<T>(2.0));
-        EXPECT_EQ(vec[2], static_cast<T>(4.0));
-        EXPECT_EQ(vec[3], static_cast<T>(8.0));
-        EXPECT_EQ(vec[4], static_cast<T>(16.0));
+        EXPECT_EQ(vec[i], data[i]);
     }
 }
 
@@ -1188,6 +1193,66 @@ void testing_amax(const Arguments& argus)
     EXPECT_EQ(max_value, static_cast<T>(2 * argus.size));
 }
 
+template <typename T>
+void testing_amax_ties(void)
+{
+    // Above the OpenMP threshold, with 2 threads, so that the host backend runs threaded and
+    // the static schedule splits the vector at size / 2
+    int64_t size = 1 << 16;
+    int64_t half = size / 2;
+
+    set_omp_threads_rocalution(2);
+    set_omp_threshold_rocalution(0);
+
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    // With dynamic teams the runtime may run the scan on one thread, which hides the race
+    int def_dynamic = omp_get_dynamic();
+    omp_set_dynamic(0);
+#endif
+
+    LocalVector<T> vec;
+    vec.Allocate("TestVector", size);
+
+    T       max_value;
+    int64_t max_index;
+
+    // All entries equal: the first one is the maximum
+    vec.Ones();
+    max_value = 0;
+    max_index = vec.Amax(max_value);
+    EXPECT_EQ(max_index, 0);
+    EXPECT_EQ(max_value, static_cast<T>(1));
+
+    // Tied maxima on both sides of the chunk boundary
+    vec[half - 1] = static_cast<T>(2);
+    vec[half]     = static_cast<T>(2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+    // Tied in magnitude only
+    vec[half - 1] = static_cast<T>(-2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+    vec[half - 1] = static_cast<T>(2);
+    vec[half]     = static_cast<T>(-2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    omp_set_dynamic(def_dynamic);
+#endif
+
+    // Default threshold; the thread count is reset by the next init_rocalution()
+    set_omp_threshold_rocalution(10000);
+}
+
 // Helper function to read binary file contents into a vector
 template <typename ValueType>
 std::vector<ValueType> ReadBinaryFile(const std::string& filename, size_t& size_out)
@@ -1441,6 +1506,116 @@ void testing_move_to_host_async(const Arguments& argus)
     for(int i = 0; i < argus.size; ++i)
     {
         EXPECT_EQ(vec[i], static_cast<T>(i + 1));
+    }
+}
+
+// LocalVector that reports which backend object it currently points to. It does not show whether
+// the other backend object was freed, because vector_host_ and vector_accel_ are private. If both
+// is_host_() and is_accel_() are true, the vector has lost both backend objects and any further
+// access (including its destructor) dereferences NULL.
+template <typename T>
+class local_vector_location : public LocalVector<T>
+{
+public:
+    bool on_host() const
+    {
+        return this->is_host_() && !this->is_accel_();
+    }
+
+    bool on_accel() const
+    {
+        return this->is_accel_() && !this->is_host_();
+    }
+};
+
+template <typename T>
+bool local_vector_reaches_accelerator()
+{
+    local_vector_location<T> vec;
+    vec.Allocate("probe", 1);
+    vec.MoveToAccelerator();
+    return vec.on_accel();
+}
+
+template <typename T>
+void testing_move_to_host_async_sync(const Arguments& argus)
+{
+    if(!local_vector_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    // Heap allocated so that a vector without backend objects can be leaked instead of crashing
+    // the test binary in its destructor
+    std::unique_ptr<local_vector_location<T>> vec(new local_vector_location<T>);
+    vec->Allocate("TestVector", argus.size);
+    for(int i = 0; i < argus.size; ++i)
+    {
+        (*vec)[i] = static_cast<T>(i + 1);
+    }
+
+    vec->MoveToAccelerator();
+    ASSERT_TRUE(vec->on_accel());
+
+    vec->MoveToHostAsync();
+
+    // The vector switches to the host only once Sync() is called
+    EXPECT_TRUE(vec->on_accel());
+
+    vec->Sync();
+
+    if(!vec->on_host())
+    {
+        vec.release();
+        FAIL() << "LocalVector is not on the host after MoveToHostAsync() and Sync()";
+    }
+
+    EXPECT_EQ(vec->GetSize(), argus.size);
+    EXPECT_TRUE(vec->Check());
+    for(int i = 0; i < argus.size; ++i)
+    {
+        EXPECT_EQ((*vec)[i], static_cast<T>(i + 1));
+    }
+}
+
+template <typename T>
+void testing_move_to_accelerator_async_sync(const Arguments& argus)
+{
+    if(!local_vector_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    // Heap allocated so that a vector without backend objects can be leaked instead of crashing
+    // the test binary in its destructor
+    std::unique_ptr<local_vector_location<T>> vec(new local_vector_location<T>);
+    vec->Allocate("TestVector", argus.size);
+    for(int i = 0; i < argus.size; ++i)
+    {
+        (*vec)[i] = static_cast<T>(i + 1);
+    }
+
+    vec->MoveToAcceleratorAsync();
+
+    // The vector switches to the accelerator only once Sync() is called
+    EXPECT_TRUE(vec->on_host());
+
+    vec->Sync();
+
+    if(!vec->on_accel())
+    {
+        vec.release();
+        FAIL() << "LocalVector is not on the accelerator after MoveToAcceleratorAsync() and Sync()";
+    }
+
+    EXPECT_EQ(vec->GetSize(), argus.size);
+    EXPECT_TRUE(vec->Check());
+
+    vec->MoveToHost();
+    ASSERT_TRUE(vec->on_host());
+    for(int i = 0; i < argus.size; ++i)
+    {
+        EXPECT_EQ((*vec)[i], static_cast<T>(i + 1));
     }
 }
 

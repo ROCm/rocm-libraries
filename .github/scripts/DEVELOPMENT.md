@@ -63,7 +63,6 @@ from the standard library plus the packages above.
 │   │
 │   ├── # Repo maintenance
 │   ├── get_changed_projects.py         ← git-diff → validated changed project list
-│   ├── merge-submodules.py             ← merge per-project .gitmodules into one file
 │   │
 │   └── tests/
 │       ├── fixtures/                   ← .patch files for commit-message tests
@@ -88,7 +87,6 @@ from the standard library plus the packages above.
 | `hipdnn-superbuild-ci.yml` | `check_wheel_freshness.py` |
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |
 | `pr-import.yml` / `multiple_pr_import.yml` | `import_subrepo_prs.py` |
-| `merge-submodules.yml` | `merge-submodules.py` |
 
 ---
 
@@ -271,9 +269,15 @@ In `therock-multi-arch-ci.yml`, build and test jobs run inside TheRock's
 reusable workflows, so the `notify_teams_on_failure` job calls this script once
 with `--failed-jobs-from-run`. The script lists the failed `Linux::`/`Windows::`
 jobs of the run attempt (skipping `(xfail)` jobs), downloads each job log with
-`gh api`, routes test jobs by job name and build jobs by `--component-name`,
+`gh api`, cuts it at the first `##[error]` line, strips timestamps, ANSI
+escapes and the runner's `##[group]Run …` step headers, routes test jobs by job
+name and build jobs by `--component-name`,
 sends one notification per job, and exits 1 if any notification failed. The
-job is `continue-on-error`, so a notifier failure never blocks a PR.
+job is `continue-on-error`, so a notifier failure never blocks a PR. It runs
+only for `pull_request` events: the Teams flow looks up every message by its
+`**PR #<n>:**` line and rejects messages without one. The notify step is
+skipped when neither webhook secret is set (fork and Dependabot PRs), which
+is checked directly instead of inferring it from the PR head being a fork.
 
 To debug this mode locally against a real run, point it at that run and use
 `--dry-run` (requires an authenticated `gh` or `GH_TOKEN`):
@@ -304,16 +308,3 @@ python .github/scripts/notify_teams.py \
 ```
 
 Sample logs for local runs live in `test/team_notification_fixtures/`.
-
----
-
-### Repo Maintenance — `merge-submodules.py`
-
-This script has no external dependencies beyond the standard library and
-operates only on the local filesystem. It is safe to run locally at any time:
-
-```bash
-python .github/scripts/merge-submodules.py   # rewrites .gitmodules
-```
-
-Inspect the diff before committing. This script has no unit tests yet.

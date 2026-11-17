@@ -43,19 +43,19 @@ extern "C" {
  * and LLVM 21+. The flavor selects a baseline datalayout and pins
  * the declaration text emitted up front (comgr verifies declares before the
  * auto-upgrade pass). Mirrors LLVM_FLAVOR_LLVM20 / LLVM_FLAVOR_LLVM22 /
- * LLVM_FLAVOR_LLVM23. */
+ * LLVM_FLAVOR_LLVM23 / LLVM_FLAVOR_LLVM24. */
 typedef enum rocke_llvm_flavor
 {
     ROCKE_LLVM_FLAVOR_AUTO = 0, /* explicit override or loaded COMGR compiler */
     ROCKE_LLVM_FLAVOR_LLVM20, /* "llvm20" */
     ROCKE_LLVM_FLAVOR_LLVM22, /* "llvm22" */
-    ROCKE_LLVM_FLAVOR_LLVM23 /* "llvm23" */
+    ROCKE_LLVM_FLAVOR_LLVM23, /* "llvm23" */
+    ROCKE_LLVM_FLAVOR_LLVM24 /* "llvm24" */
 } rocke_llvm_flavor_t;
 
-/* Canonical flavor string ("llvm20"/"llvm22"/"llvm23"), or "" for AUTO. */
+/* Canonical flavor string ("llvm20"/"llvm22"/"llvm23"/"llvm24"), or "" for AUTO. */
 const char* rocke_llvm_flavor_name(rocke_llvm_flavor_t flavor);
-/* Reverse: "llvm20"/"llvm22"/"llvm23" -> flavor; ROCKE_LLVM_FLAVOR_AUTO if
- * unknown. */
+/* Reverse a canonical concrete flavor name; ROCKE_LLVM_FLAVOR_AUTO if unknown. */
 rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name);
 
 /* Enumerate the concrete (non-AUTO) flavors, oldest first, so a caller can
@@ -67,6 +67,14 @@ int rocke_llvm_flavor_count(void);
 const char* rocke_llvm_flavor_at(int index);
 /* True for a concrete flavor; false for AUTO or an out-of-range value. */
 bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
+
+/* ------------------------------------------------------------ LDS pool */
+
+/* Alignment (bytes) of the single LDS pool global that backs every smem
+ * allocation (Python core.lower_llvm.SMEM_POOL_ALIGN). No segment can be
+ * aligned more strictly than the pool it lives in. Public: the fused-MoE LDS
+ * budget (rocke_mega_lds_pool_bytes) bounds the pool with it. */
+#define ROCKE_SMEM_POOL_ALIGN 16
 
 /* ------------------------------------------------------------ entry point */
 

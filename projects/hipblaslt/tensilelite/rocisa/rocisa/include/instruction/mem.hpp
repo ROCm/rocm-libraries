@@ -3933,12 +3933,14 @@ namespace rocisa
     {
         using ContainerPtr    = std::shared_ptr<Container>;
         using RegContainerPtr = std::shared_ptr<RegisterContainer>;
-        TensorLoadToLds(const RegContainerPtr& group0,
-                        const RegContainerPtr& group1,
-                        const RegContainerPtr& group2,
-                        const RegContainerPtr& group3,
-                        const std::string&     comment = std::string())
+        TensorLoadToLds(const RegContainerPtr&         group0,
+                        const RegContainerPtr&         group1,
+                        const RegContainerPtr&         group2,
+                        const RegContainerPtr&         group3,
+                        const std::string&             comment = std::string(),
+                        std::optional<TENSORModifiers> tensor  = std::nullopt)
             : Instruction(InstType::INST_TDM, comment)
+            , tensor(tensor)
             , group0(group0)
             , group1(group1)
             , group2(group2)
@@ -3962,6 +3964,7 @@ namespace rocisa
 
         TensorLoadToLds(const TensorLoadToLds& other)
             : Instruction(other)
+            , tensor(other.tensor)
             , group0(other.group0)
             , group1(other.group1)
             , group2(other.group2)
@@ -4018,8 +4021,14 @@ namespace rocisa
         std::string toString() const override
         {
             auto kStr = preStr() + " " + getArgStr();
+            if(tensor)
+            {
+                kStr += tensor->toString();
+            }
             return formatWithComment(kStr);
         }
+
+        std::optional<TENSORModifiers> tensor;
 
     private:
         RegContainerPtr group0;
