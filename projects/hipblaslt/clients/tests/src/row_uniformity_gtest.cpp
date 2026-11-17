@@ -1198,6 +1198,7 @@ namespace
         int64_t     k;
         const char* gfx950Pick;
         bool        tiledB;
+        int64_t     m = 4096;
     };
 
     // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
@@ -1250,7 +1251,7 @@ namespace
     {
         const MXFp6Case&  c       = GetParam();
         const bool        e3m2    = c.type == HIP_R_6F_E3M2;
-        constexpr int64_t m       = 4096;
+        const int64_t     m       = c.m;
         constexpr int64_t n       = 4096;
         const int64_t     k       = c.k;
         const int64_t     kBlocks = k / 32;
@@ -1258,7 +1259,7 @@ namespace
         const int64_t     large1  = kBlocks / 2;
         constexpr int     one     = 127;
         // One kernel per registered K and B order: the pick must be the one built for them.
-        const std::string kTag           = "_4096x4096x" + std::to_string(k) + "_";
+        const std::string kTag = "_" + std::to_string(m) + "x4096x" + std::to_string(k) + "_";
         auto              isExpectedPick = [&](const std::string& pick) {
             return pick.rfind(c.gfx950Pick, 0) == 0 && pick.find(kTag) != std::string::npos
                    && (pick.find("_Acanonical_") == std::string::npos) == c.tiledB;
@@ -1622,6 +1623,10 @@ namespace
         ::testing::Values(
             MXFp6Case{"E2M3_K2048", HIP_R_6F_E2M3, 2048, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{"E3M2_K2048", HIP_R_6F_E3M2, 2048, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{
+                "E2M3_M32768_K6144", HIP_R_6F_E2M3, 6144, "rocke_gemm_mx_e2m3_e2m3_", true, 32768},
+            MXFp6Case{
+                "E3M2_M32768_K6144", HIP_R_6F_E3M2, 6144, "rocke_gemm_mx_e3m2_e3m2_", true, 32768},
             MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{
                 "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false},
