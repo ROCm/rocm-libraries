@@ -64,9 +64,9 @@ StaggerU is 0. The kernels therefore declare `uniformSummationOrder: true` in
 
 ## `wvSplitKQ_vllm_f8_{bf16,f16}_tn_n<N>_y<YTILE>u<UNRL>`
 
-FP8 (E4M3) A and B with scalar scales, BF16 or FP16 C and D, FP32 accumulate,
-hipBLASLt TN with `n = N` tokens, and optionally hipBLASLt's bias vector, one
-value of D's type per row of D:
+FP8 (E4M3) A and B with scalar scales or none, BF16 or FP16 C and D, FP32
+accumulate, hipBLASLt TN with `n = N` tokens, and optionally hipBLASLt's bias
+vector, one value of D's type per row of D:
 
 ```
 D[m + n*ldd] = alpha * scaleA * scaleB * sum_k A[m*lda + k] * B[n*ldb + k]
@@ -112,7 +112,8 @@ stage for its 160 KB per CU and use its OCP FP8 encoding.
 Predicated in `custom.config`: `batch == 1`, `n == N`, `K % 16 == 0`, and unit
 strides on all four tensors. Rows past `m` read the last row and are not
 written, so `m` needs no bound, and K needs none either. Rows are reduced as in
-the BF16 and FP16 kernels, so these kernels also declare
+the BF16 and FP16 kernels, and the epilogue rounds every row the same way,
+whether its row tile is whole or not, so these kernels also declare
 `uniformSummationOrder: true`.
 
 ## Kernarg preload
@@ -183,18 +184,24 @@ FP16 D, so the FP16 file forms a placeholder of its own, with the same header
 and D's data types set to FP16. Each bias file forms a placeholder of its own,
 searched after the plain-GEMM one and before the FP8 Bias/activation/scale-vector
 libraries, and its rows lie inside the plain file's rows, so a GEMM without a
-bias never takes a bias row. Problems with an FP32 bias, an activation or a
-scale-alpha vector, scale vectors, or `K % 16 != 0` fall through to the
-libraries they reach today. With or without a bias, the rows cover every `n`
-up to 4, as vLLM does, from m = 9 and K = 1024, where the 64 lanes of a wave
-first get 16 bytes of K each; vLLM itself sends any such GEMM with M and K
-multiples of 16 to the kernel.
+bias never takes a bias row. FP8 GEMMs without A and B scales match these files
+too, since hipBLASLt accepts a problem without scales in any scale mode, and
+the kernels read a null scale as 1. Problems with an FP32 bias, an activation
+or a scale-alpha vector, scale vectors, or `K % 16 != 0` fall through to the
+libraries they reach today, and the solutions refuse a user split-K or WGM
+override, since the kernels take neither. With or without a bias, the rows
+cover every `n` up to 4, as vLLM does, from m = 9 and K = 1024, where the 64
+lanes of a wave first get 16 bytes of K each; vLLM itself sends any such GEMM
+with M and K multiples of 16 to the kernel.
 
-MI355X searches its own tuned logic first here too. Its FP8 Bias logic with
-BF16 D (`gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs.yaml`),
-which also accepts GEMMs without a bias, tunes 24 shapes with `n` up to 4
-inside the BF16 rows, among them the Llama-3.1-70B TP8 decode GEMMs, so on
-MI355X those shapes keep their tuned kernels, with or without a bias.
+The FP8 Bias logic with BF16 D, which also accepts GEMMs without a bias, tunes
+24 shapes with `n` of 1, 2 or 4 inside the BF16 rows, among them the
+Llama-3.1-70B TP8 decode GEMMs, in both the MI350 file
+(`gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs.yaml`)
+and MI355X's (`gfx950/gfx950_id75a3/Equality/`, same name). MI355X searches its
+own tuned logic first, so there those shapes keep their tuned kernels, with or
+without a bias. On MI350 the files above come first, so these kernels take
+them over.
 
 ## Tensile metadata
 

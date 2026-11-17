@@ -276,43 +276,37 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_and_saveexec_b64 s[34:35], s[0:1]
 	s_cbranch_execz .LBB0_71
 ; %bb.30:
-	v_mbcnt_lo_u32_b32 v0, -1, 0
-	v_mbcnt_hi_u32_b32 v0, -1, v0
 	s_lshl_b64 s[36:37], s[30:31], 1
-	v_and_b32_e32 v1, 63, v0
 	s_cmp_eq_u64 s[28:29], 0
-	v_cmp_gt_u32_e32 vcc, 44, v1
 	s_cselect_b64 s[0:1], -1, 0
 	s_cmp_lg_u64 s[28:29], 0
-	v_cndmask_b32_e64 v2, 0, 20, vcc
-	v_cmp_gt_u32_e32 vcc, 24, v1
 	s_cselect_b64 s[16:17], -1, 0
 	s_cmp_lg_u32 s2, 0
-	v_cndmask_b32_e64 v1, 0, 40, vcc
-	s_mov_b32 s41, 0
 	s_cselect_b64 s[18:19], -1, 0
-	v_add_lshl_u32 v58, v2, v0, 2
-	v_add_lshl_u32 v59, v1, v0, 2
 	v_cndmask_b32_e64 v0, 0, 1, s[16:17]
+	s_mov_b32 s41, 0
+	v_cmp_ne_u32_e64 s[22:23], 1, v0
+	v_cndmask_b32_e64 v0, 0, 1, s[18:19]
 	s_mov_b32 s40, s26
 	s_mov_b32 s44, s27
 	s_mov_b32 s45, s41
-	v_cmp_ne_u32_e64 s[22:23], 1, v0
-	v_cndmask_b32_e64 v0, 0, 1, s[18:19]
+	v_cmp_ne_u32_e64 s[16:17], 1, v0
+	v_mbcnt_lo_u32_b32 v0, -1, 0
 	s_mov_b64 s[38:39], 0
 	s_add_i32 s24, s2, -16
 	v_cmp_eq_u32_e64 s[8:9], 0, v47
 	v_cmp_neq_f32_e64 s[42:43], s25, 0
 	s_lshl_b64 s[46:47], s[40:41], 1
 	s_lshl_b64 s[48:49], s[44:45], 1
-	v_add_u32_e32 v60, s2, v44
-	v_add_u32_e32 v61, s56, v44
+	v_add_u32_e32 v58, s2, v44
+	v_add_u32_e32 v59, s56, v44
 	v_mov_b32_e32 v49, 0
-	v_cmp_ne_u32_e64 s[16:17], 1, v0
+	v_mbcnt_hi_u32_b32 v60, -1, v0
 	v_mov_b32_e32 v50, v46
 	s_branch .LBB0_33
 .LBB0_31:                               ;   in Loop: Header=BB0_33 Depth=1
-	v_add_f32_e32 v0, v62, v4
+	v_cvt_f32_f16_e32 v0, v61
+	v_add_f32_e32 v0, v4, v0
 	v_cndmask_b32_e64 v0, v0, v4, s[0:1]
 	v_cvt_f16_f32_e32 v0, v0
 	global_store_short v[2:3], v0, off offset:2
@@ -325,24 +319,20 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_cbranch_execz .LBB0_71
 .LBB0_33:                               ; =>This Loop Header: Depth=1
                                         ;     Child Loop BB0_39 Depth 2
-	v_or_b32_e32 v64, 1, v50
+	v_or_b32_e32 v62, 1, v50
 	s_and_b64 vcc, exec, s[22:23]
 	v_min_u32_e32 v48, s3, v50
-	v_min_u32_e32 v0, s3, v64
+	v_min_u32_e32 v0, s3, v62
 	v_mov_b32_e32 v63, v49
-	v_mov_b32_e32 v62, v49
+	v_mov_b32_e32 v61, v49
 	s_cbranch_vccnz .LBB0_35
 ; %bb.34:                               ;   in Loop: Header=BB0_33 Depth=1
 	v_lshl_add_u64 v[2:3], v[48:49], 1, s[28:29]
 	v_mov_b32_e32 v1, v49
 	s_waitcnt lgkmcnt(0)
 	v_lshl_add_u64 v[4:5], v[0:1], 1, s[28:29]
-	global_load_ushort v1, v[2:3], off
-	global_load_ushort v6, v[4:5], off
-	s_waitcnt vmcnt(1)
-	v_cvt_f32_f16_e32 v63, v1
-	s_waitcnt vmcnt(0)
-	v_cvt_f32_f16_e32 v62, v6
+	global_load_ushort v63, v[2:3], off
+	global_load_ushort v61, v[4:5], off
 .LBB0_35:                               ;   in Loop: Header=BB0_33 Depth=1
 	s_and_b64 vcc, exec, s[16:17]
 	s_cbranch_vccnz .LBB0_52
@@ -446,7 +436,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_cbranch_execz .LBB0_48
 ; %bb.47:                               ;   in Loop: Header=BB0_39 Depth=2
 	s_waitcnt vmcnt(0)
-	v_add_u32_e32 v36, s50, v60
+	v_add_u32_e32 v36, s50, v58
 	ds_read_b128 v[36:39], v36
 .LBB0_48:                               ;   in Loop: Header=BB0_39 Depth=2
 	s_or_b64 exec, exec, s[20:21]
@@ -463,7 +453,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_cbranch_execz .LBB0_37
 ; %bb.51:                               ;   in Loop: Header=BB0_39 Depth=2
 	s_waitcnt vmcnt(0)
-	v_add_u32_e32 v40, s50, v61
+	v_add_u32_e32 v40, s50, v59
 	ds_read_b128 v[40:43], v40
 	s_branch .LBB0_37
 .LBB0_52:                               ;   in Loop: Header=BB0_33 Depth=1
@@ -473,14 +463,14 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	v_mov_b32_e32 v20, v23
 	s_waitcnt lgkmcnt(5)
 	v_mov_b32_e32 v19, v23
-	v_mov_b32_e32 v18, v23
 	s_waitcnt lgkmcnt(4)
+	v_mov_b32_e32 v18, v23
 	v_mov_b32_e32 v17, v23
-	v_mov_b32_e32 v16, v23
 	s_waitcnt lgkmcnt(3)
+	v_mov_b32_e32 v16, v23
 	v_mov_b32_e32 v11, v23
-	v_mov_b32_e32 v10, v23
 	s_waitcnt lgkmcnt(2)
+	v_mov_b32_e32 v10, v23
 	v_mov_b32_e32 v9, v23
 	v_mov_b32_e32 v8, v23
 	s_waitcnt lgkmcnt(1)
@@ -498,54 +488,67 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	v_mov_b32_e32 v13, v23
 	v_mov_b32_e32 v12, v23
 .LBB0_53:                               ;   in Loop: Header=BB0_33 Depth=1
-	s_nop 5
+	v_and_b32_e32 v24, 63, v60
+	s_nop 4
 	v_add_f32_dpp v0, v1, v0 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_cmp_gt_u32_e32 vcc, 44, v24
 	v_add_f32_dpp v20, v21, v20 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v16, v17, v16 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v8, v9, v8 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v4, v5, v4 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v0, v2, v0 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v2, v13, v12 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_cndmask_b32_e64 v25, 0, 20, vcc
 	v_add_f32_dpp v20, v22, v20 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v16, v18, v16 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v8, v10, v8 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v4, v6, v4 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v2, v14, v2 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_add_lshl_u32 v25, v25, v60, 2
 	v_add_f32_dpp v20, v23, v20 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v16, v19, v16 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
-	v_add_f32_dpp v8, v11, v8 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_add_f32_dpp v9, v11, v8 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v4, v7, v4 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v0, v3, v0 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v2, v15, v2 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
-	ds_bpermute_b32 v21, v58, v20
-	ds_bpermute_b32 v17, v58, v16
-	ds_bpermute_b32 v9, v58, v8
-	ds_bpermute_b32 v5, v58, v4
-	ds_bpermute_b32 v1, v58, v0
-	ds_bpermute_b32 v3, v58, v2
+	ds_bpermute_b32 v21, v25, v20
+	ds_bpermute_b32 v17, v25, v16
+	ds_bpermute_b32 v10, v25, v9
+	ds_bpermute_b32 v5, v25, v4
+	ds_bpermute_b32 v1, v25, v0
+	ds_bpermute_b32 v3, v25, v2
+	v_cmp_gt_u32_e32 vcc, 24, v24
 	s_waitcnt lgkmcnt(5)
-	v_add_f32_e32 v18, v20, v21
+	v_add_f32_e32 v8, v20, v21
 	s_waitcnt lgkmcnt(4)
-	v_add_f32_e32 v16, v16, v17
+	v_add_f32_e32 v17, v16, v17
+	v_cndmask_b32_e64 v24, 0, 40, vcc
+	v_add_lshl_u32 v24, v24, v60, 2
 	s_waitcnt lgkmcnt(3)
-	v_add_f32_e32 v10, v8, v9
+	v_add_f32_e32 v11, v9, v10
 	s_waitcnt lgkmcnt(2)
-	v_add_f32_e32 v8, v4, v5
+	v_add_f32_e32 v9, v4, v5
 	s_waitcnt lgkmcnt(1)
 	v_add_f32_e32 v6, v0, v1
 	s_waitcnt lgkmcnt(0)
 	v_add_f32_e32 v4, v2, v3
-	ds_bpermute_b32 v19, v59, v18
-	ds_bpermute_b32 v17, v59, v16
-	ds_bpermute_b32 v11, v59, v10
-	ds_bpermute_b32 v9, v59, v8
-	ds_bpermute_b32 v7, v59, v6
-	ds_bpermute_b32 v5, v59, v4
+	ds_bpermute_b32 v19, v24, v8
+	ds_bpermute_b32 v18, v24, v17
+	ds_bpermute_b32 v16, v24, v11
+	ds_bpermute_b32 v10, v24, v9
+	ds_bpermute_b32 v7, v24, v6
+	ds_bpermute_b32 v5, v24, v4
+	s_waitcnt vmcnt(1)
+	;;#ASMSTART
+	;;#ASMEND
+	s_waitcnt vmcnt(0)
+	;;#ASMSTART
+	;;#ASMEND
 	s_and_saveexec_b64 s[50:51], s[8:9]
 	s_cbranch_execz .LBB0_32
 ; %bb.54:                               ;   in Loop: Header=BB0_33 Depth=1
 	s_waitcnt lgkmcnt(5)
-	v_add_f32_e32 v2, v18, v19
+	v_add_f32_e32 v2, v8, v19
 	v_mov_b32_e32 v51, v49
 	v_cndmask_b32_e64 v3, 0, 1, s[42:43]
 	v_lshl_add_u64 v[0:1], v[50:51], 1, s[12:13]
@@ -558,17 +561,18 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_waitcnt vmcnt(0)
 	v_fma_mix_f32 v2, s25, v3, v2 op_sel_hi:[0,1,0]
 .LBB0_56:                               ;   in Loop: Header=BB0_33 Depth=1
-	v_add_f32_e32 v3, v63, v2
+	v_cvt_f32_f16_e32 v8, v63
+	v_cmp_gt_u32_e64 s[20:21], s11, v62
+	v_add_f32_e32 v3, v2, v8
 	v_cndmask_b32_e64 v2, v3, v2, s[0:1]
 	v_cvt_f16_f32_e32 v12, v2
 	v_lshl_add_u64 v[2:3], v[50:51], 1, s[14:15]
-	v_cmp_gt_u32_e64 s[20:21], s11, v64
 	global_store_short v[2:3], v12, off
 	s_and_saveexec_b64 s[52:53], s[20:21]
 	s_cbranch_execz .LBB0_60
 ; %bb.57:                               ;   in Loop: Header=BB0_33 Depth=1
 	s_waitcnt lgkmcnt(4)
-	v_add_f32_e32 v12, v16, v17
+	v_add_f32_e32 v12, v17, v18
 	s_and_b64 vcc, exec, s[18:19]
 	v_mul_f32_e32 v12, v45, v12
 	s_cbranch_vccnz .LBB0_59
@@ -577,45 +581,47 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_waitcnt vmcnt(0)
 	v_fma_mix_f32 v12, s25, v13, v12 op_sel_hi:[0,1,0]
 .LBB0_59:                               ;   in Loop: Header=BB0_33 Depth=1
-	v_add_f32_e32 v13, v62, v12
+	v_cvt_f32_f16_e32 v13, v61
+	v_add_f32_e32 v13, v12, v13
 	v_cndmask_b32_e64 v12, v13, v12, s[0:1]
 	v_cvt_f16_f32_e32 v12, v12
 	global_store_short v[2:3], v12, off offset:2
 .LBB0_60:                               ;   in Loop: Header=BB0_33 Depth=1
 	s_or_b64 exec, exec, s[52:53]
 	s_waitcnt lgkmcnt(3)
-	v_add_f32_e32 v10, v10, v11
+	v_add_f32_e32 v11, v11, v16
 	v_lshl_add_u64 v[0:1], s[40:41], 1, v[0:1]
 	s_and_b64 vcc, exec, s[18:19]
-	v_mul_f32_e32 v10, v45, v10
+	v_mul_f32_e32 v11, v45, v11
 	s_cbranch_vccnz .LBB0_62
 ; %bb.61:                               ;   in Loop: Header=BB0_33 Depth=1
-	global_load_ushort v11, v[0:1], off
+	global_load_ushort v12, v[0:1], off
 	s_waitcnt vmcnt(0)
-	v_fma_mix_f32 v10, s25, v11, v10 op_sel_hi:[0,1,0]
+	v_fma_mix_f32 v11, s25, v12, v11 op_sel_hi:[0,1,0]
 .LBB0_62:                               ;   in Loop: Header=BB0_33 Depth=1
-	v_add_f32_e32 v11, v63, v10
-	v_cndmask_b32_e64 v10, v11, v10, s[0:1]
-	v_cvt_f16_f32_e32 v10, v10
+	v_add_f32_e32 v12, v11, v8
+	v_cndmask_b32_e64 v11, v12, v11, s[0:1]
+	v_cvt_f16_f32_e32 v11, v11
 	v_lshl_add_u64 v[2:3], s[44:45], 1, v[2:3]
-	global_store_short v[2:3], v10, off
+	global_store_short v[2:3], v11, off
 	s_and_saveexec_b64 s[52:53], s[20:21]
 	s_cbranch_execz .LBB0_66
 ; %bb.63:                               ;   in Loop: Header=BB0_33 Depth=1
 	s_waitcnt lgkmcnt(2)
-	v_add_f32_e32 v8, v8, v9
+	v_add_f32_e32 v9, v9, v10
 	s_and_b64 vcc, exec, s[18:19]
-	v_mul_f32_e32 v8, v45, v8
+	v_mul_f32_e32 v9, v45, v9
 	s_cbranch_vccnz .LBB0_65
 ; %bb.64:                               ;   in Loop: Header=BB0_33 Depth=1
-	global_load_ushort v9, v[0:1], off offset:2
+	global_load_ushort v10, v[0:1], off offset:2
 	s_waitcnt vmcnt(0)
-	v_fma_mix_f32 v8, s25, v9, v8 op_sel_hi:[0,1,0]
+	v_fma_mix_f32 v9, s25, v10, v9 op_sel_hi:[0,1,0]
 .LBB0_65:                               ;   in Loop: Header=BB0_33 Depth=1
-	v_add_f32_e32 v9, v62, v8
-	v_cndmask_b32_e64 v8, v9, v8, s[0:1]
-	v_cvt_f16_f32_e32 v8, v8
-	global_store_short v[2:3], v8, off offset:2
+	v_cvt_f32_f16_e32 v10, v61
+	v_add_f32_e32 v10, v9, v10
+	v_cndmask_b32_e64 v9, v10, v9, s[0:1]
+	v_cvt_f16_f32_e32 v9, v9
+	global_store_short v[2:3], v9, off offset:2
 .LBB0_66:                               ;   in Loop: Header=BB0_33 Depth=1
 	s_or_b64 exec, exec, s[52:53]
 	s_waitcnt lgkmcnt(1)
@@ -629,7 +635,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_waitcnt vmcnt(0)
 	v_fma_mix_f32 v6, s25, v7, v6 op_sel_hi:[0,1,0]
 .LBB0_68:                               ;   in Loop: Header=BB0_33 Depth=1
-	v_add_f32_e32 v7, v63, v6
+	v_add_f32_e32 v7, v6, v8
 	v_cndmask_b32_e64 v6, v7, v6, s[0:1]
 	v_cvt_f16_f32_e32 v6, v6
 	v_lshl_add_u64 v[2:3], v[2:3], 0, s[48:49]
@@ -658,41 +664,35 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_and_b64 exec, exec, vcc
 	s_cbranch_execz .LBB0_103
 ; %bb.74:
-	v_mbcnt_lo_u32_b32 v0, -1, 0
-	v_mbcnt_hi_u32_b32 v0, -1, v0
-	v_and_b32_e32 v1, 63, v0
 	s_cmp_eq_u64 s[28:29], 0
-	v_cmp_gt_u32_e32 vcc, 44, v1
 	s_cselect_b64 s[0:1], -1, 0
 	s_cmp_lg_u64 s[28:29], 0
-	v_cndmask_b32_e64 v2, 0, 20, vcc
-	v_cmp_gt_u32_e32 vcc, 24, v1
 	s_cselect_b64 s[8:9], -1, 0
 	s_cmp_lg_u32 s2, 0
-	v_cndmask_b32_e64 v1, 0, 40, vcc
-	s_mov_b32 s31, 0
 	s_cselect_b64 s[16:17], -1, 0
-	v_add_lshl_u32 v54, v2, v0, 2
-	v_add_lshl_u32 v55, v1, v0, 2
 	v_cndmask_b32_e64 v0, 0, 1, s[8:9]
+	s_mov_b32 s31, 0
+	v_cmp_ne_u32_e64 s[8:9], 1, v0
+	v_cndmask_b32_e64 v0, 0, 1, s[16:17]
 	s_mov_b32 s30, s26
 	s_mov_b32 s26, s27
 	s_mov_b32 s27, s31
-	v_cmp_ne_u32_e64 s[8:9], 1, v0
-	v_cndmask_b32_e64 v0, 0, 1, s[16:17]
+	v_cmp_ne_u32_e64 s[20:21], 1, v0
+	v_mbcnt_lo_u32_b32 v0, -1, 0
 	s_mov_b64 s[22:23], 0
 	s_add_i32 s24, s2, -16
 	v_cmp_eq_u32_e64 s[6:7], 0, v47
 	v_cmp_neq_f32_e64 s[34:35], s25, 0
 	s_lshl_b64 s[36:37], s[30:31], 1
 	s_lshl_b64 s[38:39], s[26:27], 1
-	v_add_u32_e32 v56, s56, v44
-	v_add_u32_e32 v57, s2, v44
+	v_add_u32_e32 v54, s56, v44
+	v_add_u32_e32 v55, s2, v44
 	v_mov_b32_e32 v49, 0
-	v_cmp_ne_u32_e64 s[20:21], 1, v0
+	v_mbcnt_hi_u32_b32 v56, -1, v0
 	s_branch .LBB0_77
 .LBB0_75:                               ;   in Loop: Header=BB0_77 Depth=1
-	v_add_f32_e32 v0, v58, v4
+	v_cvt_f32_f16_e32 v0, v57
+	v_add_f32_e32 v0, v4, v0
 	v_cndmask_b32_e64 v0, v0, v4, s[0:1]
 	v_cvt_f16_f32_e32 v0, v0
 	global_store_short v[2:3], v0, off offset:2
@@ -705,24 +705,20 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_cbranch_execz .LBB0_103
 .LBB0_77:                               ; =>This Loop Header: Depth=1
                                         ;     Child Loop BB0_82 Depth 2
-	v_or_b32_e32 v60, 1, v46
+	v_or_b32_e32 v58, 1, v46
 	s_and_b64 vcc, exec, s[8:9]
 	v_min_u32_e32 v48, s3, v46
-	v_min_u32_e32 v0, s3, v60
+	v_min_u32_e32 v0, s3, v58
 	v_mov_b32_e32 v59, v49
-	v_mov_b32_e32 v58, v49
+	v_mov_b32_e32 v57, v49
 	s_cbranch_vccnz .LBB0_79
 ; %bb.78:                               ;   in Loop: Header=BB0_77 Depth=1
 	v_lshl_add_u64 v[2:3], v[48:49], 1, s[28:29]
 	v_mov_b32_e32 v1, v49
 	s_waitcnt lgkmcnt(0)
 	v_lshl_add_u64 v[4:5], v[0:1], 1, s[28:29]
-	global_load_ushort v1, v[2:3], off
-	global_load_ushort v6, v[4:5], off
-	s_waitcnt vmcnt(1)
-	v_cvt_f32_f16_e32 v59, v1
-	s_waitcnt vmcnt(0)
-	v_cvt_f32_f16_e32 v58, v6
+	global_load_ushort v59, v[2:3], off
+	global_load_ushort v57, v[4:5], off
 .LBB0_79:                               ;   in Loop: Header=BB0_77 Depth=1
 	s_and_b64 vcc, exec, s[20:21]
 	s_cbranch_vccnz .LBB0_84
@@ -796,10 +792,10 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_and_saveexec_b64 s[16:17], vcc
 	s_cbranch_execz .LBB0_81
 ; %bb.83:                               ;   in Loop: Header=BB0_82 Depth=2
-	v_add_u32_e32 v32, s18, v57
+	v_add_u32_e32 v32, s18, v55
 	ds_read_b128 v[36:39], v47
 	ds_read_b128 v[40:43], v32
-	v_add_u32_e32 v32, s18, v56
+	v_add_u32_e32 v32, s18, v54
 	ds_read_b128 v[32:35], v32
 	s_branch .LBB0_81
 .LBB0_84:                               ;   in Loop: Header=BB0_77 Depth=1
@@ -809,14 +805,14 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	v_mov_b32_e32 v20, v23
 	s_waitcnt lgkmcnt(5)
 	v_mov_b32_e32 v19, v23
-	v_mov_b32_e32 v18, v23
 	s_waitcnt lgkmcnt(4)
+	v_mov_b32_e32 v18, v23
 	v_mov_b32_e32 v17, v23
-	v_mov_b32_e32 v16, v23
 	s_waitcnt lgkmcnt(3)
+	v_mov_b32_e32 v16, v23
 	v_mov_b32_e32 v11, v23
-	v_mov_b32_e32 v10, v23
 	s_waitcnt lgkmcnt(2)
+	v_mov_b32_e32 v10, v23
 	v_mov_b32_e32 v9, v23
 	v_mov_b32_e32 v8, v23
 	s_waitcnt lgkmcnt(1)
@@ -834,54 +830,67 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	v_mov_b32_e32 v13, v23
 	v_mov_b32_e32 v12, v23
 .LBB0_85:                               ;   in Loop: Header=BB0_77 Depth=1
-	s_nop 5
+	v_and_b32_e32 v24, 63, v56
+	s_nop 4
 	v_add_f32_dpp v0, v1, v0 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_cmp_gt_u32_e32 vcc, 44, v24
 	v_add_f32_dpp v20, v21, v20 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v16, v17, v16 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v8, v9, v8 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v4, v5, v4 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v0, v2, v0 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v2, v13, v12 row_shl:1 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_cndmask_b32_e64 v25, 0, 20, vcc
 	v_add_f32_dpp v20, v22, v20 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v16, v18, v16 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v8, v10, v8 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v4, v6, v4 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v2, v14, v2 row_shl:2 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_add_lshl_u32 v25, v25, v56, 2
 	v_add_f32_dpp v20, v23, v20 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v16, v19, v16 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
-	v_add_f32_dpp v8, v11, v8 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
+	v_add_f32_dpp v9, v11, v8 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v4, v7, v4 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v0, v3, v0 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
 	v_add_f32_dpp v2, v15, v2 row_shl:3 row_mask:0xf bank_mask:0xf bound_ctrl:1
-	ds_bpermute_b32 v21, v54, v20
-	ds_bpermute_b32 v17, v54, v16
-	ds_bpermute_b32 v9, v54, v8
-	ds_bpermute_b32 v5, v54, v4
-	ds_bpermute_b32 v1, v54, v0
-	ds_bpermute_b32 v3, v54, v2
+	ds_bpermute_b32 v21, v25, v20
+	ds_bpermute_b32 v17, v25, v16
+	ds_bpermute_b32 v10, v25, v9
+	ds_bpermute_b32 v5, v25, v4
+	ds_bpermute_b32 v1, v25, v0
+	ds_bpermute_b32 v3, v25, v2
+	v_cmp_gt_u32_e32 vcc, 24, v24
 	s_waitcnt lgkmcnt(5)
-	v_add_f32_e32 v18, v20, v21
+	v_add_f32_e32 v8, v20, v21
 	s_waitcnt lgkmcnt(4)
-	v_add_f32_e32 v16, v16, v17
+	v_add_f32_e32 v17, v16, v17
+	v_cndmask_b32_e64 v24, 0, 40, vcc
+	v_add_lshl_u32 v24, v24, v56, 2
 	s_waitcnt lgkmcnt(3)
-	v_add_f32_e32 v10, v8, v9
+	v_add_f32_e32 v11, v9, v10
 	s_waitcnt lgkmcnt(2)
-	v_add_f32_e32 v8, v4, v5
+	v_add_f32_e32 v9, v4, v5
 	s_waitcnt lgkmcnt(1)
 	v_add_f32_e32 v6, v0, v1
 	s_waitcnt lgkmcnt(0)
 	v_add_f32_e32 v4, v2, v3
-	ds_bpermute_b32 v19, v55, v18
-	ds_bpermute_b32 v17, v55, v16
-	ds_bpermute_b32 v11, v55, v10
-	ds_bpermute_b32 v9, v55, v8
-	ds_bpermute_b32 v7, v55, v6
-	ds_bpermute_b32 v5, v55, v4
+	ds_bpermute_b32 v19, v24, v8
+	ds_bpermute_b32 v18, v24, v17
+	ds_bpermute_b32 v16, v24, v11
+	ds_bpermute_b32 v10, v24, v9
+	ds_bpermute_b32 v7, v24, v6
+	ds_bpermute_b32 v5, v24, v4
+	s_waitcnt vmcnt(1)
+	;;#ASMSTART
+	;;#ASMEND
+	s_waitcnt vmcnt(0)
+	;;#ASMSTART
+	;;#ASMEND
 	s_and_saveexec_b64 s[40:41], s[6:7]
 	s_cbranch_execz .LBB0_76
 ; %bb.86:                               ;   in Loop: Header=BB0_77 Depth=1
 	s_waitcnt lgkmcnt(5)
-	v_add_f32_e32 v2, v18, v19
+	v_add_f32_e32 v2, v8, v19
 	v_mov_b32_e32 v47, v49
 	v_cndmask_b32_e64 v3, 0, 1, s[34:35]
 	v_lshl_add_u64 v[0:1], v[46:47], 1, s[12:13]
@@ -894,17 +903,18 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_waitcnt vmcnt(0)
 	v_fma_mix_f32 v2, s25, v3, v2 op_sel_hi:[0,1,0]
 .LBB0_88:                               ;   in Loop: Header=BB0_77 Depth=1
-	v_add_f32_e32 v3, v59, v2
+	v_cvt_f32_f16_e32 v8, v59
+	v_cmp_gt_u32_e64 s[18:19], s11, v58
+	v_add_f32_e32 v3, v2, v8
 	v_cndmask_b32_e64 v2, v3, v2, s[0:1]
 	v_cvt_f16_f32_e32 v12, v2
 	v_lshl_add_u64 v[2:3], v[46:47], 1, s[14:15]
-	v_cmp_gt_u32_e64 s[18:19], s11, v60
 	global_store_short v[2:3], v12, off
 	s_and_saveexec_b64 s[42:43], s[18:19]
 	s_cbranch_execz .LBB0_92
 ; %bb.89:                               ;   in Loop: Header=BB0_77 Depth=1
 	s_waitcnt lgkmcnt(4)
-	v_add_f32_e32 v12, v16, v17
+	v_add_f32_e32 v12, v17, v18
 	s_and_b64 vcc, exec, s[16:17]
 	v_mul_f32_e32 v12, v45, v12
 	s_cbranch_vccnz .LBB0_91
@@ -913,45 +923,47 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_waitcnt vmcnt(0)
 	v_fma_mix_f32 v12, s25, v13, v12 op_sel_hi:[0,1,0]
 .LBB0_91:                               ;   in Loop: Header=BB0_77 Depth=1
-	v_add_f32_e32 v13, v58, v12
+	v_cvt_f32_f16_e32 v13, v57
+	v_add_f32_e32 v13, v12, v13
 	v_cndmask_b32_e64 v12, v13, v12, s[0:1]
 	v_cvt_f16_f32_e32 v12, v12
 	global_store_short v[2:3], v12, off offset:2
 .LBB0_92:                               ;   in Loop: Header=BB0_77 Depth=1
 	s_or_b64 exec, exec, s[42:43]
 	s_waitcnt lgkmcnt(3)
-	v_add_f32_e32 v10, v10, v11
+	v_add_f32_e32 v11, v11, v16
 	v_lshl_add_u64 v[0:1], s[30:31], 1, v[0:1]
 	s_and_b64 vcc, exec, s[16:17]
-	v_mul_f32_e32 v10, v45, v10
+	v_mul_f32_e32 v11, v45, v11
 	s_cbranch_vccnz .LBB0_94
 ; %bb.93:                               ;   in Loop: Header=BB0_77 Depth=1
-	global_load_ushort v11, v[0:1], off
+	global_load_ushort v12, v[0:1], off
 	s_waitcnt vmcnt(0)
-	v_fma_mix_f32 v10, s25, v11, v10 op_sel_hi:[0,1,0]
+	v_fma_mix_f32 v11, s25, v12, v11 op_sel_hi:[0,1,0]
 .LBB0_94:                               ;   in Loop: Header=BB0_77 Depth=1
-	v_add_f32_e32 v11, v59, v10
-	v_cndmask_b32_e64 v10, v11, v10, s[0:1]
-	v_cvt_f16_f32_e32 v10, v10
+	v_add_f32_e32 v12, v11, v8
+	v_cndmask_b32_e64 v11, v12, v11, s[0:1]
+	v_cvt_f16_f32_e32 v11, v11
 	v_lshl_add_u64 v[2:3], s[26:27], 1, v[2:3]
-	global_store_short v[2:3], v10, off
+	global_store_short v[2:3], v11, off
 	s_and_saveexec_b64 s[42:43], s[18:19]
 	s_cbranch_execz .LBB0_98
 ; %bb.95:                               ;   in Loop: Header=BB0_77 Depth=1
 	s_waitcnt lgkmcnt(2)
-	v_add_f32_e32 v8, v8, v9
+	v_add_f32_e32 v9, v9, v10
 	s_and_b64 vcc, exec, s[16:17]
-	v_mul_f32_e32 v8, v45, v8
+	v_mul_f32_e32 v9, v45, v9
 	s_cbranch_vccnz .LBB0_97
 ; %bb.96:                               ;   in Loop: Header=BB0_77 Depth=1
-	global_load_ushort v9, v[0:1], off offset:2
+	global_load_ushort v10, v[0:1], off offset:2
 	s_waitcnt vmcnt(0)
-	v_fma_mix_f32 v8, s25, v9, v8 op_sel_hi:[0,1,0]
+	v_fma_mix_f32 v9, s25, v10, v9 op_sel_hi:[0,1,0]
 .LBB0_97:                               ;   in Loop: Header=BB0_77 Depth=1
-	v_add_f32_e32 v9, v58, v8
-	v_cndmask_b32_e64 v8, v9, v8, s[0:1]
-	v_cvt_f16_f32_e32 v8, v8
-	global_store_short v[2:3], v8, off offset:2
+	v_cvt_f32_f16_e32 v10, v57
+	v_add_f32_e32 v10, v9, v10
+	v_cndmask_b32_e64 v9, v10, v9, s[0:1]
+	v_cvt_f16_f32_e32 v9, v9
+	global_store_short v[2:3], v9, off offset:2
 .LBB0_98:                               ;   in Loop: Header=BB0_77 Depth=1
 	s_or_b64 exec, exec, s[42:43]
 	s_waitcnt lgkmcnt(1)
@@ -965,7 +977,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	s_waitcnt vmcnt(0)
 	v_fma_mix_f32 v6, s25, v7, v6 op_sel_hi:[0,1,0]
 .LBB0_100:                              ;   in Loop: Header=BB0_77 Depth=1
-	v_add_f32_e32 v7, v59, v6
+	v_add_f32_e32 v7, v6, v8
 	v_cndmask_b32_e64 v6, v7, v6, s[0:1]
 	v_cvt_f16_f32_e32 v6, v6
 	v_lshl_add_u64 v[2:3], v[2:3], 0, s[38:39]
@@ -1007,7 +1019,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 		.amdhsa_system_vgpr_workitem_id 1
 		.amdhsa_next_free_vgpr 97
 		.amdhsa_next_free_sgpr 96
-		.amdhsa_accum_offset 68
+		.amdhsa_accum_offset 64
 		.amdhsa_reserve_vcc 1
 		.amdhsa_reserve_xnack_mask 1
 		.amdhsa_float_round_mode_32 0
@@ -1030,7 +1042,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 .Lfunc_end0:
 	.size	wvSplitKQ_vllm_f8_f16_tn_n3_y2u1, .Lfunc_end0-wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
                                         ; -- End function
-	.set wvSplitKQ_vllm_f8_f16_tn_n3_y2u1.num_vgpr, 65
+	.set wvSplitKQ_vllm_f8_f16_tn_n3_y2u1.num_vgpr, 64
 	.set wvSplitKQ_vllm_f8_f16_tn_n3_y2u1.num_agpr, 0
 	.set wvSplitKQ_vllm_f8_f16_tn_n3_y2u1.numbered_sgpr, 58
 	.set wvSplitKQ_vllm_f8_f16_tn_n3_y2u1.num_named_barrier, 0
@@ -1042,11 +1054,11 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	.set wvSplitKQ_vllm_f8_f16_tn_n3_y2u1.has_indirect_call, 0
 	.section	.AMDGPU.csdata,"",@progbits
 ; Kernel info:
-; codeLenInByte = 4684
+; codeLenInByte = 4700
 ; TotalNumSgprs: 64
-; NumVgprs: 65
+; NumVgprs: 64
 ; NumAgprs: 0
-; TotalNumVgprs: 65
+; TotalNumVgprs: 64
 ; ScratchSize: 0
 ; MemoryBound: 1
 ; FloatMode: 240
@@ -1056,7 +1068,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 ; VGPRBlocks: 12
 ; NumSGPRsForWavesPerEU: 102
 ; NumVGPRsForWavesPerEU: 97
-; AccumOffset: 68
+; AccumOffset: 64
 ; Occupancy: 4
 ; WaveLimiterHint : 0
 ; COMPUTE_PGM_RSRC2:SCRATCH_EN: 0
@@ -1066,7 +1078,7 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 ; COMPUTE_PGM_RSRC2:TGID_Y_EN: 0
 ; COMPUTE_PGM_RSRC2:TGID_Z_EN: 0
 ; COMPUTE_PGM_RSRC2:TIDIG_COMP_CNT: 1
-; COMPUTE_PGM_RSRC3_GFX90A:ACCUM_OFFSET: 16
+; COMPUTE_PGM_RSRC3_GFX90A:ACCUM_OFFSET: 15
 ; COMPUTE_PGM_RSRC3_GFX90A:TG_SPLIT: 0
 	.text
 	.p2alignl 6, 3212836864
@@ -1076,17 +1088,17 @@ wvSplitKQ_vllm_f8_f16_tn_n3_y2u1:       ; @wvSplitKQ_vllm_f8_f16_tn_n3_y2u1
 	.set amdgpu.max_num_agpr, 0
 	.set amdgpu.max_num_sgpr, 0
 	.text
-	.type	__hip_cuid_8d987c28af5765f4,@object ; @__hip_cuid_8d987c28af5765f4
+	.type	__hip_cuid_5dcf06e3e358c528,@object ; @__hip_cuid_5dcf06e3e358c528
 	.section	.bss,"aw",@nobits
-	.globl	__hip_cuid_8d987c28af5765f4
-__hip_cuid_8d987c28af5765f4:
+	.globl	__hip_cuid_5dcf06e3e358c528
+__hip_cuid_5dcf06e3e358c528:
 	.byte	0                               ; 0x0
-	.size	__hip_cuid_8d987c28af5765f4, 1
+	.size	__hip_cuid_5dcf06e3e358c528, 1
 
 	.ident	"AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.4 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
-	.addrsig_sym __hip_cuid_8d987c28af5765f4
+	.addrsig_sym __hip_cuid_5dcf06e3e358c528
 	.amdgpu_metadata
 ---
 custom.config:
@@ -1229,7 +1241,7 @@ amdhsa.kernels:
     .sgpr_count:     64
     .sgpr_spill_count: 0
     .symbol:         wvSplitKQ_vllm_f8_f16_tn_n3_y2u1.kd
-    .vgpr_count:     65
+    .vgpr_count:     64
     .vgpr_spill_count: 0
     .wavefront_size: 64
 amdhsa.target:   amdgcn-amd-amdhsa--gfx950

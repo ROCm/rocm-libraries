@@ -1490,6 +1490,29 @@ def test_wvspltk_code_object_version_matches_library_build(name):
     assert re.search(r"^\s*\.amdhsa_code_object_version\s+4\s*$", text, re.M)
 
 
+_ARG_BYTES = {"int32": 4, "float32": 4, "address": 8}
+
+
+@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES, *_VLLM_WVSPLITKQ_NAMES])
+def test_skinny_tn_args_match_kernarg_layout(name):
+    """hipBLASLt packs these kernels' arguments from custom.config alone, back to
+    back, so the list must match the kernel's own argument metadata: an argument
+    missing from custom.config would leave the kernel reading past the buffer."""
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
+    args = getCustomKernelConfig(name, {}, ck_root)["CustomKernel"]["args"]
+    lines = custom_kernel_text(name).splitlines()
+    start = lines.index("---") + 1
+    kernel = yaml.safe_load("\n".join(lines[start : lines.index("...", start)]))["amdhsa.kernels"][0]
+    assert len(args) == len(kernel[".args"])
+    offset = 0
+    for arg, meta in zip(args, kernel[".args"]):
+        size = _ARG_BYTES[arg["type"]]
+        assert (meta[".offset"], meta[".size"]) == (offset, size), (arg["semantic"], meta)
+        assert (meta[".value_kind"] == "global_buffer") == (arg["type"] == "address"), (arg["semantic"], meta)
+        offset += size
+    assert kernel[".kernarg_segment_size"] == offset
+
+
 _UNIT_STRIDE_KEYS = (
     "AssertStrideAEqual",
     "AssertStrideBEqual",
@@ -1744,6 +1767,18 @@ def test_skinny_tn_range_logic(rel, problemType, kernels, plainRel):
             if dim in config.get("AssertSizeLessThan", {}):
                 assert -1 < hi < config["AssertSizeLessThan"][dim], (name, dim)
         assert key[6] >= config["AssertSummationElementMultiple"], name
+
+
+@needs_logic_corpus
+@pytest.mark.parametrize("stem", ["F8BS_BH_SAB", "F8HS_BH_SAB", "F8BS_BH_Bias_B_SAB", "F8HS_BH_Bias_H_SAB"])
+def test_vllm_wvsplitkq_range_refuses_user_overrides(stem):
+    """The kernels take no split-K or WGM argument. hipBLASLt would run a user
+    split-K by passing the workspace as C and D, so the solutions refuse both."""
+    with open(require_logic_file(_F8_RANGE.format(stem))) as f:
+        doc = yaml.safe_load(f)
+    for s in doc["Solutions"]:
+        params = s["InternalSupportParams"]
+        assert (params["SupportUserGSU"], params["SupportCustomWGM"]) == (False, False), s["CustomKernel"]["name"]
 
 
 # ---------------------------------------------------------------------------
