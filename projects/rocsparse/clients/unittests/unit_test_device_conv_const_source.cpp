@@ -25,9 +25,12 @@
 // A const sparse descriptor stores its arrays in const_row_data / const_col_data /
 // const_val_data and leaves the mutable pointers null. These tests run rocsparse_extract
 // (CSR and CSC) and the BSR-to-CSR, CSR-to-BSR and CSR-to-ELL conversions of
-// rocsparse_sparse_to_sparse on a mutable source and on a const source that share the same
-// arrays. Both runs must return the same statuses and write the output of a host reference,
-// and neither may write past the end of the output arrays.
+// rocsparse_sparse_to_sparse on a const source. Extract calls the shared run_extract helper,
+// which builds the source with the const constructor and checks the output against its host
+// reference, including the sentinel and the guard tail. The other conversions run a mutable
+// source and a const source that share the same arrays; both must return the same statuses
+// and write the output of a host reference, and neither may write past the end of the
+// output arrays.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -207,211 +210,13 @@ namespace
         return st;
     }
 
-    // Analysis, then rocsparse_extract_nnz, then the target arrays are attached and the
-    // compute stage runs.
-    Run extract_stages(rocsparse_handle            handle,
-                       rocsparse_const_spmat_descr source,
-                       rocsparse_spmat_descr       target,
-                       bool                        csc,
-                       void*                       ptr,
-                       void*                       ind,
-                       void*                       val)
-    {
-        Run          run;
-        StageStatus& st = run.st;
-        ExtractDescr descr;
-        if(create_extract(descr, source, target) != st_ok)
-            return run;
-        const auto one = [&](rocsparse_extract_stage stage, rocsparse_status& out) {
-            size_t bytes = 0;
-            out = rocsparse_extract_buffer_size(handle, descr, source, target, stage, &bytes);
-            if(out != st_ok)
-                return;
-            DevBuf<char> buffer(bytes);
-            out = rocsparse_extract(handle, descr, source, target, stage, bytes, buffer);
-        };
-        one(rocsparse_extract_stage_analysis, st.analysis);
-        st.sync_a = hipDeviceSynchronize();
-        if(st.analysis != st_ok || st.sync_a != hipSuccess)
-            return run;
-
-        // rocsparse_extract_nnz writes a host scalar; it does not read the pointer mode.
-        EXPECT_EQ(rocsparse_extract_nnz(handle, descr, &run.nnz), st_ok);
-        EXPECT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
-
-        EXPECT_EQ(
-            (csc ? rocsparse_csc_set_pointers : rocsparse_csr_set_pointers)(target, ptr, ind, val),
-            st_ok);
-        one(rocsparse_extract_stage_compute, st.compute);
-        st.sync_c = hipDeviceSynchronize();
-        return run;
-    }
-
-    template <typename P, typename J, typename T>
-    bool make_csx(bool                 csc,
-                  int64_t              rows,
-                  int64_t              cols,
-                  int64_t              nnz,
-                  void*                ptr,
-                  void*                ind,
-                  void*                val,
-                  rocsparse_index_base base,
-                  Spmat&               mutable_out,
-                  ConstSpmat&          const_out,
-                  bool                 as_const)
-    {
-        const auto pt = it_of<P>();
-        const auto jt = it_of<J>();
-        const auto dt = dt_of<T>();
-        const auto st
-            = as_const
-                  ? (csc ? rocsparse_create_const_csc_descr(
-                               &const_out, rows, cols, nnz, ptr, ind, val, pt, jt, base, dt)
-                         : rocsparse_create_const_csr_descr(
-                               &const_out, rows, cols, nnz, ptr, ind, val, pt, jt, base, dt))
-                  : (csc ? rocsparse_create_csc_descr(
-                               &mutable_out, rows, cols, nnz, ptr, ind, val, pt, jt, base, dt)
-                         : rocsparse_create_csr_descr(
-                               &mutable_out, rows, cols, nnz, ptr, ind, val, pt, jt, base, dt));
-        EXPECT_EQ(st, st_ok);
-        return st == st_ok;
-    }
-
-    // Extracts the lower or upper part of the CSR (or CSC) matrix (ptr_h, ind_h, val_h). A
-    // unit diagonal drops the diagonal entries.
-    template <typename P, typename J, typename T>
-    void run_extract_case(rocsparse_handle      handle,
-                          bool                  csc,
-                          int                   base,
-                          rocsparse_fill_mode   fill,
-                          rocsparse_diag_type   diag,
-                          int64_t               rows,
-                          int64_t               cols,
-                          const std::vector<P>& ptr_h,
-                          const std::vector<J>& ind_h,
-                          const std::vector<T>& val_h,
-                          const std::string&    label)
-    {
-        SCOPED_TRACE(label + (fill == rocsparse_fill_mode_lower ? " lower" : " upper")
-                     + (diag == rocsparse_diag_type_unit ? " unit" : " non-unit"));
-        const int64_t nnz    = static_cast<int64_t>(ind_h.size());
-        const size_t  ptr_n  = ptr_h.size();
-        const bool    strict = diag == rocsparse_diag_type_unit;
-
-        std::vector<P> want_ptr{static_cast<P>(base)};
-        std::vector<J> want_ind;
-        std::vector<T> want_val;
-        for(size_t outer = 0; outer + 1 < ptr_n; ++outer)
-        {
-            for(int64_t k = ptr_h[outer] - base; k < ptr_h[outer + 1] - base; ++k)
-            {
-                const int64_t inner = ind_h[k] - base;
-                const int64_t row   = csc ? inner : static_cast<int64_t>(outer);
-                const int64_t col   = csc ? static_cast<int64_t>(outer) : inner;
-                if(row == col ? !strict : (fill == rocsparse_fill_mode_lower) == (col < row))
-                {
-                    want_ind.push_back(ind_h[k]);
-                    want_val.push_back(val_h[k]);
-                }
-            }
-            want_ptr.push_back(static_cast<P>(base + want_ind.size()));
-        }
-        const int64_t want_nnz = static_cast<int64_t>(want_ind.size());
-
-        DevBuf<P>  src_ptr(ptr_h);
-        DevBuf<J>  src_ind(ind_h);
-        DevBuf<T>  src_val(val_h);
-        DevBuf<P>  mut_ptr(sentinel_vector<P>(ptr_n)), cst_ptr(sentinel_vector<P>(ptr_n));
-        DevBuf<J>  mut_ind(sentinel_vector<J>(nnz)), cst_ind(sentinel_vector<J>(nnz));
-        DevBuf<T>  mut_val(sentinel_vector<T>(nnz)), cst_val(sentinel_vector<T>(nnz));
-        const auto ib = base_of(base);
-
-        const auto once
-            = [&](bool as_const, DevBuf<P>& dst_ptr, DevBuf<J>& dst_ind, DevBuf<T>& dst_val) {
-                  Spmat      mutable_source, target;
-                  ConstSpmat const_source;
-                  if(!make_csx<P, J, T>(csc,
-                                        rows,
-                                        cols,
-                                        nnz,
-                                        src_ptr,
-                                        src_ind,
-                                        src_val,
-                                        ib,
-                                        mutable_source,
-                                        const_source,
-                                        as_const))
-                      return Run{};
-                  const auto created = (csc ? rocsparse_create_csc_descr
-                                            : rocsparse_create_csr_descr)(&target,
-                                                                          rows,
-                                                                          cols,
-                                                                          0,
-                                                                          dst_ptr.get(),
-                                                                          nullptr,
-                                                                          nullptr,
-                                                                          it_of<P>(),
-                                                                          it_of<J>(),
-                                                                          ib,
-                                                                          dt_of<T>());
-                  EXPECT_EQ(created, st_ok);
-                  if(created != st_ok)
-                      return Run{};
-                  EXPECT_EQ(rocsparse_spmat_set_attribute(
-                                target, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
-                            st_ok);
-                  EXPECT_EQ(rocsparse_spmat_set_attribute(
-                                target, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
-                            st_ok);
-                  rocsparse_const_spmat_descr source
-                      = as_const ? const_source.get() : mutable_source.get();
-                  return extract_stages(
-                      handle, source, target, csc, dst_ptr.get(), dst_ind.get(), dst_val.get());
-              };
-
-        const Run mut = once(false, mut_ptr, mut_ind, mut_val);
-        const Run cst = once(true, cst_ptr, cst_ind, cst_val);
-        expect_same_status(label, mut.st, cst.st);
-        if(!healthy(mut.st) || !healthy(cst.st))
-            return;
-        EXPECT_EQ(mut.nnz, want_nnz) << "mutable nnz";
-        EXPECT_EQ(cst.nnz, want_nnz) << "const nnz";
-        expect_written(mut_ptr, want_ptr, "mutable ptr");
-        expect_written(cst_ptr, want_ptr, "const ptr");
-        expect_written(mut_ind, want_ind, "mutable ind");
-        expect_written(cst_ind, want_ind, "const ind");
-        expect_written(mut_val, want_val, "mutable val");
-        expect_written(cst_val, want_val, "const val");
-    }
-
-    // Runs one matrix through both fill modes and both diagonal types.
-    template <typename P, typename J, typename T>
-    void run_extract_all(rocsparse_handle      handle,
-                         bool                  csc,
-                         int                   base,
-                         int64_t               rows,
-                         int64_t               cols,
-                         const std::vector<P>& ptr,
-                         const std::vector<J>& ind,
-                         const std::vector<T>& val,
-                         const std::string&    label)
-    {
-        for(auto fill : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
-        {
-            for(auto diag : {rocsparse_diag_type_non_unit, rocsparse_diag_type_unit})
-            {
-                if(failed())
-                    return;
-                run_extract_case<P, J, T>(
-                    handle, csc, base, fill, diag, rows, cols, ptr, ind, val, label);
-            }
-        }
-    }
-
+    // Const CSR and CSC extract. The host reference, the const constructor, and the
+    // sentinel guard live in run_extract.
     template <typename P, typename J, typename T>
     void extract_sweep(rocsparse_handle handle)
     {
         const std::string kind = type_label<P, J, T>();
+        const auto        dt   = dt_of<T>();
         for(int base : {0, 1})
         {
             for(bool csc : {false, true})
@@ -420,25 +225,37 @@ namespace
                     = kind + (csc ? " csc" : " csr") + " base " + std::to_string(base);
                 // 3x3 with entries on, above and below the diagonal. The CSC arrays hold the
                 // transposed pattern, which is the same pattern.
-                run_extract_all<P, J, T>(handle,
-                                         csc,
-                                         base,
-                                         3,
-                                         3,
-                                         shift<P>({0, 2, 3, 5}, base),
-                                         shift<J>({0, 2, 1, 0, 2}, base),
-                                         numbered_vector<T>(5),
-                                         label + " 3x3");
-                // Two compressed rows (columns for CSC) of length four.
-                run_extract_all<P, J, T>(handle,
-                                         csc,
-                                         base,
-                                         csc ? 4 : 2,
-                                         csc ? 2 : 4,
-                                         shift<P>({0, 2, 4}, base),
-                                         shift<J>({1, 3, 0, 2}, base),
-                                         numbered_vector<T>(4),
-                                         label + " rectangular");
+                for(auto fill : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
+                {
+                    for(auto diag : {rocsparse_diag_type_non_unit, rocsparse_diag_type_unit})
+                    {
+                        if(failed())
+                            return;
+                        SCOPED_TRACE(label + " 3x3");
+                        run_extract<P, J, true>(handle,
+                                                csc,
+                                                3,
+                                                3,
+                                                base,
+                                                dt,
+                                                shift<P>({0, 2, 3, 5}, base),
+                                                shift<J>({0, 2, 1, 0, 2}, base),
+                                                fill,
+                                                diag);
+                        // Two compressed rows (columns for CSC) of length four.
+                        SCOPED_TRACE(label + " rectangular");
+                        run_extract<P, J, true>(handle,
+                                                csc,
+                                                csc ? 4 : 2,
+                                                csc ? 2 : 4,
+                                                base,
+                                                dt,
+                                                shift<P>({0, 2, 4}, base),
+                                                shift<J>({1, 3, 0, 2}, base),
+                                                fill,
+                                                diag);
+                    }
+                }
                 // No non-zeros, with and without rows and columns. The pointer array of the
                 // source is read whenever there is a row (a column for CSC).
                 for(const auto& [rows, cols] : {std::pair<int64_t, int64_t>{3, 3},
@@ -449,18 +266,19 @@ namespace
                     if(failed())
                         return;
                     const int64_t outer = csc ? cols : rows;
-                    run_extract_case<P, J, T>(
+                    SCOPED_TRACE(label + " empty " + std::to_string(rows) + "x"
+                                 + std::to_string(cols));
+                    run_extract<P, J, true>(
                         handle,
                         csc,
-                        base,
-                        rocsparse_fill_mode_lower,
-                        rocsparse_diag_type_non_unit,
                         rows,
                         cols,
+                        base,
+                        dt,
                         std::vector<P>(static_cast<size_t>(outer + 1), static_cast<P>(base)),
-                        {},
-                        {},
-                        label + " empty " + std::to_string(rows) + "x" + std::to_string(cols));
+                        std::vector<J>{},
+                        rocsparse_fill_mode_lower,
+                        rocsparse_diag_type_non_unit);
                 }
             }
         }
@@ -963,24 +781,16 @@ namespace
         }
     }
 
-    // Runs SWEEP::run<P, J, T> for every value type and every pair of 32- and 64-bit
-    // pointer and index types.
-    template <typename SWEEP, typename T>
-    void index_sweep(rocsparse_handle handle)
-    {
-        SWEEP::template run<int32_t, int32_t, T>(handle);
-        SWEEP::template run<int32_t, int64_t, T>(handle);
-        SWEEP::template run<int64_t, int32_t, T>(handle);
-        SWEEP::template run<int64_t, int64_t, T>(handle);
-    }
-
+    // Pointer and index widths, in the style of ConvExtract.ExtractIndexTypesAndFormats.
+    // The null mutable pointers do not depend on the value type, so each conversion runs
+    // as float. The four widths are 32/32, 64/32, 32/64 and 64/64.
     template <typename SWEEP>
     void type_sweep(rocsparse_handle handle)
     {
-        index_sweep<SWEEP, float>(handle);
-        index_sweep<SWEEP, double>(handle);
-        index_sweep<SWEEP, rocsparse_float_complex>(handle);
-        index_sweep<SWEEP, rocsparse_double_complex>(handle);
+        SWEEP::template run<int32_t, int32_t, float>(handle);
+        SWEEP::template run<int64_t, int32_t, float>(handle);
+        SWEEP::template run<int32_t, int64_t, float>(handle);
+        SWEEP::template run<int64_t, int64_t, float>(handle);
     }
 
 #define CONST_SOURCE_SWEEP(NAME, FUNCTION)            \
@@ -1038,9 +848,9 @@ namespace
             Spmat      mutable_source, target;
             ConstSpmat const_source;
             EXPECT_EQ(as_const ? rocsparse_create_const_csr_descr(
-                                     &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32)
+                          &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32)
                                : rocsparse_create_csr_descr(
-                                     &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
+                                   &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
                       st_ok);
             EXPECT_EQ(rocsparse_create_ell_descr(
                           &target, 2, 2, ell_ind, ell_val, 1, i32, base0, rocsparse_datatype_f64_r),
@@ -1069,9 +879,9 @@ namespace
             Spmat      mutable_source, target;
             ConstSpmat const_source;
             EXPECT_EQ(as_const ? rocsparse_create_const_csr_descr(
-                                     &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32)
+                          &const_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32)
                                : rocsparse_create_csr_descr(
-                                     &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
+                                   &mutable_source, 2, 2, 1, ptr, ind, val, i32, i32, base0, f32),
                       st_ok);
             EXPECT_EQ(rocsparse_create_bsr_descr(&target,
                                                  2,
@@ -1105,17 +915,17 @@ namespace
     {
         for(bool csc : {false, true})
         {
-            run_extract_case<int32_t, int32_t, float>(handle,
-                                                      csc,
-                                                      0,
-                                                      rocsparse_fill_mode_lower,
-                                                      rocsparse_diag_type_non_unit,
-                                                      2,
-                                                      2,
-                                                      {0, 1, 2},
-                                                      {0, 1},
-                                                      {2.f, 3.f},
-                                                      csc ? "csc" : "csr");
+            SCOPED_TRACE(csc ? "csc" : "csr");
+            run_extract<int32_t, int32_t, true>(handle,
+                                                csc,
+                                                2,
+                                                2,
+                                                0,
+                                                f32,
+                                                std::vector<int32_t>{0, 1, 2},
+                                                std::vector<int32_t>{0, 1},
+                                                rocsparse_fill_mode_lower,
+                                                rocsparse_diag_type_non_unit);
         }
     }
 
