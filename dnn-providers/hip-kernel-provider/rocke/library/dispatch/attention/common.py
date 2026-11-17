@@ -56,9 +56,10 @@ from typing import Any, Tuple
 
 from kernels.common._attention_validation import (
     require_attention_int,
-    validate_attention_request_types,
     validate_attention_3d_spec_types,
+    validate_attention_request_types,
 )
+from kernels.common._spec_checks import require_bool
 
 # Re-exported, never redeclared: the tiled kernel specs name their band by these
 # ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
@@ -933,10 +934,7 @@ class AttentionSpec:
     def __post_init__(self) -> None:
         # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
         # (1, "yes") would silently produce an LSE identity: refuse it instead.
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
 
     def identity(self) -> dict:
         """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,

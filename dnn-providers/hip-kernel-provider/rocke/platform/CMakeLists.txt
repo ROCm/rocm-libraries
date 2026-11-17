@@ -886,6 +886,43 @@ if(ROCKE_INSTALL_TESTS)
 
   endif()
 
+  # TheRock starts every installed entry on every hipkernelprovider CI shard. A
+  # pytest entry runs only its shard's share when its command starts with
+  # ${_ROCKE_INSTALLED_PYTEST}; otherwise it runs whole on every shard. Stop the
+  # configure for such an entry. An entry runs pytest when its command runs
+  # "-m pytest" or its program is pytest (or py.test). The explicit gates,
+  # _ROCKE_EXPLICIT_PYTEST_GATES in library/tests/ctest_lists.cmake, stop on a
+  # partial run, so they must not load the shard plugin.
+  string(REGEX MATCHALL "add_test\\([^\n]*" _rocke_adds "${_ROCKE_INSTALLED_CTEST_ENTRIES}")
+  set(_rocke_bad_pytest_entries "")
+  foreach(_rocke_add IN LISTS _rocke_adds)
+    if(NOT _rocke_add MATCHES
+       "^add_test\\([A-Za-z0-9_]+ (\"?([^ \"]*[/\\\\])?(pytest|py\\.test)(\\.exe)?\"?[ )]|[^\n]* -m pytest[ )])")
+      continue()
+    endif()
+    string(REGEX REPLACE "^add_test\\(([A-Za-z0-9_]+) .*" "\\1" _rocke_name "${_rocke_add}")
+    if(_rocke_name IN_LIST _ROCKE_EXPLICIT_PYTEST_GATES)
+      if(_rocke_add MATCHES "rocke\\.tests\\.ctest_shard")
+        list(APPEND _rocke_bad_pytest_entries
+             "${_rocke_name} (an explicit gate must not load the shard plugin)")
+      endif()
+    else()
+      string(FIND "${_rocke_add}" "add_test(${_rocke_name} ${_ROCKE_INSTALLED_PYTEST}"
+             _rocke_prefix_pos)
+      if(NOT _rocke_prefix_pos EQUAL 0)
+        list(APPEND _rocke_bad_pytest_entries "${_rocke_name}")
+      endif()
+    endif()
+  endforeach()
+  if(_rocke_bad_pytest_entries)
+    list(JOIN _rocke_bad_pytest_entries "\n  " _rocke_bad_pytest_entries)
+    message(FATAL_ERROR
+            "Each installed rocKE pytest entry must start its command with "
+            "\${_ROCKE_INSTALLED_PYTEST}, so that each hipkernelprovider CI shard "
+            "runs only its share of the entry's tests (see rocke/TESTING.md):\n"
+            "  ${_rocke_bad_pytest_entries}")
+  endif()
+
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
     set_property(GLOBAL APPEND_STRING PROPERTY
                  "EXTERNAL_TEST_INSTALL_STAGING_${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}"
