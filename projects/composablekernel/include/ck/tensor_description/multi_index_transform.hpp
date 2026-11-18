@@ -1769,70 +1769,88 @@ struct ConvBwdDataImplicitGemmOutTransform
 /**
  * @brief Map forward-convolution implicit-GEMM input indices to tensor indices.
  *
- * The upper dimensions are M=(N, Ho, Wo) and K=(Y, X, C), flattened. The
- * lower dimensions are the input tensor coordinates (N, Hi, Wi, C).
+ * The upper dimensions are M=(N, O_0..O_{D-1}) and K=(F_0..F_{D-1}, C), flattened. The lower
+ * dimensions are the input tensor coordinates (N, I_0..I_{D-1}, C). D is NDimSpatial.
+ * Indices must be non-negative and below 2^31 (magic division limitation).
  */
+template <index_t NDimSpatial>
 struct ConvFwdDataImplicitGemmInTransform
 {
-    static constexpr auto I0 = Number<0>{};
-    static constexpr auto I1 = Number<1>{};
-    static constexpr auto I2 = Number<2>{};
-    static constexpr auto I3 = Number<3>{};
+    static_assert(NDimSpatial >= 1, "NDimSpatial must be positive");
 
-    using LowerIndex = MultiIndex<4>;
-    using UpperIndex = MultiIndex<2>;
-    using UpLengths  = Tuple<index_t, index_t>;
+    using LowerIndex  = MultiIndex<NDimSpatial + 2>;
+    using UpperIndex  = MultiIndex<2>;
+    using UpLengths   = Tuple<index_t, index_t>;
+    using SpatialDims = MultiIndex<NDimSpatial>;
 
-    index_t Hi_, Wi_, nC_;
-    index_t nX_, nHo_, nWo_;
-    index_t ConvStrideH_, ConvStrideW_;
-    index_t ConvDilationH_, ConvDilationW_;
-    index_t InLeftPadH_, InLeftPadW_;
+    SpatialDims in_lengths_;
+    SpatialDims conv_strides_;
+    SpatialDims conv_dilations_;
+    SpatialDims left_pads_;
+    // negated lengths so that remainder = dividend + quotient * negated_length
+    SpatialDims neg_out_lengths_;
+    SpatialDims neg_filter_lengths_;
+    index_t nC_;
     UpLengths up_lengths_;
-    Tuple<index_t, index_t, index_t, index_t> magic_divisor_multiplier_;
-    Tuple<index_t, index_t, index_t, index_t> magic_divisor_shift_;
+    // M side: divisors O_{D-1}, ..., O_0 (the last quotient is n)
+    // K side: divisors C, F_{D-1}, ..., F_1 (the last quotient is f_0)
+    SpatialDims m_magic_multiplier_;
+    SpatialDims m_magic_shift_;
+    SpatialDims k_magic_multiplier_;
+    SpatialDims k_magic_shift_;
 
     __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform() = default;
 
-    __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform(index_t N,
-                                                                     index_t Hi,
-                                                                     index_t Wi,
-                                                                     index_t C,
-                                                                     index_t Y,
-                                                                     index_t X,
-                                                                     index_t Ho,
-                                                                     index_t Wo,
-                                                                     index_t ConvStrideH,
-                                                                     index_t ConvStrideW,
-                                                                     index_t ConvDilationH,
-                                                                     index_t ConvDilationW,
-                                                                     index_t InLeftPadH,
-                                                                     index_t InLeftPadW)
-        : Hi_{Hi},
-          Wi_{Wi},
+    __host__
+        __device__ constexpr ConvFwdDataImplicitGemmInTransform(index_t N,
+                                                                index_t C,
+                                                                const SpatialDims& in_lengths,
+                                                                const SpatialDims& filter_lengths,
+                                                                const SpatialDims& out_lengths,
+                                                                const SpatialDims& conv_strides,
+                                                                const SpatialDims& conv_dilations,
+                                                                const SpatialDims& left_pads)
+        : in_lengths_{in_lengths},
+          conv_strides_{conv_strides},
+          conv_dilations_{conv_dilations},
+          left_pads_{left_pads},
+          neg_out_lengths_{},
+          neg_filter_lengths_{},
           nC_{-C},
-          nX_{-X},
-          nHo_{-Ho},
-          nWo_{-Wo},
-          ConvStrideH_{ConvStrideH},
-          ConvStrideW_{ConvStrideW},
-          ConvDilationH_{ConvDilationH},
-          ConvDilationW_{ConvDilationW},
-          InLeftPadH_{InLeftPadH},
-          InLeftPadW_{InLeftPadW},
-          up_lengths_{make_tuple(N * Ho * Wo, Y * X * C)},
-          magic_divisor_multiplier_{MagicDivision::CalculateMagicMultiplier(Wo),
-                                    MagicDivision::CalculateMagicMultiplier(Ho),
-                                    MagicDivision::CalculateMagicMultiplier(C),
-                                    MagicDivision::CalculateMagicMultiplier(X)},
-          magic_divisor_shift_{MagicDivision::CalculateMagicShift(Wo),
-                               MagicDivision::CalculateMagicShift(Ho),
-                               MagicDivision::CalculateMagicShift(C),
-                               MagicDivision::CalculateMagicShift(X)}
+          up_lengths_{},
+          m_magic_multiplier_{},
+          m_magic_shift_{},
+          k_magic_multiplier_{},
+          k_magic_shift_{}
     {
+        index_t m_length = N;
+        index_t k_length = C;
+        static_for<0, NDimSpatial, 1>{}([&](auto d) {
+            neg_out_lengths_(d)    = -out_lengths[d];
+            neg_filter_lengths_(d) = -filter_lengths[d];
+            m_length *= out_lengths[d];
+            k_length *= filter_lengths[d];
+
+            constexpr index_t rev = NDimSpatial - 1 - d;
+            m_magic_multiplier_(d) =
+                MagicDivision::CalculateMagicMultiplier(out_lengths[Number<rev>{}]);
+            m_magic_shift_(d) = MagicDivision::CalculateMagicShift(out_lengths[Number<rev>{}]);
+        });
+        k_magic_multiplier_(Number<0>{}) = MagicDivision::CalculateMagicMultiplier(C);
+        k_magic_shift_(Number<0>{})      = MagicDivision::CalculateMagicShift(C);
+        static_for<1, NDimSpatial, 1>{}([&](auto j) {
+            k_magic_multiplier_(j) =
+                MagicDivision::CalculateMagicMultiplier(filter_lengths[Number<NDimSpatial - j>{}]);
+            k_magic_shift_(j) =
+                MagicDivision::CalculateMagicShift(filter_lengths[Number<NDimSpatial - j>{}]);
+        });
+        up_lengths_ = make_tuple(m_length, k_length);
     }
 
-    __host__ __device__ static constexpr index_t GetNumOfLowerDimension() { return 4; }
+    __host__ __device__ static constexpr index_t GetNumOfLowerDimension()
+    {
+        return NDimSpatial + 2;
+    }
 
     __host__ __device__ static constexpr index_t GetNumOfUpperDimension() { return 2; }
 
@@ -1845,29 +1863,41 @@ struct ConvFwdDataImplicitGemmInTransform
     __host__ __device__ constexpr void CalculateLowerIndex(LowIdx& idx_low,
                                                            const UpIdx& idx_up) const
     {
-        static_assert(LowIdx::Size() == 4 && UpIdx::Size() == 2,
+        static_assert(LowIdx::Size() == NDimSpatial + 2 && UpIdx::Size() == 2,
                       "wrong! inconsistent # of dimensions");
 
-        index_t output_position = idx_up[I0];
-        const index_t n_ho      = MagicDivision::DoMagicDivision(
-            output_position, magic_divisor_multiplier_[I0], magic_divisor_shift_[I0]);
-        const index_t wo = output_position + n_ho * nWo_;
-        const index_t n  = MagicDivision::DoMagicDivision(
-            n_ho, magic_divisor_multiplier_[I1], magic_divisor_shift_[I1]);
-        const index_t ho = n_ho + n * nHo_;
+        // M = (n, o_0, ..., o_{D-1}) -> innermost output dimension first
+        index_t quotient = idx_up[Number<0>{}];
+        SpatialDims out_idx;
+        static_for<0, NDimSpatial, 1>{}([&](auto j) {
+            constexpr index_t dim = NDimSpatial - 1 - j;
+            const index_t next =
+                MagicDivision::DoMagicDivision(quotient, m_magic_multiplier_[j], m_magic_shift_[j]);
+            out_idx(Number<dim>{}) = quotient + next * neg_out_lengths_[Number<dim>{}];
+            quotient               = next;
+        });
+        idx_low(Number<0>{}) = quotient;
 
-        index_t filter_channel = idx_up[I1];
-        const index_t y_c      = MagicDivision::DoMagicDivision(
-            filter_channel, magic_divisor_multiplier_[I2], magic_divisor_shift_[I2]);
-        const index_t c = filter_channel + y_c * nC_;
-        const index_t y = MagicDivision::DoMagicDivision(
-            y_c, magic_divisor_multiplier_[I3], magic_divisor_shift_[I3]);
-        const index_t x = y_c + y * nX_;
+        // K = (f_0, ..., f_{D-1}, c) -> c first, then innermost filter dimension
+        quotient     = idx_up[Number<1>{}];
+        index_t next = MagicDivision::DoMagicDivision(
+            quotient, k_magic_multiplier_[Number<0>{}], k_magic_shift_[Number<0>{}]);
+        idx_low(Number<NDimSpatial + 1>{}) = quotient + next * nC_;
+        quotient                           = next;
+        SpatialDims filter_idx;
+        static_for<1, NDimSpatial, 1>{}([&](auto j) {
+            constexpr index_t dim = NDimSpatial - j;
+            next =
+                MagicDivision::DoMagicDivision(quotient, k_magic_multiplier_[j], k_magic_shift_[j]);
+            filter_idx(Number<dim>{}) = quotient + next * neg_filter_lengths_[Number<dim>{}];
+            quotient                  = next;
+        });
+        filter_idx(Number<0>{}) = quotient;
 
-        idx_low(I0) = n;
-        idx_low(I1) = ho * ConvStrideH_ + y * ConvDilationH_ - InLeftPadH_;
-        idx_low(I2) = wo * ConvStrideW_ + x * ConvDilationW_ - InLeftPadW_;
-        idx_low(I3) = c;
+        static_for<0, NDimSpatial, 1>{}([&](auto d) {
+            idx_low(Number<d + 1>{}) =
+                out_idx[d] * conv_strides_[d] + filter_idx[d] * conv_dilations_[d] - left_pads_[d];
+        });
     }
 
     template <typename LowIdxDiff,
@@ -1899,17 +1929,15 @@ struct ConvFwdDataImplicitGemmInTransform
     {
         LowerIndex idx_low;
         CalculateLowerIndex(idx_low, idx_up);
-        // Previously:
-        // bool valid = idx_low[I1] >= 0;
-        // valid &= idx_low[I1] < Hi_;
-        // valid &= idx_low[I2] >= 0;
-        // valid &= idx_low[I2] < Wi_;
         // Indices are signed 32-bit values and lengths are nonnegative. Converting a negative
         // index to uint32_t produces a value >= 2^31, larger than any valid signed length;
         // nonnegative indices retain their value. Each unsigned comparison therefore checks
         // both bounds, eliminating separate sign checks and their instruction dependencies.
-        bool valid = static_cast<uint32_t>(idx_low[I1]) < static_cast<uint32_t>(Hi_);
-        valid &= static_cast<uint32_t>(idx_low[I2]) < static_cast<uint32_t>(Wi_);
+        bool valid = true;
+        static_for<0, NDimSpatial, 1>{}([&](auto d) {
+            valid &= static_cast<uint32_t>(idx_low[Number<d + 1>{}]) <
+                     static_cast<uint32_t>(in_lengths_[d]);
+        });
         return valid;
     }
 

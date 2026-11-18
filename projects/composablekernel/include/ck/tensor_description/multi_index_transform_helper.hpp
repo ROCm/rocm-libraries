@@ -157,35 +157,19 @@ __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
                                                KPad};
 }
 
-__host__ __device__ constexpr auto make_conv_fwd_data_in_transform(index_t N,
-                                                                   index_t Hi,
-                                                                   index_t Wi,
-                                                                   index_t C,
-                                                                   index_t Y,
-                                                                   index_t X,
-                                                                   index_t Ho,
-                                                                   index_t Wo,
-                                                                   index_t ConvStrideH,
-                                                                   index_t ConvStrideW,
-                                                                   index_t ConvDilationH,
-                                                                   index_t ConvDilationW,
-                                                                   index_t InLeftPadH,
-                                                                   index_t InLeftPadW)
+template <index_t NDimSpatial>
+__host__ __device__ constexpr auto
+make_conv_fwd_data_in_transform(index_t N,
+                                index_t C,
+                                const MultiIndex<NDimSpatial>& in_lengths,
+                                const MultiIndex<NDimSpatial>& filter_lengths,
+                                const MultiIndex<NDimSpatial>& out_lengths,
+                                const MultiIndex<NDimSpatial>& conv_strides,
+                                const MultiIndex<NDimSpatial>& conv_dilations,
+                                const MultiIndex<NDimSpatial>& left_pads)
 {
-    return ConvFwdDataImplicitGemmInTransform{N,
-                                              Hi,
-                                              Wi,
-                                              C,
-                                              Y,
-                                              X,
-                                              Ho,
-                                              Wo,
-                                              ConvStrideH,
-                                              ConvStrideW,
-                                              ConvDilationH,
-                                              ConvDilationW,
-                                              InLeftPadH,
-                                              InLeftPadW};
+    return ConvFwdDataImplicitGemmInTransform<NDimSpatial>{
+        N, C, in_lengths, filter_lengths, out_lengths, conv_strides, conv_dilations, left_pads};
 }
 
 template <typename LowerIndex>

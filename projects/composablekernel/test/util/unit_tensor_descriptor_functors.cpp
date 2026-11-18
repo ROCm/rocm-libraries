@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <array>
 #include <cstdint>
 #include <random>
+#include <sstream>
+#include <string>
 #include <vector>
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
@@ -370,100 +373,206 @@ TEST(TensorDescriptorFunctorsIntegration, BatchConvertMatchesSingle)
 
 namespace {
 
+template <index_t NDim>
 struct ForwardConvCase
 {
-    index_t N, Hi, Wi, C, Y, X;
-    index_t StrideH, StrideW, DilationH, DilationW;
-    index_t PadHLeft, PadHRight, PadWLeft, PadWRight;
+    index_t N, C;
+    std::array<index_t, NDim> In, Filter, Stride, Dilation, PadLeft, PadRight;
 };
 
-void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase& cfg)
+template <index_t NDim>
+auto ToMultiIndex(const std::array<index_t, NDim>& a)
 {
-    const index_t N         = cfg.N;
-    const index_t Hi        = cfg.Hi;
-    const index_t Wi        = cfg.Wi;
-    const index_t C         = cfg.C;
-    const index_t Y         = cfg.Y;
-    const index_t X         = cfg.X;
-    const index_t StrideH   = cfg.StrideH;
-    const index_t StrideW   = cfg.StrideW;
-    const index_t DilationH = cfg.DilationH;
-    const index_t DilationW = cfg.DilationW;
-    const index_t PadHLeft  = cfg.PadHLeft;
-    const index_t PadHRight = cfg.PadHRight;
-    const index_t PadWLeft  = cfg.PadWLeft;
-    const index_t PadWRight = cfg.PadWRight;
-    const index_t Ho        = (Hi + PadHLeft + PadHRight - DilationH * (Y - 1) - 1) / StrideH + 1;
-    const index_t Wo        = (Wi + PadWLeft + PadWRight - DilationW * (X - 1) - 1) / StrideW + 1;
+    MultiIndex<NDim> r;
+    static_for<0, NDim, 1>{}([&](auto i) { r(i) = a[i]; });
+    return r;
+}
 
-    SCOPED_TRACE(::testing::Message()
-                 << "N=" << N << " Hi=" << Hi << " Wi=" << Wi << " C=" << C << " Y=" << Y << " X="
-                 << X << " stride=" << StrideH << "x" << StrideW << " dilation=" << DilationH << "x"
-                 << DilationW << " padH=" << PadHLeft << "/" << PadHRight << " padW=" << PadWLeft
-                 << "/" << PadWRight << " Ho=" << Ho << " Wo=" << Wo);
+template <index_t NDim>
+std::array<int64_t, NDim> OutputLengths(const ForwardConvCase<NDim>& cfg)
+{
+    std::array<int64_t, NDim> out{};
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        out[d] = (int64_t(cfg.In[d]) + cfg.PadLeft[d] + cfg.PadRight[d] -
+                  int64_t(cfg.Dilation[d]) * (cfg.Filter[d] - 1) - 1) /
+                     cfg.Stride[d] +
+                 1;
+    }
+    return out;
+}
 
-    const auto input_desc = make_naive_tensor_descriptor_packed(make_tuple(N, Hi, Wi, C));
-    const auto custom_desc =
-        transform_tensor_descriptor(input_desc,
-                                    make_tuple(make_conv_fwd_data_in_transform(N,
-                                                                               Hi,
-                                                                               Wi,
-                                                                               C,
-                                                                               Y,
-                                                                               X,
-                                                                               Ho,
-                                                                               Wo,
-                                                                               StrideH,
-                                                                               StrideW,
-                                                                               DilationH,
-                                                                               DilationW,
-                                                                               PadHLeft,
-                                                                               PadWLeft)),
-                                    make_tuple(Sequence<0, 1, 2, 3>{}),
-                                    make_tuple(Sequence<0, 1>{}));
+template <index_t NDim>
+std::string Describe(const ForwardConvCase<NDim>& cfg)
+{
+    const auto out = OutputLengths(cfg);
+    std::ostringstream os;
+    os << NDim << "D N=" << cfg.N << " C=" << cfg.C;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        os << " | in=" << cfg.In[d] << " filter=" << cfg.Filter[d] << " stride=" << cfg.Stride[d]
+           << " dilation=" << cfg.Dilation[d] << " pad=" << cfg.PadLeft[d] << "/" << cfg.PadRight[d]
+           << " out=" << out[d];
+    }
+    return os.str();
+}
 
-    const auto padded_input_desc = transform_tensor_descriptor(
+// Pad -> embed -> merge chain the custom transform replaces
+template <index_t NDim>
+auto MakeGenericDescriptor(const ForwardConvCase<NDim>& cfg, const std::array<index_t, NDim>& out)
+{
+    const index_t N = cfg.N;
+    const index_t C = cfg.C;
+    if constexpr(NDim == 1)
+    {
+        const auto input_desc = make_naive_tensor_descriptor_packed(make_tuple(N, cfg.In[0], C));
+        const auto padded     = transform_tensor_descriptor(
+            input_desc,
+            make_tuple(make_pass_through_transform(N),
+                       make_pad_transform(cfg.In[0], cfg.PadLeft[0], cfg.PadRight[0]),
+                       make_pass_through_transform(C)),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+        const auto embedded = transform_tensor_descriptor(
+            padded,
+            make_tuple(make_pass_through_transform(N),
+                       make_embed_transform(make_tuple(cfg.Filter[0], out[0]),
+                                            make_tuple(cfg.Dilation[0], cfg.Stride[0])),
+                       make_pass_through_transform(C)),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
+            make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3>{}));
+        return transform_tensor_descriptor(
+            embedded,
+            make_tuple(make_merge_transform(make_tuple(N, out[0])),
+                       make_merge_transform(make_tuple(cfg.Filter[0], C))),
+            make_tuple(Sequence<0, 2>{}, Sequence<1, 3>{}),
+            make_tuple(Sequence<0>{}, Sequence<1>{}));
+    }
+    else if constexpr(NDim == 2)
+    {
+        const auto input_desc =
+            make_naive_tensor_descriptor_packed(make_tuple(N, cfg.In[0], cfg.In[1], C));
+        const auto padded = transform_tensor_descriptor(
+            input_desc,
+            make_tuple(make_pass_through_transform(N),
+                       make_pad_transform(cfg.In[0], cfg.PadLeft[0], cfg.PadRight[0]),
+                       make_pad_transform(cfg.In[1], cfg.PadLeft[1], cfg.PadRight[1]),
+                       make_pass_through_transform(C)),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+        const auto embedded = transform_tensor_descriptor(
+            padded,
+            make_tuple(make_pass_through_transform(N),
+                       make_embed_transform(make_tuple(cfg.Filter[0], out[0]),
+                                            make_tuple(cfg.Dilation[0], cfg.Stride[0])),
+                       make_embed_transform(make_tuple(cfg.Filter[1], out[1]),
+                                            make_tuple(cfg.Dilation[1], cfg.Stride[1])),
+                       make_pass_through_transform(C)),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+            make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+        return transform_tensor_descriptor(
+            embedded,
+            make_tuple(make_merge_transform(make_tuple(N, out[0], out[1])),
+                       make_merge_transform(make_tuple(cfg.Filter[0], cfg.Filter[1], C))),
+            make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3, 5>{}),
+            make_tuple(Sequence<0>{}, Sequence<1>{}));
+    }
+    else
+    {
+        static_assert(NDim == 3);
+        const auto input_desc =
+            make_naive_tensor_descriptor_packed(make_tuple(N, cfg.In[0], cfg.In[1], cfg.In[2], C));
+        const auto padded = transform_tensor_descriptor(
+            input_desc,
+            make_tuple(make_pass_through_transform(N),
+                       make_pad_transform(cfg.In[0], cfg.PadLeft[0], cfg.PadRight[0]),
+                       make_pad_transform(cfg.In[1], cfg.PadLeft[1], cfg.PadRight[1]),
+                       make_pad_transform(cfg.In[2], cfg.PadLeft[2], cfg.PadRight[2]),
+                       make_pass_through_transform(C)),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}));
+        const auto embedded = transform_tensor_descriptor(
+            padded,
+            make_tuple(make_pass_through_transform(N),
+                       make_embed_transform(make_tuple(cfg.Filter[0], out[0]),
+                                            make_tuple(cfg.Dilation[0], cfg.Stride[0])),
+                       make_embed_transform(make_tuple(cfg.Filter[1], out[1]),
+                                            make_tuple(cfg.Dilation[1], cfg.Stride[1])),
+                       make_embed_transform(make_tuple(cfg.Filter[2], out[2]),
+                                            make_tuple(cfg.Dilation[2], cfg.Stride[2])),
+                       make_pass_through_transform(C)),
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}),
+            make_tuple(Sequence<0>{},
+                       Sequence<1, 2>{},
+                       Sequence<3, 4>{},
+                       Sequence<5, 6>{},
+                       Sequence<7>{}));
+        return transform_tensor_descriptor(
+            embedded,
+            make_tuple(
+                make_merge_transform(make_tuple(N, out[0], out[1], out[2])),
+                make_merge_transform(make_tuple(cfg.Filter[0], cfg.Filter[1], cfg.Filter[2], C))),
+            make_tuple(Sequence<0, 2, 4, 6>{}, Sequence<1, 3, 5, 7>{}),
+            make_tuple(Sequence<0>{}, Sequence<1>{}));
+    }
+}
+
+template <index_t NDim>
+auto MakeCustomTransform(const ForwardConvCase<NDim>& cfg, const std::array<index_t, NDim>& out)
+{
+    return make_conv_fwd_data_in_transform<NDim>(cfg.N,
+                                                 cfg.C,
+                                                 ToMultiIndex<NDim>(cfg.In),
+                                                 ToMultiIndex<NDim>(cfg.Filter),
+                                                 ToMultiIndex<NDim>(out),
+                                                 ToMultiIndex<NDim>(cfg.Stride),
+                                                 ToMultiIndex<NDim>(cfg.Dilation),
+                                                 ToMultiIndex<NDim>(cfg.PadLeft));
+}
+
+template <index_t NDim>
+void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase<NDim>& cfg)
+{
+    SCOPED_TRACE(Describe(cfg));
+
+    std::array<index_t, NDim> out{};
+    const auto out64    = OutputLengths(cfg);
+    index_t out_spatial = 1;
+    index_t filter_size = 1;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        out[d] = static_cast<index_t>(out64[d]);
+        out_spatial *= out[d];
+        filter_size *= cfg.Filter[d];
+    }
+
+    const auto generic_desc = MakeGenericDescriptor<NDim>(cfg, out);
+    const auto input_desc   = [&] {
+        if constexpr(NDim == 1)
+            return make_naive_tensor_descriptor_packed(make_tuple(cfg.N, cfg.In[0], cfg.C));
+        else if constexpr(NDim == 2)
+            return make_naive_tensor_descriptor_packed(
+                make_tuple(cfg.N, cfg.In[0], cfg.In[1], cfg.C));
+        else
+            return make_naive_tensor_descriptor_packed(
+                make_tuple(cfg.N, cfg.In[0], cfg.In[1], cfg.In[2], cfg.C));
+    }();
+    const auto custom_desc = transform_tensor_descriptor(
         input_desc,
-        make_tuple(make_pass_through_transform(N),
-                   make_pad_transform(Hi, PadHLeft, PadHRight),
-                   make_pad_transform(Wi, PadWLeft, PadWRight),
-                   make_pass_through_transform(C)),
-        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
-
-    const auto embedded_input_desc = transform_tensor_descriptor(
-        padded_input_desc,
-        make_tuple(make_pass_through_transform(N),
-                   make_embed_transform(make_tuple(Y, Ho), make_tuple(DilationH, StrideH)),
-                   make_embed_transform(make_tuple(X, Wo), make_tuple(DilationW, StrideW)),
-                   make_pass_through_transform(C)),
-        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-        make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
-
-    const auto generic_desc =
-        transform_tensor_descriptor(embedded_input_desc,
-                                    make_tuple(make_merge_transform(make_tuple(N, Ho, Wo)),
-                                               make_merge_transform(make_tuple(Y, X, C))),
-                                    make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3, 5>{}),
-                                    make_tuple(Sequence<0>{}, Sequence<1>{}));
+        make_tuple(MakeCustomTransform<NDim>(cfg, out)),
+        make_tuple(typename arithmetic_sequence_gen<0, NDim + 2, 1>::type{}),
+        make_tuple(Sequence<0, 1>{}));
 
     // Upper indices beyond M and K are also checked: GEMM padding produces them and the custom
     // transform must behave exactly like the generic merge/embed/pad chain there.
-    const index_t M      = N * Ho * Wo;
-    const index_t K      = Y * X * C;
-    const index_t M_ext  = M + Ho * Wo + 1;
-    const index_t K_ext  = K + X * C + 1;
-    int64_t mismatches   = 0;
-    index_t first_bad_m  = -1;
-    index_t first_bad_k  = -1;
-    auto record_mismatch = [&](index_t m, index_t k) {
-        if(mismatches++ == 0)
-        {
-            first_bad_m = m;
-            first_bad_k = k;
-        }
-    };
+    const index_t M     = cfg.N * out_spatial;
+    const index_t K     = filter_size * cfg.C;
+    const index_t M_ext = M + out_spatial + 1;
+    const index_t K_ext = K + cfg.C + 1;
 
+    int64_t mismatches  = 0;
+    index_t first_bad_m = -1;
+    index_t first_bad_k = -1;
     for(index_t m = 0; m < M_ext; ++m)
     {
         for(index_t k = 0; k < K_ext; ++k)
@@ -478,7 +587,11 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase& cfg)
                    coordinate_has_valid_offset_assuming_visible_index_is_valid(generic_desc,
                                                                                generic_coordinate))
             {
-                record_mismatch(m, k);
+                if(mismatches++ == 0)
+                {
+                    first_bad_m = m;
+                    first_bad_k = k;
+                }
             }
         }
     }
@@ -486,8 +599,12 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase& cfg)
 
     // Moving a coordinate (UpdateLowerIndex path used by the kernels) must agree with building
     // the coordinate from scratch. Steps go forward and backward, change one or both dimensions.
-    const index_t dms[] = {0, 1, -1, 3, -3, Wo, -Wo, Ho * Wo, -Ho * Wo, 16, -16};
-    const index_t dks[] = {0, 1, -1, C, -C, X * C, -X * C, 4, -4, 8, -8, 32, -32};
+    const index_t out_last  = out[NDim - 1];
+    const index_t filt_last = cfg.Filter[NDim - 1];
+    const index_t dms[]     = {
+        0, 1, -1, 3, -3, 16, -16, out_last, -out_last, out_spatial, -out_spatial};
+    const index_t dks[] = {
+        0, 1, -1, cfg.C, -cfg.C, 4, -4, 8, -8, 32, -32, filt_last * cfg.C, -filt_last * cfg.C};
     std::mt19937 rng(2024);
     index_t cur_m           = 0;
     index_t cur_k           = 0;
@@ -517,71 +634,50 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase& cfg)
 
 // Checks the transform alone (lower index and validity) against an int64 reference derived from
 // the convolution definition. Used for index ranges where a tensor offset would overflow.
-void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase& cfg)
+template <index_t NDim>
+void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg)
 {
-    const int64_t Ho = (int64_t(cfg.Hi) + cfg.PadHLeft + cfg.PadHRight -
-                        int64_t(cfg.DilationH) * (cfg.Y - 1) - 1) /
-                           cfg.StrideH +
-                       1;
-    const int64_t Wo = (int64_t(cfg.Wi) + cfg.PadWLeft + cfg.PadWRight -
-                        int64_t(cfg.DilationW) * (cfg.X - 1) - 1) /
-                           cfg.StrideW +
-                       1;
-    const int64_t M = int64_t(cfg.N) * Ho * Wo;
-    const int64_t K = int64_t(cfg.Y) * cfg.X * cfg.C;
+    SCOPED_TRACE(Describe(cfg));
+
+    const auto out64 = OutputLengths(cfg);
+    std::array<index_t, NDim> out{};
+    int64_t out_spatial = 1;
+    int64_t filter_size = 1;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        out[d] = static_cast<index_t>(out64[d]);
+        out_spatial *= out64[d];
+        filter_size *= cfg.Filter[d];
+    }
+    const int64_t M = int64_t(cfg.N) * out_spatial;
+    const int64_t K = filter_size * cfg.C;
     ASSERT_LT(M, int64_t(1) << 31);
 
-    SCOPED_TRACE(::testing::Message()
-                 << "N=" << cfg.N << " Hi=" << cfg.Hi << " Wi=" << cfg.Wi << " C=" << cfg.C
-                 << " Y=" << cfg.Y << " X=" << cfg.X << " stride=" << cfg.StrideH << "x"
-                 << cfg.StrideW << " dilation=" << cfg.DilationH << "x" << cfg.DilationW
-                 << " padH=" << cfg.PadHLeft << "/" << cfg.PadHRight << " padW=" << cfg.PadWLeft
-                 << "/" << cfg.PadWRight << " Ho=" << Ho << " Wo=" << Wo);
-
-    const auto transform = make_conv_fwd_data_in_transform(cfg.N,
-                                                           cfg.Hi,
-                                                           cfg.Wi,
-                                                           cfg.C,
-                                                           cfg.Y,
-                                                           cfg.X,
-                                                           Ho,
-                                                           Wo,
-                                                           cfg.StrideH,
-                                                           cfg.StrideW,
-                                                           cfg.DilationH,
-                                                           cfg.DilationW,
-                                                           cfg.PadHLeft,
-                                                           cfg.PadWLeft);
+    const auto transform = MakeCustomTransform<NDim>(cfg, out);
 
     // Upper-index boundaries around every divisor, plus values up to the largest dividend
     // (2^31 - 1) magic division supports; random samples cover the rest.
-    std::vector<int64_t> ms{0,
-                            1,
-                            Wo - 1,
-                            Wo,
-                            Wo + 1,
-                            Ho * Wo - 1,
-                            Ho * Wo,
-                            Ho * Wo + 1,
-                            M - 1,
-                            M,
-                            INT32_MAX - 1,
-                            INT32_MAX};
-    std::vector<int64_t> ks{0,
-                            1,
-                            cfg.C - 1,
-                            cfg.C,
-                            cfg.C + 1,
-                            int64_t(cfg.X) * cfg.C - 1,
-                            int64_t(cfg.X) * cfg.C,
-                            K - 1,
-                            K,
-                            K + int64_t(cfg.X) * cfg.C};
+    std::vector<int64_t> ms{0, 1, M - 1, M, INT32_MAX - 1, INT32_MAX};
+    std::vector<int64_t> ks{0, 1, cfg.C - 1, cfg.C, cfg.C + 1, K - 1, K, K + cfg.C};
+    int64_t prod = 1;
+    for(index_t d = NDim - 1; d >= 0; --d)
+    {
+        prod *= out64[d];
+        for(int64_t delta : {-1, 0, 1})
+            ms.push_back(prod + delta);
+    }
+    prod = cfg.C;
+    for(index_t d = NDim - 1; d >= 0; --d)
+    {
+        prod *= cfg.Filter[d];
+        for(int64_t delta : {-1, 0, 1})
+            ks.push_back(prod + delta);
+    }
     std::mt19937_64 rng(7);
     for(int i = 0; i < 2000; ++i)
     {
         ms.push_back(rng() % (int64_t(INT32_MAX) + 1));
-        ks.push_back(rng() % (K + int64_t(cfg.X) * cfg.C));
+        ks.push_back(rng() % (K + cfg.C));
     }
 
     int64_t mismatches = 0;
@@ -595,31 +691,48 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase& cfg)
             }
             const auto up = make_tuple(static_cast<index_t>(m), static_cast<index_t>(k));
 
-            const int64_t n  = m / (Wo * Ho);
-            const int64_t ho = (m / Wo) % Ho;
-            const int64_t wo = m % Wo;
-            const int64_t y  = k / (int64_t(cfg.X) * cfg.C);
-            const int64_t x  = (k / cfg.C) % cfg.X;
-            const int64_t c  = k % cfg.C;
-            const int64_t hi = ho * cfg.StrideH + y * cfg.DilationH - cfg.PadHLeft;
-            const int64_t wi = wo * cfg.StrideW + x * cfg.DilationW - cfg.PadWLeft;
-            const bool valid = hi >= 0 && hi < cfg.Hi && wi >= 0 && wi < cfg.Wi;
+            std::array<int64_t, NDim> o{}, f{}, in_idx{};
+            int64_t q = m;
+            for(index_t d = NDim - 1; d >= 0; --d)
+            {
+                o[d] = q % out64[d];
+                q /= out64[d];
+            }
+            const int64_t n = q;
+            q               = k;
+            const int64_t c = q % cfg.C;
+            q /= cfg.C;
+            for(index_t d = NDim - 1; d >= 1; --d)
+            {
+                f[d] = q % cfg.Filter[d];
+                q /= cfg.Filter[d];
+            }
+            f[0]          = q;
+            bool valid    = true;
+            bool in_range = true;
+            for(index_t d = 0; d < NDim; ++d)
+            {
+                in_idx[d] = o[d] * cfg.Stride[d] + f[d] * cfg.Dilation[d] - cfg.PadLeft[d];
+                valid &= in_idx[d] >= 0 && in_idx[d] < cfg.In[d];
+                in_range &= in_idx[d] >= INT32_MIN && in_idx[d] <= INT32_MAX;
+            }
 
             // The transform computes lower indices in 32-bit arithmetic; a lower index outside
             // the int32 range (only reachable with absurd dilation/pad past the filter) is not
             // representable and therefore outside the supported range.
-            if(hi < INT32_MIN || hi > INT32_MAX || wi < INT32_MIN || wi > INT32_MAX)
+            if(!in_range)
             {
                 continue;
             }
 
-            MultiIndex<4> low;
+            MultiIndex<NDim + 2> low;
             transform.CalculateLowerIndex(low, up);
 
             mismatches += low[Number<0>{}] != n;
-            mismatches += low[Number<1>{}] != hi;
-            mismatches += low[Number<2>{}] != wi;
-            mismatches += low[Number<3>{}] != c;
+            mismatches += low[Number<NDim + 1>{}] != c;
+            static_for<0, NDim, 1>{}([&](auto d) {
+                mismatches += static_cast<int64_t>(low[Number<d + 1>{}]) != in_idx[d];
+            });
             mismatches += transform.IsValidUpperIndexMappedToValidLowerIndex(up) != valid;
         }
     }
@@ -630,68 +743,154 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase& cfg)
 
 TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneric)
 {
-    // {N, Hi, Wi, C, Y, X, StrideH, StrideW, DilationH, DilationW,
-    //  PadHLeft, PadHRight, PadWLeft, PadWRight}
-    const ForwardConvCase cases[] = {
-        // original configuration
-        {1, 7, 7, 2, 3, 3, 2, 2, 2, 2, 1, 5, 2, 4},
-        // N > 1 with every H/W parameter different (Ho != Wo, Y != X, ...)
-        {3, 9, 13, 5, 3, 2, 2, 3, 1, 2, 1, 4, 3, 0},
-        {2, 8, 10, 4, 2, 5, 2, 1, 3, 2, 0, 1, 2, 0},
-        {5, 14, 11, 6, 3, 3, 1, 2, 1, 1, 1, 1, 1, 1},
-        // different channel counts: 1, odd, non power of two, power of two
-        {2, 6, 5, 1, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
-        {2, 6, 5, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
-        {2, 6, 5, 7, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
-        {2, 6, 5, 16, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
-        // 1x1 filters, with and without stride
-        {2, 5, 6, 4, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-        {2, 5, 6, 4, 1, 1, 2, 3, 1, 1, 0, 0, 0, 0},
-        // Ho == Wo == 1
-        {3, 3, 3, 4, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0},
-        // padding larger than the input
-        {2, 2, 3, 3, 3, 3, 1, 1, 1, 1, 4, 4, 5, 5},
-        // right padding not fully consumed by the stride
-        {2, 7, 7, 3, 3, 3, 3, 3, 1, 1, 1, 3, 1, 3},
-        // large stride and dilation
-        {2, 31, 29, 3, 3, 3, 4, 5, 6, 7, 6, 6, 7, 7},
+    // {N, C, In, Filter, Stride, Dilation, PadLeft, PadRight}
+    const ForwardConvCase<1> cases1d[] = {
+        {2, 3, {17}, {3}, {1}, {1}, {1}, {1}},
+        {3, 5, {13}, {4}, {2}, {2}, {3}, {0}},
+        {2, 1, {9}, {1}, {1}, {1}, {0}, {0}},
+        {2, 7, {10}, {1}, {3}, {1}, {0}, {0}},
+        {1, 4, {5}, {5}, {1}, {1}, {0}, {0}},
+        {2, 4, {2}, {3}, {1}, {1}, {4}, {5}},
+        {2, 3, {31}, {3}, {4}, {6}, {6}, {6}},
+        {3, 16, {12}, {3}, {1}, {1}, {1}, {1}},
     };
-
-    for(const auto& cfg : cases)
+    const ForwardConvCase<2> cases2d[] = {
+        // original configuration
+        {1, 2, {7, 7}, {3, 3}, {2, 2}, {2, 2}, {1, 2}, {5, 4}},
+        // N > 1 with every H/W parameter different (Ho != Wo, Y != X, ...)
+        {3, 5, {9, 13}, {3, 2}, {2, 3}, {1, 2}, {1, 3}, {4, 0}},
+        {2, 4, {8, 10}, {2, 5}, {2, 1}, {3, 2}, {0, 2}, {1, 0}},
+        {5, 6, {14, 11}, {3, 3}, {1, 2}, {1, 1}, {1, 1}, {1, 1}},
+        // different channel counts: 1, odd, non power of two, power of two
+        {2, 1, {6, 5}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}},
+        {2, 3, {6, 5}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}},
+        {2, 7, {6, 5}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}},
+        {2, 16, {6, 5}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}},
+        // 1x1 filters, with and without stride
+        {2, 4, {5, 6}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+        {2, 4, {5, 6}, {1, 1}, {2, 3}, {1, 1}, {0, 0}, {0, 0}},
+        // Ho == Wo == 1
+        {3, 4, {3, 3}, {3, 3}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+        // padding larger than the input
+        {2, 3, {2, 3}, {3, 3}, {1, 1}, {1, 1}, {4, 5}, {4, 5}},
+        // right padding not fully consumed by the stride
+        {2, 3, {7, 7}, {3, 3}, {3, 3}, {1, 1}, {1, 1}, {3, 3}},
+        // large stride and dilation
+        {2, 3, {31, 29}, {3, 3}, {4, 5}, {6, 7}, {6, 7}, {6, 7}},
+    };
+    const ForwardConvCase<3> cases3d[] = {
+        {2, 3, {5, 6, 7}, {3, 2, 3}, {1, 2, 1}, {1, 1, 2}, {1, 0, 1}, {1, 1, 0}},
+        {3, 4, {4, 9, 5}, {2, 3, 2}, {2, 1, 3}, {2, 2, 1}, {0, 2, 1}, {1, 0, 2}},
+        {2, 1, {4, 4, 4}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        {2, 5, {4, 5, 6}, {1, 1, 1}, {2, 3, 2}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        {2, 4, {3, 3, 3}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        {2, 3, {2, 2, 3}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {3, 4, 5}, {3, 4, 5}},
+        {2, 3, {9, 9, 9}, {3, 3, 3}, {3, 3, 3}, {2, 1, 2}, {1, 3, 1}, {2, 3, 0}},
+        {1, 16, {5, 4, 6}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+    };
+    for(const auto& cfg : cases1d)
     {
-        CheckForwardConvInputTransformMatchesGeneric(cfg);
+        CheckForwardConvInputTransformMatchesGeneric<1>(cfg);
+    }
+    for(const auto& cfg : cases2d)
+    {
+        CheckForwardConvInputTransformMatchesGeneric<2>(cfg);
+    }
+    for(const auto& cfg : cases3d)
+    {
+        CheckForwardConvInputTransformMatchesGeneric<3>(cfg);
     }
 
     // Extreme configurations, checked against an int64 reference (offsets would overflow here).
-    const ForwardConvCase extreme_cases[] = {
-        // M just below 2^31 and a large channel count
-        {32767, 256, 256, 4096, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
-        // power-of-two divisors everywhere
-        {4, 16, 16, 64, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0},
-        // divisors of the form 2^k + 1 and 2^k
-        {2, 33, 17, 65, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
-        {2, 2, 2, 65536, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
-        // large divisors: Wo = 65537, C = 65537
-        {1, 1, 65537, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-        {2, 3, 3, 65537, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-        // very negative lower indices; only hi == 0 / wi == 0 is valid
-        {1, 4, 4, 1, 1, 1, 1 << 28, 1 << 28, 1, 1, 1 << 30, 0, 1 << 30, 0},
-        // very large positive lower indices; only hi == 0 / wi == 0 is valid
-        {1, 4, 4, 1, 1, 1, 1 << 28, 1 << 28, 1, 1, 0, 1 << 30, 0, 1 << 30},
-        {1, 4, 4, 1, 1, 1, 1 << 28, 1 << 28, 1, 1, 0, 7 << 28, 0, 7 << 28},
-        // lower indices down to -(2^31 - 1)
-        {1, 4, 4, 1, 1, 1, 1 << 28, 1 << 28, 1, 1, INT32_MAX, 0, INT32_MAX, 0},
-        // extents at the 32-bit limit: Hi = Wi = INT32_MAX, filter taps reaching Hi - 1 and Hi
-        {1, INT32_MAX, INT32_MAX, 1, 2, 2, 1, 1, INT32_MAX - 1, INT32_MAX - 1, 0, 0, 0, 0},
-        {1, INT32_MAX, INT32_MAX, 1, 2, 2, 1, 1, INT32_MAX, INT32_MAX, 0, 1, 0, 1},
-        // Wo = INT32_MAX (largest magic-division divisor) with M = INT32_MAX
-        {1, 1, INT32_MAX, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-        // K = Y * X * C just below 2^31, with X = 1 (divisor 1) and a huge C divisor
-        {1, 3, 1, 715827882, 3, 1, 1, 1, 1, 1, 0, 0, 0, 0},
+    const ForwardConvCase<1> extreme1d[] = {
+        // Wo = INT32_MAX: largest magic-division divisor on the M side
+        {1, 1, {INT32_MAX}, {1}, {1}, {1}, {0}, {0}},
+        // Wo = 65537, C = 65537
+        {1, 1, {65537}, {1}, {1}, {1}, {0}, {0}},
+        {2, 65537, {3}, {1}, {1}, {1}, {0}, {0}},
+        // K = Y * C just below 2^31
+        {1, 715827882, {3}, {3}, {1}, {1}, {0}, {0}},
+        // very negative and very large lower indices; only wi == 0 is valid
+        {1, 1, {4}, {1}, {1 << 28}, {1}, {1 << 30}, {0}},
+        {1, 1, {4}, {1}, {1 << 28}, {1}, {0}, {1 << 30}},
+        {1, 1, {4}, {1}, {1 << 28}, {1}, {INT32_MAX}, {0}},
+        {1, 1, {INT32_MAX}, {2}, {INT32_MAX - 1}, {1}, {0}, {0}},
     };
-
-    for(const auto& cfg : extreme_cases)
+    const ForwardConvCase<2> extreme2d[] = {
+        // M just below 2^31 and a large channel count
+        {32767, 4096, {256, 256}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}},
+        // power-of-two divisors everywhere
+        {4, 64, {16, 16}, {2, 2}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+        // divisors of the form 2^k + 1 and 2^k
+        {2, 65, {33, 17}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}},
+        {2, 65536, {2, 2}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}},
+        // large divisors: Wo = 65537, C = 65537
+        {1, 1, {1, 65537}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+        {2, 65537, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+        // very negative lower indices; only hi == 0 / wi == 0 is valid
+        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {1 << 30, 1 << 30}, {0, 0}},
+        // very large positive lower indices; only hi == 0 / wi == 0 is valid
+        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {1 << 30, 1 << 30}},
+        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {7 << 28, 7 << 28}},
+        // lower indices down to -(2^31 - 1)
+        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {INT32_MAX, INT32_MAX}, {0, 0}},
+        // extents at the 32-bit limit: Hi = Wi = INT32_MAX, filter taps reaching Hi - 1 and Hi
+        {1,
+         1,
+         {INT32_MAX, INT32_MAX},
+         {2, 2},
+         {INT32_MAX - 1, INT32_MAX - 1},
+         {1, 1},
+         {0, 0},
+         {0, 0}},
+        {1, 1, {INT32_MAX, INT32_MAX}, {2, 2}, {INT32_MAX, INT32_MAX}, {1, 1}, {0, 0}, {1, 1}},
+        // Wo = INT32_MAX (largest magic-division divisor) with M = INT32_MAX
+        {1, 1, {1, INT32_MAX}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+        // K = Y * X * C just below 2^31, with X = 1 (divisor 1) and a huge C divisor
+        {1, 715827882, {3, 1}, {3, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+    };
+    const ForwardConvCase<3> extreme3d[] = {
+        // M just below 2^31, large C
+        {2047, 1024, {32, 32, 32}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+        // power-of-two divisors everywhere
+        {4, 64, {8, 8, 8}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        // divisors of the form 2^k + 1
+        {2, 65, {5, 17, 33}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+        // large divisors on both sides
+        {1, 1, {1, 1, 65537}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        {2, 65537, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        // very negative / large lower indices on every dimension
+        {1,
+         1,
+         {4, 4, 4},
+         {1, 1, 1},
+         {1 << 28, 1 << 28, 1 << 28},
+         {1, 1, 1},
+         {1 << 30, 1 << 30, 1 << 30},
+         {0, 0, 0}},
+        {1,
+         1,
+         {4, 4, 4},
+         {1, 1, 1},
+         {1 << 28, 1 << 28, 1 << 28},
+         {1, 1, 1},
+         {0, 0, 0},
+         {1 << 30, 1 << 30, 1 << 30}},
+        // Wo = INT32_MAX with the other output dimensions 1
+        {1, 1, {1, 1, INT32_MAX}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        // K just below 2^31 with filter 3 x 1 x 1 and a huge C divisor
+        {1, 715827882, {3, 1, 1}, {3, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+    };
+    for(const auto& cfg : extreme1d)
     {
-        CheckForwardConvInputTransformLowerIndices(cfg);
+        CheckForwardConvInputTransformLowerIndices<1>(cfg);
+    }
+    for(const auto& cfg : extreme2d)
+    {
+        CheckForwardConvInputTransformLowerIndices<2>(cfg);
+    }
+    for(const auto& cfg : extreme3d)
+    {
+        CheckForwardConvInputTransformLowerIndices<3>(cfg);
     }
 }
