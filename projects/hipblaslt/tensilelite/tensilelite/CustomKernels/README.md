@@ -141,6 +141,15 @@ the device, with the kernel asserted as the default pick on its architecture.
 `AddCustomConfig` copies the key from the kernel's `CustomKernel` entry in the
 test YAML.
 
+## Occupancy
+
+A custom kernel skips code generation, so nothing derives its `CUOccupancy`
+(workgroups per CU or WGP), which Origami uses to rank the kernels of a
+Prediction library. A logic entry that uses a custom kernel can declare it:
+a positive `CUOccupancy` there is kept on any architecture. Without one, gfx9
+kernels get it computed from the resources their `.s` declares, and other
+kernels keep `-1`, which the host treats as 1.
+
 ## Adding a new external kernel
 
 The `tensilelite.AddCustomConfig` helper extracts the Tensile-side interface from
