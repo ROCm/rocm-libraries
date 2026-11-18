@@ -182,6 +182,28 @@ struct w4a16_params_t {
   size_t token_tile_wgs_per_cu;
   // Grid when no rule applies: generic (true) or DP (false).
   bool generic_grid_otherwise;
+
+  // --- Decode kernels (dot2 WaveSplitK: one wave per workgroup, MT_M weight rows x
+  // MT_N tokens, K split over the wave's lanes; see compute_w4a16_decode_latency) ---
+  // DRAM read bandwidth reached by the weight stream, bytes/us.
+  double decode_dram_bytes_per_us;
+  // DRAM latency the weight reads in flight have to cover, us: a grid with few waves
+  // (small weight matrices) does not keep enough bytes in flight for the bandwidth.
+  double decode_dram_latency_us;
+  // Activation reads (every wave reads its tokens' K values, mostly from L2), bytes/us.
+  double decode_l2_bytes_per_us;
+  // Waves resident per CU, per unit of the kernel's occupancy.
+  double decode_waves_per_cu_per_occupancy;
+  // Cycles of a wave: fixed (prologue, reduction, store), and per K iteration: the
+  // global-read latency, per weight byte read, per dequantized weight (bf16 counts
+  // twice) and per v_dot2 of the tile.
+  double decode_wave_cycles;
+  double decode_iter_cycles;
+  double decode_byte_cycles;
+  double decode_dequant_cycles;
+  double decode_mac_cycles;
+  // Fixed kernel time, us.
+  double decode_fixed_us;
 };
 
 // gfx1151 (Strix Halo).
@@ -208,6 +230,16 @@ constexpr w4a16_params_t w4a16_gfx1151() {
   p.token_tile_max_n                  = 48;
   p.token_tile_wgs_per_cu             = 2;
   p.generic_grid_otherwise            = true;
+  p.decode_dram_bytes_per_us          = 239.0e3;
+  p.decode_dram_latency_us            = 1.15;
+  p.decode_l2_bytes_per_us            = 9320.0e3;
+  p.decode_waves_per_cu_per_occupancy = 3.24;
+  p.decode_wave_cycles                = 933.0;
+  p.decode_iter_cycles                = 1090.0;
+  p.decode_byte_cycles                = 0.39;
+  p.decode_dequant_cycles             = 5.6;
+  p.decode_mac_cycles                 = 0.354;
+  p.decode_fixed_us                   = 2.44;
   return p;
 }
 
@@ -237,6 +269,16 @@ constexpr w4a16_params_t w4a16_gfx1150() {
   p.token_tile_wgs_per_cu             = 2;
   // The generic grid scales with occupancy: it split few tiles' K over 64 workgroups, 3x slower.
   p.generic_grid_otherwise            = false;
+  p.decode_dram_bytes_per_us          = 83.4e3 ;
+  p.decode_dram_latency_us            = 1.15;
+  p.decode_l2_bytes_per_us            = 9320.0e3;
+  p.decode_waves_per_cu_per_occupancy = 3.24;
+  p.decode_wave_cycles                = 933.0;
+  p.decode_iter_cycles                = 1090.0;
+  p.decode_byte_cycles                = 0.39;
+  p.decode_dequant_cycles             = 5.6;
+  p.decode_mac_cycles                 = 0.354;
+  p.decode_fixed_us                   = 2.44;
   return p;
 }
 

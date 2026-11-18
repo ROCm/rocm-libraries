@@ -1178,6 +1178,56 @@ static double compute_w4a16_dequant_latency(const problem_t& problem,
   return static_cast<double>(config.mt.m) * static_cast<double>(config.mt.k) * per_elem / lanes;
 }
 
+// W4A16 decode kernels: dot2 (no MI) WaveSplitK kernels, one wave per workgroup that
+// owns MT_M weight rows x MT_N tokens and splits K over its lanes. They stream the
+// weights once per token tile, so they are bound by DRAM bandwidth, by the activation
+// reads of every wave, or by the loop's issue, whichever is longest. The tile model
+// (MI tiles, LDS, workgroup waves) does not describe them and rejects them.
+static bool is_w4a16_decode(const problem_t& problem,
+                            const hardware_t& hardware,
+                            const config_t& config) {
+  return w4a16_params(problem, hardware) != nullptr && config.mi.m == 1 && config.mi.n == 1 && config.mi.k == 64;
+}
+
+// Latency of a W4A16 decode kernel, in the cycles of compute_total_latency (2200 per us,
+// as KERNEL_LAUNCH_OVERHEAD). problem.size: m weight rows, n tokens, k. The block scales
+// are counted as fp16 per 128 weights (the problem does not carry the group size). The
+// waves run in rounds of the resident ones (the kernel's occupancy), each wave one K
+// iteration after another (the last one partial when DepthU does not divide K).
+static double compute_w4a16_decode_latency(const problem_t& problem,
+                                           const hardware_t& hardware,
+                                           const config_t& config) {
+  const w4a16_params_t& d        = *w4a16_params(problem, hardware);
+  constexpr double CYCLES_PER_US = 2200.0;
+  const double m                 = static_cast<double>(problem.size.m);
+  const double k                 = static_cast<double>(problem.size.k);
+  const double mt_m              = static_cast<double>(config.mt.m);
+  const double mt_n              = static_cast<double>(config.mt.n);
+  const double depth_u           = static_cast<double>(config.mt.k);
+  const double token_tiles
+      = static_cast<double>(math::safe_ceil_div(problem.size.n, std::max<size_t>(config.mt.n, 1)));
+  const double waves = static_cast<double>(math::safe_ceil_div(problem.size.m, std::max<size_t>(config.mt.m, 1)))
+                       * token_tiles * static_cast<double>(std::max<size_t>(problem.batch, 1));
+  // The weights are read once per token tile; every wave reads its tokens' activations.
+  const double t_dram = token_tiles * m * k * (0.5 + 1.0 / 64.0) / d.decode_dram_bytes_per_us;
+  const double t_l2   = waves * mt_n * k * 2.0 / d.decode_l2_bytes_per_us;
+  // The waves run in rounds of the resident ones, each one K iteration after another
+  // (the last one partial when DepthU does not divide K), and the resident waves must
+  // keep enough weight bytes in flight to cover the DRAM latency.
+  const double resident = static_cast<double>(resolve_num_cus(problem.num_cus, hardware.N_CU))
+                          * d.decode_waves_per_cu_per_occupancy * static_cast<double>(std::max(config.occupancy, 1));
+  const double dequant  = problem.mi_dtype == data_type_t::BFloat16 ? 2.0 : 1.0;
+  const double iter_cycles = d.decode_iter_cycles + d.decode_byte_cycles * mt_m * depth_u / 2.0
+                             + d.decode_dequant_cycles * dequant * mt_m * depth_u / 32.0
+                             + d.decode_mac_cycles * mt_m * mt_n * depth_u / 64.0;
+  const double wave_cycles = d.decode_wave_cycles + std::ceil(k / depth_u) * iter_cycles;
+  const double t_waves = std::ceil(waves / resident) * wave_cycles / CYCLES_PER_US;
+  // Little's law: the resident waves keep MT_M x DepthU/2 weight bytes each in flight.
+  const double t_inflight = token_tiles * m * k * 0.5 * d.decode_dram_latency_us
+                            / (std::min(waves, resident) * mt_m * depth_u / 2.0);
+  return (std::max({t_dram, t_l2, t_waves, t_inflight}) + d.decode_fixed_us) * CYCLES_PER_US;
+}
+
 // Compute cvt overhead in tf32 emulation
 double compute_cvt_overhead(const problem_t& problem,
                             const hardware_t& hardware,
@@ -2894,6 +2944,9 @@ double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config) {
   if (!config.is_valid()) return std::numeric_limits<double>::max();
+
+  // W4A16 decode kernels have their own model (and none of the tile model's rules).
+  if (is_w4a16_decode(problem, hardware, config)) return compute_w4a16_decode_latency(problem, hardware, config);
 
   // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
   // When a matching heuristic marks the config as rejected, report the maximum
