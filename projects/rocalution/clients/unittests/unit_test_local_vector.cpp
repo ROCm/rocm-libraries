@@ -30,6 +30,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -1322,7 +1323,8 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
 }
 
 // The destructor frees only the current backend object, so this leaks the other one. The
-// test checks that the destruction itself is safe.
+// test checks that the destruction itself is safe. It runs in a child that ends with _Exit,
+// so that the leak does not reach LeakSanitizer in an ASAN build.
 TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_sync)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -1330,21 +1332,21 @@ TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_s
         using T = typename decltype(type)::type;
 
         const std::vector<T> a = x<T>();
-        {
-            SCOPED_TRACE("MoveToAcceleratorAsync");
-            auto v = make_local_vector(Backend::Host, a);
-            v->MoveToAcceleratorAsync();
-            rocalution::_rocalution_sync();
-            v.reset();
-        }
-        {
-            SCOPED_TRACE("MoveToHostAsync");
-            auto v = make_local_vector(Backend::Accelerator, a);
-            v->MoveToHostAsync();
-            rocalution::_rocalution_sync();
-            v.reset();
-        }
-        EXPECT_TRUE(logged_check(*make_local_vector(Backend::Accelerator, a)));
+        EXPECT_EXIT(
+            {
+                auto to_accelerator = make_local_vector(Backend::Host, a);
+                to_accelerator->MoveToAcceleratorAsync();
+                rocalution::_rocalution_sync();
+                to_accelerator.reset();
+
+                auto to_host = make_local_vector(Backend::Accelerator, a);
+                to_host->MoveToHostAsync();
+                rocalution::_rocalution_sync();
+                to_host.reset();
+                std::_Exit(0);
+            },
+            testing::ExitedWithCode(0),
+            "");
     });
 }
 
