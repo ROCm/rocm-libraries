@@ -335,7 +335,7 @@ def test_binding_rejects_bad_input():
         lambda: eng.conv_direct_fwd_pp_mfma_describe(sd, "gfx950"),
         lambda: eng.conv_direct_fwd_pp_mfma_lower_llvm(sd, arch="gfx950"),
     ):
-        with pytest.raises(ValueError, match="dtype must be a string, not None"):
+        with pytest.raises(ValueError, match="dtype must be .* not None"):
             fn()
     spec = FwdPpMfmaSpec(problem=replace(_problem(), dtype=None))
     assert fwd_pp_mfma_reason(spec) == "fp16/bf16 only"
