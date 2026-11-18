@@ -880,13 +880,6 @@ _BOUNDARY_MUTATION = {
 }
 
 
-def is_distinguished(case: StructuredCase, query: int, key: int) -> bool:
-    """Whether ``key`` carries the row's nonzero score (legality aside)."""
-    if (key + case.residue_shift - query) % STRUCTURED_PERIOD:
-        return False
-    return not (case.fixture is StructuredFixture.LATE_MAX and key < case.late)
-
-
 def score_numerator(
     case: StructuredCase,
     head: int,
@@ -2109,7 +2102,7 @@ def search_head_scales(
 
 # Chosen by ``search_head_scales(STRUCTURED_SEARCH_BASES, family)`` with the default
 # exponent range; ``STRUCTURED_HEAD_SCALE_MARGIN`` is the attained worst-case gap in
-# target ULPs, recomputed by a CPU contract.
+# target ULPs. CPU contracts rerun the search and recompute the margin.
 STRUCTURED_HEAD_SCALES: Mapping[
     str, tuple[tuple[Fraction, ...], tuple[Fraction, ...]]
 ] = MappingProxyType(

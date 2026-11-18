@@ -133,6 +133,7 @@ from ._structured_analytical import (
     row_trace,
     score,
     score_numerator,
+    search_head_scales,
     sum_any_order,
     target_rank,
     target_value,
@@ -3321,6 +3322,16 @@ def test_head_scales_keep_their_committed_separation(family: str) -> None:
     q_scales, k_scales = STRUCTURED_HEAD_SCALES[family]
     margin = head_scale_margin(STRUCTURED_SEARCH_BASES, family, q_scales, k_scales)
     assert margin == STRUCTURED_HEAD_SCALE_MARGIN[family] > 0
+
+
+@pytest.mark.parametrize("family", sorted(STRUCTURED_HEAD_SCALES))
+def test_committed_head_scales_are_what_the_search_returns(family: str) -> None:
+    """The committed scales are the maximin choice, not only a choice with a
+    positive margin: the search over signed powers of two, with its default
+    exponent range, returns them and their margin."""
+    q_scales, k_scales, margin = search_head_scales(STRUCTURED_SEARCH_BASES, family)
+    assert (q_scales, k_scales) == STRUCTURED_HEAD_SCALES[family]
+    assert margin == STRUCTURED_HEAD_SCALE_MARGIN[family]
 
 
 # ---------------------------------------------------------------------------

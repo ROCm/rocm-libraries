@@ -11,7 +11,9 @@ measured value enters that set.
 The only skip is a processor that is not gfx942, through the shared
 ``rocke.tests.gpu.current_device_arch_in`` gate, so ``ROCKE_REQUIRE_GFX942=1``
 turns it into a failure. On gfx942 a missing or mismatched ``STRUCTURED_CALIBRATION``
-entry fails after the records are written, so an unratified case fails closed.
+entry fails, so an unratified case fails closed. That assertion comes after the
+record capture, which writes the records only when
+``ROCKE_ORACLE_FREE_CALIBRATION_OUT`` names a directory.
 """
 
 from __future__ import annotations
@@ -149,9 +151,10 @@ def _capture_records(
 def test_structured_logits(case: StructuredCase) -> None:
     """Gate a ratified case: deterministic, and every coordinate in Tier B.
 
-    Mutation self-checks and record capture run before any assertion, so a
-    mutation that goes unrejected and an unratified case both still record
-    what the offline audit and ratification need."""
+    Mutation self-checks and record capture run before any assertion, so
+    with ``ROCKE_ORACLE_FREE_CALIBRATION_OUT`` set a mutation that goes
+    unrejected and an unratified case both still record what the offline
+    audit and ratification need. Without it nothing is written."""
     arch = current_device_arch_in(
         ("gfx942",), subject="the gfx942 dense structured-logit gate"
     )

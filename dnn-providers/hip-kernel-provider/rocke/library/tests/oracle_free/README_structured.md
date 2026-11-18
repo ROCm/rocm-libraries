@@ -64,9 +64,11 @@ when `k + r = q (mod 64)`.
 | `late_max` | as `identity` | as `identity`, rows `k < 64` zeroed | 0 | as `identity`, keys `k >= 64` only |
 
 The head scales `(a_h, b_h)` give each head its own logit (periodic fixtures
-`8, -8, 2, -1/2`; Walsh magnitudes `8, 2, 1/2, 4`). They were chosen by a
-maximin search so that every wrong Q-head or K-head read changes some stored
-value; a CPU contract recomputes the committed margin. Causal rows contain
+`8, -8, 2, -1/2`; Walsh magnitudes `8, 2, 1/2, 4`). They are what a maximin
+search over signed powers of two returns (`search_head_scales`), so that every
+wrong Q-head or K-head read changes some stored value, by at least 181 target
+ULPs. CPU contracts rerun the search and recompute the margin of the committed
+scales. Causal rows contain
 masked distinguished keys (`k = q + 64j`), so any mask leak is visible.
 Window-64 rows straddle two KV tiles, and `late_max` moves the row maximum
 into a later tile; both exercise the online rescale.
@@ -203,12 +205,19 @@ carries that assumption's label; the other assumption labels are heuristics:
 A CPU contract replaces one primitive at a time by a value its assumption
 excludes and requires every coordinate that leaves Tier B to fail with a named
 label. Only the conversions are visible in the stored bits: a truncating cast
-and a truncated FP16 store move about 6 to 9 percent of the coordinates out of
-Tier B. An exponential two FP32 steps outside its candidate set, a folded
-addition two steps outside the faithful pair, a Walsh score one step off, a
-reciprocal one step off and round-toward-zero FP32 arithmetic leave Tier B at
-no coordinate of the quick matrix (`STRUCTURED_UNOBSERVED_VIOLATIONS`). That is a
-limit of what the stored bits can show, not evidence for those assumptions.
+and a truncated FP16 store move between about 21 and 35 percent of the
+coordinates of a case out of Tier B. An exponential two FP32 steps outside its
+candidate set, a folded addition two steps outside the faithful pair, a Walsh
+score one step off, a reciprocal one step off and round-toward-zero FP32
+arithmetic leave Tier B at no coordinate of the quick matrix
+(`STRUCTURED_UNOBSERVED_VIOLATIONS`). That is a limit of what the stored bits
+can show, not evidence for those assumptions.
+
+By default, and in CI, the contract judges seven rows of each case (0, 63, 64,
+127, 128, 207 and 255: block, tile and window edges). With
+`ROCKE_STRUCTURED_FULL_VIOLATION_SWEEP=1` it judges all 256 rows, which takes
+about twenty minutes; the figures and the "no coordinate" statement above are
+those of that sweep.
 
 ## Mutation self-checks
 
@@ -265,7 +274,8 @@ entry, a fingerprint mismatch or a run that compared nothing is a failure,
 never a skip. The adapter launches the spec dispatch resolves by default and
 pins no knob, so a retune that changes a fingerprint field reaches this gate.
 Mutation self-checks and record capture run before any assertion, so a failing
-run, one with an unrejected mutation included, still writes its records.
+run, one with an unrejected mutation included, still writes its records when
+record capture is enabled (below). CI does not enable it.
 
 Each case runs the five exposures twice, and the two runs must be
 bit-identical. With `ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>` set, each case
