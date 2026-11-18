@@ -69,6 +69,66 @@ TEST(TestGpuPointwiseMixedLayouts, Binary)
         outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
+TEST(TestGpuPointwiseMixedLayouts, Compare)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Input tensors have different layouts
+    Tensor<float> input0Tensor({1, 3, 2, 2}, TensorLayout::NHWC);
+    Tensor<float> input1Tensor({1, 3, 2, 2}, TensorLayout::NCHW);
+    Tensor<bool> outputCpuTensor({1, 3, 2, 2}, TensorLayout::NHWC);
+    Tensor<bool> outputGpuTensor({1, 3, 2, 2}, TensorLayout::NHWC);
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::CMP_GT;
+    CpuReferencePointwiseImpl<bool, float, float>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<bool, float, float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwiseMixedLayouts, Ternary)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // All three inputs and the output have different layouts
+    Tensor<float> input0Tensor({1, 3, 2, 2}, TensorLayout::NHWC);
+    Tensor<float> input1Tensor({1, 3, 2, 2}, TensorLayout::NCHW);
+    Tensor<bool> maskTensor({1, 3, 2, 2}, TensorLayout::NHWC);
+    Tensor<float> outputCpuTensor({1, 3, 2, 2}, TensorLayout::NCHW);
+    Tensor<float> outputGpuTensor({1, 3, 2, 2}, TensorLayout::NCHW);
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+    fillMaskWithAlternatingValues(maskTensor);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::BINARY_SELECT;
+    CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
 // --- Test mixed types ---
 
 TEST(TestGpuPointwiseMixedTypes, UnaryUpcast)
@@ -156,6 +216,131 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
                    getDynamicTolerance<float, HalfType>(operation, fillRange));
 }
 
+TEST(TestGpuPointwiseMixedTypes, CompareMixedInputs)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Input tensors have different types, output is boolean
+    Tensor<HalfType> input0Tensor({1, 3, 2, 2});
+    Tensor<BFloat16Type> input1Tensor({1, 3, 2, 2});
+    Tensor<bool> outputCpuTensor({1, 3, 2, 2});
+    Tensor<bool> outputGpuTensor({1, 3, 2, 2});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, HalfType{-fillRange}, HalfType{fillRange}, seed);
+    fillWithRandomValues(input1Tensor, BFloat16Type{-fillRange}, BFloat16Type{fillRange}, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::CMP_GT;
+    CpuReferencePointwiseImpl<bool, HalfType, BFloat16Type>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<bool, HalfType, BFloat16Type>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwiseMixedTypes, CompareInt32)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<int32_t> input0Tensor({1, 1, 2, 2});
+    Tensor<int32_t> input1Tensor({1, 1, 2, 2});
+    Tensor<bool> outputGpuTensor({1, 1, 2, 2});
+
+    // 16777217 is not representable as a float, so these only compare correctly when two
+    // integral inputs are compared exactly rather than through the float compute type
+    input0Tensor.setHostValue(16777217, 0, 0, 0, 0);
+    input1Tensor.setHostValue(16777216, 0, 0, 0, 0);
+    input0Tensor.setHostValue(16777216, 0, 0, 0, 1);
+    input1Tensor.setHostValue(16777217, 0, 0, 0, 1);
+    input0Tensor.setHostValue(-3, 0, 0, 1, 0);
+    input1Tensor.setHostValue(-4, 0, 0, 1, 0);
+    input0Tensor.setHostValue(5, 0, 0, 1, 1);
+    input1Tensor.setHostValue(5, 0, 0, 1, 1);
+
+    GpuReferencePointwise::pointwiseCompute<bool, int32_t, int32_t, float>(
+        PointwiseMode::CMP_GT, outputGpuTensor, input0Tensor, input1Tensor);
+
+    // Non-const access to migrate the result back to the host
+    outputGpuTensor.memory().hostData();
+
+    EXPECT_TRUE(outputGpuTensor.getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(outputGpuTensor.getHostValue(0, 0, 0, 1));
+    EXPECT_TRUE(outputGpuTensor.getHostValue(0, 0, 1, 0));
+    EXPECT_FALSE(outputGpuTensor.getHostValue(0, 0, 1, 1));
+}
+
+TEST(TestGpuPointwiseMixedTypes, TernaryMixedInputs)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Input tensors have different types, output is a third type
+    Tensor<HalfType> input0Tensor({1, 3, 2, 2});
+    Tensor<BFloat16Type> input1Tensor({1, 3, 2, 2});
+    Tensor<bool> maskTensor({1, 3, 2, 2});
+    Tensor<float> outputCpuTensor({1, 3, 2, 2});
+    Tensor<float> outputGpuTensor({1, 3, 2, 2});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, HalfType{-fillRange}, HalfType{fillRange}, seed);
+    fillWithRandomValues(input1Tensor, BFloat16Type{-fillRange}, BFloat16Type{fillRange}, seed + 1);
+    fillMaskWithAlternatingValues(maskTensor);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::BINARY_SELECT;
+    CpuReferencePointwiseImpl<float, HalfType, BFloat16Type, bool>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    GpuReferencePointwise::pointwiseCompute<float, HalfType, BFloat16Type, bool>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwiseMixedTypes, TernaryInt32)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<int32_t> input0Tensor({1, 1, 2, 2});
+    Tensor<int32_t> input1Tensor({1, 1, 2, 2});
+    Tensor<bool> maskTensor({1, 1, 2, 2});
+    Tensor<int32_t> outputGpuTensor({1, 1, 2, 2});
+
+    input0Tensor.setHostValue(10, 0, 0, 0, 0);
+    input0Tensor.setHostValue(11, 0, 0, 0, 1);
+    input0Tensor.setHostValue(12, 0, 0, 1, 0);
+    input0Tensor.setHostValue(13, 0, 0, 1, 1);
+    input1Tensor.setHostValue(-10, 0, 0, 0, 0);
+    input1Tensor.setHostValue(-11, 0, 0, 0, 1);
+    input1Tensor.setHostValue(-12, 0, 0, 1, 0);
+    input1Tensor.setHostValue(-13, 0, 0, 1, 1);
+    maskTensor.setHostValue(true, 0, 0, 0, 0);
+    maskTensor.setHostValue(false, 0, 0, 0, 1);
+    maskTensor.setHostValue(false, 0, 0, 1, 0);
+    maskTensor.setHostValue(true, 0, 0, 1, 1);
+
+    GpuReferencePointwise::pointwiseCompute<int32_t, int32_t, int32_t, bool>(
+        PointwiseMode::BINARY_SELECT, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    // Non-const access to migrate the result back to the host
+    outputGpuTensor.memory().hostData();
+
+    EXPECT_EQ(outputGpuTensor.getHostValue(0, 0, 0, 0), 10);
+    EXPECT_EQ(outputGpuTensor.getHostValue(0, 0, 0, 1), -11);
+    EXPECT_EQ(outputGpuTensor.getHostValue(0, 0, 1, 0), -12);
+    EXPECT_EQ(outputGpuTensor.getHostValue(0, 0, 1, 1), 13);
+}
+
 // --- Test 1D/2D/3D shapes ---
 
 TEST(TestGpuPointwise1DShapes, Unary)
@@ -212,6 +397,64 @@ TEST(TestGpuPointwise1DShapes, Binary)
         outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
+TEST(TestGpuPointwise1DShapes, Compare)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({3});
+    Tensor<float> input1Tensor({3});
+    Tensor<bool> outputCpuTensor({3});
+    Tensor<bool> outputGpuTensor({3});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::CMP_GT;
+    CpuReferencePointwiseImpl<bool, float, float>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<bool, float, float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwise1DShapes, Ternary)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({3});
+    Tensor<float> input1Tensor({3});
+    Tensor<bool> maskTensor({3});
+    Tensor<float> outputCpuTensor({3});
+    Tensor<float> outputGpuTensor({3});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+    fillMaskWithAlternatingValues(maskTensor);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::BINARY_SELECT;
+    CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
 TEST(TestGpuPointwise2DShapes, Unary)
 {
     SKIP_IF_NO_DEVICES();
@@ -266,6 +509,64 @@ TEST(TestGpuPointwise2DShapes, Binary)
         outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
+TEST(TestGpuPointwise2DShapes, Compare)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({3, 2});
+    Tensor<float> input1Tensor({3, 2});
+    Tensor<bool> outputCpuTensor({3, 2});
+    Tensor<bool> outputGpuTensor({3, 2});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::CMP_GT;
+    CpuReferencePointwiseImpl<bool, float, float>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<bool, float, float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwise2DShapes, Ternary)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({3, 2});
+    Tensor<float> input1Tensor({3, 2});
+    Tensor<bool> maskTensor({3, 2});
+    Tensor<float> outputCpuTensor({3, 2});
+    Tensor<float> outputGpuTensor({3, 2});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+    fillMaskWithAlternatingValues(maskTensor);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::BINARY_SELECT;
+    CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
 TEST(TestGpuPointwise3DShapes, Unary)
 {
     SKIP_IF_NO_DEVICES();
@@ -318,6 +619,64 @@ TEST(TestGpuPointwise3DShapes, Binary)
 
     assertAllClose(
         outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
+}
+
+TEST(TestGpuPointwise3DShapes, Compare)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({3, 2, 4});
+    Tensor<float> input1Tensor({3, 2, 4});
+    Tensor<bool> outputCpuTensor({3, 2, 4});
+    Tensor<bool> outputGpuTensor({3, 2, 4});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::CMP_GT;
+    CpuReferencePointwiseImpl<bool, float, float>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<bool, float, float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwise3DShapes, Ternary)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({3, 2, 4});
+    Tensor<float> input1Tensor({3, 2, 4});
+    Tensor<bool> maskTensor({3, 2, 4});
+    Tensor<float> outputCpuTensor({3, 2, 4});
+    Tensor<float> outputGpuTensor({3, 2, 4});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+    fillMaskWithAlternatingValues(maskTensor);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::BINARY_SELECT;
+    CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
 }
 
 // Edge case tests with DISABLED_ prefix to avoid running in CI.
@@ -408,6 +767,48 @@ TEST(TestGpuPointwiseValidation, InvalidBinaryOp)
     EXPECT_THROW(GpuReferencePointwise::pointwiseCompute(
                      PointwiseMode::ABS, outputTensor, input1Tensor, input2Tensor),
                  std::invalid_argument);
+}
+
+TEST(TestGpuPointwiseValidation, InvalidTernaryOp)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // ADD is a binary operation rather than a ternary operation
+    Tensor<float> input0Tensor({2, 3, 2, 4});
+    Tensor<float> input1Tensor({2, 3, 2, 4});
+    Tensor<bool> maskTensor({2, 3, 2, 4});
+    Tensor<float> outputTensor({2, 3, 2, 4});
+    EXPECT_THROW((GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+                     PointwiseMode::ADD, outputTensor, input0Tensor, input1Tensor, maskTensor)),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuPointwiseValidation, TernaryNotBroadcastable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto operation = PointwiseMode::BINARY_SELECT;
+    Tensor<float> outputTensor({1, 3, 2, 4});
+
+    // Not broadcastable if the mask dims mismatch and are not 1
+    {
+        Tensor<float> input0Tensor({1, 3, 2, 4});
+        Tensor<float> input1Tensor({1, 3, 2, 4});
+        Tensor<bool> maskTensor({1, 3, 2, 2});
+        EXPECT_THROW((GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+                         operation, outputTensor, input0Tensor, input1Tensor, maskTensor)),
+                     std::invalid_argument);
+    }
+
+    // Not broadcastable if input1 dims mismatch and are not 1
+    {
+        Tensor<float> input0Tensor({1, 3, 2, 4});
+        Tensor<float> input1Tensor({1, 3, 2, 2});
+        Tensor<bool> maskTensor({1, 3, 2, 4});
+        EXPECT_THROW((GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+                         operation, outputTensor, input0Tensor, input1Tensor, maskTensor)),
+                     std::invalid_argument);
+    }
 }
 
 // --- Test broadcasting ---
@@ -588,6 +989,95 @@ TEST(TestGpuPointwiseBroadcast, Broadcast5D)
         outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
+TEST(TestGpuPointwiseBroadcast, BinaryBroadcast3D)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // broadcast [4, 1, 3] and [1, 5, 3] -> [4, 5, 3]
+    Tensor<float> input0Tensor({4, 1, 3});
+    Tensor<float> input1Tensor({1, 5, 3});
+    Tensor<float> outputCpuTensor({4, 5, 3});
+    Tensor<float> outputGpuTensor({4, 5, 3});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::MAX_OP;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwiseBroadcast, CompareBroadcast4D)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // broadcast [2, 1, 4, 1] and [1, 3, 1, 5] -> [2, 3, 4, 5]
+    Tensor<float> input0Tensor({2, 1, 4, 1});
+    Tensor<float> input1Tensor({1, 3, 1, 5});
+    Tensor<bool> outputCpuTensor({2, 3, 4, 5});
+    Tensor<bool> outputGpuTensor({2, 3, 4, 5});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::CMP_GT;
+    CpuReferencePointwiseImpl<bool, float, float>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<bool, float, float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+TEST(TestGpuPointwiseBroadcast, TernaryBroadcast5D)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // broadcast [2, 1, 3, 1, 4], [1, 5, 1, 2, 1] and mask [3, 1, 4] -> [2, 5, 3, 2, 4]
+    Tensor<float> input0Tensor({2, 1, 3, 1, 4});
+    Tensor<float> input1Tensor({1, 5, 1, 2, 1});
+    Tensor<bool> maskTensor({3, 1, 4});
+    Tensor<float> outputCpuTensor({2, 5, 3, 2, 4});
+    Tensor<float> outputGpuTensor({2, 5, 3, 2, 4});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+    fillMaskWithAlternatingValues(maskTensor);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::BINARY_SELECT;
+    CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    GpuReferencePointwise::pointwiseCompute<float, float, float, bool>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
 // --- Test activation parameters ---
 
 TEST(TestGpuPointwiseRefSwishForward, WithBetaVal)
@@ -690,6 +1180,32 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
     assertAllClose(outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, 5.0f));
 }
 
+// --- Test NaN and infinity handling ---
+
+// The CPU reference uses std::max and std::min: a NaN first operand propagates and a NaN second
+// operand is dropped.
+TEST(TestGpuPointwiseSpecialValues, Max)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runGpuVsCpuPointwiseBinarySpecialValues<float>(PointwiseMode::MAX_OP);
+}
+
+TEST(TestGpuPointwiseSpecialValues, Min)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runGpuVsCpuPointwiseBinarySpecialValues<float>(PointwiseMode::MIN_OP);
+}
+
+// Every ordered comparison with NaN is false
+TEST(TestGpuPointwiseSpecialValues, CompareGreater)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runGpuVsCpuPointwiseBinarySpecialValues<bool>(PointwiseMode::CMP_GT);
+}
+
 // --- Test suite instantiations ---
 
 using TestGpuPointwiseUnaryRef4DFp16 = PointwiseTestSuite<HalfType>;
@@ -704,6 +1220,12 @@ using TestGpuPointwiseUnaryRef4DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseUnaryRef5DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseBinaryRef4DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseBinaryRef5DFp32 = PointwiseTestSuite<float>;
+using TestGpuPointwiseTernaryRef4DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseTernaryRef5DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseTernaryRef4DBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseTernaryRef5DBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseTernaryRef4DFp32 = PointwiseTestSuite<float>;
+using TestGpuPointwiseTernaryRef5DFp32 = PointwiseTestSuite<float>;
 
 TEST_P(TestGpuPointwiseUnaryRef4DFp16, MatchesCpuRef)
 {
@@ -765,6 +1287,36 @@ TEST_P(TestGpuPointwiseBinaryRef5DFp32, MatchesCpuRef)
     this->runPointwiseBinaryTest();
 }
 
+TEST_P(TestGpuPointwiseTernaryRef4DFp16, MatchesCpuRef)
+{
+    this->runPointwiseTernaryTest();
+}
+
+TEST_P(TestGpuPointwiseTernaryRef5DFp16, MatchesCpuRef)
+{
+    this->runPointwiseTernaryTest();
+}
+
+TEST_P(TestGpuPointwiseTernaryRef4DBfp16, MatchesCpuRef)
+{
+    this->runPointwiseTernaryTest();
+}
+
+TEST_P(TestGpuPointwiseTernaryRef5DBfp16, MatchesCpuRef)
+{
+    this->runPointwiseTernaryTest();
+}
+
+TEST_P(TestGpuPointwiseTernaryRef4DFp32, MatchesCpuRef)
+{
+    this->runPointwiseTernaryTest();
+}
+
+TEST_P(TestGpuPointwiseTernaryRef5DFp32, MatchesCpuRef)
+{
+    this->runPointwiseTernaryTest();
+}
+
 // ============================================================================
 // 4D tests
 // ============================================================================
@@ -775,6 +1327,9 @@ INSTANTIATE_TEST_SUITE_P(Quick,
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuPointwiseTernaryRef4DFp32,
+                         ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dUnaryPointwiseCases()));
@@ -782,11 +1337,17 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseTernaryRef4DFp16,
+                         ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseTernaryRef4DBfp16,
+                         ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
 // Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
 // Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -795,12 +1356,18 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseTernaryRef4DFp32,
+                         ::testing::ValuesIn(getMedium4dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseUnaryRef4DFp32,
                          ::testing::ValuesIn(getLarge4dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuPointwiseTernaryRef4DFp32,
+                         ::testing::ValuesIn(getLarge4dTernaryPointwiseCases()));
 
 // ============================================================================
 // 5D tests
@@ -812,6 +1379,9 @@ INSTANTIATE_TEST_SUITE_P(Quick,
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuPointwiseTernaryRef5DFp32,
+                         ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dUnaryPointwiseCases()));
@@ -819,11 +1389,17 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseTernaryRef5DFp16,
+                         ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseTernaryRef5DBfp16,
+                         ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
 // Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
 // Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -832,9 +1408,15 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseTernaryRef5DFp32,
+                         ::testing::ValuesIn(getMedium5dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseUnaryRef5DFp32,
                          ::testing::ValuesIn(getLarge5dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuPointwiseTernaryRef5DFp32,
+                         ::testing::ValuesIn(getLarge5dTernaryPointwiseCases()));
