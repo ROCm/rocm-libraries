@@ -112,7 +112,7 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 ## Models
 
 One trained model (UHD), the L2 `sort_kernel_catalog` kernel ranker
-`18bb432e-d871-4290-9ae8-f5111aaf2ffe` (ranks this catalog's kernels and picks the one to run), is
+`948543e3-03a7-4ff1-b8bc-50424275b002` (ranks this catalog's kernels and picks the one to run), is
 bound in the UED for gfx942; other architectures keep the native selector. It is tracked at
 `heuristics/a74a5afb-30c0-41c2-8006-501d2961f808/sort_kernel_catalog/gfx942/tflops/` (the UED id,
 role, arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git, `model.bin`
@@ -125,8 +125,11 @@ for the head size), a tensor uid, or a feature that depends on how many tensors 
 through `graph.nodes[0].{q,k,v,o}`, and reads an unset `generate_stats` as false. It reads no FLOPs
 feature: hipDNN publishes none for a sliding-window graph, and a ranker that cannot evaluate falls
 back to declared kernel order, so the L2 ranks every graph the engine serves. No training graph had
-a window (`hipdnn_corpus_gen`'s `sdpa_fwd` has no window parameter), so its window rankings, and the
-TFLOPS scores it reports for them, are extrapolated. Retrain it when the catalog's kernels change;
+a window or an additive bias (`hipdnn_corpus_gen`'s `sdpa_fwd` has no window or `attn_mask`
+parameter), so its window rankings, and the TFLOPS scores it reports for them, are extrapolated. So
+are its rankings of the 48 bias variants: no bias kernel was timed, and the L2 reads no
+`use_additive_bias` field, so it ranks them from their tile and knob fields as it ranks the plain
+variants. Retrain it when the catalog's kernels change;
 `tests/test_trained_rankers.py` in the IngestorGenerator fails when the shipped KDP no longer
 matches the fingerprint the configs record.
 
@@ -139,7 +142,8 @@ then `TestGfx942AttentionDenseModelBinding.TheBoundL1EnginePredictorLoadsAndMatc
 that no L1 loads.
 
 How the L2 was trained (the `hipdnn-uhd` skill; `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`), on
-one gfx942 device with the catalog compiled by CI's COMGR:
+one gfx942 device with the catalog compiled by CI's COMGR (last trained on the 272-entry catalog:
+its 224 plain kernels and 48 bias variants; only the plain kernels have a graph to time):
 
 - Shape sets: two `hipdnn_corpus_gen --operation sdpa_fwd` sets for this engine, 200 graphs
   (`--seed 1`) and 1800 graphs (`--seed 2`, excluding the first), each with its evaluation slice
@@ -148,7 +152,8 @@ one gfx942 device with the catalog compiled by CI's COMGR:
   sort_kernel_catalog`), then trained with `--metric tflops` and an explicit `--feature-signature`:
   the automatic signature minus the features excluded above, with
   `{"value_or_default": ["$graph.nodes[0].generate_stats", false]}`.
-- Validated on the held-out graphs with Stage V (`validate_l2.py` against the native scorer), then
+- Validated on the held-out graphs with Stage V (`validate_l2.py` against the native scorer, or
+  against the ranker it replaces), then
   installed with `uhd_gen promote`, `model.bin` pushed with `dvc push -r ingestor`, and the id and
   the catalog fingerprint (`tools/catalog_fingerprint.py <this
   bundle>/artifacts/gfx942_attention_dense.kdp.json`) recorded in both IngestorGenerator configs.
