@@ -69,6 +69,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -600,6 +601,145 @@ namespace
         check_spmm<T, I, J>(handle, a, n, 1, rocsparse_spmm_alg_bsr, order_B, limits, what);
     }
 
+    // bsrmm large_ext with op(B) = B^H for complex T, on the check_bsrmm large_ext
+    // shape. B is stored as the n x k matrix whose conjugate transpose is op(B). A is
+    // real, so only the conjugation of B decides the sign of the imaginary parts.
+    template <typename T, typename I, typename J, size_t N>
+    void check_bsrmm_conj_B(rocsparse_handle    handle,
+                            int64_t             block_dim,
+                            rocsparse_direction dir,
+                            rocsparse_order     order_B,
+                            const GridLimits (&limits)[N],
+                            const char* what)
+    {
+        using cplx = std::complex<double>;
+
+        const int64_t    mb = 24;
+        const int64_t    n  = 200;
+        const HostSparse a  = make_bsr(mb, mb, block_dim, dir);
+
+        const std::vector<double> b_re = make_dense(n * a.k, 1);
+        const std::vector<double> b_im = make_dense(n * a.k, 2);
+        const std::vector<double> c_re = make_dense(a.m * n, 4);
+        const std::vector<double> c_im = make_dense(a.m * n, 5);
+
+        const int64_t ldb   = (order_B == rocsparse_order_column) ? n : a.k;
+        auto          b_idx = [&](int64_t j, int64_t q) {
+            return (order_B == rocsparse_order_column) ? j + ldb * q : j * ldb + q;
+        };
+
+        std::vector<cplx> want(a.m * n, cplx(0.0, 0.0));
+        for(size_t e = 0; e < a.t_val.size(); ++e)
+        {
+            for(int64_t j = 0; j < n; ++j)
+            {
+                const int64_t idx = b_idx(j, a.t_col[e]);
+                want[a.t_row[e] + a.m * j] += a.t_val[e] * std::conj(cplx(b_re[idx], b_im[idx]));
+            }
+        }
+        for(int64_t i = 0; i < a.m * n; ++i)
+        {
+            want[i] = alpha_value * want[i] + beta_value * cplx(c_re[i], c_im[i]);
+        }
+
+        std::vector<T> h_b(n * a.k);
+        std::vector<T> h_c(a.m * n);
+        for(size_t i = 0; i < h_b.size(); ++i)
+        {
+            h_b[i] = T(b_re[i], b_im[i]);
+        }
+        for(size_t i = 0; i < h_c.size(); ++i)
+        {
+            h_c[i] = T(c_re[i], c_im[i]);
+        }
+
+        const T alpha = static_cast<T>(alpha_value);
+        const T beta  = static_cast<T>(beta_value);
+
+        for(const GridLimits& l : limits)
+        {
+            device_vector<I> d_row(convert<I>(a.row));
+            device_vector<J> d_col(convert<J>(a.col));
+            device_vector<T> d_val(convert_values<T>(a.val));
+            device_vector<T> d_b(h_b);
+            device_vector<T> d_c(h_c);
+
+            SpmmDescrs descrs;
+            ASSERT_EQ(rocsparse_create_bsr_descr(&descrs.mat_a,
+                                                 a.mb,
+                                                 a.kb,
+                                                 a.nnz,
+                                                 a.dir,
+                                                 a.block_dim,
+                                                 d_row.ptr,
+                                                 d_col.ptr,
+                                                 d_val.ptr,
+                                                 it_of<I>(),
+                                                 it_of<J>(),
+                                                 rocsparse_index_base_zero,
+                                                 dt_of<T>()),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &descrs.mat_b, n, a.k, ldb, d_b.ptr, dt_of<T>(), order_B),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &descrs.mat_c, a.m, n, a.m, d_c.ptr, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+
+            auto spmm = [&](rocsparse_spmm_stage stage, size_t* buffer_size, void* buffer) {
+                return rocsparse_spmm(handle,
+                                      rocsparse_operation_none,
+                                      rocsparse_operation_conjugate_transpose,
+                                      &alpha,
+                                      descrs.mat_a,
+                                      descrs.mat_b,
+                                      &beta,
+                                      descrs.mat_c,
+                                      dt_of<T>(),
+                                      rocsparse_spmm_alg_bsr,
+                                      stage,
+                                      buffer_size,
+                                      buffer);
+            };
+
+            size_t buffer_size = 0;
+            ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, &buffer_size, nullptr),
+                      rocsparse_status_success);
+            device_vector<char> d_buffer(buffer_size > 0 ? buffer_size : size_t(1));
+            ASSERT_EQ(spmm(rocsparse_spmm_stage_preprocess, &buffer_size, d_buffer.ptr),
+                      rocsparse_status_success);
+            {
+                ScopedMaxGridSizeXY clamp(handle, l.x, l.y);
+                ASSERT_EQ(spmm(rocsparse_spmm_stage_compute, &buffer_size, d_buffer.ptr),
+                          rocsparse_status_success);
+            }
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            const std::vector<T> got = to_host(d_c);
+            ASSERT_EQ(got.size(), want.size());
+
+            const double eps   = std::numeric_limits<decltype(std::real(got[0]))>::epsilon();
+            int64_t      bad   = 0;
+            int64_t      first = -1;
+            for(size_t i = 0; i < got.size(); ++i)
+            {
+                const cplx g(std::real(got[i]), std::imag(got[i]));
+                if(std::abs(g - want[i]) > 4.0 * eps * std::max(1.0, std::abs(want[i])))
+                {
+                    if(bad++ == 0)
+                    {
+                        first = static_cast<int64_t>(i);
+                    }
+                }
+            }
+            EXPECT_EQ(bad, 0) << what << ", op(B) = B^H, " << describe_limits(l)
+                              << ", block_dim = " << block_dim << ", order_B = "
+                              << (order_B == rocsparse_order_column ? "column" : "row") << ": "
+                              << bad << " of " << got.size() << " entries wrong; first at row "
+                              << (first % a.m) << ", column " << (first / a.m);
+        }
+    }
+
     // coomm segmented: 2000 rows of 5 entries is nnz = 10000, i.e. 10 segments of
     // 1024 for the block reduction to combine. n = 20 runs the WF_SIZE = 8 main
     // kernel on 16 columns and the remainder kernel on 4, and the block
@@ -749,6 +889,33 @@ TEST_F(BsrmmGrids, general_clamped)
                                               order_B,
                                               bsrmm_limits,
                                               "bsrmm_general_blockdim_kernel");
+    }
+}
+
+// The clamped large_ext kernel runs a separate grid-stride copy of the B loads, so
+// op(B) = B^H needs its own clamped check, in both B orders (nn and nt loads), for
+// every tuned config. The unclamped double complex run is the control.
+TEST_F(BsrmmGrids, large_ext_conj_B_clamped)
+{
+    const struct
+    {
+        int64_t             block_dim;
+        rocsparse_direction dir;
+        const char*         kernel;
+    } shapes[] = {{3, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<4, 16, 2>"},
+                  {7, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<8, 8, 2>"},
+                  {13, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<16, 16, 2>"},
+                  {29, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<32, 32, 2>"}};
+
+    for(const auto& s : shapes)
+    {
+        for(const rocsparse_order order_B : {rocsparse_order_column, rocsparse_order_row})
+        {
+            check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
+                handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
+            check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
+                handle, s.block_dim, s.dir, order_B, unclamped, s.kernel);
+        }
     }
 }
 
