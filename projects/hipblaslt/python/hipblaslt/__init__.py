@@ -7,7 +7,12 @@ This is a development and testing tool for hipBLASLt and its consumers, not a RO
 
 from . import _build_info, _loader
 
-library = _loader.load(_build_info.LIB_DIR, _build_info.BIN_DIR)
+library = _loader.load(
+    _build_info.LIB_DIR,
+    _build_info.BIN_DIR,
+    _build_info.LIB_NAME,
+    _build_info.HIP_RUNTIME,
+)
 
 from . import _core  # noqa: E402 - libhipblaslt must be preloaded first
 
