@@ -102,7 +102,12 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
     }
     }
 
-    // Identity is all or nothing: every pointer is checked before any array is written.
+    //
+    // Index pointers are checked before any array is written. A null target value
+    // array is a symbolic conversion, so it is not an error. When both value
+    // arrays are set, the values are converted first: an unsupported data type
+    // pair is rejected before the index arrays are written.
+    //
     ROCSPARSE_CHECKARG(1,
                        target,
                        ((source->const_row_data != nullptr) && (target->row_data == nullptr)),
@@ -115,6 +120,16 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
                        target,
                        ((source->const_ind_data != nullptr) && (target->ind_data == nullptr)),
                        rocsparse_status_invalid_pointer);
+
+    if(source->const_val_data != nullptr && target->val_data != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
+                                                           size_val_data,
+                                                           target->data_type,
+                                                           target->val_data,
+                                                           source->data_type,
+                                                           source->const_val_data));
+    }
 
     //
     // ROW_DATA.
@@ -153,19 +168,6 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
                                                            target->ind_data,
                                                            source->row_type,
                                                            source->const_ind_data));
-    }
-
-    //
-    // VAL_DATA.
-    //
-    if(source->const_val_data != nullptr && target->val_data != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
-                                                           size_val_data,
-                                                           target->data_type,
-                                                           target->val_data,
-                                                           source->data_type,
-                                                           source->const_val_data));
     }
 
     return rocsparse_status_success;

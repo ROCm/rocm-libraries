@@ -46,6 +46,14 @@ rocsparse_status rocsparse::gcoo_aos2csr(rocsparse_handle     handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    // Values first: an unsupported data type pair is rejected before anything is
+    // written.
+    if(source_val_data != nullptr && target_val_data != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
+            handle, nnz, target_data_type, target_val_data, source_data_type, source_val_data));
+    }
+
     //
     // Convert array of column.
     //
@@ -72,11 +80,6 @@ rocsparse_status rocsparse::gcoo_aos2csr(rocsparse_handle     handle,
                                                   target_row_data,
                                                   source_idx_base));
 
-    if(source_val_data != nullptr && target_val_data != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
-            handle, nnz, target_data_type, target_val_data, source_data_type, source_val_data));
-    }
     return rocsparse_status_success;
 }
 
@@ -92,8 +95,9 @@ rocsparse_status rocsparse::gcoo_aos2csr_buffer_size(rocsparse_handle     handle
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    buffer_size_[0]
-        = ((rocsparse::indextype_sizeof(target_row_type) * (nnz + 1) - 1) / 256 + 1) * 256;
+    // The buffer holds the nnz row indices of the source, with the source index
+    // type.
+    buffer_size_[0] = ((rocsparse::indextype_sizeof(source_ind_type) * nnz) / 256 + 1) * 256;
     return rocsparse_status_success;
 }
 
