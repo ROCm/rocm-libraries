@@ -230,7 +230,7 @@ void rocsolver_lahr2_getMemorySize(const I n,
     *size_beta = sizeof(T) * batch_count;
 }
 
-template <typename T, typename U, typename I>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_lahr2_argCheck(rocblas_handle handle,
                                         const I n,
                                         const I k,
