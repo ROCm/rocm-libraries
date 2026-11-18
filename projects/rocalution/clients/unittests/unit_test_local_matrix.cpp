@@ -1801,9 +1801,10 @@ TYPED_TEST(local_matrix, triangular_solves_of_a_triangle_stored_without_its_diag
         const Csr<T> strict = is_lower ? lower(ref, false) : upper(ref, false);
         const Csr<T> M      = unit_triangle(strict);
 
+        // The direct solves overwrite start, the iterative ones start from it
         auto A  = make_local_matrix(this->backend(), strict);
         auto in = make_local_vector(this->backend(), b);
-        auto x  = make_local_vector(this->backend(), std::vector<T>(ref.n, 0.0));
+        auto x  = make_local_vector(this->backend(), start);
 
         std::string log;
         if(is_lower)
@@ -1822,7 +1823,7 @@ TYPED_TEST(local_matrix, triangular_solves_of_a_triangle_stored_without_its_diag
         expect_solves(M, values_of(*x), b, tol<T>());
         expect_fallback_warning(log, is_lower ? "LSolve" : "USolve", true);
 
-        // The iterative solves start from start, without and with a tolerance
+        // Without and with a tolerance
         auto y = make_local_vector(this->backend(), start);
         auto z = make_local_vector(this->backend(), start);
         if(is_lower)
@@ -3487,9 +3488,8 @@ TEST(local_stencil_DeathTest, null_output_ends_the_program)
     });
 }
 
-// The device analysis goes with the device matrix when the matrix moves to the host,
-// also with the LL analysis still there after a clear of the L one. The matrix can then
-// be analysed again on the host and, after moving back, on the device.
+// An LL-analysed matrix moves to the host, also after LAnalyseClear, and is analysed and
+// solved again there and, after moving back, on the device
 TEST(local_matrix_moves, an_analysed_matrix_is_analysed_again_after_moves)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -3531,6 +3531,21 @@ TEST(local_matrix_moves, an_analysed_matrix_is_analysed_again_after_moves)
             L->LLAnalyseClear();
             EXPECT_EQ(backend_of(*L), backend_name(Backend::Accelerator));
         }
+
+        // Without a move in between, as on the host
+        KNOWN_BUG("after LLAnalyse, the HIP LAnalyseClear keeps tmp_vec_, and the next LLAnalyse "
+                  "aborts");
+        expect_in_child([&] {
+            auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
+            auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());
+            L->ICFactorize(inv.get());
+            L->LLAnalyse();
+            L->LAnalyseClear();
+            L->LLAnalyse();
+            auto x = make_local_vector(Backend::Accelerator, std::vector<T>(s.n, 0.0));
+            L->LLSolve(*make_local_vector(Backend::Accelerator, b), x.get());
+            expect_close(s.apply(values_of(*x)), b, loose_tol<T>(1e-10));
+        });
     });
 }
 

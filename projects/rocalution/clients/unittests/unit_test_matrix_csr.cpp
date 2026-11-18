@@ -776,8 +776,9 @@ TYPED_TEST(matrix_csr, lu_solve)
         values_of(*out), upper_solve(D, ref.n, lower_solve(D, ref.n, b, true), false), tol<T>());
 }
 
-// Both factors have rows longer than a 64-wide wavefront, as the complete LU factors of
-// a 2D Laplacian have
+// Both factors have rows longer than a 64-wide wavefront, so that the device solves walk
+// each row in more than one pass on wave32 and wave64. The entries follow no short period,
+// so that the entries of a row beyond its first 64 change the result, also in float.
 TYPED_TEST(matrix_csr, lu_solve_of_factors_with_long_rows)
 {
     using T              = typename TypeParam::value_type;
@@ -789,8 +790,9 @@ TYPED_TEST(matrix_csr, lu_solve_of_factors_with_long_rows)
     {
         for(int j = std::max(0, i - half_width); j <= std::min(n - 1, i + half_width); ++j)
         {
-            const T off = static_cast<T>(j < i ? 0.01 : 0.02) / static_cast<T>(std::abs(i - j));
-            ref.add(j, i == j ? static_cast<T>(10) : off);
+            const double off
+                = j < i ? 0.002 * (1 + (i + 2 * j) % 7) : 0.003 * (1 + (2 * i + j) % 5);
+            ref.add(j, static_cast<T>(i == j ? 2.0 : off));
         }
         ref.end_row();
     }
@@ -800,7 +802,7 @@ TYPED_TEST(matrix_csr, lu_solve_of_factors_with_long_rows)
     auto A = this->make(ref);
     ASSERT_NE(A, nullptr);
     auto in  = make_vector(TypeParam::backend, b);
-    auto out = make_vector(TypeParam::backend, std::vector<T>(n, T(0)));
+    auto out = make_vector(TypeParam::backend, std::vector<T>(n, T(-7)));
 
     A->LUAnalyse();
     ASSERT_TRUE(A->LUSolve(*in, out.get()));
@@ -963,6 +965,33 @@ TYPED_TEST(matrix_csr, iterative_l_and_u_analyses_of_one_matrix_keep_their_solve
             }
         }
     }
+
+    KNOWN_BUG("ItLAnalyseClear and ItUAnalyseClear free the buffer that the iterative analysis "
+              "of the other triangle still uses");
+    for(bool clear_lower : {true, false})
+    {
+        SCOPED_TRACE(clear_lower ? "U after clearing L" : "L after clearing U");
+        expect_in_child([&] {
+            auto M = this->make(ref);
+            auto x = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+            M->ItLAnalyse(false);
+            M->ItUAnalyse(false);
+            if(clear_lower)
+            {
+                M->ItLAnalyseClear();
+                ASSERT_TRUE(
+                    M->ItUSolve(it, 0.0, false, *make_vector(TypeParam::backend, b), x.get()));
+                expect_near(values_of(*x), upper_solve(D, ref.n, b, false), iterative_tol<T>());
+            }
+            else
+            {
+                M->ItUAnalyseClear();
+                ASSERT_TRUE(
+                    M->ItLSolve(it, 0.0, false, *make_vector(TypeParam::backend, b), x.get()));
+                expect_near(values_of(*x), lower_solve(D, ref.n, b, false), iterative_tol<T>());
+            }
+        });
+    }
 }
 
 // The unit lower solve converges in one iteration, the upper solve needs more
@@ -1017,7 +1046,7 @@ TYPED_TEST(matrix_csr, iterative_ll_solve)
     ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, *inv, out_inv.get()));
     expect_near(values_of(*out_inv), expected, iterative_tol<T>());
 
-    // out is the initial guess
+    // A nonzero out converges too. Only the L^T sweep starts from out.
     auto from_guess = make_vector(TypeParam::backend, std::vector<T>(L.n, T(3)));
     ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, from_guess.get()));
     expect_near(values_of(*from_guess), expected, iterative_tol<T>());
