@@ -107,9 +107,9 @@ hipTensor without the full ROCm HPC SDK.
            - RDNA 3, RDNA 3.5
            - ``gfx1103``, ``gfx1150``, ``gfx1151``, ``gfx1152``, ``gfx1153``
 
-        hipTensor requires matrix core hardware support (AMD CDNA and RDNA 3 or
-        later architectures).  Packages for earlier architectures such as ``gfx103x``
-        aren't available.
+         hipTensor requires matrix core hardware support (AMD CDNA and RDNA
+         3 or later architectures).  Packages for earlier architectures such as
+         ``gfx103x`` aren't available.
 
    For example: ``amdrocm-hiptensor10.2-gfx950`` and ``amdrocm-hiptensor-dev10.2``
 
