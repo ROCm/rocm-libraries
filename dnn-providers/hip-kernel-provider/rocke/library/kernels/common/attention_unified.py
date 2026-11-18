@@ -11,6 +11,7 @@ until every required primitive and correctness/perf path is present.
 from __future__ import annotations
 
 from collections import OrderedDict
+from functools import lru_cache
 from dataclasses import dataclass, replace
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
@@ -4838,16 +4839,15 @@ def _run_3d_tiled_on_stream(
     if tuning_spec is not None:
         num_segments = int(tuning_spec.kernel_spec.num_segments)
         cache_key = tuning_spec.cache_key()
-        # Last gate, for a count the caller pinned. The heuristic branch below
-        # is already capped by ``_num_segments`` and the dispatcher's
-        # ``validate`` skips over-bound variants, so only an explicit spec can
-        # still arrive here with a workspace the kernels cannot address, and
-        # silently running a different count than the one asked for would make
-        # the measurement meaningless.
-        _check_3d_workspace_addr_width(problem, num_segments)
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
+    # Both branches: a pinned count is refused outright, and a capped one is
+    # refused only when no split fits, since ``_num_segments`` floors at one
+    # segment and a single segment can still overrun on a long enough prefill.
+    # Lowering the count is the only lever either branch has, so there is
+    # nothing left to try at that point.
+    _check_3d_workspace_addr_width(problem, num_segments)
     # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
     # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
     if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
@@ -5615,6 +5615,26 @@ def _torch_stream_capturing() -> bool:
         return False
 
 
+@lru_cache(maxsize=1)
+def _workspace_f32():
+    """The fp32 dtype the workspace specs carry, resolved once per process.
+
+    A CPU-only or static caller has no torch, and a failed import is not cached
+    by Python: it re-walks every ``sys.path`` entry on each attempt, costing
+    roughly an order of magnitude more than a cached one, and more again where
+    the path is longer. Resolving it per call therefore put a filesystem walk
+    on the split rule and the dispatcher's ``validate``, which run on every
+    candidate. ``WorkspacePool.required_nbytes`` understands the string
+    fallback through ``_dtype_element_size``.
+    """
+    try:
+        import torch
+
+        return torch.float32
+    except Exception:
+        return "float32"
+
+
 def _attention_3d_workspace_specs(
     problem: UnifiedAttentionProblem,
     num_segments: int,
@@ -5629,15 +5649,7 @@ def _attention_3d_workspace_specs(
     kernels by pointer. The launcher allocates them per invocation; captured
     allocations use Torch's graph-private pool.
     """
-    try:
-        import torch
-
-        f32 = torch.float32
-    except Exception:
-        # CPU-only/static tests can still ask for byte accounting without
-        # importing torch. WorkspacePool.required_nbytes understands this
-        # string fallback via `_dtype_element_size`.
-        f32 = "float32"
+    f32 = _workspace_f32()
 
     return (
         WorkspaceSpec(
@@ -5671,16 +5683,23 @@ _WORKSPACE_I32_INDEX_LIMIT = 2**31
 def _3d_workspace_max_index(problem: UnifiedAttentionProblem, num_segments: int) -> int:
     """Largest element index the 3D pipeline forms into the segment workspace.
 
-    Taken from the allocation itself rather than restated here, so the bound
-    follows ``_attention_3d_workspace_specs`` if the layout changes. Spec 0 is
-    ``segm_output``, which dominates ``segm_{max,expsum}``: they share its three
-    outer axes and drop ``head_size``. Both kernels address it with the i32
-    strides built in their ``segm_output`` / ``segm_ml`` descriptors, so the
-    reach of the contiguous layout is ``numel - 1``.
+    ``segm_output`` is ``[total_q, num_query_heads, num_segments, head_size]``
+    and dominates ``segm_{max,expsum}``, which share its three outer axes and
+    drop ``head_size``. Both kernels address it with the i32 strides built in
+    their ``segm_output`` / ``segm_ml`` descriptors, so the reach of the
+    contiguous layout is ``numel - 1``.
 
-    ``device=None``: this is byte accounting, nothing is allocated.
+    The product is written out rather than read off
+    ``_attention_3d_workspace_specs``, which would keep the two in step by
+    construction but costs about 400x more per call: it builds three
+    ``WorkspaceSpec`` objects and resolves the torch dtype every time, and both
+    the split rule and the dispatcher's ``validate`` call this on every
+    candidate. ``test_max_index_matches_the_workspace_specs`` pins the two
+    forms together instead.
     """
-    return _attention_3d_workspace_specs(problem, num_segments, None)[0].numel() - 1
+    return (
+        problem.total_q * problem.num_query_heads * num_segments * problem.head_size
+    ) - 1
 
 
 def _check_3d_workspace_addr_width(
@@ -5697,18 +5716,22 @@ def _check_3d_workspace_addr_width(
     index, not the element count, and it is the same rule
     ``_validate_additive_bias`` applies to the bias tensor.
 
-    This is the last gate, and it only sees a count the caller pinned through a
-    tuning spec. A count nobody chose is capped instead, upstream: the split
-    rule caps its own result (``_num_segments``) and the dispatcher's
-    ``validate`` skips a fixed-segment variant whose workspace overruns, so the
-    default route runs at a smaller split rather than refusing. Refusing is
-    right only here, because silently running a different count than the one
-    pinned would make the measurement meaningless.
+    This is the last gate and it runs on both branches of the launch, but it
+    should rarely fire on the heuristic one. A count nobody chose is capped
+    first: the split rule caps its own result (``_num_segments``) and the
+    dispatcher's ``validate`` skips a fixed-segment variant whose workspace
+    overruns, so the default route normally runs at a smaller split instead of
+    refusing. ``select_auto_path`` sends an LSE request the tiled 2D gate
+    declines to split-KV, so ``backend="auto"`` on gfx942 D256 block-size 32
+    reaches these sizes: a 65536-token, 32-head prefill prefers 8 segments,
+    twice the bound, and now runs at 4.
 
-    The default route does reach these sizes: ``select_auto_path`` sends an LSE
-    request the tiled 2D gate declines to split-KV, so ``backend="auto"`` on
-    gfx942 D256 block-size 32 lands on this path, and a 65536-token, 32-head
-    prefill prefers 8 segments, twice the bound. That one now runs at 4.
+    Two cases still reach the raise. A count pinned through a tuning spec is
+    refused outright, because silently running a different one would make the
+    measurement meaningless. And a capped count is refused when even a single
+    segment overruns, which a long enough prefill does (32 seqs of 8193 tokens
+    at Hq 32, D256 is past the bound at one segment): the cap floors at one, so
+    there is no smaller split left to fall back to.
     """
     max_idx = _3d_workspace_max_index(problem, num_segments)
     if max_idx >= _WORKSPACE_I32_INDEX_LIMIT:
