@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import types
@@ -23,6 +24,7 @@ def _completed(document: dict[str, object]) -> subprocess.CompletedProcess[bytes
     )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="/proc maps format is Linux-specific")
 def test_worker_enumerates_behavior_contributing_shared_libraries(
     tmp_path: Path,
 ) -> None:
@@ -41,6 +43,13 @@ def test_worker_enumerates_behavior_contributing_shared_libraries(
         (str(llvm.resolve()), str(clang.resolve()))
     )
     assert worker._loaded_compiler_dependencies(tmp_path / "missing") is None
+
+
+def test_worker_has_no_process_maps_path_off_linux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(worker.sys, "platform", "win32")
+    assert worker._process_maps_path() is None
 
 
 def test_raw_worker_bypasses_only_the_legacy_profile_guard(

@@ -186,20 +186,14 @@ the flavor model.
 
 ## COMGR probe corpus
 
-Every candidate is a complete LLVM module compiled in an isolated process
-through COMGR's source-to-bitcode, codegen, and executable-link actions.
+The directory [README](README.md#observed-contracts) owns the probe protocol and
+corpus summary; `rocke.compiler.corpus` is the executable definition. This
+inventory owns the delta from that corpus to existing flavor consumers: every
+flavor-varying declaration, operation gate, and processor-name decision listed
+above must map to a capability before its flavor branch can be removed.
 
-| Capability | Mechanical corpus rule |
-| --- | --- |
-| `amdgpu.comgr.explicit_data_layout` | every complete layout rocKE currently or historically emitted |
-| `amdgpu.comgr.intrinsic.make_buffer_resource.abis` | every spelling × count width |
-| `amdgpu.comgr.intrinsic.mfma_fp8_bf8.packed_operand_type` | one all-family module per packed type |
-| `amdgpu.comgr.intrinsic.named_barrier.pointer_address_space` | one all-operation module per address space |
-| `amdgpu.comgr.intrinsic.mfma_f8f6f4.call_abi` | one all-shape module per historical/current call form |
-| `amdgpu.comgr.accepts_processor_name` | requested processor plus its explicit catalogued generic candidate |
-
-The checkout validator pins exact ordered coverage. Adding a production form
-without adding its candidate must fail a closure test in the integration slice.
+The closure tests fail when a production consumer or emitted form is added
+without a corresponding inventory and corpus decision.
 
 ## Facts that are not compiler capabilities
 

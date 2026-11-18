@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -26,14 +27,19 @@ def _disable_core_dumps() -> None:
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
-def _loaded_compiler_dependencies(
-    maps: Path = Path("/proc/self/maps"),
-) -> list[str] | None:
+def _process_maps_path() -> Path | None:
+    if not sys.platform.startswith("linux"):
+        return None
+    return Path(os.sep) / "proc" / "self" / "maps"
+
+
+def _loaded_compiler_dependencies(maps: Path | None = None) -> list[str] | None:
     """Mapped shared LLVM libraries, or ``None`` when they cannot be enumerated."""
-    if not maps.is_file():
+    selected_maps = maps if maps is not None else _process_maps_path()
+    if selected_maps is None or not selected_maps.is_file():
         return None
     try:
-        lines = maps.read_text(encoding="utf-8").splitlines()
+        lines = selected_maps.read_text(encoding="utf-8").splitlines()
     except OSError:
         return None
     dependencies = set()

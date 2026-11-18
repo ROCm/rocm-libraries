@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
+import rocke.compiler
 from rocke.compiler import _support as support
 from rocke.compiler import cli
 from rocke.compiler import corpus as C
@@ -63,6 +64,15 @@ def _report(tmp_path: Path) -> dict[str, object]:
     )
     assert cache_hit is False
     return report
+
+
+def test_public_compiler_exports_resolve_and_unknown_names_fail() -> None:
+    assert all(
+        getattr(rocke.compiler, name) is not None for name in rocke.compiler.__all__
+    )
+    unknown = "not_an_export"
+    with pytest.raises(AttributeError, match="no attribute 'not_an_export'"):
+        getattr(rocke.compiler, unknown)
 
 
 def test_default_cache_dir_is_persistent_and_platform_appropriate(
@@ -366,10 +376,16 @@ def test_invalid_processor_and_duplicate_request_keys_are_rejected(
         support.probe_all([request, request], comgr_lib=None)
 
 
+def test_cli_requires_an_explicit_processor() -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["--quiet"])
+
+
 def test_main_writes_report_without_llvm_tool_arguments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    output = tmp_path / "capabilities.json"
+    output_with_policy = tmp_path / "capabilities-with-policy.json"
+    output_without_policy = tmp_path / "capabilities-without-policy.json"
     policy_output = tmp_path / "compiler-policy.json"
     report = _report(tmp_path / "source")
     seen: dict[str, object] = {}
@@ -379,20 +395,26 @@ def test_main_writes_report_without_llvm_tool_arguments(
         return report, False
 
     monkeypatch.setattr(cli, "load_or_probe", fake)
-    assert (
-        cli.main(
-            [
-                "--comgr-lib",
-                str(tmp_path / "lib.so"),
-                "--output",
-                str(output),
-                "--policy-output",
-                str(policy_output),
-                "--quiet",
-            ]
-        )
-        == 0
+    common = [
+        "--comgr-lib",
+        str(tmp_path / "lib.so"),
+        "--processor",
+        "gfx950",
+        "--quiet",
+    ]
+    with_policy = cli.main(
+        [
+            *common,
+            "--output",
+            str(output_with_policy),
+            "--policy-output",
+            str(policy_output),
+        ]
     )
+    without_policy = cli.main([*common, "--output", str(output_without_policy)])
+
+    assert with_policy == without_policy == 0
     assert seen["comgr_lib"] == tmp_path / "lib.so"
-    assert json.loads(output.read_text()) == report
+    assert output_with_policy.read_bytes() == output_without_policy.read_bytes()
+    assert json.loads(output_with_policy.read_text()) == report
     assert CompilerPolicy.from_json(policy_output.read_text()) == resolve_policy(report)

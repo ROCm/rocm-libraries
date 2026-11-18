@@ -98,11 +98,17 @@ class CompilerPolicy:
             self.fp8_packed_operand_type,
             _FP8_PACKING_PREFERENCE,
         )
-        if self.named_barrier_address_space not in {None, 3, 15}:
-            raise ValueError(
-                "compiler policy named_barrier_address_space="
-                f"{self.named_barrier_address_space!r}, expected 3, 15, or null"
-            )
+        if self.named_barrier_address_space is not None:
+            if type(self.named_barrier_address_space) is not int:
+                raise TypeError(
+                    "compiler policy named_barrier_address_space="
+                    f"{self.named_barrier_address_space!r}, expected an integer or null"
+                )
+            if self.named_barrier_address_space not in {3, 15}:
+                raise ValueError(
+                    "compiler policy named_barrier_address_space="
+                    f"{self.named_barrier_address_space!r}, expected 3, 15, or null"
+                )
         _validate_optional_choice(
             "scaled_mfma_call_abi",
             self.scaled_mfma_call_abi,
@@ -254,6 +260,11 @@ def _optional_address_space(document: dict[str, object]) -> int | None:
     value = document.get("named_barrier_address_space")
     if value is None:
         return None
+    if type(value) is not int:
+        raise TypeError(
+            "compiler policy named_barrier_address_space="
+            f"{value!r}, expected an integer or null"
+        )
     if value not in {3, 15}:
         raise ValueError(
             "compiler policy named_barrier_address_space="

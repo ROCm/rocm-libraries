@@ -14,7 +14,7 @@
 This study records the production COMGR LLVM-IR-to-HSACO route across nine
 selected weekly snapshots and public 7.0.0 and 7.2.0 release packages. The
 weekly set contains the first sampled artifact plus both sides of every
-structural transition found by the initial 43-week survey. Weekly artifacts use
+structural transition found by the initial broad survey. Weekly artifacts use
 gfx950 for common contracts and gfx1250 for the named-barrier generation;
 release baselines use gfx950.
 

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
 from . import _support as support
@@ -52,7 +51,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="explicit libamd_comgr path (default: rocKE runtime discovery)",
     )
-    parser.add_argument("--processor", default="gfx950")
+    parser.add_argument("--processor", required=True)
     parser.add_argument("--output", type=Path, default=Path("capabilities.json"))
     parser.add_argument(
         "--policy-output",
@@ -77,7 +76,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    started = time.perf_counter()
     try:
         report, cache_hit = load_or_probe(
             comgr_lib=args.comgr_lib,
@@ -102,7 +100,6 @@ def main(argv: list[str] | None = None) -> int:
         _print_summary(report, cache_hit, args.output, args.policy_output)
         if args.validate:
             print("schema validation: passed")
-        print(f"elapsed: {time.perf_counter() - started:.3f} s")
     outcomes = [
         observation["outcome"]
         for result in report["capabilities"].values()

@@ -25,9 +25,8 @@ The selected transition pairs contain four structural changes:
 - three change named-barrier address-space outcomes, including crash versus
   normal rejection and parser-stage versus codegen-stage failure.
 
-The initial 43-week survey found no structural change at 37 of 42 adjacent
-boundaries. Those unchanged intermediate artifacts do not remain in the
-maintained replay set.
+The initial broad survey identified the retained transition endpoints. The
+unchanged intermediate artifacts do not remain in the maintained replay set.
 
 Generated HSACO digests are also excluded. A digest change can route a compiler
 to generated-code or resource qualification, but it is not a configuration

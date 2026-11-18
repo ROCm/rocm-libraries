@@ -113,6 +113,8 @@ def _buffer_resource_candidates() -> tuple[_IntrinsicCandidate, ...]:
         ("p8_p1", "llvm.amdgcn.make.buffer.rsrc.p8.p1"),
     ):
         for count_type in ("i32", "i64"):
+            # This module is compiled and linked but never launched. Word 3 is
+            # therefore an inert ABI operand, not a runtime buffer descriptor.
             result.append(
                 _IntrinsicCandidate(
                     f"{spelling}_{count_type}",

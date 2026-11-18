@@ -13,6 +13,10 @@
 
 ## Decision
 
+The directory [README](README.md#document-ownership) owns the live probe protocol
+and corpus. This decision record owns the evidence/policy document boundaries,
+cache identity, and schema evolution rules.
+
 `capabilities.json` is installed-tool evidence about the exact COMGR library
 that rocKE uses to compile production LLVM IR. It is not a compiler-version
 label, an emission profile, or a qualification claim. The packaged resolver
@@ -107,9 +111,9 @@ The embedded LLVM version explains which compiler lineage was observed. It does
 not predict a capability and never substitutes for one.
 
 Historical evidence covers nine weekly transition endpoints on gfx950 and
-gfx1250, plus 7.0.0 and 7.2.0 release baselines on gfx950. The initial broad
-survey found no structural change at 37 of 42 adjacent weekly boundaries, so
-unchanged intermediate artifacts are not retained as a permanent replay tax.
+gfx1250, plus 7.0.0 and 7.2.0 release baselines on gfx950. The initial broad survey
+identified the retained transition endpoints; unchanged intermediate artifacts
+are not retained as a permanent replay tax.
 Historical evidence is invalidated only when the semantic protocol or evidence
 schema changes. File moves, comments, CLI changes, cache changes, and type-only
 refactors change the local cache identity but do not require compiler replay.

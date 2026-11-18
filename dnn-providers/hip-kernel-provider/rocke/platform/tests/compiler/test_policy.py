@@ -88,21 +88,56 @@ def test_policy_resolver_preserves_unsupported_optional_families(
         M.CAPABILITY_SCALED_MFMA,
     ):
         for entry in report["capabilities"][name]["value"]["observations"]:
-            entry.clear()
-            entry.update(
-                {
-                    "family": "unsupported",
-                    "candidate": "unsupported",
-                    "outcome": "rejected",
-                    "diagnostic": "not supported",
-                }
-            )
+            entry["outcome"] = "rejected"
+            entry["diagnostic"] = "not supported"
+            entry.pop("evidence")
 
     policy = resolve_policy(report)
 
     assert policy.fp8_packed_operand_type is None
     assert policy.named_barrier_address_space is None
     assert policy.scaled_mfma_call_abi is None
+
+
+@pytest.mark.parametrize(
+    ("capability", "candidate", "field", "expected"),
+    [
+        *[
+            (M.CAPABILITY_LAYOUT, value, "data_layout", value)
+            for value in ("L3", "L2", "L1", "L0")
+        ],
+        *[
+            (M.CAPABILITY_BUFFER_RESOURCE, value, "buffer_resource_abi", value)
+            for value in ("p8_p1_i64", "p8_p1_i32", "p1_i64", "p1_i32")
+        ],
+        *[
+            (M.CAPABILITY_FP8_PACKING, value, "fp8_packed_operand_type", value)
+            for value in ("i64", "v2i32")
+        ],
+        (M.CAPABILITY_NAMED_BARRIER, "as15", "named_barrier_address_space", 15),
+        (M.CAPABILITY_NAMED_BARRIER, "as3", "named_barrier_address_space", 3),
+        *[
+            (M.CAPABILITY_SCALED_MFMA, value, "scaled_mfma_call_abi", value)
+            for value in ("current_9", "legacy_11")
+        ],
+    ],
+)
+def test_policy_resolver_decision_table(
+    tmp_path: Path,
+    capability: str,
+    candidate: str,
+    field: str,
+    expected: object,
+) -> None:
+    report = _report(tmp_path)
+    for entry in report["capabilities"][capability]["value"]["observations"]:
+        if entry["candidate"] == candidate:
+            continue
+        entry["outcome"] = "rejected"
+        entry["diagnostic"] = "not selected"
+        entry.pop("evidence")
+
+    assert getattr(resolve_policy(report), field) == expected
 
 
 def test_policy_resolver_rejects_missing_required_evidence(tmp_path: Path) -> None:
@@ -153,6 +188,18 @@ def test_policy_constructor_rejects_invalid_fields(
     fields[field] = value
 
     with pytest.raises(ValueError, match=re.escape(message)):
+        CompilerPolicy(**fields)
+
+
+@pytest.mark.parametrize("value", [True, False, 3.0, 15.0, "3"])
+def test_policy_constructor_rejects_non_integer_address_spaces(
+    tmp_path: Path, value: object
+) -> None:
+    policy = resolve_policy(_report(tmp_path))
+    fields = dict(policy.__dict__)
+    fields["named_barrier_address_space"] = value
+
+    with pytest.raises(TypeError, match="expected an integer or null"):
         CompilerPolicy(**fields)
 
 

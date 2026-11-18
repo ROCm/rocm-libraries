@@ -289,8 +289,8 @@
   },
   "probe": {
     "effective_processor": "gfx950",
-    "fingerprint": "72f09bf135624f05b4366e36fe217fb711850b471fb626fae45984187935f3f9",
-    "implementation_sha256": "76e1d53e1436bac742087e72a7371697c9e26e6f06fb3706ea587ee7475ec3b4",
+    "fingerprint": "13540bb26cc2ca0d991380904388c576c831d679c2e1923bd83dca137dadf4bb",
+    "implementation_sha256": "c5b7514db6974340c4fe07ae6d0b2953676cbef196c7c96ae03fef4764850167",
     "name": "rocke-comgr-capabilities",
     "processor": "gfx950",
     "protocol_sha256": "5dc387c0b1364ea54984981698b386fcad049bdf4f90dfed4461ae91b04d1291",

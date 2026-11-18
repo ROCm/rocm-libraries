@@ -3,6 +3,7 @@
 ## Contents
 
 - [Purpose](#purpose)
+- [Document ownership](#document-ownership)
 - [One compiler route](#one-compiler-route)
 - [Observed contracts](#observed-contracts)
 - [Isolation and verdicts](#isolation-and-verdicts)
@@ -30,6 +31,21 @@ instead of mapping its embedded LLVM major to one broad emission profile. It
 then resolves the evidence into a canonical `CompilerPolicy` manifest. rocKE
 lowering does not consume that policy in this change; moving each lowering
 choice is a separately qualified migration.
+
+## Document ownership
+
+This README is the entry point and owns the live probe protocol, corpus summary,
+CLI/API usage, and relationship to LLVM-family migration. Sibling documents own
+only their stated deltas:
+
+| Document | Owns |
+| --- | --- |
+| [`SCHEMA_DECISION.md`](SCHEMA_DECISION.md) | Evidence/policy schema decisions, cache identity, and evolution rules |
+| [`flavor_inventory.md`](flavor_inventory.md) | Existing flavor consumers and the migration map |
+| [`historical_study.md`](historical_study.md) | Selected historical inputs, method, and observed transition table |
+| [`churn_report.md`](churn_report.md) | Interpretation work and the steady-state decision |
+
+Machine-readable inputs and observations are documented by the historical study.
 
 ## One compiler route
 
@@ -196,9 +212,9 @@ byte identity, generated-code/resource checks, and numeric testing.
 
 The probe is replayed across nine selected weekly transition endpoints on
 gfx950 and gfx1250, plus public 7.0.0 and 7.2.0 release baselines on gfx950.
-The initial broad survey showed that 37 of 42 adjacent weekly pairs had no
-structural change; unchanged intermediate weeks and processor copies are not a
-permanent replay obligation.
+The initial broad survey identified the retained transition endpoints;
+unchanged intermediate weeks and processor copies are not a permanent replay
+obligation.
 
 Normal replay is offline and uses a persistent content-addressed artifact cache.
 `--fetch-missing` is the explicit maintenance action that acquires absent public
