@@ -25,7 +25,15 @@
 # compiler-option reproducibility gate joins it: it re-measures which -mllvm
 # options the loaded compiler accepts. Both are registered in build-tree and
 # installed-artifact CTest, so developers and provider CI execute the same
-# logical gates against their respective package data.
+# logical gates against their respective package data. The python-standard
+# category holds Python entries that start at the standard tier. Thus the quick
+# tier does not run them. An example is rocke_ctest_shard_pytest, the tests of
+# the rocke.tests.ctest_shard plugin. These tests start many child pytest and
+# CTest runs. The tier rule gives a category whose name is not a tier only its
+# own name as a label. Thus python-standard lists the standard, comprehensive
+# and full labels itself. The pytest-scaling runner and counted-sync entries
+# start at comprehensive so nightly/full runs own them without adding work to
+# quick/standard pre-merge and post-merge runs.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -77,8 +85,12 @@ test_categories:
       - "rocke_streamk_iter_partition"
       - "rocke_wgrad_streamk_host"
       - "rocke_conv_direct_dw_dgrad_host"
+      - "rocke_conv_direct_dgrad_pp_mfma_host"
       - "rocke_conv_implicit_gemm_spec_guards"
+      - "rocke_conv_direct_fwd_pp_mfma_host"
+      - "rocke_conv_direct_fwd_flex_mfma_host"
       - "rocke_conv_direct_wgrad_refusals_host"
+      - "rocke_mx_gemm_host"
       - "rocke_wmma_fmha_decode_host"
       - "rocke_future_intrinsic_lowering"
       - "rocke_flavor_decl_chain"
@@ -95,6 +107,8 @@ test_categories:
       - "rocke_gpu_checked_value"
       - "rocke_portable_ir_dom_decoders"
       - "rocke_portable_ir_recipe_vm_replay"
+      - "rocke_smem_access_alignment"
+      - "rocke_global_access_alignment"
       - "rocke_qk_scale_spec_validate"
       - "rocke_tensor_view_buffer_errors"
       - "rocke_mfma_atom_lane_to_output"
@@ -107,7 +121,9 @@ test_categories:
       - "rocke_gemm_universal_spec_guards"
       - "rocke_buffer_rsrc_hip"
       - "rocke_attention_dense_spec"
+      - "rocke_yield_rules"
       - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_tiled_attention_2d_gfx950_fp8_k_read"
       - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
       # Registered only in the build tree: they read engine sources the
@@ -129,9 +145,6 @@ test_categories:
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
-      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
-      # parser ignores a listed name that has no registered test.
-      - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
@@ -168,8 +181,12 @@ test_categories:
       - "rocke_streamk_iter_partition"
       - "rocke_wgrad_streamk_host"
       - "rocke_conv_direct_dw_dgrad_host"
+      - "rocke_conv_direct_dgrad_pp_mfma_host"
       - "rocke_conv_implicit_gemm_spec_guards"
+      - "rocke_conv_direct_fwd_pp_mfma_host"
+      - "rocke_conv_direct_fwd_flex_mfma_host"
       - "rocke_conv_direct_wgrad_refusals_host"
+      - "rocke_mx_gemm_host"
       - "rocke_wmma_fmha_decode_host"
       - "rocke_future_intrinsic_lowering"
       - "rocke_flavor_decl_chain"
@@ -186,6 +203,8 @@ test_categories:
       - "rocke_gpu_checked_value"
       - "rocke_portable_ir_dom_decoders"
       - "rocke_portable_ir_recipe_vm_replay"
+      - "rocke_smem_access_alignment"
+      - "rocke_global_access_alignment"
       - "rocke_qk_scale_spec_validate"
       - "rocke_tensor_view_buffer_errors"
       - "rocke_mfma_atom_lane_to_output"
@@ -198,7 +217,9 @@ test_categories:
       - "rocke_gemm_universal_spec_guards"
       - "rocke_buffer_rsrc_hip"
       - "rocke_attention_dense_spec"
+      - "rocke_yield_rules"
       - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_tiled_attention_2d_gfx950_fp8_k_read"
       - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
       # Registered only in the build tree: they read engine sources the
@@ -212,6 +233,7 @@ test_categories:
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_fwd_aot_packaging_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
@@ -247,6 +269,79 @@ test_categories:
       - "host"
       - "toolchain"
       - "generated-artifact"
+
+  python-standard:
+    description: "rocKE Python checks that start at the standard tier, not quick"
+    test_patterns:
+      - "rocke_ctest_shard_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_gdn_pytest"
+      # Its host tests are too slow for the single-shard quick tier.
+      - "rocke_library_conv_fwd_aot_packaging_pytest"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  runner-contract-comprehensive:
+    description: "rocKE affordable-runner policy contracts, comprehensive and full"
+    test_patterns:
+      - "rocke_library_runner_contract_pytest"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "runner"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  worker-integration-comprehensive:
+    description: "rocKE file-worker lifecycle contracts, comprehensive and full"
+    test_patterns:
+      - "rocke_library_worker_integration_pytest"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "runner"
+      - "integration"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  counted-structural-comprehensive:
+    description: "rocKE counted-sync exhaustive structural gate, comprehensive and full"
+    test_patterns:
+      - "rocke_library_counted_structural_gate"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "structural"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  counted-compiler-comprehensive:
+    description: "rocKE counted-sync compiler and resource gate, comprehensive and full"
+    test_patterns:
+      - "rocke_library_counted_compiler_gate"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "compiler"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
 
   comprehensive:
     description: "rocKE checks run by scheduled CI only"

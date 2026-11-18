@@ -23,6 +23,7 @@
 ################################################################################
 
 from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .CustomKernels import magicSizeSemantic
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from .ir import SBitcmp1B32
@@ -62,6 +63,7 @@ from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, 
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Problem import isFusedA2A
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .SolutionStructs.segment_interleave import wave_tile_span
 from .AsmMemoryInstruction import MemoryInstruction
@@ -71,7 +73,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
-from .Common.Architectures import ARCH_CAP_OVERRIDES
+from .Common.Capabilities import archCapOverrides
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
@@ -301,7 +303,7 @@ class StateValues:
   lrvwUnrollMetadata: int                = 0 # For Sparse Metadat
 
   numMfmaPerIter: int                    = 0
-  SubTileIdx: int                       = 0
+  SubTileIdx: int                        = 0
   subtileLdsSwizzle: bool                = False
   subtileIterateModeA: bool              = False
   subtileIterateModeB: bool              = False
@@ -369,7 +371,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
-  startVgprPersistentConsts: int                 = -1
+  startVgprPersistentConsts: int         = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
   startVgprInfCheck: int                 = -1
@@ -426,7 +428,7 @@ class StateValues:
   numStoreSgprInstExt: int               = 0 # For pose-loop kernel args
   numSgprAddressBias: int                = 0
   numSgprAddressGSUSync: int             = 0
-  numSgprPersistent: int                    = 0
+  numSgprPersistent: int                 = 0
   tileProcessing: TileProcessingSettings               = field(default_factory=TileProcessingSettings)
   BiasType: int                          = 0
   BiasStride: int                        = 0
@@ -590,7 +592,7 @@ class StateValues:
 
     self.nonPostLoopSgpr = []
 
-    # FusedGemmA2A store dispatch mode (codegen-time): "BOTH" emits the per-store
+    # FusedA2A=GemmA2A store dispatch mode (codegen-time): "BOTH" emits the per-store
     # runtime gate + both push/local versions (default, unchanged behavior);
     # "PUSH"/"LOCAL" emit only that single version (gate hoisted to caller).
     self.fusedA2ADispatchMode = "BOTH"
@@ -3456,6 +3458,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, i))
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
+        module.add(self.openA2AShardLoop(kernel, tensorParametersA, tensorParametersB))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
       if deferInitC:
@@ -7008,36 +7011,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # Update local write pointers in case the upcoming global reads are writing directly to LDS:
       if kernel["PrefetchGlobalRead"]:
-        #TODO: TDM
-        module.addComment1("local write reset offsets a")
-        if not kernel["enableTDMA"]:
-          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA))
-          if kernel["ExpandPointerSwap"]:
-            # reset local write offset in asm code as well
-            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA))
-
-        module.addComment1("local write reset offsets b")
-        if not kernel["enableTDMB"]:
-          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB))
-          if kernel["ExpandPointerSwap"]:
-            # reset local write offset in asm code as well
-            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB))
-
-        if kernel["ProblemType"]["MXBlockA"]:
-          if not kernel["enableTDMA"]:
-            module.addComment1("local write reset offsets mxsa")
-            module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA["MX"]))
-            if kernel["ExpandPointerSwap"]:
-              # reset local write offset in asm code as well
-              module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA["MX"]))
-
-        if kernel["ProblemType"]["MXBlockB"]:
-          if not kernel["enableTDMA"]:
-            module.addComment1("local write reset offsets mxsb")
-            module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB["MX"]))
-            if kernel["ExpandPointerSwap"]:
-              # reset local write offset in asm code as well
-              module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB["MX"]))
+        module.add(self.localWriteResetOffsetsAB(kernel, tensorParametersA, tensorParametersB))
 
       # tail: global read
       # Check out VGPR for DTVA
@@ -7564,6 +7538,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self._dcpAdvanceTokens("Tensor")
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, i, True))
 
+    module.add(self.a2aTransitionPhase(kernel, tensorParametersA, tensorParametersB))
+    module.add(self.closeA2AShardLoop(kernel))
+    module.add(self.a2aExitTally(kernel))
+
     # Drop GlobalReadIncs* from the free pool so endSummation's store-phase SRDs don't
     # re-check-out an already-grabbed slot.
     for grIncName in ("GlobalReadIncsA", "GlobalReadIncsB", "GlobalReadIncsMXSA", "GlobalReadIncsMXSB"):
@@ -8049,13 +8027,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # process -- including unqualified ones, which then lose their drains
       # without anything reporting it.
       self.states.archCaps = {**self.states.archCaps,
-                              "EnableXnackReplay": isaInfo.archCaps["EnableXnackReplay"]}
+                              "EnableXnackReplay": isaInfo.archCaps["EnableXnackReplay"],
+                              "MTypeNC": isaInfo.archCaps.get("MTypeNC", True)}
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
     # dict rather than mutate: some backends return the live cached cap dict.
     archName = globalParameters.get("StinkyTofuArchName") or ""
-    archCapDeltas = ARCH_CAP_OVERRIDES.get(archName, {}).get("archCaps", {})
+    archCapDeltas = archCapOverrides(archName).get("archCaps", {})
     if archCapDeltas:
       self.states.archCaps = {**self.states.archCaps, **archCapDeltas}
 
@@ -8142,7 +8121,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # doShadowInit performs initialization in the 'shadow' of the global mem prefetch
     # TODO re-enable..
-    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"]:
+    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"] \
+       and kernel["ProblemType"]["FusedA2A"] != "A2AGemm":
       if kernel["PrefetchGlobalRead"]:
         if self.states.actualSummationLoops == 1:
           self.states.doShadowInit = 2 # 2 is both store setup and initC
@@ -10584,6 +10564,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
+    if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+      self.defineSgpr("A2AW", 1)
+      self.defineSgpr("A2AShardCounter", 1)
+      self.defineSgpr("A2AShardIdx", 1)
+      self.defineSgpr("A2AFeatIdx", 1)
+      self.defineSgpr("A2AKLocal", 1)
+      self.defineSgpr("A2ABlockLo", 1)
+      self.defineSgpr("A2ABlockCount", 1)
+      self.defineSgpr("FusedCounterPtr", 2, 2)
+
     self.defineSgpr("OrigLoopCounter", 1)
     if kernel.get("LDSSegmentBRotate"):
       # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0.
@@ -10641,7 +10631,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # Persistent copy of the grid-wide WG count for the counter3 last-WG election;
     # latched in graWorkGroup because NumWorkGroups0/1 can be borrowed as temps later.
-    if kernel["ProblemType"]["FusedGemmA2A"]:
+    if kernel["ProblemType"]["FusedA2A"] == "GemmA2A":
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
       # from it by immediate offset (client/src/DeviceContext.cpp).
@@ -11347,6 +11337,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
 
+    # The distance to the peer D (64-bit) follows the activation arguments, as in the kernel
+    # signature.
+    if kernel["ProblemType"]["OutputPeerD"]:
+      storeSgprLoad += self.states.rpga
+      self.states.numStoreSgprNames.append("DeltaPeerD")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)
+
     self.states.numStoreSgprToLoad = storeSgprLoad
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
@@ -11769,6 +11766,34 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     return ""
 
   ##############################################################################
+  # Open A2A-GEMM Shard Loop
+  ##############################################################################
+  @abc.abstractmethod
+  def openA2AShardLoop(self, kernel, tPA, tPB):
+    return ""
+
+  ##############################################################################
+  # Close A2A-GEMM Shard Loop
+  ##############################################################################
+  @abc.abstractmethod
+  def closeA2AShardLoop(self, kernel):
+    return ""
+
+  ##############################################################################
+  # A2A-GEMM Transition Phase
+  ##############################################################################
+  @abc.abstractmethod
+  def a2aTransitionPhase(self, kernel, tPA, tPB):
+    return ""
+
+  ##############################################################################
+  # A2A-GEMM Exit Tally
+  ##############################################################################
+  @abc.abstractmethod
+  def a2aExitTally(self, kernel):
+    return ""
+
+  ##############################################################################
   # End Summation
   ##############################################################################
   @abc.abstractmethod
@@ -11822,6 +11847,40 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   @abc.abstractmethod
   def localWriteResetOffsets(self, kernel, internalPointerSwap, tP):
     return ""
+
+  def localWriteResetOffsetsAB(self, kernel, tPA, tPB):
+    module = Module("localWriteResetOffsetsAB")
+    #TODO: TDM
+    module.addComment1("local write reset offsets a")
+    if not kernel["enableTDMA"]:
+      module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPA))
+      if kernel["ExpandPointerSwap"]:
+        # reset local write offset in asm code as well
+        module.add(self.localWriteResetOffsets(kernel, False, tPA))
+
+    module.addComment1("local write reset offsets b")
+    if not kernel["enableTDMB"]:
+      module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPB))
+      if kernel["ExpandPointerSwap"]:
+        # reset local write offset in asm code as well
+        module.add(self.localWriteResetOffsets(kernel, False, tPB))
+
+    if kernel["ProblemType"]["MXBlockA"]:
+      if not kernel["enableTDMA"]:
+        module.addComment1("local write reset offsets mxsa")
+        module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPA["MX"]))
+        if kernel["ExpandPointerSwap"]:
+          # reset local write offset in asm code as well
+          module.add(self.localWriteResetOffsets(kernel, False, tPA["MX"]))
+
+    if kernel["ProblemType"]["MXBlockB"]:
+      if not kernel["enableTDMA"]:
+        module.addComment1("local write reset offsets mxsb")
+        module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPB["MX"]))
+        if kernel["ExpandPointerSwap"]:
+          # reset local write offset in asm code as well
+          module.add(self.localWriteResetOffsets(kernel, False, tPB["MX"]))
+    return module
 
   ##############################################################################
   # Local Write in Prefetch Pass (PreLoop): Do It A/B
@@ -12569,12 +12628,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # -- Packed-batch magic divisors -------------------------------------------
     for i, _ in enumerate(kernel["PackedC0IdxChars"][:-1]):
       idx = kernel["PackedC0IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
+      _reg("uint32", magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]), idx)
+      _reg("uint32", magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]), idx)
     for i, _ in enumerate(kernel["PackedC1IdxChars"][:-1]):
       idx = kernel["PackedC1IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
+      _reg("uint32", magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]), idx)
+      _reg("uint32", magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]), idx)
 
     # -- Alpha / Beta ----------------------------------------------------------
     numSgprAlpha = max(1, int(self.states.bpeCinternal / 4))
@@ -12665,6 +12724,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
         _reg("uint32", "ActivationTypeArg")
 
+    # -- Peer D output ---------------------------------------------------------
+    if kernel["ProblemType"]["OutputPeerD"]:
+      _reg("int64", "DeltaPeerD")
+
     # -- Amax output -----------------------------------------------------------
     if kernel["ProblemType"]["OutputAmaxD"]:
       _reg("address", "AddressAmaxOut")
@@ -12685,8 +12748,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         _reg("uint64", "BatchOffset" + tensor)
 
     # One entry for the whole fixed-size fusegemmm a2a segment
-    if kernel["ProblemType"]["FusedGemmA2A"]:
+    if isFusedA2A(kernel["ProblemType"]):
       _reg("uint32", "FusedA2ASegment")
+
+    if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
+      _reg("uint32", "RNDSeed")
 
   def _getKernelSource(self, kernel: Solution):
     """

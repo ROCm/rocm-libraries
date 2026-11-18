@@ -141,9 +141,10 @@ namespace TensileLite
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
         X_MACRO(SKTilesAndSplit) \
-        /* Packed batch dimension divisors */ \
-        X_MACRO(MagicNumberSize) \
-        X_MACRO(MagicShiftSize) \
+        X_MACRO(MagicNumberSizeAlg1) \
+        X_MACRO(MagicShiftSizeAlg1) \
+        X_MACRO(MagicNumberSizeAlg2) \
+        X_MACRO(MagicShiftSizeAlg2) \
         /* Epilogue control args */ \
         X_MACRO(BiasType) \
         X_MACRO(StrideBias) \
@@ -185,7 +186,8 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        X_MACRO(DeltaPeerD)
 
     enum class CustomArgSemantic
     {
@@ -433,43 +435,140 @@ namespace TensileLite
 
     struct SizeMapping
     {
-        size_t waveNum = 0;
-        int    WavefrontSize = 0;
+        int                    a2aSubRounds     = 1;
+        bool                   activationFused  = true;
+        int                    adaptiveGemm     = 0;
+        int                    adaptiveGemmGSUA = 0;
+        int                    adaptiveGemmNTAB = 0;
+        bool                   BufferLoad       = true;
+        bool                   BufferStore      = true;
+        dim3                   clusterDim{1, 1, 1};
+        int                    CUOccupancy                            = 0;
+        int                    customMainLoopScheduling               = 0;
+        size_t                 depthU                                 = 0;
+        bool                   DirectToLdsA                           = false;
+        bool                   DirectToLdsB                           = false;
+        bool                   DirectToVgprA                          = false;
+        bool                   DirectToVgprB                          = false;
+        bool                   enableLDSTrA                           = false;
+        bool                   enableLDSTrB                           = false;
+        int                    expertSchedulingMode                   = 0;
+        int                    globalAccumulation                     = 0;
+        int16_t                globalSplitU                           = 0;
+        bool                   globalSplitUCoalesced                  = false;
+        size_t                 globalSplitUPGR                        = 0;
+        bool                   globalSplitUWorkGroupMappingRoundRobin = false;
+        size_t                 grvwA                                  = 1;
+        size_t                 grvwB                                  = 1;
+        size_t                 gwvwC                                  = 1;
+        size_t                 gwvwD                                  = 1;
+        int                    HalfPLR                                = 0;
+        bool                   hasTemporalHint                        = false;
+        int                    LocalSplitU                            = 1;
+        dim3                   macroTile;
+        int                    magicDivAlg            = 1;
+        int                    MathClocksUnrolledLoop = 0;
+        std::array<int, 4>     matrixInstruction{};
+        int                    Multicast                  = 0;
+        int                    nonTemporalA               = 0;
+        int                    nonTemporalB               = 0;
+        int                    NonTemporalD               = 0;
+        int                    NumLoadsCoalescedA         = 0;
+        int                    NumLoadsCoalescedB         = 0;
+        bool                   OneLDSBuffer               = false;
+        size_t                 packBatchDims              = 0;
+        int                    packSummationDims          = 0;
+        int                    persistentKernel           = 0;
+        bool                   persistentKernelAlongBatch = false;
+        int                    prefetchAcrossPersistent   = 0;
+        int                    PrefetchGL2                = 0;
+        int                    PrefetchGlobalRead         = 2;
+        int                    PrefetchLocalRead          = 1;
+        bool                   sourceKernel               = false;
+        bool                   SourceSwap                 = false;
+        size_t                 staggerStrideShift         = 0;
+        size_t                 staggerU                   = 0;
+        size_t                 staggerUMapping            = 0;
+        int                    streamKAtomic              = 0;
+        size_t                 synchronizerSizePerWG      = 0;
+        int                    TDMInst                    = 0;
+        int                    temporalHintA              = 0;
+        int                    temporalHintB              = 0;
+        int                    temporalHintD              = 0;
+        dim3                   threadTile{0, 0, 0};
+        TileProcessingStrategy tileProcessingStrategy        = TileProcessingStrategy::None;
+        int                    UnrollLoopSwapGlobalReadOrder = 0;
+        int                    UnrollMajorLDSA               = -1;
+        int                    UnrollMajorLDSB               = -1;
+        bool                   useSubtileImpl                = false;
+        int                    VectorWidthA                  = 1;
+        int                    VectorWidthB                  = 1;
+        int                    WavefrontSize                 = 0;
+        std::array<int, 2>     waveGroup{};
+        size_t                 waveNum                  = 0;
+        int                    WaveSeparateGlobalReadA  = 0;
+        int                    WaveSeparateGlobalReadB  = 0;
+        WorkAssignment         workAssignment           = WorkAssignment::StaticGrid;
+        int                    workGroupMapping         = 0;
+        int                    workGroupMappingXCC      = 0;
+        int                    workGroupMappingXCCGroup = 0;
+        dim3                   workGroupSize{0, 0, 0};
+        size_t                 workspaceSizePerElemBias = 0;
+        size_t                 workspaceSizePerElemC    = 0;
 
-        dim3 clusterDim{1, 1, 1};
+        int cacheHintA() const
+        {
+            return hasTemporalHint ? (temporalHintA == 1 || temporalHintA == 3 ? 4 : 0)
+                                   : nonTemporalA;
+        }
 
-        // vector3's default ctor leaves members uninitialized, but this field is
-        // read (calculateAutoGSU divides by it) before every solution sets it.
-        dim3 workGroupSize{0, 0, 0};
-        dim3 threadTile;
-        dim3 macroTile;
+        int cacheHintB() const
+        {
+            return hasTemporalHint ? (temporalHintB == 1 || temporalHintB == 3 ? 4 : 0)
+                                   : nonTemporalB;
+        }
 
-        std::array<int, 4> matrixInstruction;
-        size_t             grvwA = 1;
-        size_t             grvwB = 1;
-        size_t             gwvwC = 1;
-        size_t             gwvwD = 1;
+        int cacheHintD() const
+        {
+            return hasTemporalHint ? (temporalHintD == 1 || temporalHintD == 3 ? 4 : 0)
+                                   : NonTemporalD;
+        }
 
-        size_t  staggerU           = 0;
-        size_t  staggerUMapping    = 0;
-        size_t  depthU             = 0;
-        size_t  globalSplitUPGR    = 0;
-        int16_t globalSplitU       = 0;
-        size_t  staggerStrideShift = 0;
-        int     workGroupMapping   = 0;
+        bool hasDynamicAssignment() const
+        {
+            return isPersistent() && workAssignment == WorkAssignment::DynamicWorkQueue;
+        }
 
-        size_t packBatchDims              = 0;
-        int    packSummationDims          = 0;
-        int    magicDivAlg                = 1;
-        TileProcessingStrategy tileProcessingStrategy = TileProcessingStrategy::None;
-        WorkAssignment workAssignment = WorkAssignment::StaticGrid;
-        bool isPersistent() const { return tileProcessingStrategy != TileProcessingStrategy::None; }
-        bool isStreamK() const { return tileProcessingStrategy == TileProcessingStrategy::StreamK; }
-        bool isPersistentDataParallel() const { return tileProcessingStrategy == TileProcessingStrategy::DataParallel; }
-        bool hasStaticAssignment() const { return isPersistent() && workAssignment == WorkAssignment::StaticGrid; }
-        bool hasDynamicAssignment() const { return isPersistent() && workAssignment == WorkAssignment::DynamicWorkQueue; }
-        bool hasHybridAssignment() const { return isPersistent() && workAssignment == WorkAssignment::Hybrid; }
-        bool requiresPartialReduction() const { return isStreamK() && streamKAtomic == 0; }
+        bool hasHybridAssignment() const
+        {
+            return isPersistent() && workAssignment == WorkAssignment::Hybrid;
+        }
+
+        bool hasStaticAssignment() const
+        {
+            return isPersistent() && workAssignment == WorkAssignment::StaticGrid;
+        }
+
+        bool isPersistent() const
+        {
+            return tileProcessingStrategy != TileProcessingStrategy::None;
+        }
+
+        bool isPersistentDataParallel() const
+        {
+            return tileProcessingStrategy == TileProcessingStrategy::DataParallel;
+        }
+
+        bool isStreamK() const
+        {
+            return tileProcessingStrategy == TileProcessingStrategy::StreamK;
+        }
+
+        bool requiresPartialReduction() const
+        {
+            return isStreamK() && streamKAtomic == 0;
+        }
+
         void validateExecutionPolicy() const
         {
             if(streamKAtomic < 0 || streamKAtomic > 1)
@@ -477,90 +576,9 @@ namespace TensileLite
             if(!isStreamK() && streamKAtomic)
                 throw std::runtime_error("StreamKAtomic requires TileProcessingStrategy=StreamK");
             if(isPersistentDataParallel() && workAssignment != WorkAssignment::StaticGrid)
-                throw std::runtime_error(std::string(toString(tileProcessingStrategy)) + " supports WorkAssignment=StaticGrid only");
+                throw std::runtime_error(std::string(toString(tileProcessingStrategy))
+                                         + " supports WorkAssignment=StaticGrid only");
         }
-        int    streamKAtomic              = 0;
-        int    prefetchAcrossPersistent   = 0;
-        int    persistentKernel           = 0;
-        bool   persistentKernelAlongBatch = false;
-
-        bool sourceKernel = false;
-
-        int    globalAccumulation       = 0;
-        int    adaptiveGemmGSUA         = 0;
-        size_t workspaceSizePerElemC    = 0;
-        size_t workspaceSizePerElemBias = 0;
-
-        bool activationFused = true;
-
-        int  workGroupMappingXCC                    = 0;
-        int  workGroupMappingXCCGroup               = 0;
-        bool globalSplitUCoalesced                  = false;
-        bool globalSplitUWorkGroupMappingRoundRobin = false;
-
-        int CUOccupancy            = 0;
-        int PrefetchGlobalRead     = 2;
-        int MathClocksUnrolledLoop = 0;
-
-        size_t synchronizerSizePerWG = 0;
-
-        int nonTemporalA = 0;
-        int nonTemporalB = 0;
-
-        int temporalHintA = 0;
-        int temporalHintB = 0;
-
-        bool hasTemporalHint = false;
-        bool BufferLoad = true;
-        bool BufferStore = true;
-
-        int cacheHintA() const
-        {
-            return hasTemporalHint ? (temporalHintA == 1 || temporalHintA == 3 ? 4 : 0)
-                                   : nonTemporalA;
-        }
-        /// @see cacheHintA
-        int cacheHintB() const
-        {
-            return hasTemporalHint ? (temporalHintB == 1 || temporalHintB == 3 ? 4 : 0)
-                                   : nonTemporalB;
-        }
-
-        int adaptiveGemmNTAB = 0;
-
-        int customMainLoopScheduling = 0;
-
-        // Whether the kernel uses the subtile implementation (UseSubtileImpl).
-        // Plumbed into the Origami config so heuristics can reason about subtile
-        // kernels (e.g. rejecting them for small K).
-        bool useSubtileImpl = false;
-
-        // SourceSwap: MFMA operands are swapped so consecutive lanes run along M
-        // in D.  Either way each lane stores StoreVectorWidth contiguous M elements.
-        bool SourceSwap = false;
-
-        int NonTemporalD = 0;
-        int WaveSeparateGlobalReadA = 0;
-        int WaveSeparateGlobalReadB = 0;
-        int UnrollLoopSwapGlobalReadOrder = 0;
-        bool DirectToVgprA = false;
-        bool DirectToVgprB = false;
-        int NumLoadsCoalescedA = 0;
-        int NumLoadsCoalescedB = 0;
-        int VectorWidthA = 1;
-        int VectorWidthB = 1;
-        int LocalSplitU = 1;
-        bool DirectToLdsA = false;
-        bool DirectToLdsB = false;
-        bool OneLDSBuffer = false;
-        int  UnrollMajorLDSA = -1;
-        int  UnrollMajorLDSB = -1;
-        bool enableLDSTrA    = false;
-        bool enableLDSTrB    = false;
-
-        int expertSchedulingMode = 0;
-
-        std::array<int, 2> waveGroup;
     };
 
     struct StreamKStaticSplit
@@ -1504,6 +1522,7 @@ namespace TensileLite
             bool             useInitialStridesCD       = false;
             bool             stridedBatched            = true;
             bool             outputAmaxD               = false;
+            bool             outputPeerD               = false;
             bool             groupedGemm               = false;
             ActivationType   activationType            = ActivationType::None;
             int              activationArgLength       = 0;
@@ -1518,7 +1537,7 @@ namespace TensileLite
             bool supportDeviceUserArguments = false;
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
-            bool fusedGemmA2A               = false;
+            FusedA2A fusedA2A                   = FusedA2A::Disabled;
             int  metadataLayout             = 0;
             // w4a16 group size, zero-point and encoding come from predicates and the problem;
             // a runtime-group kernel matches several group sizes.
@@ -1609,7 +1628,6 @@ namespace TensileLite
 
         uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
         std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,

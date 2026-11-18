@@ -116,8 +116,10 @@ dW rows, and the extra memory transactions outweigh the halved atomic count.
   degree that keeps that bound under the suite's 5e-2 tolerance
   (`atomic_rounding_degree_cap`); higher degrees miss it on all-positive
   inputs. fp32 takes the general cap of 128.
-- fp16 has its own policy: fill to 1024 CTAs (2048 grouped) with K slices
-  down to 512, up to degree 97. Earlier fp16 was not split automatically
+- fp16 has its own policy (see `_WGRAD_SPLIT_POLICY_BY_DTYPE` in
+  `kernels/common/conv_split_k.py`): fill to 1024 CTAs (2048 grouped) with K
+  slices down to 64 (ungrouped) or 512 (grouped), up to degree 97. Earlier
+  fp16 was not split automatically
   (cap 1), because the packed fp16 atomic was lowered as a fenced atomic
   (`global_wb` / `global_inv` around every add). It is now an agent-scope
   monotonic `atomicrmw`, like bf16's, and the policy was refitted on a degree

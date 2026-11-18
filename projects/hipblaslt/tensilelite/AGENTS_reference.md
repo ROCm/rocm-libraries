@@ -25,7 +25,7 @@ cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
 # Run test with custom client path
-./my-custom-build/Tensile.sh tensilelite/Tests/common/<test>.yaml tensile-out \
+tensilelite/bin/Tensile tensilelite/Tests/common/<test>.yaml tensile-out \
     --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
 
 # Build with custom args (e.g., Debug + specific GPU)
@@ -60,13 +60,30 @@ make co TENSILE_OUT=tensile-out ARCH="gfx942" WAVE=64   # gfx9 explicit
 make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32  # gfx11 explicit
 ```
 
+## Profiling Device-Library Build Memory
+
+`scripts/memwatch.py` runs a command and samples RSS/PSS/USS of every process in
+its tree from `/proc` (parent, joblib workers, assembler, linker, bundler),
+reporting peaks per process class and per build phase. Use it around the exact
+`TensileCreateLibrary` command cmake prints as "Device lib build command":
+
+```bash
+python scripts/memwatch.py --out mem.json --csv timeline.csv --log tcl.log -- \
+    python -m tensilelite.create_library --architecture=gfx942 ... <logic> <out> HIP
+```
+
+Summed PSS is the number to compare: summed RSS double-counts pages shared
+between processes. For a fast loop, scope the build with
+`--logic-filter='gfx942/Equality/*'` and compare `out/library` file hashes
+against a develop run; set `TENSILE_DISABLE_HELPER_CACHE=1` when comparing wall
+clock so the helper-kernel compile is cold in both runs.
+
 ## CMake Options
 
 | Option | Default | Purpose |
 |--------|---------|---------|
 | `TENSILELITE_ENABLE_HOST` | ON | Build C++ runtime library |
 | `TENSILELITE_ENABLE_CLIENT` | ON | Build benchmark client |
-| `TENSILELITE_ENABLE_AUTOBUILD` | OFF | Auto-rebuild rocisa wrapper scripts |
 | `TENSILELITE_BUILD_TESTING` | OFF | Build C++ host library tests |
 | `GPU_TARGETS` | (detected) | Semicolon-separated list of gfx targets |
 
