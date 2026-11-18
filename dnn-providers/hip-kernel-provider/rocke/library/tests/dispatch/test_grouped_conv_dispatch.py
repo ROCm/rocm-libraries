@@ -258,7 +258,6 @@ def test_an_instance_builds_only_for_its_own_arch():
     "kw, match",
     [
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
-        (dict(arch="gfx942"), "arch 'gfx942'"),
         (dict(arch="gfx1250"), "arch 'gfx1250'"),
         (dict(arch="gfx1250", llvm_flavor="llvm23"), "arch 'gfx1250'"),
         (dict(direction="wgrad"), "no 'wgrad' instances"),

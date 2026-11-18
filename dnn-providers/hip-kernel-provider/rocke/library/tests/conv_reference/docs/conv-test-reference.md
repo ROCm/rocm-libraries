@@ -35,7 +35,8 @@ tuple, so editing one processor's cases changes only its cohort.
 Inputs are NHWC, weights KYXC with C/groups channels, and outputs NHWK.
 
 The gfx942 current adapter uses an explicit 64x64x64 implicit-GEMM configuration;
-there is no registered production forward instance list for that processor.
+it is not enrolled in that processor's production forward instance list
+(`gfx942_fwd.json`).
 The gfx950 adapter requests `algorithm="implicit_gemm"` from production dispatch,
 builds the selected instance, and uses its production launch plan. This keeps
 implicit-GEMM coverage even when default dispatch prefers a direct depthwise

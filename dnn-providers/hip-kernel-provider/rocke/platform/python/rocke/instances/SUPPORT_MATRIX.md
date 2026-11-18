@@ -229,7 +229,8 @@ parity runs on the matching device and is not implied by the ✅ here.
   merged GEMM that does not fit one tile (`Gm > tile_m`, or `Z*Y*X*Gm > tile_n`).
   Forward merged kernels are built into the AOT kernel cache at every
   admissible degree and selected there by timing; the grouped-conv dispatcher
-  does not select a forward merge degree. **Engine coverage differs between the two directions.** Forward is
+  selects one only as an instance of its forward lists (each fixes its own
+  degrees), never by choosing a degree for the problem. **Engine coverage differs between the two directions.** Forward is
   implemented in **both** engines — `group_merge` is a field on the C-ABI spec
   struct (`rocke_implicit_gemm_conv_spec`), is carried across the pybind
   boundary, and the fwd parity emitters build eight depthwise configs

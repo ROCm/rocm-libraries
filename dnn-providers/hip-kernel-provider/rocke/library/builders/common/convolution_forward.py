@@ -1,14 +1,21 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Packaging adapter for the gfx950 implicit-GEMM forward convolution.
+"""Packaging adapter for the implicit-GEMM forward convolution.
 
 The descriptor spec is flat, while the original builder takes nested problem
 and data specs plus optional fusion callbacks. :class:`Gfx950ConvFwdSpec`
 holds one packaged kernel's build problem and resolved tuning; the
-shape-generic AOT-instance packaging below (:class:`Gfx950ConvFwdAotSpec`)
-builds against it without callbacks. Neither changes the kernel body or
-introduces a runtime Python dependency.
+shape-generic AOT-instance packaging below (:class:`ConvFwdAotSpec`) builds
+against it without callbacks. Neither changes the kernel body or introduces a
+runtime Python dependency.
+
+Two AOT engines share the instance packaging, one per architecture
+(:data:`TARGETS`): ``hipkernel:Gfx950ConvFwdAot`` and
+``hipkernel:Gfx942ConvFwdAot``, both wave64, with one spec class each
+(:class:`Gfx950ConvFwdAotSpec`, :class:`Gfx942ConvFwdAotSpec`). Both match
+:class:`Gfx950ConvFwdSpec` problems; gfx942 packages gfx950's direct
+algorithms except the windowed depthwise.
 
 The initial contract is 2D cross-correlation, dense NHWC input, KYXC filter,
 NHWK output, uniform fp16/bf16, and fp32 accumulation. Padding is symmetric.
@@ -24,10 +31,10 @@ B_bytes:i32, D_bytes:i32)`` followed by the problem block of
 ``kernels.common.conv_abi`` (extents, strides, magic divisors and tile counts as
 i32 kernel arguments). A packaged kernel is built for one problem, but it
 computes every problem its build-time capabilities admit, and the native pack
-matches it to all of them. :func:`gfx950_conv_fwd_aot_capabilities` reports
+matches it to all of them. :func:`conv_fwd_aot_capabilities` reports
 what a binary keeps from its build problem (grouped and pointwise code paths,
 load and store widths; for the direct kernels the filter, stride and padding)
-and :func:`gfx950_conv_fwd_aot_serves` decides a
+and :func:`conv_fwd_aot_serves` decides a
 runtime problem against it. :meth:`Gfx950ConvFwdSpec.launch_signature` and
 :meth:`Gfx950ConvFwdSpec.launch_values` give the launch through rocKE's own
 ``ConvArgs``; the native pack mirrors them.
@@ -55,8 +62,10 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
+from typing import ClassVar
 
 from dispatch.grouped_convolution import (
+    DEFAULT_LLVM_FLAVORS,
     ConvGroupedRequest,
     ConvInstanceSpec,
     launch_plan_for,
@@ -86,7 +95,6 @@ from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.ir import KernelDef
 from rocke.core.lower_llvm import LLVM_FLAVORS
 
-_ARCH = "gfx950"
 _INT32_MAX = (1 << 31) - 1
 _MAX_GRID_DIM_Z = 65535
 # rocKE's grid bounds for the direct kernels: every axis at most 65535.
@@ -137,7 +145,7 @@ class Gfx950ConvFwdSpec:
     Direct construction is useful for descriptor hydration; the AOT-instance
     packaging and validators below use it for the build problem, while the
     kernel takes the runtime problem as AOT arguments (see
-    :func:`gfx950_conv_fwd_aot_serves`).
+    :func:`conv_fwd_aot_serves`).
 
     The trailing family fields default to the implicit-GEMM family, so a spec
     serialized before they existed hydrates and hashes unchanged.
@@ -484,13 +492,14 @@ def _direct_error(spec: Gfx950ConvFwdSpec) -> str:
 
 
 def _base_spec_for_request(
-    request: ConvGroupedRequest, *, decline_grouped_pointwise: bool = True
+    request: ConvGroupedRequest, *, arch: str, decline_grouped_pointwise: bool = True
 ) -> Gfx950ConvFwdSpec:
-    """The request's problem fields under the packaged contract's request checks."""
+    """The request's problem fields under the packaged contract's request checks,
+    for the engine of ``arch``."""
     if not isinstance(request, ConvGroupedRequest):
         raise TypeError("expected ConvGroupedRequest")
-    if request.arch != _ARCH:
-        raise ValueError(f"this adapter requires arch={_ARCH}")
+    if request.arch != arch:
+        raise ValueError(f"this adapter requires arch={arch}")
     if request.direction != "fwd":
         raise ValueError("the packaged contract supports forward convolution only")
     if any(
@@ -561,7 +570,7 @@ def _direct_serves(
     checks. It must pass the direct guard and have the compiled filter, stride and
     padding (the guard already pins dilation to 1).
 
-    Used by :func:`gfx950_conv_fwd_aot_serves`.
+    Used by :func:`conv_fwd_aot_serves`.
     """
     error = _direct_error(runtime)
     if error:
@@ -598,7 +607,7 @@ def _direct_serves(
 # ``direct_job_for_identity``), it serves what the grouped-convolution
 # dispatcher admits for that identity, and it launches with the dispatcher's
 # launch plan. This module adds only the packaged contract: which identities
-# the native launch models (:func:`gfx950_conv_fwd_aot_spec_for_identity`
+# the native launch models (:func:`conv_fwd_aot_spec_for_identity`
 # refuses the others with a reason) and the launch bounds the native pack
 # enforces on top of rocKE's.
 
@@ -608,9 +617,6 @@ _AOT_VECTOR_WIDTHS = (1, 2, 4, 8)
 _AOT_PIPELINES = _PACKAGED_PIPELINES
 #: ``KernelIdentity.stable_hash()`` is a SHA-1 hex digest.
 _AOT_INSTANCE_ID_LENGTH = 40
-#: The flavor an instance's identity is spelled with when no LLVM flavor
-#: reproduces its ``instance_id`` (the flavor rocKE's dispatcher lists use).
-_AOT_DEFAULT_LLVM_FLAVOR = "llvm22"
 #: The implicit-GEMM fields of a direct instance hold exactly what the direct
 #: sweep writes into a direct identity (``direct_aot_jobs._identity``).
 _AOT_DIRECT_PLACEHOLDERS = {
@@ -670,6 +676,59 @@ AOT_DIRECT_ALGORITHMS = {
 _AOT_HALO_VARIANTS = (DIRECT_VARIANT_NONGROUPED, DIRECT_VARIANT_GROUPED_HALO)
 _AOT_DIRECT_VARIANTS = tuple(AOT_DIRECT_ALGORITHMS.values())
 _AOT_ALGORITHM_OF_VARIANT = {v: a for a, v in AOT_DIRECT_ALGORITHMS.items()}
+
+
+@dataclass(frozen=True)
+class ConvFwdAotTarget:
+    """One architecture's packaged forward engine.
+
+    ``llvm_flavor`` is the LLVM flavor its catalog's instances were swept, hashed and
+    measured under (every label of its catalog ends in it; the dispatcher's
+    ``DEFAULT_LLVM_FLAVORS`` entry of the arch), and ``direct_algorithms`` the
+    direct algorithms of :data:`AOT_DIRECT_ALGORITHMS` it packages. Both engines
+    package the implicit-GEMM pipelines of ``_AOT_PIPELINES``.
+    """
+
+    arch: str
+    engine: str
+    wave_size: int
+    llvm_flavor: str
+    direct_algorithms: tuple[str, ...]
+
+    @property
+    def direct_variants(self) -> tuple[str, ...]:
+        """The ``direct_variant`` values its direct instances carry."""
+        return tuple(
+            AOT_DIRECT_ALGORITHMS[algorithm] for algorithm in self.direct_algorithms
+        )
+
+
+#: The packaged forward engines, by architecture.
+TARGETS = {
+    "gfx950": ConvFwdAotTarget(
+        arch="gfx950",
+        engine="hipkernel:Gfx950ConvFwdAot",
+        wave_size=64,
+        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx950"],
+        direct_algorithms=tuple(AOT_DIRECT_ALGORITHMS),
+    ),
+    "gfx942": ConvFwdAotTarget(
+        arch="gfx942",
+        engine="hipkernel:Gfx942ConvFwdAot",
+        wave_size=64,
+        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx942"],
+        # gfx950's direct algorithms except the windowed depthwise, whose Toeplitz form
+        # is the 16x16x32 MFMA gfx942 does not have (its direct sweep builds none);
+        # its instances leave every other gfx950-only instruction (16x16x32 and
+        # 32x32x16 MFMA atoms, ds_read_tr) off.
+        direct_algorithms=tuple(
+            algorithm
+            for algorithm in AOT_DIRECT_ALGORITHMS
+            if algorithm != "direct_depthwise_win"
+        ),
+    ),
+}
+
 #: The block knobs after ``block_w``/``block_waves`` and the value each holds
 #: where its variant does not use it (the KMD default). ``cpg``/``kpg`` are the
 #: grouped kernel's compiled channel counts, ``block_h`` also its row tile;
@@ -895,7 +954,7 @@ def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
     dilation and channel counts, and ``knobs`` JSON. Raises ``ValueError`` for
     an algorithm without a packaged launch or knobs that are not exactly its
     variant's. The caller states the placeholders (``_AOT_DIRECT_PLACEHOLDERS``)
-    and checks the result with :func:`supports_gfx950_conv_fwd_aot`.
+    and checks the result with :func:`supports_conv_fwd_aot`.
     """
     variant = AOT_DIRECT_ALGORITHMS.get(identity.algorithm)
     if variant is None:
@@ -927,8 +986,8 @@ def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
 
 
 @dataclass(frozen=True)
-class Gfx950ConvFwdAotSpec:
-    """One shape-generic forward instance.
+class ConvFwdAotSpec:
+    """One shape-generic forward instance, of the engine of :attr:`ARCH`.
 
     Booleans are ints (0/1) so every field is a descriptor ``int`` or
     ``string``. ``async_chunk_a``/``async_chunk_b`` are the async loaders'
@@ -948,7 +1007,14 @@ class Gfx950ConvFwdAotSpec:
 
     :meth:`identity` is the rocKE ``KernelIdentity`` the fields spell; a
     packageable instance's ``instance_id`` is its ``stable_hash()``.
+
+    Instantiate an architecture's subclass (:data:`SPEC_CLASSES`), not this one.
+    The subclasses add no field, so a gfx950 and a gfx942 instance of one
+    identity differ only in the identity's ``arch``, hence in ``instance_id``.
     """
+
+    #: The architecture of the engine the spec packages for (:data:`TARGETS`).
+    ARCH: ClassVar[str] = ""
 
     dtype: str
     tile_m: int
@@ -1006,6 +1072,11 @@ class Gfx950ConvFwdAotSpec:
     prefetch_rows: int = 0
     w_fold: int = 0
 
+    @classmethod
+    def target(cls) -> ConvFwdAotTarget:
+        """The engine this spec packages for."""
+        return TARGETS[cls.ARCH]
+
     @property
     def is_direct(self) -> bool:
         return self.kernel_family == KERNEL_FAMILY_DIRECT_DEPTHWISE
@@ -1035,7 +1106,7 @@ class Gfx950ConvFwdAotSpec:
 
         Its ``llvm_flavor`` is the one whose ``stable_hash()`` is ``instance_id``;
         when none is, the dispatcher lists' flavor. The fields must already be
-        consistent (:func:`supports_gfx950_conv_fwd_aot` checks them first).
+        consistent (:func:`supports_conv_fwd_aot` checks them first).
         """
         return _aot_identity(self)
 
@@ -1179,8 +1250,8 @@ class Gfx950ConvFwdAotSpec:
         # rocKE appends the probe problem and tuning to this; the instance id
         # alone already makes the symbol unique.
         if self.is_direct:
-            return f"hkp_conv_fwd_dw_aot_gfx950_{self.instance_id[:24]}"
-        return f"hkp_conv_fwd_aot_gfx950_{self.instance_id[:24]}"
+            return f"hkp_conv_fwd_dw_aot_{self.ARCH}_{self.instance_id[:24]}"
+        return f"hkp_conv_fwd_aot_{self.ARCH}_{self.instance_id[:24]}"
 
     def kernel_name(self) -> str:
         if self.is_direct:
@@ -1230,7 +1301,7 @@ class Gfx950ConvFwdAotSpec:
             Wi=problem.Wi,
             Y=problem.Y,
             X=problem.X,
-            arch=_ARCH,
+            arch=self.ARCH,
             G=problem.groups,
             stride_h=problem.sH,
             stride_w=problem.sW,
@@ -1284,7 +1355,9 @@ class Gfx950ConvFwdAotSpec:
             self.probe_problem(),
             {"split_c": self.split_c},
         )
-        return replace(spec, name=f"hkp_conv_fwd_sr_aot_gfx950_{self.instance_id[:24]}")
+        return replace(
+            spec, name=f"hkp_conv_fwd_sr_aot_{self.ARCH}_{self.instance_id[:24]}"
+        )
 
     def split_workspace_bytes(self, problem: Gfx950ConvFwdSpec) -> int:
         """Bytes of the fp32 ``[split_c, N, Ho, Wo, K]`` workspace a split-C
@@ -1337,10 +1410,30 @@ class Gfx950ConvFwdAotSpec:
         )
 
 
-def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
+@dataclass(frozen=True)
+class Gfx950ConvFwdAotSpec(ConvFwdAotSpec):
+    """An instance of hipkernel:Gfx950ConvFwdAot: exactly the shared fields."""
+
+    ARCH: ClassVar[str] = "gfx950"
+
+
+@dataclass(frozen=True)
+class Gfx942ConvFwdAotSpec(ConvFwdAotSpec):
+    """An instance of hipkernel:Gfx942ConvFwdAot: exactly the shared fields."""
+
+    ARCH: ClassVar[str] = "gfx942"
+
+
+#: The spec class of each packaged engine, by architecture.
+SPEC_CLASSES: dict[str, type[ConvFwdAotSpec]] = {
+    cls.ARCH: cls for cls in (Gfx950ConvFwdAotSpec, Gfx942ConvFwdAotSpec)
+}
+
+
+def _aot_identity_fields(spec: ConvFwdAotSpec) -> dict:
     """The ``KernelIdentity`` fields ``spec`` spells, all but ``llvm_flavor``."""
     values = dict(
-        arch=_ARCH,
+        arch=spec.ARCH,
         dtype_a=spec.dtype,
         dtype_b=spec.dtype,
         dtype_d=spec.dtype,
@@ -1377,17 +1470,19 @@ def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
 
 
 @functools.lru_cache(maxsize=1 << 18)
-def _aot_identity(spec: Gfx950ConvFwdAotSpec) -> KernelIdentity:
+def _aot_identity(spec: ConvFwdAotSpec) -> KernelIdentity:
     values = _aot_identity_fields(spec)
     for flavor in LLVM_FLAVORS:
         identity = KernelIdentity(**values, llvm_flavor=flavor)
         if identity.stable_hash() == spec.instance_id:
             return identity
-    return KernelIdentity(**values, llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR)
+    # No flavor reproduces ``instance_id``: spell it with the catalog's flavor
+    # (:attr:`ConvFwdAotTarget.llvm_flavor`).
+    return KernelIdentity(**values, llvm_flavor=spec.target().llvm_flavor)
 
 
 @functools.lru_cache(maxsize=1 << 14)
-def _aot_sweep_job(spec: Gfx950ConvFwdAotSpec):
+def _aot_sweep_job(spec: ConvFwdAotSpec):
     """The job rocKE's sweep builds ``spec``'s identity from; ``ValueError`` when
     the sweep does not build it."""
     identity = spec.identity()
@@ -1397,12 +1492,12 @@ def _aot_sweep_job(spec: Gfx950ConvFwdAotSpec):
         return job_for_identity(identity)
     except LookupError as exc:
         raise ValueError(
-            f"not an identity of rocKE's {_ARCH} forward AOT sweep: {exc}"
+            f"not an identity of rocKE's {spec.ARCH} forward AOT sweep: {exc}"
         ) from None
 
 
 @functools.lru_cache(maxsize=1 << 14)
-def _aot_instance(spec: Gfx950ConvFwdAotSpec) -> ConvInstanceSpec:
+def _aot_instance(spec: ConvFwdAotSpec) -> ConvInstanceSpec:
     """``spec`` as the dispatcher's instance, for its launch plan."""
     identity = spec.identity()
     return ConvInstanceSpec(
@@ -1430,7 +1525,7 @@ def aot_direct_problem(problem: Gfx950ConvFwdSpec) -> _direct.DirectConvProblem:
     )
 
 
-def _aot_direct_knob_error(spec: Gfx950ConvFwdAotSpec) -> str:
+def _aot_direct_knob_error(spec: ConvFwdAotSpec) -> str:
     """The block knobs of a direct instance other than std or spatial: each used
     one has its type and a sane range (rocKE's validators bound it further), every
     other one holds its ``_AOT_FAMILY_DEFAULTS`` value; "" when accepted."""
@@ -1481,7 +1576,7 @@ def _aot_direct_knob_error(spec: Gfx950ConvFwdAotSpec) -> str:
     return ""
 
 
-def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
+def _aot_direct_error(spec: ConvFwdAotSpec) -> str:
     """The direct instance contract, before rocKE's validators; "" when accepted.
 
     rocKE's direct kernels compile one stride and one padding (they read
@@ -1493,8 +1588,8 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
         actual = getattr(spec, name)
         if actual != value or type(actual) is not type(value):
             return f"a direct depthwise instance must set {name} to {value!r}, got {actual!r}"
-    if spec.wave_size != _DIRECT_WAVE_SIZE:
-        return f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
+    if spec.wave_size != spec.target().wave_size:
+        return f"wave_size must be {spec.target().wave_size} on {spec.ARCH}"
     if spec.direct_variant not in _AOT_DIRECT_VARIANTS:
         return (
             f"direct_variant must be one of {_AOT_DIRECT_VARIANTS} for a direct "
@@ -1545,7 +1640,7 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
     return ""
 
 
-def _aot_sweep_error(spec: Gfx950ConvFwdAotSpec) -> tuple[bool, str]:
+def _aot_sweep_error(spec: ConvFwdAotSpec) -> tuple[bool, str]:
     """``spec`` must be an identity of rocKE's sweep, and ``instance_id`` its hash."""
     try:
         _aot_sweep_job(spec)
@@ -1559,20 +1654,25 @@ def _aot_sweep_error(spec: Gfx950ConvFwdAotSpec) -> tuple[bool, str]:
     return True, "ok"
 
 
-def supports_gfx950_conv_fwd_aot(
-    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+def supports_conv_fwd_aot(
+    spec: ConvFwdAotSpec, *, arch: str | None = None
 ) -> tuple[bool, str]:
-    """Whether ``spec`` is a packageable instance.
+    """Whether ``spec`` is a packageable instance of its engine (on ``arch``, by
+    default the spec's own).
 
     The packaged contract's field checks, then rocKE's validators on the
     sweep's probe, then rocKE's sweep itself: the fields must spell an identity
     the sweep builds (``job_for_identity`` / ``direct_job_for_identity``), whose
     ``stable_hash()`` is ``instance_id``.
     """
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
-    if not isinstance(spec, Gfx950ConvFwdAotSpec):
-        return False, "expected Gfx950ConvFwdAotSpec"
+    if not isinstance(spec, ConvFwdAotSpec) or spec.ARCH not in TARGETS:
+        return (
+            False,
+            f"expected one of {sorted(c.__name__ for c in SPEC_CLASSES.values())}",
+        )
+    if arch is not None and arch != spec.ARCH:
+        return False, f"a {type(spec).__name__} requires arch={spec.ARCH}, got {arch!r}"
+    arch = spec.ARCH
     if spec.dtype not in ("fp16", "bf16"):
         return False, "the packaged forward contract supports fp16 or bf16 only"
     if spec.layout != "NHWC":
@@ -1596,6 +1696,11 @@ def supports_gfx950_conv_fwd_aot(
         error = _aot_direct_error(spec)
         if error:
             return False, error
+        if spec.direct_variant not in spec.target().direct_variants:
+            return False, (
+                f"no packaged forward launch of the {spec.direct_variant!r} direct "
+                f"variant on {arch}"
+            )
         try:
             ok, why = validate_direct_spec(
                 spec.algorithm, spec.rocke_direct_spec(spec.probe_problem()), arch
@@ -1629,8 +1734,8 @@ def supports_gfx950_conv_fwd_aot(
         value = getattr(spec, name)
         if type(value) is not int or not 0 < value <= _INT32_MAX:
             return False, f"{name} must be a positive signed 32-bit integer"
-    if spec.wave_size != _DIRECT_WAVE_SIZE:
-        return False, f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
+    if spec.wave_size != spec.target().wave_size:
+        return False, f"wave_size must be {spec.target().wave_size} on {arch}"
     if spec.pipeline not in _AOT_PIPELINES:
         return False, (
             f"the packaged forward contract supports pipelines {_AOT_PIPELINES}, "
@@ -1679,12 +1784,13 @@ def supports_gfx950_conv_fwd_aot(
     return _aot_sweep_error(spec)
 
 
-def gfx950_conv_fwd_aot_spec_for_identity(
-    identity: KernelIdentity,
-) -> tuple[Gfx950ConvFwdAotSpec | None, str]:
-    """``(instance, "")`` for a packageable rocKE identity, else ``(None, reason)``.
+def conv_fwd_aot_spec_for_identity(
+    identity: KernelIdentity, *, arch: str
+) -> tuple[ConvFwdAotSpec | None, str]:
+    """``(instance, "")`` for a packageable rocKE identity of the engine of
+    ``arch``, else ``(None, reason)``.
 
-    Packageable: a gfx950 forward identity in fp16 or bf16 of rocKE's sweeps,
+    Packageable: an ``arch`` forward identity in fp16 or bf16 of rocKE's sweeps,
     with no feature the packaged launch does not model. Refused, each with its
     reason:
 
@@ -1694,13 +1800,16 @@ def gfx950_conv_fwd_aot_spec_for_identity(
     * the direct algorithms without a packaged launch: any one outside
       ``AOT_DIRECT_ALGORITHMS``, and ``direct_split_reduce``, which ships as the
       second launch of each split-C instance (``AOT_REFUSED_SPLIT_REDUCE``);
-    * anything :func:`supports_gfx950_conv_fwd_aot` declines.
+    * anything :func:`supports_conv_fwd_aot` declines.
     """
+    spec_class = SPEC_CLASSES.get(arch)
+    if spec_class is None:
+        return None, f"no packaged forward engine on {arch!r}"
     if not isinstance(identity, KernelIdentity):
         return None, "expected a KernelIdentity"
     kind = f"({identity.arch}, {identity.direction}, {identity.algorithm})"
-    if identity.arch != _ARCH:
-        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
+    if identity.arch != arch:
+        return None, f"not a {arch} forward implicit-GEMM or direct identity {kind}"
     if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
         return None, "mixed operand dtypes are not packaged"
     if identity.direction == "direct_fwd_helper":
@@ -1716,7 +1825,7 @@ def gfx950_conv_fwd_aot_spec_for_identity(
             direct_job_for_identity(identity)
         except (KeyError, LookupError, TypeError, ValueError) as exc:
             return None, str(exc)
-        spec = Gfx950ConvFwdAotSpec(
+        spec = spec_class(
             dtype=identity.dtype_a,
             wave_size=identity.wave_size,
             instance_id=identity.stable_hash(),
@@ -1739,15 +1848,15 @@ def gfx950_conv_fwd_aot_spec_for_identity(
         values = {name: getattr(identity, name) for name in AOT_IMPLICIT_GEMM_CARRIED}
         for name in ("unroll_k", "async_dma", "grouped"):
             values[name] = int(values[name])
-        spec = Gfx950ConvFwdAotSpec(
+        spec = spec_class(
             dtype=identity.dtype_a,
             instance_id=identity.stable_hash(),
             group_merge=identity.group_merge,
             **values,
         )
     else:
-        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
-    ok, reason = supports_gfx950_conv_fwd_aot(spec)
+        return None, f"not a {arch} forward implicit-GEMM or direct identity {kind}"
+    ok, reason = supports_conv_fwd_aot(spec)
     if not ok:
         return None, reason
     if spec.identity() != identity:
@@ -1757,9 +1866,21 @@ def gfx950_conv_fwd_aot_spec_for_identity(
     return spec, ""
 
 
-def gfx950_conv_fwd_aot_capabilities(
-    spec: Gfx950ConvFwdAotSpec,
-) -> Gfx950ConvFwdCapabilities:
+def gfx950_conv_fwd_aot_spec_for_identity(
+    identity: KernelIdentity,
+) -> tuple[Gfx950ConvFwdAotSpec | None, str]:
+    """:func:`conv_fwd_aot_spec_for_identity` for hipkernel:Gfx950ConvFwdAot."""
+    return conv_fwd_aot_spec_for_identity(identity, arch="gfx950")
+
+
+def gfx942_conv_fwd_aot_spec_for_identity(
+    identity: KernelIdentity,
+) -> tuple[Gfx942ConvFwdAotSpec | None, str]:
+    """:func:`conv_fwd_aot_spec_for_identity` for hipkernel:Gfx942ConvFwdAot."""
+    return conv_fwd_aot_spec_for_identity(identity, arch="gfx942")
+
+
+def conv_fwd_aot_capabilities(spec: ConvFwdAotSpec) -> Gfx950ConvFwdCapabilities:
     """What instance ``spec`` bakes in, as a :class:`Gfx950ConvFwdCapabilities`.
 
     The widths are the identity's own, not derived from a build problem. A and B
@@ -1787,9 +1908,7 @@ def gfx950_conv_fwd_aot_capabilities(
     )
 
 
-def _aot_admits(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
-) -> tuple[bool, str]:
+def _aot_admits(spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
     """rocKE's grouped-convolution dispatcher's admission of ``spec``'s identity
     for ``problem``: ``identity_supports_problem``, and for a direct identity the
     per-shape re-validation of its knobs (``direct_spec_for_problem``)."""
@@ -1798,7 +1917,7 @@ def _aot_admits(
 
 
 def _aot_direct_serves(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+    spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
     """Whether a direct instance other than std or spatial computes ``problem``,
     which already passed the problem checks.
@@ -1859,7 +1978,7 @@ def _aot_direct_serves(
     return True, "ok"
 
 
-def gfx950_conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | None:
+def conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | None:
     """Images per launch of a non-grouped or grouped-halo kernel on ``problem``, or
     None when one launch serves it: rocKE's ``direct_kernel_sweep._batch_chunks``.
 
@@ -1883,8 +2002,8 @@ def gfx950_conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | 
     return [base + (i < extra) for i in range(n_steps)]
 
 
-def gfx950_conv_fwd_aot_serves(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+def conv_fwd_aot_serves(
+    spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
     """Whether instance ``spec`` computes ``problem`` (only its problem fields).
 
@@ -1903,7 +2022,7 @@ def gfx950_conv_fwd_aot_serves(
     are kernel arguments, and for non-grouped the channel counts too.
 
     A non-grouped or grouped-halo instance runs a batch rocKE splits in pieces
-    (:func:`gfx950_conv_fwd_aot_batch_chunks`) one launch per chunk, as
+    (:func:`conv_fwd_aot_batch_chunks`) one launch per chunk, as
     ``direct_kernel_sweep._batch_split_plan`` does: it serves when it serves each
     chunk as a problem of its own, and a split-C one, whose workspace would span
     the whole batch, never does. Every other instance needs the whole problem in
@@ -1914,12 +2033,12 @@ def gfx950_conv_fwd_aot_serves(
         and spec.direct_variant in _AOT_HALO_VARIANTS
         and problem.dtype == spec.dtype
     ):
-        chunks = gfx950_conv_fwd_aot_batch_chunks(problem)
+        chunks = conv_fwd_aot_batch_chunks(problem)
         if chunks is not None:
             if spec.is_split_c:
                 return False, "a batch-split launch does not take split-C kernels"
             for images in sorted(set(chunks)):
-                ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, N=images))
+                ok, why = conv_fwd_aot_serves(spec, replace(problem, N=images))
                 if not ok:
                     return False, f"batch chunk of {images} image(s): {why}"
             return True, "ok"
@@ -1930,7 +2049,7 @@ def gfx950_conv_fwd_aot_serves(
         return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
     if spec.is_direct:
         if spec.direct_variant in _DIRECT_VARIANTS:
-            caps = gfx950_conv_fwd_aot_capabilities(spec)
+            caps = conv_fwd_aot_capabilities(spec)
             return _direct_serves(caps, spec.runtime_spec(problem))
         return _aot_direct_serves(spec, problem)
     if problem.Y * problem.X * (problem.C // problem.groups) >= MUL24_REDUCTION_LIMIT:
@@ -1938,12 +2057,12 @@ def gfx950_conv_fwd_aot_serves(
     return _aot_admits(spec, problem)
 
 
-def gfx950_conv_fwd_aot_runtime_candidates(
-    problem: Gfx950ConvFwdSpec, specs: Sequence[Gfx950ConvFwdAotSpec]
-) -> list[Gfx950ConvFwdAotSpec]:
-    """The instances of ``specs`` hipkernel:Gfx950ConvFwdAot selects for ``problem``.
+def conv_fwd_aot_runtime_candidates(
+    problem: Gfx950ConvFwdSpec, specs: Sequence[ConvFwdAotSpec]
+) -> list[ConvFwdAotSpec]:
+    """The instances of ``specs`` a packaged forward engine selects for ``problem``.
 
-    "Serves" (:func:`gfx950_conv_fwd_aot_serves`) is what a binary can compute;
+    "Serves" (:func:`conv_fwd_aot_serves`) is what a binary can compute;
     this is what the engine then runs, so it depends on the whole catalog ``specs``,
     not on one instance. The problem's widest combination is the widest load width
     C/groups admits and the widest store width K/groups admits (the largest of 8, 4,
@@ -1959,7 +2078,7 @@ def gfx950_conv_fwd_aot_runtime_candidates(
     ``conv::widestVectorSelection`` is the same policy; the result keeps the order
     of ``specs``.
     """
-    serving = [spec for spec in specs if gfx950_conv_fwd_aot_serves(spec, problem)[0]]
+    serving = [spec for spec in specs if conv_fwd_aot_serves(spec, problem)[0]]
     load = _widest_vector_width(problem.C // problem.groups)
     store = _widest_vector_width(problem.K // problem.groups)
     widest = [
@@ -1985,17 +2104,15 @@ def _widest_vector_width(channels: int) -> int:
     return next(width for width in (8, 4, 2, 1) if channels % width == 0)
 
 
-def build_gfx950_conv_fwd_aot(
-    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
-) -> KernelDef:
-    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance.
+def _build_conv_fwd_aot(spec: ConvFwdAotSpec, arch: str) -> KernelDef:
+    """Build an instance of its target's engine.
 
     Builds what rocKE's AOT build builds for the identity: ``kernel_for_job`` of
     its sweep job for implicit GEMM, ``direct_kernel_for_job`` (the variant's
     builder, ``select_direct_kernel_builder``) for a direct one. Only the kernel
     symbol differs.
     """
-    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    ok, reason = supports_conv_fwd_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT forward instance: {reason}")
     if spec.is_direct:
@@ -2003,12 +2120,12 @@ def build_gfx950_conv_fwd_aot(
     return _conv.build_implicit_gemm_conv(spec.to_instance_spec(), arch=arch)
 
 
-def supports_gfx950_conv_fwd_aot_split_reduce(
-    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+def supports_conv_fwd_aot_split_reduce(
+    spec: ConvFwdAotSpec, *, arch: str | None = None
 ) -> tuple[bool, str]:
-    """hkp_pack's predicate for :func:`build_gfx950_conv_fwd_aot_split_reduce`: a
-    packageable split-C instance."""
-    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    """Whether ``spec`` is a packageable split-C instance, whose second launch
+    :func:`_build_conv_fwd_aot_split_reduce` builds."""
+    ok, reason = supports_conv_fwd_aot(spec, arch=arch)
     if not ok:
         return False, reason
     if not spec.is_split_c:
@@ -2016,14 +2133,12 @@ def supports_gfx950_conv_fwd_aot_split_reduce(
     return True, "ok"
 
 
-def build_gfx950_conv_fwd_aot_split_reduce(
-    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
-) -> KernelDef:
+def _build_conv_fwd_aot_split_reduce(spec: ConvFwdAotSpec, arch: str) -> KernelDef:
     """The second launch of a split-C instance, the ``reduce`` entry of its
     descriptor's ``sources``: rocKE's ``direct_split_reduce`` fold for the
-    instance's dtype and ``split_c`` (:meth:`Gfx950ConvFwdAotSpec.split_reduce_spec`).
+    instance's dtype and ``split_c`` (:meth:`ConvFwdAotSpec.split_reduce_spec`).
     """
-    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    ok, reason = supports_conv_fwd_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT forward instance: {reason}")
     if not spec.is_split_c:
@@ -2033,26 +2148,185 @@ def build_gfx950_conv_fwd_aot_split_reduce(
     )
 
 
-def gfx950_conv_fwd_aot_problem_for_request(
-    request: ConvGroupedRequest,
+def conv_fwd_aot_problem_for_request(
+    request: ConvGroupedRequest, *, arch: str
 ) -> Gfx950ConvFwdSpec:
-    """The problem hipkernel:Gfx950ConvFwdAot would match for ``request``.
+    """The problem the packaged forward engine of ``arch`` would match for
+    ``request``.
 
     Instances are chosen per problem by capability, so there is no single spec
     to resolve; this is the graph side of that match (the profile's
     ``dispatch``). Raises ``ValueError`` outside the graph contract, which
     unlike the exact-shape one includes grouped pointwise.
     """
-    return _base_spec_for_request(request, decline_grouped_pointwise=False)
+    return _base_spec_for_request(request, arch=arch, decline_grouped_pointwise=False)
 
 
-def supports_gfx950_conv_fwd_aot_problem(
-    problem: Gfx950ConvFwdSpec, *, arch: str = _ARCH
+def supports_conv_fwd_aot_problem(
+    problem: Gfx950ConvFwdSpec, *, engine_arch: str, arch: str
 ) -> tuple[bool, str]:
-    """The graph contract of hipkernel:Gfx950ConvFwdAot (the profile's predicate)."""
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
+    """The graph contract of the packaged forward engine of ``engine_arch`` on
+    ``arch`` (the profile's predicate)."""
+    if arch != engine_arch:
+        return False, f"this adapter requires arch={engine_arch}, got {arch!r}"
     if not isinstance(problem, Gfx950ConvFwdSpec):
         return False, "expected Gfx950ConvFwdSpec"
     error = _problem_error(problem, decline_grouped_pointwise=False)
     return (False, error) if error else (True, "ok")
+
+
+# ---------------------------------------------------------------------------
+# Per-engine entry points
+# ---------------------------------------------------------------------------
+# hkp_pack resolves an instance's spec class from its builder's first-parameter
+# type hint and its predicate as ``supports_`` + the builder's name, and the
+# profiles and launch-surface manifests name these functions; each delegates to
+# the shared one above.
+
+
+def supports_gfx950_conv_fwd_aot(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = "gfx950"
+) -> tuple[bool, str]:
+    """The support predicate hkp_pack resolves for :func:`build_gfx950_conv_fwd_aot`
+    (``supports_`` + the builder's name): :func:`supports_conv_fwd_aot`."""
+    return supports_conv_fwd_aot(spec, arch=arch)
+
+
+def supports_gfx942_conv_fwd_aot(
+    spec: Gfx942ConvFwdAotSpec, *, arch: str = "gfx942"
+) -> tuple[bool, str]:
+    """The support predicate hkp_pack resolves for :func:`build_gfx942_conv_fwd_aot`
+    (``supports_`` + the builder's name): :func:`supports_conv_fwd_aot`."""
+    return supports_conv_fwd_aot(spec, arch=arch)
+
+
+def build_gfx950_conv_fwd_aot(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance of
+    hipkernel:Gfx950ConvFwdAot."""
+    return _build_conv_fwd_aot(spec, arch)
+
+
+def build_gfx942_conv_fwd_aot(
+    spec: Gfx942ConvFwdAotSpec, *, arch: str = "gfx942"
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance of
+    hipkernel:Gfx942ConvFwdAot."""
+    return _build_conv_fwd_aot(spec, arch)
+
+
+def supports_gfx950_conv_fwd_aot_split_reduce(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = "gfx950"
+) -> tuple[bool, str]:
+    """hkp_pack's predicate for :func:`build_gfx950_conv_fwd_aot_split_reduce`:
+    :func:`supports_conv_fwd_aot_split_reduce`."""
+    return supports_conv_fwd_aot_split_reduce(spec, arch=arch)
+
+
+def supports_gfx942_conv_fwd_aot_split_reduce(
+    spec: Gfx942ConvFwdAotSpec, *, arch: str = "gfx942"
+) -> tuple[bool, str]:
+    """hkp_pack's predicate for :func:`build_gfx942_conv_fwd_aot_split_reduce`:
+    :func:`supports_conv_fwd_aot_split_reduce`."""
+    return supports_conv_fwd_aot_split_reduce(spec, arch=arch)
+
+
+def build_gfx950_conv_fwd_aot_split_reduce(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """The split-C fold of an instance of hipkernel:Gfx950ConvFwdAot
+    (:func:`_build_conv_fwd_aot_split_reduce`)."""
+    return _build_conv_fwd_aot_split_reduce(spec, arch)
+
+
+def build_gfx942_conv_fwd_aot_split_reduce(
+    spec: Gfx942ConvFwdAotSpec, *, arch: str = "gfx942"
+) -> KernelDef:
+    """The split-C fold of an instance of hipkernel:Gfx942ConvFwdAot
+    (:func:`_build_conv_fwd_aot_split_reduce`)."""
+    return _build_conv_fwd_aot_split_reduce(spec, arch)
+
+
+def gfx950_conv_fwd_aot_capabilities(
+    spec: Gfx950ConvFwdAotSpec,
+) -> Gfx950ConvFwdCapabilities:
+    """:func:`conv_fwd_aot_capabilities` of a hipkernel:Gfx950ConvFwdAot instance."""
+    return conv_fwd_aot_capabilities(spec)
+
+
+def gfx942_conv_fwd_aot_capabilities(
+    spec: Gfx942ConvFwdAotSpec,
+) -> Gfx950ConvFwdCapabilities:
+    """:func:`conv_fwd_aot_capabilities` of a hipkernel:Gfx942ConvFwdAot instance."""
+    return conv_fwd_aot_capabilities(spec)
+
+
+def gfx950_conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | None:
+    """:func:`conv_fwd_aot_batch_chunks` on hipkernel:Gfx950ConvFwdAot."""
+    return conv_fwd_aot_batch_chunks(problem)
+
+
+def gfx942_conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | None:
+    """:func:`conv_fwd_aot_batch_chunks` on hipkernel:Gfx942ConvFwdAot."""
+    return conv_fwd_aot_batch_chunks(problem)
+
+
+def gfx950_conv_fwd_aot_serves(
+    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """:func:`conv_fwd_aot_serves` for a hipkernel:Gfx950ConvFwdAot instance."""
+    return conv_fwd_aot_serves(spec, problem)
+
+
+def gfx942_conv_fwd_aot_serves(
+    spec: Gfx942ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """:func:`conv_fwd_aot_serves` for a hipkernel:Gfx942ConvFwdAot instance."""
+    return conv_fwd_aot_serves(spec, problem)
+
+
+def gfx950_conv_fwd_aot_runtime_candidates(
+    problem: Gfx950ConvFwdSpec, specs: Sequence[Gfx950ConvFwdAotSpec]
+) -> list[Gfx950ConvFwdAotSpec]:
+    """:func:`conv_fwd_aot_runtime_candidates`: what hipkernel:Gfx950ConvFwdAot
+    selects for ``problem``."""
+    return conv_fwd_aot_runtime_candidates(problem, specs)
+
+
+def gfx942_conv_fwd_aot_runtime_candidates(
+    problem: Gfx950ConvFwdSpec, specs: Sequence[Gfx942ConvFwdAotSpec]
+) -> list[Gfx942ConvFwdAotSpec]:
+    """:func:`conv_fwd_aot_runtime_candidates`: what hipkernel:Gfx942ConvFwdAot
+    selects for ``problem``."""
+    return conv_fwd_aot_runtime_candidates(problem, specs)
+
+
+def gfx950_conv_fwd_aot_problem_for_request(
+    request: ConvGroupedRequest,
+) -> Gfx950ConvFwdSpec:
+    """The problem hipkernel:Gfx950ConvFwdAot would match for ``request``
+    (:func:`conv_fwd_aot_problem_for_request`)."""
+    return conv_fwd_aot_problem_for_request(request, arch="gfx950")
+
+
+def gfx942_conv_fwd_aot_problem_for_request(
+    request: ConvGroupedRequest,
+) -> Gfx950ConvFwdSpec:
+    """The problem hipkernel:Gfx942ConvFwdAot would match for ``request``
+    (:func:`conv_fwd_aot_problem_for_request`)."""
+    return conv_fwd_aot_problem_for_request(request, arch="gfx942")
+
+
+def supports_gfx950_conv_fwd_aot_problem(
+    problem: Gfx950ConvFwdSpec, *, arch: str = "gfx950"
+) -> tuple[bool, str]:
+    """The graph contract of hipkernel:Gfx950ConvFwdAot (the profile's predicate)."""
+    return supports_conv_fwd_aot_problem(problem, engine_arch="gfx950", arch=arch)
+
+
+def supports_gfx942_conv_fwd_aot_problem(
+    problem: Gfx950ConvFwdSpec, *, arch: str = "gfx942"
+) -> tuple[bool, str]:
+    """The graph contract of hipkernel:Gfx942ConvFwdAot (the profile's predicate)."""
+    return supports_conv_fwd_aot_problem(problem, engine_arch="gfx942", arch=arch)

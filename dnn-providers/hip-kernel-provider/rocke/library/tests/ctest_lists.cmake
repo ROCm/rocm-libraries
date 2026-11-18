@@ -111,6 +111,19 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT 900)\n")
 
+# The gfx942 forward AOT-packaging check (hipkernel:Gfx942ConvFwdAot) gets an entry of
+# its own beside it: it builds and compares the IR of every instance of the gfx942
+# forward list, so it takes the gfx950 entry's budgets rather than the shared one's.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv_fwd_aot_packaging_gfx942_pytest ${_ROCKE_INSTALLED_PYTEST} "
+       "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging_gfx942.py\" "
+       "-v -rs --timeout=600)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv_fwd_aot_packaging_gfx942_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+        "  TIMEOUT 900)\n")
+
 # Library conv IR golden, platform-regression, split-K planner, ceil_div and
 # conv doc-example (the conv part of dsl_docs' verify_dsl_docs.py) CPU tests
 # (no GPU). Their own entry, with the conv entry's arguments, labels and

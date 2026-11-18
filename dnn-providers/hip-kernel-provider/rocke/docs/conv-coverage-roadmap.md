@@ -27,9 +27,10 @@ qualification from checks of the current source. Use the
 
 ## Production selection and explicit coverage
 
-The grouped-convolution dispatcher registers only gfx950 forward and dgrad and
-gfx942 and gfx1250 dgrad instance lists. A gfx942 forward request or wgrad request
-cannot establish production selection coverage. Their tests build explicit configurations without modifying
+The grouped-convolution dispatcher registers only gfx950 and gfx942 forward and
+dgrad and gfx1250 dgrad instance lists. A wgrad request cannot establish production
+selection coverage, and the gfx942 forward reference cohort is not enrolled in its
+production list. Their tests build explicit configurations without modifying
 the production registry. No test silently falls back from a refused production
 request. The explicitly enrolled gfx950 K=33 gradient cases preserve coverage
 where the production list has no admitted instance.
@@ -55,7 +56,7 @@ certificate.
 | Direct forward: grouped, nongrouped, and depthwise schedules | Explicit variant admission and ABI coverage; preserve one-binary/multiple-runtime-shape tests |
 | Direct dgrad, including MFMA weight transforms | Ordered multi-kernel plans, auxiliary workspaces, and independent dX checks |
 | Stream-K wgrad | Linear/tree/atomic/workspace protocols, flags and partial initialization, synchronization assertions |
-| Restored production gfx942 or wgrad instance lists | Separate production enrollment and selection validation before claiming dispatch coverage |
+| Restored production wgrad instance lists | Separate production enrollment and selection validation before claiming dispatch coverage |
 | Additional pipelines, vector widths, and LDS layouts | Named configurations and assertions that the intended paths actually executed |
 | 3-D, FP32, fused convolution/pooling | Extend case, dtype, output, and independent-oracle contracts explicitly |
 | Native provider and kernel packs | Validate shipped dispatch, ABI, workspace planning, and device outputs |

@@ -4,13 +4,13 @@
 """gfx942 forward cohort: the implicit-GEMM conv kernel at its gfx942 configuration.
 
 This cohort pins the gfx942 forward configuration the grouped-convolution
-dispatcher used to select, before gfx942 fwd was removed from the dispatcher
-(no gfx942 instance list is registered, pending a curated one): a 64x64x64
-tile, 2x2 waves, the 16x16x16 MFMA
-atom, the ``mem`` pipeline, and the cshuffle epilogue whenever the output store
-vectorises. The dispatcher no longer registers gfx942 instances, so this cohort
-only certifies ``build_implicit_gemm_conv`` at that fixed configuration -- it
-does not certify anything the live dispatcher currently selects.
+dispatcher used to select, before gfx942 fwd was removed from the dispatcher: a
+64x64x64 tile, 2x2 waves, the 16x16x16 MFMA atom, the ``mem`` pipeline, and the
+cshuffle epilogue whenever the output store vectorises. The dispatcher now
+registers a curated gfx942 forward list (``gfx942_fwd.json``), but this cohort
+keeps its explicit configuration and is not enrolled in that list, so it only
+certifies ``build_implicit_gemm_conv`` at that fixed configuration -- it does not
+certify anything the live dispatcher currently selects.
 """
 
 from __future__ import annotations
