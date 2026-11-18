@@ -34,7 +34,9 @@
 // their scale layout before relaxing the provider's TN-only rule.
 //
 // To remove after the fix: `git grep WORKAROUND_ISSUE_13715` finds the macro, its
-// call sites (including the integration test) and the pinning test.
+// call sites (including the integration test) and the pinning test; `git grep 13715`
+// also finds the provider's TN-only rule in HipblasltMxMatmulPlanBuilder.cpp, the
+// gfx950-only skips of the M/N-contiguous execute tests and the provider doc.
 // ----------------------------------------------------------------------------
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>

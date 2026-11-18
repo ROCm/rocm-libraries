@@ -54,7 +54,7 @@ Matmul(a, b) → d
 
 **Hardware support:**
 - **gfx950:** every operand layout in the table below.
-- **gfx1250:** K-contiguous A and B only (#13715); no FP6 inputs.
+- **gfx1250:** K-contiguous A and B only (#13715). The type pairs are those the installed hipBLASLt has gfx1250 MX kernels for; graphs it has no kernel for (FP6 inputs among them) are declined.
 
 **Operand layouts:** each MX input is a packed matrix.
 
