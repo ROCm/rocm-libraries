@@ -850,6 +850,17 @@ def _wgrad_extra_k_only(arch: str, tile_k: int) -> bool:
     return arch in CACHE_RDNA4_ARCHS and tile_k in CACHE_RDNA4_EXTRA_TILE_K
 
 
+def _wgrad_regt_only(arch: str, tile_k: int, epilogue: str) -> bool:
+    """Whether the wgrad geometry builds register-transpose kernels only.
+
+    The axis walk (:func:`_wgrad_extra_k_only`) yields default-epilogue
+    geometries alone; WMMA wgrad's deep-K geometry at that depth
+    (:data:`CACHE_WGRAD_DEEPK_GEOMETRIES`, a cshuffle one) is its own list and
+    keeps its usual kernels.
+    """
+    return _wgrad_extra_k_only(arch, tile_k) and epilogue == "default"
+
+
 @functools.lru_cache(maxsize=None)
 def _wgrad_regt_listed_geometries() -> frozenset:
     from kernels.conv.rdna4_wgrad_regt_kernels import CACHE_WGRAD_REGT_KERNELS
@@ -1661,7 +1672,7 @@ def _wgrad_jobs(
         )
         if epilogue != "default" and not in_cover:
             continue
-        regt_only = _wgrad_extra_k_only(arch, tile_k)
+        regt_only = _wgrad_regt_only(arch, tile_k, epilogue)
         ts_cover = _wgrad_two_stage_cover(
             arch, mma_family, (tile_m, tile_n, tile_k, warp_m, warp_n), in_cover
         )
@@ -2600,7 +2611,7 @@ def count_jobs(
                         ):
                             # The ungrouped x_run twin of the grouped job.
                             regt_total += sum(1 for c in _layout_caps() if c["grouped"])
-                if _wgrad_extra_k_only(target.gfx, geo[2]):
+                if _wgrad_regt_only(target.gfx, geo[2], geo[7]):
                     # The RDNA4 tile_k axis: register-transpose rows only.
                     total += regt_total
                     continue

@@ -500,19 +500,29 @@ class TestWgradRdna4Grid(unittest.TestCase):
 
     def test_tile_k_128_axis_is_wgrad_regt_only(self):
         from kernels.conv.aot_jobs import (
+            CACHE_WGRAD_DEEPK_GEOMETRIES,
             _geometry_list,
             _wgrad_regt_listed_geometries,
         )
         from rocke.core.arch import ArchTarget
 
         listed = _wgrad_regt_listed_geometries()
+
+        def at_128(target, direction):
+            # WMMA wgrad's own deep-K geometries (one is tile_k 128, cshuffle)
+            # are a separate list, not this axis.
+            return [
+                g
+                for g in _geometry_list(target, "fp16", direction)
+                if g[2] == 128 and tuple(g[:5]) not in CACHE_WGRAD_DEEPK_GEOMETRIES
+            ]
+
         for arch in ("gfx1201", "gfx1200", "gfx12-generic"):
             target = ArchTarget.from_gfx(arch)
             for direction in ("fwd", "dgrad"):
                 with self.subTest(arch=arch, direction=direction):
-                    geos = _geometry_list(target, "fp16", direction)
-                    self.assertFalse([g for g in geos if g[2] == 128])
-            geos = [g for g in _geometry_list(target, "fp16", "wgrad") if g[2] == 128]
+                    self.assertFalse(at_128(target, direction))
+            geos = at_128(target, "wgrad")
             with self.subTest(arch=arch, direction="wgrad"):
                 self.assertTrue(geos)
                 # Only geometries of a listed register-transpose kernel.
@@ -523,6 +533,22 @@ class TestWgradRdna4Grid(unittest.TestCase):
                 jobs = self._jobs(arch, geos=geos[:60])
                 self.assertTrue(jobs)
                 self.assertTrue(all(j.identity.reg_transpose for j in jobs))
+        # WMMA wgrad's deep-K geometry at tile_k 128 (cshuffle) is not on the
+        # register-transpose-only axis: it still builds non-regt kernels.
+        deep = [
+            g
+            for g in _geometry_list(ArchTarget.from_gfx("gfx1201"), "fp16", "wgrad")
+            if tuple(g[:5]) in CACHE_WGRAD_DEEPK_GEOMETRIES and g[2] == 128
+        ]
+        with self.subTest(deep_k=True):
+            self.assertTrue(deep)
+            self.assertTrue(
+                [
+                    j
+                    for j in self._jobs("gfx1201", geos=deep)
+                    if not j.identity.reg_transpose
+                ]
+            )
         # The filter is the wgrad axis's: were forward walked on the axis too
         # (a combined ("fwd", "wgrad") tuple), its tile_k 128 geometries would
         # stay unfiltered.
@@ -552,8 +578,7 @@ class TestWgradRdna4Grid(unittest.TestCase):
             target = ArchTarget.from_gfx(arch)
             for direction in ("fwd", "dgrad", "wgrad"):
                 with self.subTest(arch=arch, direction=direction):
-                    geos = _geometry_list(target, "fp16", direction)
-                    self.assertFalse([g for g in geos if g[2] == 128])
+                    self.assertFalse(at_128(target, direction))
 
     def test_count_jobs_matches_the_walk(self):
         from kernels.conv.aot_jobs import (
