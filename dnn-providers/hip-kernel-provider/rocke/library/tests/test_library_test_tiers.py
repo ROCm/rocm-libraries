@@ -23,7 +23,6 @@ from rocke.tests.subprocess_launcher import (
 )
 
 from . import _file_manifest_plugin as manifest_plugin
-from ._child_pytest import pin_child_rootdir
 from . import _worker_process as worker_process
 from . import run_all
 from ._affordable_lane import EXHAUSTIVE_MODULES, mark_exhaustive_items
@@ -31,6 +30,7 @@ from ._attention_bwd_counted_cases import (
     require_explicit_gate_entrypoint,
     selected_isa_arch,
 )
+from ._child_pytest import pin_child_rootdir
 from ._explicit_gate_policy import (
     configured_selection_is_partial,
     preflight_is_disabled,
