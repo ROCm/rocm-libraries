@@ -60,6 +60,7 @@ from .immediate import (
     training_binding,
     validate_signature,
 )
+from .optional import optional_feature_of, optional_features
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 
 logger = logging.getLogger(__name__)
@@ -1693,6 +1694,7 @@ def feature_recipe(
     kmd_fields: list[str] | None,
     knobs: list[str],
     pairs: list[tuple[str, str]],
+    optional: tuple = (),
 ) -> tuple[list, list]:
     """(signature, omitted proposals): the authored recipe, or one proposed from the corpus.
 
@@ -1701,20 +1703,34 @@ def feature_recipe(
 
     A proposed recipe reads every field all rows publish, plus each field only some
     operations publish as `value_or_default` with `ABSENT_FIELD_VALUE`: dropping those would
-    take a convolution's geometry out of a model trained beside batchnorms. It then adds the
-    derived features (`physics.derived_features`) of each operation the corpus holds. An
-    authored recipe is taken as written.
+    take a convolution's geometry out of a model trained beside batchnorms. A column some rows
+    of one operation leave unbound is proposed only if it is one of hipDNN's `optional`
+    features, which training reads through value_or_default; any other gap (a rank some rows'
+    tensor lacks) leaves the column out. It then adds the derived features
+    (`physics.derived_features`) of each operation the corpus holds. An authored recipe is
+    taken as written.
     """
     omitted = []
     if authored is not None:
         signature = authored
     else:
         offered = {"kernel." + field for field in kmd_fields or () if field in knobs}
+        # A field only some operations publish is read with ABSENT_FIELD_VALUE below, so it
+        # is not also proposed as an optional feature.
+        operation_fields = _operation_fields(train_frame, published)
         scalar_columns = [
             name
             for name in sorted(published)
-            if train_frame[name].notna().all()
+            if (
+                train_frame[name].notna().all()
+                or (
+                    train_frame[name].notna().any()
+                    and name not in operation_fields
+                    and optional_feature_of(name, optional) is not None
+                )
+            )
             and train_frame[name]
+            .dropna()
             .map(lambda value: isinstance(value, (str, int, float, bool)))
             .all()
         ]
@@ -1726,7 +1742,7 @@ def feature_recipe(
         )
         signature.extend(
             {"value_or_default": ["$" + name, ABSENT_FIELD_VALUE]}
-            for name in _operation_fields(train_frame, published)
+            for name in operation_fields
         )
         signature.extend(derived_features(train_frame).values())
     if not isinstance(signature, list) or not signature:
@@ -2207,7 +2223,13 @@ def _feature_signature(
     else:
         authored = None
     signature, omitted = feature_recipe(
-        train_frame, published, authored, kmd_fields, knobs, pairs
+        train_frame,
+        published,
+        authored,
+        kmd_fields,
+        knobs,
+        pairs,
+        optional_features(args.feature_evaluator),
     )
     withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
     if immediate:

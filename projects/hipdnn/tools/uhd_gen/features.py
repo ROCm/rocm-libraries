@@ -305,6 +305,37 @@ def evaluator_feature_semantics_revision(executable: str | Path | None = None) -
 
 # UhdFeatures.cpp refuses a request over 256 MiB; a chunk stays well under it.
 _REQUEST_CHUNK_BYTES = 64 * 1024 * 1024
+def run_evaluator(
+    request: dict | None,
+    executable: str | Path | None = None,
+    mode: str | None = None,
+) -> dict:
+    """The only crossing into hipdnn_uhd_features: resolve it, send `request` (None: nothing)
+    and return its parsed answer, whatever the mode (`--lint`, `--optional-features`, or the
+    default feature extraction). A nonzero exit or an unparsable answer is a ValueError.
+    """
+    flags = [] if mode is None else [mode]
+    result = subprocess.run(
+        [resolve_feature_evaluator(executable), *flags],
+        input=(
+            ""
+            if request is None
+            else json.dumps(request, ensure_ascii=False, allow_nan=False)
+        ),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError(
+            f"{' '.join([EVALUATOR_NAME, *flags])} failed ({result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
 
 
 def _run_feature_evaluator(
@@ -313,31 +344,34 @@ def _run_feature_evaluator(
     rows: list,
     executable: str | Path | None,
 ) -> tuple[str, list[list[float]], int]:
-    """The only crossing into FeatureExtractor, which owns both the digest and the values.
+    """Features and digest of `signature` over `rows`, from FeatureExtractor, which owns both.
 
     Entries are parsed first only for a readable error; the evaluator does the hashing.
     Rows are evaluated independently, so a large batch is split into requests under the
     evaluator's size bound; every chunk must agree on the digest and revision.
     """
     parsed = [parse_signature_entry(entry) for entry in signature]
-    header = json.dumps(
-        {"signature": parsed, "categorical_encoding": categorical_encoding or {}},
-        ensure_ascii=False,
-        allow_nan=False,
+    # Size every row once; a chunk's request (header and its rows) stays under the bound.
+    header = len(
+        json.dumps(
+            {"signature": parsed, "categorical_encoding": categorical_encoding or {}},
+            ensure_ascii=False,
+            allow_nan=False,
+        )
     )
-    encoded = [json.dumps(row, ensure_ascii=False, allow_nan=False) for row in rows]
-    chunks: list[list[str]] = [[]]
-    size = len(header)
-    for row in encoded:
-        if chunks[-1] and size + len(row) + 1 > _REQUEST_CHUNK_BYTES:
+    chunks: list[list] = [[]]
+    size = header
+    for row in rows:
+        length = len(json.dumps(row, ensure_ascii=False, allow_nan=False)) + 1
+        if chunks[-1] and size + length > _REQUEST_CHUNK_BYTES:
             chunks.append([])
-            size = len(header)
+            size = header
         chunks[-1].append(row)
-        size += len(row) + 1
+        size += length
     evaluator = resolve_feature_evaluator(executable)
     digest, values, revision = None, [], None
     for chunk in chunks:
-        part = _evaluate_chunk(evaluator, header, chunk, len(parsed))
+        part = _evaluate_chunk(parsed, categorical_encoding, chunk, evaluator)
         if digest is not None and part[0::2] != (digest, revision):
             raise ValueError(
                 f"invalid {EVALUATOR_NAME} response: digest or revision changed between chunks"
@@ -348,24 +382,17 @@ def _run_feature_evaluator(
 
 
 def _evaluate_chunk(
-    evaluator: str, header: str, rows: list[str], width: int
+    parsed: list, categorical_encoding: dict | None, rows: list, evaluator: str
 ) -> tuple[str, list[list[float]], int]:
-    """One evaluator request: `header` with its closing brace replaced by the rows."""
-    request = header[:-1] + ', "rows": [' + ", ".join(rows) + "]}"
-    result = subprocess.run(
-        [evaluator],
-        input=request,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if result.returncode:
-        raise ValueError(
-            f"{EVALUATOR_NAME} failed ({result.returncode}): {result.stderr.strip()}"
-        )
+    """One evaluator request over `rows`, checked against the request's shape."""
+    width = len(parsed)
+    request = {
+        "signature": parsed,
+        "categorical_encoding": categorical_encoding or {},
+        "rows": rows,
+    }
+    response = run_evaluator(request, evaluator)
     try:
-        response = json.loads(result.stdout)
         digest, values = response["features_hash"], response["values"]
         # An evaluator that omits it predates the field: revision 1 by definition.
         revision = response.get("feature_semantics_revision", 1)
