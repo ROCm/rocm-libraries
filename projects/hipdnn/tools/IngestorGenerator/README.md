@@ -838,6 +838,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
 | `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
+| `configs/gfx950_conv_fwd_aot_seed.yaml` | Sharded multi-pack engine: one pack per dtype and no `discriminator`, so no operation-scoped UMD. It is also an engine that names another engine's native symbols (`native_symbols_from`): the test-only seed of `hipkernel:Gfx950ConvFwdAot`, written by `tools/make_conv_aot_config.py` |
 | `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: rocKE prefill kernels per head/dtype/mask cell, served through a host-derived identity paged-KV block table. Kernel and geometry counts: the bundle README, `rocKE/gfx950_attention_unified_2d/README.md` |
 | `configs/gfx950_attention_unified_2d.engine.yaml` | That engine's manifest: the `unified_tuning` geometries, the batch capacity (`enumerate.fixed.batch` -> the spec's `num_seqs`, which bounds the sequences one launch resolves at `2^ceil(log2(num_seqs+1)) - 1`), `mask_type` as the KMD's mask field, and the `engine.slug` override |
 | `configs/gfx950_attention_unified_3d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified3D` descriptors: split-KV decode kernels, each one code object launched as a `segment` and a `reduce` launch (UKD 1.1 `sources`). Counts: the bundle README, `rocKE/gfx950_attention_unified_3d/README.md` |
@@ -984,6 +985,8 @@ packs:
     arch: [gfx942]                # optional; empty means arch-independent
     discriminator: add             # on every pack or none of a >1-pack engine; forbidden
                                     # for a single-pack engine
+    dispatch: split_c              # optional: a dispatch handler of its own (own UDD),
+                                    # for kernels of another launch set
     kernels:
       - name: my_engine.f32_block64
         kernel_source:
@@ -1053,10 +1056,12 @@ enumerate:
   # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
   # spec_overrides: {kv_cache_policy: stream}  # optional: pin a spec field the candidate picks
   # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
+  # hold_fields: [use_k_sliced_ring]  # optional, per section (inherited): performance fields kept at the default spec
   also:                           # optional: more sections in the same pack, each its own
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
       space: full                 #   candidates/request/sweep_level/space inherited unless set;
-                                  #   selector_fields/cell_keyed_by inherited, a different list exits 2
+                                  #   selector_fields/cell_keyed_by/hold_fields inherited, a different
+                                  #   selector_fields/cell_keyed_by list exits 2
       spec_overrides: {emit_lse: true}  # optional: spec fields this section's kernels take
       kernel_name_template: "..."       # optional: this section's own names (needed when
                                         #   an override would otherwise repeat a name)
@@ -1094,7 +1099,7 @@ or flat kernel may carry `default: true`, the variant its cell always keeps. An 
 kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
 config's `launches` rules below, checked when the generated config loads.
 
-Four optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+Five optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
 request and picks a knob from request fields (rocKE's strided split-KV decode picks
 `num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
 field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
@@ -1124,11 +1129,13 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
   `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
   the value builds; a value it refuses exits 2 naming the request. An overridden field must
-  be a spec field, and must not be a `performance` or neutral field. It must not be a
-  `feature` field either, unless another section pins it differently (another value, or
-  none): then the field takes more than one value across the catalog, so it is a feature
-  axis. The gfx950 unified engines' `also` sections override `emit_lse` for their LSE-on
-  twins this way, beside a primary section that leaves it off. The g3
+  be a spec field, and must not be a neutral field. It may be a `performance` field: each
+  section then pins one value of it (`hold_fields` below keeps the sections that do not
+  override it from sweeping it). It must not be a `feature` field, unless another section
+  pins it differently (another value, or none): then the field takes more than one value
+  across the catalog, so it is a feature axis. The gfx950 unified engines' `also` sections
+  override `emit_lse` for their LSE-on twins this way, beside a primary section that leaves
+  it off. `spec_overrides` is not inherited by `also` sections: each sets its own. The g3
   regeneration gate compares the shipped catalog against the overridden picks.
 - `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
   that also key the merged cell, so combos merge only when they agree on them. It serves
@@ -1141,8 +1148,20 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   keys a shape by its own pick's value. A keyed attribute must not be a cell field, and
   every spec a cell holds must keep the cell's values, or the run exits 2: a neutral
   field or sweep spec that moves one would silently file a kernel in the wrong cell.
+- `hold_fields` lists `performance` fields a section keeps at its default spec's value
+  instead of varying and projecting them, so a section that leaves a stack of codegen
+  flags alone does not also sweep it. It applies to `space: full` sections only: a `slice`
+  section projects no performance field, so one that sets it (or inherits it, where an `also`
+  section's `hold_fields: []` opts out) exits 2. It is inherited by `also` sections unless they
+  set their own, must name spec fields (checked when the section is read, in every section),
+  and applies after `spec_overrides` (a section may
+  override and hold the same field: the override moves the default, the hold keeps every spec
+  there). The gfx942 unified 2D engine uses the pair for rocKE's production stacks: three
+  `also` sections override the stack on the geometry rocKE selects (D64 for both dtypes,
+  fp16 D128, bf16 D128), while every geometry section holds the five stack fields
+  (`configs/gfx942_attention_unified_2d.engine.yaml`).
 
-Without any of the four keys (or with all empty) the output is byte-identical to a manifest
+Without any of the five keys (or with all empty) the output is byte-identical to a manifest
 that never had them. `--plan-space` counts merged cells and prints the combo count beside
 them; duplicate kernel names after merging still exit 2.
 
@@ -1191,16 +1210,22 @@ launches that report it (see the packaging reference).
 
 The descriptor only lists the launches: the pack's native dispatch handler declares the
 names it launches and owns their order, and the provider drops a kernel whose launch names
-differ from the handler's when it builds its catalog. One engine has one handler, so every
-kernel of an engine must name the same set of launches: a config mixing single- and
-multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
-engines by launch set). In a slotted engine the rule holds per slot, because each slot has
-its own handler (see "Slotted engines"). An operation whose variants need different launch
+differ from the handler's when it builds its catalog. The packs of an unslotted engine
+share its handler, so every kernel launched through one handler must name the same set of
+launches: a config mixing single- and multi-launch kernels, or two different sets, on one
+handler is a `ConfigError`. A pack whose kernels launch another set names a handler of its
+own with `dispatch: <name>` (a lowercase identifier): the generator emits one more UDD,
+`<slug>_<name>.udd.json`, with the native symbol `<namespace>.<name>_dispatch`, and the
+pack's KDP references it. `hipkernel:Gfx950ConvFwdAot` does so for its split-C kernels
+(`dispatch: split_c`), which launch a conv pass and a fold. In a slotted engine the rule
+holds per slot instead, because each slot has its own handler (see "Slotted engines"), and
+there is no per-pack `dispatch` override. An operation whose variants need different launch
 counts, such as a single-launch prefill and a two-launch decode of SDPA forward, is
-therefore split into separate engines, one per launch set. The generated native stub
-declares `launchNames()` from the config's launches and notes in `prepare()` that each
-launch is built with `launchKernelDefinition`; the generated census test checks each
-kernel's `sources` entries against the emitted source kind. See the
+therefore split into separate slots (or separate engines, for an unslotted one), one per
+launch set. The generated native stub declares `launchNames()` from the config's launches
+and notes in `prepare()` that each launch is built with `launchKernelDefinition`; the
+generated census test checks each kernel's `sources` entries against the emitted source
+kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
 
 ## Slotted engines: `slots`

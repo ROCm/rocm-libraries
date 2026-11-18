@@ -52,6 +52,7 @@
 #include "utility.hpp"
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/LongPath.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -3086,6 +3087,13 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
         void* betaf  = (void*)beta;
         auto  prob   = construct_rocblaslt_problem(
             handle, matmul_descr, matA, matB, matC, matD, alphaf, betaf, algo->max_workspace_bytes);
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+            return gate;
+        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+           gate != rocblaslt_status_success)
+            return gate;
+#endif
         status = isSolutionSupported(handle, prob, gemmData, algo, workspaceSizeInBytes);
 
         if(status != rocblaslt_status_success)
@@ -3696,12 +3704,12 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
         if(relpath)
         {
             auto full_path = p / (*relpath);
-            if(std::filesystem::exists(full_path))
+            if(std::filesystem::exists(TensileLite::longPathSafe(full_path.string())))
                 return full_path;
             return {};
         }
 
-        if(std::filesystem::exists(p))
+        if(std::filesystem::exists(TensileLite::longPathSafe(p.string())))
             return p;
         return {};
     };

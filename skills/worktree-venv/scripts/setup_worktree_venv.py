@@ -70,9 +70,9 @@ if BASE_SITE_PACKAGES not in sys.path:
 
 _ROCM_BLOCK = """
 
-# Pin the ROCm toolchain this venv was configured against. With
-# editable.rebuild, CMake runs on plain `import`, so this must hold for
-# non-shell entry points too. setdefault: an explicit ROCM_PATH still wins.
+# Pin the ROCm toolchain this venv was configured against. For
+# a package that sets editable.rebuild = true, CMake runs on plain `import`, so
+# this must hold for non-shell entry points too. setdefault: an explicit ROCM_PATH still wins.
 ROCM_PATH = r"{rocm_root}"
 # NOT necessarily <root>/bin. For the pip SDK, bin/ holds trampolines that
 # resolve the real tools at runtime; the raw <root>/bin binaries are not

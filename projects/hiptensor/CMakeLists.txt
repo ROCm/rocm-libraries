@@ -211,7 +211,21 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
-find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
+# hipTensor instantiates the CK templates itself and links no CK instance library, so it only
+# needs the CK headers. Prefer the header-only `headers` component: CK configured with
+# CK_HEADERS_ONLY ships no instance library at all. Fall back to the include directories of an
+# instance library for CK packages that predate the component. Older CK package configs error out
+# on an unknown component even with QUIET, so locate the package first and only request `headers`
+# when its targets file exists.
+find_package(composable_kernel 1.0.0 REQUIRED)
+if(EXISTS "${composable_kernel_DIR}/composable_kernelheadersTargets.cmake")
+    find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS headers)
+    set(HIPTENSOR_CK_INCLUDE_TARGET composable_kernel::headers)
+else()
+    find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_other_operations)
+    set(HIPTENSOR_CK_INCLUDE_TARGET composable_kernel::device_other_operations)
+endif()
+message(STATUS "Using Composable Kernel headers from ${HIPTENSOR_CK_INCLUDE_TARGET}")
 rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
 
 # Configure library build

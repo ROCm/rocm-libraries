@@ -62,9 +62,9 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
     __device__ static void Run(const src2dDescType& src2dDesc,
                                const dst1dDescType& dst1dDesc,
                                int origReduceLen,
-                               srcDataType alpha,
+                               compType alpha,
                                const srcDataType* const __restrict__ p_src_global,
-                               dstDataType beta,
+                               compType beta,
                                dstDataType* const __restrict__ p_dst_global,
                                const int* const __restrict__ ws_indices_global,
                                int* const __restrict__ indices_global);
@@ -73,9 +73,9 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
     __device__ static void Run<1>(const src2dDescType& src2dDesc,
                                   const dst1dDescType& dst1dDesc,
                                   int origReduceLen,
-                                  srcDataType alpha,
+                                  compType alpha,
                                   const srcDataType* const __restrict__ p_src_global,
-                                  dstDataType beta,
+                                  compType beta,
                                   dstDataType* const __restrict__ p_dst_global,
                                   const int* const __restrict__ ws_indices_global,
                                   int* const __restrict__ indices_global)
@@ -159,8 +159,6 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
 
             StaticBuffer<AddressSpaceEnum_t::Vgpr, dstDataType, 1, true> dstValue_buf;
 
-            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
-
             if(!float_equal_zero{}(beta))
             {
                 auto threadwise_dst_load =
@@ -181,8 +179,10 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
                 threadwise_dst_load.Run(
                     dst1dDesc, dst_global_buf, ReducedDataDesc, make_tuple(I0), priorDstValue_buf);
 
-                dstValue_buf(I0) += priorDstValue_buf(I0) * beta;
+                accuValue_buf(I0) += type_convert<compType>{}(priorDstValue_buf[I0]) * beta;
             }
+
+            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
 
             auto threadwise_dst_store =
                 ThreadwiseTensorSliceTransfer_v1r3<dstDataType,
@@ -207,9 +207,9 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
     __device__ static void Run<2>(const src2dDescType& src2dDesc,
                                   const dst1dDescType& dst1dDesc,
                                   int origReduceLen,
-                                  srcDataType alpha,
+                                  compType alpha,
                                   const srcDataType* const __restrict__ p_src_global,
-                                  dstDataType beta,
+                                  compType beta,
                                   dstDataType* const __restrict__ p_dst_global,
                                   const int* const __restrict__ ws_indices_global,
                                   int* const __restrict__ indices_global)
@@ -298,8 +298,6 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
 
             StaticBuffer<AddressSpaceEnum_t::Vgpr, dstDataType, 1, true> dstValue_buf;
 
-            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
-
             if(!float_equal_zero{}(beta))
             {
                 auto threadwise_dst_load =
@@ -323,8 +321,10 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
                                         make_tuple(I0),
                                         priorDstValue_buf);
 
-                dstValue_buf(I0) += priorDstValue_buf[I0] * beta;
+                accuValue_buf(I0) += type_convert<compType>{}(priorDstValue_buf[I0]) * beta;
             }
+
+            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
 
             auto threadwise_dst_val_store =
                 ThreadwiseTensorSliceTransfer_v1r3<dstDataType,
@@ -365,9 +365,9 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
     __device__ static void Run<3>(const src2dDescType& src2dDesc,
                                   const dst1dDescType& dst1dDesc,
                                   int origReduceLen,
-                                  srcDataType alpha,
+                                  compType alpha,
                                   const srcDataType* const __restrict__ ws_values_global,
-                                  dstDataType beta,
+                                  compType beta,
                                   dstDataType* const __restrict__ p_dst_global,
                                   const int* const __restrict__ ws_indices_global,
                                   int* const __restrict__ indices_global)
@@ -477,8 +477,6 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
 
             StaticBuffer<AddressSpaceEnum_t::Vgpr, dstDataType, 1, true> dstValue_buf;
 
-            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
-
             if(!float_equal_zero{}(beta))
             {
                 auto threadwise_dst_load =
@@ -502,8 +500,10 @@ struct GridwiseReduction_xy_to_x_direct_warpwise
                                         make_tuple(I0),
                                         priorDstValue_buf);
 
-                dstValue_buf(I0) += priorDstValue_buf[I0] * beta;
+                accuValue_buf(I0) += type_convert<compType>{}(priorDstValue_buf[I0]) * beta;
             }
+
+            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
 
             auto threadwise_dst_val_store =
                 ThreadwiseTensorSliceTransfer_v1r3<dstDataType,
