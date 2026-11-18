@@ -2984,6 +2984,15 @@ def _miopen_forw_to_direction(forw: int) -> "str | None":
     return _FORW_TO_DIR.get(forw & 7)
 
 
+def _case_direction(forw: int, req_dirs) -> "str | None":
+    """The direction a parsed MIOpen case is listed under: the first
+    explicitly requested ``--directions`` entry (``_run_from_cache`` launches
+    every requested direction whatever ``-F`` says), else the ``-F`` mapping."""
+    if req_dirs:
+        return req_dirs[0]
+    return _miopen_forw_to_direction(forw)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -3333,7 +3342,7 @@ def main() -> int:
                 continue
             try:
                 prob, dt, forw = parse_miopen_cmd_direct(line, req_dirs)
-                direction = _miopen_forw_to_direction(forw)
+                direction = _case_direction(forw, req_dirs)
                 if direction is None:
                     print(
                         f"[skip] {path}:{lineno}: -F={forw} maps to no supported direction",
@@ -3352,7 +3361,7 @@ def main() -> int:
         except ValueError as e:
             print(f"error: --miopen-cmd: {e}", file=sys.stderr)
             return 2
-        direction = _miopen_forw_to_direction(forw)
+        direction = _case_direction(forw, req_dirs)
         if direction is None:
             print(
                 f"error: --miopen-cmd: -F={forw} maps to no supported direction "

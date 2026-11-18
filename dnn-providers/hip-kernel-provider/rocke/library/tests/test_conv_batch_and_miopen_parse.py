@@ -83,6 +83,23 @@ def test_direct_parse_keeps_flags_before_mode():
     assert (problem.KH, problem.KW, problem.PAD, problem.stride) == (3, 3, 1, 1)
 
 
+def test_direct_explicit_directions_override_a_zero_forw():
+    """``--run-from-cache --directions wgrad`` with ``-F 0`` still lists the
+    case (under the requested direction); without the override it has none."""
+    from benchmarks.common.benchmark_direct_conv import (
+        _case_direction,
+        parse_miopen_cmd_direct,
+    )
+
+    cmd = "MIOpenDriver convfp16 " + _FLAGS.format(g=64, f=0)
+    _, _, forw = parse_miopen_cmd_direct(cmd, ("wgrad",))
+    assert forw == 0
+    assert _case_direction(forw, None) is None
+    assert _case_direction(forw, ()) is None
+    assert _case_direction(forw, ("wgrad", "fwd")) == "wgrad"
+    assert _case_direction(1, None) == "fwd"
+
+
 @pytest.mark.parametrize("kw", ["conv", "convfp32"])
 def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
