@@ -485,7 +485,8 @@ TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
         hipdnn_test_sdk::utilities::ReferencePointwiseBase<
             hipdnn_test_sdk::utilities::CpuDeviceExecutor<float, float>,
             float,
-            float>::pointwiseCompute<float, float>(testCase.mode, output, input);
+            float,
+            float>::pointwiseCompute<float>(testCase.mode, output, input);
 
         const double scale = isBoundedOutput(testCase.mode)
                                  ? 1.0

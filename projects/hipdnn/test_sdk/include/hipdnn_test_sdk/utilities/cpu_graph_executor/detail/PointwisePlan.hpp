@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
@@ -78,23 +79,11 @@ struct PointwiseParams
     }
 };
 
-// A comparison rounds nothing into its boolean result, so the plan compares its operands exactly
-// (in double) instead of in the node's compute type.
-inline bool isComparisonPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode)
-{
-    using Mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
-    return mode == Mode::CMP_EQ || mode == Mode::CMP_NEQ || mode == Mode::CMP_GT
-           || mode == Mode::CMP_GE || mode == Mode::CMP_LT || mode == Mode::CMP_LE;
-}
-
-// ComputeType is the node's compute_data_type: every operand is converted to it, the operation
-// is carried out in it (rounding once per operation) and the result is converted to OutputType.
-// Comparisons are the exception (see isComparisonPointwiseMode()).
 template <typename Input0Type,
           typename Input1Type,
           typename Input2Type,
-          typename ComputeType,
-          typename OutputType>
+          typename OutputType,
+          typename ComputeType>
 class PointwisePlan : public IGraphNodePlanExecutor
 {
 public:
@@ -127,22 +116,20 @@ public:
 private:
     void executeNonParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
-            _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
+        auto shallowIn0Tensor = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(_params.mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
         {
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
-                _params.mode, *shallowOut0Tensor, _params.axis.value());
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type>::
+                pointwiseCompute(_params.mode, *shallowOut0Tensor, _params.axis.value());
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::
-                template pointwiseComputeAs<ComputeType>(
-                    _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type>::
+                pointwiseCompute(_params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -151,21 +138,12 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
-                _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
+            auto shallowIn1Tensor
+                = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
 
-            if(isComparisonPointwiseMode(_params.mode))
-            {
-                utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                    pointwiseCompute(
-                        _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
-            }
-            else
-            {
-                utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                    template pointwiseComputeAs<ComputeType>(
-                        _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
-            }
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
+                pointwiseCompute(
+                    _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(_params.mode))
         {
@@ -177,18 +155,21 @@ private:
                         "Ternary pointwise operation requires in1 and in2 tensors");
                 }
 
-                auto shallowIn1Tensor = createShallowTensor<Input1Type>(
-                    _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
-                auto shallowIn2Tensor = createShallowTensor<Input2Type>(
-                    _params.in2Tensor.value(), variantPack.at(_params.in2Tensor.value().uid));
+                auto shallowIn1Tensor
+                    = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
+                auto shallowIn2Tensor
+                    = bindOperandOrScalar<Input2Type>(_params.in2Tensor.value(), variantPack);
 
-                utilities::
-                    CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type, Input2Type>::
-                        template pointwiseComputeAs<ComputeType>(_params.mode,
-                                                                 *shallowOut0Tensor,
-                                                                 *shallowIn0Tensor,
-                                                                 *shallowIn1Tensor,
-                                                                 *shallowIn2Tensor);
+                utilities::CpuReferencePointwiseImpl<
+                    OutputType,
+                    ComputeType,
+                    Input0Type,
+                    Input1Type,
+                    Input2Type>::pointwiseCompute(_params.mode,
+                                                  *shallowOut0Tensor,
+                                                  *shallowIn0Tensor,
+                                                  *shallowIn1Tensor,
+                                                  *shallowIn2Tensor);
             }
             else
             {
@@ -203,25 +184,23 @@ private:
 
     void executeParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
-            _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
+        auto shallowIn0Tensor = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::
-                template pointwiseComputeAs<ComputeType>(
-                    _params.mode,
-                    *shallowOut0Tensor,
-                    *shallowIn0Tensor,
-                    _params.reluLowerClip.value_or(0.0f),
-                    _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
-                    _params.reluLowerClipSlope.value_or(0.0f),
-                    _params.swishBeta.value_or(1.0f),
-                    _params.eluAlpha.value_or(1.0f),
-                    _params.softplusBeta.value_or(1.0f));
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type>::
+                pointwiseCompute(_params.mode,
+                                 *shallowOut0Tensor,
+                                 *shallowIn0Tensor,
+                                 _params.reluLowerClip.value_or(0.0f),
+                                 _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                                 _params.reluLowerClipSlope.value_or(0.0f),
+                                 _params.swishBeta.value_or(1.0f),
+                                 _params.eluAlpha.value_or(1.0f),
+                                 _params.softplusBeta.value_or(1.0f));
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -230,21 +209,20 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
-                _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
+            auto shallowIn1Tensor
+                = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
 
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                template pointwiseComputeAs<ComputeType>(
-                    _params.mode,
-                    *shallowOut0Tensor,
-                    *shallowIn0Tensor,
-                    *shallowIn1Tensor,
-                    _params.reluLowerClip.value_or(0.0f),
-                    _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
-                    _params.reluLowerClipSlope.value_or(0.0f),
-                    _params.swishBeta.value_or(1.0f),
-                    _params.eluAlpha.value_or(1.0f),
-                    _params.softplusBeta.value_or(1.0f));
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
+                pointwiseCompute(_params.mode,
+                                 *shallowOut0Tensor,
+                                 *shallowIn0Tensor,
+                                 *shallowIn1Tensor,
+                                 _params.reluLowerClip.value_or(0.0f),
+                                 _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                                 _params.reluLowerClipSlope.value_or(0.0f),
+                                 _params.swishBeta.value_or(1.0f),
+                                 _params.eluAlpha.value_or(1.0f),
+                                 _params.softplusBeta.value_or(1.0f));
         }
         else
         {
@@ -351,6 +329,29 @@ public:
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
 
+        // Every input must broadcast to the output shape
+        std::vector<int64_t> inputUids = {nodeAttributes->in_0_tensor_uid()};
+        for(const auto& optionalUid :
+            {nodeAttributes->in_1_tensor_uid(), nodeAttributes->in_2_tensor_uid()})
+        {
+            if(optionalUid.has_value())
+            {
+                inputUids.push_back(optionalUid.value());
+            }
+        }
+        const auto* outDims = tensorMap.at(nodeAttributes->out_0_tensor_uid())->dims();
+        for(const auto uid : inputUids)
+        {
+            const auto* inDims = tensorMap.at(uid)->dims();
+            if(inDims == nullptr || outDims == nullptr
+               || !hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(
+                   std::vector<int64_t>(inDims->begin(), inDims->end()),
+                   std::vector<int64_t>(outDims->begin(), outDims->end())))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -379,7 +380,7 @@ public:
                                      : nullptr);
 
         return std::make_unique<
-            PointwisePlan<Input0Type, Input1Type, Input2Type, ComputeType, OutputType>>(
+            PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType, ComputeType>>(
             PointwiseParams(nodeAttributes->operation(),
                             *in0Tensor,
                             in1Tensor,

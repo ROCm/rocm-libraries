@@ -1,0 +1,17 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_3_4_4_fp32_nchw"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
