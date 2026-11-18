@@ -232,10 +232,20 @@ std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& probl
     valid_kernels.reserve(conv_ptrs.size());
     for(size_t idx = 0; idx < conv_ptrs.size(); ++idx)
     {
-        if(require_large_tensor && !IsLargeTensorCKInstance(conv_ptrs[idx]))
+        if(require_large_tensor != IsLargeTensorCKInstance(conv_ptrs[idx]))
             continue;
         if(args.IsSupportedBy(conv_ptrs[idx]))
             valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
+    }
+    // If the only registered instances are large-tensor ones, take them: a slower
+    // instance is better than making the solver inapplicable.
+    if(valid_kernels.empty() && !require_large_tensor)
+    {
+        for(size_t idx = 0; idx < conv_ptrs.size(); ++idx)
+        {
+            if(IsLargeTensorCKInstance(conv_ptrs[idx]) && args.IsSupportedBy(conv_ptrs[idx]))
+                valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
+        }
     }
     // When require_large_tensor is true and no large-tensor instances are
     // registered for this DeviceOp, returning an empty list is the intended
@@ -545,14 +555,14 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 
             auto ptr_iter = FindCachedConvPtr<DeviceOpType>(kernel_id.substr(0, pos));
             return (ptr_iter != conv_ptrs.end()) &&
-                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
+                   (require_large_tensor == IsLargeTensorCKInstance(*ptr_iter)) &&
                    CKArgsType{problem}.IsSupportedBySplitK(*ptr_iter, split_k);
         }
         else
         {
             auto ptr_iter = FindCachedConvPtr<DeviceOpType>(kernel_id);
             return (ptr_iter != conv_ptrs.end()) &&
-                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
+                   (require_large_tensor == IsLargeTensorCKInstance(*ptr_iter)) &&
                    CKArgsType{problem}.IsSupportedBy(*ptr_iter);
         }
     }
@@ -573,7 +583,7 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
     const auto ptrs                 = DeviceOpType::GetInstances();
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     return std::any_of(ptrs.begin(), ptrs.end(), [&](auto& ptr) {
-        if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
+        if(require_large_tensor != IsLargeTensorCKInstance(ptr))
             return false;
         return args.IsSupportedBy(ptr);
     });
@@ -699,7 +709,7 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     for(auto& ptr : ptrs)
     {
-        if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
+        if(require_large_tensor != IsLargeTensorCKInstance(ptr))
             continue;
         // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
         // The loop then restarts from 1 for the next conv instance.
