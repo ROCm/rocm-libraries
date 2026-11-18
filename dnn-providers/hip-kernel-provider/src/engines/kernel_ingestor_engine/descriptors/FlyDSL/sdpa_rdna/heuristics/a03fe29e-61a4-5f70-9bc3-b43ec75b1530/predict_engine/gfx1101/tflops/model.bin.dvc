@@ -1,6 +1,6 @@
 outs:
-- md5: 63b4986f2ff31b9f2c65dbb9da4a8324
-  size: 644000
+- md5: 436f5d3517aa3270b18e7b2d7a6c487c
+  size: 207280
   hash: md5
   path: model.bin
   remote: ingestor

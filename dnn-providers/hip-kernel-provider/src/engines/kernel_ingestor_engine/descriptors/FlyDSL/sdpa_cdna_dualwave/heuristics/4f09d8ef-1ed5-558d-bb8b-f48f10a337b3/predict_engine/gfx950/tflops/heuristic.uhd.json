@@ -1,22 +1,95 @@
 {
   "version": "1.0",
-  "id": "bb86d970-e496-47c3-af4e-ea8b7d803fd5",
-  "name": "hipkernel:flydsl_sdpa_cdna_dualwave (gfx950, 67 contribution(s))",
-  "adapter": "tree_data",
+  "id": "0f5ccdb4-f513-4fe6-a61f-8b80e7050750",
+  "name": "hipkernel:flydsl_sdpa_cdna_dualwave (gfx950, 39 contribution(s))",
+  "adapter": "mlp_data",
   "features_signature": [
-    "$device.memory_clock_rate",
-    "$device.peak_memory_bandwidth",
     "$device.total_global_mem",
+    "$flydsl_sdpa_cdna.bias.uid",
+    "$flydsl_sdpa_cdna.bias.vectorized",
     "$flydsl_sdpa_cdna.causal",
     "$flydsl_sdpa_cdna.diag_bottom_right",
     "$flydsl_sdpa_cdna.diag_offset",
     "$flydsl_sdpa_cdna.scale",
+    "$flydsl_sdpa_cdna.scale_source",
     "$flydsl_sdpa_cdna.stats.uid",
     "$flydsl_sdpa_cdna.v.heads",
     "$graph.arithmetic_intensity",
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
     "$graph.logical_bytes",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.virtual",
+        -1
+      ]
+    },
     {
       "value_or_default": [
         "$graph.nodes[0].attn_scale_value",
@@ -31,6 +104,7 @@
         false
       ]
     },
+    "$graph.nodes[0].has_attention_mask",
     "$graph.nodes[0].k.data_type",
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
@@ -58,6 +132,156 @@
     "$graph.nodes[0].q.strides[0]",
     "$graph.nodes[0].q.strides[1]",
     "$graph.nodes[0].q.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].right_bound",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.virtual",
+        -1
+      ]
+    },
     "$graph.nodes[0].v.data_type",
     "$graph.nodes[0].v.dims[0]",
     "$graph.nodes[0].v.dims[1]",
@@ -101,7 +325,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:35b617efd17cf279",
+  "features_hash": "sha256:be8c08021f7c23ce",
   "trained_against": {
     "ued": {
       "id": "4f09d8ef-1ed5-558d-bb8b-f48f10a337b3",
@@ -126,8 +350,8 @@
     "calibrated": true,
     "transform": "log"
   },
-  "tree_data": {
+  "mlp_data": {
     "artifact": "model.bin",
-    "hash": "ae3ba208d529e860059d2e5a2bd714e3e77dc66db903806ed078b030e7118f0b"
+    "hash": "560ca8ec0c1a32c734854d6f6300bf39d898a3a034f52dac39e14ebeca9a5f59"
   }
 }
