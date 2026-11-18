@@ -107,8 +107,6 @@ jobs:
     env:
       HIPBLASLT_PY_DEVICE: gfx942
       HIPBLASLT_PY_REQUIRE_GPU: "1"
-      # TEMPORARY deliberate red: hide the GPU, so the lane must fail instead of skipping.
-      HIP_VISIBLE_DEVICES: "-1"
     steps:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
