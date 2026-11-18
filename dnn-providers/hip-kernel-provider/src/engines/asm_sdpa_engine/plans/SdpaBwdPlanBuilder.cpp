@@ -504,10 +504,17 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
+    // No dropout tensor either: AITER's keep mask (8-bit randoms per 32x32 tile) is not the
+    // Philox stream the FlyDSL SDPA engines' forwards draw, so this backward could not replay
+    // the mask another engine's forward dropped with.
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seed_tensor_uid(), "seed tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.offset_tensor_uid(), "offset tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
                                "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_inv_tensor_uid(),
+                               "dropout_scale_inv tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
 
     // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
@@ -539,6 +546,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
     const auto& tensorMap = opGraph.getTensorMap();
     HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
                                "Ragged tensors are not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(tensorMap),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
     HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
         "All tensors must be aligned to a multiple of 16 bytes");
@@ -764,6 +774,12 @@ bool SdpaBwdPlanBuilder::isApplicable(
             + ", dk=" + EnumNameDataType(dkTensor->data_type())
             + ", dv=" + EnumNameDataType(dvTensor->data_type()));
     const auto& dataTypeId = *dataTypeIdOpt;
+
+    // The kernels read O in the dtype of Q, K and V, with the same element size.
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->data_type() != qTensor->data_type(),
+                               "O tensor dtype must equal the Q/K/V dtype (O: "
+                                   + EnumNameDataType(oTensor->data_type())
+                                   + ", Q: " + EnumNameDataType(qTensor->data_type()) + ")");
 
     auto headDimQk = static_cast<int>(qTensor->dims()->Get(3));
     auto headDimV = static_cast<int>(vTensor->dims()->Get(3));

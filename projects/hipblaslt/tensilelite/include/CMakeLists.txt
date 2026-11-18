@@ -41,10 +41,12 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ExactLogicLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FreeSizeLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FusedA2A.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FusedA2AKernArg.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/GranularitySelectionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelArguments.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelLanguageTypes.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LongPath.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLFeatures.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassification.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassificationLibrary.hpp"
@@ -125,6 +127,7 @@ else()
             FILE_SET tensilelite_public_headers TYPE HEADERS
                 FILES
                     "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/SolutionState.hpp"
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS
                 FILES
