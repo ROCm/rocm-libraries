@@ -268,6 +268,15 @@ namespace rocalution
 
         op.InitialPairwiseAggregation(
             this->beta_, nc, trans, Gsize, &rG, rGsize, this->aggregation_ordering_);
+
+        // Every row is strongly diagonally dominant, so there is no aggregate to coarsen. With a
+        // GlobalMatrix, nc is 0 on every process when it is 0 on one.
+        if(nc == 0)
+        {
+            free_host(&rG);
+            return false;
+        }
+
         op.CoarsenOperator(coarse, nc, nc, *trans, Gsize, rG, rGsize);
 
         int cycle = 0;
@@ -275,9 +284,21 @@ namespace rocalution
         while(static_cast<double>(op.GetM()) / static_cast<double>(coarse->GetM())
               < this->coarsening_factor_)
         {
+            int64_t coarse_m = coarse->GetM();
+
             coarse->FurtherPairwiseAggregation(
                 this->beta_, nc, trans, Gsize, &rG, rGsize, this->aggregation_ordering_);
             op.CoarsenOperator(coarse, nc, nc, *trans, Gsize, rG, rGsize);
+
+            // Each pass doubles the size of the aggregate map. A pass that pairs fewer than half
+            // of the nodes ends the level, and the next level starts again from pairs.
+            if(4 * coarse->GetM() > 3 * coarse_m)
+            {
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: PairwiseAMG::Build() Pairwise aggregation paired "
+                                 "fewer than half of the nodes, coarsening factor not reached");
+                break;
+            }
 
             ++cycle;
 
@@ -287,6 +308,13 @@ namespace rocalution
                                  "*** warning: PairwiseAMG::Build() Coarsening cannot obtain "
                                  "satisfying coarsening factor");
             }
+        }
+
+        // A level that does not coarsen at all would be followed by identical ones
+        if(coarse->GetM() == op.GetM())
+        {
+            free_host(&rG);
+            return false;
         }
 
         res->CreateFromMap(*trans, op.GetLocalM(), nc, pro);
