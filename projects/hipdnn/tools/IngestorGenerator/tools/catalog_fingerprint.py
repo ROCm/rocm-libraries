@@ -4,8 +4,8 @@
     python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
 
 A bundle whose catalog is sharded over several KDPs, one ranker serving them all (the
-dgrad AOT bundles), passes every shard: the fingerprint is that of their kernels
-together.
+dgrad and forward AOT bundles), passes every shard: the fingerprint is that of their
+kernels together.
 """
 
 from __future__ import annotations

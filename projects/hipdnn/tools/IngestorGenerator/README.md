@@ -1022,6 +1022,11 @@ The dgrad AOT engines commit no config, so `tests/test_trained_rankers.py` does 
 their rankers: `_TRAINED_CATALOG_SHA256` in `tests/test_make_conv_dgrad_aot_config.py`
 records each one's fingerprint instead, over every shard of its bundle
 (`python3 tools/catalog_fingerprint.py <bundle>/artifacts/*.kdp.json`).
+The forward AOT engines commit no product config either: `_TRAINED_CATALOG_SHA256` in
+`tests/test_make_conv_aot_config.py` records the fingerprint of the catalog
+`hipkernel:Gfx942ConvFwdAot`'s ranker was trained on, over every shard of its bundle
+(`python3 tools/catalog_fingerprint.py <bundle>/artifacts/*.kdp.json`), and
+`_SHIPS_A_RANKER` there states which forward bundles ship a ranker.
 
 ### The engine manifest and `reduction:`
 

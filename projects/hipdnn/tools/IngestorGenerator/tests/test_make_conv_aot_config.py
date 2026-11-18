@@ -5,6 +5,7 @@
 
 import copy
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -23,6 +24,7 @@ _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
 
 import launch_surface  # noqa: E402
+from catalog_fingerprint import catalog_fingerprint  # noqa: E402
 import make_conv_aot_config as tool  # noqa: E402
 
 _REPO = launch_surface.find_repo_root(_TOOLS)
@@ -64,6 +66,20 @@ _BUNDLES = {
 }
 #: The architecture of each bundle's engine.
 _BUNDLE_ARCH = {"product": "gfx950", "seed": "gfx950", "gfx942": "gfx942"}
+#: Per bundle, whether its engine ships a trained ranker: its UED binds the model after
+#: the native scorer and its heuristics/ (DVC-tracked as heuristics.dvc) sits beside
+#: the KDPs. Stated here, not read from the bundle under test, so a regenerated bundle
+#: that drops its ranker fails.
+_SHIPS_A_RANKER = {"product": True, "seed": False, "gfx942": True}
+#: Per bundle, the fingerprint (tools/catalog_fingerprint.py over every shard) of the
+#: catalog its shipped ranker was trained on, or None when none is recorded: the seed
+#: ships no ranker, and gfx950's predates this table. No forward AOT config is committed,
+#: so tests/test_trained_rankers.py's gate does not cover these rankers: this table does.
+_TRAINED_CATALOG_SHA256 = {
+    "product": None,
+    "seed": None,
+    "gfx942": "3daac9f58965d52354e6db105da347fb43b02c564d782978f8a86c34d2bf9d71",
+}
 #: Worker processes that convert a catalog.
 _JOBS = min(32, os.cpu_count() or 1)
 
@@ -134,6 +150,14 @@ def bundle(request, catalogs):
     return engine, folder, catalogs[request.param], sharding
 
 
+def test_every_bundle_states_its_expectations():
+    """A bundle the tool gains fails here until its expectations are stated."""
+    for table in (_BUNDLE_ARCH, _SHIPS_A_RANKER, _TRAINED_CATALOG_SHA256):
+        assert set(table) == set(_BUNDLES)
+    for name, trained in _TRAINED_CATALOG_SHA256.items():
+        assert trained is None or _SHIPS_A_RANKER[name], name
+
+
 def test_seed_config_is_what_the_tool_generates(seed_specs):
     assert yaml.safe_load(_CONFIG.read_text()) == tool.build_config(
         seed_specs, _SEED_ENGINE
@@ -199,6 +223,13 @@ def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
         + ["kernel_dtype_matches_graph.umd.json"]
         + dispatches
     )
+    # Beside the descriptors: the DVC-tracked KDPs, and the trained ranker of an engine
+    # that ships one (heuristics.dvc).
+    name = next(n for n, bundled in _BUNDLES.items() if bundled[1] == folder)
+    folders = {path.name for path in folder.iterdir() if path.is_dir()}
+    ranker = (folder / "heuristics.dvc").is_file() or "heuristics" in folders
+    assert ranker == _SHIPS_A_RANKER[name], name
+    assert folders <= {"artifacts", "heuristics"}, folders
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
     for path in files:
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
@@ -230,6 +261,73 @@ def test_every_bundle_runs_the_shipped_engines_native_code():
         udd = json.loads((folder / f"{tool.engine_slug(engine)}.udd.json").read_text())
         assert udd["dispatch_symbol"] == f"{native}.dispatch"
     assert tool.product_native_namespace("gfx950") == "hipkernel.gfx950_conv_fwd_aot"
+
+
+@pytest.mark.parametrize("name", sorted(_BUNDLES))
+def test_the_ued_ranks_with_the_native_scorer_then_the_trained_ranker(name):
+    """The native fallback scorer comes first; a promoted model packet appends its own
+    id after it instead of replacing it, so "default" is a list once one ships. Each
+    model it binds is in heuristics/ under the UED's id, with the model file its UHD
+    names, when that folder is in this checkout (dvc pull)."""
+    engine, folder, _, _ = _BUNDLES[name]
+    slug = tool.engine_slug(engine)
+    ued = json.loads((folder / f"{slug}.ued.json").read_text())
+    uhd = json.loads((folder / f"{slug}.uhd.json").read_text())
+    assert uhd["adapter"] == "native"
+    assert list(ued["sort_kernel_catalog"]) == ["default"]
+    default = ued["sort_kernel_catalog"]["default"]
+    if not _SHIPS_A_RANKER[name]:
+        assert default == uhd["id"]
+        return
+    assert isinstance(default, list) and len(default) > 1, default
+    assert default[0] == uhd["id"]
+    assert all(isinstance(i, str) for i in default)
+    heuristics = folder / "heuristics" / ued["id"] / "sort_kernel_catalog" / "default"
+    if not heuristics.is_dir():
+        pytest.skip(f"heuristics not in this checkout (dvc pull): {heuristics}")
+    models = {}
+    for path in heuristics.glob("*/heuristic.uhd.json"):
+        model = json.loads(path.read_text())
+        models[model["id"]] = (path.parent, model)
+    assert sorted(models) == sorted(default[1:])
+    for directory, model in models.values():
+        assert model["trained_against"]["ued"]["id"] == ued["id"]
+        assert model["trained_against"]["kmd"]["id"] == ued["metadata"]
+        artifact = directory / model["tree_data"]["artifact"]
+        assert artifact.is_file(), f"{artifact} not in this checkout"
+        digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        assert digest == model["tree_data"]["hash"], artifact
+
+
+@pytest.mark.parametrize("name", sorted(_BUNDLES))
+def test_the_shipped_ranker_was_trained_on_the_shipped_catalog(name):
+    """The descriptor loader ties a ranker to its engine's UED/KMD/UMD ids only, so a
+    catalog edit that keeps them leaves it ranking a catalog it never saw. The catalog
+    is every shard's kernels: one ranker serves them all."""
+    engine, folder, _, _ = _BUNDLES[name]
+    if not _SHIPS_A_RANKER[name]:
+        pytest.skip(f"{engine} ships no trained ranker")
+    trained = _TRAINED_CATALOG_SHA256[name]
+    if trained is None:
+        pytest.skip(f"no trained-catalog fingerprint is recorded for {engine}'s ranker")
+    kdps = _kdps(folder)
+    kernels = [
+        kernel
+        for kdp in kdps
+        for kernel in json.loads(kdp.read_text())["kernelDescriptors"]
+    ]
+    shipped = catalog_fingerprint({"kernelDescriptors": kernels})
+    slug = tool.engine_slug(engine)
+    ued = json.loads((folder / f"{slug}.ued.json").read_text())
+    ranker = ued["sort_kernel_catalog"]["default"][1:]
+    shards = _kdp_dir(folder)
+    assert shipped == trained, (
+        f"{engine}'s ranker(s) {ranker} were trained on catalog {trained}, but its "
+        f"shards in {shards} are now {shipped}. The loader would keep using the stale "
+        f"model silently: retrain on the new catalog (hipdnn-uhd skill) and record the "
+        f"new fingerprint (tools/catalog_fingerprint.py {shards}/*.kdp.json) in "
+        f"_TRAINED_CATALOG_SHA256, or remove the binding and record None."
+    )
 
 
 def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):

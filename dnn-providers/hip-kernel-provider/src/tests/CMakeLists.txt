@@ -620,6 +620,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942ConvDgradAotModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942ConvFwdAotModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
@@ -745,9 +746,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "for gfx950, so its census is not registered.")
     endif()
 
-    # Census for its gfx942 sibling, hipkernel:Gfx942ConvFwdAot. Its UED binds only the
-    # native fallback score until a trained ranker ships, so it has no ModelBinding census
-    # yet.
+    # Census for its gfx942 sibling, hipkernel:Gfx942ConvFwdAot.
     hkp_product_ships_engine_for_arch(_hkp_gfx942_conv_fwd_aot
                                       "hipkernel:Gfx942ConvFwdAot" gfx942)
     if(_hkp_gfx942_conv_fwd_aot)
@@ -757,6 +756,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             ARCHES gfx942
             SUITES TestGfx942ConvFwdAotPacks
             EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+        # Its trained ranker, as the dgrad engines' below: the bound model loads and scores
+        # every shipped kernel.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942ConvFwdAotModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL2KernelRankerScoresEveryShippedKernel
         )
     else()
         message(STATUS
