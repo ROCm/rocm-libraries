@@ -356,6 +356,13 @@ class ImplicitGemmConvSpec:
     # launch. Bakes the degree: the launch passes ks_count == S.
     split_k_cluster: int = 0
 
+    # Large-tensor forward addressing (64-bit tile origin + i32 per-lane
+    # delta, no magic division on the M decode): see
+    # library/kernels/conv/docs/large_tensor_addr64_plan.md. Phase 0 only --
+    # no builder reads this yet, so ``validate()`` refuses ``True`` rather
+    # than silently building the plain i32 kernel under a tagged name.
+    addr64: bool = False
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -462,10 +469,18 @@ class ImplicitGemmConvSpec:
                 # tells it from an fp32 kernel with the same atom shape. Last,
                 # and only when set, so every existing name is unchanged.
                 "tf32": self.data.is_tf32,
+                # Large-tensor addressing (see the field's docstring). Last,
+                # and only when set, so every existing name is unchanged.
+                "a64": self.addr64,
             },
         )
 
     def validate(self) -> None:
+        if self.addr64:
+            raise ValueError(
+                "addr64 is declared but not yet implemented by any builder "
+                "(see library/kernels/conv/docs/large_tensor_addr64_plan.md)"
+            )
         # ``ImplicitGemmConvSpec.groups`` (the legacy P86 field) must not
         # contradict the authoritative ``problem.groups``. The kernel body reads
         # the problem's grouping; the spec field is kept for back-compat and, if

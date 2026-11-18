@@ -168,6 +168,25 @@ rocke_status_t rocke_tv_make_buffer_resource(rocke_ir_builder_t* b,
                                              rocke_value_t* num_bytes,
                                              rocke_value_t* soffset /* NULL => const_i32(0) */);
 
+/* make_tile_buffer_resource(b, ptr, origin_i64=, total_bytes_i64=, soffset=None):
+ * the large-tensor (addr64) forward-addressing primitive. See
+ * library/kernels/conv/docs/large_tensor_addr64_plan.md section 5.
+ *
+ * Scalarizes origin_i64 to SGPR (to_sgpr_u32), folds it into ptr via
+ * global_ptr_offset (not global_ptr_add: an empty/fully-masked tile's
+ * origin is allowed to land outside the allocation), then clamps
+ * (total_bytes_i64 - origin) to [0, 2**31-1] with cmp+select (not
+ * smax/smin: the scalar smax/smin ops hardcode an i32 LLVM intrinsic
+ * regardless of operand width) before truncating to the i32
+ * num_records make_buffer_resource expects. Mirrors
+ * rocke.helpers.tensor_view.make_tile_buffer_resource op for op. */
+rocke_status_t rocke_tv_make_tile_buffer_resource(rocke_ir_builder_t* b,
+                                                  rocke_tv_buffer_resource_t* out,
+                                                  rocke_value_t* ptr,
+                                                  rocke_value_t* origin_i64,
+                                                  rocke_value_t* total_bytes_i64,
+                                                  rocke_value_t* soffset /* NULL => const_i32(0) */);
+
 /* ----------------------------------------------------------------- TensorView */
 
 /* pointer + descriptor + address space. Analogue of CK Tile's tensor_view.

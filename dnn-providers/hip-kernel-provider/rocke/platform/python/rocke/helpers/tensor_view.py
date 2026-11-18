@@ -62,7 +62,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, Sequence, Tuple, Union
 
-from ..core.ir import IRBuilder, Type, Value
+from ..core.ir import I32, IRBuilder, Type, Value
 
 
 StrideElem = Union[int, Value]
@@ -86,6 +86,7 @@ __all__ = [
     "make_naive_tensor_descriptor_packed",
     "make_naive_tensor_view_packed",
     "make_tensor_coordinate",
+    "make_tile_buffer_resource",
     "make_tile_window",
     "move_tensor_coordinate",
     "view_from_transforms_descriptor",
@@ -262,6 +263,53 @@ def make_buffer_resource(
         soffset = b.const_i32(0)
     n = int(num_bytes) if isinstance(num_bytes, int) else 0
     return BufferResource(rsrc=rsrc, soffset=soffset, num_bytes=n)
+
+
+# The AMDGPU buffer descriptor's num_records field is i32; INT32_MAX is the
+# sentinel ``make_buffer_resource`` callers already clamp an i32 buffer size
+# to (see e.g. conv_direct_nongrouped's _OOB_BASE), kept at 2**31-1 so the
+# existing OOB-masking trick (a byte offset of INT32_MAX reads/drops as OOB)
+# keeps working once ``num_records`` is reduced from an i64 remaining size.
+_TILE_RSRC_MAX_RECORDS = (1 << 31) - 1
+
+
+def make_tile_buffer_resource(
+    b: IRBuilder,
+    ptr: Value,
+    *,
+    origin_i64: Value,
+    total_bytes_i64: Value,
+    soffset: Optional[Value] = None,
+) -> BufferResource:
+    """Build a :class:`BufferResource` whose tile origin is a 64-bit byte
+    offset -- the large-tensor (``addr64``) forward addressing primitive.
+    See ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 5.
+
+    Two-level address: ``origin_i64`` (a workgroup-uniform i64 byte offset
+    that may exceed 2 GiB) is scalarized to SGPR and folded into the
+    pointer via :meth:`IRBuilder.global_ptr_offset` -- not
+    :meth:`IRBuilder.global_ptr_add`, because an empty or fully-masked
+    tile's origin is allowed to land outside the allocation, and only
+    ``global_ptr_offset`` permits that. The resulting buffer resource's
+    ``num_records`` is ``clamp(total_bytes_i64 - origin_i64, 0, 2**31-1)``,
+    still an i32, so the existing OOB-zero behavior, the vector load/store
+    family and ``async_buffer_load_lds`` all keep working unchanged; the
+    per-lane ``voffset`` into this resource stays i32 and is the caller's
+    responsibility (the within-tile delta, never the origin).
+    """
+    origin_sgpr = b.to_sgpr_u32(origin_i64)
+    base_ptr = b.global_ptr_offset(ptr, origin_sgpr)
+    remaining = b.sub(total_bytes_i64, origin_sgpr)
+    # cmp + select, not smax/smin: the scalar smax/smin ops hardcode the i32
+    # LLVM intrinsic regardless of operand width (lower_llvm.py
+    # _op_arith_smax/_op_arith_smin), so an i64 operand there would emit
+    # mistyped IR. cmp/select are width-generic.
+    zero = b.const_i64(0)
+    cap = b.const_i64(_TILE_RSRC_MAX_RECORDS)
+    nonneg = b.select(b.cmp_lt(remaining, zero), zero, remaining)
+    clamped = b.select(b.cmp_gt(nonneg, cap), cap, nonneg)
+    num_records = b.trunc(clamped, I32)
+    return make_buffer_resource(b, base_ptr, num_bytes=num_records, soffset=soffset)
 
 
 def _dtype_elem_bytes(dtype: Type) -> int:

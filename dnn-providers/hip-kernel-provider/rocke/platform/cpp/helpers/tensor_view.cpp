@@ -1078,6 +1078,48 @@ rocke_status_t rocke_tv_make_buffer_resource(rocke_ir_builder_t* b,
     return ROCKE_OK;
 }
 
+rocke_status_t rocke_tv_make_tile_buffer_resource(rocke_ir_builder_t* b,
+                                                  rocke_tv_buffer_resource_t* out,
+                                                  rocke_value_t* ptr,
+                                                  rocke_value_t* origin_i64,
+                                                  rocke_value_t* total_bytes_i64,
+                                                  rocke_value_t* soffset)
+{
+    /* Python make_tile_buffer_resource:
+     *   origin_sgpr = b.to_sgpr_u32(origin_i64)
+     *   base_ptr = b.global_ptr_offset(ptr, origin_sgpr)
+     *   remaining = b.sub(total_bytes_i64, origin_sgpr)
+     *   zero = b.const_i64(0); cap = b.const_i64(2**31-1)
+     *   nonneg = b.select(b.cmp_lt(remaining, zero), zero, remaining)
+     *   clamped = b.select(b.cmp_gt(nonneg, cap), cap, nonneg)
+     *   num_records = b.trunc(clamped, I32)
+     *   return make_buffer_resource(b, base_ptr, num_bytes=num_records, soffset=soffset)
+     */
+    rocke_value_t* origin_sgpr;
+    rocke_value_t* base_ptr;
+    rocke_value_t* remaining;
+    rocke_value_t* zero;
+    rocke_value_t* cap;
+    rocke_value_t* nonneg;
+    rocke_value_t* clamped;
+    rocke_value_t* num_records;
+    if(b == NULL || out == NULL)
+        return ROCKE_ERR_VALUE;
+    origin_sgpr = rocke_b_to_sgpr_u32(b, origin_i64);
+    base_ptr = rocke_b_global_ptr_offset(b, ptr, origin_sgpr);
+    remaining = rocke_b_sub(b, total_bytes_i64, origin_sgpr);
+    zero = rocke_b_const_i64(b, 0);
+    /* Same 2**31-1 value as ROCKE_TV_OOB_SENTINEL above, for a different
+     * reason here: the AMDGPU buffer descriptor's num_records field is i32,
+     * so the i64 "remaining bytes" term must be clamped to it before the
+     * truncate below. */
+    cap = rocke_b_const_i64(b, ROCKE_TV_OOB_SENTINEL);
+    nonneg = rocke_b_select(b, rocke_b_cmp_lt(b, remaining, zero), zero, remaining);
+    clamped = rocke_b_select(b, rocke_b_cmp_gt(b, nonneg, cap), cap, nonneg);
+    num_records = rocke_b_trunc(b, clamped, rocke_i32());
+    return rocke_tv_make_buffer_resource(b, out, base_ptr, num_records, soffset);
+}
+
 rocke_status_t rocke_tv_make_buffer_view(rocke_tensor_view_t* out,
                                          const rocke_tv_buffer_resource_t* rsrc,
                                          const int* shape,

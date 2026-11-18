@@ -473,6 +473,11 @@ def _conv_signature(
         "f32*": "ptr<f32, global>",
         "i32*": "ptr<i32, global>",
         "i32": "i32",
+        # Large-tensor (addr64) scalars: see
+        # library/kernels/conv/docs/large_tensor_addr64_plan.md. Not yet
+        # used by any arg-name list; ``runtime/packing.py`` already packs it
+        # (SCALAR_ARG_FORMATS["i64"]).
+        "i64": "i64",
     }
     out: List[Dict[str, Any]] = []
     for name, kind in arg_names:

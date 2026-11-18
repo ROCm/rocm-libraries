@@ -153,6 +153,36 @@ def test_fwd_abi_is_pipeline_independent(label, pipeline, extra):
     )
 
 
+def test_i64_kernarg_kind_is_8_byte_aligned():
+    """The ``"i64"`` ``ArgSpec`` kind (large-tensor ``addr64`` ABI; see
+    ``library/kernels/conv/docs/large_tensor_addr64_plan.md``) is declared
+    but not yet produced by any arg-name list -- this pins the signature
+    builder's handling of it in isolation, ahead of a family actually using
+    it. Existing i32/pointer entries must be unaffected."""
+    from kernels.common.conv_abi import _conv_signature
+
+    sig = _conv_signature(
+        [("A", "a"), ("A_bytes", "i64"), ("p_N", "i32")], "fp16", "fp16", "fp16"
+    )
+    assert [a["type"] for a in sig] == ["ptr<f16, global>", "i64", "i32"]
+    assert [a["size_bytes"] for a in sig] == [8, 8, 4]
+    # Every existing i32-only signature is unaffected by the new kind.
+    assert all(
+        a["type"] != "i64"
+        for a in conv_args_signature("fp16", direction="fwd", is_3d=True)
+    )
+
+
+def test_emit_param_block_declares_an_i64_param():
+    from rocke.core.ir import I64, IRBuilder
+    from kernels.common._conv_implicit_gemm_common import emit_param_block
+
+    b = IRBuilder("i64_param_block")
+    out = emit_param_block(b, [("p_N", "i32"), ("total_bytes", "i64")])
+    assert out["total_bytes"].type is I64
+    assert [p.name for p in b.kernel.params] == ["p_N", "total_bytes"]
+
+
 # ---------------------------------------------------------------------
 # wgrad — one case per optional trailing-arg combination
 # ---------------------------------------------------------------------

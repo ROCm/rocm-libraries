@@ -39,7 +39,11 @@ typedef enum
     ROCKE_CONV_ARG_D, /* "d"    -- pointer with the D operand dtype */
     ROCKE_CONV_ARG_F32_PTR, /* "f32*" */
     ROCKE_CONV_ARG_I32_PTR, /* "i32*" */
-    ROCKE_CONV_ARG_I32 /* "i32"  -- scalar */
+    ROCKE_CONV_ARG_I32, /* "i32"  -- scalar */
+    /* "i64" -- scalar. Large-tensor (addr64) ABI; see
+     * library/kernels/conv/docs/large_tensor_addr64_plan.md. Not yet
+     * produced by any arg-name list below. */
+    ROCKE_CONV_ARG_I64
 } rocke_conv_arg_kind_t;
 
 #define ROCKE_CONV_ARG_NAME_CAP 32
@@ -57,7 +61,7 @@ typedef struct
     int count;
 } rocke_conv_arg_list_t;
 
-/* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32"). */
+/* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32", "i64"). */
 const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind);
 
 /* Implicit-GEMM ABI for one direction ("fwd", "wgrad", "dgrad"). two_stage

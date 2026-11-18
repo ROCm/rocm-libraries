@@ -261,6 +261,18 @@ def test_artifact_stem_fits_a_file_name():
     assert other != stem
 
 
+def test_addr64_is_omitted_from_the_name_at_its_default():
+    """``addr64`` (large-tensor forward addressing) must not disturb an
+    existing name while it sits at its default -- same rule as
+    ``prefetch_addr``/``ws_replicas``."""
+    base = _base_identity(direct=False)
+    assert dataclasses.replace(base, addr64=False).label() == base.label()
+    with_a64 = dataclasses.replace(base, addr64=True)
+    assert with_a64.label() != base.label()
+    assert "-a64-" in with_a64.label()
+    _round_trips(with_a64)
+
+
 def test_launch_suffix_is_ignored():
     ident = _base_identity(direct=False)
     assert KernelIdentity.from_label(f"  {ident.label()} @split_k=4\n") == ident

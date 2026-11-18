@@ -280,6 +280,8 @@ const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind)
         return "i32*";
     case ROCKE_CONV_ARG_I32:
         return "i32";
+    case ROCKE_CONV_ARG_I64:
+        return "i64";
     }
     return "?";
 }
@@ -397,6 +399,10 @@ bool rocke_conv_emit_param_block(rocke_ir_builder_t* b,
         if(a->kind == ROCKE_CONV_ARG_I32)
         {
             v = rocke_b_param(b, a->name, rocke_i32(), NULL);
+        }
+        else if(a->kind == ROCKE_CONV_ARG_I64)
+        {
+            v = rocke_b_param(b, a->name, rocke_i64(), NULL);
         }
         else
         {

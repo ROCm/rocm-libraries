@@ -86,6 +86,7 @@ _BASELINE: Dict[str, Any] = dict(
     halo_max_wo=0,
     num_load_waves=0,
     cshuffle_no_alias=False,
+    addr64=False,
     is_3d=False,
     is_pointwise=False,
     filter_h=0,
@@ -283,6 +284,7 @@ _TAGS: Tuple[_Tag, ...] = (
     _num(("halo_max_wo",), "hwo"),
     _num(("max_sub_gemms",), "msg"),
     _num(("block_h",), "bh"),
+    _Tag(("addr64",), "a64"),
 )
 
 _WAVE = _num(("wave_size",), "wave")

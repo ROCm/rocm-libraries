@@ -37,6 +37,7 @@ from rocke.core.ir import (
     F16,
     F32,
     I32,
+    I64,
     TF32,
     IRBuilder,
     Type,
@@ -564,6 +565,8 @@ def emit_param_block(
     for name, kind in arg_names:
         if kind == "i32":
             out[name] = b.param(name, I32)
+        elif kind == "i64":
+            out[name] = b.param(name, I64)
         else:
             if declare_ptr is None:
                 raise ValueError(
