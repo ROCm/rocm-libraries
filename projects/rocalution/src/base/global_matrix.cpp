@@ -2240,6 +2240,19 @@ namespace rocalution
 
         this->matrix_interior_.InitialPairwiseAggregation(
             tmp, beta, nc, G, Gsize, rG, rGsize, ordering);
+
+#ifdef SUPPORT_MULTINODE
+        // A process without an aggregate cannot coarsen its part of the operator, so no process
+        // coarsens this level
+        int local_empty = (nc == 0) ? 1 : 0;
+        int global_empty;
+        communication_sync_allreduce_single_sum(&local_empty, &global_empty, this->pm_->comm_);
+
+        if(global_empty > 0)
+        {
+            nc = 0;
+        }
+#endif
     }
 
     template <typename ValueType>
