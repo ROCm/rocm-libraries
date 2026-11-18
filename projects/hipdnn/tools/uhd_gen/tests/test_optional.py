@@ -505,6 +505,72 @@ def test_a_rewrite_that_would_change_a_bound_feature_is_refused(
     assert _files(path) == files
 
 
+def test_a_rewrite_that_leaves_a_graph_without_the_feature_unscorable_is_refused(
+    tmp_path, evaluator, monkeypatch
+):
+    """The wrap claims the scale but leaves it bare: bound rows agree, and every row without
+    the scale is still unscorable."""
+    from uhd_gen import rewrite
+
+    monkeypatch.setattr(
+        rewrite,
+        "safe_signature",
+        lambda *_: ([SCALE, Q_DIM], [{"reference": SCALE, "default": 1.0}]),
+    )
+    path = _installed_model(tmp_path, [SCALE, Q_DIM])
+    files = _files(path)
+
+    with pytest.raises(ValueError, match="attn_scale_value"):
+        rewrite.rewrite_descriptor(path, _rewrite_args([path]))
+    assert _files(path) == files
+
+
+#: The features_hash the repack tests restamp an artifact with.
+NEW_HASH = "sha256:0123456789abcdef"
+
+
+def _gbdt_pack_that(monkeypatch, change):
+    """Patches the tree artifact's packer to apply `change` to a model before packing it
+    under the new features_hash, as a repacking bug would."""
+    from hipdnn_flatbuffers_sdk.data_objects import GbdtModel
+
+    pack = GbdtModel.GbdtModelT.Pack
+
+    def changed(self, builder):
+        if self.featuresHash == NEW_HASH:
+            saved = dict(vars(self))
+            change(self)
+            offset = pack(self, builder)
+            vars(self).update(saved)
+            return offset
+        return pack(self, builder)
+
+    monkeypatch.setattr(GbdtModel.GbdtModelT, "Pack", changed)
+
+
+def test_a_repack_that_loses_the_new_hash_is_refused(monkeypatch):
+    from uhd_gen.rewrite import restamp_artifact
+
+    data = leaf_model("sha256:fedcba9876543210", 2)
+    _gbdt_pack_that(monkeypatch, lambda model: setattr(model, "featuresHash", None))
+    with pytest.raises(ValueError, match="does not record the new features_hash"):
+        restamp_artifact(data, "tree_data", NEW_HASH)
+
+
+def test_a_repack_that_changes_another_value_is_refused(monkeypatch):
+    from uhd_gen.rewrite import restamp_artifact
+
+    data = leaf_model("sha256:fedcba9876543210", 2)
+    _gbdt_pack_that(monkeypatch, lambda model: setattr(model, "learningRate", 0.5))
+    with pytest.raises(ValueError, match="other than features_hash"):
+        restamp_artifact(data, "tree_data", NEW_HASH)
+
+    # Unpatched, the same artifact restamps.
+    monkeypatch.undo()
+    restamped, _ = restamp_artifact(data, "tree_data", NEW_HASH)
+    assert restamped != data
+
+
 def test_an_artifact_the_loader_would_refuse_leaves_both_files_untouched(
     tmp_path, evaluator, monkeypatch
 ):

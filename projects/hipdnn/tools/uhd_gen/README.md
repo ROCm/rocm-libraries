@@ -732,6 +732,14 @@ now scorable. The artifact and then the descriptor are written through temporary
 `os.replace`, after the staged artifact passes the loader's checks. An adapter whose artifact
 embeds the hash but that has no rule (`table`) is refused: retrain it.
 
+The proof covers only graphs the old model could already score. Graphs that become scorable
+(those lacking a wrapped feature) are outside what the old model trained on: they reach it
+with the default or the marker, which no training row held, and go down whichever branches
+that value selects. A model whose training rows always bound the feature has learnt nothing
+about such graphs, so before promoting a rewritten model, `evaluate` it on rows that lack the
+feature (for example a corpus with the optional `form`s), or retrain it on a corpus that
+includes them.
+
 A ranker's model hash and features hash are inputs to its engine's selector revision, so
 rewriting a `sort_kernel_catalog` model changes it, and the `predict_engine` models recording
 the old one are unavailable until they are restamped or retrained. The report's
