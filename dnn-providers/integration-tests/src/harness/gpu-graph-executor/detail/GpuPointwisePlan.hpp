@@ -30,7 +30,9 @@ struct GpuPointwiseUnaryParams
         const std::optional<float> reluFwdLowerClip,
         const std::optional<float> reluFwdUpperClip,
         const std::optional<float> reluFwdLowerSlope,
-        const std::optional<float> swishFwdBeta)
+        const std::optional<float> swishFwdBeta,
+        const std::optional<float> eluFwdAlpha,
+        const std::optional<float> softplusFwdBeta)
         : inputTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(inputAttributes))
         , outputTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(outputAttributes))
         , pointwiseMode(pointwiseMode)
@@ -38,6 +40,8 @@ struct GpuPointwiseUnaryParams
         , reluFwdUpperClip(reluFwdUpperClip)
         , reluFwdLowerSlope(reluFwdLowerSlope)
         , swishFwdBeta(swishFwdBeta)
+        , eluFwdAlpha(eluFwdAlpha)
+        , softplusFwdBeta(softplusFwdBeta)
     {
     }
 
@@ -48,6 +52,8 @@ struct GpuPointwiseUnaryParams
     std::optional<float> reluFwdUpperClip;
     std::optional<float> reluFwdLowerSlope;
     std::optional<float> swishFwdBeta;
+    std::optional<float> eluFwdAlpha;
+    std::optional<float> softplusFwdBeta;
 };
 
 struct GpuPointwiseBinaryParams
@@ -224,6 +230,8 @@ public:
             = _params.reluFwdUpperClip.value_or(std::numeric_limits<float>::max());
         const float lowerSlope = _params.reluFwdLowerSlope.value_or(0.0f);
         const float swishBeta = _params.swishFwdBeta.value_or(1.0f);
+        const float eluAlpha = _params.eluFwdAlpha.value_or(1.0f);
+        const float softplusBeta = _params.softplusFwdBeta.value_or(1.0f);
 
         hipdnn_gpu_ref::GpuReferencePointwise::
             pointwiseCompute<OutputDataType, InputDataType, ComputeDataType>(_params.pointwiseMode,
@@ -232,7 +240,9 @@ public:
                                                                              lowerClip,
                                                                              upperClip,
                                                                              lowerSlope,
-                                                                             swishBeta);
+                                                                             swishBeta,
+                                                                             eluAlpha,
+                                                                             softplusBeta);
     }
 
 private:
@@ -381,6 +391,18 @@ public:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_FWD:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::EXP:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOG:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SQRT:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RSQRT:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIN:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TAN:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ERF:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CEIL:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::FLOOR:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD:
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
             break;
         default:
             return false;
@@ -421,7 +443,9 @@ public:
                                        nodeAttributes->relu_lower_clip(),
                                        nodeAttributes->relu_upper_clip(),
                                        nodeAttributes->relu_lower_clip_slope(),
-                                       nodeAttributes->swish_beta());
+                                       nodeAttributes->swish_beta(),
+                                       nodeAttributes->elu_alpha(),
+                                       nodeAttributes->softplus_beta());
         return std::make_unique<
             GpuPointwiseUnaryPlan<InputDataType, OutputDataType, ComputeDataType>>(
             std::move(params));

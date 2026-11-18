@@ -95,10 +95,19 @@ public:
                                  const float lowerClip,
                                  const float upperClip,
                                  const float lowerSlope,
-                                 const float swishBeta = float{1})
+                                 const float swishBeta = float{1},
+                                 const float eluAlpha = float{1},
+                                 const float softplusBeta = float{1})
     {
-        executeUnaryParamOperation<OutputType, InputType, ComputeType>(
-            operation, output, input, lowerClip, upperClip, lowerSlope, swishBeta);
+        executeUnaryParamOperation<OutputType, InputType, ComputeType>(operation,
+                                                                       output,
+                                                                       input,
+                                                                       lowerClip,
+                                                                       upperClip,
+                                                                       lowerSlope,
+                                                                       swishBeta,
+                                                                       eluAlpha,
+                                                                       softplusBeta);
     }
 
     template <typename OutputType,
@@ -203,7 +212,9 @@ private:
                                    const float lowerClip,
                                    const float upperClip,
                                    const float lowerSlope,
-                                   const float swishBeta = float{1})
+                                   const float swishBeta = float{1},
+                                   const float eluAlpha = float{1},
+                                   const float softplusBeta = float{1})
     {
         validateTensors<OutputType, InputType, ComputeType>(output, input);
 
@@ -220,7 +231,9 @@ private:
                     lowerClip,
                     upperClip,
                     lowerSlope,
-                    swishBeta);
+                    swishBeta,
+                    eluAlpha,
+                    softplusBeta);
         output.memory().markDeviceModified();
     }
 
@@ -434,7 +447,9 @@ private:
                             float lowerClip = 0.f,
                             float upperClip = std::numeric_limits<float>::max(),
                             float lowerSlope = 0.f,
-                            float swishBeta = 1.f);
+                            float swishBeta = 1.f,
+                            float eluAlpha = 1.f,
+                            float softplusBeta = 1.f);
 
     static void launchBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                              const void* input0Ptr,

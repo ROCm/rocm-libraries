@@ -55,7 +55,9 @@ void GpuReferencePointwise::launchUnary(
     const float lowerClip,
     const float upperClip,
     const float lowerSlope,
-    const float swishBeta)
+    const float swishBeta,
+    const float eluAlpha,
+    const float softplusBeta)
 {
     int opCode;
     switch(operation)
@@ -86,6 +88,42 @@ void GpuReferencePointwise::launchUnary(
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD:
         opCode = detail::POINTWISE_UNARY_OP_SWISH_FWD;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::EXP:
+        opCode = POINTWISE_UNARY_OP_EXP;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOG:
+        opCode = POINTWISE_UNARY_OP_LOG;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SQRT:
+        opCode = POINTWISE_UNARY_OP_SQRT;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RSQRT:
+        opCode = POINTWISE_UNARY_OP_RSQRT;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL:
+        opCode = POINTWISE_UNARY_OP_RECIPROCAL;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIN:
+        opCode = POINTWISE_UNARY_OP_SIN;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TAN:
+        opCode = POINTWISE_UNARY_OP_TAN;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ERF:
+        opCode = POINTWISE_UNARY_OP_ERF;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CEIL:
+        opCode = POINTWISE_UNARY_OP_CEIL;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::FLOOR:
+        opCode = POINTWISE_UNARY_OP_FLOOR;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD:
+        opCode = POINTWISE_UNARY_OP_ELU_FWD;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
+        opCode = POINTWISE_UNARY_OP_SOFTPLUS_FWD;
         break;
     default:
         throw std::invalid_argument("Unsupported unary pointwise operation: "
@@ -118,6 +156,8 @@ void GpuReferencePointwise::launchUnary(
     args.lowerSlope = lowerSlope;
     args.upperClip = upperClip;
     args.swishBeta = swishBeta;
+    args.eluAlpha = eluAlpha;
+    args.softplusBeta = softplusBeta;
 
     detail::launchKernel1d(kernel.function(), numBlocks, BLOCK_SIZE, &args, sizeof(args));
 }

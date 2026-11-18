@@ -31,6 +31,18 @@ enum PointwiseOps
     POINTWISE_BINARY_OP_MIN = 16,
     POINTWISE_BINARY_OP_CMP_GT = 17,
     POINTWISE_TERNARY_OP_BINARY_SELECT = 18,
+    POINTWISE_UNARY_OP_EXP = 19,
+    POINTWISE_UNARY_OP_LOG = 20,
+    POINTWISE_UNARY_OP_SQRT = 21,
+    POINTWISE_UNARY_OP_RSQRT = 22,
+    POINTWISE_UNARY_OP_RECIPROCAL = 23,
+    POINTWISE_UNARY_OP_SIN = 24,
+    POINTWISE_UNARY_OP_TAN = 25,
+    POINTWISE_UNARY_OP_ERF = 26,
+    POINTWISE_UNARY_OP_CEIL = 27,
+    POINTWISE_UNARY_OP_FLOOR = 28,
+    POINTWISE_UNARY_OP_ELU_FWD = 29,
+    POINTWISE_UNARY_OP_SOFTPLUS_FWD = 30,
 };
 
 // Maximum number of dimensions the kernels support
@@ -58,6 +70,8 @@ struct PointwiseUnaryArgs
     float upperClip;
     float lowerSlope;
     float swishBeta;
+    float eluAlpha;
+    float softplusBeta;
 };
 
 struct PointwiseBinaryArgs
