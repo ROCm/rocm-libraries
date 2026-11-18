@@ -6,7 +6,8 @@ paths of the attention backward.
 CPU only. A fake torch package whose ``__init__`` raises stands in for the
 wheel: finding its library and its ROCm vintage must never run it.
 
-* ``attention_bwd_comgr`` finds ``<torch>/lib`` comgr and pins it as
+* ``attention_bwd_comgr`` finds torch's comgr (``<torch>/lib``, else TheRock's
+  ``_rocm_sdk_core``) and pins it as
   ``ROCKE_COMGR_LIB`` (an explicit setting wins, ``ROCKE_BWD_NO_COMGR_PIN``
   opts out); the platform names that library's ROCm vintage from the
   package's ``version.py`` without importing it, so the toolchain identity
@@ -53,9 +54,32 @@ def fake_torch(tmp_path, monkeypatch):
     monkeypatch.delenv(pc.COMGR_LIB_ENV, raising=False)
     monkeypatch.delenv(pc.HIP_LIB_ENV, raising=False)
     monkeypatch.delenv(pc.NO_PIN_ENV, raising=False)
+    # No rocm-sdk-core wheel unless a test adds one (the host's may be installed).
+    from rocke.runtime import runtime_coexistence
+
+    monkeypatch.setattr(runtime_coexistence, "_rocm_sdk_core_dirs", lambda: [])
     pc.torch_package_dir.cache_clear()
     yield pkg
     pc.torch_package_dir.cache_clear()
+
+
+@pytest.fixture
+def fake_therock(fake_torch, monkeypatch):
+    """A TheRock torch: no comgr in ``<torch>/lib``; comgr and the HIP runtime,
+    SONAME only, in a ``_rocm_sdk_core`` package that raises when imported."""
+    from rocke.runtime import runtime_coexistence
+
+    for name in ("libamd_comgr.so", "amd_comgr0702.dll"):
+        (fake_torch / "lib" / name).unlink()
+    sdk = fake_torch.parent / "_rocm_sdk_core"
+    (sdk / "lib").mkdir(parents=True)
+    (sdk / "bin").mkdir()
+    (sdk / "__init__.py").write_text("raise RuntimeError('sdk was imported')\n")
+    (sdk / "lib" / "libamd_comgr.so.3").write_bytes(b"\x7fELF")
+    (sdk / "lib" / "libamdhip64.so.7").write_bytes(b"\x7fELF")
+    (sdk / "bin" / "amd_comgr0702.dll").write_bytes(b"MZ")
+    monkeypatch.setattr(runtime_coexistence, "_rocm_sdk_core_dirs", lambda: [str(sdk)])
+    yield sdk
 
 
 def _lib(pkg) -> str:
@@ -111,6 +135,23 @@ def test_hip_runtime_pin_pairs_with_the_bundled_comgr(fake_torch):
     env = {pc.COMGR_LIB_ENV: _lib(fake_torch)}
     assert pc.pin_production_hip(env) is None and pc.HIP_LIB_ENV not in env
     assert "torch" not in sys.modules
+
+
+def test_therock_wheel_pins_the_sdk_core_comgr_and_hip(fake_therock):
+    """A TheRock torch keeps comgr and the HIP runtime in ``_rocm_sdk_core``
+    under their SONAMEs; both are pinned, as a pair, without importing torch
+    or the SDK package."""
+    if sys.platform == "win32":
+        want = str(fake_therock / "bin" / "amd_comgr0702.dll")
+        assert pc.torch_bundled_comgr() == want
+        return
+    comgr = str(fake_therock / "lib" / "libamd_comgr.so.3")
+    assert pc.torch_bundled_comgr() == comgr
+    env = {}
+    assert pc.pin_production_comgr(env) == comgr
+    assert pc.pin_production_hip(env) == str(fake_therock / "lib" / "libamdhip64.so.7")
+    assert env[pc.COMGR_LIB_ENV] == comgr
+    assert "torch" not in sys.modules and "_rocm_sdk_core" not in sys.modules
 
 
 def test_comgr_cache_is_owned_by_the_process_unless_set(monkeypatch, tmp_path):
