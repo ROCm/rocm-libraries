@@ -5,6 +5,7 @@
 and the fallback to a compile without it."""
 
 import os
+import re
 import shutil
 import stat
 import time
@@ -39,6 +40,13 @@ for a in "$@"; do
             printf ' "/x/clang" "-cc1" "-idirafter" "%s" "-include" "%s" "-x" "hip" "-"\n' \
               "$inc" "__clang_hip_runtime_wrapper.h" >&2
             exit 0;;
+    "-E") [ -e "$dir/preprocess_fails" ] && { echo "preprocessor error" >&2; exit 1; }
+          if [ -e "$dir/preprocessed_headers.txt" ]; then
+            cat "$dir/preprocessed_headers.txt"
+          else
+            cat
+          fi
+          exit 0;;
   esac
 done
 out=""; pch=""; prev=""
@@ -98,7 +106,8 @@ def _cacheEntries(cacheDir):
 def _key(compiler, targets):
     pchArgs = compiler.pchArgs(targets)
     return HKP._computePchKey(
-        pchArgs, targets, HKP._compilerVersion(compiler.path), HKP._headerSearchPaths(pchArgs)
+        pchArgs, targets, HKP._compilerVersion(compiler.path), HKP._headerSearchPaths(pchArgs),
+        HKP._preprocessedHeaderHash(compiler.pchArgs(targets, preprocess=True)),
     )
 
 
@@ -110,6 +119,7 @@ BASE = dict(
     targets=["gfx950"],
     compilerVersion="AMD clang version 22.0.0git (roc-7.2.1 26084 f58b06dce1f9)\n",
     headerSearchPaths=["-idirafter /opt/rocm-7.2.1/include"],
+    headerFingerprint="a" * 64,
 )
 
 
@@ -127,6 +137,7 @@ def test_key_is_deterministic():
         # Same major.minor.patch, another build: clang rejects a PCH across compiler builds.
         ("compilerVersion", "AMD clang version 22.0.0git (roc-7.2.0 25133 0123456789ab)\n"),
         ("headerSearchPaths", ["-idirafter /opt/rocm-7.2.0/include"]),
+        ("headerFingerprint", "b" * 64),
     ],
 )
 def test_every_input_changes_the_key(field, value):
@@ -252,6 +263,9 @@ def test_pch_is_built_with_the_compile_arguments(fakeDriver, monkeypatch):
         "-emit-pch",
         "-fsyntax-only",
         "-",
+    ]
+    assert compiler.pchArgs(["gfx950"], preprocess=True) == [
+        *compiler.default_args, "--offload-arch=gfx950", "-E", "-dD", "-"
     ]
 
 
@@ -499,10 +513,91 @@ def test_unusable_header_search_query_compiles_without_a_pch(fakeDriver, tmp_pat
     assert _pchBuilds(fakeDriver) == []
 
 
+@pytest.mark.parametrize("failure", ["error", "empty"])
+def test_failed_header_preprocessing_compiles_without_a_pch(fakeDriver, tmp_path, failure):
+    if failure == "error":
+        (fakeDriver / "preprocess_fails").touch()
+    else:
+        (fakeDriver / "preprocessed_headers.txt").write_text("")
+    pchPath, objPath = _compileHelpers(_compiler(fakeDriver), tmp_path)
+    assert pchPath is None
+    assert objPath.read_text() == "obj\n"
+    assert len(_calls(fakeDriver, "Kernels.cpp")) == 1
+    assert _pchBuilds(fakeDriver) == []
+
+
 # =========================================================================== #
 # The real compiler
 # =========================================================================== #
 REAL_COMPILER = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "bin" / "amdclang++"
+
+
+@pytest.mark.skipif(not REAL_COMPILER.exists(), reason="needs a ROCm amdclang++")
+@pytest.mark.parametrize("header", ["hip/hip_fp8.h", "hip/amd_detail/amd_hip_fp8.h"])
+@pytest.mark.parametrize("search", ["environment", "build"])
+def test_real_compiler_detects_new_headers_in_unchanged_search_directory(
+    tmp_path, monkeypatch, header, search
+):
+    """A new direct or transitive header can shadow unchanged files recorded in the old PCH."""
+    for name in ("CPATH", "CPLUS_INCLUDE_PATH", "C_INCLUDE_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    rocm = REAL_COMPILER.resolve().parents[3]
+    monkeypatch.setenv("HIP_PATH", str(rocm))
+    monkeypatch.setenv("TENSILE_HELPER_PCH_DIR", str(tmp_path / "pch_cache"))
+    monkeypatch.delenv("TENSILE_DISABLE_HELPER_PCH", raising=False)
+    monkeypatch.delenv("Tensile_CXX_COMPILER_LAUNCHER", raising=False)
+    monkeypatch.setattr(HKP, "_rejections", {})
+    overlay = tmp_path / "include"
+    overlay.mkdir()
+    if search == "environment":
+        monkeypatch.setenv("CPATH", str(overlay))
+    compiler = Component.Compiler(str(REAL_COMPILER), "sha1")
+    pch = HKP.HelperKernelPch()
+    includeDir = overlay if search == "build" else None
+    first = pch.get(compiler, ["gfx950"], includeDir)
+    assert first is not None
+    assert pch.get(compiler, ["gfx950"], includeDir) == first
+    if search == "build":
+        otherBuild = tmp_path / "other_build"
+        otherBuild.mkdir()
+        assert pch.get(compiler, ["gfx950"], otherBuild) == first
+
+    replacement = overlay / header
+    replacement.parent.mkdir(parents=True, exist_ok=True)
+    stock = (rocm / "include" / header).read_text()
+    guard = re.search(r"(?m)^#ifndef (\w+)\n#define \1[ \t]*$", stock)
+    assert guard is not None
+    # Keep HIP's own guard: a new wrapper guard would let the old PCH reparse this header.
+    replacement.write_text(
+        stock[:guard.end()] + "\n#define PCH_TEST_VALUE 2\n" + stock[guard.end():]
+    )
+    # Transitive HIP headers use quoted sibling includes; preserve their original contents.
+    for sibling in (rocm / "include" / header).parent.iterdir():
+        if sibling.name != replacement.name:
+            (replacement.parent / sibling.name).symlink_to(sibling, target_is_directory=sibling.is_dir())
+    second = pch.get(compiler, ["gfx950"], includeDir)
+    assert second is not None and second != first
+    source = tmp_path / "Kernels.cpp"
+    source.write_text(
+        "#include <hip/hip_fp8.h>\n"
+        "#ifndef PCH_TEST_VALUE\n#define PCH_TEST_VALUE 1\n#endif\n"
+        "static_assert(PCH_TEST_VALUE == 2);\n"
+        "__global__ void k(int* p) { *p = PCH_TEST_VALUE; }\n"
+    )
+    args = (str(overlay), ["gfx950"], str(source))
+    compiler(*args, str(tmp_path / "with_pch.o"), pch_path=str(second))
+    compiler(*args, str(tmp_path / "plain.o"))
+    assert pch.get(compiler, ["gfx950"], includeDir) == second
+
+    # A macro unused while parsing the PCH still affects later helper source. Keep size/mtime
+    # unchanged to prove the key sees macro contents rather than relying on clang's stat check.
+    info = replacement.stat()
+    replacement.write_text(replacement.read_text().replace("PCH_TEST_VALUE 2", "PCH_TEST_VALUE 3"))
+    os.utime(replacement, ns=(info.st_atime_ns, info.st_mtime_ns))
+    third = pch.get(compiler, ["gfx950"], includeDir)
+    assert third is not None and third != second
+    source.write_text(source.read_text().replace("PCH_TEST_VALUE == 2", "PCH_TEST_VALUE == 3"))
+    compiler(*args, str(tmp_path / "macro_with_pch.o"), pch_path=str(third))
 
 
 @pytest.mark.skipif(not REAL_COMPILER.exists(), reason="needs a ROCm amdclang++")

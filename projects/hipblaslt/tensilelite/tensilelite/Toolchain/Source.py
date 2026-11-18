@@ -178,7 +178,7 @@ def buildSourceCodeObjectFiles(
     objPath = str(tmpObjDir / objFilename)
     pch = HelperKernelPch()
     with timing_context("python_kernel_build_src_co.pch"):
-        pchPath = pch.get(compiler, cmdlineArchs)
+        pchPath = pch.get(compiler, cmdlineArchs, includeDir)
     with timing_context("python_kernel_build_src_co.compile"):
         _compileHelperSource(
             compiler, pch, pchPath, str(includeDir), cmdlineArchs, str(kernelPath), objPath

@@ -5,11 +5,11 @@
 
 About 0.3 s of every helper-kernel (Kernels.cpp) compile is parsing the HIP headers: the driver's
 implicit __clang_hip_runtime_wrapper.h, <hip/hip_runtime.h>, <hip/hip_ext.h> and <hip/hip_fp8.h>.
-A PCH of exactly those headers is built once per compiler build, HIP install, argument list and
-target, stored next to the helper-kernel cache with HelperKernelCache's pattern (SHA-256 key, a
-temporary directory renamed into place, age-based eviction) and given to the compile with
--include-pch. The TensileLite static headers stay out of it: they are copied into every build
-directory with a new mtime, which clang rejects.
+A PCH of exactly those headers is keyed on compiler build, current preprocessed headers and
+macros, argument list and target, stored next to the helper-kernel cache with HelperKernelCache's
+pattern (SHA-256 key, a temporary directory renamed into place, age-based eviction) and given to
+the compile with -include-pch. The TensileLite static headers stay out of it: they are copied
+into every build directory with a new mtime, which clang rejects.
 
 TENSILE_HELPER_PCH_DIR overrides the location (default ~/.tensile/helper_pch).
 TENSILE_DISABLE_HELPER_PCH=1/YES/ON/TRUE compiles without a PCH.
@@ -25,7 +25,7 @@ import threading
 from pathlib import Path
 from shlex import split
 from subprocess import DEVNULL, PIPE, STDOUT, CalledProcessError, run
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from filelock import FileLock, Timeout
 
@@ -127,12 +127,16 @@ def _headerSearchPaths(pchArgs: List[str]) -> List[str]:
 
 
 def _computePchKey(
-    pchArgs: List[str], targets: List[str], compilerVersion: str, headerSearchPaths: List[str]
+    pchArgs: List[str],
+    targets: List[str],
+    compilerVersion: str,
+    headerSearchPaths: List[str],
+    headerFingerprint: str,
 ) -> str:
-    """SHA-256 of everything a PCH is only valid for: the exact argument list it is built with
+    """SHA-256 of everything a PCH is only valid for: the compiler argument list
     (every -D, -O, -std, sanitizer and target flag: a -D baked into a PCH would leak silently
     into a compile without it), the target, the exact compiler build, where the HIP headers are
-    found, and the headers it contains."""
+    found, and the freshly preprocessed header contents and macro definitions."""
     return hashlib.sha256(
         json.dumps(
             {
@@ -141,9 +145,23 @@ def _computePchKey(
                 "targets": list(targets),
                 "compilerVersion": compilerVersion,
                 "headerSearchPaths": headerSearchPaths,
+                "headerFingerprint": headerFingerprint,
             }
         ).encode()
     ).hexdigest()
+
+
+def _preprocessedHeaderHash(args: List[str]) -> str:
+    """Fingerprint current header lookup, transitive contents and macro definitions.
+
+    Clang's PCH validation checks the old dependency files. It can miss a new, higher-priority
+    header in an unchanged search directory, so query the preprocessor before selecting a PCH.
+    This avoids full C++ parsing while accounting for what a fresh compile would read.
+    """
+    result = run(args, input=PCH_SOURCE, stdout=PIPE, stderr=PIPE, check=True)
+    if not result.stdout:
+        raise ValueError("No preprocessed HIP headers returned by the compiler")
+    return hashlib.sha256(result.stdout).hexdigest()
 
 
 def _isUsable(pchPath: Path) -> bool:
@@ -179,8 +197,13 @@ class HelperKernelPch:
                 self.enabled = False
                 print1(f"# Helper kernel PCH not used, cannot access {self.dir}: {err}")
 
-    def get(self, compiler, targets: List[str]) -> Optional[Path]:
+    def get(
+        self, compiler, targets: List[str], includeDir: Optional[Union[Path, str]] = None
+    ) -> Optional[Path]:
         """The PCH for compiling `targets` with `compiler`, built and stored on a miss.
+
+        Include the build's include directory when resolving HIP headers, so a header there
+        is selected by both preprocessing and the helper compile.
 
         None (compile without a PCH) when disabled, for more than one target (a PCH serves one
         target, and a multi-target compile would give it to every device compile), under a
@@ -190,10 +213,16 @@ class HelperKernelPch:
         """
         if not self.enabled or len(targets) != 1 or compiler.launcher:
             return None
+        includePath = None if includeDir is None else str(Path(includeDir).absolute())
+        # The build-directory path itself need not split entries when it selects the same HIP
+        # headers. Their actual paths, contents and macros are captured by the preprocessor.
         pchArgs = compiler.pchArgs(targets)
         try:
             key = _computePchKey(
-                pchArgs, targets, _compilerVersion(compiler.path), _headerSearchPaths(pchArgs)
+                pchArgs, targets, _compilerVersion(compiler.path), _headerSearchPaths(pchArgs),
+                _preprocessedHeaderHash(
+                    compiler.pchArgs(targets, preprocess=True, include_path=includePath)
+                ),
             )
         except (OSError, CalledProcessError, ValueError) as err:
             print1(f"# Helper kernel PCH not used, querying the compiler failed: {err}")
@@ -211,9 +240,10 @@ class HelperKernelPch:
             return pchPath
 
         print1(f"# Helper kernel PCH MISS ({key[:12]}...)")
-        return self._build(compiler, targets, key)
+        return self._build(compiler, targets, key, includePath)
 
-    def _build(self, compiler, targets: List[str], key: str) -> Optional[Path]:
+    def _build(self, compiler, targets: List[str], key: str,
+               includePath: Optional[str]=None) -> Optional[Path]:
         """Build into a temporary directory, then rename it into place: safe under concurrent
         builds of the same key (xdist workers, overlapping helper compiles). Publication and
         removal share a lock, so repairing an invalid entry preserves a valid concurrent
@@ -225,7 +255,10 @@ class HelperKernelPch:
             print1(f"# Helper kernel PCH not used, cannot write {self.dir}: {err}")
             return None
         try:
-            compiler.buildPch(targets, PCH_SOURCE, tmpDir / _PCH_FILE)
+            if includePath is None:
+                compiler.buildPch(targets, PCH_SOURCE, tmpDir / _PCH_FILE)
+            else:
+                compiler.buildPch(targets, PCH_SOURCE, tmpDir / _PCH_FILE, include_path=includePath)
         except (OSError, RuntimeError) as err:
             shutil.rmtree(tmpDir, ignore_errors=True)
             print1(f"# Helper kernel PCH build failed, compiling without it: {err}")
