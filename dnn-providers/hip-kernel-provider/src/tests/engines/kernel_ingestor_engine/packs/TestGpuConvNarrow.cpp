@@ -278,6 +278,9 @@ struct DeviceCase
     bool specials = false;
     /// Run only the first admitted config (a large case).
     bool oneConfig = false;
+    /// Served only with 160 KiB of LDS (gfx950): a 7x7 stem's 147 or a 3x7x7 stem's 441
+    /// (narrow channel, tap) columns of products outgrow 64 KiB.
+    bool largeLds = false;
 };
 
 ConvShape conv(int64_t c,
@@ -333,6 +336,7 @@ std::vector<DeviceCase> deviceCases()
         // Backward data: conv(c = dx channels, k = dy channels, dx extents, ...).
         const auto bwd = ConvDirection::BACKWARD_DATA;
         cases.push_back({l + "Bwd7x7S2C3", conv(3, 64, {45, 61}, {7, 7}, {2, 2}, {3, 3}, cl), bwd});
+        cases.back().largeLds = true;
         cases.push_back(
             {l + "Bwd7x7S2C1", conv(1, 24, {20, 21}, {7, 7}, {2, 2}, {3, 3}, cl, 1), bwd});
         cases.push_back(
@@ -347,11 +351,13 @@ std::vector<DeviceCase> deviceCases()
         cases.push_back({l + "Bwd3x7x7S122C3",
                          conv(3, 24, {6, 30, 30}, {3, 7, 7}, {1, 2, 2}, {1, 3, 3}, cl, 1),
                          bwd});
+        cases.back().largeLds = true;
         cases.push_back(
             {l + "Bwd1x1C3", conv(3, 48, {13, 17}, {1, 1}, {1, 1}, {0, 0}, cl, 1), bwd});
         auto bwdConvolution = conv(3, 40, {21, 19}, {7, 7}, {2, 2}, {3, 3}, cl, 1);
         bwdConvolution.mode = ConvMode::CONVOLUTION;
         cases.push_back({l + "Bwd7x7S2ConvolutionMode", bwdConvolution, bwd});
+        cases.back().largeLds = true;
 
         cases.push_back({l + "3x3K3Specials",
                          conv(32, 3, {13, 37}, {3, 3}, {1, 1}, {1, 1}, cl, 1),
@@ -361,6 +367,7 @@ std::vector<DeviceCase> deviceCases()
                          conv(3, 24, {23, 30}, {7, 7}, {2, 2}, {3, 3}, cl, 1),
                          bwd,
                          true});
+        cases.back().largeLds = true;
     }
     // Backward weights: an output layer's (K <= 8) and a stem's (C <= 8), conv(c, k, x extents).
     const auto wrw = ConvDirection::BACKWARD_WEIGHTS;
@@ -391,6 +398,7 @@ std::vector<DeviceCase> deviceCases()
         cases.push_back({l + "3x7x7S122C3",
                          conv(3, 24, {6, 30, 30}, {3, 7, 7}, {1, 2, 2}, {1, 3, 3}, cl, 1),
                          wrw});
+        cases.back().largeLds = true;
         cases.push_back({l + "4x4S4C3", conv(3, 48, {36, 44}, {4, 4}, {4, 4}, {0, 0}, cl, 1), wrw});
         auto wrwConvolution = conv(3, 40, {21, 19}, {7, 7}, {2, 2}, {3, 3}, cl, 1);
         wrwConvolution.mode = ConvMode::CONVOLUTION;
@@ -623,8 +631,15 @@ void runCase(const DeviceCase& deviceCase)
             break;
         }
     }
-    // The vector-ALU configs ship everywhere: every case is served on every device.
-    EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    // The vector-ALU configs ship everywhere: every case is served on every device, but those
+    // whose products outgrow 64 KiB of LDS, which the 160 KiB devices serve.
+    hipDeviceProp_t properties{};
+    ASSERT_EQ(hipGetDeviceProperties(&properties, 0), hipSuccess);
+    if(!deviceCase.largeLds
+       || conv_narrow::ldsLimitOf(properties.gcnArchName) >= int64_t{160} * 1024)
+    {
+        EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    }
 }
 
 class TestGpuConvNarrow : public ::testing::TestWithParam<DeviceCase>

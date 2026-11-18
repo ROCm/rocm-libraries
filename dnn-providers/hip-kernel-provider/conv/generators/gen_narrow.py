@@ -47,9 +47,8 @@ ES = {"FLOAT": 4, "HALF": 2, "BFLOAT16": 2}
 # valu everywhere (the floor: any channel count, gfx906, and fp32 on RDNA, which has no fp32
 # matrix core).
 SHIPS = [
-    ("gfx950", 160 * 1024, ["mfma16x32_f16", "mfma16x32_bf16"]),
-    ("gfx908,gfx90a,gfx942,gfx950", 64 * 1024, ["mfma16_f32"]),
-    ("gfx908,gfx90a,gfx942", 64 * 1024, ["mfma16_f16"]),
+    ("gfx950", 160 * 1024, ["mfma16x32_f16", "mfma16x32_bf16", "mfma16_f32"]),
+    ("gfx908,gfx90a,gfx942", 64 * 1024, ["mfma16_f16", "mfma16_f32"]),
     ("gfx90a,gfx942", 64 * 1024, ["mfma16_bf16"]),
     ("gfx908", 64 * 1024, ["mfma16_bf16_908"]),
     ("gfx11", 64 * 1024, ["wmma11_f16", "wmma11_bf16"]),
@@ -59,7 +58,6 @@ SHIPS = [
 # Catalog files: one a ship group (the repository caps a file at 500 KB).
 PACK_OF = {
     "gfx950": "gfx950",
-    "gfx908,gfx90a,gfx942,gfx950": "cdna_f32",
     "gfx908,gfx90a,gfx942": "cdna",
     "gfx90a,gfx942": "cdna",
     "gfx908": "gfx908",
@@ -85,7 +83,14 @@ def run_of(atom):
 # stride 2, 3x7x7 video stems, stride-1 3x3 / 3x3x3 and 1x1).
 FILTERS = {
     "FWD": [(3, 3, 3, 1), (1, 3, 3, 1), (1, 1, 1, 1), (1, 1, 7, 1)],
-    "BWD": [(1, 7, 7, 2), (3, 7, 7, 2), (1, 3, 3, 1), (3, 3, 3, 1)],
+    "BWD": [
+        (1, 7, 7, 2),
+        (3, 7, 7, 2),
+        (1, 3, 3, 2),
+        (1, 3, 3, 1),
+        (3, 3, 3, 1),
+        (1, 1, 1, 1),
+    ],
 }
 # Reduction-channel tiers of the matrix-core configs: a config holds cm channels and serves the
 # graphs whose channels round up into (previous tier, cm]; a graph's channels pick one tier.
