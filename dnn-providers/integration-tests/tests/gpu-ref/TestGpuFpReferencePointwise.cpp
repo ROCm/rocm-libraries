@@ -1180,6 +1180,61 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
     assertAllClose(outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, 5.0f));
 }
 
+TEST(TestGpuPointwiseRefEluForward, WithAlphaVal)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> inputTensor({1, 1, 4, 4});
+    Tensor<float> outputCpuTensor({1, 1, 4, 4});
+    Tensor<float> outputGpuTensor({1, 1, 4, 4});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 3.0f;
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
+    auto operation = PointwiseMode::ELU_FWD;
+    const float alpha = 2.5f;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor, 0.f, 0.f, 0.f, 1.f, alpha);
+
+    GpuReferencePointwise::pointwiseCompute<float>(
+        operation, outputGpuTensor, inputTensor, 0.f, 0.f, 0.f, 1.f, alpha);
+
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
+}
+
+TEST(TestGpuPointwiseRefSoftplusForward, WithBetaVal)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> inputTensor({1, 1, 4, 4});
+    Tensor<float> outputCpuTensor({1, 1, 4, 4});
+    Tensor<float> outputGpuTensor({1, 1, 4, 4});
+
+    // Spread the values so that some are above the threshold where softplus falls back to x
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 12.0f;
+    fillWithRandomValues(inputTensor, -fillRange, fillRange, seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
+    auto operation = PointwiseMode::SOFTPLUS_FWD;
+    const float beta = 2.0f;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor, 0.f, 0.f, 0.f, 1.f, 1.f, beta);
+
+    GpuReferencePointwise::pointwiseCompute<float>(
+        operation, outputGpuTensor, inputTensor, 0.f, 0.f, 0.f, 1.f, 1.f, beta);
+
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
+}
+
 // --- Test NaN and infinity handling ---
 
 // The CPU reference uses std::max and std::min: a NaN first operand propagates and a NaN second
@@ -1220,6 +1275,9 @@ using TestGpuPointwiseUnaryRef4DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseUnaryRef5DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseBinaryRef4DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseBinaryRef5DFp32 = PointwiseTestSuite<float>;
+using TestGpuPointwiseUnarySpecialValuesFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseUnarySpecialValuesBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseUnarySpecialValuesFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseTernaryRef4DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseTernaryRef5DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseTernaryRef4DBfp16 = PointwiseTestSuite<BFloat16Type>;
@@ -1315,6 +1373,21 @@ TEST_P(TestGpuPointwiseTernaryRef4DFp32, MatchesCpuRef)
 TEST_P(TestGpuPointwiseTernaryRef5DFp32, MatchesCpuRef)
 {
     this->runPointwiseTernaryTest();
+}
+
+TEST_P(TestGpuPointwiseUnarySpecialValuesFp16, MatchesCpuRef)
+{
+    this->runPointwiseUnarySpecialValuesTest();
+}
+
+TEST_P(TestGpuPointwiseUnarySpecialValuesBfp16, MatchesCpuRef)
+{
+    this->runPointwiseUnarySpecialValuesTest();
+}
+
+TEST_P(TestGpuPointwiseUnarySpecialValuesFp32, MatchesCpuRef)
+{
+    this->runPointwiseUnarySpecialValuesTest();
 }
 
 // ============================================================================
@@ -1420,3 +1493,17 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseTernaryRef5DFp32,
                          ::testing::ValuesIn(getLarge5dTernaryPointwiseCases()));
+
+// ============================================================================
+// Special values (signed zeros, NaN, infinities, a negative number)
+// ============================================================================
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuPointwiseUnarySpecialValuesFp32,
+                         ::testing::ValuesIn(getUnarySpecialValuePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseUnarySpecialValuesFp16,
+                         ::testing::ValuesIn(getUnarySpecialValuePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseUnarySpecialValuesBfp16,
+                         ::testing::ValuesIn(getUnarySpecialValuePointwiseCases()));
