@@ -55,7 +55,7 @@ def _overrideLayers(name: str):
     return base, full
 
 
-def _effectiveOverrides(name: str) -> dict:
+def archCapOverrides(name: str) -> dict:
     """The capabilities a spec ends up with, both layers merged."""
     merged: dict = {}
     for layer in _overrideLayers(name):
@@ -134,8 +134,8 @@ def _rejectConflictingArchNames(archNames: List[str]) -> None:
             namesByIsa[isa].append(spec)
 
     for isa, names in namesByIsa.items():
-        first = _effectiveOverrides(names[0])
-        conflicting = [n for n in names[1:] if _effectiveOverrides(n) != first]
+        first = archCapOverrides(names[0])
+        conflicting = [n for n in names[1:] if archCapOverrides(n) != first]
         if conflicting:
             raise ValueError(
                 f"Architectures {names} share ISA {tuple(isa)} but declare different "

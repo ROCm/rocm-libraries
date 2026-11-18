@@ -3484,6 +3484,84 @@ def cases():
             build_fwd_small_wmma_case(_kind, _prob, **_over),
         )
 
+    # --- conv_direct_fwd_small{c,k}_mfma: wave64 MFMA forward of tiny channel
+    # counts (gfx950). Buffer-load window staging; no llvm23-gated op, so every
+    # flavor builds them. The C++ twin is gated by
+    # library/tests/parity/conv_fwd_small_mfma_emit.*.
+    def build_fwd_small_mfma_case(kind, prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+            from kernels.common.conv_fwd_small_mfma import (
+                FwdSmallcMfmaSpec,
+                FwdSmallkMfmaSpec,
+                build_fwd_smallc_mfma,
+                build_fwd_smallk_mfma,
+            )
+
+            p = DirectConvProblem(N=2, H=32, W=40, groups=1, **prob_kw)
+            if kind == "smallc":
+                return build_fwd_smallc_mfma(
+                    FwdSmallcMfmaSpec(problem=p, **spec_kw), arch="gfx950"
+                )
+            return build_fwd_smallk_mfma(
+                FwdSmallkMfmaSpec(problem=p, **spec_kw), arch="gfx950"
+            )
+
+        return _build
+
+    for _kind, _case_id, _prob, _over in (
+        (
+            "smallc",
+            "bf16_c3_default",
+            dict(cpg=3, kpg=64, dtype="bf16"),
+            {},
+        ),
+        (
+            "smallc",
+            "fp16_c3_s2_tb4",
+            dict(cpg=3, kpg=64, stride=2, dtype="fp16"),
+            dict(tiles_k=1, tiles_p=4, out_h=8, out_w=32, tiles_per_block=4),
+        ),
+        (
+            "smallc",
+            "bf16_c3_k7s2_tb4_pf",
+            dict(cpg=3, kpg=64, KH=7, KW=7, PAD=3, stride=2, dtype="bf16"),
+            dict(
+                waves_p=8,
+                tiles_k=4,
+                tiles_p=2,
+                out_h=8,
+                out_w=32,
+                tiles_per_block=4,
+                prefetch=True,
+            ),
+        ),
+        (
+            "smallk",
+            "bf16_k4",
+            dict(cpg=64, kpg=4, dtype="bf16"),
+            dict(waves=4, out_h=8, out_w=8),
+        ),
+        (
+            "smallk",
+            "fp16_k3_w8",
+            dict(cpg=64, kpg=3, dtype="fp16"),
+            dict(waves=8, out_h=16, out_w=32),
+        ),
+        (
+            "smallk",
+            "fp16_1x7_pw3_k1",
+            dict(cpg=32, kpg=1, KH=1, KW=7, PAD=0, pad_w=3, dtype="fp16"),
+            dict(waves=4, out_h=1, out_w=128),
+        ),
+    ):
+        add(
+            f"conv_direct_fwd_{_kind}_mfma",
+            f"conv_direct_fwd_{_kind}_mfma/gfx950/{_case_id}",
+            "gfx950",
+            build_fwd_small_mfma_case(_kind, _prob, **_over),
+        )
+
     # --- conv_direct_fwd_tapouter_wmma: tap-outer forward of large dilations
     # (gfx1250). TDM tap windows + wave32 WMMA; every case needs llvm23 (TDM),
     # so the other flavors record them as expected failures. The C++ twin is
@@ -3683,6 +3761,52 @@ def cases():
             f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
             "gfx1250",
             build_direct_dgrad_wmma_case(_dtype, **_over),
+        )
+
+    # --- conv_direct_dgrad_pp_mfma: LDS-DMA ping-pong MFMA dgrad (gfx950) ---
+    # buffer_load ... lds staging, two wave ranks with s_setprio ping-pong,
+    # per-buffer LDS alias scopes, in-kernel transposed weights read with
+    # ds_read_b64_tr_b16. The C++ twin is gated (every knob, both dtypes) by
+    # library/tests/parity/conv_direct_dgrad_pp_mfma_emit.*.
+    def build_direct_dgrad_pp_mfma_case(dtype, KH, block_k):
+        def _build():
+            from kernels.common.conv_direct_dgrad_pp_mfma import (
+                DgradPpMfmaSpec,
+                build_dgrad_pp_mfma,
+                dgrad_pp_mfma_problem,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=72,
+                kpg=96,
+                KH=KH,
+                KW=KH,
+                PAD=(KH - 1) // 2,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_dgrad_pp_mfma(
+                DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(p), block_k=block_k),
+                arch="gfx950",
+            )
+
+        return _build
+
+    for _case_id, _dtype, _KH, _bk in (
+        ("bf16_k3_bk128", "bf16", 3, 128),
+        ("fp16_k3_bk256", "fp16", 3, 256),
+        ("bf16_k5_bk128", "bf16", 5, 128),
+    ):
+        add(
+            "conv_direct_dgrad_pp_mfma",
+            f"conv_direct_dgrad_pp_mfma/gfx950/{_case_id}",
+            "gfx950",
+            build_direct_dgrad_pp_mfma_case(_dtype, _KH, _bk),
         )
 
     # --- conv_direct_fwd_wmma: wave32 WMMA direct forward (gfx1250) ---
@@ -4171,10 +4295,29 @@ def cases():
             ),
         ),
         (
+            "tiled_pingpong_halves",
+            "tiled",
+            dict(H=30),
+            dict(pingpong=True, row_unroll=4, rows_per_seg=12),
+        ),
+        (
             "tiled_fp16_unfold4",
             "tiled",
             dict(N=4, H=15, W=40, dtype="fp16"),
             dict(unfold_n=4, rows_per_seg=15, row_unroll=3),
+        ),
+        (
+            "tiled_auto_launch",
+            "tiled",
+            dict(H=30),
+            dict(
+                waves_k=2,
+                wave_c16=1,
+                prefetch=3,
+                row_unroll=4,
+                rows_per_seg=0,
+                target_blocks=512,
+            ),
         ),
         ("fold_t9", "fold", {}, dict(taps=9)),
         (

@@ -5,6 +5,7 @@ This page covers:
 - `library/kernels/common/conv_implicit_gemm.py`
 - `library/kernels/common/conv_direct_grouped.py`
 - `library/kernels/common/conv_direct_nongrouped.py`
+- `library/kernels/common/conv_direct_dgrad_pp_mfma.py` (gfx950 direct dgrad)
 - `library/kernels/common/conv_direct_wgrad_tiled.py`,
   `library/kernels/common/conv_direct_dw_wgrad.py`,
   `library/kernels/common/conv_direct_wgrad_gather.py`,
@@ -1319,6 +1320,58 @@ packed super-group under the phase decomposition), `DGRAD_WMMA_STRIDED_KNOBS`,
 covers every knob; the byte-identity gate is
 `library/tests/parity/conv_direct_dgrad_wmma_emit.{c,py}` (llvm23 lane).
 
+## Direct Dgrad on MFMA with LDS DMA (gfx950)
+
+`library/kernels/common/conv_direct_dgrad_pp_mfma.py`, spec `DgradPpMfmaSpec`,
+builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`).
+A dense (`groups == 1`) stride-1 dgrad for gfx950 (wave64,
+`mfma_f32_16x16x32`), computed as the forward pass over the transposed problem
+(`dgrad_pp_mfma_problem`: dY in, dX out, padding `dil_h * (KH - 1) - PAD`
+per axis). The spec's problem is that forward pass: its `cpg` is the dgrad's
+K and its `kpg` the dgrad's C. The arch gate reads `ArchTarget` capabilities
+(wave64, `ds_read_b64_tr_b16`, 16-byte `buffer_load ... lds`,
+`mfma_f32_16x16x32`), which of the known targets only gfx950 has.
+
+A workgroup of 8 waves owns a 16x16 dX pixel tile and `block_k` (128 or 256)
+dX channels, and walks the dY channels in chunks of 64:
+
+- every operand byte is staged with `buffer_load ... lds` (16 bytes per lane,
+  4 for the narrow tail of a halo row), never through VGPRs; the LDS
+  swizzle, a 16-byte granule XOR chosen from the bank arithmetic to spread
+  fragment reads over distinct slots, is applied on the global side;
+- the waves form two ranks of 4: rank 0 streams the next filter tap's weights
+  into a double buffer, rank 1 the next chunk's dY halo
+  `[16 + KH - 1][16 + KW - 1][64]` into the other input buffer, a few 1 KiB
+  pieces per step;
+- the KRSC filter is read flipped and transposed in-kernel: a tap's weights
+  are staged as `[64 dY channels][block_k dX channels]` with granule `g` of
+  row `r` at slot `g ^ 2 * (r % 4 + 4 * ((r / 8) % 2))`, and the A fragments
+  are read with two `ds_read_b64_tr_b16` per operand, so there is no weight
+  pre-pass;
+- rank 1 runs one barrier behind; every step (one tap, one 32-channel half of
+  the chunk) is `reads + DMA issue; barrier; s_setprio 1; MFMAs; s_setprio 0;
+  barrier`, so one rank's MFMAs overlap the other rank's fragment reads and
+  DMA issue. The `vmcnt` waits are explicit, every buffer is its own LDS
+  allocation (`lds_alias_scopes`), and the chunk loop is unrolled twice so
+  each read names its buffer statically.
+
+Runtime (kernargs, the forward direct-conv block over the transposed problem):
+batch, extents and both channel counts. Build-time: the filter, padding,
+dtype and `block_k`. Constraints: square odd filters, stride 1, no dilation,
+"same" padding on both axes (an explicit `pad_w` is flipped with `PAD`),
+every extent and channel count at least 1, the dgrad's K a multiple of 8 and
+C a multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 only
+at `block_k` 128, 7x7 not at all), and one dY image, one dX image and the
+filter each at most `INT32_MAX` bytes (the buffer descriptors span them and a
+masked lane reads at that offset), with an i32 block count. The AOT
+grid is `DGRAD_PP_MFMA_FILTERS` (3, 5) times `DGRAD_PP_MFMA_BLOCK_K`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_pp_mfma`, a
+single-kernel forward-ABI step of `DIRECT_DGRAD_FPROP_SINGLE`); a binary is
+offered where at least half of its padded tile grid is real work. The C++
+twin covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_dgrad_pp_mfma_emit.{c,py}`, the GPU numeric
+test `library/tests/test_direct_dgrad_pp_mfma.py`.
+
 ## Direct Forward on WMMA (gfx1250)
 
 `library/kernels/common/conv_direct_fwd_wmma.py`, spec `DirectFwdWmmaSpec`,
@@ -1417,6 +1470,40 @@ the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` (or
 the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
 3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /
 `direct_fwd_smallk_wmma`).
+
+### Tiny channel counts on MFMA (`FwdSmallcMfmaSpec`, `FwdSmallkMfmaSpec`)
+
+`library/kernels/common/conv_fwd_small_mfma.py` (C++ twin
+`instance_conv_fwd_small_mfma.h`) is the wave64 MFMA form of the two kernels
+above, for gfx950 (no TDM): the same GEMMs on `mfma_f32_16x16x32`, with the
+data moved by buffer loads.
+
+- `build_fwd_smallc_mfma` -- `C <= 4` input channels (stems). A block stages
+  its output tile's input window into LDS with 16-byte buffer loads from the
+  8-element boundary at or below each window row (a load wholly outside the
+  tensor reads zero through the buffer bounds), masks every element to the
+  image and stores it at its window position; each lane gathers its im2col
+  fragment from that window at offsets computed once per kernel. The weights
+  stay in registers for the `tiles_per_block` tiles a block walks;
+  `prefetch` (with `tiles_per_block > 1`) issues the next tile's window loads
+  before the current tile's compute and stores. Each lane writes 4
+  consecutive output channels as one 8-byte store, so `K` must be a multiple
+  of 4.
+- `build_fwd_smallk_mfma` -- `K` <= 8 output channels. The same
+  `Z[q, (r, s, k)]` GEMM over the window's input pixels, its fragments read
+  straight from global memory (8 channels, one 16-byte load each; the
+  weights' fragments stay in L2), then the overlap-add from an fp32 copy of
+  `Z` in LDS. `C` must be a multiple of 8; filters may be rectangular with
+  their own column padding. `K` of 2, 4 or 8 writes one vector per pixel,
+  any other `K` channel by channel.
+
+Both: wave64, `PAD` in 0..KH-1, every tensor below 2 GiB; small C takes
+square filters with one padding only. The AOT grid is
+`FWD_SMALLC_MFMA_KNOBS` over the `FWD_SMALLC_STEMS` whose flattened filter
+fits five MFMA steps (the 14x14 / 16x16 patch-embedding stems stay on
+implicit GEMM), and `FWD_SMALLK_MFMA_KNOBS` over `FWD_SMALLK_LAYERS`
+(variants `direct_fwd_smallc_mfma` / `direct_fwd_smallk_mfma`), filtered per
+problem by tile efficiency.
 
 ### Large dilations (`DirectFwdTapOuterSpec`)
 
@@ -1620,6 +1707,25 @@ in fp32.
   that `pick_swizzle` picks at build time so the `ds_read_b64_tr_b16` fragment
   reads are bank-conflict free. `unfold_n` packs several images into one strip;
   `q_groups=2` (+`pingpong`) runs two wave groups half a row apart.
+- **Tiled launch.** Blocks walk (image group, strip, row segment) units with
+  a stride of `n_splits` per channel tile. A fixed `rows_per_seg` gives
+  `ceil(target_blocks / channel_tiles)` splits. `rows_per_seg = 0` derives
+  the launch from the runtime shape instead: one segment is a whole strip
+  (all `H` rows, the row loop's trip count rounded up to the unroll), and the
+  grid is `max(1, floor(target_blocks / channel_tiles))` splits per tile, so it
+  runs in one round when `target_blocks` is the number of blocks the device
+  holds (`rpsH` in the kernel name). The row loop pins each row's MFMAs with a
+  scheduling barrier, which a runtime trip count would otherwise let the
+  scheduler sink into the last unrolled rows.
+- **Ping-pong on one row stream.** `pingpong` with `q_groups=1` splits the
+  block's waves into two halves that share the row buffers, the second half a
+  barrier behind, so one half's MFMAs run while the other reads its fragments
+  (two barriers per row). The row DMA is issued after the fragment reads,
+  pinned there by scheduling barriers, so its address math runs under the read
+  latency and the waitcnt pass does not drain it before every read. The mid
+  barrier skips the LDS wait (each MFMA waits for its own fragment); one extra
+  row buffer (`n_buffers = prefetch + 2`) keeps the refill clear of reads still
+  in flight. Each segment starts staggered and ends realigned.
 - **Partial slots + fold.** Same-address fp32 atomics serialize, and a
   depthwise `dW` has only a few thousand addresses, so the depthwise and gather
   kernels store one partial slot per partition with plain stores and
@@ -1658,8 +1764,9 @@ also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_wgrad_gather.cpp`), `rocke_build_dw_wgrad_mfma`
 (`conv_direct_dw_wgrad_mfma.cpp`), `rocke_build_grouped_wgrad_mfma`
 (`conv_direct_grouped_wgrad_mfma.cpp`); byte-identity gated by
-`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+), Python IR
-golden `conv_direct_wgrad/*` in `library/tests/test_conv_ir_golden.py`.
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+; auto
+launch 359+; single-group ping-pong 364+), Python IR golden
+`conv_direct_wgrad/*` in `library/tests/test_conv_ir_golden.py`.
 On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 `library/tests/test_direct_conv_correctness.py` (built on the cache probe,
 launched on other shapes); the two-step plans:

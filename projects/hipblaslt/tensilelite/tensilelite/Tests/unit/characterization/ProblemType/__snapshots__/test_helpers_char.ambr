@@ -18,7 +18,7 @@
     'DataTypeMXSB',
     'DestDataType',
     'F32XdlMathOp',
-    'FusedGemmA2A',
+    'FusedA2A',
     'Gradient',
     'GroupedGemm',
     'HighPrecisionAccumulate',
@@ -42,6 +42,7 @@
     'NumIndicesLD',
     'OperationType',
     'OutputAmaxD',
+    'OutputPeerD',
     'ScaleBlockSizesA',
     'ScaleZeroPointA',
     'SetConstStrideA',
@@ -123,8 +124,8 @@
     'F32XdlMathOp': list([
       'int',
     ]),
-    'FusedGemmA2A': list([
-      'bool',
+    'FusedA2A': list([
+      'str',
     ]),
     'Gradient': list([
       'bool',
@@ -193,6 +194,9 @@
       'str',
     ]),
     'OutputAmaxD': list([
+      'bool',
+    ]),
+    'OutputPeerD': list([
       'bool',
     ]),
     'ScaleBlockSizesA': list([

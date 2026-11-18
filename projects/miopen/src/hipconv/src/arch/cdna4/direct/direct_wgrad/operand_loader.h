@@ -5,7 +5,7 @@
 // Both operands take the channel axis as their non-reduction dimension, so both are read with
 // ds_read_b64_tr_b16. bunnies::load_tile drives the lane and round mapping; this file supplies
 // the coordinate-to-LDS-offset functor. The swizzle those offsets apply is derived in
-// docs/algorithms/direct/direct-wgrad-cdna4-lds-swizzle.md.
+// docs/algorithms/details/direct/direct-wgrad-cdna4-lds-swizzle.md.
 
 #include "bunnies.hpp"
 #include "bunnies_cdna4.hpp"
@@ -45,7 +45,7 @@ template <hipconv::DataType DT>
 constexpr bunnies::fpfmt plane_fmt =
     DT == hipconv::DataType::fp16 ? bunnies::fpfmt::e5m10 : bunnies::fpfmt::e8m7;
 
-// S contributes the A operand, C x Q; delta the B operand, Q x K.
+// S contributes the A operand, C × Q; delta the B operand, Q × K.
 template <hipconv::DataType DT>
 using mat_s = arch::matrix<operand_fmt<DT>, MFMA_M, MFMA_K, bunnies::use::A>;
 template <hipconv::DataType DT>
@@ -78,7 +78,7 @@ __device__ void zero_tile(RegTile& tile)
             tile.block(mb, nb) = typename RegTile::matrix{};
 }
 
-// Load this wave's C x Q(32) slice of the S row held in `row_lds`.
+// Load this wave's C × Q(32) slice of the S row held in `row_lds`.
 //
 // q_shift is the filter-column offset of the read window: the compute phase reads the same row
 // at shifts 0..kw-1, which is why the S tile carries a kw-1 column halo. c_base is the wave's
@@ -118,8 +118,8 @@ __device__ void load_s(rt_s<cfg, DT>& tile, LdsType<DT>* row_lds, int q_shift, i
 //
 // A shift whose rotation matches the unshifted read's is that read's address plus a constant, so
 // the tiles share one address register and the constant rides in the instruction's offset field.
-// The ladder section of docs/algorithms/direct/direct-wgrad-cdna4-lds-swizzle.md derives which
-// displacements fold and why `RowLayout::ladder_pays` gates the form.
+// The ladder section of docs/algorithms/details/direct/direct-wgrad-cdna4-lds-swizzle.md derives
+// which displacements fold and why `RowLayout::ladder_pays` gates the form.
 //
 // This drives the load itself where `load_s` goes through `bunnies::load_tile`. The fold needs the
 // round-0 coordinate hoisted out of the round loop and the displacement known as a constant, and a
@@ -133,7 +133,7 @@ __device__ void load_s(rt_s<cfg, DT>& tile, LdsType<DT>* row_lds, int q_shift, i
 //
 // The shift is the outermost loop, and that is not cosmetic. Which reads share an address is a
 // matter of common subexpressions and does not depend on the order, but the schedule does, and
-// issuing a block's whole ladder before moving to the next block measured 1.27x slower on a config
+// issuing a block's whole ladder before moving to the next block measured 1.27× slower on a config
 // with nothing to gain from the fold in the first place.
 //
 // A split operand runs the whole ladder twice, once per plane, the small plane's base being the
@@ -184,7 +184,7 @@ __device__ void load_s_ladder(rt_s<cfg, DT> (&tiles)[cfg.kw], LdsType<DT>* row_l
         ladder.template operator()<true>(row_lds + Layout::plane_stride);
 }
 
-// Load this wave's Q(32) x K slice of the delta row held in `row_lds`.
+// Load this wave's Q(32) × K slice of the delta row held in `row_lds`.
 //
 // Delta is read at a single column offset, so there is no shift argument. k_base is the wave's
 // channel origin within the workgroup's K block.
