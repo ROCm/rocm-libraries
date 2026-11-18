@@ -79,14 +79,14 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMallocAsync(&csrmv_info->lrb.rows_bins, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync(&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
+        rocsparse_hipMallocAsync(&csrmv_info->lrb.n_rows_bins, sizeof(J) * 64, stream));
 
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
-        rocsparse_hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 64, stream));
 
     dim3 blocks(256);
     dim3 threads(WG_SIZE);
@@ -106,10 +106,18 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     // n_rows_bins as both input and output, we can make the memcpy async and parallelize it
     // with the phase-2 and phase-3 kernels. Alternatively, we could always launch a fixed grid
     // size and then do more in the (SpMV) kernels to compute intra-kernel iteration bounds.
-    J temp[32];
+    // n_rows_bins holds 64 counters so that rows of length > 2^31 (bin >= 32) are counted in
+    // bounds by phase 1 and can be rejected here instead of corrupting memory.
+    J temp[64];
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        temp, csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, hipMemcpyDeviceToHost, stream));
+        temp, csrmv_info->lrb.n_rows_bins, sizeof(J) * 64, hipMemcpyDeviceToHost, stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+    for(int i = 32; i < 64; i++)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(temp[i] != 0 ? rocsparse_status_not_implemented
+                                               : rocsparse_status_success);
+    }
 
     for(int i = 0; i < 32; i++)
     {

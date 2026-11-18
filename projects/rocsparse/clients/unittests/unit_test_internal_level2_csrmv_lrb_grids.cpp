@@ -673,3 +673,69 @@ TEST_F(CsrmvAdaptiveGrids, unclamped_grid_matches_host)
     check_adaptive_partial_scale_y<float, int64_t, int32_t>(handle, false);
     check_adaptive_partial_scale_y<double, int64_t, int32_t>(handle, false);
 }
+
+// ---------------------------------------------------------------------------
+// A row longer than 2^31 entries falls in LRB bin >= 32, which has no slot. The
+// analysis must reject it. It never reads col_ind or val, so tiny buffers are
+// enough to reach it.
+// ---------------------------------------------------------------------------
+
+TEST_F(CsrmvLrbGrids, analysis_rejects_row_longer_than_2_pow_31)
+{
+    const int64_t row_len = (int64_t(1) << 31) + 1;
+
+    device_vector<int64_t> d_row_ptr(std::vector<int64_t>{0, row_len});
+    device_vector<int32_t> d_col_ind(std::vector<int32_t>{0});
+    device_vector<float>   d_val(std::vector<float>{1.0f});
+    device_vector<float>   d_x(std::vector<float>{1.0f});
+    device_vector<float>   d_y(std::vector<float>{1.0f});
+    ASSERT_NE(d_row_ptr.ptr, nullptr);
+    ASSERT_NE(d_col_ind.ptr, nullptr);
+    ASSERT_NE(d_val.ptr, nullptr);
+    ASSERT_NE(d_x.ptr, nullptr);
+    ASSERT_NE(d_y.ptr, nullptr);
+
+    SpmvDescrs descrs;
+    ASSERT_EQ(rocsparse_create_csr_descr(&descrs.mat,
+                                         1,
+                                         row_len,
+                                         row_len,
+                                         d_row_ptr.ptr,
+                                         d_col_ind.ptr,
+                                         d_val.ptr,
+                                         rocsparse_indextype_i64,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(
+                  &descrs.x, row_len, d_x.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&descrs.y, 1, d_y.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    const float alpha = 1.0f;
+    const float beta  = 0.0f;
+    auto        spmv  = [&](rocsparse_spmv_stage stage, size_t* size, void* buffer) {
+        return rocsparse_spmv(handle,
+                              rocsparse_operation_none,
+                              &alpha,
+                              descrs.mat,
+                              descrs.x,
+                              &beta,
+                              descrs.y,
+                              rocsparse_datatype_f32_r,
+                              rocsparse_spmv_alg_csr_lrb,
+                              stage,
+                              size,
+                              buffer);
+    };
+
+    size_t size = 0;
+    ASSERT_EQ(spmv(rocsparse_spmv_stage_buffer_size, &size, nullptr), rocsparse_status_success);
+    device_vector<char> d_buffer(size > 0 ? size : size_t(1));
+    ASSERT_NE(d_buffer.ptr, nullptr);
+
+    ASSERT_EQ(spmv(rocsparse_spmv_stage_preprocess, &size, d_buffer.ptr),
+              rocsparse_status_not_implemented);
+}
