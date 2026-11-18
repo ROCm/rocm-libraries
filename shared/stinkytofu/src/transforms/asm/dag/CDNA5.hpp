@@ -646,6 +646,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // WMMA->WMMA / WMMA->VALU coexec hazards; those pads keep their full 7+1
     // length. 0 = feature off.
     int fillQuotaPerWindow_ = 0;
+    // VALU fillers per window: what a wait-hide tail counts (SALU and TRANS fill nothing). For
+    // the planning gap estimate.
+    int valuFillQuotaPerWindow_ = 0;
     int fillsThisWindow_ = 0;
     // Critical fillers: a SALU/VALU becomes critical kCriticalSlackWmmas windows before the
     // planned window of the prefetch / tensor_load / ds_load it feeds. It then skips the
@@ -3107,6 +3110,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
     fillQuotaPerWindow_ = 0;
+    valuFillQuotaPerWindow_ = 0;
     wmmaPosByNode_.clear();
     remainingDs_.clear();
     regionWmmaWindows_.clear();
@@ -3157,6 +3161,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     std::unordered_set<StinkyInstruction*> regionInsts;
     const auto& dagFeatures = getPassContext().getPassFeatureConfig().dagFeatures;
     int regionFillerCount = 0;
+    int regionValuFillerCount = 0;
     regionCoIssueSlots_ = 0;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -3167,8 +3172,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Fillers are what push() routes to otherQueue/valuQueue, minus global prefetches: with
         // PrefetchLeadWmmas = 0 a prefetch sits in otherQueue but is not counted here.
         if (!isMatrixInstruction(inst) && !isDSRead(inst) && !isBarrier(inst) &&
-            !(dagFeatures.distributeGlobalRead && isTensorLoad(inst)) && !isGlobalPrefetch(inst))
+            !(dagFeatures.distributeGlobalRead && isTensorLoad(inst)) && !isGlobalPrefetch(inst)) {
             ++regionFillerCount;
+            if (isVectorALU(inst)) ++regionValuFillerCount;
+        }
 
         if (isMatrixInstruction(inst) && regionCoIssueSlots_ == 0)
             regionCoIssueSlots_ = popcount16(inst.coIssueWindow);
@@ -3216,8 +3223,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
     // 25 / 128), and floor would give a quota of 0 that never closes a window.
-    if (dagFeatures.evenSpreadFillers && wmmaTotalThisRegion_ > 0)
+    if (dagFeatures.evenSpreadFillers && wmmaTotalThisRegion_ > 0) {
         fillQuotaPerWindow_ = (regionFillerCount + wmmaTotalThisRegion_ - 1) / wmmaTotalThisRegion_;
+        valuFillQuotaPerWindow_ =
+            (regionValuFillerCount + wmmaTotalThisRegion_ - 1) / wmmaTotalThisRegion_;
+    }
     regionFillerTotal_ = regionFillerCount;
     fillersIssuedThisRegion_ = 0;
 
@@ -4237,7 +4247,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);
     };
     // WMMAs the scoreboard needs between a filler and the placed op it feeds for the op to need no
-    // va_vdst; 0 when no count of WMMAs hides it.
+    // va_vdst; 0 when no count of WMMAs hides it. Each window is taken to carry the VALU filler
+    // quota, at most the co-issue slots one WMMA window has.
+    const int valusPerWindow = std::min(valuFillQuotaPerWindow_, regionCoIssueSlots_);
     std::unordered_map<uint64_t, int> gapCache;
     auto gapWmmas = [&](unsigned id, unsigned succ) {
         if (!waitAlu_) return 0;
@@ -4245,7 +4257,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         if (fresh)
             it->second = std::max(
                 0, waitAlu_->requiredGap(*deps.dag.nodes[id].inst, *deps.dag.nodes[succ].inst,
-                                         WaitAluHideOp::Wmma, formWmma_));
+                                         WaitAluHideOp::Wmma, formWmma_, valusPerWindow));
         return it->second;
     };
     // Latest window per filler: the planned window of the nearest placed op it feeds, less `gap`
