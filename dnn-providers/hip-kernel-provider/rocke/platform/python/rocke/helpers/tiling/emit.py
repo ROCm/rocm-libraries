@@ -382,16 +382,15 @@ def _register_index(
     :func:`_unit_index`) plus the register's compile-time coordinate offset linearized by the tensor
     strides and converted to units. Consecutive registers' indices then differ by a constant, which
     the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
-    positions by linearity. For every byte-or-wider dtype a unit is an element."""
+    positions by linearity. For every byte-or-wider dtype a unit is an element, so the offset keeps
+    its sign: a negative stride (a reversed view) gives a negative offset."""
     deltas = _register_coord_offsets(tile_desc.layout, register)
     lead = _leading_rank(window, len(deltas))
-    offset = elements_to_storage(
-        dtype.name,
-        sum(
-            delta * window.tensor.strides[lead + axis]
-            for axis, delta in enumerate(deltas)
-        ),
+    offset = sum(
+        delta * window.tensor.strides[lead + axis] for axis, delta in enumerate(deltas)
     )
+    if is_register_packed(dtype.name):
+        offset = elements_to_storage(dtype.name, offset)
     return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
 
 
