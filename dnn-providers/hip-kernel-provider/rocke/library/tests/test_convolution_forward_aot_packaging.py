@@ -656,12 +656,15 @@ _DIRECT_COUNTS = {
     "direct_depthwise_win": 759,
 }
 #: Forward direct identities per dtype the packaged launch refuses as an instance: the
-#: split-C fold (the second launch of each split-C instance), and the two MFMA
-#: small-channel direct families, not yet in AOT_DIRECT_ALGORITHMS.
+#: split-C fold (the second launch of each split-C instance), and the four gfx950
+#: MFMA direct families (small-channel, small-K, ping-pong and flattened-pixel), not
+#: yet in AOT_DIRECT_ALGORITHMS.
 _REFUSED_DIRECT_COUNTS = {
     "direct_split_reduce": 4,
     "direct_fwd_smallc_mfma": 222,
     "direct_fwd_smallk_mfma": 44,
+    "direct_fwd_pp_mfma": 3,
+    "direct_fwd_flex_mfma": 102,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are

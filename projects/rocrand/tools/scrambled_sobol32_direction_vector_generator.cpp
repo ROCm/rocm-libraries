@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -80,7 +80,16 @@ int main(int argc, char const* argv[])
         << "#endif // SCRAMBLED_SOBOL_DIM\n"
         << "#define SCRAMBLED_SOBOL32_N " << rocrand_tools::SOBOL32_N << "\n"
         << "\n"
-        << "extern \"C\" ROCRANDAPI const unsigned int " << symbol << "[SCRAMBLED_SOBOL32_N];\n"
+        << "namespace rocrand_device\n"
+        << "{\n"
+        << "namespace detail\n"
+        << "{\n"
+        << "\n"
+        << "extern \"C\" ROCRANDAPI const unsigned int\n    " << symbol
+        << "[SCRAMBLED_SOBOL32_N];\n"
+        << "\n"
+        << "} // end namespace detail\n"
+        << "} // end namespace rocrand_device\n"
         << "\n"
         << "#endif // ROCRAND_SCRAMBLED_SOBOL32_PRECOMPUTED_H_\n";
 
@@ -93,9 +102,10 @@ int main(int argc, char const* argv[])
         return -1;
     }
 
-    rocrand_tools::write_matrix_with_offset(binary_out,
-                                            directions_32.data(),
-                                            rocrand_tools::SOBOL32_N,
-                                            640000);
+    if(!rocrand_tools::write_matrix_with_lms(binary_out, directions_32.data(), binary_path))
+    {
+        return -1;
+    }
+
     return 0;
 }
