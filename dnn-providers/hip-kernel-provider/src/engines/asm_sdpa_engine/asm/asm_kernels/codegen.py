@@ -8,6 +8,8 @@ import sys
 import csv
 from collections import defaultdict
 
+from co_metadata import CodeObjectError, max_flat_workgroup_size
+
 this_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.basename(this_dir)
 archs = [el for el in os.environ["AITER_GPU_ARCHS"].split(";")]
@@ -23,6 +25,27 @@ content = """// SPDX-License-Identifier: MIT
 #include <unordered_map>
 
 """
+
+
+def row_max_flat_workgroup_size(row):
+    """Largest launch block every code object a CSV row can resolve to accepts.
+
+    A row names one object, but gfx942 forward ships one build per device
+    family (MI300/, MI308/) below the CSV's directory and the engine picks one
+    at run time, so the row records the smallest limit among them.
+    """
+    paths = glob.glob(
+        os.path.join(glob.escape(row["csv_dir"]), "**", row["co_name"]), recursive=True
+    )
+    if not paths:
+        print(f"ERROR: no code object {row['co_name']} under {row['csv_dir']}")
+        sys.exit(1)
+    try:
+        return min(max_flat_workgroup_size(path, row["knl_name"]) for path in paths)
+    except CodeObjectError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -84,7 +107,9 @@ if __name__ == "__main__":
                 print(f"ERROR: CSV headers don't match in -- {cfgname}.")
                 sys.exit(1)
 
-            dicts = [d | {"arch": arch} for d in df]
+            dicts = [
+                d | {"arch": arch, "csv_dir": os.path.dirname(single_file)} for d in df
+            ]
             dfs += dicts
         if dfs:
             relpath = os.path.relpath(
@@ -104,9 +129,9 @@ if __name__ == "__main__":
                     ]
                 )
                 content += f"""
-#define ADD_CFG({other_columns_comma}, arch, path, knl_name, co_name)         \\
+#define ADD_CFG({other_columns_comma}, max_flat_workgroup_size, arch, path, knl_name, co_name)         \\
     {{                                         \\
-        std::string(arch) + (knl_name), {{ knl_name, std::string(arch) + "/" + std::string(path) + (co_name), arch, {other_columns_comma} }}         \\
+        std::string(arch) + (knl_name), {{ knl_name, std::string(arch) + "/" + std::string(path) + (co_name), arch, {other_columns_comma}, max_flat_workgroup_size }}         \\
     }}
 
 struct {args.module}Config
@@ -115,6 +140,9 @@ struct {args.module}Config
     std::string co_name;
     std::string arch;
 {other_columns_cpp_def}
+    // Largest block, in threads, the kernel can be launched with: its code
+    // object's .max_flat_workgroup_size, read when this header is generated.
+    int max_flat_workgroup_size;
 }};
 
 using CFG = std::unordered_map<std::string, {args.module}Config>;
@@ -131,6 +159,7 @@ using CFG = std::unordered_map<std::string, {args.module}Config>;
                     )
                     for col in other_columns
                 )
+                + f", {row_max_flat_workgroup_size(row):>4}"
                 + f', "{row["arch"]}", "{relpath}/", "{row["knl_name"]}", "{row["co_name"]}"),'
                 for row in dfs
                 if row["arch"] in archs
