@@ -395,6 +395,16 @@ ResampleFwdConfig resolve(const IGraph& opGraph)
                 "pooling kernels");
     }
 
+    // Workaround for ALMIOPEN-3419 (see Workarounds.hpp): MIOpen's channels-first tiled kernels
+    // estimate their tile in arithmetic that can overflow, and then fail to build.
+    const size_t elementSize = dataType == DataType::FLOAT ? 4 : 2;
+    if(layout == Layout::CHANNELS_FIRST
+       && WORKAROUND_ALMIOPEN_3419_DECLINES_TILE(elementSize, config.window, config.stride))
+    {
+        decline("the window and stride are too large for MIOpen's channels-first (NCHW/NCDHW) "
+                "pooling kernels; their tile size estimate overflows");
+    }
+
     config.xUid = x.uid;
     config.xDims = x.dims;
     config.xStrides = packedStrides(x.dims, layout);

@@ -826,3 +826,81 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForChannelsLastIntMaxWindowWit
                             std::vector<int64_t>{big - 2, 0}),
                    TILE_LIMIT_REASON);
 }
+
+// ============================================================================
+// Workaround for ALMIOPEN-3419 (see Workarounds.hpp): MIOpen's channels-first tiled kernels
+// estimate their tile in arithmetic that can overflow. Each pair below sits on one side of an
+// overflow boundary; X is a single element, so only the window, stride and padding matter.
+// ============================================================================
+
+namespace
+{
+
+constexpr const char* TILE_ESTIMATE_REASON = "tile size estimate overflows";
+constexpr int64_t TWO_POW_30 = int64_t{1} << 30;
+
+} // namespace
+
+// 3D: the W tile, 3 * 715827883 + 2147483646, is UINT32_MAX.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetricTileWidthAtUint32Max)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1, 1},
+                                                {1, 1, 2147483646},
+                                                {1, 1, 715827883},
+                                                {0, 0, 2147483645}));
+}
+
+// 3D: the W tile, 3 * 715827883 + INT_MAX, is 2^32.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricTileWidthAboveUint32Max)
+{
+    const auto big = INT_MAX_VALUE;
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1, 1},
+                                                {1, 1, big},
+                                                {1, 1, 715827883},
+                                                {0, 0, big - 1}),
+                   TILE_ESTIMATE_REASON);
+}
+
+// 3D: tiles 4 x 2^30 x (2^30 - 1) of 4 bytes are 2^64 - 2^34 bytes.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetricTileBytesBelowSizeMax)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1, 1},
+                                                {1, TWO_POW_30 - 3, TWO_POW_30 - 4},
+                                                {1, 1, 1},
+                                                {0, TWO_POW_30 / 2 - 2, TWO_POW_30 / 2 - 2}));
+}
+
+// 3D: tiles 4 x 2^30 x 2^30 of 4 bytes are 2^64 bytes.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricTileBytesAboveSizeMax)
+{
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1, 1},
+                                                {1, TWO_POW_30 - 3, TWO_POW_30 - 3},
+                                                {1, 1, 1},
+                                                {0, TWO_POW_30 / 2 - 2, TWO_POW_30 / 2 - 2}),
+                   TILE_ESTIMATE_REASON);
+}
+
+// 2D: 4 * (15 * 143165577 + 2147483640) * 2^30 is 2^64 - 2^32 bytes.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarTileBytesBelowSizeMax)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1},
+                                                {2147483640, TWO_POW_30},
+                                                {143165577, TWO_POW_30},
+                                                {2147483639, TWO_POW_30 - 1}));
+}
+
+// 2D: 4 * (15 * 143165577 + 2147483641) * 2^30 is 2^64 bytes.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarTileBytesAboveSizeMax)
+{
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1},
+                                                {2147483641, TWO_POW_30},
+                                                {143165577, TWO_POW_30},
+                                                {2147483640, TWO_POW_30 - 1}),
+                   TILE_ESTIMATE_REASON);
+}

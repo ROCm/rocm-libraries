@@ -210,3 +210,78 @@ inline bool windowVolumeExceedsUint32(const std::vector<int>& window)
 #define WORKAROUND_ALMIOPEN_3375_DECLINES_WINDOW(mode, window)                               \
     ((mode) == ::hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING \
      && ::miopen_plugin::workaround_almiopen_3375::windowVolumeExceedsUint32(window))
+
+// ----------------------------------------------------------------------------
+// ALMIOPEN-3419 — MIOpen's tiled pooling forward solvers decide applicability by
+// comparing an estimate of the kernel's private tile with the scratch limit, and
+// that estimate can overflow. PoolingForwardNd (3 spatial dimensions,
+// src/solver/pooling/forwardNd.cpp) computes each tile dimension,
+// (4 - 1) * stride + window, in uint32_t and the byte count in size_t;
+// PoolingForward2d (2 spatial dimensions, forward2d.cpp) computes the byte count,
+// size * ((16 - 1) * stride_h + window_h) * window_w, in size_t, and adds 64
+// bytes of accumulators. A wrapped estimate looks small, MIOpen selects the tiled
+// kernel over its naive fallback, and the kernel fails to build.
+//
+// WORKAROUND_ALMIOPEN_3419_DECLINES_TILE(elementSize, window, stride) is true for
+// the channels-first graphs the resample forward checks decline until the fix
+// lands: those whose estimate overflows, computed here without wrapping from the
+// strides MIOpen receives. Channels-last graphs are already bounded by the
+// channels-last tile check.
+//
+// To remove after the fix: delete this section, its helper and its macro, its
+// call site in engines/plans/MiopenResampleFwdChecks.cpp (and that file's
+// `#include "Workarounds.hpp"` once no workaround there remains), and the tests
+// tagged ALMIOPEN-3419 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
+// drop the channels-first tile rule from the Resample Forward notes in
+// docs/OperationSupport.md and
+// projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
+// ALMIOPEN.3419` finds the code sites.
+// ----------------------------------------------------------------------------
+
+namespace miopen_plugin::workaround_almiopen_3419
+{
+
+// True when MIOpen's tiled pooling forward solver for this rank would overflow while estimating
+// its tile. Window and stride values are in [1, INT_MAX], so each tile dimension fits in 64 bits.
+inline bool tileEstimateOverflows(size_t elementSize,
+                                  const std::vector<int>& window,
+                                  const std::vector<int>& stride)
+{
+    constexpr uint64_t K_SIZE_MAX = ::std::numeric_limits<size_t>::max();
+    // MIOpen rounds the tile bytes up to 16, and in 2D adds 16 fp32 accumulators rounded to 16.
+    const uint64_t headroom = window.size() == 2 ? 15 + 64 : 15;
+
+    uint64_t bytes = elementSize;
+    const auto grow = [&bytes, headroom](uint64_t factor) {
+        if(bytes > (K_SIZE_MAX - headroom) / factor)
+        {
+            return false;
+        }
+        bytes *= factor;
+        return true;
+    };
+
+    if(window.size() == 2)
+    {
+        const uint64_t tileH
+            = 15 * static_cast<uint64_t>(stride[0]) + static_cast<uint64_t>(window[0]);
+        return !grow(tileH) || !grow(static_cast<uint64_t>(window[1]));
+    }
+
+    for(size_t i = 0; i < window.size(); ++i)
+    {
+        const uint64_t tile
+            = 3 * static_cast<uint64_t>(stride[i]) + static_cast<uint64_t>(window[i]);
+        if(tile > ::std::numeric_limits<uint32_t>::max() || !grow(tile))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace miopen_plugin::workaround_almiopen_3419
+
+#define WORKAROUND_ALMIOPEN_3419_DECLINES_TILE(elementSize, window, stride) \
+    (::miopen_plugin::workaround_almiopen_3419::tileEstimateOverflows(      \
+        (elementSize), (window), (stride)))
