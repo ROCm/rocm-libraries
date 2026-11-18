@@ -17,7 +17,8 @@ A vector store also claims a width: the value it stores must have that many
 lanes, and the builder and the verifier refuse one that does not. The f32
 epilogue store emits an f32 access, so it refuses a value that does not hold
 f32 with a TypeError; ``smem_store_f16`` records an f16 store, so it refuses a
-value that does not hold f16 the same way.
+value that does not hold f16 the same way. Both refuse a value with no type
+first.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
+    Value,
 )
 from rocke.core.ir_serialize import parse
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
@@ -785,6 +787,57 @@ def test_an_f16_store_of_a_value_not_holding_f16_is_refused(value_elem):
         == f"smem_store_f16 failed - value element type='{value_elem.name}', expected f16"
     )
     assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize(
+    ("store_name", "tile_element"),
+    [("smem_store_f16", F16), ("smem_store_vN_f32", F32)],
+)
+def test_a_store_of_a_value_with_no_type_is_refused(store_name, tile_element):
+    """A value built by hand can lack a type: ``smem_store_f16`` and
+    ``smem_store_vN_f32`` refuse it as a ``TypeError`` naming its operand,
+    with the operand rule's text, before they read its element type. The
+    builder adds no op."""
+    b = IRBuilder(f"lds_{store_name}_untyped_value")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(tile_element, [16], name_hint="t")
+    untyped = Value("%untyped", None)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(TypeError) as refusal:
+        if store_name == "smem_store_f16":
+            b.smem_store_f16(tile, [zero], untyped)
+        else:
+            b.smem_store_vN_f32(tile, [zero], untyped, 1)
+    assert str(refusal.value) == (
+        f"{store_name} operand 2 failed - type=None, expected an IR type"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+def test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder():
+    """IR edited past the builder can store a value with no type; serialized
+    IR cannot spell one, so only the Python engine receives it here (the
+    native test covers the C++ engine). The verifier reports it and the LLVM
+    and HIP lowerings refuse it as a ``TypeError`` with the builder's text
+    naming the op, before they read its element type."""
+    b = IRBuilder("lds_store_f32_epilogue_untyped_value")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [16], name_hint="f")
+    b.smem_store_vN_f32(tile, [zero], b.const_f32(1.0), 1)
+    b.ret()
+    (store,) = [op for op in b.kernel.body.ops if op.name == "tile.smem_store_vN_f32"]
+    store.operands[-1] = Value("%untyped", None)
+    assert_refused_everywhere(
+        b.kernel,
+        _ARCH,
+        error_type=TypeError,
+        message=(
+            "tile.smem_store_vN_f32 operand 2 failed - type=None, "
+            "expected an IR type"
+        ),
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+        engines=("python",),
+    )
 
 
 @pytest.mark.parametrize(

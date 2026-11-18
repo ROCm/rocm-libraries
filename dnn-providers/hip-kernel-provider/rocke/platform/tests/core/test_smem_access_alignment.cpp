@@ -15,11 +15,12 @@
  * the verifier and the LLVM and HIP lowerings refuse a stored value without
  * that many lanes. The f32
  * epilogue store refuses a value that does not hold f32, and smem_store_f16 a
- * value that does not hold f16.
+ * value that does not hold f16; both refuse a value with no type first.
  */
 
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -56,14 +57,14 @@ struct Lowering
     std::string error;
 };
 
-/* Lower the kernel `builder` holds for gfx942 at llvm20, then free the builder. */
-Lowering lower_and_free(rocke_ir_builder_t* builder)
+/* Lower the kernel `builder` holds for gfx942 at llvm20. The builder stays the
+ * caller's. */
+Lowering lower_to_llvm(rocke_ir_builder_t* builder)
 {
     Lowering lowering{ROCKE_ERR_VALUE, "", ""};
     if(!rocke_ir_builder_ok(builder))
     {
         lowering.error = "the builder refused the kernel";
-        rocke_ir_builder_free(builder);
         return lowering;
     }
     char* llvm_text = NULL;
@@ -76,6 +77,13 @@ Lowering lower_and_free(rocke_ir_builder_t* builder)
         std::free(llvm_text);
     }
     lowering.error = err;
+    return lowering;
+}
+
+/* lower_to_llvm, then free the builder. */
+Lowering lower_and_free(rocke_ir_builder_t* builder)
+{
+    const Lowering lowering = lower_to_llvm(builder);
     rocke_ir_builder_free(builder);
     return lowering;
 }
@@ -539,9 +547,25 @@ bool builder_refuses(rocke_ir_builder_t* builder,
     return refused && builder->kernel->body->num_ops == ops_before;
 }
 
+/* Lower `kernel`, which `builder` holds, to HIP for gfx942: the status, and
+ * the HIP source or the refusal message. The builder stays the caller's. */
+Lowering lower_to_hip(rocke_ir_builder_t* builder, rocke_kernel_def_t* kernel)
+{
+    Lowering lowering{ROCKE_ERR_VALUE, "", ""};
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 0);
+    rocke_lower_hip_opts_t opts{};
+    opts.arch = kArch;
+    lowering.status = rocke_lower_kernel_to_hip(builder, kernel, &opts, &out);
+    lowering.text = lowering.status == ROCKE_OK ? rocke_strbuf_cstr(&out) : "";
+    const char* error = rocke_ir_builder_error(builder);
+    lowering.error = error ? error : "";
+    rocke_strbuf_free(&out);
+    return lowering;
+}
+
 /* Parse the serialized kernel `text` into a fresh builder and lower it to HIP
- * for gfx942: the status, and the HIP source or the refusal message. A parse
- * failure is reported as such. */
+ * for gfx942 (lower_to_hip). A parse failure is reported as such. */
 Lowering lower_serialized_to_hip(const std::string& text)
 {
     Lowering lowering{ROCKE_ERR_VALUE, "", "the kernel did not parse"};
@@ -550,17 +574,7 @@ Lowering lower_serialized_to_hip(const std::string& text)
         return lowering;
     rocke_kernel_def_t* kernel = NULL;
     if(rocke_ir_parse(text.c_str(), &b, &kernel) == ROCKE_OK)
-    {
-        rocke_strbuf_t out;
-        rocke_strbuf_init(&out, 0);
-        rocke_lower_hip_opts_t opts{};
-        opts.arch = kArch;
-        lowering.status = rocke_lower_kernel_to_hip(&b, kernel, &opts, &out);
-        lowering.text = lowering.status == ROCKE_OK ? rocke_strbuf_cstr(&out) : "";
-        const char* error = rocke_ir_builder_error(&b);
-        lowering.error = error ? error : "";
-        rocke_strbuf_free(&out);
-    }
+        lowering = lower_to_hip(&b, kernel);
     rocke_ir_builder_free(&b);
     return lowering;
 }
@@ -815,6 +829,94 @@ int test_an_f16_store_of_a_value_not_holding_f16_is_refused()
     return 0;
 }
 
+/* A raw value (rocke_i_value_named given no type) has no type:
+ * smem_store_f16 and smem_store_vN_f32 refuse it with ROCKE_ERR_TYPE naming its
+ * operand, with the operand rule's text, before they read its element type, and
+ * add no op. Mirrors test_a_store_of_a_value_with_no_type_is_refused. */
+int test_a_store_of_a_value_with_no_type_is_refused()
+{
+    using Store
+        = void (*)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t* const*, rocke_value_t*);
+    const struct
+    {
+        const char* name;
+        const rocke_type_t* tile_element;
+        Store store;
+    } cases[] = {
+        {"smem_store_f16",
+         rocke_f16(),
+         [](rocke_ir_builder_t* b,
+            rocke_value_t* tile,
+            rocke_value_t* const* at,
+            rocke_value_t* value) { rocke_b_smem_store_f16(b, tile, at, 1, value); }},
+        {"smem_store_vN_f32",
+         rocke_f32(),
+         [](rocke_ir_builder_t* b,
+            rocke_value_t* tile,
+            rocke_value_t* const* at,
+            rocke_value_t* value) { rocke_b_smem_store_vN_f32(b, tile, at, 1, value, 1); }},
+    };
+    for(const auto& test_case : cases)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "lds_store_untyped_value") == ROCKE_OK);
+        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+        const int tile_shape[] = {16};
+        rocke_value_t* tile = rocke_b_smem_alloc(&b, test_case.tile_element, tile_shape, 1, "t");
+        rocke_value_t* untyped = rocke_i_value_named(&b, "%untyped", nullptr);
+        CHECK(rocke_ir_builder_ok(&b));
+        rocke_value_t* const at_zero[] = {zero};
+        const std::string message
+            = std::string(test_case.name) + " operand 2 failed - type=None, expected an IR type";
+        const bool refused = builder_refuses(
+            &b,
+            [&] { test_case.store(&b, tile, at_zero, untyped); },
+            ROCKE_ERR_TYPE,
+            message.c_str());
+        rocke_ir_builder_free(&b);
+        CHECK(refused);
+    }
+    return 0;
+}
+
+/* IR edited past the builder can store a value with no type, which serialized
+ * IR cannot spell: the verifier reports it, and the LLVM and HIP lowerings
+ * refuse it with ROCKE_ERR_TYPE and the builder's text naming the op, before
+ * they read its element type. Mirrors
+ * test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder. */
+int test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder()
+{
+    const char* message
+        = "tile.smem_store_vN_f32 operand 2 failed - type=None, expected an IR type";
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_store_f32_epilogue_untyped_value") == ROCKE_OK);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {16};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f32(), tile_shape, 1, "f");
+    rocke_value_t* const at_zero[] = {zero};
+    rocke_b_smem_store_vN_f32(&b, tile, at_zero, 1, rocke_b_const_f32(&b, 1.0f), 1);
+    CHECK(rocke_ir_builder_ok(&b));
+    rocke_op_t* store = b.kernel->body->ops[b.kernel->body->num_ops - 1];
+    CHECK(store->opcode == ROCKE_OP_TILE_SMEM_STORE_VN_F32);
+    store->operands[store->num_operands - 1] = rocke_i_value_named(&b, "%untyped", nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = NULL;
+    size_t num_diags = 0;
+    CHECK(rocke_verify(b.kernel, &diags, &num_diags) == ROCKE_OK);
+    bool reported = false;
+    for(size_t i = 0; i < num_diags; ++i)
+        reported = reported || std::strcmp(diags[i].message, message) == 0;
+    rocke_diags_free(diags, num_diags);
+    /* LLVM first: a refused HIP lowering leaves its error on the builder. */
+    const Lowering lowering = lower_to_llvm(&b);
+    const Lowering hip = lower_to_hip(&b, b.kernel);
+    rocke_ir_builder_free(&b);
+    CHECK(reported);
+    CHECK(lowering.status == ROCKE_ERR_TYPE && lowering.text.empty() && lowering.error == message);
+    CHECK(hip.status == ROCKE_ERR_TYPE && hip.text.empty() && hip.error == message);
+    return 0;
+}
+
 /* Serialized IR reaches the verifier and the lowerings without passing the
  * builder: the verifier reports, and the LLVM and HIP lowerings refuse, an f32
  * epilogue store whose value does not hold f32 (ROCKE_ERR_TYPE) or does not
@@ -913,6 +1015,8 @@ int main()
        || test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused()
        || test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused()
        || test_an_f16_store_of_a_value_not_holding_f16_is_refused()
+       || test_a_store_of_a_value_with_no_type_is_refused()
+       || test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder()
        || test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused()
        || test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile())
     {

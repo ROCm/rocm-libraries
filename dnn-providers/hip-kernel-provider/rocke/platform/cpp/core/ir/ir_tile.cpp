@@ -240,8 +240,12 @@ void rocke_b_smem_store_f16(rocke_ir_builder_t* b,
     }
     {
         char element_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_value_element_error(
-               "smem_store_f16", value->type, "f16", element_error, sizeof element_error))
+        if(rocke_i_value_element_error("smem_store_f16",
+                                       value->type,
+                                       num_indices + 1,
+                                       "f16",
+                                       element_error,
+                                       sizeof element_error))
         {
             rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", element_error);
             return;
@@ -508,8 +512,14 @@ void rocke_b_smem_store_vN_f32(rocke_ir_builder_t* b,
     {
         char contract_error[ROCKE_ERR_MSG_CAP];
         const int64_t width = n;
-        const rocke_status_t contract_status = rocke_i_smem_store_vN_f32_error(
-            "smem_store_vN_f32", value->type, &width, "n", contract_error, sizeof contract_error);
+        const rocke_status_t contract_status
+            = rocke_i_smem_store_vN_f32_error("smem_store_vN_f32",
+                                              value->type,
+                                              num_indices + 1,
+                                              &width,
+                                              "n",
+                                              contract_error,
+                                              sizeof contract_error);
         if(contract_status != ROCKE_OK)
         {
             rocke_i_set_err(b, contract_status, "%s", contract_error);
