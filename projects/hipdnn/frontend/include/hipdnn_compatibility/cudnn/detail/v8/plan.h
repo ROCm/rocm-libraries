@@ -29,12 +29,17 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 
 // The plan JSON format is the compatibility layer's own:
 //   {"version":1,
-//    "engine":{"globalIndex":i,"id":"<decimal>","name":"...","behaviorNotes":[n,...]},
+//    "engine":{"globalIndex":i,"id":"<decimal>","name":"...","behaviorNotes":[n,...],
+//              "numericalNotes":[n,...]},
 //    "knobs":[{"type":t,"value":v},...],
 //    "requestedKnobs":[{"type":t,"value":v},...],
 //    "payload":"<base64 of the hipDNN serialized plan>"}
 // "id" is a string because hashed engine IDs exceed 2^53. "name" and "payload"
-// are optional; a plan without a payload cannot be loaded. "requestedKnobs" is
+// are optional; a plan without a payload cannot be loaded. A plan without
+// "numericalNotes" loads as {NONDETERMINISTIC}: an engine that declares no
+// numerical notes is never assumed deterministic. "version" is 1 with
+// "numericalNotes"; a reader without that key rejects the plan as an unknown
+// engine key. "requestedKnobs" is
 // written only when the requested choices (unset -1 entries included, which
 // the plan tag keeps) differ from "knobs"; it defaults to "knobs".
 namespace plan_json
@@ -50,6 +55,7 @@ struct Plan
     std::int64_t id = 0;
     std::optional<std::string> name;
     std::vector<cudnnBackendBehaviorNote_t> behaviorNotes;
+    std::vector<cudnnBackendNumericalNote_t> numericalNotes{CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
     KnobChoices knobs;
     std::optional<KnobChoices> requestedKnobs;
     std::vector<std::uint8_t> payload;
@@ -210,6 +216,11 @@ inline std::string write(const Plan& plan, bool withPayload)
     for(std::size_t i = 0; i < plan.behaviorNotes.size(); ++i)
     {
         out += (i == 0 ? "" : ",") + std::to_string(static_cast<int>(plan.behaviorNotes[i]));
+    }
+    out += R"(],"numericalNotes":[)";
+    for(std::size_t i = 0; i < plan.numericalNotes.size(); ++i)
+    {
+        out += (i == 0 ? "" : ",") + std::to_string(static_cast<int>(plan.numericalNotes[i]));
     }
     out += R"(]},"knobs":)";
     appendKnobs(out, plan.knobs);
@@ -408,6 +419,7 @@ inline void readEngine(Reader& reader, Plan& plan)
     bool haveId = false;
     bool haveName = false;
     bool haveNotes = false;
+    bool haveNumericalNotes = false;
     reader.expect('{');
     if(!reader.consume('}'))
     {
@@ -448,6 +460,26 @@ inline void readEngine(Reader& reader, Plan& plan)
                             reader.fail("invalid behavior note");
                         }
                         plan.behaviorNotes.push_back(static_cast<cudnnBackendBehaviorNote_t>(note));
+                    } while(reader.consume(','));
+                    reader.expect(']');
+                }
+            }
+            else if(key == "numericalNotes")
+            {
+                reader.markSeen(haveNumericalNotes, key);
+                plan.numericalNotes.clear();
+                reader.expect('[');
+                if(!reader.consume(']'))
+                {
+                    do
+                    {
+                        const std::int64_t note = reader.integer();
+                        if(note < 0 || note >= CUDNN_NUMERICAL_NOTE_TYPE_COUNT)
+                        {
+                            reader.fail("invalid numerical note");
+                        }
+                        plan.numericalNotes.push_back(
+                            static_cast<cudnnBackendNumericalNote_t>(note));
                     } while(reader.consume(','));
                     reader.expect(']');
                 }
@@ -637,7 +669,7 @@ public:
         return _config->engine().behaviorNotes();
     }
 
-    std::vector<cudnnBackendNumericalNote_t> numericalNotes() const
+    const std::vector<cudnnBackendNumericalNote_t>& numericalNotes() const
     {
         return _config->engine().numericalNotes();
     }
@@ -697,6 +729,7 @@ private:
         plan.id = _config->engineId();
         plan.name = engine.name();
         plan.behaviorNotes = engine.behaviorNotes();
+        plan.numericalNotes = engine.numericalNotes();
         plan.knobs = _config->knobChoices();
         if(_config->requestedChoices() != plan.knobs)
         {
@@ -801,6 +834,7 @@ inline std::shared_ptr<const PlanRecord>
         = makeLoadedConfigRecord(parsed->id,
                                  parsed->globalIndex,
                                  std::move(parsed->behaviorNotes),
+                                 std::move(parsed->numericalNotes),
                                  std::move(parsed->knobs),
                                  std::move(requested),
                                  std::move(parsed->name));
