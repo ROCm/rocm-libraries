@@ -21,6 +21,13 @@ afterwards, for the --verify-top best arms only (verify-sparse and verify-rand a
     python3 sweep.py --build-dir <build> --config sweep_mx.json --gpu 0 --out <dir> [--jobs 8]
                      [--runner "gpu-guard run --"] [--verify-top 3] [--no-build]
 
+--gpu auto (partitioned hosts, e.g. two partitions per physical GPU): samples `amd-smi
+process` (--free-samples x --free-interval s), takes the first pair of --pairs (default
+6,7 0,1 2,3 4,5) whose partitions both stayed idle and runs on the pair's first partition.
+Before every timed batch one more sample is taken; a batch during which another process
+used the pair is tagged and left out of the ranking. --allow-single falls back to a single
+idle partition (quick checks only; the summary says so).
+
 Writes <out>/results.csv (one row per timed launch batch) and prints a ranked summary.
 """
 import argparse
@@ -156,6 +163,70 @@ def arm_args(arm, shape, cfg):
     return a
 
 
+def _amdsmi(args):
+    r = subprocess.run(["timeout", "30", "amd-smi"] + args, capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError(f"amd-smi {' '.join(args)} failed or timed out")
+    return r.stdout
+
+
+def hip_index_map():
+    """amd-smi GPU id -> HIP device index, matched on PCI bus id. The HIP query runs in its own
+    short-lived process, before any sampling, so its context is never mistaken for a job."""
+    bdf_of = {}
+    for line in _amdsmi(["list", "--csv"]).splitlines()[1:]:
+        f = line.split(",")
+        if len(f) >= 2 and f[0].strip().isdigit():
+            bdf_of[f[0].strip()] = f[1].strip().lower()
+    code = ("import ctypes,sys\nh=ctypes.CDLL('/opt/rocm/lib/libamdhip64.so')\n"
+            "for i in range(int(sys.argv[1])):\n b=ctypes.create_string_buffer(64)\n"
+            " h.hipDeviceGetPCIBusId(b,64,i)\n print(i,b.value.decode().lower())\n")
+    r = subprocess.run(["timeout", "60", sys.executable, "-c", code, str(len(bdf_of))],
+                       capture_output=True, text=True)
+    hip_of_bdf = {}
+    for line in r.stdout.splitlines():
+        i, b = line.split()
+        hip_of_bdf[b] = int(i)
+    return {g: hip_of_bdf[b] for g, b in bdf_of.items() if b in hip_of_bdf}
+
+
+def busy_sample(gmap):
+    """HIP indices with a process on them right now (one amd-smi process sample)."""
+    busy = set()
+    for line in _amdsmi(["process", "--csv"]).splitlines()[1:]:
+        f = line.split(",")
+        if len(f) >= 3 and f[2].strip().isdigit() and f[0].strip() in gmap:
+            busy.add(gmap[f[0].strip()])
+    return busy
+
+
+def pick_gpu(o):
+    gmap = hip_index_map()
+    if not gmap:
+        sys.exit("--gpu auto: could not map amd-smi GPUs to HIP indices; pass --gpu N")
+    busy = {}
+    for s in range(o.free_samples):
+        for i in busy_sample(gmap):
+            busy[i] = busy.get(i, 0) + 1
+        if s + 1 < o.free_samples:
+            time.sleep(o.free_interval)
+    pairs = [tuple(int(x) for x in p.split(",")) for p in o.pairs.split()]
+    for p in pairs:
+        log(f"  pair {p}: " + ", ".join(f"HIP {i} " + (f"busy ({busy[i]} samples)" if i in busy else "free")
+                                         for i in p))
+    for p in pairs:
+        if all(i in gmap.values() and i not in busy for i in p):
+            log(f"--gpu auto: pair {p} free, running on HIP {p[0]}")
+            return p[0], p, gmap, False
+    if o.allow_single:
+        for p in pairs:
+            for i in p:
+                if i in gmap.values() and i not in busy:
+                    log(f"--gpu auto: no free pair; SINGLE partition HIP {i} (quick check only)")
+                    return i, (i,), gmap, True
+    sys.exit("--gpu auto: no free pair" + ("" if o.allow_single else " (--allow-single takes one partition)"))
+
+
 def run(cmd, env, runner):
     full = (shlex.split(runner) if runner else []) + cmd
     r = subprocess.run(full, env=env, capture_output=True, text=True, timeout=900)
@@ -166,7 +237,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build-dir", required=True, type=Path)
     ap.add_argument("--config", required=True, type=Path)
-    ap.add_argument("--gpu", required=True, help="HIP device index (HIP_VISIBLE_DEVICES)")
+    ap.add_argument("--gpu", required=True, help="HIP device index (HIP_VISIBLE_DEVICES), or auto")
+    ap.add_argument("--pairs", default="6,7 0,1 2,3 4,5", help="--gpu auto: partition pairs, in order")
+    ap.add_argument("--free-samples", type=int, default=6, help="--gpu auto: amd-smi samples")
+    ap.add_argument("--free-interval", type=float, default=10.0, help="--gpu auto: seconds between")
+    ap.add_argument("--allow-single", action="store_true", help="--gpu auto: fall back to one partition")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--runner", default="", help='launch prefix, e.g. "gpu-guard run --"')
@@ -216,25 +291,35 @@ def main():
         return
 
     # --- time first
-    env = dict(os.environ, HIP_VISIBLE_DEVICES=str(o.gpu))
+    gpu, pair, gmap, single = o.gpu, None, None, False
+    if o.gpu == "auto":
+        gpu, pair, gmap, single = pick_gpu(o)
+    env = dict(os.environ, HIP_VISIBLE_DEVICES=str(gpu))
     rounds, warm, rep = cfg.get("rounds", 5), cfg.get("warmup", 50), cfg.get("repeat", 100)
     timing = ["-mode=sustained", "-data=rand", "-sigma=0.1", f"-warmup={warm}", f"-repeat={rep}"]
     res = {}
     with open(out / "results.csv", "w", newline="") as fcsv:
         w = csv.writer(fcsv)
-        w.writerow(["variant_arm", "M", "N", "K", "round", "median_tflops"])
+        w.writerow(["variant_arm", "M", "N", "K", "round", "median_tflops", "pair_busy"])
         for shape in cfg["shapes"]:
             for r in range(rounds):
                 order = plan if r % 2 == 0 else plan[::-1]
                 for p in order:
                     time.sleep(1.0)
+                    tainted = False
+                    if pair:
+                        try:
+                            tainted = bool(busy_sample(gmap) & set(pair))
+                        except RuntimeError:
+                            tainted = True
                     rc, txt = run([str(p["exe"])] + arm_args(p["arm"], shape, cfg) + timing, env, o.runner)
                     m = re.search(r'"median_tflops":([0-9.]+)', txt)
                     tf = float(m.group(1)) if (m and rc == 0) else None
-                    res.setdefault((p["tag"], tuple(shape)), []).append(tf)
-                    w.writerow([p["tag"], *shape, r + 1, tf if tf is not None else "ERR"])
+                    res.setdefault((p["tag"], tuple(shape)), []).append(None if tainted else tf)
+                    w.writerow([p["tag"], *shape, r + 1, tf if tf is not None else "ERR", int(tainted)])
                     fcsv.flush()
-                    log(f"r{r + 1} {shape} {p['tag']}: {tf if tf is not None else 'ERROR rc=%d' % rc}")
+                    log(f"r{r + 1} {shape} {p['tag']}: {tf if tf is not None else 'ERROR rc=%d' % rc}"
+                        + ("  [pair busy: not ranked]" if tainted else ""))
 
     # --- summary, best first per shape
     best = []
@@ -245,10 +330,13 @@ def main():
             if v:
                 rows.append((statistics.median(v), min(v), max(v), p))
         rows.sort(key=lambda x: -x[0])
-        log(f"\n== {shape[0]}x{shape[1]}x{shape[2]}: median TF over {rounds} rounds")
+        log(f"\n== {shape[0]}x{shape[1]}x{shape[2]}: median TF over clean rounds of {rounds}"
+            + (f" on HIP {gpu}" if gpu is not None else "")
+            + ("  [SINGLE partition: quick check only]" if single else ""))
         top = rows[0][0] if rows else 1.0
         for med, lo, hi, p in rows:
-            log(f"  {med:8.1f}  ({lo:.0f}-{hi:.0f})  {med / top:.3f}x  {p['tag']}")
+            n_ok = len([x for x in res.get((p["tag"], tuple(shape)), []) if x is not None])
+            log(f"  {med:8.1f}  ({lo:.0f}-{hi:.0f})  {med / top:.3f}x  {p['tag']}  [{n_ok}/{rounds} clean]")
         best += [(shape, p) for _, _, _, p in rows[: o.verify_top]]
 
     # --- verify the winners last
