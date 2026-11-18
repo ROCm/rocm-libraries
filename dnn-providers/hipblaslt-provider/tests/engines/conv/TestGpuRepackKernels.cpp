@@ -659,7 +659,15 @@ void runClamp(data_objects::DataType type, float lower, float upper, int64_t fir
             EXPECT_TRUE(std::isnan(r)) << "NaN kept, at " << i;
             continue;
         }
-        const float want = v <= lower ? lower : (v >= upper ? upper : v);
+        float want = v;
+        if(v <= lower)
+        {
+            want = lower;
+        }
+        else if(v >= upper)
+        {
+            want = upper;
+        }
         EXPECT_EQ(r, want) << "at " << i << ", from " << v;
     }
 }

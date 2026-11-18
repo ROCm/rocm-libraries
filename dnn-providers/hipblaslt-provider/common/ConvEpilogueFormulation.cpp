@@ -284,7 +284,7 @@ std::optional<ConvGemmPlanCalls> fuseIntoGemm(const ConvProblem& problem,
     {
         const int64_t uid = freshUid(problem, plan, 0);
         const size_t offset = alignUp(plan.workspaceBytes);
-        const size_t bytes = static_cast<size_t>(tileRows * problem.k * elementBytes(yType));
+        const auto bytes = static_cast<size_t>(tileRows * problem.k * elementBytes(yType));
         plan.workspace.push_back(WorkspaceTensor{uid, offset, bytes});
         plan.workspaceBytes = offset + bytes;
         StridedCopyArgs fill{};
@@ -602,7 +602,8 @@ std::optional<GemmEpilogue> gemmEpilogueFor(const ConvProblem& problem,
     }
     const auto& op = ops[next];
     const auto value = [&](int offset) -> std::optional<float> {
-        const auto& slot = epilogue.scalars[static_cast<size_t>(op.slot + offset)];
+        const auto& slot
+            = epilogue.scalars[static_cast<size_t>(op.slot) + static_cast<size_t>(offset)];
         if(slot.runtime.has_value())
         {
             return std::nullopt;
