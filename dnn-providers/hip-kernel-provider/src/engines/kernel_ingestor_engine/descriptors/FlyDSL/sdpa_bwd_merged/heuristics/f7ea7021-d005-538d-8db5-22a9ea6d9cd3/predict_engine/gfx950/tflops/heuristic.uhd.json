@@ -1,11 +1,13 @@
 {
   "version": "1.0",
-  "id": "1a66d89a-a32c-49eb-b1c1-0097301184ec",
-  "name": "hipkernel:flydsl_sdpa_bwd_merged (gfx950, 42 contribution(s))",
-  "adapter": "tree_data",
+  "id": "9246db1b-b60c-47bb-97de-3f84fb4fdf28",
+  "name": "hipkernel:flydsl_sdpa_bwd_merged (gfx950, 50 contribution(s))",
+  "adapter": "mlp_data",
   "features_signature": [
     "$flydsl_sdpa_bwd_merged.batch",
+    "$flydsl_sdpa_bwd_merged.bias_row_broadcast",
     "$flydsl_sdpa_bwd_merged.class",
+    "$flydsl_sdpa_bwd_merged.dropout",
     "$flydsl_sdpa_bwd_merged.dtype",
     "$flydsl_sdpa_bwd_merged.gqa_pack",
     "$flydsl_sdpa_bwd_merged.head_dim_qk",
@@ -20,10 +22,83 @@
     "$graph.logical_bytes",
     {
       "value_or_default": [
+        "$graph.nodes[0].attn_mask.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
         "$graph.nodes[0].attn_scale_value",
         1.0
       ]
     },
+    "$graph.nodes[0].data_dependent",
     "$graph.nodes[0].diagonal_alignment",
     "$graph.nodes[0].dk.data_type",
     "$graph.nodes[0].dk.dims[0]",
@@ -52,6 +127,12 @@
     "$graph.nodes[0].dq.strides[0]",
     "$graph.nodes[0].dq.strides[1]",
     "$graph.nodes[0].dq.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dropout_probability",
+        0.0
+      ]
+    },
     "$graph.nodes[0].dv.data_type",
     "$graph.nodes[0].dv.dims[0]",
     "$graph.nodes[0].dv.dims[1]",
@@ -80,6 +161,79 @@
     "$graph.nodes[0].o.strides[0]",
     "$graph.nodes[0].o.strides[1]",
     "$graph.nodes[0].o.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.virtual",
+        -1
+      ]
+    },
+    "$graph.nodes[0].padding_mask",
     "$graph.nodes[0].q.data_type",
     "$graph.nodes[0].q.dims[0]",
     "$graph.nodes[0].q.dims[1]",
@@ -89,6 +243,300 @@
     "$graph.nodes[0].q.strides[0]",
     "$graph.nodes[0].q.strides[1]",
     "$graph.nodes[0].q.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].right_bound",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.virtual",
+        -1
+      ]
+    },
     "$graph.nodes[0].stats.dims[0]",
     "$graph.nodes[0].stats.dims[1]",
     "$graph.nodes[0].stats.dims[2]",
@@ -104,6 +552,7 @@
     "$graph.nodes[0].v.strides[0]",
     "$graph.nodes[0].v.strides[1]",
     "$graph.nodes[0].v.strides[2]",
+    "$graph.tensor_count",
     "$graph.tensors[0].data_type",
     "$graph.tensors[0].dims[0]",
     "$graph.tensors[0].dims[1]",
@@ -413,7 +862,7 @@
       ]
     }
   ],
-  "features_hash": "sha256:a92543154dcaf8fa",
+  "features_hash": "sha256:0b6b248762cfcbdd",
   "trained_against": {
     "ued": {
       "id": "f7ea7021-d005-538d-8db5-22a9ea6d9cd3",
@@ -438,9 +887,9 @@
     "calibrated": true,
     "transform": "log"
   },
-  "tree_data": {
+  "mlp_data": {
     "artifact": "model.bin",
-    "hash": "2b2c4c9616eb830be0225708fa14fb4059069c6a327be7e5b244beb20d8c6c94"
+    "hash": "c173849d6a7e20027bef652b4edd1f1484d6405eee50eaa3c4ee511dedd07886"
   },
   "categorical_encoding": {
     "$flydsl_sdpa_bwd_merged.dtype": {
