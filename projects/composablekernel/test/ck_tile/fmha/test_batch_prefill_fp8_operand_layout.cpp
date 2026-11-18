@@ -12,8 +12,11 @@
 // bit for bit. Warp 0 records the LDS addresses of its reads: each wave-wide read must cover one
 // contiguous 256-byte span of its tile (each of the 64 four-byte LDS banks once, no padding).
 // Controls read K or V as whole 16-byte chunks, in the b128 order of AttrNumAccess::Double, which
-// the Default-order WMMAs mis-pair: the K control must change S, the V control O alone. A further
-// kernel runs the policy's split softmax on the page-tile problem's score tile against the host.
+// the Default-order WMMAs mis-pair: the K control must change S, the V control O alone. The probe
+// also sums the rows of its P tile with the policy's SumQuantizedPRows (the row sum on the WMMA
+// unit): they must equal the host's row sums of P exactly, and differ from its column sums (the
+// control). A further kernel runs the policy's split softmax on the page-tile problem's score tile
+// against the host.
 // The tile is M128 (32-key QK stages), or M64 (64-key QK stages and the M64 split softmax) with
 // CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64 1.
 
@@ -139,7 +142,28 @@ struct Args
     uint32_t* k_reads;  // LDS byte address of each K read of warp 0: [stage][access][lane]
     uint32_t* v_reads;  // of each V read of warp 0: [access][lane]
     uint32_t* lds_base; // LDS byte address of the arena
+    float* row_sum;     // [kTileM] the row sums of P (Policy::SumQuantizedPRows)
 };
+
+// Row index of each element of a row tile.
+template <typename RowTile, typename F>
+CK_TILE_DEVICE void ForEachRow(RowTile& rows, F f)
+{
+    constexpr auto spans = RowTile::get_distributed_spans();
+    sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
+        constexpr auto i = make_tuple(idx0);
+        const auto x     = get_x_indices_from_distributed_indices(rows.get_tile_distribution(), i);
+        f(rows(i), x.at(number<0>{}));
+    });
+}
+
+// The row tile of gemm_1's output (the pipeline's l), one element per M iteration.
+template <typename Gemm1>
+using RowTileOf = decltype(block_tile_reduce<float>(
+    cast_tile<float>(decltype(Gemm1{}.MakeCBlockTile()){}),
+    sequence<1>{},
+    [](auto a, auto b) { return max(a, b); },
+    float{0}));
 
 // Contraction index of the run a whole-chunk (b128, AttrNumAccess::Double) read places where the
 // Default order expects 16 k0 + 8 h: a lane's two runs of one chunk-pair become chunk 2 (k0 / 2) +
@@ -326,6 +350,17 @@ struct OperandProbe
         static_assert(std::is_same_v<typename decltype(p_tile)::StaticTileDistribution::DstrEncode,
                                      remove_cvref_t<decltype(Pv::MakeABlockDistributionEncode())>>);
 
+        // ---- the row sums of P on the WMMA unit, stored by the row of each l element ----
+        if constexpr(!ControlK && !ControlV)
+        {
+            const auto sums = Policy::template SumQuantizedPRows<Pv>(p_tile);
+            RowTileOf<Pv> rows{};
+            static_assert(decltype(rows)::get_thread_buffer_size() == Geometry::kPvMIter);
+            static_for<0, Geometry::kPvMIter, 1>{}(
+                [&](auto m) { rows.get_thread_buffer()(m) = sums[m]; });
+            ForEachRow(rows, [&](float& x, index_t row) { args.row_sum[row] = x; });
+        }
+
         // ---- O = P V ----
         auto v_read_window = make_tile_window(v_lds,
                                               make_tuple(number<kTileN>{}, number<kHeadDim>{}),
@@ -366,18 +401,6 @@ struct SoftmaxProbe
 {
     static constexpr index_t kBlockSize = Geometry::kWaves * Geometry::kWaveSize;
 
-    // Row index of each element of a row tile.
-    template <typename RowTile, typename F>
-    CK_TILE_DEVICE static void ForEachRow(RowTile& rows, F f)
-    {
-        constexpr auto spans = RowTile::get_distributed_spans();
-        sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
-            constexpr auto i = make_tuple(idx0);
-            const auto x = get_x_indices_from_distributed_indices(rows.get_tile_distribution(), i);
-            f(rows(i), x.at(number<0>{}));
-        });
-    }
-
     [[maybe_unused]] CK_TILE_DEVICE void operator()(SoftmaxArgs args) const
     {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
@@ -398,10 +421,8 @@ struct SoftmaxProbe
                                        {0, 0},
                                        score.get_tile_distribution()))
                 .get_thread_buffer();
-        using OTile      = decltype(gemm_1.MakeCBlockTile());
-        using STile      = decltype(cast_tile<float>(OTile{}));
-        const auto f_max = [](auto a, auto b) { return max(a, b); };
-        using RowTile = decltype(block_tile_reduce<float>(STile{}, sequence<1>{}, f_max, float{0}));
+        using OTile   = decltype(gemm_1.MakeCBlockTile());
+        using RowTile = RowTileOf<remove_cvref_t<decltype(gemm_1)>>;
         RowTile row_max{};
         RowTile row_sum{};
         ForEachRow(row_max, [&](float& x, index_t row) { x = args.old_max[row]; });
@@ -435,6 +456,10 @@ struct Mismatches
     // Reads of warp 0 whose 32 lanes do not cover one contiguous, 8-byte aligned 256-byte span of
     // their tile (the bank model: each of 64 four-byte banks once).
     std::size_t scattered_reads = 0;
+    // Rows whose WMMA row sum of P differs from the host's row sum, and (the control) from the
+    // host's column sum of the same index.
+    std::size_t row_sum            = 0;
+    std::size_t row_sum_as_columns = 0;
 };
 
 // The 32 lane addresses of one wave-wide b64 read: one contiguous 256-byte span inside
@@ -537,7 +562,8 @@ Mismatches Run(const Tile& tile, const char* name)
     DeviceMem dq(q.size()), dk(k_pool.size()), dv(v_pool.size()),
         dpages(tile.page_row.size() * sizeof(int32_t)), ds(kTileM * kTileN * sizeof(float)),
         dout(kTileM * kHeadDim * sizeof(float)), dk_reads(kKReads * sizeof(uint32_t)),
-        dv_reads(kVReads * sizeof(uint32_t)), dbase(sizeof(uint32_t));
+        dv_reads(kVReads * sizeof(uint32_t)), dbase(sizeof(uint32_t)),
+        drow_sum(kTileM * sizeof(float));
     dq.ToDevice(q.data());
     dk.ToDevice(k_pool.data());
     dv.ToDevice(v_pool.data());
@@ -551,7 +577,8 @@ Mismatches Run(const Tile& tile, const char* name)
                     static_cast<float*>(dout.GetDeviceBuffer()),
                     static_cast<uint32_t*>(dk_reads.GetDeviceBuffer()),
                     static_cast<uint32_t*>(dv_reads.GetDeviceBuffer()),
-                    static_cast<uint32_t*>(dbase.GetDeviceBuffer())};
+                    static_cast<uint32_t*>(dbase.GetDeviceBuffer()),
+                    static_cast<float*>(drow_sum.GetDeviceBuffer())};
     using Probe = OperandProbe<ControlK, ControlV>;
     launch_kernel(stream_config{nullptr, false, 0},
                   make_kernel<1, gfx125_t>(Probe{}, dim3(1), dim3(Probe::kBlockSize), 0, args));
@@ -585,6 +612,22 @@ Mismatches Run(const Tile& tile, const char* name)
                                 base + Policy::kLdsOffsetV0);
         std::cout << ", reads not one contiguous 256-byte span " << result.scattered_reads << " / "
                   << (kKReads + kVReads) / 32;
+        // P = clamp(S, -16, 16) holds integers, exact in e4m3, so its row sums are exact.
+        std::vector<float> row_sum(kTileM);
+        drow_sum.FromDevice(row_sum.data());
+        for(int m = 0; m < kTileM; ++m)
+        {
+            int row = 0, column = 0;
+            for(int n = 0; n < kTileN; ++n)
+                row += Clamp16(static_cast<int>(s_ref[m * kTileN + n]));
+            for(int r = 0; r < kTileM; ++r)
+                column += Clamp16(static_cast<int>(s_ref[r * kTileN + m]));
+            result.row_sum += row_sum[m] != static_cast<float>(row);
+            result.row_sum_as_columns += row_sum[m] != static_cast<float>(column);
+        }
+        std::cout << ", WMMA row sums of P wrong " << result.row_sum << " / " << kTileM
+                  << " (control, against the column sums: " << result.row_sum_as_columns << " / "
+                  << kTileM << " differ)";
     }
     std::cout << '\n';
     return result;
@@ -622,6 +665,8 @@ TEST_F(Fp8PageTileOperands, PairExactly)
         EXPECT_EQ(result.s, 0u);
         EXPECT_EQ(result.o, 0u);
         EXPECT_EQ(result.scattered_reads, 0u);
+        EXPECT_EQ(result.row_sum, 0u);
+        EXPECT_GT(result.row_sum_as_columns, 0u);
     }
 }
 

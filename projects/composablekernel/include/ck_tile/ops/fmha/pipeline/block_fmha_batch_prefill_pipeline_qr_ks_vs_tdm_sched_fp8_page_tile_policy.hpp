@@ -784,6 +784,58 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         return p_tile;
     }
 
+    // The row sum of the FP8 P that gemm_1 consumes (the pipeline's quantized mass), on the WMMA
+    // unit: per M iteration of gemm_1, the sum of the lane's row of the P tile (gemm_1's A layout,
+    // as RepackPForGemm1 returns it). Each is the PV WMMA of that iteration's P chunk with V's
+    // operand replaced by FP8 ones: C = P * ones(128 x 16). Every column of C's row m is the sum
+    // of P's row m, and C has O's layout, so the lane holds the row of its l (the WMMA sums both
+    // lane halves). The WMMA reads the FP8 values PV reads; products by 1.0 are exact and it
+    // accumulates in fp32. The chunks are sliced as the pipeline's PV emitter slices them.
+    template <typename Gemm1, typename PTile>
+    CK_TILE_DEVICE static auto SumQuantizedPRows(const PTile& p_tile)
+    {
+        using WarpGemm    = typename Gemm1::WarpGemm;
+        using AWarpDstr   = typename WarpGemm::AWarpDstr;
+        using AWarpTensor = typename WarpGemm::AWarpTensor;
+        using BWarpTensor = typename WarpGemm::BWarpTensor;
+        using CWarpTensor = typename WarpGemm::CWarpTensor;
+        using BBuffer     = remove_cvref_t<decltype(BWarpTensor{}.get_thread_buffer())>;
+        static_assert(WarpGemm::kK == Geometry::kN &&
+                          std::is_same_v<typename WarpGemm::BDataType, fp8_t>,
+                      "one P chunk per M iteration covers the KV tile; the ones are FP8");
+        constexpr index_t kPMI = Gemm1::MIterPerWarp;
+        static_assert(kPMI == Geometry::kPvMIter);
+        constexpr auto a_warp_y_lengths =
+            to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+
+        BWarpTensor ones;
+        static_for<0, BBuffer::size(), 1>{}(
+            [&](auto e) { ones.get_thread_buffer()(e) = type_convert<fp8_t>(1.0f); });
+        array<AWarpTensor, kPMI> p_rows;
+        array<CWarpTensor, kPMI> sums;
+        static_for<0, kPMI, 1>{}([&](auto m) {
+            constexpr index_t kM          = decltype(m)::value;
+            p_rows(m).get_thread_buffer() = p_tile.get_y_sliced_thread_data(
+                merge_sequences(sequence<0, kM>{}, a_warp_y_index_zeros),
+                merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+            sums(m).get_thread_buffer().template set_as<fp32x8_t>(number<0>{}, fp32x8_t{});
+            WarpGemm{}(sums(m), p_rows[m], ones);
+        });
+        // The guard as the PV emitter's: the WMMAs complete in order, so the RAW fence on the last
+        // result covers every operand, and the operands stay allocated until the fence.
+        if constexpr(kWmmaOperandGuard)
+        {
+            WaitWmmaOperandsRead(sums(number<kPMI - 1>{}));
+            KeepOperandLive(ones);
+            static_for<0, kPMI, 1>{}([&](auto m) { KeepOperandLive(p_rows[m]); });
+        }
+        array<float, kPMI> rows;
+        static_for<0, kPMI, 1>{}(
+            [&](auto m) { rows(m) = sums[m].get_thread_buffer()[number<0>{}]; });
+        return rows;
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {

@@ -205,47 +205,21 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
         return Policy::GetLdsArenaSize() + PageTileTraits::kMetadataBytes;
     }
 
-    // fp8x8 as fp32. On gfx1250 (not strict, not gfx1251) one literal-scale builtin, the same for
-    // every lane, converts the whole wave (fp8x8_to_fp32x8 converts each half-wave under its own
-    // scale select there). The other targets take fp8x8_to_fp32x8: float8_ext.hpp allows the
-    // builtin only on that target. The forward FP8 pipeline's Dequantize guards it with
-    // __gfx125__ only.
-    CK_TILE_DEVICE static fp32x8_t Dequantize(const fp8x8_t& q)
-    {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1250__) && !defined(__gfx1250_strict__) && \
-    !defined(__gfx1251__)
-        return __builtin_amdgcn_cvt_scale_pk8_f32_fp8(bit_cast<uint32x2_t>(q), 0x7f7f7f7fu, 0);
-#else
-        return fp8x8_to_fp32x8(q, 1.0f);
-#endif
-    }
-
     // Rescales row_sum like l and adds the lane rows' sum of the FP8 P that gemm_1 consumes (the
-    // forward FP8 pipeline's AccumulateQuantizedMass), per M iteration: the lane's row of M
-    // iteration 0 takes scale_m0, that of M iteration 1 (M128 only) scale_m1.
+    // forward FP8 pipeline's AccumulateQuantizedMass, whose sum runs on the VALU), per M
+    // iteration: the lane's row of M iteration 0 takes scale_m0, that of M iteration 1 (M128
+    // only) scale_m1. The sums come from the WMMA unit (Policy::SumQuantizedPRows).
     template <typename Gemm1, typename PTile, typename RowTile>
     CK_TILE_DEVICE static void
     AccumulateQuantizedMass(const PTile& p_tile, RowTile& row_sum, float scale_m0, float scale_m1)
     {
-        constexpr index_t kVec  = 8;
-        constexpr index_t kPMI  = Geometry::kPvMIter;
-        constexpr index_t kBuf  = PTile::get_thread_buffer_size();
-        constexpr index_t kPKI  = kN0 / Gemm1::WarpGemm::kK;
-        constexpr index_t kPSub = kBuf / (kPMI * kPKI);
-        static_assert((kPMI == 1 || kPMI == 2) && kPSub % kVec == 0 &&
-                      RowTile::get_thread_buffer_size() == kPMI);
-        array<fp32x8_t, 2 * kPMI> acc{};
-        static_for<0, kBuf / kVec, 1>{}([&](auto i) {
-            constexpr index_t row = (decltype(i)::value * kVec / kPSub) % kPMI;
-            constexpr index_t a   = row * 2 + decltype(i)::value % 2;
-            acc(number<a>{}) += Dequantize(p_tile.get_thread_buffer().template get_as<fp8x8_t>(i));
-        });
-        auto& lq = row_sum.get_thread_buffer();
+        constexpr index_t kPMI = Geometry::kPvMIter;
+        static_assert((kPMI == 1 || kPMI == 2) && RowTile::get_thread_buffer_size() == kPMI);
+        const auto sums = Policy::template SumQuantizedPRows<Gemm1>(p_tile);
+        auto& lq        = row_sum.get_thread_buffer();
         static_for<0, kPMI, 1>{}([&](auto row) {
-            const fp32x8_t v = acc[number<row * 2>{}] + acc[number<row * 2 + 1>{}];
-            float s          = ((v[0] + v[1]) + (v[2] + v[3])) + ((v[4] + v[5]) + (v[6] + v[7]));
-            s += SplitSoftmax::PermuteLaneX16(s);
-            lq(row) = __builtin_fmaf(decltype(row)::value == 0 ? scale_m0 : scale_m1, lq[row], s);
+            lq(row) =
+                __builtin_fmaf(decltype(row)::value == 0 ? scale_m0 : scale_m1, lq[row], sums[row]);
         });
     }
 
