@@ -339,7 +339,7 @@ When `ORIGAMI_ENABLE_NN=OFF`, all NN code is compiled out and `rank_configs` alw
 | Dtype family | Tensile type | Transpose layouts |
 |------------|--------------|-------------------|
 | bf16 BBS (`bf16_r`) | `BB_BB` | TN, NN, TT, NT (all four) |
-| fp8 F8BS | `F8F8_BF8` | NN only |
+| fp8 F8BS (`f8_r` inputs, `bf16_r` output) | `F8F8_BF8` | TN only (`--transA T --transB N`, Tensile `Alik_Bljk`) |
 | fp32 with xf32 compute (`f32_r`, `--compute_type xf32_r`) | `SS_SS` (`S_MX_B`) | TN, NN, TT, NT (all four) |
 
 If no model exists for a given logic stem, `load_models_for_logic` returns `invalid_handle` (`-1`) and `rank_configs` falls back to analytical when `ORIGAMI_INFERENCE_MODE=nn_fallback`. The miss is cached for the life of the process, so place the weights before the first lookup.
