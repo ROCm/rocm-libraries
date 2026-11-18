@@ -749,5 +749,126 @@ class TestRegistryCombos(unittest.TestCase):
         self.assertNotEqual(spec_identity(Spec(16)), spec_identity(Spec(32)))
 
 
+@dataclass(frozen=True)
+class _ListRequest(OperatorRequest):
+    """A request that cannot be hashed: a frozen dataclass hashes its fields."""
+
+    arch: str = "gfx950"
+    shape: list = None
+
+
+class TestCachedDispatch(unittest.TestCase):
+    """``cached_dispatch`` answers an equal request from its store, and only
+    where a fresh dispatch would give the same answer."""
+
+    def setUp(self):
+        self.consulted: list[str] = []
+        self.registry = CandidateRegistry("dummy")
+        self.registry.register(self._counting("fast", priority=10))
+        self.registry.register(self._counting("generic", priority=50))
+
+    def _counting(self, name: str, *, priority: int, min_rows: int = 1):
+        def _supports(req):
+            self.consulted.append(name)
+            if getattr(req, "rows", min_rows) < min_rows:
+                return False, f"rows below {min_rows}"
+            return True, "ok"
+
+        return _candidate(name, priority=priority, _supports=_supports)
+
+    def _dispatch(self, request, ranker):
+        """What a family's ``dispatch_<family>`` does without the store."""
+        candidate = self.registry.select(request, ranker=ranker)
+        return DispatchResult(
+            request=request,
+            candidate=candidate,
+            spec=candidate.select_spec(request),
+            kernel_id=_kernel_id(candidate=candidate.name),
+            grid=candidate.grid(None, request),
+            block=candidate.block(None),
+            signature=(),
+            explanation=(f"selected {candidate.name}",),
+        )
+
+    def _cached(self, request, **kwargs):
+        return self.registry.cached_dispatch(request, self._dispatch, **kwargs)
+
+    def test_an_equal_request_is_answered_without_consulting_predicates(self):
+        first = self._cached(_Request(rows=64))
+        self.assertEqual(self.consulted, ["fast", "generic"])
+        self.consulted.clear()
+        again = self._cached(_Request(rows=64))
+        self.assertEqual(again, first)
+        self.assertEqual(self.consulted, [])
+        # A different request is still a fresh selection.
+        self._cached(_Request(rows=65))
+        self.assertEqual(self.consulted, ["fast", "generic"])
+
+    def test_registering_a_candidate_drops_the_stored_answer(self):
+        self.assertEqual(self._cached(_Request()).candidate.name, "fast")
+        self.registry.register(self._counting("faster", priority=1))
+        self.assertEqual(self._cached(_Request()).candidate.name, "faster")
+
+    def test_a_ranker_neither_reads_nor_writes_the_store(self):
+        def last_first(_req, supported):
+            return tuple(reversed(supported))
+
+        # Stored answer present: the ranker's pick still wins.
+        self.assertEqual(self._cached(_Request()).candidate.name, "fast")
+        ranked = self._cached(_Request(), ranker=last_first)
+        self.assertEqual(ranked.candidate.name, "generic")
+        # No stored answer: the ranker's pick is not left behind for a call
+        # without one.
+        other = _Request(rows=7)
+        self.assertEqual(
+            self._cached(other, ranker=last_first).candidate.name, "generic"
+        )
+        self.assertEqual(self._cached(other).candidate.name, "fast")
+
+    def test_context_keeps_answers_chosen_under_different_state_apart(self):
+        state = {"override": "a"}
+
+        def dispatch(request, ranker):
+            result = self._dispatch(request, ranker)
+            return replace(result, spec=state["override"])
+
+        def cached():
+            return self.registry.cached_dispatch(
+                _Request(), dispatch, context=state["override"]
+            )
+
+        self.assertEqual(cached().spec, "a")
+        state["override"] = "b"
+        self.assertEqual(cached().spec, "b")
+        state["override"] = "a"
+        self.assertEqual(cached().spec, "a")
+
+    def test_an_unhashable_request_is_dispatched_every_time(self):
+        for _ in range(2):
+            self.consulted.clear()
+            result = self._cached(_ListRequest(shape=[4, 4]))
+            self.assertEqual(result.candidate.name, "fast")
+            self.assertEqual(self.consulted, ["fast", "generic"])
+
+    def test_a_refusal_is_derived_again_and_never_stored(self):
+        registry = CandidateRegistry("dummy")
+        registry.register(self._counting("wide", priority=10, min_rows=512))
+        self.registry = registry
+        for _ in range(2):
+            with self.assertRaisesRegex(ValueError, "wide: rows below 512"):
+                self._cached(_Request(rows=64))
+        # The refused request is served once a candidate that admits it exists.
+        registry.register(self._counting("narrow", priority=20))
+        self.assertEqual(self._cached(_Request(rows=64)).candidate.name, "narrow")
+
+    def test_the_store_is_bounded(self):
+        self.registry.RESULT_CACHE_CAPACITY = 4
+        for rows in range(1, 13):
+            self._cached(_Request(rows=rows))
+            self.assertLessEqual(len(self.registry._results), 4)
+        # Requests dropped on the way are selected again, correctly.
+        self.assertEqual(self._cached(_Request(rows=1)).candidate.name, "fast")
+
+
 if __name__ == "__main__":
     unittest.main()

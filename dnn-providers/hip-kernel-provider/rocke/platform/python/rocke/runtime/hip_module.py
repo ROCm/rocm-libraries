@@ -791,6 +791,16 @@ class Runtime:
     # :meth:`wait_stream` (event-blocking drain per stream).
     _pending_args: "Dict[int, List[Tuple[Tuple[Any, ...], Optional[Event]]]]" = {}
 
+    # Per ``(grid, block, shared_bytes, stream)``, the eight ctypes scalars a
+    # plain ``hipModuleLaunchKernel`` takes between the function handle and the
+    # argument pointers. HIP receives them by value and nothing writes to them,
+    # so every launch with the same geometry on the same stream shares one
+    # tuple instead of constructing eight objects. Holds at most
+    # ``_LAUNCH_SCALARS_CAPACITY`` geometries: a miss on a full cache empties
+    # it, so a caller that never repeats a geometry cannot grow it.
+    _launch_scalars: "Dict[Tuple[int, ...], Tuple[Any, ...]]" = {}
+    _LAUNCH_SCALARS_CAPACITY = 256
+
     def check_gpu_checks(self, stream: int | None = None) -> None:
         """Raise :class:`GpuCheckFailed` if a ``gpu_checked_value`` fact was
         false in a launch queued through this runtime on ``stream`` (every
@@ -1027,6 +1037,65 @@ class Runtime:
         return Event(h)
 
     @staticmethod
+    def _plain_launch_scalars(
+        grid: Tuple[int, int, int],
+        block: Tuple[int, int, int],
+        shared_bytes: int,
+        stream: int,
+    ) -> Tuple[Any, ...]:
+        """The by-value ctypes arguments of a plain launch, in call order:
+        grid x/y/z, block x/y/z, shared memory bytes, stream. Shared between
+        launches through :attr:`_launch_scalars`."""
+        key = (
+            grid[0],
+            grid[1],
+            grid[2],
+            block[0],
+            block[1],
+            block[2],
+            shared_bytes,
+            stream,
+        )
+        cache = Runtime._launch_scalars
+        scalars = cache.get(key)
+        if scalars is None:
+            scalars = (
+                ctypes.c_uint(grid[0]),
+                ctypes.c_uint(grid[1]),
+                ctypes.c_uint(grid[2]),
+                ctypes.c_uint(block[0]),
+                ctypes.c_uint(block[1]),
+                ctypes.c_uint(block[2]),
+                ctypes.c_uint(shared_bytes),
+                ctypes.c_void_p(stream),
+            )
+            if len(cache) >= Runtime._LAUNCH_SCALARS_CAPACITY:
+                cache.clear()
+            cache[key] = scalars
+        return scalars
+
+    @staticmethod
+    def _extra_launch_params(args_packed: bytes) -> Tuple[Any, Any, Any]:
+        """Copy ``args_packed`` into a buffer of its own and build the HIP
+        ``extra`` array over it: ``[BUFFER_POINTER, &args, BUFFER_SIZE, &size,
+        END]``.
+
+        Returns ``(args_buf, size_buf, extra)``. ``extra`` stores the two
+        addresses as integers, so it does not keep ``args_buf`` or ``size_buf``
+        alive: the caller holds all three for as long as HIP may read them.
+        """
+        args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
+        size_buf = ctypes.c_size_t(len(args_packed))
+        extra = (ctypes.c_void_p * 5)(
+            HIP_LAUNCH_PARAM_BUFFER_POINTER,
+            ctypes.addressof(args_buf),
+            HIP_LAUNCH_PARAM_BUFFER_SIZE,
+            ctypes.addressof(size_buf),
+            HIP_LAUNCH_PARAM_END,
+        )
+        return args_buf, size_buf, extra
+
+    @staticmethod
     def _enqueue(
         fn: _HipFunctionHandle,
         grid: Tuple[int, int, int],
@@ -1050,14 +1119,7 @@ class Runtime:
             _check(
                 _hipModuleLaunchKernel(
                     fn,
-                    ctypes.c_uint(grid[0]),
-                    ctypes.c_uint(grid[1]),
-                    ctypes.c_uint(grid[2]),
-                    ctypes.c_uint(block[0]),
-                    ctypes.c_uint(block[1]),
-                    ctypes.c_uint(block[2]),
-                    ctypes.c_uint(shared_bytes),
-                    ctypes.c_void_p(stream),
+                    *Runtime._plain_launch_scalars(grid, block, shared_bytes, stream),
                     params,
                     extra,
                 ),
@@ -1174,16 +1236,7 @@ class Runtime:
         # already completed. Keeps the bucket bounded in steady state.
         self._reap_completed(s)
 
-        # Build the HIP "extra" array: [BUFFER_POINTER, &args, BUFFER_SIZE, &size, END].
-        args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
-        size_buf = ctypes.c_size_t(len(args_packed))
-        extra = (ctypes.c_void_p * 5)(
-            HIP_LAUNCH_PARAM_BUFFER_POINTER,
-            ctypes.cast(args_buf, ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_BUFFER_SIZE,
-            ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_END,
-        )
+        args_buf, size_buf, extra = self._extra_launch_params(args_packed)
         _GPU_CHECKS.note(fn, s)
         cluster_refs = self._enqueue(
             fn,
@@ -1228,8 +1281,8 @@ class Runtime:
 
         For loops that launch the same kernel with the same arguments
         over and over -- the timed loop of a benchmark. :meth:`launch`
-        rebuilds the args buffer, the ``extra`` array and the scalar
-        ctypes on each call, which costs more host time than a small
+        copies the args buffer and rebuilds the ``extra`` array on each
+        call, which costs more host time than a small
         kernel runs, so a timed loop of those measures the host and not
         the GPU. The callable owns its args buffer, so it stays valid
         for as long as the callable is alive and is never written to
@@ -1237,25 +1290,10 @@ class Runtime:
         :func:`rocke.runtime.packing.pack_args_kernelparams`) always
         sees the right bytes.
         """
-        args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
-        size_buf = ctypes.c_size_t(len(args_packed))
-        extra = (ctypes.c_void_p * 5)(
-            HIP_LAUNCH_PARAM_BUFFER_POINTER,
-            ctypes.cast(args_buf, ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_BUFFER_SIZE,
-            ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_END,
-        )
+        args_buf, size_buf, extra = self._extra_launch_params(args_packed)
         call_args = (
             fn,
-            ctypes.c_uint(grid[0]),
-            ctypes.c_uint(grid[1]),
-            ctypes.c_uint(grid[2]),
-            ctypes.c_uint(block[0]),
-            ctypes.c_uint(block[1]),
-            ctypes.c_uint(block[2]),
-            ctypes.c_uint(shared_bytes),
-            ctypes.c_void_p(int(stream)),
+            *self._plain_launch_scalars(grid, block, shared_bytes, int(stream)),
             None,
             extra,
         )
@@ -1328,15 +1366,7 @@ class Runtime:
         # from growing if the caller mixes fenced and unfenced launches.
         self._reap_completed(s)
 
-        args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
-        size_buf = ctypes.c_size_t(len(args_packed))
-        extra = (ctypes.c_void_p * 5)(
-            HIP_LAUNCH_PARAM_BUFFER_POINTER,
-            ctypes.cast(args_buf, ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_BUFFER_SIZE,
-            ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
-            HIP_LAUNCH_PARAM_END,
-        )
+        args_buf, size_buf, extra = self._extra_launch_params(args_packed)
         _GPU_CHECKS.note(fn, s)
         cluster_refs = self._enqueue(
             fn,
@@ -1350,12 +1380,12 @@ class Runtime:
             "hipModuleLaunchKernel",
         )
         # Single ``hipStreamSynchronize`` is both the kernel-completion
-        # wait and the args-buffer-drain barrier. After it returns,
-        # ``args_buf``/``size_buf``/``extra`` (and ``cluster_refs``) can be
-        # dropped by Python's frame cleanup -- the GPU is no longer reading
-        # them.
+        # wait and the args-buffer-drain barrier. ``extra`` only holds the
+        # addresses of ``args_buf`` and ``size_buf``, so those two (and
+        # ``cluster_refs``) stay referenced until it returns -- the GPU is
+        # no longer reading them after that.
         _sync_stream(s)
-        del cluster_refs
+        del args_buf, size_buf, cluster_refs
         _GPU_CHECKS.read(s)
 
     def launch_kernelparams(

@@ -395,8 +395,7 @@ def dispatch_moe_all(req: MoeRequest) -> Tuple[DispatchResult, ...]:
     return MOE_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
-def dispatch_moe(req: MoeRequest, *, ranker: Ranker | None = None) -> DispatchResult:
-    """Select the fused-MoE mega-kernel element path for ``req``."""
+def _dispatch(req: MoeRequest, ranker: Ranker | None) -> DispatchResult:
     candidate = MOE_REGISTRY.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
@@ -416,3 +415,13 @@ def dispatch_moe(req: MoeRequest, *, ranker: Ranker | None = None) -> DispatchRe
             f"request_hash={kid.request_hash}",
         ),
     )
+
+
+def dispatch_moe(req: MoeRequest, *, ranker: Ranker | None = None) -> DispatchResult:
+    """Select the fused-MoE mega-kernel element path for ``req``.
+
+    An equal request dispatched again without a ``ranker`` gets the stored
+    result (:meth:`CandidateRegistry.cached_dispatch`); the selection reads
+    nothing but the request and the registry.
+    """
+    return MOE_REGISTRY.cached_dispatch(req, _dispatch, ranker=ranker)

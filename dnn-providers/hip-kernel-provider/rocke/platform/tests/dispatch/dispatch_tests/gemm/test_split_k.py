@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 from rocke.dispatch import GemmRequest, dispatch_gemm_bf16
 from rocke.helpers.split_k import (
@@ -121,6 +123,24 @@ class TestDispatchWiring(unittest.TestCase):
         self.assertEqual(r.candidate.spec_id, "cdna_cshuffle_default")
         self.assertEqual(r.spec.trait.split_k, 1)
         self.assertEqual(r.grid[2], 1)
+
+    def test_env_override_changed_between_equal_requests_is_honoured(self):
+        # select_spec reads ROCKE_GEMM_SPLIT_K, so an answer chosen under one
+        # value must not be handed back under another.
+        def split_k(value):
+            with mock.patch.dict(os.environ):
+                os.environ.pop("ROCKE_GEMM_SPLIT_K", None)
+                if value is not None:
+                    os.environ["ROCKE_GEMM_SPLIT_K"] = value
+                r = dispatch_gemm_bf16(_bf16(2, 4096, 4096))
+            self.assertEqual(r.grid[2], r.spec.trait.split_k)
+            return r.spec.trait.split_k
+
+        auto = split_k(None)
+        self.assertGreater(auto, 1)
+        self.assertEqual(split_k("off"), 1)
+        self.assertEqual(split_k("2"), 2)
+        self.assertEqual(split_k(None), auto)
 
     def test_decode_candidate_off_for_large_m(self):
         # Large M must not pick the decode candidate.
