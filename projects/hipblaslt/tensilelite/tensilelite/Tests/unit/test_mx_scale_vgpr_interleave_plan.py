@@ -31,7 +31,6 @@ def _writer(numVgprBuffer=2, lrvwTile=1, valuPerBlock=(4, 4)):
   writer._mxsInterleavePlan = lambda kernel, tPA, tPB, **kw: KernelWriter._mxsInterleavePlan(writer, kernel, tPA, tPB, **kw)
   writer._mxsBudgetPlan = lambda *args: KernelWriter._mxsBudgetPlan(writer, *args)
   writer._mxsLayoutConflicts = lambda *args, **kw: KernelWriter._mxsLayoutConflicts(writer, *args, **kw)
-  writer.do = {"MXScaleVgprInterleaveExtraVgpr": False}
   return writer
 
 
@@ -46,6 +45,7 @@ def _kernel(**over):
     "ISA": (12, 5, 0),
     "UnrollMajorLDSA": 1, "UnrollMajorLDSB": 1,
     "SourceSwap": 1,
+    "MXScaleVgprInterleaveExtraVgpr": False,
   }
   kernel.update(over)
   return kernel
@@ -228,9 +228,8 @@ def _conflicts(plan, pairing):
 
 def test_region_shares_groups_when_extra_vgprs_are_allowed():
   writer = _unbalanced_writer()
-  writer.do["MXScaleVgprInterleaveExtraVgpr"] = True
   # default: align(0 + 8) = 10, plus 26 MXSB VGPRs, from v0 -> 36; the stacked layout needs 60
-  plan, regionLen, reason = _region(writer, _kernel(), vgprIdx=0)
+  plan, regionLen, reason = _region(writer, _kernel(MXScaleVgprInterleaveExtraVgpr=True), vgprIdx=0)
   assert reason is None and len(plan["groups"]) == 1 and "conflicts" not in plan
   assert 36 <= regionLen < 60
   # a layout that already fits keeps its per-group stacking
