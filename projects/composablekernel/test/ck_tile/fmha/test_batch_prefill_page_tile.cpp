@@ -92,7 +92,7 @@
 #define CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL 0
 #endif
 // 1: the FP8 page tile (fp8bf16): FP8 Q/K/V and P, BF16 O, per-tensor q/k/v descales; vectorized
-// x = 16 pools, P64, D64, M128, vLLM table.
+// x = 16 pools, P64, D64, M128 or M64 (CK_TILE_FMHA_PAGE_TILE_TEST_M64), vLLM table.
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_FP8
 #define CK_TILE_FMHA_PAGE_TILE_TEST_FP8 0
 #endif
@@ -147,10 +147,10 @@ constexpr index_t kQueryTailRows = CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL != 0 ?
 static_assert(kQueryTailRows == 0 || (kKvSplits == 2 && kM64),
               "the query tail is a KV split with M64 tiles");
 static_assert(!kFp8 || (kVectorized && kPage == 64 && CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM == 64 &&
-                        !kSglang && !kFp16 && !kLse && !kSink && !kSoftcap && kBias == 0 && !kM64 &&
+                        !kSglang && !kFp16 && !kLse && !kSink && !kSoftcap && kBias == 0 &&
                         kKvSplits == 1),
-              "the FP8 page tile is P64 D64 M128 over vectorized pools and a vLLM table, without "
-              "LSE, sink, soft cap, bias or KV split");
+              "the FP8 page tile is P64 D64 (M128 or M64) over vectorized pools and a vLLM table, "
+              "without LSE, sink, soft cap, bias or KV split");
 
 // The page-tile pipeline of a problem, the FP8 one in FP8 binaries. Each binary names only its
 // own pipeline: naming the FP8 pipeline forms its default policy from the problem.

@@ -18,9 +18,9 @@ namespace ck_tile {
 
 // FP8 batch-prefill pipeline of the gfx1250 page tile (fp8bf16, per-tensor descales): FP8 Q / K / V
 // and P with the FP8 WMMAs, BF16 O. The loop is the lean D64 loop of the BF16 page tile
-// (BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile): M128 query tiles, N128 KV tiles of two
-// P64 pages (one per pair of waves) from the vectorized x = 16 pool, the page ids of tile i + 3
-// from VGPR batches, three barriers per tile. P is handled as in the forward FP8 pipeline
+// (BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile): M128 or M64 query tiles, N128 KV tiles
+// of two P64 pages (one per pair of waves) from the vectorized x = 16 pool, the page ids of tile
+// i + 3 from VGPR batches, three barriers per tile. P is handled as in the forward FP8 pipeline
 // (BlockFmhaPipelineQRKSVSTdmSchedFp8): it is cast to FP8 as kPScale * P, the row sum is the mass
 // of that FP8 P, and the output is O / l. The kernel folds q_descale * k_descale into scale_s and
 // scales the output by v_descale.
@@ -84,8 +84,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
                   "qr_tdm_sched: every softmax site calls exp2, so log2(e) must be folded into "
                   "scale_s");
 
-    // Scope of the FP8 page tile: per-tensor FP8 Q / K / V / P with BF16 O; D64/V64 M128 N128
-    // tiles of P64 pages from the vectorized x = 16 pool through a vLLM block table; no sink
+    // Scope of the FP8 page tile: per-tensor FP8 Q / K / V / P with BF16 O; D64/V64 M128 or M64,
+    // N128 tiles of P64 pages from the vectorized x = 16 pool through a vLLM block table; no sink
     // tokens, bias, logits soft cap, LSE or dropout.
     static_assert(std::is_same_v<QDataType, fp8_t> && std::is_same_v<KDataType, fp8_t> &&
                       std::is_same_v<VDataType, fp8_t> && std::is_same_v<PDataType, fp8_t> &&
@@ -93,8 +93,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
                   "the FP8 page tile takes FP8 Q, K, V and P and stores BF16 O");
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
                   "the FP8 page tile takes per-tensor descales");
-    static_assert(kM0 == 128 && kN0 == 128 && kQKHeaddim == 64 && kN1 == 64,
-                  "the FP8 page tile supports D64/V64 M128 N128 tiles");
+    static_assert((kM0 == 128 || kM0 == 64) && kN0 == 128 && kQKHeaddim == 64 && kN1 == 64,
+                  "the FP8 page tile supports D64/V64 M128 or M64, N128 tiles");
     static_assert(Problem::kIsGroupMode && Problem::kPageBlockSize == 64);
     static_assert(Problem::kKVMemoryLayout ==
                           BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT &&
@@ -221,7 +221,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
     }
 
     // Rescales row_sum like l and adds the lane rows' sum of the FP8 P that gemm_1 consumes (the
-    // forward FP8 pipeline's AccumulateQuantizedMass).
+    // forward FP8 pipeline's AccumulateQuantizedMass), per M iteration: the lane's row of M
+    // iteration 0 takes scale_m0, that of M iteration 1 (M128 only) scale_m1.
     template <typename Gemm1, typename PTile, typename RowTile>
     CK_TILE_DEVICE static void
     AccumulateQuantizedMass(const PTile& p_tile, RowTile& row_sum, float scale_m0, float scale_m1)
@@ -231,15 +232,16 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
         constexpr index_t kBuf  = PTile::get_thread_buffer_size();
         constexpr index_t kPKI  = kN0 / Gemm1::WarpGemm::kK;
         constexpr index_t kPSub = kBuf / (kPMI * kPKI);
-        static_assert(kPMI == 2 && kPSub % kVec == 0);
-        array<fp32x8_t, 4> acc{};
+        static_assert((kPMI == 1 || kPMI == 2) && kPSub % kVec == 0 &&
+                      RowTile::get_thread_buffer_size() == kPMI);
+        array<fp32x8_t, 2 * kPMI> acc{};
         static_for<0, kBuf / kVec, 1>{}([&](auto i) {
             constexpr index_t row = (decltype(i)::value * kVec / kPSub) % kPMI;
             constexpr index_t a   = row * 2 + decltype(i)::value % 2;
             acc(number<a>{}) += Dequantize(p_tile.get_thread_buffer().template get_as<fp8x8_t>(i));
         });
         auto& lq = row_sum.get_thread_buffer();
-        static_for<0, 2, 1>{}([&](auto row) {
+        static_for<0, kPMI, 1>{}([&](auto row) {
             const fp32x8_t v = acc[number<row * 2>{}] + acc[number<row * 2 + 1>{}];
             float s          = ((v[0] + v[1]) + (v[2] + v[3])) + ((v[4] + v[5]) + (v[6] + v[7]));
             s += SplitSoftmax::PermuteLaneX16(s);

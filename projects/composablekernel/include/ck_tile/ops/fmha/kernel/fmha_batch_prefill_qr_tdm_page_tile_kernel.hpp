@@ -29,8 +29,8 @@ namespace ck_tile {
 // FP8 (fp8bf16, BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile): FP8 Q and vectorized FP8
 // K/V pools with 16-element vectors (K [page, kv_head, dim / 16, token, 16], V [page, kv_head,
 // token / 16, dim, 16]), BF16 O, per-tensor descales (q/k/v_descale_ptr, one fp32 each: the
-// kernel reads one element and cannot check the count), D64/V64, P64, vLLM block table, M128,
-// no mask or a window as above, no sink tokens or logits, bias, soft cap or LSE. The FP8
+// kernel reads one element and cannot check the count), D64/V64, P64, vLLM block table, M128 or
+// M64, no mask or a window as above, no sink tokens or logits, bias, soft cap or LSE. The FP8
 // instances are validated on gfx1250 only; they also compile for gfx1251, where the FP8 converts
 // are software conversions (float8_ext.hpp), and would be emitted for gfx1250-strict, which the
 // current compiler does not target. Neither target is validated. Build with

@@ -415,21 +415,30 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
-    # FP8 page tile (fp8bf16, per-tensor descales): vectorized x = 16 pools, P64 D64 M128, dense
-    # and causal.
+    # FP8 page tile (fp8bf16, per-tensor descales): vectorized x = 16 pools, P64 D64, M128 and the
+    # M64 small-grid tile, dense and causal.
     foreach(mask IN ITEMS dense causal)
         add_page_tile_gtest(p64_d64_${mask}_vec_fp8
             CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
             CK_TILE_FMHA_PAGE_TILE_TEST_FP8=1)
+        add_page_tile_gtest(p64_d64_${mask}_vec_fp8_m64
+            CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
+            CK_TILE_FMHA_PAGE_TILE_TEST_FP8=1
+            CK_TILE_FMHA_PAGE_TILE_TEST_M64=1)
     endforeach()
 
-    # FP8 page tile (fp8bf16): the policy's operand pairing on the window's LDS tiles, and the
-    # native FP8 conversions and WMMA on subnormals, with the page-tile gtests' flags.
-    foreach(name IN ITEMS operand_layout native_controls)
+    # FP8 page tile (fp8bf16): the policy's operand pairing and split softmax on the window's LDS
+    # tiles (M128, and M64 with CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64), and the native FP8
+    # conversions and WMMA on subnormals, with the page-tile gtests' flags.
+    foreach(name IN ITEMS operand_layout operand_layout_m64 native_controls)
         set(target test_ck_tile_fmha_batch_prefill_fp8_${name})
-        add_qr_tdm_sched_gtest(${target} test_batch_prefill_fp8_${name}.cpp)
+        string(REGEX REPLACE "_m64$" "" source ${name})
+        add_qr_tdm_sched_gtest(${target} test_batch_prefill_fp8_${source}.cpp)
         target_compile_options(${target} PRIVATE -Wno-float-equal
             -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        if(name MATCHES "_m64$")
+            target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_FP8_OPERAND_LAYOUT_TEST_M64=1)
+        endif()
     endforeach()
 endif()
 
