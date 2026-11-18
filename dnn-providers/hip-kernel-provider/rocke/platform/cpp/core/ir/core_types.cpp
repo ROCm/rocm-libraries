@@ -695,9 +695,19 @@ const char* rocke_i_type_name_message(const char* what,
 }
 
 /* Python core/ir.py::_value_element_error; the texts are the Python engine's. */
-const char* rocke_i_value_element_error(
-    const char* access, const rocke_type_t* value_type, const char* expected, char* buf, size_t cap)
+const char* rocke_i_value_element_error(const char* access,
+                                        const rocke_type_t* value_type,
+                                        int value_index,
+                                        const char* expected,
+                                        char* buf,
+                                        size_t cap)
 {
+    char what[ROCKE_ERR_MSG_CAP];
+    snprintf(what, sizeof what, "%s operand", access);
+    if(rocke_i_untyped_value_message(value_type, what, value_index, "an IR type", buf, cap))
+    {
+        return buf;
+    }
     const char* element = rocke_i_elem_of(value_type)->name;
     if(strcmp(element, expected) == 0)
     {
@@ -709,12 +719,13 @@ const char* rocke_i_value_element_error(
 /* Python core/ir.py::_smem_store_vN_f32_error; the texts are the Python engine's. */
 rocke_status_t rocke_i_smem_store_vN_f32_error(const char* store,
                                                const rocke_type_t* value_type,
+                                               int value_index,
                                                const int64_t* width,
                                                const char* width_param,
                                                char* buf,
                                                size_t cap)
 {
-    if(rocke_i_value_element_error(store, value_type, "f32", buf, cap))
+    if(rocke_i_value_element_error(store, value_type, value_index, "f32", buf, cap))
     {
         return ROCKE_ERR_TYPE;
     }
@@ -734,8 +745,10 @@ rocke_status_t rocke_i_smem_store_vN_f32_op_error(const rocke_op_t* op, char* bu
     }
     int64_t width = 0;
     const bool has_width = vec_width(op, &width);
+    const int value_index = op->num_operands - 1;
     return rocke_i_smem_store_vN_f32_error(rocke_opcode_name(op->opcode),
-                                           op->operands[op->num_operands - 1]->type,
+                                           op->operands[value_index]->type,
+                                           value_index,
                                            has_width ? &width : NULL,
                                            "vec",
                                            buf,

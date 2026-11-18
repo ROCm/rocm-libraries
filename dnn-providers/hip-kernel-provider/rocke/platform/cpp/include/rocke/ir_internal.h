@@ -363,27 +363,31 @@ const char* rocke_i_type_name_message(const char* what,
                                       char* buf,
                                       size_t cap);
 
-/* The error for an LDS store `access` whose value (a scalar or a vector of type
- * `value_type`) does not hold `expected` elements, or NULL when it does
- * (Python core/ir.py::_value_element_error, same texts). The store records, and
- * its lowerings emit, an access of `expected` elements, so the callers refuse
- * it as ROCKE_ERR_TYPE. A returned error is written to `buf`. */
+/* The error for an LDS store `access` whose value (operand `value_index`, of
+ * type `value_type`) is not a scalar or vector of `expected` elements, or NULL
+ * when it is (Python core/ir.py::_value_element_error, same
+ * texts). The store records, and its lowerings emit, an access of `expected`
+ * elements, so the callers refuse it as ROCKE_ERR_TYPE. A value with no type is
+ * refused first, with the operand rule's text (rocke_i_untyped_value_message),
+ * before its element type is read. A returned error is written to `buf`. */
 const char* rocke_i_value_element_error(const char* access,
                                         const rocke_type_t* value_type,
+                                        int value_index,
                                         const char* expected,
                                         char* buf,
                                         size_t cap);
 
-/* Whether an f32 epilogue LDS `store` (smem_store_vN_f32) of a value of type
- * `value_type` and `*width` lanes is sound (Python
- * core/ir.py::_smem_store_vN_f32_error, which returns the exception whose
- * status this returns, same text): ROCKE_OK, or the refusal's status with its
- * text written into `buf`. A value that does not hold f32
+/* Whether an f32 epilogue LDS `store` (smem_store_vN_f32) of its operand
+ * `value_index`, a value of type `value_type` and `*width` lanes, is sound
+ * (Python core/ir.py::_smem_store_vN_f32_error, which returns the exception
+ * whose status this returns, same text): ROCKE_OK, or the refusal's status with
+ * its text written into `buf`. A value with no type or that does not hold f32
  * (rocke_i_value_element_error) is ROCKE_ERR_TYPE; one without `*width` lanes
  * (rocke_i_smem_store_lanes_error, not checked when `width` is NULL) is
  * ROCKE_ERR_VALUE. `width_param` names the width as the caller spells it. */
 rocke_status_t rocke_i_smem_store_vN_f32_error(const char* store,
                                                const rocke_type_t* value_type,
+                                               int value_index,
                                                const int64_t* width,
                                                const char* width_param,
                                                char* buf,

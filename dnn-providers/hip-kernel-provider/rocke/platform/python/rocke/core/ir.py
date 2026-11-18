@@ -372,12 +372,22 @@ def _type_name_message(what: str, param: str, type_name: str, expected: str) -> 
     return f"{what} failed - {param}={type_name!r}, expected {expected}"
 
 
-def _value_element_error(access: str, value_type: Type, expected: str) -> str | None:
-    """The error for an LDS store ``access`` whose value (a scalar or a vector
-    of type ``value_type``) does not hold ``expected`` elements, or None when
-    it does. The store records, and its lowerings emit, an access of
-    ``expected`` elements, so the callers raise it as a ``TypeError``. The C++
-    engine (``rocke_i_value_element_error``) reports the same texts."""
+def _value_element_error(
+    access: str, value_type: object, value_index: int, expected: str
+) -> str | None:
+    """The error for an LDS store ``access`` whose value (operand
+    ``value_index``, of type ``value_type``) is not a scalar or vector of
+    ``expected`` elements, or None when it is. The store records, and
+    its lowerings emit, an access of ``expected`` elements, so the callers
+    raise it as a ``TypeError``. A value with no type is refused first, with
+    the operand rule's text (:func:`_untyped_value_message`), before its
+    element type is read. The C++ engine (``rocke_i_value_element_error``)
+    reports the same texts."""
+    untyped = _untyped_value_message(
+        value_type, f"{access} operand", value_index, "an IR type"
+    )
+    if untyped is not None:
+        return untyped
     element = element_type(value_type).name
     if element == expected:
         return None
@@ -385,18 +395,23 @@ def _value_element_error(access: str, value_type: Type, expected: str) -> str | 
 
 
 def _smem_store_vN_f32_error(
-    store: str, value_type: Type, width: int | None, width_param: str
+    store: str,
+    value_type: object,
+    value_index: int,
+    width: int | None,
+    width_param: str,
 ) -> TypeError | ValueError | None:
     """The refusal, for its caller to raise, of an f32 epilogue LDS ``store``
-    (``smem_store_vN_f32``) of a value of type ``value_type`` and ``width``
-    lanes, or None when it is sound: the value holds f32
-    (:func:`_value_element_error`, a ``TypeError``) and has ``width`` lanes
+    (``smem_store_vN_f32``) of its operand ``value_index``, a value of type
+    ``value_type`` and ``width`` lanes, or None when it is sound: the value is
+    typed and holds f32 (:func:`_value_element_error`, a ``TypeError``) and
+    has ``width`` lanes
     (:func:`_smem_store_lanes_error`, a ``ValueError``; not checked when
     ``width`` is None). The builder names the width ``n`` and serialized IR
     ``vec`` (``width_param``). The C++ engine
     (``rocke_i_smem_store_vN_f32_error``) returns the matching status and text.
     """
-    error = _value_element_error(store, value_type, "f32")
+    error = _value_element_error(store, value_type, value_index, "f32")
     if error:
         return TypeError(error)
     if width is None:
@@ -413,8 +428,9 @@ def _smem_store_vN_f32_op_error(op: Op) -> TypeError | ValueError | None:
     ``rocke_i_smem_store_vN_f32_op_error``)."""
     if not op.operands:
         return None
+    value_index = len(op.operands) - 1
     return _smem_store_vN_f32_error(
-        op.name, op.operands[-1].type, _vec_width(op), "vec"
+        op.name, op.operands[value_index].type, value_index, _vec_width(op), "vec"
     )
 
 
@@ -5054,10 +5070,12 @@ class IRBuilder:
     ) -> None:
         """Store ``value``, which holds f16, whole at ``indices`` of ``smem``.
 
-        A value of any other element type is refused with TypeError: the op
-        records ``elem_type`` f16.
+        A value with no type or of any other element type is refused with
+        TypeError: the op records ``elem_type`` f16.
         """
-        element_error = _value_element_error("smem_store_f16", value.type, "f16")
+        element_error = _value_element_error(
+            "smem_store_f16", value.type, len(indices) + 1, "f16"
+        )
         if element_error:
             raise TypeError(element_error)
         self._op(
@@ -8121,12 +8139,14 @@ class IRBuilder:
         """Store ``value``, ``n`` f32 lanes (n in {1, 2, 4}; a scalar for
         ``n=1``), at ``indices`` of ``smem``. The tile may hold any element type:
         ``indices`` address it in its own elements, and the alignment claim is
-        bounded by its row starts in bytes. A value that does not hold f32 is
-        refused with TypeError, a value of another lane count with
-        ValueError."""
+        bounded by its row starts in bytes. A value with no type or one that
+        does not hold f32 is refused with TypeError, a value of another lane
+        count with ValueError."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_store_vN_f32 n must be 1, 2, or 4 (got {n})")
-        refusal = _smem_store_vN_f32_error("smem_store_vN_f32", value.type, n, "n")
+        refusal = _smem_store_vN_f32_error(
+            "smem_store_vN_f32", value.type, len(indices) + 1, n, "n"
+        )
         if refusal:
             raise refusal
         self._op(
