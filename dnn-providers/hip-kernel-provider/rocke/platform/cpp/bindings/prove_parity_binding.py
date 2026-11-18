@@ -1412,6 +1412,32 @@ def cfgs_peer_tile_copy() -> list[tuple[dict[str, int | str], str]]:
     ]
 
 
+def cfgs_peer_gemm() -> list[tuple[dict[str, int | str], str]]:
+    """Mirror the standalone fused peer GEMM emitter's source/panel ordering."""
+    configs = [
+        (16, 16, 16, 1, "f16"),
+        (16, 16, 16, 2, "bf16"),
+        (32, 16, 32, 3, "f16"),
+        (16, 32, 64, 8, "bf16"),
+        (32, 32, 64, 4, "f16"),
+        (32, 32, 32, 3, "bf16"),
+    ]
+    return [
+        (
+            {
+                "rows_per_source": rows,
+                "cols_per_rank": columns,
+                "k": k,
+                "sources": sources,
+                "dtype": dtype,
+            },
+            arch,
+        )
+        for rows, columns, k, sources, dtype in configs
+        for arch in ("gfx950", "gfx942")
+    ]
+
+
 # (family, lower_fn_name, configs, arch). arch=None => use per-config arch
 # (configs are (dict, arch) tuples). Otherwise configs are plain dicts.
 FAMILIES = [
@@ -1434,6 +1460,7 @@ FAMILIES = [
     ("pooling", "pooling_lower_llvm", cfgs_pooling(), "gfx950"),
     ("transpose", "transpose_lower_llvm", cfgs_transpose(), "gfx950"),
     ("peer_tile_copy", "peer_tile_copy_lower_llvm", cfgs_peer_tile_copy(), None),
+    ("peer_gemm", "peer_gemm_lower_llvm", cfgs_peer_gemm(), None),
     ("permute_nd", "permute_nd_lower_llvm", cfgs_permute_nd(), "gfx950"),
     ("smoothquant", "smoothquant_lower_llvm", cfgs_smoothquant(), "gfx950"),
     ("topk_softmax", "topk_softmax_lower_llvm", cfgs_topk_softmax(), "gfx950"),

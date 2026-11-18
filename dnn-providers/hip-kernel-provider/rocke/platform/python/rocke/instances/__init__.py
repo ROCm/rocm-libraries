@@ -124,6 +124,16 @@ from .common.elementwise import (  # noqa: F401
     elementwise_signature,
     is_valid_spec as is_valid_elementwise_spec,
 )
+from .common.peer_gemm import (  # noqa: F401
+    PeerGemmAllocation,
+    PeerGemmSpec,
+    PeerGemmTables,
+    build_peer_gemm,
+    is_valid_spec as is_valid_peer_gemm_spec,
+    make_peer_gemm_tables,
+    peer_gemm_grid,
+    peer_gemm_signature,
+)
 from .common.peer_tile_copy import (  # noqa: F401
     PeerTileCopyProblem,
     PeerTileCopySpec,

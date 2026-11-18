@@ -124,6 +124,7 @@ void register_fused_moe_e2e(py::module_& m);
  * transforms rocke_tensor_descriptor tag clash note above). */
 void register_moe_gemm_fused(py::module_& m);
 void register_peer_tile_copy(py::module_& m);
+void register_peer_gemm(py::module_& m);
 
 namespace
 {
@@ -3582,4 +3583,5 @@ PYBIND11_MODULE(rocke_engine, m)
     /* ---- fused-MoE end-to-end orchestrator (separate TU) ---- */
     register_fused_moe_e2e(m);
     register_peer_tile_copy(m);
+    register_peer_gemm(m);
 }

@@ -60,6 +60,7 @@ claim; see the
 | `gemm_multi_d` | ✅ | ✅ | ❌ | needs `cshuffle` epilogue (not on WMMA) |
 | `gemm_multi_abd` | ✅ | ✅ | ❌ | needs `cshuffle` epilogue (not on WMMA) |
 | `mfma_gemm` | ❌ | ✅ | ❌ | needs f16 16x16x32 kpack atom (CDNA4) |
+| `peer_gemm` | ✅ | ✅ | ❌ | fixed aligned pointer-selected panels; compiled, not GPU-validated |
 | `streamk_gemm` | ✅ | ✅ | ❌ | MFMA stream-K reduction path |
 | `block_scale_gemm` | ✅ | ✅ | ❌ | MFMA quantized GEMM |
 | `mx_gemm` | ✅ | ✅ | ❌ | MFMA microscaling GEMM |

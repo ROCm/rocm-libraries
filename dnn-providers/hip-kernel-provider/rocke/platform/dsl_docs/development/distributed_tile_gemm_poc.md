@@ -1,9 +1,10 @@
 # Distributed-tile GEMM PoC plan
 
-**Status:** Stage 0 runtime support and Stage 1 peer-copy builders are implemented.
-CPU, compiler, and engine-parity checks passed. The basic two-GPU peer-read/write
-gate passed on `gfx950`; `gfx942` hardware validation is still pending an
-allocation. Fused GEMM kernels are not implemented.
+**Status:** Stage 0 runtime support, Stage 1 peer-copy builders, and the Stage 2
+direct-peer GEMM panel prototype are implemented. CPU, compiler, and engine-parity
+checks passed. Stage 1's basic peer-copy gate passed on `gfx950`; its `gfx942`
+lane is queued. Stage 2 development proceeded without waiting for that lane;
+the new fused MFMA kernels are not yet hardware-validated on either target.
 
 ## Goal and agreed scope
 
@@ -91,8 +92,12 @@ rank r: local B column shard → GEMM → local C column shard
 ```
 
 For GEMM + scatter, place each completed `C[s, r]` tile at row owner `s`.
-The destination assembles its row shard from the disjoint column blocks produced
-by the participating ranks. To test scatter independently, replicate `A` before
+The destination assembles its logical row shard from the disjoint column blocks
+produced by the participating ranks. The first Stage 2 implementation stores
+these as rank-major contiguous panels, `C_owner[compute_rank, Mshard, Nshard]`,
+not a full-width row-major matrix. That explicit layout lets the existing GEMM
+store helper target each peer panel directly without a separate scatter launch.
+To test scatter independently, replicate `A` before
 launch and compute against each local `B_r`; input replication is setup, not a
 claimed fused gather.
 
@@ -303,6 +308,45 @@ LLVM output is byte-identical; the kernel sequence confirms fused placement and
 no separate gather/scatter launches in the fused variants. This proves fusion,
 not communication/compute overlap.
 
+#### Stage 2 implementation status
+
+`instances/common/peer_gemm.py` and its C ABI counterpart implement one rank
+launch with a z-grid entry per source row panel. Two device pointer tables select
+A and C panel addresses; a local B column panel is shared across all sources.
+The existing one-wave MFMA lane decode, A/B loaders, full K accumulation, and
+output conversion/store helpers are reused. No new IR primitive, transport,
+atomic operation, or independent GEMM compute implementation was needed.
+
+Host table planning provides all variants through the same three-pointer ABI:
+
+- Gathered A row shards and local C panels.
+- Local replicated A row views and scattered C panels.
+- Gathered A and scattered C together.
+- Local-only controls.
+
+Initial support is fixed, tile-aligned F16/BF16 panels, FP32 accumulation,
+source counts up to the PoC bound, and the shared 16x16x16 atom. Each GEMM panel
+must fit the existing helpers' i32 indexing. Full pointer values are preserved;
+selected panel pointers start inside their allocations, not before them.
+The z selector is guarded, but x/y and reduction tails are not implemented.
+
+The host planner validates owners, region sizes, needed peer mappings,
+input/output aliasing, and distinct column-panel placement. It does not allocate
+or publish memory. Pointer tables and all allocation owners must remain alive
+until every consuming execution stream is drained.
+
+CPU numerical reconstruction tests cover logical distributed output and
+panel-packed layout. A canonical IR test also proves the compute body equals
+the existing MFMA GEMM body after pointer substitution. Independent builder and
+binding checks, full LLVM-flavor parity, snapshots, and offline COMGR compilation
+pass; they are not evidence of GPU numerical correctness or overlap.
+
+Development proceeded before the queued Stage 1 `gfx942` gate completed. That
+choice does not turn the pending copy lane or either new fused-kernel lane into
+a hardware pass. See the
+[direct-peer GEMM methodology](../../python/rocke/examples/common/peer_gemm/README.md)
+for the exact layout/lifetime contract and the next validation scope.
+
 ### Stage 3 — Characterize multi-peer scheduling
 
 Expand from two ranks to four and eight when allocations permit. Exercise one,
@@ -406,11 +450,13 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 - [x] Implement minimal paired peer-copy builders and CPU/compiler/parity tests (Stage 1).
 - [x] Validate mapped-peer tile reads/writes on `gfx950` hardware (Stage 1).
 - [ ] Obtain an allocation and validate the `gfx942` hardware lane (Stage 1 gate).
-- [ ] Add parity-tested fused direct-peer GEMM variants (Stage 2).
+- [x] Add parity-tested direct-peer GEMM panel variants (Stage 2 implementation).
+- [ ] Validate the fused GEMM variants numerically on hardware (Stage 2 gate).
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
 - [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
 
-**Immediate next action:** obtain an approved two-GPU `gfx942` allocation and
-resume its read/write validation. Preserve the passed `gfx950` evidence rather
-than rerunning it unnecessarily. Use explicit per-device modules and raw-buffer
-ownership; do not change the GEMM pipeline until both target lanes have passed.
+**Immediate next action:** review/commit the Stage 2 prototype and separately
+authorize focused GPU numerical validation for the new kernels. Preserve the
+independent queued Stage 1 `gfx942` job and passed `gfx950` copy evidence; neither
+validates Stage 2. Do not make overlap or throughput claims before the new
+numerical/ownership checks and later scheduling measurements.
