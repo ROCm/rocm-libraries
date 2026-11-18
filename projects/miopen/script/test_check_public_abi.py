@@ -24,6 +24,7 @@ is needed and the module runs in a lint lane:
 """
 
 import hashlib
+import os
 import struct
 import subprocess
 import sys
@@ -2347,6 +2348,29 @@ def test_check_plugin_fails_a_public_plugin_end_to_end(tmp_path, capsys):
     assert "FAIL: plugin DT_NEEDED on libMIOpen_private is (absent)" in out
     assert "FAIL: plugin has DT_NEEDED on libMIOpen.so.1" in out
     assert "  miopenConvolutionForward\n" in out
+
+
+@pytest.mark.skipif(
+    os.name != "posix" or os.geteuid() == 0,
+    reason="a file with no read permission is still readable by root and on Windows",
+)
+def test_check_plugin_that_cannot_be_read_exits_2(tmp_path, capsys):
+    plugin = tmp_path / "libmiopen_plugin.so"
+    plugin.write_bytes(elf_image(needed=["libMIOpen_private.so.1"]))
+    plugin.chmod(0)
+    private = tmp_path / "libMIOpen_private.so.1.0"
+    private.write_bytes(elf_image(defined=["miopenCreate_impl"]))
+    result = abi.main(["check-plugin", str(plugin), "--private-lib", str(private)])
+    assert result == 2
+    assert "ERROR:" in capsys.readouterr().err
+
+
+def test_elf_with_a_section_name_table_index_out_of_range_exits_2(tmp_path, capsys):
+    """e_shstrndx sits at offset 0x3E of a 64-bit header."""
+    image = bytearray(elf_image(needed=["libMIOpen_private.so.1"]))
+    struct.pack_into("<H", image, 0x3E, 0xFFFF)
+    assert run_check_plugin_files(tmp_path, bytes(image)) == 2
+    assert "out of range" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])

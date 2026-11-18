@@ -22,20 +22,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_plugin_reentry as reentry  # noqa: E402
 
+# The fake test binary is a `#!` script, which Windows cannot start.
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="the fake test binary is a #! script"
+)
+
+# Written out here, not taken from the script, so that dropping a name from the script's tuple
+# fails a test instead of also dropping it from the check.
+CALLER_SETTING_NAMES = (
+    "GTEST_FILTER",
+    "GTEST_SHARD_INDEX",
+    "GTEST_TOTAL_SHARDS",
+    "GTEST_ALSO_RUN_DISABLED_TESTS",
+    "HIPDNN_PLUGIN_DIR",
+    "MIOPEN_DISABLE_HIPDNN_FOR",
+    "MIOPEN_LOG_LEVEL",
+    "MIOPEN_TEST_EXPECT_REENTRY_REJECTION",
+)
+
 # Behaves as the re-entry test does in each situation. The run with the stand-in is the one
 # that has HIPDNN_PLUGIN_DIR set; every run is appended to FAKE_LOG with the environment it saw.
 FAKE_GTEST = f"""#!{sys.executable}
 import json, os, sys, time
 
-KEYS = {list(reentry.CALLER_SETTINGS)!r}
+KEYS = {list(CALLER_SETTING_NAMES)!r}
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps({{
         "stand_in": "HIPDNN_PLUGIN_DIR" in os.environ,
         "plugin_dir": os.environ.get("HIPDNN_PLUGIN_DIR"),
         "expect": os.environ.get("{reentry.EXPECT_REJECTION}"),
         "forwarding": os.environ.get("MIOPEN_HIPDNN_FORWARDING"),
-        "leaked": sorted(k for k in KEYS if k in os.environ
-                         and k not in ("HIPDNN_PLUGIN_DIR", "{reentry.EXPECT_REJECTION}")),
+        "settings": {{k: os.environ[k] for k in KEYS if k in os.environ}},
         "args": sys.argv[1:],
     }}) + "\\n")
 
@@ -56,6 +73,22 @@ if mode == "pass_no_message":
 if mode == "pass":
     print("{reentry.PASSED_LINE}.")
     sys.exit(0)
+if mode == "message_pass_then_abort":
+    print("[MIOpen] [hipDNN-forwarded] miopenStatusInternalError: {reentry.MESSAGE} "
+          "miopenConvolutionForward while hipDNN was running a forwarded call.")
+    print("{reentry.PASSED_LINE}.")
+    sys.exit(134)
+if mode == "message_pass_then_hang":
+    print("[MIOpen] [hipDNN-forwarded] miopenStatusInternalError: {reentry.MESSAGE} "
+          "miopenConvolutionForward while hipDNN was running a forwarded call.", flush=True)
+    print("{reentry.PASSED_LINE}.", flush=True)
+    time.sleep(60)
+if mode == "pass_then_abort":
+    print("{reentry.PASSED_LINE}.")
+    sys.exit(134)
+if mode == "pass_then_hang":
+    print("{reentry.PASSED_LINE}.", flush=True)
+    time.sleep(60)
 if mode == "no_test":
     print("[==========] {reentry.NO_TEST_LINE} from 0 test suites.")
     sys.exit(0)
@@ -68,6 +101,8 @@ sys.exit(1)
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    for name in CALLER_SETTING_NAMES:
+        monkeypatch.delenv(name, raising=False)
     gtest = tmp_path / "test_binary"
     gtest.write_text(FAKE_GTEST)
     gtest.chmod(gtest.stat().st_mode | stat.S_IXUSR)
@@ -114,7 +149,7 @@ def test_a_passing_test_with_the_message_is_a_pass_and_needs_no_control_run(
 
 def test_the_message_alone_is_not_a_pass(setup, monkeypatch, capsys):
     """The message printed but the test failed, for example the application's call still
-    returned success: the old script reported PASS here."""
+    returned success."""
     gtest, stand_in, log = setup
     assert check(gtest, stand_in, monkeypatch, "message_fail", "pass") == reentry.FAIL
     out = capsys.readouterr().out
@@ -150,6 +185,36 @@ def test_a_call_that_never_returns_is_a_failure_on_a_machine_that_runs_the_test(
         check(gtest, stand_in, monkeypatch, "hang", "pass", timeout="1") == reentry.FAIL
     )
     assert "did not finish" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mode", ["message_pass_then_abort", "message_pass_then_hang"])
+def test_a_run_that_prints_the_pass_line_and_then_dies_is_a_failure(
+    setup, monkeypatch, capsys, mode
+):
+    """The pass line and the message are printed before the process aborts (status 134) or
+    hangs, so the output alone looks like a pass."""
+    gtest, stand_in, log = setup
+    assert (
+        check(gtest, stand_in, monkeypatch, mode, "pass", timeout="1") == reentry.FAIL
+    )
+    out = capsys.readouterr().out
+    assert "FAIL" in out
+    assert "PASS:" not in out
+    assert len(runs(log)) == 2
+
+
+@pytest.mark.parametrize("control", ["pass_then_abort", "pass_then_hang"])
+def test_a_control_run_that_dies_after_the_pass_line_is_not_a_pass(
+    setup, monkeypatch, capsys, control
+):
+    """A control run that aborts or hangs after its pass line has not shown the machine can run
+    the test, so a failing stand-in run is a skip, not a failure."""
+    gtest, stand_in, log = setup
+    assert (
+        check(gtest, stand_in, monkeypatch, "silent", control, timeout="1")
+        == reentry.SKIP
+    )
+    assert "SKIP" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("control", ["fail", "hang", "no_test"])
@@ -221,29 +286,35 @@ def test_both_runs_forward_and_use_the_requested_test(setup, monkeypatch):
         ("GTEST_TOTAL_SHARDS", "2"),
         ("GTEST_SHARD_INDEX", "1"),
         ("GTEST_FILTER", "Nothing.Matches"),
+        ("GTEST_ALSO_RUN_DISABLED_TESTS", "1"),
+        ("HIPDNN_PLUGIN_DIR", "/somewhere/else"),
         ("MIOPEN_DISABLE_HIPDNN_FOR", "*"),
         ("MIOPEN_LOG_LEVEL", "1"),
+        ("MIOPEN_TEST_EXPECT_REENTRY_REJECTION", "0"),
     ],
 )
 def test_the_callers_settings_do_not_reach_either_run(
     setup, monkeypatch, setting, value
 ):
-    """A shard or filter could select no test, a deny list would keep the call on MIOpen and
-    a log level of 1 or 2 hides the message."""
+    """A shard or filter could select no test, a deny list would keep the call on MIOpen, a
+    caller's plugin directory or expectation would replace the ones under test and a log level
+    of 1 or 2 hides the message."""
     gtest, stand_in, log = setup
     monkeypatch.setenv(setting, value)
-    monkeypatch.setenv("HIPDNN_PLUGIN_DIR", "/somewhere/else")
     check(gtest, stand_in, monkeypatch, "silent", "pass")
     stand_in_run, control_run = runs(log)
-    assert stand_in_run["leaked"] == [] and control_run["leaked"] == []
-    assert stand_in_run["plugin_dir"] == str(stand_in)
-    assert not control_run["stand_in"]
+    assert stand_in_run["settings"] == {
+        "HIPDNN_PLUGIN_DIR": str(stand_in),
+        "MIOPEN_TEST_EXPECT_REENTRY_REJECTION": "1",
+    }
+    assert control_run["settings"] == {}
 
 
 def test_a_relative_stand_in_directory_reaches_hipdnn_as_an_absolute_one(
     setup, monkeypatch
 ):
-    """hipDNN ignores a relative HIPDNN_PLUGIN_DIR and loads its default plugins instead."""
+    """An absolute path is needed: hipDNN would resolve a relative one against its own
+    library's directory, not the working directory."""
     gtest, stand_in, log = setup
     monkeypatch.chdir(stand_in.parent)
     check(gtest, Path(stand_in.name), monkeypatch, "silent", "pass")

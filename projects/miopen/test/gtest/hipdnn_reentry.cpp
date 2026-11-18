@@ -6,8 +6,8 @@
 // with hipDNN loading only a plugin built against the public libMIOpen.so (it calls back into
 // the wrapper from inside hipDNN). With MIOPEN_TEST_EXPECT_REENTRY_REJECTION=1 the convolution
 // must fail as the wrapper promises; without it, it must work, as with hipDNN's default plugin.
-// Either way miopenDestroy must return: the state a rejected call leaves on the handle once
-// made it deadlock.
+// Either way miopenDestroy must return: it releases the handle's hipDNN state, and the plugin's
+// handle destructor calls miopenDestroy for the plugin's own handle.
 //
 // "Shim" is not in the suite name on purpose: that puts a suite in the forwarding parity run.
 

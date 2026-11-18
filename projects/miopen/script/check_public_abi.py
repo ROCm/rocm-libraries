@@ -310,6 +310,8 @@ class Elf:
                 }
             )
 
+        if e_shstrndx >= len(raw):
+            raise AbiError(f"ELF section name table index is out of range: {self.path}")
         shstr = raw[e_shstrndx]
         for sec in raw:
             sec["name"] = self._cstr(shstr["offset"] + sec["name_off"])
@@ -2367,7 +2369,7 @@ def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except AbiError as exc:
+    except (AbiError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

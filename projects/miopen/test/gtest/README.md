@@ -235,16 +235,18 @@ again (`ScopedHipdnnCall` and `RejectReentrantCall` in `src/private/hipdnn_graph
   `RunGraphWith`) against a stand-in for hipDNN. A re-entry fails the call even when hipDNN
   succeeded, outranks hipDNN's own failure, and is never cached. Like every `CPU_` test in
   `miopen_gtest`, they need a visible device.
-- `CPU_HipdnnEraseOutsideLock_NONE.*` test the helper that releases a handle's hipDNN state
-  without holding the map lock. The plugin's handle destructor takes that lock again (when the
-  plugin is built against the public library), which would deadlock `miopenDestroy`.
+- `CPU_HipdnnEraseOutsideLock_NONE.*` test the two helpers that create and release a handle's
+  hipDNN state without holding the map lock. The plugin's handle destructor takes that lock again
+  (when the plugin is built against the public library), which would deadlock `miopenDestroy`.
 - `CPU_WrapperRoutingReentryMacro_NONE.*` run the dispatch macro itself, through a stub named
   like an entry point. The route is read from `MIOPEN_HIPDNN_FORWARDING` once per process, so the
   tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it and
   fails when a test skips: gtest exits 0 for a skip, and a stray `MIOPEN_DISABLE_HIPDNN_FOR`
-  would otherwise leave an entry that checks nothing. It needs a visible device and a loadable
-  hipDNN, but no compute. It is registered for the build tree and, in a combined build, the
-  packaged test list, with the per-architecture entries `check_wrapper_registration.py` checks.
+  would otherwise leave an entry that checks nothing. It needs a visible device (without one,
+  `miopen_gtest` aborts at start-up) but no compute, and no hipDNN install: with hipDNN missing
+  the route is still hipDNN, so the tests do not skip. It is registered for the build tree and, in
+  a combined build, the packaged test list, with the per-architecture entries
+  `check_wrapper_registration.py` checks.
   The flag-on workflow does not run it because its runner has no device.
 - `miopen-provider-plugin-reentry-guard` (registered by `dnn-providers/miopen-provider` in a
   superbuild that has both) runs `script/check_plugin_reentry.py`, which runs
@@ -271,8 +273,10 @@ workflow's provider job runs both. It is never given a plugin built elsewhere.
 
 No pull-request lane builds the wrapper, so none of these run automatically. The flag-on workflow
 (`miopen-wrapper-flag-on.yml`, manual dispatch) builds the wrapper and runs the two plugin ABI
-entries in its provider job. The routing, macro and GPU entries run wherever MIOpen's ctest suite
-runs on hardware with the wrapper flag on.
+entries in its provider job. The routing and macro entries run where MIOpen's ctest suite runs on
+a machine with a device and the wrapper flag on. The re-entry entry is registered only by the
+provider's CMake, in a build tree of a superbuild that has both, so it is not in the installed test
+list.
 
 A default discrete build's ctest does not register the plain-named re-entry and erase tests (it
 keeps only `Smoke` names unless `MIOPEN_TEST_ALL` is on), like most `CPU_` tests. A combined

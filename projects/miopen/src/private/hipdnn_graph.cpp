@@ -5,6 +5,7 @@
 #include "hipdnn_types.hpp"
 
 #include "erase_outside_lock.hpp"
+#include "insert_outside_lock.hpp"
 #include "lru_cache.hpp"
 #include "miopen_impl.h"
 #include "routing.hpp"
@@ -127,50 +128,68 @@ private:
     int previous_ = -1;
 };
 
+// Creating a handle runs the plugin's code, and so does destroying one that is not kept. For a
+// plugin built against the public libMIOpen.so that code calls miopenDestroy, which takes
+// HandleMapMutex, so neither happens while the lock is held.
+std::pair<std::unique_ptr<HandleState>, miopenStatus_t> CreateHandleState(hipStream_t stream)
+{
+    auto [created, error] = fe::createHipdnnHandle(stream);
+    if(!error.is_good() || created == nullptr)
+        return {nullptr,
+                RecordFailure(miopenStatusInternalError, "could not create a hipDNN handle")};
+    auto state = std::make_unique<HandleState>();
+    if(hipEventCreateWithFlags(&state->lastWork, hipEventDisableTiming) != hipSuccess)
+        return {nullptr,
+                RecordFailure(miopenStatusInternalError,
+                              "could not create the HIP event that orders hipDNN work")};
+    state->hipdnnHandle = std::move(created);
+    state->stream       = stream;
+    return {std::move(state), miopenStatusSuccess};
+}
+
 // Created on first forwarded call rather than in miopenCreate, so a process that
 // never forwards never pays for hipdnnCreate.
 std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle,
                                                            hipStream_t stream)
 {
-    const std::lock_guard<std::mutex> lock(HandleMapMutex());
-    auto& slot = HandleMap()[handle];
-    if(slot == nullptr)
+    // Two threads using one MIOpen handle at once can both miss and both create a state;
+    // the one that loses is dropped and the loop finds the winner's.
+    for(;;)
     {
-        auto [created, error] = fe::createHipdnnHandle(stream);
-        if(!error.is_good() || created == nullptr)
         {
-            HandleMap().erase(handle);
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError, "could not create a hipDNN handle")};
+            const std::lock_guard<std::mutex> lock(HandleMapMutex());
+            const auto found = HandleMap().find(handle);
+            if(found != HandleMap().end())
+            {
+                HandleState& state = *found->second;
+                if(state.stream != stream)
+                {
+                    // Work still queued on the old stream may be using the shared workspace.
+                    if(hipStreamWaitEvent(stream, state.lastWork, 0) != hipSuccess)
+                        return {nullptr,
+                                RecordFailure(
+                                    miopenStatusInternalError,
+                                    "could not make the MIOpen handle's new stream wait for the "
+                                    "hipDNN work queued on its old stream")};
+                    if(!fe::setHipdnnHandleStream(state.hipdnnHandle, stream).is_good())
+                        return {nullptr,
+                                RecordFailure(miopenStatusInternalError,
+                                              "could not move the hipDNN handle to the MIOpen "
+                                              "handle's new stream")};
+                    state.stream = stream;
+                }
+                return {&state, miopenStatusSuccess};
+            }
         }
-        auto state = std::make_unique<HandleState>();
-        if(hipEventCreateWithFlags(&state->lastWork, hipEventDisableTiming) != hipSuccess)
-        {
-            HandleMap().erase(handle);
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError,
-                                  "could not create the HIP event that orders hipDNN work")};
-        }
-        state->hipdnnHandle = std::move(created);
-        state->stream       = stream;
-        slot                = std::move(state);
+
+        auto [created, status] = CreateHandleState(stream);
+        if(created == nullptr)
+            return {nullptr, status};
+        HandleState* const raw = created.get();
+        if(InsertDestroyingLoserOutsideLock(
+               HandleMap(), HandleMapMutex(), handle, std::move(created)))
+            return {raw, miopenStatusSuccess};
     }
-    else if(slot->stream != stream)
-    {
-        // Work still queued on the old stream may be using the shared workspace.
-        if(hipStreamWaitEvent(stream, slot->lastWork, 0) != hipSuccess)
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError,
-                                  "could not make the MIOpen handle's new stream wait for the "
-                                  "hipDNN work queued on its old stream")};
-        if(!fe::setHipdnnHandleStream(slot->hipdnnHandle, stream).is_good())
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError,
-                                  "could not move the hipDNN handle to the MIOpen handle's new "
-                                  "stream")};
-        slot->stream = stream;
-    }
-    return {slot.get(), miopenStatusSuccess};
 }
 
 using GraphPtr = std::shared_ptr<fe::graph::Graph>;

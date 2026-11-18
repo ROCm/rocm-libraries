@@ -561,8 +561,9 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
       "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 
   # Tests of the dispatch macro's re-entry check. They need forwarding on from the first
-  # call and skip otherwise. gtest exits 0 when every test skips, so a skip fails the entry:
-  # a stray MIOPEN_DISABLE_HIPDNN_FOR would otherwise leave an entry that checks nothing.
+  # call and skip otherwise. gtest exits 0 when every test skips, or when the filter matches
+  # no test (a renamed fixture), so both fail the entry: a stray MIOPEN_DISABLE_HIPDNN_FOR
+  # or a rename would otherwise leave an entry that checks nothing.
   if(MIOPEN_TEST_DISCRETE)
     set(MIOPEN_WRAPPER_ROUTING_TEST test_wrapper_routing)
   else()
@@ -572,7 +573,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     COMMAND $<TARGET_FILE:${MIOPEN_WRAPPER_ROUTING_TEST}> --gtest_filter=CPU_WrapperRoutingReentryMacro_NONE.*
     ENVIRONMENT "MIOPEN_HIPDNN_FORWARDING=1"
     ENVIRONMENT_MODIFICATION "MIOPEN_DISABLE_HIPDNN_FOR=unset:"
-    FAIL_REGULAR_EXPRESSION "\\[  SKIPPED \\]")
+    FAIL_REGULAR_EXPRESSION "\\[  SKIPPED \\]|Running 0 tests")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )
@@ -665,11 +666,12 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
 endif()
 
 # The dispatch macro's re-entry tests, with the settings wrapper_reentry_macro gives them in the
-# build tree. They need a visible device and a loadable hipDNN, like the parity entries.
+# build tree. They need a visible device: miopen_gtest's startup fails every test without one.
+# A missing hipDNN does not skip them.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
   miopen_append_installed_wrapper_check(wrapper_reentry_macro
     "\"--gtest_filter=CPU_WrapperRoutingReentryMacro_NONE.*\""
-    " ENVIRONMENT \"MIOPEN_HIPDNN_FORWARDING=1\" ENVIRONMENT_MODIFICATION \"MIOPEN_DISABLE_HIPDNN_FOR=unset:\" FAIL_REGULAR_EXPRESSION \"\\\\[  SKIPPED \\\\]\""
+    " ENVIRONMENT \"MIOPEN_HIPDNN_FORWARDING=1\" ENVIRONMENT_MODIFICATION \"MIOPEN_DISABLE_HIPDNN_FOR=unset:\" FAIL_REGULAR_EXPRESSION \"\\\\[  SKIPPED \\\\]|Running 0 tests\""
     "../miopen_gtest${CMAKE_EXECUTABLE_SUFFIX}")
 endif()
 

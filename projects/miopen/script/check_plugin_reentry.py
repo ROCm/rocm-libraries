@@ -55,7 +55,8 @@ TAIL_LINES = 25
 
 
 def run_test(gtest, test_filter, env, timeout):
-    """Return (finished, output). A run that exceeds `timeout` has not finished."""
+    """Return (finished, status, output). A run that exceeds `timeout` has not finished and
+    has no status (None)."""
     try:
         done = subprocess.run(
             [str(gtest), f"--gtest_filter={test_filter}"],
@@ -70,12 +71,13 @@ def run_test(gtest, test_filter, env, timeout):
         partial = expired.stdout or ""
         if isinstance(partial, bytes):
             partial = partial.decode(errors="replace")
-        return False, partial
-    return True, done.stdout
+        return False, None, partial
+    return True, done.returncode, done.stdout
 
 
-def passed(finished, output):
-    return finished and PASSED_LINE in output
+def passed(finished, status, output):
+    """The pass line alone is not enough: the process can still abort or hang afterwards."""
+    return finished and status == 0 and PASSED_LINE in output
 
 
 def tail(output):
@@ -110,25 +112,28 @@ def main(argv=None):
     control_env = {k: v for k, v in os.environ.items() if k not in CALLER_SETTINGS}
     control_env["MIOPEN_HIPDNN_FORWARDING"] = "1"
     env = dict(control_env)
-    # hipDNN ignores a relative plugin directory and falls back to its default plugins.
+    # hipDNN resolves a relative plugin directory against its own library's directory, not
+    # against this process's working directory, so only an absolute path finds the stand-in.
     env["HIPDNN_PLUGIN_DIR"] = str(stand_in_dir.resolve())
     env[EXPECT_REJECTION] = "1"
 
-    finished, output = run_test(gtest, args.filter, env, args.timeout)
+    finished, status, output = run_test(gtest, args.filter, env, args.timeout)
     if NO_TEST_LINE in output:
         print(
             f"FAIL: {args.filter} selects no test in {gtest}. Is the test renamed or removed?"
         )
         return FAIL
-    if passed(finished, output) and MESSAGE in output:
+    if passed(finished, status, output) and MESSAGE in output:
         print(
             "PASS: the wrapper failed the plugin's call, printed its reason and the handle "
             "was destroyed"
         )
         return PASS
 
-    finished_control, control = run_test(gtest, args.filter, control_env, args.timeout)
-    if not passed(finished_control, control):
+    finished_control, status_control, control = run_test(
+        gtest, args.filter, control_env, args.timeout
+    )
+    if not passed(finished_control, status_control, control):
         print(
             "SKIP: this machine cannot run the re-entry test with hipDNN's default plugins, "
             "so the check cannot tell a regression from a missing environment (no GPU, an "
@@ -139,8 +144,10 @@ def main(argv=None):
 
     if not finished:
         how = "did not finish (the call looped or hung)"
-    elif passed(finished, output):
+    elif passed(finished, status, output):
         how = "passed without the wrapper's message"
+    elif PASSED_LINE in output:
+        how = f"printed its pass line but then exited with status {status}"
     else:
         how = "failed"
     print(

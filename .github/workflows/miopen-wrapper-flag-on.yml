@@ -161,7 +161,7 @@ jobs:
     runs-on: azure-linux-scale-rocm
     timeout-minutes: 180
     container:
-      image: rocm/miopen-dev:multiarch_dev_20260910
+      image: rocm/miopen-dev:multiarch_dev_20261117
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -205,8 +205,18 @@ jobs:
       - name: Build the plugin and the stand-in plugin
         run: cmake --build build --target miopen_plugin miopen_plugin_public_stand_in -j$(nproc)
 
+      # The pattern also matches when only one of the two entries exists, so the entries are
+      # counted first: losing the stand-in's rejection entry would otherwise go unnoticed.
       # --no-tests=error: ctest exits 0 when -R matches nothing, which is what a configure
       # that did not enable the wrapper would give.
       - name: Plugin binary check
         run: |
-          ctest --test-dir build -R '^miopen-provider-plugin-abi-check(-rejects-public-plugin)?$' --no-tests=error --output-on-failure
+          pattern='^miopen-provider-plugin-abi-check(-rejects-public-plugin)?$'
+          listing=$(ctest --test-dir build -N -R "$pattern")
+          count=$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p')
+          test "$count" = "2" || {
+            echo "expected the plugin check and the stand-in rejection check, found ${count:-<unparsed>} entries"
+            printf '%s\n' "$listing"
+            exit 1
+          }
+          ctest --test-dir build -R "$pattern" --no-tests=error --output-on-failure

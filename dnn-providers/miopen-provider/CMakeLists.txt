@@ -571,6 +571,10 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
                     FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache)
             endif()
             list(APPEND miopen_plugin_abi_tests ${PROJECT_NAME}-plugin-reentry-guard)
+        elseif(TARGET miopen_plugin_public_stand_in)
+            message(STATUS "${PROJECT_NAME}-plugin-reentry-guard not registered: "
+                           "MIOpen's test binary '${miopen_plugin_reentry_gtest}' is not "
+                           "configured (it needs BUILD_TESTING=ON)")
         endif()
         if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)
             apply_ctest_category_labels("${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"

@@ -1534,7 +1534,6 @@ TEST_F(CPU_WrapperRoutingReentryMacro_NONE, ForwardsOutsideHipdnn)
     EXPECT_EQ(reentry_stub::forwardedCalls, 1);
 }
 
-// Before the check, this call forwarded and, with a plugin under hipDNN, looped.
 TEST_F(CPU_WrapperRoutingReentryMacro_NONE, FailsInsteadOfForwardingFromInsideHipdnn)
 {
     const hipdnn::ScopedHipdnnCall scope;

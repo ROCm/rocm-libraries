@@ -180,7 +180,8 @@ ctest --test-dir build --output-on-failure --no-tests=error \
 # Wrapper-ON superbuild with the provider: the miopen-with-provider preset plus
 # -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON and -DROCM_LIBS_ENABLE_ROOT_CTEST=ON (the preset alone enables
 # neither, and then no plugin entry is registered). The first two need
-# no GPU; the third needs a GPU and the miopen_gtest binary, and skips without them:
+# no GPU; the third needs a GPU and a built test binary (test_hipdnn_reentry in the default discrete
+# build, miopen_gtest with -DMIOPEN_TEST_DISCRETE=OFF), and skips without them:
 ctest --test-dir build --output-on-failure --no-tests=error \
   -R '^miopen-provider-plugin-(abi-check|abi-check-rejects-public-plugin|reentry-guard)$'
 # A built plugin by hand (it must link libMIOpen_private and call only _impl entry points):
