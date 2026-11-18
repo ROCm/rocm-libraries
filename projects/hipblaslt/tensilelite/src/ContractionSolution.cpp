@@ -6551,6 +6551,8 @@ namespace TensileLite
                != customKernel.streamKReductions.end();
     }
 
+    // Only matters for kernels that also complete parallel reduction. The
+    // divisor is the uniform-summation-order tree split F | itersPerTile.
     bool ContractionSolution::customTreeSplitNeedsDivisor() const
     {
         return handwrittenCustomKernel() && customKernelReduces(CustomReductionMode::Parallel)

@@ -440,6 +440,8 @@ size_t grid_k_split_aware(const problem_t& problem,
       // may exceed the CUs. Take the smallest F that best fills the last of
       // at most two waves.
       if (config.tree_split_needs_divisor && cu_budget == 0 && tiles > cu_count / 4) {
+        // grid / (waves * cu_count) is proportional to the inverse of the time,
+        // so larger is better; ties keep the smallest F.
         auto wave_fill = [&](size_t f) {
           const size_t grid  = tiles * f;
           const size_t waves = (grid + cu_count - 1) / cu_count;

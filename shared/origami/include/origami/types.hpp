@@ -631,6 +631,8 @@ struct config_t {
   ///   (problem.num_cus) and tiles > CU count / 4: the smallest split F, at
   ///   most two waves of tiles * F workgroups, that best fills the last wave.
   ///   At or below CU count / 4 tiles, or under a CU cap, the grid is unchanged.
+  /// The wide-parallel preference applies with or without uniform summation
+  /// order, since one wave of tree splits fills the machine worse.
   /// Like occupancy and workspace_size it is a launch-policy input, not part
   /// of the kernel's identity, so operator== and hash() leave it out.
   bool tree_split_needs_divisor = false;

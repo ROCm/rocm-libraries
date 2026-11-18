@@ -462,7 +462,7 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
 TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split", "[streamk]") {
   // `tiles` output tiles (one tile row per batch entry) on 256 CUs. Returns
   // origami's reduction and the k_split_aware grid sized for that reduction.
-  constexpr size_t MT_M = 256, MT_N = 32, MT_K = 128;
+  constexpr size_t MT_M = 128, MT_N = 128, MT_K = 64;
   constexpr size_t kTileBytes = MT_M * MT_N * 4;
   auto make = [](size_t tiles, size_t ipt, bool needs_divisor, size_t num_cus, size_t batch,
                  size_t workspace) {
@@ -488,19 +488,20 @@ TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split
 
   // Default: parallel only up to cu_count / 4 = 64 tiles.
   REQUIRE(pick(64, 4096, false) == R{reduction_t::parallel, 256});
-  REQUIRE(pick(128, 4225, false) == R{reduction_t::tree, 256});
-  REQUIRE(pick(161, 708, false) == R{reduction_t::tree, 161});
+  REQUIRE(pick(128, 1025, false) == R{reduction_t::tree, 256});
+  REQUIRE(pick(160, 1024, false) == R{reduction_t::tree, 160});
 
   // At or below cu_count / 4 tiles the flag changes nothing.
   REQUIRE(pick(64, 4096, true) == R{reduction_t::parallel, 256});
-  REQUIRE(pick(1, 1811, true) == pick(1, 1811, false));
+  REQUIRE(pick(1, 2048, true) == pick(1, 2048, false));
 
   // Above it: parallel, smallest F that best fills the last of <= 2 waves.
-  REQUIRE(pick(76, 235, true) == R{reduction_t::parallel, 76 * 3});
-  REQUIRE(pick(128, 4225, true) == R{reduction_t::parallel, 128 * 2});
-  REQUIRE(pick(161, 708, true) == R{reduction_t::parallel, 161 * 3});
-  // F = 1 already fills the wave: no split (the caller demotes to tree).
-  REQUIRE(pick(247, 5770, true) == R{reduction_t::parallel, 247});
+  REQUIRE(pick(80, 256, true) == R{reduction_t::parallel, 80 * 3});
+  REQUIRE(pick(128, 1025, true) == R{reduction_t::parallel, 128 * 2});
+  REQUIRE(pick(160, 1024, true) == R{reduction_t::parallel, 160 * 3});
+  // F = 1 fills the wave as well as F = 2: ties keep the smaller F, so no
+  // split (the caller demotes to tree).
+  REQUIRE(pick(240, 1024, true) == R{reduction_t::parallel, 240});
   REQUIRE(pick(100, 64, true) == R{reduction_t::parallel, 100 * 5});
 
   // Still tree below MinItersForParallel and at or above the CU count.
@@ -524,12 +525,12 @@ TEST_CASE("Origami streamk: tree_split_needs_divisor widens the parallel K-split
 
   // A split whose partials do not fit the workspace falls back to one
   // workgroup per tile (the caller demotes that to tree).
-  REQUIRE(pick(128, 4225, true, 0, 1, 256 * kTileBytes) == R{reduction_t::parallel, 256});
-  REQUIRE(pick(128, 4225, true, 0, 1, 256 * kTileBytes - 1) == R{reduction_t::parallel, 128});
+  REQUIRE(pick(128, 1025, true, 0, 1, 256 * kTileBytes) == R{reduction_t::parallel, 256});
+  REQUIRE(pick(128, 1025, true, 0, 1, 256 * kTileBytes - 1) == R{reduction_t::parallel, 128});
 
   // Batch entries count as tiles.
-  REQUIRE(pick(128, 4225, true, 0, 4) == R{reduction_t::parallel, 128 * 2});
-  REQUIRE(pick(128, 4225, false, 0, 4) == R{reduction_t::tree, 128 * 2});
+  REQUIRE(pick(128, 1025, true, 0, 4) == R{reduction_t::parallel, 128 * 2});
+  REQUIRE(pick(128, 1025, false, 0, 4) == R{reduction_t::tree, 128 * 2});
 
   // A genuine CU cap keeps the one-wave split, and at or below a quarter of
   // the cap the flag changes nothing.

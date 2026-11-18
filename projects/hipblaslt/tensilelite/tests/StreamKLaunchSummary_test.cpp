@@ -1476,7 +1476,8 @@ TEST(StreamKLaunchSummaryTest, CustomTreeSplitNeedsDivisorScope)
     EXPECT_TRUE(solution.customTreeSplitNeedsDivisor());
 
     solution.internalArgsSupport.perTileExtraIters = true;
-    EXPECT_FALSE(solution.customTreeSplitNeedsDivisor()) << "tree splits unevenly";
+    EXPECT_FALSE(solution.customTreeSplitNeedsDivisor())
+        << "per-tile extra iterations split a tile unevenly, no divisor needed";
 
     solution.internalArgsSupport.perTileExtraIters = false;
     solution.customKernel.streamKReductions        = {CustomReductionMode::Tree};
@@ -1504,7 +1505,7 @@ TEST(StreamKLaunchSummaryTest, CustomDivisorBoundKernelSplitsParallelAboveQuarte
     solution.customKernel.workspaceSizePerElemC = 4;
     solution.customKernel.macrotile             = TensileLite::dim3(128, 128, 64);
 
-    auto problem = makeGemmProblem(1024, 2048, 64 * 4225);
+    auto problem = makeGemmProblem(1024, 2048, 64 * 1025);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
@@ -1517,7 +1518,7 @@ TEST(StreamKLaunchSummaryTest, CustomDivisorBoundKernelSplitsParallelAboveQuarte
 
         auto d = solution.computeStreamKDecisions(problem, env.device);
         ASSERT_EQ(d.tiles, 128u) << "1024/128 * 2048/128";
-        ASSERT_EQ(problem.getItersPerTile(solution.sizeMapping), 4225u);
+        ASSERT_EQ(problem.getItersPerTile(solution.sizeMapping), 1025u);
         EXPECT_EQ(d.reduction, origami::reduction_t::parallel);
         EXPECT_EQ(d.finalGrid, 256u);
         EXPECT_EQ(d.skSplit, 2u);

@@ -172,6 +172,11 @@ The host picks one mode per launch and passes it in `SKSplitFactor`:
   writes one partial slot. The post kernel then reduces the `F` slots of each
   tile and applies the epilogue.
 
+For a kernel that declares `parallel`, the host prefers it above a quarter of
+the CU count in tiles (up to the CU count), with a grid of up to two waves of
+`tiles * F` workgroups, because a handwritten tree split needs `F | itersPerTile`
+under uniform summation order.
+
 `NumTiles` counts the tiles of all batches, and `F = grid / NumTiles` is the
 same for every batch. A post kernel `grid` of `TilesBands` launches
 `tilesX * tilesY * batch * bands` workgroups. The host sizes the workspace as

@@ -225,11 +225,11 @@ def test_tree_split_needs_divisor_widens_parallel():
     """tree_split_needs_divisor admits parallel above CU count / 4 tiles."""
     hw = HARDWARE["gfx1250"]  # 256 CUs
     problem = origami.problem_t()
-    problem.size = origami.dim3_t(256, 32 * 128, 128 * 4225)  # 128 tiles
+    problem.size = origami.dim3_t(128, 128 * 128, 64 * 1025)  # 128 tiles
     problem.batch = 1
 
     config = origami.config_t()
-    config.mt = origami.dim3_t(256, 32, 128)
+    config.mt = origami.dim3_t(128, 128, 64)
     config.workspace_size = 2**40
     config.workspace_size_per_elem_c = 4
     assert config.tree_split_needs_divisor is False
