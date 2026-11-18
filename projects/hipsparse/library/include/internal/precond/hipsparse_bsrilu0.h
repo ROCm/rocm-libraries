@@ -45,6 +45,11 @@ extern "C" {
  *  \f$A_{j,j}\f$ is missing (structural zero) or the diagonal block \f$A_{j,j}\f$ is not
  *  invertible (numerical zero).
  *
+ *  \note
+ *  With the ROCm backend, if numeric boost is enabled with \ref hipsparseSbsrilu02_numericBoost
+ *  "hipsparseXbsrilu02_numericBoost()", a diagonal entry that is exactly zero after the optional
+ *  boost is reported as a zero pivot, whatever its value before the boost.
+ *
  *  \note \p hipsparseXbsrilu02_zeroPivot is a blocking function. It might negatively influence
  *  performance.
  *

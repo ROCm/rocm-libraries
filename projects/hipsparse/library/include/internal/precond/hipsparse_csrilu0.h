@@ -39,6 +39,11 @@ extern "C" {
 *  \p position can be in host or device memory. If no zero pivot has been found,
 *  \p position is set to -1 and \ref HIPSPARSE_STATUS_SUCCESS is returned instead.
 *
+*  \note
+*  With the ROCm backend, if numeric boost is enabled with \ref hipsparseScsrilu02_numericBoost
+*  "hipsparseXcsrilu02_numericBoost()", a diagonal entry that is exactly zero after the optional
+*  boost is reported as a zero pivot, whatever its value before the boost.
+*
 *  \note \p hipsparseXcsrilu02_zeroPivot is a blocking function. It might negatively influence
 *  performance.
 *
