@@ -251,6 +251,11 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  for each stage. The required buffer size can be different between stages.
 *
 *  \note
+*  A null value array in \p target requests a symbolic conversion, which writes only the
+*  index arrays of \p target, when \p source and \p target both use the COO, COO AoS, CSR,
+*  or CSC format. The other format pairs require a value array in \p target.
+*
+*  \note
 *  This routine does not support batched computation.
 *
 *  @param[in]
@@ -271,7 +276,8 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_pointer if a source row, column, or index array is
 *               set and the corresponding target array is null. A null target value array
-*               requests a symbolic conversion and is not an error.
+*               between the COO, COO AoS, CSR, and CSC formats requests a symbolic
+*               conversion and is not an error.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
