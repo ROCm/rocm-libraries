@@ -842,6 +842,20 @@ namespace
             SCOPED_TRACE("5 x 7, i32, base 0, 1 x 1 source");
             sparse_to_sparse_bsr_reblock<int32_t>(handle, 5, 7, 1, dir_r, base0);
         }
+        {
+            SCOPED_TRACE("4 x 4, i32, base 0, 2 x 2 row-major source, device pointer mode");
+            PointerModeScope device_mode(handle, rocsparse_pointer_mode_device);
+            sparse_to_sparse_bsr_reblock<int32_t>(handle, 4, 4, 2, dir_r, base0);
+        }
+    }
+
+    // The conversions do not return scalars to the caller, so the pointer mode of the handle
+    // does not change them. Every pair of formats, including CSR -> BSR and BSR -> BSR with
+    // another block size and direction, in device pointer mode.
+    TEST_F(ConvSpmat, SparseToSparseMatrixDevicePointerMode)
+    {
+        PointerModeScope device_mode(handle, rocsparse_pointer_mode_device);
+        run_all_pairs<double, int32_t>(handle, {base0, 2, dir_r, base0, 3, dir_c});
     }
 
     // A BSR -> BSR conversion with another block dimension keeps the index and value types:
