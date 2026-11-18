@@ -94,10 +94,11 @@ namespace rocsparse
             else if(mat_B->format == rocsparse_format_bell)
             {
                 const int64_t mb = rocsparse::ceil_div(mat_B->rows, mat_B->block_dim);
-                if(mb > static_cast<int64_t>(std::numeric_limits<size_t>::max() / sizeof(int64_t)))
-                {
-                    return rocsparse_status_invalid_size;
-                }
+                ROCSPARSE_CHECKARG(2,
+                                   mat_B,
+                                   (mb > static_cast<int64_t>(std::numeric_limits<size_t>::max()
+                                                              / sizeof(int64_t))),
+                                   rocsparse_status_invalid_size);
 
                 *buffer_size = sizeof(int64_t) * static_cast<size_t>(mb);
             }
