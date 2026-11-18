@@ -738,6 +738,17 @@ tracked as a gap.
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
 
+### Python bindings enum sync
+
+The opt-in Python bindings (`projects/hipblaslt/python/`) bind every value of every public enum. The `hipblaslt-python-enum-sync` pre-commit hook checks that, on any PR that changes `hipblaslt.h`, `hipblaslt-ext.hpp` or `hipblas-common.h`, with nothing built. It runs locally if pre-commit is installed, and in the `pre-commit` workflow.
+
+If it fires on your PR, you added an enum value. Fix it in one of two ways, as the message says:
+
+- add a `reg(e, "<C enum>", "<Python name>", <C value>);` line to `projects/hipblaslt/python/src/enums.cpp`, under the same `#if HIPBLASLT_HAS_...` guard if the value has one;
+- or, for a sentinel or a value the header marks "Not supported yet", add it to `ALLOWED_MISSING` in `projects/hipblaslt/python/hipblaslt/_coverage.py` with a one-line reason.
+
+The bindings' coverage test is the backstop. It reads the headers after the preprocessor has run, in the bindings' Component CI lanes.
+
 ### Flaky Test Policy
 
 hipBLASLt does not currently tag flaky tests, and has no `UNSTABLE` category. A nondeterministic
