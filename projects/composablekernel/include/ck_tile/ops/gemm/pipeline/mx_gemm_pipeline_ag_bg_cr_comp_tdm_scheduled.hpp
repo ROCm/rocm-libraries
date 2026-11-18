@@ -325,6 +325,15 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         return nullptr;
     }
 
+    /// The DRAM step between the iterate-mode blocks of A's or B's data load: iterate_rows rows of
+    /// row_bytes. It passes 2^32 at long K, and the descriptor field holds 48 bits.
+    template <bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr uint64_t GetIterateGlobalIncrement(index_t row_bytes)
+    {
+        constexpr index_t tile_rows = Policy::template GetLdsOperand<Problem, IsA>().iterate_rows;
+        return static_cast<uint64_t>(row_bytes) * static_cast<uint64_t>(tile_rows);
+    }
+
     template <typename ADramWindow,
               typename BDramWindow,
               typename AScaleDramWindow,
@@ -577,7 +586,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 const index_t row_bytes = integer_divide_nonnegative<kKPerByte>(
                     view.get_tensor_descriptor().calculate_offset(make_multi_index(1, 0)));
                 config.iterate_enable = true;
-                config.iter_config    = {static_cast<uint32_t>(row_bytes * tile_rows),
+                config.iter_config    = {GetIterateGlobalIncrement<IsA>(row_bytes),
                                          static_cast<uint32_t>(L.iterate_stride),
                                          static_cast<uint16_t>(iterations - 1)};
             }

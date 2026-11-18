@@ -184,6 +184,20 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     EXPECT_EQ(Mab::GetTuningName<MabProblem>(), "_c1x4_pf0_lp0_hplrnone");
 }
 
+// A's iterate-mode load steps 16 rows of K bytes per block: 2^32 bytes at K = 2^28, past 32 bits.
+TEST(MxGemmTdmScheduledHost, IterateIncrementIsSixtyFourBit)
+{
+    using Wide   = ck_tile::MxTdmScheduledGemmTraits<false, false, true, true>;
+    using P      = ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 256, 64, 256, 1, 4, 16, 1, 1, Wide>;
+    using Policy = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false>;
+    using Pipe   = PipelineOf<P, Policy>;
+    static_assert(Policy::GetLdsOperand<P, true>().iterate_rows == 16);
+    constexpr index_t K = index_t{1} << 28;
+    const char* why     = Pipe::GetUnsupportedReason(256, 64, K);
+    EXPECT_EQ(why, nullptr) << why;
+    static_assert(Pipe::GetIterateGlobalIncrement<true>(K) == uint64_t{1} << 32);
+}
+
 // The host picks the kernel of a whole-tile count's parity: TailNumber::One for odd counts, Two
 // for even ones, with the K tail excluded; each variant rejects the other parity, Full none.
 TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCount)
