@@ -360,7 +360,7 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
 }
 
 /**
- * @brief Stream-K grid of W4A16 kernels on gfx1151 (is_w4a16). Measured on
+ * @brief Stream-K grid of W4A16 kernels on gfx1151 and gfx1150 (is_w4a16). Measured on
  *        prefill GEMMs of LLM projection layers (16 to 4096 tokens), 4 W4A16 types, every
  *        kernel at every grid below.
  *

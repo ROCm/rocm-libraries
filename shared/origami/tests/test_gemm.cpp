@@ -220,6 +220,19 @@ TEST_CASE("GEMM: W4A16 tiles pay the in-kernel dequantize", "[gemm][w4a16]") {
   // twice the VALU of the fp16 one (packed halves).
   const auto gfx1151 = make_w4a16_gfx1151_hardware();
   REQUIRE(tile(gfx1151, origami::data_type_t::BFloat16) > tile(gfx1151, origami::data_type_t::Half));
+  // gfx1150 runs the same kernels, so it takes the same dequantize constants: its 128x96x128
+  // tiles pay more for the bf16 dequantize (10 VALU per element) than for the fp16 one (5).
+  // gfx1150 (Strix Point) as Origami derives it from the device: 16 CUs, 2 MB L2, 2.9 GHz.
+  const auto gfx1150 = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1150, 16, 65536, 262144, 2097152, 2900000);
+  auto small = [&](origami::data_type_t mi_dtype) {
+    auto problem    = make_problem(4096, 96, 2048);
+    problem.a_dtype = origami::data_type_t::Int4;
+    problem.b_dtype = problem.c_dtype = problem.d_dtype = problem.mi_dtype = mi_dtype;
+    auto c          = make_config(128, 96, 128, 16, 16, 16, false, 1, 1, 0, 0, 0);
+    return origami::gemm::compute_total_latency(problem, gfx1150, c);
+  };
+  REQUIRE(small(origami::data_type_t::BFloat16) > small(origami::data_type_t::Half));
   const auto gfx950 = make_hardware(950);
   REQUIRE(tile(gfx950, origami::data_type_t::BFloat16) == tile(gfx950, origami::data_type_t::Half));
 }

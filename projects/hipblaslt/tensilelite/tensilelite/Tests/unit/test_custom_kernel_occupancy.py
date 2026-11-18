@@ -440,16 +440,17 @@ class TestSolutionKeepsTheDeclaredCustomKernelOccupancy:
 
 
 @needs_logic_corpus
-class TestGfx1151W4A16LogicDeclaresOccupancy:
-    """The gfx1151 W4A16 custom kernels get no computed occupancy (not gfx9), so every
-    logic entry that uses one must declare it, and every entry of a kernel the same
-    value; otherwise Origami would see one workgroup per WGP for all of them."""
+class TestGfx11W4A16LogicDeclaresOccupancy:
+    """The gfx1151 and gfx1150 W4A16 custom kernels get no computed occupancy (not gfx9),
+    so every logic entry that uses one must declare it, and every entry of a kernel the
+    same value; otherwise Origami would see one workgroup per WGP for all of them."""
 
-    def test_every_entry_declares_one_consistent_value(self):
+    @pytest.mark.parametrize("arch", ["gfx1151", "gfx1150"])
+    def test_every_entry_declares_one_consistent_value(self, arch):
         import yaml
 
         values, missing = {}, []
-        for f in sorted(require_asm_full_root().glob("gfx1151/*/gfx1151_*I4*.yaml")):
+        for f in sorted(require_asm_full_root().glob(f"{arch}/*/{arch}_*I4*.yaml")):
             text = f.read_text()
             # The libyaml loader when PyYAML has it: the Origami logic files are large.
             data = yaml.load(text, Loader=yaml.CSafeLoader) if hasattr(yaml, "CSafeLoader") else yaml.safe_load(text)
@@ -462,7 +463,7 @@ class TestGfx1151W4A16LogicDeclaresOccupancy:
                     missing.append(f"{f.name}: {name} ({occ})")
                 else:
                     values.setdefault(name, set()).add(occ)
-        assert values, "no gfx1151 W4A16 custom kernels found"
+        assert values, f"no {arch} W4A16 custom kernels found"
         assert not missing, f"{len(missing)} entries without CUOccupancy, e.g. {missing[:3]}"
         inconsistent = {n: v for n, v in values.items() if len(v) > 1}
         assert not inconsistent, f"kernels declared with different values: {inconsistent}"
