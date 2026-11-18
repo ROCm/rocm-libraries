@@ -46,6 +46,7 @@ from rocke.core.lower_llvm import (
     _flavor_for_llvm,
     _lower_kernel_to_llvm_python,
 )
+from rocke.tests.arch_marks import arch_specific
 
 _ARCH = "gfx950"
 _FLAVORS = LLVM_FLAVORS
@@ -155,6 +156,10 @@ def _body(llvm: str) -> list[str]:
     return [ln for ln in lines[start + 1 :] if not ln.startswith("}")]
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestBf16x3Expansion(unittest.TestCase):
     """The recipe itself, read back out of the emitted IR."""
 
@@ -318,6 +323,10 @@ class TestBf16x3Expansion(unittest.TestCase):
                 )
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestTopBinadeSaturation(unittest.TestCase):
     """The cap on ``big``, read back out of the emitted IR.
 
@@ -493,6 +502,10 @@ _FOLDED_SPLITS = {
 }
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestLlvmFoldsTheSplit(unittest.TestCase):
     """LLVM's own constant folder, as an evaluator of the emitted IR.
 
@@ -602,6 +615,10 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
         self._check_no_infinity_in_a_term("cpp")
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestOperandContract(unittest.TestCase):
     """Emulated atoms share the native atoms' ABI: TF32 in, FP32 accumulator.
 
@@ -661,6 +678,10 @@ class TestOperandContract(unittest.TestCase):
             builder.mma(atom, a, a, c)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestHipBackend(unittest.TestCase):
     def test_hip_lowering_rejects_an_emulated_atom_by_name(self):
         """The expansion exists only in the LLVM lowerer.
@@ -681,6 +702,10 @@ class TestHipBackend(unittest.TestCase):
                     lower_kernel_to_hip(_mma_kernel(op_id), arch=_ARCH)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestBareOpIdForm(unittest.TestCase):
     def test_the_bare_op_id_builds_the_same_kernel_as_the_atom(self):
         """``IRBuilder.mma`` documents a bare-op_id form; emulated atoms take it.
@@ -696,6 +721,10 @@ class TestBareOpIdForm(unittest.TestCase):
                 )
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestNativeAtomsAreUntouched(unittest.TestCase):
     def test_a_native_bf16_mma_still_lowers_to_one_call(self):
         """The guard is confined to emulated atoms -- no native atom moved."""
@@ -710,6 +739,10 @@ class TestNativeAtomsAreUntouched(unittest.TestCase):
                 self.assertEqual(len([ln for ln in body if "fptrunc" in ln]), 0)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+)
 class TestEngineParity(unittest.TestCase):
     """The #1 invariant: the two engines emit the same bytes for the expansion.
 

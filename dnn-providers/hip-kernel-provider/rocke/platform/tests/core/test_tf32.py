@@ -29,6 +29,7 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.verify import verify, verify_or_raise
 from rocke.examples.gfx942.tf32_numerics import rne_bits
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 from rocke.tests.engines import (
     ENGINES,
     assert_both_engines_reject,
@@ -122,6 +123,10 @@ def test_catalog_isolation(m, k, acc):
             assert coords == expected
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 @pytest.mark.parametrize(
@@ -200,6 +205,10 @@ def test_probe_rejects_incompatible_result_layout(m, mode, field):
         builder.assert_not_called()
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 def test_both_builders_and_lowerers(m, mode):
@@ -257,18 +266,20 @@ def test_concrete_xf32_uses_catalog_target_diagnostic(m, gfx, flavor):
         _lower_kernel_to_llvm_python(kernel, arch=gfx, llvm_flavor=flavor)
 
 
-def test_arithmetic_rejected_after_serialization():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_arithmetic_rejected_after_serialization(arch):
     b = IRBuilder("bad_arithmetic")
     v = b.param("x", TF32)
     b.add(v, v)
     b.ret()
     with pytest.raises(ValueError, match="TF32 arithmetic"):
-        _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
+        _lower_kernel_to_llvm_python(b.kernel, arch=arch)
     native = pytest.importorskip("rocke_engine")
     with pytest.raises(Exception):
-        native.lower_serialized_ir(serialize(b.kernel), arch="gfx950")
+        native.lower_serialized_ir(serialize(b.kernel), arch=arch)
 
 
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
 @pytest.mark.parametrize(
     "operation",
     [
@@ -291,7 +302,7 @@ def test_arithmetic_rejected_after_serialization():
         "trunc_result",
     ],
 )
-def test_vector_arithmetic_rejected_after_serialization(operation):
+def test_vector_arithmetic_rejected_after_serialization(operation, arch):
     b = IRBuilder("invalid_tf32_vector_arithmetic")
     elem = I32 if operation == "trunc_result" else TF32
     v = b.param("v", VectorType(elem, 2))
@@ -322,15 +333,16 @@ def test_vector_arithmetic_rejected_after_serialization(operation):
     message = "TF32 arithmetic requires an explicit conversion to f32"
     assert any(message in str(d) for d in verify(kernel))
     with pytest.raises(ValueError, match=message):
-        _lower_kernel_to_llvm_python(kernel, arch="gfx950")
+        _lower_kernel_to_llvm_python(kernel, arch=arch)
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(kernel)
     native = pytest.importorskip("rocke_engine")
     with pytest.raises(Exception, match=message):
-        native.lower_serialized_ir(ir, arch="gfx950")
+        native.lower_serialized_ir(ir, arch=arch)
 
 
-def test_vector_payload_operations_remain_supported():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_vector_payload_operations_remain_supported(arch):
     b = IRBuilder("tf32_vector_payload")
     p = b.param("p", PtrType(TF32, "global"))
     mask = b.param("mask", I1)
@@ -349,10 +361,14 @@ def test_vector_payload_operations_remain_supported():
     assert "i32x4" in lower_kernel_to_hip(kernel)
     native = pytest.importorskip("rocke_engine")
     for flavor in LLVM_FLAVORS:
-        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
-        assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
+        ll = _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
+        assert native.lower_serialized_ir(ir, arch=arch, flavor=flavor) == ll
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; the smoke tests (test_transport and the rejection tests) run on every covered arch",
+)
 @pytest.mark.parametrize("n", [2, 3, 4, 8])
 @pytest.mark.parametrize("align", [None, 4])
 def test_global_vector_load(n, align):
@@ -386,7 +402,8 @@ def test_global_vector_load_rejects_unsupported_width(n):
         b.global_load_vN(p, b.const_i32(0), TF32, n)
 
 
-def test_transport():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_transport(arch):
     b = IRBuilder("transport")
     p = b.param("p", PtrType(TF32, "global"))
     i = b.const_i32(0)
@@ -397,10 +414,10 @@ def test_transport():
     b.ret()
     ir = serialize(b.kernel)
     assert serialize(parse(ir)) == ir
-    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch=arch)
     assert "load i32" in ll and "store i32" in ll
     native = pytest.importorskip("rocke_engine")
-    assert native.lower_serialized_ir(ir, arch="gfx950") == ll
+    assert native.lower_serialized_ir(ir, arch=arch) == ll
 
 
 def test_rne_reference_edges():
@@ -448,6 +465,10 @@ def test_rne_reference_edges():
     assert np.array_equal(rne_bits(expected), expected)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; the smoke tests (test_transport and the rejection tests) run on every covered arch",
+)
 @pytest.mark.parametrize("n", [1, 2, 4])
 def test_lds_and_loop_transport(n):
     b = IRBuilder("tf32_lds_loop")
@@ -484,6 +505,10 @@ def test_fp32_atom_rejects_tf32_carrier():
         b.mma("mfma_f32_16x16x4_f32", a, a, c)
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 def test_parsed_mma_rejects_wrong_operands():
     native = pytest.importorskip("rocke_engine")
     for bad in ("vec<i32x2>", "vec<f32x2>", "vec<tf32x4>"):
@@ -512,6 +537,10 @@ def tf32_recipe_replay_cli():
     return Path(resolved)
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 def test_recipe_replay_preserves_ir(m, mode, tmp_path, tf32_recipe_replay_cli):
@@ -545,6 +574,10 @@ def test_recipe_replay_preserves_ir(m, mode, tmp_path, tf32_recipe_replay_cli):
         )
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; the smoke tests (test_transport and the rejection tests) run on every covered arch",
+)
 @pytest.mark.parametrize("n", [1, 2, 4, 8, 16])
 @pytest.mark.parametrize("align", [None, 4, 64, "legacy"])
 @pytest.mark.parametrize("dtype", [TF32, I32, F32])
@@ -590,6 +623,10 @@ def test_global_vector_store(n, align, dtype):
         assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; the smoke tests (test_transport and the rejection tests) run on every covered arch",
+)
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     ("align", "error_type", "refusal"),
@@ -632,14 +669,15 @@ def test_global_vector_store_rejects_invalid_alignment(
         )
 
 
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("scalar_result", [False, True])
-def test_non_xf32_mma_rejects_tf32_result(m, scalar_result):
+def test_non_xf32_mma_rejects_tf32_result(m, scalar_result, arch):
     b = IRBuilder("non_xf32_tf32_result")
     out = b.param("out", PtrType(TF32, "global"))
     a = b.param("a", F32)
     c = b.param("c", VectorType(F32, 4 if m == 16 else 16))
-    atom = ArchTarget.from_gfx("gfx942").mma.op_for_shape(
+    atom = ArchTarget.from_gfx(arch).mma.op_for_shape(
         family="mma",
         a_dtype="fp32",
         b_dtype="fp32",
@@ -659,15 +697,19 @@ def test_non_xf32_mma_rejects_tf32_result(m, scalar_result):
     message = "MMA results must not use TF32"
     assert any(message in str(d) for d in verify(kernel))
     with pytest.raises(ValueError, match=message):
-        lower_kernel_to_hip(kernel, arch="gfx942")
+        lower_kernel_to_hip(kernel, arch=arch)
     native = pytest.importorskip("rocke_engine")
     for flavor in LLVM_FLAVORS:
         with pytest.raises(ValueError, match=message):
-            _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
+            _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
         with pytest.raises(Exception, match=message):
-            native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor)
+            native.lower_serialized_ir(ir, arch=arch, flavor=flavor)
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("m", [16, 32])
 def test_concrete_mma_identity_conflict_is_a_verifier_diagnostic(m):
     kernel = build_tf32_mma_probe(Tf32MmaProbeSpec(m))
@@ -688,6 +730,10 @@ def test_concrete_mma_identity_conflict_is_a_verifier_diagnostic(m):
         _lower_kernel_to_llvm_python(kernel, arch="gfx942")
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("role", ["accumulator", "result"])
 @pytest.mark.parametrize("bad", ["integer", "tf32", "width"])
@@ -709,6 +755,10 @@ def test_parsed_mma_rejects_wrong_accumulator_and_result(m, role, bad):
         native.lower_serialized_ir(ir, arch="gfx942")
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_numeric_harness_auto_flavor(flavor, monkeypatch, tmp_path):
     pytest.importorskip("rocke_engine")
@@ -737,6 +787,10 @@ def test_numeric_harness_auto_flavor(flavor, monkeypatch, tmp_path):
         tf32_numerics.run(tmp_path, backend="cpp", shapes=(16,))
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 @pytest.mark.parametrize(
@@ -842,6 +896,10 @@ def test_probe_rejects_fixed_abi_corruption(m, mode, field):
         builder.assert_not_called()
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize(
     "field",
