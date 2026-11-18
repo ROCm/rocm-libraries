@@ -51,6 +51,21 @@ bool currentDeviceIsGfx11()
     return found->second;
 }
 
+bool usesAddend(const ConvGemmPlanCalls& calls)
+{
+    for(const auto& stage : calls.stages)
+    {
+        for(const auto& call : stage.calls)
+        {
+            if(call.c.has_value())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 const char* epilogueFormName(EpilogueForm form)
 {
     switch(form)
@@ -305,9 +320,11 @@ void ConvGemmPlanBuilder::buildPlan(
         };
         seen.push_back(signature(*calls));
         candidates.push_back({"default", planFor(handle, *calls)});
-        // A GEMM epilogue against the same epilogue in a pass: the GEMM's own may cost it more
-        // than the pass's traffic (a broadcast-bias addend on a bandwidth-bound layer).
-        if(calls->epilogueForm == EpilogueForm::NATIVE)
+        // A GEMM epilogue against the same epilogue in a pass, where the GEMM's own may cost
+        // more than the pass's traffic: a broadcast-bias addend (one more y-sized read a
+        // GEMM, and its fill) on a bandwidth-bound layer. A bias along the rows costs the GEMM
+        // nothing, and the clamp tail moves fewer bytes than the pass: never a candidate.
+        if(calls->epilogueForm == EpilogueForm::NATIVE && usesAddend(*calls))
         {
             auto pass = callsFor(opGraph, _layout, _splitReduction, false, false);
             if(pass.has_value())
