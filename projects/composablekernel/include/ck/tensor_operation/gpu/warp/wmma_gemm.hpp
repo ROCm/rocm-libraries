@@ -27,6 +27,7 @@ enum struct WmmaInstr
     wmma_f32_16x16x16_bf8f8_gfx12,
     wmma_f32_16x16x16_bf8bf8_gfx12,
     // gfx125x
+    wmma_f32_16x16x4_f32_gfx12,
     wmma_f16_16x16x32_f16_gfx12,
     wmma_bf16_16x16x32_bf16_gfx12,
     wmma_f32_16x16x32_f16_gfx12,
@@ -637,6 +638,53 @@ struct wmma_type<WmmaInstr::wmma_bf16_16x16x32_bf16_gfx12,
         }
     }
 };
+
+template <index_t WaveSize>
+struct wmma_type<WmmaInstr::wmma_f32_16x16x4_f32_gfx12,
+                 WaveSize,
+                 typename std::enable_if_t<WaveSize == 32 || WaveSize == 64>>
+{
+    // Absolute fixing property
+    // * Data Pixel
+    static constexpr index_t m_per_wmma = 16;
+    static constexpr index_t n_per_wmma = 16;
+    static constexpr index_t k_per_wmma = 4;
+    static constexpr index_t k_per_blk  = 2;
+    // static constexpr index_t src_a_data_size = 2;
+    // static constexpr index_t src_b_data_size = 2;
+    // static constexpr index_t acc_data_size   = 4;
+    // * Thread mapping inside wave, num_thread_per_subgroups always alone N direction
+    static constexpr index_t acc_data_size            = 4;
+    static constexpr index_t acc_pack_number          = 1;
+    static constexpr index_t num_thread_per_subgroups = n_per_wmma;
+
+    // Wave mode dependent propety
+    static constexpr index_t wave_size = Number<WaveSize>{};
+    // * Fixed in Navi3x, Will be wave mode dependent on Navi4x
+    // static constexpr index_t num_src_a_vgprs_per_wave = k_per_wmma / 2 * src_a_data_size / 4;
+    // static constexpr index_t num_src_b_vgprs_per_wave = k_per_wmma / 2 * src_b_data_size / 4;
+    // * num_acc_vgprs_per_wave alone M direction
+    // * num_subgroups alone M direction
+    static constexpr index_t num_acc_vgprs_per_wave = m_per_wmma * n_per_wmma / wave_size;
+    static constexpr index_t num_subgroups          = wave_size / num_thread_per_subgroups;
+
+    template <index_t MPerWmma, index_t NPerWmma, class FloatA, class FloatB, class FloatC>
+    __device__ void run(const FloatA& a, const FloatB& b, FloatC& reg_c) const
+    {
+        static_assert(wave_size == 32, "only support wave32 for gfx12 wmma");
+        if constexpr(wave_size == 32)
+        {
+#if defined(__gfx125__)
+            intrin_wmma_f32_16x16x4_f32<MPerWmma, NPerWmma>::Run(a, b, reg_c);
+#else
+            ignore = a;
+            ignore = b;
+            ignore = reg_c;
+#endif
+        }
+    }
+};
+
 // A-swizzled
 template <index_t WaveSize>
 struct wmma_type<WmmaInstr::wmma_f32_16x16x32_f16_gfx12,
@@ -909,6 +957,12 @@ struct WmmaSelector
     static constexpr auto GetWmma();
 
     template <>
+    constexpr auto GetWmma<float, float, float, 16, 16>()
+    {
+        return WmmaInstr::wmma_f32_16x16x4_f32_gfx12;
+    }
+
+    template <>
     constexpr auto GetWmma<half_t, half_t, float, 16, 16>()
     {
 #if defined(__gfx120__) || defined(__gfx117__)
@@ -1023,12 +1077,13 @@ struct WmmaSelector
         static_assert(selected_wmma.m_per_wmma == 16, "WRONG! WMMA_M must equal to 16");
 
         static_assert(selected_wmma.m_per_wmma == 16, "WRONG! WMMA_M must equal to 16");
-#if defined(__gfx125__)
-        // on gfx125x k_per_wmma could be 32 or 64
-        // static_assert(selected_wmma.k_per_wmma == 32, "WRONG! WMMA_M must equal to 32");
-#else
-        static_assert(selected_wmma.k_per_wmma == 16, "WRONG! WMMA_M must equal to 16");
-#endif
+        // #if defined(__gfx125__)
+        //         // on gfx125x k_per_wmma could be 32 or 64
+        //         // static_assert(selected_wmma.k_per_wmma == 32, "WRONG! WMMA_M must equal to
+        //         32");
+        // #else
+        //         static_assert(selected_wmma.k_per_wmma == 16, "WRONG! WMMA_M must equal to 16");
+        // #endif
         static_assert(selected_wmma.wave_size * selected_wmma.num_acc_vgprs_per_wave *
                               selected_wmma.acc_data_size * selected_wmma.acc_pack_number ==
                           selected_wmma.m_per_wmma * selected_wmma.n_per_wmma * 4,
@@ -1159,8 +1214,10 @@ struct WmmaGemm
     __device__ void Run(const FloatA& p_a_wave, const FloatB& p_b_wave, FloatC& p_c_thread) const
     {
         static_assert(
-            (is_same<src_type_a, half_t>::value && is_same<src_type_b, half_t>::value &&
+            (is_same<src_type_a, float>::value && is_same<src_type_b, float>::value &&
              is_same<dst_type, float>::value) ||
+                (is_same<src_type_a, half_t>::value && is_same<src_type_b, half_t>::value &&
+                 is_same<dst_type, float>::value) ||
                 (is_same<src_type_a, bhalf_t>::value && is_same<src_type_b, bhalf_t>::value &&
                  is_same<dst_type, float>::value) ||
                 (is_same<src_type_a, half_t>::value && is_same<src_type_b, half_t>::value &&
