@@ -201,6 +201,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
                 arg.starts_with("--wmma-queue-depth=") ||
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
+                arg == "--wmma-queue-fill-each-reset" ||
                 arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
                 arg == "--ds-spread" || arg == "--no-ds-spread" ||
                 arg.starts_with("--barrier-half-slack=") ||
@@ -605,6 +606,8 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
+        } else if (a == "--wmma-queue-fill-each-reset") {
+            passFeatureConfig.dagFeatures.wmmaQueueFillEachReset = true;
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));

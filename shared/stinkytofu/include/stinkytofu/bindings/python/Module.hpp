@@ -145,6 +145,7 @@
     X(WaitAluHoldFirstWaitOnly, bool, false) /* move a free strict filler to after its barrier */ \
     X(WaitAluHoldWideWindows, bool, false) /* strict-filler hold spans 6 WMMA windows, not 2 */  \
     X(DsOneWaitAluPerWindow, bool, false) /* one s_wait_alu ds_load per WMMA window */         \
+    X(WmmaQueueFillEachReset, bool, false) /* queue-fill gate per barrier reset, not loop head */ \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \

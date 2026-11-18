@@ -120,6 +120,10 @@ struct PassFeatureConfig {
         /// matrix consumer. The production backend supplies the resolved scheduling-policy value;
         /// direct pass users may leave it at 0 for no additional safety margin.
         int queueFillSafetyMarginCycles = 0;
+        /// Mirrors ModuleOptions::WmmaQueueFillEachReset. false = the loop head decides the queue
+        /// fill once and every barrier reset reuses it. true = each reset decides from the ds_loads
+        /// and WMMAs still ahead of it.
+        bool wmmaQueueFillEachReset = false;
         /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.

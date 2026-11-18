@@ -93,6 +93,7 @@ the queue is kept busy and covers the small stalls of the ds_loads and barriers 
 | `WmmaRefillMode` | 0 (`Fixed`) | `--wmma-refill-mode=fixed\|dynamic` | `0` / `fixed`: each refill issues `WmmaBatchSize` WMMAs. `1` / `dynamic`: each refill issues WMMAs until the queued cover reaches `WmmaRefillToCycles`; the count follows the live timeline and the WMMA latency. |
 | `WmmaBatchSize` | 1 | `--wmma-batch-size=N` | Fixed mode: WMMAs per refill. 1 is the one-WMMA-at-a-time refill. |
 | `WmmaRefillToCycles` | 0 → full queue | `--wmma-refill-to-cycles=N` | Dynamic mode: the queued cover (cycles) a refill fills up to. 0 = the queue depth × the WMMA latency. |
+| `WmmaQueueFillEachReset` | false | `--wmma-queue-fill-each-reset` | Queue-fill gate per queue reset. false: the loop head decides once and every barrier reset reuses that answer. true: each barrier reset (and each region that starts after a barrier wait) asks the gate about the ds_loads and WMMAs still ahead of it. The loop-head answer still feeds `promoteDueLastDs`. |
 
 A refill also ends when the queue is full. A dependent WMMA that needs coexec padding is held as
 before.

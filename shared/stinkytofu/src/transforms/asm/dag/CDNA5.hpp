@@ -823,8 +823,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // ds stages it held then count their batches from there (DsSpreadPacer::noteHeldUntil).
     bool wmmaQueueFillPending_ = false;
     bool headerFillPending_ = false;  // per BB: the loop header's first WMMA region is still ahead
-    // The loop-header decision is shared by every queue reset in this loop. Keeping it on the
-    // per-loop ReadyQueue makes the policy scope explicit and avoids per-reset mode changes.
+    // The loop header's queue-fill answer, kept for promoteDueLastDs for the whole loop.
+    // A later barrier reset does not reuse it: that reset runs the gate on the ds_loads
+    // and WMMAs still ahead of it.
     std::optional<bool> loopQueueFillPolicy_;
     // Immutable region plan used by the queue-fill gate. Node positions are in WMMA program
     // order; remainingDs_ is cleared as loads are scheduled.
@@ -1093,7 +1094,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool promotePrefetchAddressValu();
     bool promotePrefetchAtWindow();
     bool promoteWmmaQueueFill();
-    bool loopHeadQueueFillPolicyAllowsBurst();
+    bool queueFillResetAllowsBurst();
     bool issuableNow(DAGNode* node) const;
     DAGNode* bestDsRead() const;
     bool loopHeadBalanceHoldsWmma() const;
@@ -2003,9 +2004,11 @@ bool CDNA5ReadyQueue::promoteDueLastDs() {
     return true;
 }
 
-// Queue-fill eligibility is estimated once at the loop head and remains fixed for all queue
-// resets in that loop. The estimate may differ from the realized schedule, but every actual pick
-// still respects DAG readiness and queue credits.
+// Queue-fill eligibility for the reset happening now. At the loop head that is the first WMMA
+// of the loop; after a barrier wait it is the ds_loads and WMMAs still ahead of that wait.
+// Used by every reset when WmmaQueueFillEachReset is on; otherwise only the loop head asks, and
+// its answer is reused. The estimate may differ from the realized schedule, but every actual
+// pick still respects DAG readiness and queue credits.
 //
 // This L4 policy consults the completed L5 DS plan only as a forecast; it is not an L5 run-time
 // veto over an admitted L4 promotion. The header snapshot predicts the burst with the live queue
@@ -2013,10 +2016,15 @@ bool CDNA5ReadyQueue::promoteDueLastDs() {
 //
 // Permit the burst only when every required ds_load returns before the first in-region matrix
 // consumer with the scheduling policy's additional cycle margin.
-bool CDNA5ReadyQueue::loopHeadQueueFillPolicyAllowsBurst() {
+bool CDNA5ReadyQueue::queueFillResetAllowsBurst() {
     if (!dsSpread_.active() || !regionDag_) return true;
 
-    const auto wmmas = std::span<const WmmaQueueWindow>(regionWmmaWindows_);
+    // The queue was just emptied, so the burst is the WMMAs still ahead, not the ones already
+    // issued. At the loop head nothing has issued and this is the whole region.
+    const int issued = std::clamp(wmmaIssuedCountThisRegion_, 0,
+                                  static_cast<int>(regionWmmaWindows_.size()));
+    const auto wmmas = std::span<const WmmaQueueWindow>(regionWmmaWindows_)
+                           .subspan(static_cast<size_t>(issued));
     const int burst = predictWmmaQueueFillBurst(wmmas, hardwareWmmaQueueDepth_);
 
     const int heldUntil = wmmaIssuedCountThisRegion_ + burst;
@@ -2886,8 +2894,14 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // window. It can issue later than that (a predecessor was held, an SCC chain, an open
             // barrier pair). Count the batches from here; the stage's planned end stays.
             dsSpread_.noteOpen(barrier->id, wmmaIssuedCountThisRegion_);
-            if (queueReset)
-                wmmaQueueFillPending_ = wmmaQueueOn() && loopQueueFillPolicy_.value_or(false);
+            if (queueReset) {
+                if (!wmmaQueueOn())
+                    wmmaQueueFillPending_ = false;
+                else if (getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueFillEachReset)
+                    wmmaQueueFillPending_ = queueFillResetAllowsBurst();
+                else
+                    wmmaQueueFillPending_ = loopQueueFillPolicy_.value_or(false);
+            }
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -3252,7 +3266,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     }
 
     // The queue starts empty at the loop header's first WMMA region and in a region cut by a
-    // barrier wait: fill it first. The loop-head deferral wins over the fill.
+    // barrier wait. The header's answer is the one promoteDueLastDs keeps. The loop-head
+    // deferral wins over the fill.
+    bool headerPolicyOwner = false;
     if (wmmaQueueOn() && hasWMMAInRegion_) {
         const bool headerStart =
             headerFillPending_ && loop && loop->headerBB == blockBegin->getParent();
@@ -3263,8 +3279,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
         if (headerStart) headerFillPending_ = false;
         const bool resetCandidate = (headerStart || afterWait) && !deferHeadBalanceThisRegion_;
+        headerPolicyOwner = headerStart && resetCandidate && !loopQueueFillPolicy_.has_value();
         wmmaQueueFillPending_ =
-            resetCandidate && (headerStart || loopQueueFillPolicy_.value_or(false));
+            resetCandidate && (headerStart ||
+                               dagFeatures.wmmaQueueFillEachReset ||
+                               loopQueueFillPolicy_.value_or(false));
     }
 
     // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
@@ -4187,11 +4206,18 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                              << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
     };
     planDsSpread();
-    // The loop header owns the policy decision. Later barrier resets reuse it rather than
-    // switching scheduling policy from one segment to the next.
-    if (wmmaQueueFillPending_ && !loopQueueFillPolicy_.has_value())
-        loopQueueFillPolicy_ = loopHeadQueueFillPolicyAllowsBurst();
-    if (wmmaQueueFillPending_) wmmaQueueFillPending_ = *loopQueueFillPolicy_;
+    // With WmmaQueueFillEachReset every reset asks the gate about its own remaining ds_loads, and
+    // only the header stores its answer, for promoteDueLastDs. Otherwise the header decides once
+    // and every later reset reuses it.
+    if (wmmaQueueFillPending_) {
+        if (dagFeatures.wmmaQueueFillEachReset) {
+            wmmaQueueFillPending_ = queueFillResetAllowsBurst();
+            if (headerPolicyOwner) loopQueueFillPolicy_ = wmmaQueueFillPending_;
+        } else {
+            if (!loopQueueFillPolicy_.has_value()) loopQueueFillPolicy_ = queueFillResetAllowsBurst();
+            wmmaQueueFillPending_ = *loopQueueFillPolicy_;
+        }
+    }
     lockDsReadOrder();
     lockWmmaOrder();
 

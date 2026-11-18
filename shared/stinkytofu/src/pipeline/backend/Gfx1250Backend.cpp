@@ -189,6 +189,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaRefillToCycles = moduleOptions.WmmaRefillToCycles;
                 passFeatureConfig.dagFeatures.queueFillSafetyMarginCycles =
                     resolvedKnobs.queueFillSafetyMarginCycles;
+                passFeatureConfig.dagFeatures.wmmaQueueFillEachReset =
+                    moduleOptions.WmmaQueueFillEachReset;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
