@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from rocke.examples.gfx942 import tf32_numerics as numerics
 from rocke.runtime import comgr, hip_module
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -86,6 +87,10 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         numerics.main()
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the CLI validates the native gfx942 xf32 example; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("optimization", ["normal", "flag", "environment"])
 @pytest.mark.parametrize(
     "fault",

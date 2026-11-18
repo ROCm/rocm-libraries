@@ -50,6 +50,7 @@ import os
 import subprocess
 import unittest
 
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -152,6 +153,10 @@ def _select(env: dict, index: int) -> dict:
     return dict(env, HIP_VISIBLE_DEVICES=str(index))
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the device test runs the gfx950 bf16x3 emulation; gfx942 uses native xf32 MFMA",
+)
 class TestBf16x3OnDevice(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -39,6 +39,7 @@ from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.tests.arch_marks import arch_specific
 
 _ARCH = "gfx950"
 _ISA = f"amdgcn-amd-amdhsa--{_ARCH}"
@@ -128,6 +129,10 @@ def _compiler():
     return comgr.build_hsaco_from_llvm_ir
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the test checks gfx950 ISA for the bf16x3 emulation; gfx942 uses native xf32 MFMA",
+)
 class TestGfx950Codegen(unittest.TestCase):
     def _compile(self, op_id: str) -> bytes:
         """The code object for the gate kernel. A compile error fails the test."""

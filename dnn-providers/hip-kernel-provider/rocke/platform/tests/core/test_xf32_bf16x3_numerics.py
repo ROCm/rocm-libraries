@@ -40,6 +40,7 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+from rocke.tests.arch_marks import arch_specific
 
 _K = 256
 _TRIALS = 64
@@ -179,6 +180,10 @@ def _err(got: float, want: float, scale: float) -> float:
     return abs(float(got) - float(want)) / scale
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestTheSplit(unittest.TestCase):
     def test_big_and_small_are_representable_in_bf16(self):
         """Both halves must survive the narrowing the MMA will do to them."""
@@ -215,6 +220,10 @@ class TestTheSplit(unittest.TestCase):
         self.assertLess(float(ratio.max()), 2.0**-8)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestAccuracyAgainstFp32(unittest.TestCase):
     """The claim that justifies the feature, stated as a measurement."""
 
@@ -273,6 +282,10 @@ class TestAccuracyAgainstFp32(unittest.TestCase):
         self.assertLess(worst["bf16x3"], 32.0 * max(worst["fp32"], 2.0**-24))
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestTheRecipeShape(unittest.TestCase):
     def test_dropping_small_times_small_costs_little_on_typical_data(self):
         """Why the recipe is three MMAs and not four.
@@ -323,6 +336,10 @@ class TestTheRecipeShape(unittest.TestCase):
         self.assertLessEqual(ours, reverse)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestTheOmittedTerm(unittest.TestCase):
     """The recipe drops ``small*small``; this is what that costs, worst case.
 
@@ -381,6 +398,10 @@ class TestTheOmittedTerm(unittest.TestCase):
         self.assertGreater(float(ratio.max()) ** 2, 0.99 * self._BOUND)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestTopBinadeSaturation(unittest.TestCase):
     """bf16 rounding overflows for magnitudes of 0x7f7f8000 or more; the cap is what
     keeps those payloads finite.
@@ -452,6 +473,10 @@ class TestTopBinadeSaturation(unittest.TestCase):
         self.assertTrue(np.isneginf(_bf16x3_dot(x, -x)))
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestSubnormalPayloads(unittest.TestCase):
     """bf16 has fp32's exponent range but only 7 mantissa bits, so its smallest
     positive value is 2^-133 and the split of a subnormal payload has an absolute
@@ -498,6 +523,10 @@ class TestSubnormalPayloads(unittest.TestCase):
                 self.assertEqual(float(big[0]) + float(small[0]), float(x[0]))
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestNonFinitePayloads(unittest.TestCase):
     """An infinity or NaN in an operand makes every output it feeds non-finite.
 
@@ -570,6 +599,10 @@ class TestNonFinitePayloads(unittest.TestCase):
         )
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the numpy model checks the gfx950 bf16x3 recipe; gfx942 uses native xf32 MFMA",
+)
 class TestTheNarrowingModel(unittest.TestCase):
     """The model's bf16 must be RNE, or every number above is off.
 
