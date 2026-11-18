@@ -32,6 +32,8 @@
 
 #include "../../../config.hpp"
 
+#if HIPCUB_USE_LEGACY_API
+
 #include "iterator_category.hpp"
 #include "iterator_wrapper.hpp"
 
@@ -41,8 +43,6 @@
 #include <cstddef>
 #include <iterator>
 #include <type_traits>
-
-#if HIPCUB_USE_LEGACY_API
 
 BEGIN_HIPCUB_NAMESPACE
 

@@ -31,6 +31,9 @@
 #define HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_
 
 #include "../../../config.hpp"
+
+#if HIPCUB_USE_LEGACY_API
+
 #include "../../../util_deprecated.hpp"
 
 #include "iterator_category.hpp"
@@ -39,8 +42,6 @@
 #include <rocprim/iterator/counting_iterator.hpp> // IWYU pragma: export
 
 #include <iterator>
-
-#if HIPCUB_USE_LEGACY_API
 
 BEGIN_HIPCUB_NAMESPACE
 

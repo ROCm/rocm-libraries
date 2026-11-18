@@ -80,7 +80,7 @@ TEST(HipcubLegacyApiTests, ThreadOperators)
     HIP_CHECK(hipSetDevice(device_id));
 
     int* results = nullptr;
-    HIP_CHECK(hipMalloc(&results, 8 * sizeof(int)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&results, 8 * sizeof(int)));
     legacy_operators_kernel<<<1, 1>>>(results);
     HIP_CHECK(hipDeviceSynchronize());
 
