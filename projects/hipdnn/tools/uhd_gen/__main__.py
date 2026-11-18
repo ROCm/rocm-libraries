@@ -224,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     rewrite = subparsers.add_parser(
         "rewrite-signature",
         help="read an installed UHD's optional features through value_or_default, "
-        "without retraining (RFC 0019 §6.2)",
+        "without retraining (RFC 0019 §6.7, §6.8 item 9)",
     )
     add_rewrite_arguments(rewrite)
 
@@ -1345,8 +1345,16 @@ def _run_train(args: argparse.Namespace) -> int:
         if not isinstance(signature, list) or not signature:
             raise ValueError("features_signature must be a nonempty JSON array")
         signature = [parse_signature_entry(entry) for entry in signature]
-        # RFC 0019 §6.2: a feature a valid graph may leave unbound is read through
-        # value_or_default, so a row without it trains on the value the runtime reads.
+        # RFC 0019 §6.7 (absent is not zero) and §6.8 item 9: a feature a valid graph may leave
+        # unbound is read through value_or_default, so a row without it trains on the value the
+        # runtime reads.
+        # Wrapping turns a bare read into an expression, so the column check below must look at
+        # the signature as requested: a column no row publishes is a typo, not an absent value.
+        requested_columns = (
+            None
+            if any(isinstance(entry, dict) for entry in signature)
+            else {reference[1:] for reference in signature_references(signature)}
+        )
         signature, wrapped = safe_signature(
             signature, args.metric, args.feature_evaluator
         )
@@ -1360,10 +1368,10 @@ def _run_train(args: argparse.Namespace) -> int:
         references = signature_references(signature)
         if immediate:
             validate_signature(signature)
-        if not any(isinstance(entry, dict) for entry in signature):
+        if requested_columns is not None:
             # A raw reference is a column gather; expression inputs may be legally absent
             # (value_or_default/present), so the shared evaluator decides for those.
-            missing = {reference[1:] for reference in references} - set(df.columns)
+            missing = requested_columns - set(df.columns)
             if missing:
                 raise ValueError(f"Missing feature columns: {sorted(missing)}")
         if args.target not in df.columns:

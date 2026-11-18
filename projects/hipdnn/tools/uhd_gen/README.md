@@ -298,6 +298,10 @@ It validates everything before writing anything, and refuses rather than half-su
   after any `--remove-knob`. The runtime drops any other model and ranks by priority, then
   id (RFC 0019 §6.3 check 2). Problem-side facts such as dtype, head counts or causal
   come from the graph's own columns, never `$kernel.*`;
+- a model that reads bare a feature a valid graph may leave unbound is refused: read it
+  through `value_or_default`, which `python -m uhd_gen rewrite-signature` does for an
+  installed model without retraining (see
+  [Optional features are read through a default](#optional-features-are-read-through-a-default));
 - a `predict_engine` model for a descriptor-backed engine must record
   `trained_against.selector_revision`, which the runtime compares with the engine's
   current selector revision. Every binding `hipdnn_bench` records carries it.
@@ -684,15 +688,18 @@ leaves unset (SDPA's `attn_scale_value`, `dropout_probability`, `left_bound`, ..
 an optional tensor it does not carry (`attn_mask`, `seq_len_q`, ...), an element of a vector
 attribute the node is too low-rank to have (`dilation[1]` of a 1-D convolution), and the work
 features where hipDNN cannot count the work. A model reading one bare cannot score such a
-graph (RFC 0019 §6.2). hipDNN lists them, from the schemas' optional fields:
+graph (RFC 0019 §6.7, absent is not zero, and §6.8 item 9). hipDNN lists them, from the schemas' optional fields:
 `hipdnn_uhd_features --optional-features` prints the list, and `--lint` reports the
 references of a signature that read one unguarded. A name does not say its node's type, so
 each node is taken to be any type having every operand the signature reads at it.
 
 - `train` reads every such reference through `value_or_default`, with the default
   `uhd_gen/optional.py` holds: the API's meaning of "unset" (1.0 for the SDPA scale, 0 for the
-  dropout probability, 1/sqrt(K) for the GDN/KDA scale, ...) or -1 where unset has no number
-  (an omitted tensor's fields, unbounded bounds, unknown work). A row without the feature trains
+  dropout probability, 1/sqrt(K) for the GDN/KDA scale, the last axis of the input for a
+  BlockScaleQuantize `axis`, ...) or, where unset has no number, a marker: -1 (an omitted
+  tensor's fields, an unset uid or sequence length, unknown work, an engine-config constraint
+  the config does not pin) and 1e14 for an unset ReLU upper clip, whose meaning is numeric max,
+  which the expression language cannot write. A row without the feature trains
   on the value the runtime will read. A test fails when hipDNN gains an optional attribute
   the table does not cover.
 - `generate`'s automatic selection keeps a column some rows leave unbound when it is one of
@@ -705,15 +712,32 @@ each node is taken to be any type having every operand the signature reads at it
 A model trained before this is migrated without retraining:
 
 ```bash
-python -m uhd_gen rewrite-signature <tree>/.../heuristic.uhd.json ... [--dry-run]
+python -m uhd_gen rewrite-signature <tree>/.../heuristic.uhd.json ... [--role ROLE] [--dry-run]
+    [--feature-evaluator PATH] [--report FILE] [--proof-rows N] [--seed N]
 ```
 
-It wraps each unguarded reference, restates `features_hash`, the hash `model.bin` embeds (the
-trees and every other value are unchanged, which it checks) and `tree_data.hash`, after
-proving through the evaluator that the features are identical on rows binding every
-reference and that a row lacking each wrapped one is now scorable. A ranker's model hash is
-an input to its engine's selector revision, so the engine's estimates need re-stamping after
-a ranker is rewritten.
+`--role` names the role each model is bound to (default: the role directory in its path;
+a path that names none needs it), `--feature-evaluator` is as for `train`, `--report FILE`
+also writes the JSON report to a file, `--proof-rows N` (default 64) and `--seed N` set the
+random rows the proof uses, and `--dry-run` proves and reports without writing. The JSON
+report goes to stdout, one entry per descriptor, and the exit status is 1 if any descriptor
+fails.
+
+It wraps each unguarded reference, restates `features_hash`, the hash the artifact embeds
+(`tree_data`, `linear_data` and `mlp_data`; the trees, weights and every other value are
+unchanged, which it checks) and the artifact digest the adapter records (`<adapter>.hash`),
+after proving through the evaluator that the features are identical on rows binding every
+reference of the old and the rewritten signature and that a row lacking each wrapped one is
+now scorable. The artifact and then the descriptor are written through temporary files and
+`os.replace`, after the staged artifact passes the loader's checks. An adapter whose artifact
+embeds the hash but that has no rule (`table`) is refused: retrain it.
+
+A ranker's model hash and features hash are inputs to its engine's selector revision, so
+rewriting a `sort_kernel_catalog` model changes it, and the `predict_engine` models recording
+the old one are unavailable until they are restamped or retrained. The report's
+`selector_revision` says whether the rewrite changes it (`changes`) and names the
+`predict_engine` models installed beside the ranker
+(`l1_models_to_restamp_or_retrain`).
 
 ### Reproducible generation
 

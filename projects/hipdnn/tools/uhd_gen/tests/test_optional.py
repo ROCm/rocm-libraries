@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import math
+import os
+from pathlib import Path
 
 import pytest
 
 pytest.importorskip("flatbuffers")
 pd = pytest.importorskip("pandas")
 
-from uhd_gen.features import compute_features_hash, evaluate_feature_maps
+from uhd_gen.features import compute_features_hash, evaluate_feature_maps, run_evaluator
 from uhd_gen.generate import feature_recipe
 from uhd_gen.optional import (
     ATTRIBUTE_DEFAULTS,
@@ -23,9 +26,11 @@ from uhd_gen.optional import (
     optional_features,
     safe_signature,
 )
+from uhd_gen.tests.model_bin import leaf_model
 
 SCALE = "$graph.nodes[0].attn_scale_value"
 Q_DIM = "$graph.nodes[0].q.dims[3]"
+K_DIM = "$graph.nodes[0].k.dims[3]"
 FLOPS = "$graph.flops"
 
 pytestmark = pytest.mark.usefixtures("evaluator")
@@ -80,24 +85,30 @@ def test_a_gdn_scale_defaults_to_rsqrt_of_its_own_nodes_key_width(evaluator):
     assert values == [[pytest.approx(1 / math.sqrt(64))]]
 
 
+# The rank the absent-attribute rows bind for their node's input, from which an unset
+# BlockScaleQuantize axis (the last one) is read.
+X_RANK = 4
+
 # What the API means by an unset optional attribute (or a vector element past the end),
 # written from the schemas and the frontend rather than read back from ATTRIBUTE_DEFAULTS.
-# A boolean reads as 0.0 (false) or 1.0 (true); -1 is the sentinel where unset has no number.
+# A boolean reads as 0.0 (false) or 1.0 (true). Where unset has no number, a marker stands in:
+# -1 for an unset uid or sequence length, and for the upper clip the largest literal the
+# expression language admits (below 1e15), since numeric max cannot be written in it.
 UNSET_MEANINGS = {
-    "graph.nodes[*].attn_scale_value": 1.0,  # sdpa_attributes.fbs: a unit scale
+    "graph.nodes[*].attn_scale_value": 1.0,  # SdpaAttributes.hpp: 1.0 with no value or tensor
     "graph.nodes[*].dropout_probability": 0.0,  # no dropout
     "graph.nodes[*].generate_stats": 0.0,  # false
     "graph.nodes[*].left_bound": -1.0,  # unbounded
     "graph.nodes[*].right_bound": -1.0,  # unbounded
     "graph.nodes[*].max_seq_len_kv": -1.0,  # not declared
     "graph.nodes[*].relu_lower_clip": 0.0,  # cuDNN pointwise defaults
-    "graph.nodes[*].relu_upper_clip": -1.0,  # no upper bound
+    "graph.nodes[*].relu_upper_clip": 1e14,  # no upper bound (numeric max): a marker
     "graph.nodes[*].relu_lower_clip_slope": 0.0,
     "graph.nodes[*].swish_beta": 1.0,
     "graph.nodes[*].elu_alpha": 1.0,
     "graph.nodes[*].softplus_beta": 1.0,
-    "graph.nodes[*].axis_tensor_uid": -1.0,  # no axis
-    "graph.nodes[*].axis": -1.0,  # no axis
+    "graph.nodes[*].axis_tensor_uid": -1.0,  # no axis: a marker
+    "graph.nodes[*].axis": X_RANK - 1,  # BlockScaleQuantizeNode.hpp: the last axis of x
     "graph.nodes[*].generate_index": 0.0,  # false
     "graph.nodes[*].scale": 1 / math.sqrt(64),  # 1/sqrt(K) with K the node's q.dims[2]
     "graph.nodes[*].gate_lower_bound": -5.0,  # kda_attributes.fbs: "absent: -5.0"
@@ -117,11 +128,14 @@ def test_an_absent_optional_attribute_reads_what_the_api_means_by_unset(
     reference = "$" + pattern.replace("[*]", "[3]", 1).replace("[*]", "[2]")
     signature, wrapped = safe_signature([reference], "time", evaluator)
     assert [item["reference"] for item in wrapped] == [reference]
-    # The GDN/KDA default reads the node's own key width, not another node's.
+    # A GDN/KDA scale and a BlockScaleQuantize axis read the node's own operands, not
+    # another node's.
     absent = {
         reference[1:]: None,
         "graph.nodes[3].q.dims[2]": 64,
         "graph.nodes[0].q.dims[2]": 16,
+        "graph.nodes[3].x.rank": X_RANK,
+        "graph.nodes[0].x.rank": X_RANK + 1,
     }
     _, values = evaluate_feature_maps([absent], signature, None, evaluator)
     assert values == [[pytest.approx(UNSET_MEANINGS[pattern])]]
@@ -255,44 +269,61 @@ def test_generate_proposes_an_optional_column_some_rows_leave_unbound(evaluator)
     assert signature == [SCALE, "$graph.nodes[0].q.dims[0]"]
 
 
-def _installed_model(tmp_path, signature, metric="tflops"):
-    from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
+#: The artifact root class of each adapter whose artifact embeds a features_hash.
+_ROOTS = {
+    "tree_data": "GbdtModel",
+    "linear_data": "LinearModel",
+    "mlp_data": "MlpModel",
+}
+#: The linear and MLP fixtures of their own test modules read four features.
+_FOUR = [SCALE, Q_DIM, FLOPS, K_DIM]
 
-    directory = tmp_path / "sort_kernel_catalog" / "gfx942" / metric
+
+def _artifact(adapter, features_hash, signature, metric) -> bytes:
+    if adapter == "tree_data":
+        return leaf_model(features_hash, len(signature))
+    assert len(signature) == 4, "the linear and MLP fixtures read four features"
+    if adapter == "linear_data":
+        from uhd_gen.linear_to_flatbuffer import build_linear_model
+        from uhd_gen.tests.test_linear_model import fixture_ranker
+
+        return build_linear_model(fixture_ranker(), features_hash)
+    from uhd_gen.mlp_to_flatbuffer import build_mlp_model
+    from uhd_gen.tests.test_mlp_model import fixture_ensemble
+
+    return build_mlp_model(fixture_ensemble(), metric, features_hash)
+
+
+def _installed_model(
+    tmp_path,
+    signature,
+    metric="tflops",
+    *,
+    role="sort_kernel_catalog",
+    adapter="tree_data",
+    encoding=None,
+):
+    directory = tmp_path / role / "gfx942" / metric
     directory.mkdir(parents=True)
-    features_hash = compute_features_hash(signature)
-    split = {
-        "split_feature": 0,
-        "threshold": 0.1,
-        "decision_type": "<=",
-        "default_left": True,
-        "missing_type": "None",
-        "left_child": {"leaf_value": 1.0},
-        "right_child": {"leaf_value": 2.0},
-    }
-    data = build_gbdt_model(
-        {
-            "tree_info": [{"tree_structure": split}],
-            "max_feature_idx": len(signature) - 1,
-            "objective": "regression",
-        },
-        features_hash,
-    )
+    features_hash = compute_features_hash(signature, encoding)
+    data = _artifact(adapter, features_hash, signature, metric)
     (directory / "model.bin").write_bytes(data)
     descriptor = {
         "version": "1.0",
         "id": "0b8f5f3e-8f0c-4d6c-9d2e-3a3c1b0f6a11",
         "name": "test model",
-        "adapter": "tree_data",
+        "adapter": adapter,
         "features_signature": signature,
         "features_hash": features_hash,
         "objective": "max",
         "score": {"metric": metric, "calibrated": True, "transform": "log"},
-        "tree_data": {
+        adapter: {
             "artifact": "model.bin",
             "hash": hashlib.sha256(data).hexdigest(),
         },
     }
+    if encoding:
+        descriptor["categorical_encoding"] = encoding
     path = directory / "heuristic.uhd.json"
     path.write_text(json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
     return path
@@ -309,15 +340,23 @@ def _rewrite_args(paths, **overrides):
     return args
 
 
-def test_rewrite_keeps_the_trees_and_restates_every_hash(tmp_path, evaluator):
-    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
+def _files(path):
+    """Every file beside a descriptor, with its bytes: a rewrite leaves nothing else there."""
+    return {file.name: file.read_bytes() for file in path.parent.iterdir()}
 
+
+@pytest.mark.parametrize("adapter", sorted(_ROOTS))
+def test_rewrite_keeps_the_model_and_restates_every_hash(tmp_path, evaluator, adapter):
     from uhd_gen.promote import _verify_artifact
     from uhd_gen.rewrite import _same, rewrite_descriptor
 
-    path = _installed_model(tmp_path, [SCALE, Q_DIM, FLOPS])
+    root = _ROOTS[adapter]
+    module = importlib.import_module(f"hipdnn_flatbuffers_sdk.data_objects.{root}")
+    path = _installed_model(tmp_path, _FOUR, adapter=adapter)
     artifact = path.parent / "model.bin"
-    before = GbdtModelT.InitFromPackedBuf(bytearray(artifact.read_bytes()), 0)
+    before = getattr(module, root + "T").InitFromPackedBuf(
+        bytearray(artifact.read_bytes()), 0
+    )
 
     report = rewrite_descriptor(path, _rewrite_args([path]))
 
@@ -333,22 +372,25 @@ def test_rewrite_keeps_the_trees_and_restates_every_hash(tmp_path, evaluator):
         {"value_or_default": [SCALE, 1.0]},
         Q_DIM,
         FLOPS,
+        K_DIM,
     ]
     assert descriptor["features_hash"] == compute_features_hash(
         descriptor["features_signature"]
     )
     # The loader's checks: the embedded hash and digest agree with the descriptor.
     assert _verify_artifact(descriptor, artifact, "sort_kernel_catalog") == (
-        descriptor["tree_data"]["hash"]
+        descriptor[adapter]["hash"]
     )
-    after = GbdtModelT.InitFromPackedBuf(bytearray(artifact.read_bytes()), 0)
+    after = getattr(module, root + "T").InitFromPackedBuf(
+        bytearray(artifact.read_bytes()), 0
+    )
     assert after.featuresHash.decode() == descriptor["features_hash"]
     before.featuresHash = after.featuresHash = None
     assert _same(before, after)
 
-    files = (path.read_bytes(), artifact.read_bytes())
+    files = _files(path)
     assert rewrite_descriptor(path, _rewrite_args([path]))["status"] == "already_safe"
-    assert (path.read_bytes(), artifact.read_bytes()) == files
+    assert _files(path) == files
 
 
 def test_a_dry_run_proves_without_writing(tmp_path, evaluator):
@@ -391,3 +433,189 @@ def test_a_bare_read_that_short_circuits_is_rewritten_and_reported_as_tolerated(
             [{Q_DIM[1:]: dimension, SCALE[1:]: None}], rewritten, None, evaluator
         )
         assert values == [expected]
+
+
+def test_a_gdn_scale_is_rewritten_though_the_signature_reads_no_q_dimension(
+    tmp_path, evaluator
+):
+    """The default reads q.dims[2], which the proof rows must bind though the old signature
+    never named it."""
+    from uhd_gen.rewrite import rewrite_descriptor
+
+    scale = "$graph.nodes[0].scale"
+    path = _installed_model(tmp_path, [scale, "$graph.nodes[0].k.dims[2]"])
+    report = rewrite_descriptor(path, _rewrite_args([path]))
+
+    assert report["status"] == "rewritten"
+    assert [item["default"] for item in report["wrapped"]] == [
+        {"rsqrt": ["$graph.nodes[0].q.dims[2]"]}
+    ]
+    assert report["proof"]["old_refused_rows_when_absent"] == {
+        scale: report["proof"]["rows_compared"]
+    }
+
+
+def test_an_adapter_whose_artifact_embeds_the_hash_without_a_rule_is_refused(
+    tmp_path, evaluator
+):
+    """A table model records features_hash too, and the loader rejects one that differs from
+    the descriptor's: rewriting only the descriptor would break the model."""
+    from uhd_gen.rewrite import rewrite_descriptor
+
+    path = _installed_model(tmp_path, [SCALE, Q_DIM])
+    descriptor = json.loads(path.read_text(encoding="utf-8"))
+    descriptor["adapter"] = "table"
+    descriptor["table"] = descriptor.pop("tree_data")
+    path.write_text(json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
+    files = _files(path)
+
+    with pytest.raises(ValueError, match="no rewrite rule"):
+        rewrite_descriptor(path, _rewrite_args([path]))
+    assert _files(path) == files
+
+
+def test_an_encoded_categorical_cannot_take_a_default(tmp_path, evaluator):
+    from uhd_gen.rewrite import rewrite_descriptor
+
+    path = _installed_model(
+        tmp_path, [SCALE, Q_DIM], encoding={SCALE: {"a": 1, "b": 2}}
+    )
+    files = _files(path)
+    with pytest.raises(ValueError, match="encoded categorical"):
+        rewrite_descriptor(path, _rewrite_args([path]))
+    assert _files(path) == files
+
+
+def test_a_rewrite_that_would_change_a_bound_feature_is_refused(
+    tmp_path, evaluator, monkeypatch
+):
+    from uhd_gen import rewrite
+
+    altered = [{"value_or_default": [SCALE, 1.0]}, {"*": [Q_DIM, 2]}]
+    monkeypatch.setattr(
+        rewrite,
+        "safe_signature",
+        lambda *_: (altered, [{"reference": SCALE, "default": 1.0}]),
+    )
+    path = _installed_model(tmp_path, [SCALE, Q_DIM])
+    files = _files(path)
+
+    with pytest.raises(ValueError, match="changes features"):
+        rewrite.rewrite_descriptor(path, _rewrite_args([path]))
+    assert _files(path) == files
+
+
+def test_an_artifact_the_loader_would_refuse_leaves_both_files_untouched(
+    tmp_path, evaluator, monkeypatch
+):
+    from uhd_gen import rewrite
+    from uhd_gen.promote import PromoteError
+
+    def refuse(descriptor, artifact, role):
+        # What the staged artifact holds is already the restamped one.
+        assert artifact.read_bytes() != (path.parent / "model.bin").read_bytes()
+        raise PromoteError("the engine would refuse this artifact")
+
+    monkeypatch.setattr(rewrite, "_verify_artifact", refuse)
+    path = _installed_model(tmp_path, [SCALE, Q_DIM])
+    files = _files(path)
+
+    with pytest.raises(PromoteError, match="would refuse"):
+        rewrite.rewrite_descriptor(path, _rewrite_args([path]))
+    assert _files(path) == files
+
+
+def test_a_descriptor_that_cannot_be_replaced_puts_the_artifact_back(
+    tmp_path, evaluator, monkeypatch
+):
+    """The artifact is swapped in first and the descriptor, which binds it, last: when that
+    last replace fails the artifact must not stay under a descriptor that disowns it."""
+    from uhd_gen import rewrite
+
+    real = os.replace
+
+    def replace(source, destination):
+        if Path(destination).name == "heuristic.uhd.json":
+            raise OSError("disk full")
+        real(source, destination)
+
+    monkeypatch.setattr(rewrite.os, "replace", replace)
+    path = _installed_model(tmp_path, [SCALE, Q_DIM])
+    files = _files(path)
+
+    with pytest.raises(OSError, match="disk full"):
+        rewrite.rewrite_descriptor(path, _rewrite_args([path]))
+    assert _files(path) == files
+
+
+def test_rewriting_a_ranker_reports_the_l1_models_whose_selector_revision_it_changes(
+    tmp_path, evaluator
+):
+    """A ranker's model and features hashes are part of its engine's selector revision, so
+    the L1 models trained against the old one are unavailable until restamped."""
+    from uhd_gen.rewrite import rewrite_descriptor
+
+    l1 = _installed_model(tmp_path / "engine", [Q_DIM], role="predict_engine")
+    ranker = _installed_model(tmp_path / "engine", [SCALE, Q_DIM])
+    report = rewrite_descriptor(ranker, _rewrite_args([ranker]))
+    assert report["selector_revision"] == {
+        "changes": True,
+        "l1_models_to_restamp_or_retrain": [str(l1)],
+    }
+
+    # An L1 model is not part of its own engine's selector.
+    scorer = _installed_model(tmp_path / "other", [SCALE, Q_DIM], role="predict_engine")
+    report = rewrite_descriptor(scorer, _rewrite_args([scorer]))
+    assert report["selector_revision"] == {"changes": False}
+
+
+def test_the_command_rewrites_what_it_can_reports_what_it_cannot_and_exits_1(
+    tmp_path, evaluator, capsys
+):
+    from uhd_gen.__main__ import main
+
+    good = _installed_model(tmp_path, [SCALE, Q_DIM])
+    # No role directory in its path and no --role: unresolvable.
+    bad = tmp_path / "elsewhere" / "heuristic.uhd.json"
+    bad.parent.mkdir()
+    bad.write_bytes(good.read_bytes())
+    report_file = tmp_path / "report.json"
+
+    code = main(
+        [
+            "rewrite-signature",
+            str(good),
+            str(bad),
+            "--feature-evaluator",
+            evaluator,
+            "--report",
+            str(report_file),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 1
+    reports = json.loads(out)
+    assert [report["status"] for report in reports] == ["rewritten", "failed"]
+    assert "name its role" in reports[1]["error"]
+    assert json.loads(good.read_text(encoding="utf-8"))["features_signature"][0] == (
+        {"value_or_default": [SCALE, 1.0]}
+    )
+    assert report_file.read_text(encoding="utf-8") == out
+
+
+def test_the_evaluator_refuses_what_it_cannot_run_and_says_why(evaluator):
+    with pytest.raises(ValueError, match="Usage: hipdnn_uhd_features"):
+        run_evaluator(None, evaluator, "--bogus")
+    with pytest.raises(ValueError, match="requires a signature array"):
+        run_evaluator({}, evaluator, "--lint")
+    # An operator nobody defines is refused by the compile that precedes the lint, and the
+    # error says to rebuild an evaluator that predates the optional-feature checks.
+    with pytest.raises(ValueError, match="nosuchoperator.*rebuild it"):
+        lint([{"nosuchoperator": [1]}], "time", evaluator)
+
+
+def test_a_model_without_a_metric_lints_the_work_features_as_unguarded(evaluator):
+    """Only a tflops model may read the work bare; a metric-less one may not."""
+    assert [found["reference"] for found in lint([FLOPS], None, evaluator)] == [FLOPS]
+    assert lint([FLOPS], "tflops", evaluator) == []

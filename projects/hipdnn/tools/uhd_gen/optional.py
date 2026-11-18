@@ -1,50 +1,67 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Features a valid graph may leave unbound, and what a model reads instead (RFC 0019 §6.2).
+"""Features a valid graph may leave unbound, and what a model reads instead (RFC 0019 §6.7, §6.8).
 
 hipDNN lists the optional features: `hipdnn_uhd_features --optional-features`, generated from
 the schemas with the operand visitor, plus the work features. This module holds what a model
 reads when one is absent, and makes and checks signatures that read each of them through
 `value_or_default`. Which references are unguarded is asked of the evaluator (`--lint`), so the
 validator, promotion and training share one definition. The runtime never fills in a missing
-value: the default is the model's choice, recorded in its signature (RFC 0019 §6.8 item 9).
+value: the default is the model's choice, recorded in its signature. A signature that reads
+an optional feature bare is refused for the reasons of RFC 0019 §6.7 (absent is not zero) and
+§6.8 item 9.
 """
 from __future__ import annotations
 
 import json
 import re
-import subprocess
 from functools import lru_cache
 from pathlib import Path
 
-from .features import EVALUATOR_NAME, parse_signature_entry, resolve_feature_evaluator
+from .features import (
+    parse_signature_entry,
+    resolve_feature_evaluator,
+    run_evaluator,
+)
 
-#: Read for an absent feature without a value of its own meaning. No absent-capable feature
-#: takes it (dims, strides, counts, uids, bounds and work are never negative), and it differs
-#: from 0: "absent, zero and unknown are different values" (RFC 0019 §6.8).
+#: Read for an absent feature whose unset has no number of its own: an omitted operand's field,
+#: unknown work, an unset uid or sequence length. It differs from 0 ("absent, zero and unknown
+#: are different values", RFC 0019 §6.8 item 9), and no such feature is negative when set.
+#: These are markers, not API meanings.
 SENTINEL = -1
 
+#: Read for an unset ReLU upper clip, whose API meaning is no upper bound: the numeric maximum
+#: of a float, which the expression language cannot write (a literal stays below 1e15). The
+#: largest literal that fits stands in for it, so a model still orders "no bound" above every
+#: real bound; SENTINEL would order it below them, as the tightest clip. A marker, not an API
+#: meaning.
+UNBOUNDED_CLIP = 1e14
+
 #: What the API means when an optional attribute or a vector element is unset, keyed by the
-#: optional feature's pattern. `{node}` in an expression default is the reading node's index.
+#: optional feature's pattern: the number, or an expression of the reading node's own operands
+#: (`{node}` is its index). Where no number or expression says it, a marker stands in:
+#: SENTINEL or UNBOUNDED_CLIP.
 ATTRIBUTE_DEFAULTS: dict[str, object] = {
-    # SDPA forward and backward (sdpa_attributes.fbs, sdpa_backward_attributes.fbs). A scale
+    # SDPA forward and backward (SdpaAttributes.hpp, SdpaBackwardAttributes.hpp: the scale is
+    # 1.0 when neither a value nor a tensor is set; the fbs files state no default). A scale
     # given as a tensor also leaves attn_scale_value unset; its value is the tensor's.
     "graph.nodes[*].attn_scale_value": 1.0,
     "graph.nodes[*].dropout_probability": 0.0,
     "graph.nodes[*].generate_stats": False,
-    "graph.nodes[*].left_bound": SENTINEL,  # unbounded
-    "graph.nodes[*].right_bound": SENTINEL,  # unbounded
+    "graph.nodes[*].left_bound": -1,  # the API's own value for unbounded
+    "graph.nodes[*].right_bound": -1,  # likewise
     "graph.nodes[*].max_seq_len_kv": SENTINEL,  # not declared
     # Pointwise (hipdnn_frontend/attributes/PointwiseAttributes.hpp; cuDNN's defaults)
     "graph.nodes[*].relu_lower_clip": 0.0,
-    "graph.nodes[*].relu_upper_clip": SENTINEL,  # no upper bound
+    "graph.nodes[*].relu_upper_clip": UNBOUNDED_CLIP,  # no upper bound
     "graph.nodes[*].relu_lower_clip_slope": 0.0,
     "graph.nodes[*].swish_beta": 1.0,
     "graph.nodes[*].elu_alpha": 1.0,
     "graph.nodes[*].softplus_beta": 1.0,
     "graph.nodes[*].axis_tensor_uid": SENTINEL,  # GEN_INDEX's axis, a plain index
-    # Block-scale quantize and resample
-    "graph.nodes[*].axis": SENTINEL,
+    # Block-scale quantize (BlockScaleQuantizeNode.hpp: an unset axis is the last axis of x)
+    # and resample (the axis of a pointwise GEN_INDEX is a tensor's uid, above)
+    "graph.nodes[*].axis": {"-": ["$graph.nodes[{node}].x.rank", 1]},
     "graph.nodes[*].generate_index": False,
     # GDN and KDA (gdn_attributes.fbs, kda_attributes.fbs): 1/sqrt(K) of q [T, H, K], and
     # KDA's safe-gate lower bound
@@ -60,33 +77,34 @@ ATTRIBUTE_DEFAULTS: dict[str, object] = {
     "graph.nodes[*].block_size[*]": 1,
 }
 
-#: Kinds whose every feature reads SENTINEL when absent: an omitted operand's fields, and work
-#: that is unknown.
-SENTINEL_KINDS = ("tensor", "tensors", "work")
+#: Kinds whose every feature reads SENTINEL when absent: an omitted operand's fields, work that
+#: is unknown, and an engine-config constraint the config does not pin (no limit, knob unset).
+SENTINEL_KINDS = ("tensor", "tensors", "work", "constraint")
+
+#: Where an optional feature without node types is absent.
+_ABSENT_WITHOUT_NODE_TYPES = {
+    "work": "any graph of unknown work",
+    "constraint": "any engine config that does not pin it",
+}
 
 _NODE_INDEX = re.compile(r"^\$?graph\.nodes\[(\d+)\]")
 
 
-def _run(mode: str, request: dict | None, executable) -> dict:
-    result = subprocess.run(
-        [resolve_feature_evaluator(executable), mode],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-        input="" if request is None else json.dumps(request, allow_nan=False),
-    )
-    if result.returncode:
+def _ask(mode: str, request: dict | None, executable, key: str):
+    """`key` of the evaluator's answer to `mode`; an evaluator that cannot answer predates the
+    optional-feature checks."""
+    try:
+        return run_evaluator(request, executable, mode)[key]
+    except (ValueError, KeyError) as error:
         raise ValueError(
-            f"{EVALUATOR_NAME} {mode} failed ({result.returncode}): {result.stderr.strip()}; "
-            "an evaluator without it predates optional-feature checks, so rebuild it"
-        )
-    return json.loads(result.stdout)
+            f"{error}; an evaluator without {mode} predates optional-feature checks, so "
+            "rebuild it"
+        ) from error
 
 
 @lru_cache(maxsize=None)
 def _optional_features(resolved: str) -> tuple[dict, ...]:
-    return tuple(_run("--optional-features", None, resolved)["optional_features"])
+    return tuple(_ask("--optional-features", None, resolved, "optional_features"))
 
 
 def optional_features(executable: str | Path | None = None) -> tuple[dict, ...]:
@@ -159,7 +177,7 @@ def lint(signature: list, metric: str | None, executable=None) -> list[dict]:
         "signature": [parse_signature_entry(entry) for entry in signature],
         "metric": metric,
     }
-    return _run("--lint", request, executable)["unguarded"]
+    return _ask("--lint", request, executable, "unguarded")
 
 
 def _wrap(node, targets: dict):
@@ -213,6 +231,12 @@ def safe_signature(
     ]
 
 
+def _optional_in(found: dict) -> str:
+    return ", ".join(found["node_types"]) or _ABSENT_WITHOUT_NODE_TYPES.get(
+        found["kind"], "some graphs"
+    )
+
+
 def require_safe_signature(
     signature: list, metric: str | None, where: str, executable=None
 ):
@@ -223,8 +247,7 @@ def require_safe_signature(
             f"{where} reads features a valid graph may leave unbound, so the engine cannot "
             "score such a graph: "
             + ", ".join(
-                f"{found['reference']} ({found['kind']}, optional in "
-                f"{', '.join(found['node_types']) or 'any graph of unknown work'})"
+                f"{found['reference']} ({found['kind']}, optional in {_optional_in(found)})"
                 for found in unguarded
             )
             + ". Read each through value_or_default (uhd_gen rewrite-signature does, without "

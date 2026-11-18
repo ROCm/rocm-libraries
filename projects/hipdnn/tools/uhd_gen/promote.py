@@ -302,9 +302,9 @@ def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
 
 
 def _require_scorable(descriptor, descriptor_path, feature_evaluator):
-    """RFC 0019 §6.2: refuse a model that reads bare a feature a valid graph may leave
-    unbound, since the engine could not score such a graph and would lose its estimate or
-    ranking there."""
+    """RFC 0019 §6.7 (absent is not zero) and §6.8 item 9: refuse a model that reads bare a
+    feature a valid graph may leave unbound, since the engine could not score such a graph
+    and would lose its estimate or ranking there."""
     if not descriptor.get("features_signature"):
         return
     try:

@@ -140,7 +140,7 @@ nlohmann::json readRequest()
 }
 
 /// `--lint`: the references of `signature` that leave a valid graph unscorable, for a model of
-/// `metric` (RFC 0019 section 6.2; OptionalFeatures.hpp).
+/// `metric` (RFC 0019 section 6.7 and section 6.8 rule 9; OptionalFeatures.hpp).
 nlohmann::json lint(const nlohmann::json& request)
 {
     if(!request.is_object() || !request.contains("signature")

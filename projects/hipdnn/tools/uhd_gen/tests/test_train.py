@@ -113,8 +113,9 @@ def test_an_unslotted_model_stays_uhd_1_0(tmp_path, evaluator):
 
 
 def test_train_reads_an_optional_attribute_through_its_default(tmp_path, evaluator):
-    """RFC 0019 §6.2: rows whose graph left the SDPA scale unset train on the 1.0 the runtime
-    reads, and the signature and hash the model records are the wrapped ones."""
+    """RFC 0019 §6.7 and §6.8 item 9: rows whose graph left the SDPA scale unset train on the
+    1.0 the runtime reads, and the signature and hash the model records are the wrapped ones.
+    """
     from uhd_gen.features import compute_features_hash
 
     scale = "graph.nodes[0].attn_scale_value"
@@ -148,6 +149,29 @@ def test_train_reads_an_optional_attribute_through_its_default(tmp_path, evaluat
     assert descriptor["features_hash"] == compute_features_hash(
         descriptor["features_signature"], None, evaluator
     )
+
+
+def test_a_requested_optional_column_no_row_publishes_is_still_a_missing_column(
+    tmp_path, evaluator, caplog
+):
+    """Wrapping reads every optional feature through a default, so a column no row publishes
+    would train as a constant: the check for missing columns looks at what was requested.
+    """
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    code = _l1_train(
+        corpus,
+        tmp_path / "model",
+        "--features",
+        "graph.flops",
+        "graph.nodes[0].x.dims[0]",
+        "graph.nodes[0].attn_scale_value",
+        "--feature-evaluator",
+        evaluator,
+    )
+    assert code == 1
+    assert "Missing feature columns" in caplog.text
+    assert "graph.nodes[0].attn_scale_value" in caplog.text
+    assert not (tmp_path / "model").exists()
 
 
 def test_a_model_trained_against_every_slots_kmd_is_uhd_1_1(tmp_path, evaluator):

@@ -25,7 +25,6 @@ from uhd_gen.features import (
     evaluator_feature_semantics_revision,
     resolve_feature_evaluator,
 )
-from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
 from uhd_gen.promote import (
     PromoteError,
     _apply,
@@ -36,6 +35,7 @@ from uhd_gen.promote import (
 )
 from uhd_gen.optional import safe_signature
 from uhd_gen.provenance import snapshot_provenance
+from uhd_gen.tests.model_bin import leaf_model
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -73,17 +73,12 @@ def _weights(
     num_features=None,
 ):
     """A `tree_data` artifact the runtime would load."""
-    ensemble = {
-        "tree_info": [{"tree_structure": {"leaf_value": leaf}}],
-        "max_feature_idx": (num_features or len(signature)) - 1,
-        "objective": "regression",
-    }
-    return build_gbdt_model(
-        ensemble,
+    return leaf_model(
         features_hash or _hash(tuple(signature)),
+        num_features or len(signature),
+        leaf=leaf,
+        grouped=grouped,
         training_arches=training_arches,
-        group_by_feature_index=0 if grouped else -1,
-        groups=[(0.0, ensemble)] if grouped else None,
     )
 
 
@@ -1197,8 +1192,9 @@ def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
 def test_an_opaque_model_reading_an_optional_feature_bare_is_refused_before_any_write(
     tmp_path,
 ):
-    """RFC 0019 §6.2 holds for an engine with no UED too: the unguarded scale would leave a
-    graph without it unscorable, while the unknown work a tflops model reads bare is not.
+    """RFC 0019 §6.7 and §6.8 item 9 hold for an engine with no UED too: the unguarded scale
+    would leave a graph without it unscorable, while the unknown work a tflops model reads
+    bare is not.
     """
     tree = _tree(tmp_path / "tree")
     scale = "$graph.nodes[0].attn_scale_value"
@@ -1938,7 +1934,8 @@ def test_malformed_uhd_id_lists_are_refused(values, refusal):
 
 
 def test_a_model_reading_an_optional_feature_bare_is_refused_before_any_write(tmp_path):
-    """RFC 0019 §6.2: a graph that leaves the scale unset would be unscorable."""
+    """RFC 0019 §6.7 and §6.8 item 9: a graph that leaves the scale unset would be
+    unscorable."""
     tree = _tree(tmp_path / "tree")
     before = _files(tree)
     model = _model(
