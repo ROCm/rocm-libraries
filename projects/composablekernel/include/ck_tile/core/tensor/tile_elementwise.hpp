@@ -180,30 +180,6 @@ CK_TILE_DEVICE void clear_tile(DstrTensors& dstr_tensor)
 }
 
 namespace impl {
-/// The largest finite magnitude of an fp8_t or bf8_t type.
-template <typename OutDataType>
-CK_TILE_DEVICE constexpr float fp8_saturation_max()
-{
-    constexpr auto interpret = numeric_traits<OutDataType>::f8_interpret;
-    if constexpr(interpret == fp8_interpretation::E4M3_FNUZ)
-        return 240.0f;
-    else if constexpr(interpret == fp8_interpretation::E4M3_OCP)
-        return 448.0f;
-    else
-        return 57344.0f;
-}
-
-/// v clamped to +-fp8_saturation_max, inf and NaN kept, as the scalar float_to_fp8_rtn_raw
-/// saturates before its conversion.
-template <typename OutDataType>
-CK_TILE_DEVICE float saturate_fp8_input(float v)
-{
-    constexpr float max = fp8_saturation_max<OutDataType>();
-    if((bit_cast<uint32_t>(v) & 0x7F800000) != 0x7F800000)
-        v = __builtin_amdgcn_fmed3f(v, max, -max);
-    return v;
-}
-
 // TODO: this is ugly
 template <typename OutDataType, typename InTensor>
 CK_TILE_DEVICE auto cast_tile_pk_fp8_fp32(const InTensor& in_dstr_tensors)
@@ -226,19 +202,17 @@ CK_TILE_DEVICE auto cast_tile_pk_fp8_fp32(const InTensor& in_dstr_tensors)
     // so we prepare an uninitialized variable purposely, and turn off the warning
     int dummy_old;
     static_for<0, thread_buffer_size_pk, 1>{}([&](auto i) {
-        const auto in = [&](auto j) {
-            return saturate_fp8_input<OutDataType>(
-                in_dstr_tensors.get_thread_buffer()[number<4 * i + j>{}]);
-        };
-        uint32_t x = __builtin_amdgcn_cvt_pk_fp8_f32(in(number<0>{}),
-                                                     in(number<1>{}),
-                                                     dummy_old,
-                                                     false); // false -> WORD0
+        uint32_t x = __builtin_amdgcn_cvt_pk_fp8_f32(
+            in_dstr_tensors.get_thread_buffer()[number<4 * i + 0>{}],
+            in_dstr_tensors.get_thread_buffer()[number<4 * i + 1>{}],
+            dummy_old,
+            false); // false -> WORD0
 
-        uint32_t y = __builtin_amdgcn_cvt_pk_fp8_f32(in(number<2>{}),
-                                                     in(number<3>{}),
-                                                     x,
-                                                     true); // true -> WORD1
+        uint32_t y = __builtin_amdgcn_cvt_pk_fp8_f32(
+            in_dstr_tensors.get_thread_buffer()[number<4 * i + 2>{}],
+            in_dstr_tensors.get_thread_buffer()[number<4 * i + 3>{}],
+            x,
+            true); // true -> WORD1
 
         using vec_t = array<OutDataType, 4>;
 
