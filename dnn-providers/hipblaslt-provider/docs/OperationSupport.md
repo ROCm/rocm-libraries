@@ -108,14 +108,20 @@ How a convolution runs, in order of preference:
 Fused forward graphs (every engine but the RPR siblings): the convolution, then a chain of pointwise nodes: scale and bias
 (per-channel or scalar), relu (clipped, clamp, leaky), GELU (exact and tanh), swish/silu, sigmoid, tanh, elu, abs and softplus.
 The chain runs in FP32 and y is rounded once:
-- **Native:** hipBLASLt's epilogue in the GEMM (a bias alone, or sigmoid alone) when y is channels-last with one group and the
-  GEMM writes it directly
+- **Native:** a leading per-channel bias in the GEMM that writes y (hipBLASLt's bias epilogue where y's channels are the
+  GEMM's rows; a broadcast bias matrix added as the GEMM's C, in y's type, where they are its columns, on both backends),
+  then hipBLASLt's sigmoid (16-bit y), or a relu / clamp whose bounds y's type holds exactly as an in-place pass over y
 - **Fused into the pass:** a channels-first y staged channels-last; the copy back into y applies the chain
-- **Extra pass:** otherwise (rocBLAS, channels-first rows, groups, other activations): the GEMMs write y in FP32 to the workspace
+- **Extra pass:** otherwise (groups, other activations, a bias of another type): the GEMMs write y in FP32 to the workspace
   and one cast applies the chain
 
+`HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`, numerical notes
+`NONDETERMINISTIC`) runs relu, clamp, swish (beta 1), tanh GELU and fp32 sigmoid in hipBLASLt's epilogue. It serves only fused
+graphs with one of those. Its special values differ from every other engine's: relu maps NaN to 0, clamp maps NaN to its upper
+bound, swish and tanh GELU map -inf to NaN.
+
 Engines and their numerical notes ([RFC 0025](../../../projects/hipdnn/docs/rfcs/0025_NumericalNotes.md)). Every engine
-below is registered by default; a caller excludes one by its notes through the hipDNN API's cuDNN-compatible
+below but the opt-in library-activation one is registered by default; a caller excludes one by its notes through the hipDNN API's cuDNN-compatible
 `deselect_numeric_notes`.
 
 | Engine | Numerical notes |
@@ -125,6 +131,7 @@ below is registered by default; a caller excludes one by its notes through the h
 | `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
 | `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | `TENSOR_CORE` |
 | `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
+| `HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`) | `NONDETERMINISTIC` |
 
 - **TF32** (`*_CONV_TF32_ENGINE`): they serve only convolutions with an FP32 GEMM and permit TF32 for them: hipBLASLt is
   asked for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to FP32 when it has no algorithm; rocBLAS runs under

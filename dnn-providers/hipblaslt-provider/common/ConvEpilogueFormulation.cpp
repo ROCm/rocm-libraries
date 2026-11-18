@@ -6,6 +6,9 @@
 #include "common/GemmFormulation.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -135,60 +138,207 @@ int64_t freshUid(const ConvProblem& problem, const ConvGemmPlanCalls& plan, int6
     return last + 16;
 }
 
-bool nativeRows(const ConvProblem& problem, const GemmCall& call)
+/// The call is whole after the libraries' limits: an epilogue applies to it once.
+bool whole(const GemmCall& call)
 {
-    // The rows of d are y's channels: one group, channels unit-stride, m all of them.
-    // The libraries' limits must leave the call whole: the epilogue applies to it once.
-    return problem.groups == 1 && call.batchCount == 1 && !call.accumulate
-           && (problem.k == 1 || problem.y.strides[1] == 1) && call.m == problem.k
-           && fitLibraryLimits({call}).size() == 1;
+    return !call.accumulate && fitLibraryLimits({call}).size() == 1;
 }
 
-std::optional<ConvGemmPlanCalls>
-    fuseNative(const ConvProblem& problem, ConvGemmPlanCalls plan, const NativeEpilogue& native)
+/// The rows of d are y's channels: one group, channels unit-stride, m all of them.
+bool channelRows(const ConvProblem& problem, const GemmCall& call)
 {
-    bool any = false;
-    for(const auto& stage : plan.stages)
+    return problem.groups == 1 && call.batchCount == 1
+           && (problem.k == 1 || problem.y.strides[1] == 1) && call.m == problem.k;
+}
+
+/// The columns of d are y's channels: one group, column j at channel j.
+bool channelColumns(const ConvProblem& problem, const GemmCall& call)
+{
+    return problem.groups == 1 && call.n == problem.k
+           && (problem.k == 1 || call.d.leadingDimension == problem.y.strides[1]);
+}
+
+/// Whether @p value is exact in @p dataType (the infinities are).
+bool exactIn(float value, DataType dataType)
+{
+    if(std::isinf(value) || dataType == DataType::FLOAT)
     {
-        for(const auto& step : stage.after)
+        return !std::isnan(value);
+    }
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const int exponent = static_cast<int>((bits >> 23) & 0xFFU) - 127;
+    const uint32_t mantissa = bits & 0x7FFFFFU;
+    if(value == 0.0F)
+    {
+        return true;
+    }
+    if(dataType == DataType::BFLOAT16)
+    {
+        // fp32's range, 7 fraction bits.
+        return (mantissa & 0xFFFFU) == 0;
+    }
+    // fp16: 10 fraction bits, normal down to 2^-14, subnormal steps of 2^-24, up to 65504.
+    if(std::fabs(value) > 65504.0F || exponent < -24)
+    {
+        return false;
+    }
+    const int dropped = exponent >= -14 ? 13 : 13 + (-14 - exponent);
+    return (mantissa & ((1U << dropped) - 1U)) == 0;
+}
+
+/// Elements of y and whether they fill its span without gaps (any order of axes).
+std::optional<int64_t> denseElements(const ConvOperand& y)
+{
+    int64_t total = 1;
+    int64_t span = 1;
+    for(size_t axis = 0; axis < y.dims.size(); ++axis)
+    {
+        total *= y.dims[axis];
+        span += (y.dims[axis] - 1) * y.strides[axis];
+    }
+    if(span != total)
+    {
+        return std::nullopt;
+    }
+    return total;
+}
+
+/// The GEMMs that write y apply @p gemm themselves; a relu / clamp tail clamps y after them.
+std::optional<ConvGemmPlanCalls> fuseIntoGemm(const ConvProblem& problem,
+                                              ConvGemmPlanCalls plan,
+                                              const GemmEpilogue& gemm,
+                                              const GemmEpilogueSupport& support)
+{
+    const DataType yType = problem.dataType;
+    // A tail alone changes no GEMM: it clamps y whoever wrote it, once everything has.
+    const bool inGemm = gemm.bias.has_value() || gemm.activation != 0;
+    // Where each call writing y takes the bias (true: as an addend), checked before any change.
+    std::vector<std::vector<bool>> addend(plan.stages.size());
+    int64_t tileRows = 0;
+    bool any = false;
+    for(size_t s = 0; s < plan.stages.size(); ++s)
+    {
+        const auto& stage = plan.stages[s];
+        for(const auto* steps : {&stage.before, &stage.after})
         {
-            if(step.dstUid == problem.y.uid)
+            for(const auto& step : *steps)
             {
-                return std::nullopt;
-            }
-        }
-        for(const auto& step : stage.before)
-        {
-            if(step.dstUid == problem.y.uid)
-            {
-                return std::nullopt;
+                if(step.srcUid == problem.y.uid || (inGemm && step.dstUid == problem.y.uid))
+                {
+                    return std::nullopt;
+                }
             }
         }
         for(const auto& call : stage.calls)
         {
-            if(call.d.uid == problem.y.uid)
+            if(call.a.uid == problem.y.uid || call.b.uid == problem.y.uid)
             {
-                if(!nativeRows(problem, call))
+                return std::nullopt;
+            }
+            bool asAddend = false;
+            if(call.d.uid == problem.y.uid && inGemm)
+            {
+                if(!whole(call) || (gemm.activation != 0 && !support.libraryEpilogue))
                 {
                     return std::nullopt;
                 }
-                any = true;
+                if(gemm.bias.has_value())
+                {
+                    // hipBLASLt has no sigmoid with a bias: that bias is an addend.
+                    const bool rows = support.libraryEpilogue && channelRows(problem, call)
+                                      && gemm.activation != NATIVE_EPILOGUE_SIGMOID;
+                    asAddend = !rows;
+                    if(asAddend && (!channelColumns(problem, call) || gemm.bias->dataType != yType))
+                    {
+                        return std::nullopt;
+                    }
+                }
+                if(asAddend)
+                {
+                    tileRows = std::max(tileRows, call.m);
+                }
             }
+            any = any || call.d.uid == problem.y.uid;
+            addend[s].push_back(asAddend);
         }
     }
     if(!any)
     {
         return std::nullopt;
     }
-    for(auto& stage : plan.stages)
+    std::optional<int64_t> yElements;
+    if(gemm.clamp.has_value())
     {
-        for(auto& call : stage.calls)
+        yElements = denseElements(problem.y);
+        if(!yElements.has_value())
         {
-            if(call.d.uid == problem.y.uid)
-            {
-                call.epilogue = native;
-            }
+            return std::nullopt;
         }
+    }
+
+    // The broadcast bias: tileRows x K, column-major, every row the bias; one fill before the
+    // first stage, read by every call through batch stride 0.
+    std::optional<GemmOperand> tile;
+    if(tileRows > 0)
+    {
+        const int64_t uid = freshUid(problem, plan, 0);
+        const size_t offset = alignUp(plan.workspaceBytes);
+        const size_t bytes = static_cast<size_t>(tileRows * problem.k * elementBytes(yType));
+        plan.workspace.push_back(WorkspaceTensor{uid, offset, bytes});
+        plan.workspaceBytes = offset + bytes;
+        StridedCopyArgs fill{};
+        fill.rank = 2;
+        fill.dims[0] = problem.k;
+        fill.dims[1] = tileRows;
+        fill.srcStrides[0] = 1;
+        fill.srcStrides[1] = 0;
+        fill.dstStrides[0] = tileRows;
+        fill.dstStrides[1] = 1;
+        fill.total = problem.k * tileRows;
+        auto& first = plan.stages.front().before;
+        first.insert(first.begin(), RepackStep{fill, yType, gemm.bias->uid, uid, 0, 0});
+        tile = GemmOperand{uid, yType, tileRows, 0, 0};
+    }
+
+    for(size_t s = 0; s < plan.stages.size(); ++s)
+    {
+        for(size_t i = 0; i < plan.stages[s].calls.size(); ++i)
+        {
+            auto& call = plan.stages[s].calls[i];
+            if(call.d.uid != problem.y.uid || !inGemm)
+            {
+                continue;
+            }
+            const bool biasHere = gemm.bias.has_value() && !addend[s][i];
+            if(addend[s][i])
+            {
+                call.c = tile;
+            }
+            if(gemm.activation == 0 && !biasHere)
+            {
+                continue;
+            }
+            NativeEpilogue native;
+            native.mode = gemm.activation + (biasHere ? NATIVE_EPILOGUE_BIAS : 0);
+            native.act0 = gemm.act0;
+            native.act1 = gemm.act1;
+            if(biasHere)
+            {
+                native.biasUid = gemm.bias->uid;
+                native.biasType = gemm.bias->dataType;
+            }
+            call.epilogue = native;
+        }
+    }
+    if(gemm.clamp.has_value())
+    {
+        ClampArgs clamp{};
+        clamp.total = *yElements;
+        clamp.lower = gemm.clamp->first;
+        clamp.upper = gemm.clamp->second;
+        plan.stages.back().after.push_back(
+            RepackStep{clamp, yType, problem.y.uid, problem.y.uid, 0, 0});
     }
     plan.epilogueForm = EpilogueForm::NATIVE;
     return plan;
@@ -420,7 +570,8 @@ ConvGemmPlanCalls splitFp32OutputReductions(ConvGemmPlanCalls plan, int64_t chun
     return plan;
 }
 
-std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem)
+std::optional<GemmEpilogue> gemmEpilogueFor(const ConvProblem& problem,
+                                            const GemmEpilogueSupport& support)
 {
     const auto& epilogue = problem.epilogue;
     const auto& ops = epilogue.ops;
@@ -428,7 +579,7 @@ std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem)
     {
         return std::nullopt;
     }
-    NativeEpilogue native;
+    GemmEpilogue gemm;
     size_t next = 0;
     if(ops[0].code == OpCode::ADD_OPERAND)
     {
@@ -438,24 +589,108 @@ std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem)
         {
             return std::nullopt;
         }
-        native.biasUid = bias.uid;
-        native.biasType = bias.dataType;
-        native.mode = NATIVE_EPILOGUE_BIAS;
+        gemm.bias = bias;
         next = 1;
     }
     if(next == ops.size())
     {
-        return native;
+        return gemm;
     }
-    // Activations run in the pass, with the conv engines' functions and accuracy rule (the
-    // few-ulp form for an fp32 output): hipBLASLt's activation epilogues have their own accuracy,
-    // and its relu and clamp map NaN to a bound and its swish and tanh GELU give NaN for -inf
-    // where the chain gives 0.
+    if(next + 1 != ops.size())
+    {
+        return std::nullopt;
+    }
+    const auto& op = ops[next];
+    const auto value = [&](int offset) -> std::optional<float> {
+        const auto& slot = epilogue.scalars[static_cast<size_t>(op.slot + offset)];
+        if(slot.runtime.has_value())
+        {
+            return std::nullopt;
+        }
+        return slot.value;
+    };
+    const bool fp32Output = problem.dataType == DataType::FLOAT;
+    switch(op.code)
+    {
+    case OpCode::RELU:
+    {
+        const auto lower = value(0);
+        const auto upper = value(1);
+        const auto slope = value(2);
+        if(!lower.has_value() || !upper.has_value() || !slope.has_value() || *slope != 0.0F)
+        {
+            return std::nullopt;
+        }
+        if(support.libraryEpilogue && support.libraryActivations)
+        {
+            if(*lower == 0.0F && std::isinf(*upper) && *upper > 0.0F)
+            {
+                gemm.activation = NATIVE_EPILOGUE_RELU;
+            }
+            else
+            {
+                gemm.activation = NATIVE_EPILOGUE_CLAMP;
+                gemm.act0 = *lower;
+                gemm.act1 = *upper;
+            }
+            return gemm;
+        }
+        // Clamping the rounded result is clamping before the rounding when the bounds are
+        // exact in y's type: the rounding is monotonic and keeps them.
+        if(!exactIn(*lower, problem.dataType) || !exactIn(*upper, problem.dataType))
+        {
+            return std::nullopt;
+        }
+        gemm.clamp = std::make_pair(*lower, *upper);
+        return gemm;
+    }
+    case OpCode::SIGMOID:
+        // The 16-bit form of the chain's sigmoid; an fp32 y takes a few-ulp one.
+        if(!support.libraryEpilogue || (fp32Output && !support.libraryActivations))
+        {
+            return std::nullopt;
+        }
+        gemm.activation = NATIVE_EPILOGUE_SIGMOID;
+        return gemm;
+    case OpCode::GELU_TANH:
+        if(!support.libraryEpilogue || !support.libraryActivations)
+        {
+            return std::nullopt;
+        }
+        gemm.activation = NATIVE_EPILOGUE_GELU;
+        return gemm;
+    case OpCode::SWISH:
+    {
+        const auto beta = value(0);
+        if(!support.libraryEpilogue || !support.libraryActivations || !beta.has_value()
+           || *beta != 1.0F)
+        {
+            return std::nullopt;
+        }
+        gemm.activation = NATIVE_EPILOGUE_SWISH;
+        return gemm;
+    }
+    default:
+        break;
+    }
+    // Everything else (exact GELU, which hipBLASLt does not have, tanh, ELU, ...) runs in a pass.
     return std::nullopt;
 }
 
-std::optional<ConvGemmPlanCalls>
-    fuseEpilogue(const ConvProblem& problem, ConvGemmPlanCalls plan, bool native)
+bool usesLibraryActivation(const ConvProblem& problem)
+{
+    const auto library = gemmEpilogueFor(problem, GemmEpilogueSupport{true, true});
+    if(!library.has_value() || library->activation == 0)
+    {
+        return false;
+    }
+    const auto exact = gemmEpilogueFor(problem, GemmEpilogueSupport{true, false});
+    return !exact.has_value() || exact->activation != library->activation;
+}
+
+std::optional<ConvGemmPlanCalls> fuseEpilogue(const ConvProblem& problem,
+                                              ConvGemmPlanCalls plan,
+                                              const std::optional<GemmEpilogueSupport>& gemm)
 {
     if(problem.epilogue.empty())
     {
@@ -465,11 +700,11 @@ std::optional<ConvGemmPlanCalls>
     {
         return std::nullopt;
     }
-    if(native)
+    if(gemm.has_value())
     {
-        if(const auto mapped = nativeEpilogueFor(problem))
+        if(const auto mapped = gemmEpilogueFor(problem, *gemm))
         {
-            auto fused = fuseNative(problem, plan, *mapped);
+            auto fused = fuseIntoGemm(problem, plan, *mapped, *gemm);
             if(fused.has_value())
             {
                 return fused;

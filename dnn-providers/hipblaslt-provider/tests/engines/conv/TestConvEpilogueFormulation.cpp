@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -49,13 +50,19 @@ ConvGemmShape threeByThree(bool channelsLast)
 
 std::optional<ConvProblem> parse(const ConvGemmShape& shape, const std::vector<Step>& steps)
 {
-    const FusedConvGraph graph(shape, steps, DataType::HALF);
+    const FusedConvGraph graph(shape, steps, shape.dataType);
     return parseConvProblem(graph.graph(), ConvDirection::FORWARD);
 }
 
+/// The engines' GEMM epilogue support: hipBLASLt's, rocBLAS's (an addend only), the opt-in
+/// library-activation engine's.
+constexpr GemmEpilogueSupport HIPBLASLT{true, false};
+constexpr GemmEpilogueSupport ROCBLAS{false, false};
+constexpr GemmEpilogueSupport LIBRARY{true, true};
+
 std::optional<ConvGemmPlanCalls> fused(const ConvGemmShape& shape,
                                        const std::vector<Step>& steps,
-                                       bool native,
+                                       std::optional<GemmEpilogueSupport> gemm,
                                        ColumnLayout layout = ColumnLayout::FOLLOW_Y)
 {
     const auto problem = parse(shape, steps);
@@ -68,7 +75,7 @@ std::optional<ConvGemmPlanCalls> fused(const ConvGemmShape& shape,
     {
         return std::nullopt;
     }
-    return fuseEpilogue(*problem, std::move(*calls), native);
+    return fuseEpilogue(*problem, std::move(*calls), gemm);
 }
 
 TEST(TestConvEpilogueFormulation, ParsesTheChainAndWritesItsOutput)
@@ -96,7 +103,8 @@ TEST(TestConvEpilogueFormulation, AcceptsTheCudnnFrontendHalfGraph)
     shape.dataType = DataType::HALF;
     const auto problem = parse(shape, {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)});
     ASSERT_TRUE(problem.has_value());
-    const auto calls = fused(shape, {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)}, true);
+    const auto calls
+        = fused(shape, {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)}, HIPBLASLT);
     ASSERT_TRUE(calls.has_value());
     EXPECT_NE(calls->epilogueForm, EpilogueForm::NONE);
 }
@@ -129,7 +137,7 @@ TEST(TestConvEpilogueFormulation, UnfusedPlanIsUnchanged)
     auto calls = convGemmCalls(*problem);
     ASSERT_TRUE(calls.has_value());
     const auto before = *calls;
-    const auto after = fuseEpilogue(*problem, std::move(*calls), true);
+    const auto after = fuseEpilogue(*problem, std::move(*calls), HIPBLASLT);
     ASSERT_TRUE(after.has_value());
     EXPECT_EQ(after->epilogueForm, EpilogueForm::NONE);
     EXPECT_EQ(after->stages.size(), before.stages.size());
@@ -141,103 +149,383 @@ TEST(TestConvEpilogueFormulation, UnfusedPlanIsUnchanged)
 // Where the epilogue runs
 // ---------------------------------------------------------------------------
 
-struct NativeCase
+ConvGemmShape oneByOneNchw(DataType type = DataType::HALF)
+{
+    ConvGemmShape shape = oneByOneNhwc();
+    shape.xChannelsLast = shape.wChannelsLast = shape.yChannelsLast = false;
+    shape.dataType = type;
+    return shape;
+}
+
+std::optional<ConvProblem> parseAs(const ConvGemmShape& shape, const std::vector<Step>& steps)
+{
+    const FusedConvGraph graph(shape, steps, DataType::FLOAT);
+    return parseConvProblem(graph.graph(), ConvDirection::FORWARD);
+}
+
+/// Which GEMM form each chain takes: the bias, the activation hipBLASLt applies, the relu /
+/// clamp tail; per support.
+struct MappingCase
 {
     std::string name;
     std::vector<Step> steps;
-    int mode; ///< 0: no native form
+    DataType yType = DataType::HALF;
+    /// gemmEpilogueFor under hipBLASLt's exact support: mapped, its activation, a tail.
+    bool exact = false;
+    int exactActivation = 0;
+    bool tail = false;
+    /// Under the library-activation support.
+    bool library = false;
+    int libraryActivation = 0;
+    /// rocBLAS (an addend and the tail only).
+    bool rocblas = false;
 };
 
-std::vector<NativeCase> nativeCases()
+std::vector<MappingCase> mappingCases()
 {
     Step swish1 = unary(PointwiseMode::SWISH_FWD);
     swish1.swishBeta = 1.0F;
     Step swish2 = unary(PointwiseMode::SWISH_FWD);
     swish2.swishBeta = 2.0F;
-    Step bf16Bias = bias(DataType::BFLOAT16);
+    const auto sigmoid = unary(PointwiseMode::SIGMOID_FWD);
+    const auto geluTanh = unary(PointwiseMode::GELU_APPROX_TANH_FWD);
+    constexpr int RELU = NATIVE_EPILOGUE_RELU;
+    constexpr int CLAMP = NATIVE_EPILOGUE_CLAMP;
+    constexpr int GELU = NATIVE_EPILOGUE_GELU;
+    constexpr int SWISH = NATIVE_EPILOGUE_SWISH;
+    constexpr int SIGMOID = NATIVE_EPILOGUE_SIGMOID;
+    const auto h = DataType::HALF;
+    const auto b = DataType::BFLOAT16;
+    const auto f = DataType::FLOAT;
     return {
-        {"Bias", {bias(DataType::HALF)}, NATIVE_EPILOGUE_BIAS},
-        {"Fp32Bias", {bias(DataType::FLOAT)}, NATIVE_EPILOGUE_BIAS},
-        // Activations run in the pass: hipBLASLt's differ from the chain on accuracy, NaN or
-        // infinity.
-        {"Sigmoid", {unary(PointwiseMode::SIGMOID_FWD)}, 0},
-        {"Relu", {relu()}, 0},
-        {"BiasRelu", {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)}, 0},
-        {"BiasClamp", {bias(), relu(-1.0F, 6.0F)}, 0},
-        {"ClippedRelu", {relu(std::nullopt, 6.0F)}, 0},
-        {"BiasGeluTanh", {bias(), unary(PointwiseMode::GELU_APPROX_TANH_FWD)}, 0},
-        {"BiasSilu", {bias(), unary(PointwiseMode::SWISH_FWD)}, 0},
-        {"Swish1", {swish1}, 0},
-        {"Swish2", {swish2}, 0},
-        {"BiasSigmoid", {bias(), unary(PointwiseMode::SIGMOID_FWD)}, 0},
-        {"ExactGelu", {bias(), unary(PointwiseMode::GELU_FWD)}, 0},
-        {"Tanh", {unary(PointwiseMode::TANH_FWD)}, 0},
-        {"Elu", {unary(PointwiseMode::ELU_FWD)}, 0},
-        {"LeakyRelu", {relu(std::nullopt, std::nullopt, 0.1F)}, 0},
-        {"ReluLowerClip", {relu(0.5F)}, 0},
-        {"ScaleBiasRelu", {scale(), bias(), relu()}, 0},
-        {"Bf16BiasOnHalf", {bf16Bias}, 0},
-        {"BiasBias", {bias(), bias()}, 0},
+        // name, steps, y, exact, exactActivation, tail, library, libraryActivation, rocblas
+        {"Bias", {bias(h)}, h, true, 0, false, true, 0, true},
+        {"Fp32Bias", {bias(f)}, h, true, 0, false, true, 0, true},
+        {"Bf16BiasOnBf16", {bias(b)}, b, true, 0, false, true, 0, true},
+        {"Bf16BiasOnHalf", {bias(b)}, h, false, 0, false, false, 0, false},
+        {"BiasRelu", {bias(h), relu()}, h, true, 0, true, true, RELU, true},
+        {"Relu", {relu()}, h, true, 0, true, true, RELU, true},
+        {"ExplicitZeroRelu", {relu(0.0F, std::nullopt, 0.0F)}, h, true, 0, true, true, RELU, true},
+        {"BiasClampHalfExact", {bias(h), relu(-1.0F, 6.0F)}, h, true, 0, true, true, CLAMP, true},
+        {"ClampBoundNotHalf", {bias(h), relu(0.0F, 0.1F)}, h, false, 0, false, true, CLAMP, false},
+        {"ClampBoundNotBf16", {bias(b), relu(0.0F, 0.1F)}, b, false, 0, false, true, CLAMP, false},
+        {"ClampBoundFp32", {bias(f), relu(0.0F, 0.1F)}, f, true, 0, true, true, CLAMP, true},
+        {"ClampHalfTooLarge", {relu(0.0F, 70000.0F)}, h, false, 0, false, true, CLAMP, false},
+        {"ClampHalfSubnormal", {relu(0.0F, 0x1p-20F)}, h, true, 0, true, true, CLAMP, true},
+        {"ReluLowerClip", {relu(0.5F)}, h, true, 0, true, true, CLAMP, true},
+        {"LeakyRelu",
+         {relu(std::nullopt, std::nullopt, 0.1F)},
+         h,
+         false,
+         0,
+         false,
+         false,
+         0,
+         false},
+        {"Sigmoid16", {sigmoid}, h, true, SIGMOID, false, true, SIGMOID, false},
+        {"SigmoidFp32", {sigmoid}, f, false, 0, false, true, SIGMOID, false},
+        {"BiasSigmoid", {bias(h), sigmoid}, h, true, SIGMOID, false, true, SIGMOID, false},
+        {"BiasGeluTanh", {bias(h), geluTanh}, h, false, 0, false, true, GELU, false},
+        {"BiasSilu",
+         {bias(h), unary(PointwiseMode::SWISH_FWD)},
+         h,
+         false,
+         0,
+         false,
+         true,
+         SWISH,
+         false},
+        {"Swish1", {swish1}, h, false, 0, false, true, SWISH, false},
+        {"Swish2", {swish2}, h, false, 0, false, false, 0, false},
+        {"ExactGelu",
+         {bias(h), unary(PointwiseMode::GELU_FWD)},
+         h,
+         false,
+         0,
+         false,
+         false,
+         0,
+         false},
+        {"Tanh", {unary(PointwiseMode::TANH_FWD)}, h, false, 0, false, false, 0, false},
+        {"Elu", {unary(PointwiseMode::ELU_FWD)}, h, false, 0, false, false, 0, false},
+        {"ScaleBiasRelu", {scale(), bias(), relu()}, h, false, 0, false, false, 0, false},
+        {"BiasBias", {bias(h), bias(h)}, h, false, 0, false, false, 0, false},
+        {"ReluBias", {relu(), bias(h)}, h, false, 0, false, false, 0, false},
     };
 }
 
-class TestConvEpilogueNative : public ::testing::TestWithParam<NativeCase>
+class TestConvEpilogueGemm : public ::testing::TestWithParam<MappingCase>
 {
 };
 
-TEST_P(TestConvEpilogueNative, MapsExactlyTheLibraryEpilogues)
+TEST_P(TestConvEpilogueGemm, MapsWhatTheGemmComputesExactly)
 {
     const auto& param = GetParam();
-    const auto problem = parse(oneByOneNhwc(), param.steps);
+    ConvGemmShape shape = oneByOneNhwc();
+    shape.dataType = param.yType;
+    const auto problem = parseAs(shape, param.steps);
     ASSERT_TRUE(problem.has_value());
-    const auto native = nativeEpilogueFor(*problem);
-    ASSERT_EQ(native.has_value(), param.mode != 0);
-    if(native.has_value())
+    const auto exact = gemmEpilogueFor(*problem, HIPBLASLT);
+    ASSERT_EQ(exact.has_value(), param.exact);
+    if(exact.has_value())
     {
-        EXPECT_EQ(native->mode, param.mode);
+        EXPECT_EQ(exact->activation, param.exactActivation);
+        EXPECT_EQ(exact->clamp.has_value(), param.tail);
+        EXPECT_EQ(exact->bias.has_value(), param.steps.front().mode == PointwiseMode::ADD);
     }
-
-    // The 1x1 channels-last plan: the GEMM's rows are y's channels.
-    const auto calls = fused(oneByOneNhwc(), param.steps, true);
-    ASSERT_TRUE(calls.has_value());
-    EXPECT_EQ(calls->epilogueForm,
-              param.mode != 0 ? EpilogueForm::NATIVE : EpilogueForm::EXTRA_PASS);
-    // rocBLAS: never native.
-    const auto passes = fused(oneByOneNhwc(), param.steps, false);
-    ASSERT_TRUE(passes.has_value());
-    EXPECT_EQ(passes->epilogueForm, EpilogueForm::EXTRA_PASS);
+    const auto library = gemmEpilogueFor(*problem, LIBRARY);
+    ASSERT_EQ(library.has_value(), param.library);
+    if(library.has_value())
+    {
+        EXPECT_EQ(library->activation, param.libraryActivation);
+        EXPECT_FALSE(library->clamp.has_value()) << "the library clamps in the GEMM";
+    }
+    EXPECT_EQ(usesLibraryActivation(*problem),
+              param.library && param.libraryActivation != param.exactActivation);
+    // rocBLAS: an addend and the tail, never a library epilogue.
+    const auto rocblas = gemmEpilogueFor(*problem, ROCBLAS);
+    ASSERT_EQ(rocblas.has_value(), param.rocblas);
+    if(rocblas.has_value())
+    {
+        EXPECT_EQ(rocblas->activation, 0);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         TestConvEpilogueNative,
-                         ::testing::ValuesIn(nativeCases()),
+                         TestConvEpilogueGemm,
+                         ::testing::ValuesIn(mappingCases()),
                          [](const auto& info) { return info.param.name; });
+
+/// Every call writing y in @p plan.
+std::vector<GemmCall> yCalls(const ConvGemmPlanCalls& plan, int64_t yUid)
+{
+    std::vector<GemmCall> calls;
+    for(const auto& stage : plan.stages)
+    {
+        for(const auto& call : stage.calls)
+        {
+            if(call.d.uid == yUid)
+            {
+                calls.push_back(call);
+            }
+        }
+    }
+    return calls;
+}
+
+/// The plan's relu / clamp tail steps.
+std::vector<ClampArgs> tails(const ConvGemmPlanCalls& plan)
+{
+    std::vector<ClampArgs> found;
+    for(const auto& stage : plan.stages)
+    {
+        for(const auto* steps : {&stage.before, &stage.after})
+        {
+            for(const auto& step : *steps)
+            {
+                if(const auto* clamp = std::get_if<ClampArgs>(&step.args))
+                {
+                    EXPECT_EQ(step.srcUid, step.dstUid) << "the tail clamps y in place";
+                    found.push_back(*clamp);
+                }
+            }
+        }
+    }
+    return found;
+}
 
 TEST(TestConvEpilogueFormulation, NativeBiasRidesOnTheGemm)
 {
     const auto problem = parse(oneByOneNhwc(), {bias(DataType::HALF)});
     ASSERT_TRUE(problem.has_value());
-    const auto native = nativeEpilogueFor(*problem);
-    ASSERT_TRUE(native.has_value());
-    ASSERT_TRUE(native->biasUid.has_value());
-    EXPECT_EQ(*native->biasUid, EPI_OPERAND_UID);
-    EXPECT_EQ(native->biasType, DataType::HALF);
+    const auto mapped = gemmEpilogueFor(*problem, HIPBLASLT);
+    ASSERT_TRUE(mapped.has_value());
+    ASSERT_TRUE(mapped->bias.has_value());
+    EXPECT_EQ(mapped->bias->uid, EPI_OPERAND_UID);
+    EXPECT_EQ(mapped->bias->dataType, DataType::HALF);
 
-    const auto calls = fused(oneByOneNhwc(), {bias(DataType::HALF)}, true);
+    const auto calls = fused(oneByOneNhwc(), {bias(DataType::HALF)}, HIPBLASLT);
     ASSERT_TRUE(calls.has_value());
+    EXPECT_EQ(calls->epilogueForm, EpilogueForm::NATIVE);
     ASSERT_EQ(calls->stages.size(), 1U);
     for(const auto& call : calls->stages[0].calls)
     {
         ASSERT_TRUE(call.epilogue.has_value());
+        EXPECT_EQ(call.epilogue->mode, NATIVE_EPILOGUE_BIAS);
+        EXPECT_EQ(call.epilogue->biasUid, EPI_OPERAND_UID);
+        EXPECT_FALSE(call.c.has_value());
         EXPECT_EQ(call.d.uid, epilogueOutputUid(1));
         EXPECT_EQ(call.m, 24) << "the GEMM's rows are the output channels";
     }
+    EXPECT_FALSE(calls->hasRepack()) << "no workspace, no pass";
+}
+
+TEST(TestConvEpilogueFormulation, ChannelsLastBiasReluIsBiasInTheGemmThenTheTail)
+{
+    const auto calls = fused(oneByOneNhwc(), {bias(DataType::HALF), relu()}, HIPBLASLT);
+    ASSERT_TRUE(calls.has_value());
+    EXPECT_EQ(calls->epilogueForm, EpilogueForm::NATIVE);
+    const auto written = yCalls(*calls, epilogueOutputUid(2));
+    ASSERT_EQ(written.size(), 1U);
+    ASSERT_TRUE(written[0].epilogue.has_value());
+    EXPECT_EQ(written[0].epilogue->mode, NATIVE_EPILOGUE_BIAS) << "relu is not hipBLASLt's";
+    EXPECT_EQ(written[0].d.dataType, DataType::HALF) << "y written once, in its type";
+    const auto clamps = tails(*calls);
+    ASSERT_EQ(clamps.size(), 1U);
+    EXPECT_EQ(clamps[0].lower, 0.0F);
+    EXPECT_TRUE(std::isinf(clamps[0].upper));
+    EXPECT_EQ(clamps[0].total, int64_t{2} * 24 * 5 * 7);
+    EXPECT_EQ(calls->workspaceBytes, 0U);
+    // The library-activation engine: relu in the GEMM, no tail.
+    const auto library = fused(oneByOneNhwc(), {bias(DataType::HALF), relu()}, LIBRARY);
+    ASSERT_TRUE(library.has_value());
+    const auto libraryCalls = yCalls(*library, epilogueOutputUid(2));
+    ASSERT_EQ(libraryCalls.size(), 1U);
+    EXPECT_EQ(libraryCalls[0].epilogue->mode, NATIVE_EPILOGUE_RELU_BIAS);
+    EXPECT_TRUE(tails(*library).empty());
+}
+
+TEST(TestConvEpilogueFormulation, ChannelsFirstBiasIsABroadcastAddend)
+{
+    // Channels-first 1x1: the GEMM's rows are pixels and its columns the output channels, so
+    // the bias is added from a matrix of it broadcast along the rows: one GEMM, one rounding.
+    for(const auto& gemm : {HIPBLASLT, ROCBLAS})
+    {
+        const auto calls = fused(oneByOneNchw(), {bias(DataType::HALF), relu()}, gemm);
+        ASSERT_TRUE(calls.has_value());
+        EXPECT_EQ(calls->epilogueForm, EpilogueForm::NATIVE);
+        const auto written = yCalls(*calls, epilogueOutputUid(2));
+        ASSERT_EQ(written.size(), 1U);
+        const auto& call = written[0];
+        EXPECT_EQ(call.n, 24) << "the columns are the output channels";
+        EXPECT_EQ(call.m, 5 * 7);
+        EXPECT_FALSE(call.epilogue.has_value());
+        ASSERT_TRUE(call.c.has_value());
+        EXPECT_EQ(call.c->dataType, DataType::HALF);
+        EXPECT_EQ(call.c->leadingDimension, call.m);
+        EXPECT_EQ(call.c->batchStride, 0) << "one matrix for every image";
+        EXPECT_FALSE(call.accumulate);
+        EXPECT_EQ(call.d.dataType, DataType::HALF);
+        // The fill: bias (stride 1 along channels, 0 along the rows) into the matrix.
+        const auto& fill = calls->stages.front().before.front();
+        const auto* copy = std::get_if<StridedCopyArgs>(&fill.args);
+        ASSERT_NE(copy, nullptr);
+        EXPECT_EQ(fill.srcUid, EPI_OPERAND_UID);
+        EXPECT_EQ(fill.dstUid, call.c->uid);
+        EXPECT_EQ(copy->rank, 2);
+        EXPECT_EQ(copy->dims[0], 24);
+        EXPECT_EQ(copy->dims[1], call.m);
+        EXPECT_EQ(copy->srcStrides[0], 1);
+        EXPECT_EQ(copy->srcStrides[1], 0);
+        EXPECT_EQ(copy->dstStrides[0], call.m);
+        EXPECT_EQ(copy->dstStrides[1], 1);
+        const auto tile
+            = std::find_if(calls->workspace.begin(),
+                           calls->workspace.end(),
+                           [&](const WorkspaceTensor& t) { return t.uid == call.c->uid; });
+        ASSERT_NE(tile, calls->workspace.end());
+        EXPECT_GE(tile->bytes, size_t{24} * 5 * 7 * 2);
+        EXPECT_EQ(tails(*calls).size(), 1U);
+    }
+    // The library-activation engine: the addend and hipBLASLt's relu.
+    const auto library = fused(oneByOneNchw(), {bias(DataType::HALF), relu()}, LIBRARY);
+    ASSERT_TRUE(library.has_value());
+    const auto libraryCalls = yCalls(*library, epilogueOutputUid(2));
+    ASSERT_EQ(libraryCalls.size(), 1U);
+    ASSERT_TRUE(libraryCalls[0].epilogue.has_value());
+    EXPECT_EQ(libraryCalls[0].epilogue->mode, NATIVE_EPILOGUE_RELU);
+    EXPECT_FALSE(libraryCalls[0].epilogue->biasUid.has_value());
+    EXPECT_TRUE(libraryCalls[0].c.has_value());
+    EXPECT_TRUE(tails(*library).empty());
+}
+
+TEST(TestConvEpilogueFormulation, AddendTakesOnlyYsType)
+{
+    // An fp32 bias on a 16-bit y would round in a 16-bit addend: the pass instead. Along the
+    // rows hipBLASLt takes an fp32 bias.
+    EXPECT_EQ(fused(oneByOneNchw(), {bias(DataType::FLOAT)}, HIPBLASLT)->epilogueForm,
+              EpilogueForm::EXTRA_PASS);
+    EXPECT_EQ(fused(oneByOneNhwc(), {bias(DataType::FLOAT)}, HIPBLASLT)->epilogueForm,
+              EpilogueForm::NATIVE);
+    EXPECT_EQ(fused(oneByOneNchw(DataType::FLOAT), {bias(DataType::FLOAT)}, ROCBLAS)->epilogueForm,
+              EpilogueForm::NATIVE);
+}
+
+TEST(TestConvEpilogueFormulation, RocblasTakesNoBiasAlongTheRows)
+{
+    // rocBLAS has no bias epilogue, and a bias along the rows is no matrix it can add.
+    EXPECT_EQ(fused(oneByOneNhwc(), {bias(DataType::HALF)}, ROCBLAS)->epilogueForm,
+              EpilogueForm::EXTRA_PASS);
+    // A tail alone needs no GEMM epilogue: y written in its type, then clamped.
+    const auto relu1 = fused(oneByOneNhwc(), {relu()}, ROCBLAS);
+    ASSERT_TRUE(relu1.has_value());
+    EXPECT_EQ(relu1->epilogueForm, EpilogueForm::NATIVE);
+    EXPECT_EQ(tails(*relu1).size(), 1U);
+    for(const auto& call : yCalls(*relu1, epilogueOutputUid(1)))
+    {
+        EXPECT_FALSE(call.epilogue.has_value());
+        EXPECT_FALSE(call.c.has_value());
+        EXPECT_EQ(call.d.dataType, DataType::HALF);
+    }
+}
+
+TEST(TestConvEpilogueFormulation, SigmoidWithABiasNeedsTheAddend)
+{
+    // hipBLASLt has no sigmoid with a bias: the bias is an addend, so channels-last declines.
+    const auto nchw = fused(
+        oneByOneNchw(), {bias(DataType::HALF), unary(PointwiseMode::SIGMOID_FWD)}, HIPBLASLT);
+    ASSERT_TRUE(nchw.has_value());
+    EXPECT_EQ(nchw->epilogueForm, EpilogueForm::NATIVE);
+    const auto written = yCalls(*nchw, epilogueOutputUid(2));
+    ASSERT_EQ(written.size(), 1U);
+    EXPECT_EQ(written[0].epilogue->mode, NATIVE_EPILOGUE_SIGMOID);
+    EXPECT_TRUE(written[0].c.has_value());
+    const auto nhwc = fused(
+        oneByOneNhwc(), {bias(DataType::HALF), unary(PointwiseMode::SIGMOID_FWD)}, HIPBLASLT);
+    EXPECT_EQ(nhwc->epilogueForm, EpilogueForm::EXTRA_PASS);
+}
+
+TEST(TestConvEpilogueFormulation, NativeDeclinesPerField)
+{
+    // Each field that rules the GEMM form out, against a chain it maps (bias + relu, half).
+    ConvGemmShape grouped = oneByOneNhwc();
+    grouped.groups = 2;
+    EXPECT_EQ(fused(grouped, {bias(DataType::HALF), relu()}, HIPBLASLT)->epilogueForm,
+              EpilogueForm::EXTRA_PASS)
+        << "groups: no per-group bias";
+    EXPECT_EQ(fused(oneByOneNhwc(),
+                    {bias(DataType::HALF), relu(std::nullopt, std::nullopt, 0.5F)},
+                    HIPBLASLT)
+                  ->epilogueForm,
+              EpilogueForm::EXTRA_PASS)
+        << "slope";
+    EXPECT_EQ(
+        fused(oneByOneNhwc(), {bias(DataType::HALF), relu(0.0F, 0.3F)}, HIPBLASLT)->epilogueForm,
+        EpilogueForm::EXTRA_PASS)
+        << "upper bound not exact in y's type";
+    EXPECT_EQ(fused(oneByOneNhwc(), {bias(DataType::BFLOAT16), relu()}, HIPBLASLT)->epilogueForm,
+              EpilogueForm::EXTRA_PASS)
+        << "bias type neither fp32 nor y's";
+    Step deviceScalar = bias(DataType::HALF);
+    deviceScalar.operand = OperandKind::DEVICE_SCALAR;
+    EXPECT_EQ(fused(oneByOneNhwc(), {deviceScalar, relu()}, HIPBLASLT)->epilogueForm,
+              EpilogueForm::EXTRA_PASS)
+        << "bias not per channel";
+    Step constantBias = bias();
+    constantBias.operand = OperandKind::CONSTANT;
+    constantBias.value = 0.5F;
+    EXPECT_EQ(fused(oneByOneNhwc(), {constantBias, relu()}, HIPBLASLT)->epilogueForm,
+              EpilogueForm::EXTRA_PASS)
+        << "scalar bias";
+    EXPECT_EQ(fused(oneByOneNhwc(), {bias(DataType::HALF), relu()}, std::nullopt)->epilogueForm,
+              EpilogueForm::EXTRA_PASS)
+        << "no GEMM epilogue asked for";
 }
 
 TEST(TestConvEpilogueFormulation, ImplicitColumnsChannelsLastIsNative)
 {
     // im2col into a channels-last y: the GEMM writes y with channels as rows.
-    const auto calls = fused(threeByThree(true), {bias(DataType::HALF)}, true);
+    const auto calls = fused(threeByThree(true), {bias(DataType::HALF)}, HIPBLASLT);
     ASSERT_TRUE(calls.has_value());
     EXPECT_EQ(calls->epilogueForm, EpilogueForm::NATIVE);
 }
@@ -247,17 +535,17 @@ TEST(TestConvEpilogueFormulation, GroupsTakeThePass)
     // hipBLASLt has no per-batch bias stride: grouped bias goes through the pass.
     ConvGemmShape shape = oneByOneNhwc();
     shape.groups = 2;
-    const auto calls = fused(shape, {bias(DataType::HALF)}, true);
+    const auto calls = fused(shape, {bias(DataType::HALF)}, HIPBLASLT);
     ASSERT_TRUE(calls.has_value());
     EXPECT_EQ(calls->epilogueForm, EpilogueForm::EXTRA_PASS);
 }
 
-TEST(TestConvEpilogueFormulation, ChannelsFirstOneByOneTakesAnExtraPass)
+TEST(TestConvEpilogueFormulation, ChannelsFirstOneByOnePassIsOneExtraCast)
 {
-    // Channels-first: the GEMM's rows are pixels, so the bias is not a row vector.
+    // The epilogue in a pass (the benchmarking candidate against the GEMM's own).
     ConvGemmShape shape = oneByOneNhwc();
     shape.xChannelsLast = shape.wChannelsLast = shape.yChannelsLast = false;
-    const auto calls = fused(shape, {bias(DataType::HALF), relu()}, true);
+    const auto calls = fused(shape, {bias(DataType::HALF), relu()}, std::nullopt);
     ASSERT_TRUE(calls.has_value());
     EXPECT_EQ(calls->epilogueForm, EpilogueForm::EXTRA_PASS);
     // y's fp32 copy in the workspace, and a last stage whose cast applies the epilogue.
@@ -284,7 +572,7 @@ TEST(TestConvEpilogueFormulation, StagedChannelsLastFusesIntoItsCopy)
     // cast of an fp32 staging -- no extra pass.
     const auto calls = fused(threeByThree(false),
                              {bias(DataType::HALF), relu()},
-                             true,
+                             HIPBLASLT,
                              ColumnLayout::STAGED_CHANNELS_LAST);
     ASSERT_TRUE(calls.has_value());
     EXPECT_EQ(calls->epilogueForm, EpilogueForm::FUSED_PASS);
@@ -312,7 +600,7 @@ TEST(TestConvEpilogueFormulation, ExtraPassAddsYsFp32Copy)
     auto calls = convGemmCalls(*problem);
     ASSERT_TRUE(calls.has_value());
     const size_t before = calls->workspaceBytes;
-    const auto after = fuseEpilogue(*problem, std::move(*calls), false);
+    const auto after = fuseEpilogue(*problem, std::move(*calls), std::nullopt);
     ASSERT_TRUE(after.has_value());
     const size_t yBytes = size_t{2} * 24 * 5 * 7 * sizeof(float);
     EXPECT_GE(after->workspaceBytes, before + yBytes);
@@ -321,7 +609,7 @@ TEST(TestConvEpilogueFormulation, ExtraPassAddsYsFp32Copy)
 TEST(TestConvEpilogueFormulation, Fp32OutputReductionsSplitInOrder)
 {
     // The extra pass of a channels-first 3x3: the GEMM writes y's fp32 copy from fp16 operands.
-    const auto calls = fused(threeByThree(false), {bias(DataType::HALF), relu()}, false);
+    const auto calls = fused(threeByThree(false), {bias(DataType::HALF), relu()}, std::nullopt);
     ASSERT_TRUE(calls.has_value());
     const auto& before = calls->stages.front().calls;
     ASSERT_EQ(before.size(), 1U);

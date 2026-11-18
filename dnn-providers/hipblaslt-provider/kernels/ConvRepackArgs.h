@@ -102,6 +102,21 @@ struct StridedCastEpilogueArgs
     ConvRepackEpilogue epilogue;
 };
 
+/// data[i] = lower where data[i] <= lower, upper where data[i] >= upper, else unchanged (NaN
+/// included), for the `total` elements of a dense tensor of the entry point's type, in place
+/// (`src` is `dst`). The relu / clamp tail of a fused epilogue whose GEMM already wrote the
+/// rounded result: with both bounds exact in that type, clamping the rounded value gives the
+/// rounding of the clamped one, so the result still has one rounding. Elements left unchanged
+/// are not written back.
+struct ClampArgs
+{
+    const void* src;
+    void* dst;
+    long long total;
+    float lower;
+    float upper;
+};
+
 /// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
 /// leading spatial axes have extent 1, pad 0, stride 1, dilation 1 and tensor stride 0.
 ///

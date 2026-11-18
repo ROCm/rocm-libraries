@@ -77,8 +77,14 @@ bool permitsXf32(const GemmCall& call);
  *        accumulating in fp32 and writing the output once.
  *
  * @param a, b, d The device buffers of the call's operands.
+ * @param c The addend's (GemmCall::c), or null for a call without one.
  * @throws HipdnnPluginException when rocBLAS reports a failure.
  */
-void runGemm(rocblas_handle handle, const GemmCall& call, const void* a, const void* b, void* d);
+void runGemm(rocblas_handle handle,
+             const GemmCall& call,
+             const void* a,
+             const void* b,
+             void* d,
+             const void* c = nullptr);
 
 } // namespace hipblaslt_plugin::rocblas_backend

@@ -46,9 +46,14 @@ struct WorkspaceTensor
 /// and filled at execution from `srcUid` and `dstUid`, advanced by the byte offsets.
 struct RepackStep
 {
-    std::variant<StridedCopyArgs, StridedCastArgs, Im2ColArgs, Col2ImArgs, StridedCastEpilogueArgs>
+    std::variant<StridedCopyArgs,
+                 StridedCastArgs,
+                 Im2ColArgs,
+                 Col2ImArgs,
+                 StridedCastEpilogueArgs,
+                 ClampArgs>
         args;
-    /// The element type moved (strided copy, im2col) or written (cast, col2im).
+    /// The element type moved (strided copy, im2col), written (cast, col2im) or clamped.
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
     int64_t srcUid = 0;
