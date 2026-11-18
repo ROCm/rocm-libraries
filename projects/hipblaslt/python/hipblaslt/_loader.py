@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Choose, preload and check the libhipblaslt that hipblaslt._core binds to.
 
-Review A's Decision 10 (AIHPBLAS-5274), based on Spike 3 (AIHPBLAS-5626). The lookup order is
-HIPBLASLT_PY_LIBRARY, then the rocm-sdk wheels, then ROCM_PATH, then ROCM_HOME, then the build-time
+The lookup order is HIPBLASLT_PY_LIBRARY, then the rocm-sdk wheels, then ROCM_PATH, then ROCM_HOME, then the build-time
 path. The chosen library is preloaded by full path, so _core's NEEDED entry binds to it.
 
 Everything above load() is a pure function of its arguments, so the tests can drive every case on
@@ -88,7 +87,7 @@ def candidate_libraries(
     rocm_sdk_libraries: Sequence[str],
     build_lib_dir: str,
 ) -> list[Candidate]:
-    """Every place to look, in Decision 10's order. Existence is checked by choose_library."""
+    """Every place to look, in lookup order. Existence is checked by choose_library."""
     name = library_file_name(platform)
     out = []
     override = environ.get(LIBRARY_ENV)
@@ -191,8 +190,8 @@ def check_companions(hipblaslt_path: str, loaded: Iterable[str], platform: str) 
     if mixed:
         raise HipblasLtLoadError(
             f"hipBLASLt from {hipblaslt_path} and its companion libraries come from different "
-            f"builds: {', '.join(sorted(set(mixed)))}. Mixing builds can corrupt memory silently "
-            "(ROCM-29472). Make sure one ROCm install comes first on the search path."
+            f"builds: {', '.join(sorted(set(mixed)))}. Mixing builds can corrupt memory silently. "
+            "Make sure one ROCm install comes first on the search path."
         )
 
 
@@ -265,8 +264,8 @@ def windows_dirs_to_register(
     """The library's directory, plus the first candidate that holds a HIP runtime.
 
     Windows doesn't define the search order among os.add_dll_directory entries, so registering every
-    candidate lets a second ROCm's amdhip64 win. Spike 3's override loaded the active environment's
-    runtime that way.
+    candidate lets a second ROCm's amdhip64 win: an override's libhipblaslt.dll can load next to the
+    active environment's HIP runtime.
     """
     if not candidates:
         return []

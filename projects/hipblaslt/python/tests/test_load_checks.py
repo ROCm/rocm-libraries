@@ -1,9 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The lookup order and the four load checks (Review A, Decision 10), as pure functions.
+"""The lookup order and the four load checks, as pure functions.
 
 Each check gets a case that must fire and a case that must stay quiet. No GPU and no second ROCm
-needed; Spike 3's evidence (AIHPBLAS-5626) is where the real-library cases came from.
+needed.
 """
 
 import os
@@ -157,7 +157,7 @@ def test_no_device_means_no_check():
 
 
 def test_same_version_different_revision_warns():
-    # Spike 3's two nightlies both reported 100500; only the revision told them apart.
+    # Two builds can share a version; only the revision tells them apart.
     msg = L.version_mismatch_warning((100500, "25f28906"), (100500, "565c4c74"), "/p")
     assert (
         msg and "1.5.0 (565c4c74)" in msg and "1.5.0 (25f28906)" in msg and "/p" in msg

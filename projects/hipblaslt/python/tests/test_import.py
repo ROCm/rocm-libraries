@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The package builds, imports, and reports hipBLASLt's own version (Review A, Decision 1)."""
+"""The package builds, imports, and reports hipBLASLt's own version."""
 
 import importlib.metadata
 
