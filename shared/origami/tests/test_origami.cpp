@@ -27,6 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstdio>
 #include <limits>
 #include "common.hpp"
 
@@ -1961,4 +1962,43 @@ TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   REQUIRE_FALSE(hw_def.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
+}
+
+TEST_CASE("gfx1151 mem_clock_ratio matches the clocks HIP reports", "[hardware]") {
+  using origami::hardware_t;
+  const auto arch_enum = hardware_t::architecture_t::gfx1151;
+  // max. SCLK / max. MCLK as printed by hipblaslt-bench.
+  const int sclk_khz = 2'900'000;
+  const int mclk_khz = 1'000'000;
+
+  hipDeviceProp_t prop{};
+  std::snprintf(prop.gcnArchName, sizeof(prop.gcnArchName), "gfx1151:xnack-");
+  prop.multiProcessorCount = 20;
+  prop.sharedMemPerBlock   = 65536;
+  prop.regsPerBlock        = 131072;
+  prop.l2CacheSize         = 2 << 20;
+  prop.clockRate           = sclk_khz;
+  prop.memoryClockRate     = mclk_khz;
+  const auto dev  = hardware_t::get_hardware_for_properties(prop);
+  const auto arch = hardware_t::get_hardware_for_arch(arch_enum, 40, 65536, 512 * 1024, 2 << 20, sclk_khz);
+
+  REQUIRE(dev.N_CU == 40);
+  // The arch path models the same machine as the device path hipBLASLt uses.
+  REQUIRE(dev.mem1_perf_ratio == Catch::Approx(arch.mem1_perf_ratio));
+  REQUIRE(dev.mem2_perf_ratio == Catch::Approx(arch.mem2_perf_ratio));
+  REQUIRE(dev.mem3_perf_ratio == Catch::Approx(arch.mem3_perf_ratio));
+  // Device-path bandwidths in B/ns.
+  const double clk = dev.compute_clock_ghz;
+  REQUIRE(dev.mem1_perf_ratio * clk == Catch::Approx(2470.0));
+  REQUIRE(dev.mem2_perf_ratio * clk == Catch::Approx(1.21875121875121875122 * 930.0));
+  REQUIRE(dev.mem3_perf_ratio * clk == Catch::Approx(215.0));
+  // The arch path keeps those bandwidths at any compute clock.
+  const auto slow = hardware_t::get_hardware_for_arch(arch_enum, 40, 65536, 512 * 1024, 2 << 20, 2'100'000);
+  REQUIRE(slow.mem2_perf_ratio * slow.compute_clock_ghz == Catch::Approx(dev.mem2_perf_ratio * clk));
+  REQUIRE(slow.mem3_perf_ratio * slow.compute_clock_ghz == Catch::Approx(dev.mem3_perf_ratio * clk));
+
+  // A device reporting another memory clock leaves the paths apart.
+  prop.memoryClockRate = mclk_khz / 2;
+  const auto other = hardware_t::get_hardware_for_properties(prop);
+  REQUIRE(other.mem3_perf_ratio == Catch::Approx(2.0 * arch.mem3_perf_ratio));
 }
