@@ -49,9 +49,20 @@ namespace hipblaslt_py
         {
             return d_;
         }
+        // hipBLASLt has no attribute to read these back, so the wrapper keeps them.
+        hipblasComputeType_t compute_type() const
+        {
+            return compute_type_;
+        }
+        hipDataType scale_type() const
+        {
+            return scale_type_;
+        }
 
     private:
         hipblasLtMatmulDesc_t d_ = nullptr;
+        hipblasComputeType_t  compute_type_;
+        hipDataType           scale_type_;
     };
 
     class MatrixLayout
