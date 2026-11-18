@@ -209,6 +209,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.waitAluScoreboard = moduleOptions.EnableESM2;
                 passFeatureConfig.dagFeatures.dsAddressPlan =
                     moduleOptions.EnableESM2 && moduleOptions.DsAddressPlan;
+                passFeatureConfig.dagFeatures.releaseOnEitherAxis =
+                    moduleOptions.EnableESM2 && moduleOptions.ReleaseOnEitherAxis;
                 passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
                 passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
                     moduleOptions.PrefetchLeadMinStageWmmas;

@@ -175,6 +175,10 @@ struct PassFeatureConfig {
         /// Mirrors ModuleOptions::DsAddressPlan. A ds_load's address fillers take its pacer
         /// window as their need-by and issue when it comes. Needs waitAluScoreboard.
         bool dsAddressPlan = false;
+        /// Mirrors ModuleOptions::ReleaseOnEitherAxis. A memory op the WMMA axis still holds is
+        /// also released through the VALU axis (ready VALUs fill its tail), and the ds pacer picks
+        /// a free ds_load before one that waits. Needs waitAluScoreboard.
+        bool releaseOnEitherAxis = false;
         /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
         /// this many WMMA windows before the tensor_load it precedes, staggered over its
         /// group; below 8 marks a single-stage loop (whole group at the load's window,

@@ -676,6 +676,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Set by findSmallestPickableNonWmma: a ds_load / tensor_load fits this window even if
     // a free filler outranks it, so the quota must not close the window yet.
     mutable bool memWorkFitsWindow_ = false;
+    // Set by findSmallestPickableNonWmma: the VALU it picked fills a held op's tail (tailFillHold
+    // / heldMemOpTailFillable), so the quota must not close the window on it either.
+    mutable bool tailFillPick_ = false;
     bool fillQuotaMet() const {
         return fillQuotaPerWindow_ > 0 && fillsThisWindow_ >= fillQuotaPerWindow_;
     }
@@ -883,6 +886,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Not held past kMixTailFillMaxValus, when no VALU can issue in this region any more, or when
     // the region's WMMAs are spent (warGateRelieved): a hold that nothing can end is a stall.
     bool tailFillHold(DAGNode* ds) const;
+    // Ready VALUs would end `node`'s va_vdst wait within kMixTailFillMaxValus (the VALU axis).
+    bool tailFillable(const DAGNode* node) const;
+    // dagFeatures.releaseOnEitherAxis: some held unplaced memory op is tailFillable.
+    bool heldMemOpTailFillable() const;
     // Ready VALUs a tail fill may take, smallest id first, up to `n`; empty when fewer are ready.
     std::vector<const StinkyInstruction*> tailFillReadyValus(int n) const;
     static constexpr int kMixTailFillMaxValus = 8;
@@ -926,6 +933,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         if (!isGlobalPrefetch(inst) && !isBufferMemLoad(inst) && !isGlobalMemLoad(inst))
             return false;
         if (prefetchEarliestWmma_.count(&inst)) return false;
+        if (getPassContext().getPassFeatureConfig().dagFeatures.releaseOnEitherAxis &&
+            tailFillable(node))
+            return true;
         return needsMoreInstsBeforeIssue(node);
     }
     // A filler feeding a prefetch's address; never strict-held, or it lands right in
@@ -1665,6 +1675,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     *kindOut = -1;
     if (outWait) *outWait = 0;
     memWorkFitsWindow_ = false;
+    tailFillPick_ = false;
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
@@ -1738,7 +1749,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // is not pulled forward from a later window, unless nothing else can issue
     // without stalling (no candidate, or the best one carries a wait).
     // A tail fill hold lifts the quota: those VALUs are the hide, not padding.
-    const bool fillerAllowed = !fillQuotaMet() || best == nullptr || bestWait > 0 || dsTailHold;
+    const bool tailFill = dsTailHold || heldMemOpTailFillable();
+    const bool fillerAllowed = !fillQuotaMet() || best == nullptr || bestWait > 0 || tailFill;
     int otherWait = 0;
     if (DAGNode* t = pickFreeBest(otherQueue, &otherWait, /*allowHiddenStall=*/true)) {
         if (fillerAllowed) consider(t, kOther, otherWait);
@@ -1767,8 +1779,10 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     }
     if (isValuPickable() || best == nullptr) {
         if (DAGNode* t = pickFreeBest(valuQueue)) {
-            if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t) && fillerAllowed)
+            if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t) && fillerAllowed) {
                 consider(t, kValu, 0);
+                if (best == t) tailFillPick_ = tailFill;
+            }
         }
     }
 
@@ -1787,20 +1801,32 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
 bool CDNA5ReadyQueue::tailFillHold(DAGNode* ds) const {
     const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-    if (!waitAlu_ || !f.mixTailFill) return false;
-    if (waitAlu_->query(*ds->inst).vaVdst < 0) return false;  // needs no wait now
-    if (warGateRelieved(ds)) return false;
-    const int n = waitAlu_->untilFree(*ds->inst, WaitAluHideOp::Valu, formWmma_);
-    PASS_DEBUG(std::cerr << "[CDNA5 tailFillHold] ds dagId=" << ds->id << " valusUntilFree=" << n
+    if (!f.mixTailFill || warGateRelieved(ds)) return false;
+    return tailFillable(ds);
+}
+
+bool CDNA5ReadyQueue::tailFillable(const DAGNode* node) const {
+    if (!waitAlu_) return false;
+    if (waitAlu_->query(*node->inst).vaVdst < 0) return false;  // needs no wait now
+    const int n = waitAlu_->untilFree(*node->inst, WaitAluHideOp::Valu, formWmma_);
+    PASS_DEBUG(std::cerr << "[CDNA5 tailFillable] dagId=" << node->id << " valusUntilFree=" << n
                          << " valuPickable=" << isValuPickable() << "\n");
     if (n <= 0 || n > kMixTailFillMaxValus) return false;
     const std::vector<const StinkyInstruction*> tail = tailFillReadyValus(n);
     if (tail.empty()) return false;
     // The scoreboard has the last word: these VALUs fill the tail (CSMACC, not TRANS or f64) and
     // need no s_wait_alu of their own.
-    const bool ok = waitAlu_->freeAfter(*ds->inst, tail, formWmma_);
-    PASS_DEBUG(std::cerr << "[CDNA5 tailFillHold]   " << n << " ready VALUs confirmed=" << ok << "\n");
+    const bool ok = waitAlu_->freeAfter(*node->inst, tail, formWmma_);
+    PASS_DEBUG(std::cerr << "[CDNA5 tailFillable]   " << n << " ready VALUs confirmed=" << ok << "\n");
     return ok;
+}
+
+bool CDNA5ReadyQueue::heldMemOpTailFillable() const {
+    if (!getPassContext().getPassFeatureConfig().dagFeatures.releaseOnEitherAxis) return false;
+    for (const ReadySetByDAGid* q : {&otherQueue, &prefetchQueue})
+        for (DAGNode* n : *q)
+            if (unplacedMemWaitsOut(n) && tailFillable(n)) return true;
+    return false;
 }
 
 std::vector<const StinkyInstruction*> CDNA5ReadyQueue::tailFillReadyValus(int n) const {
@@ -2153,11 +2179,18 @@ bool CDNA5ReadyQueue::promoteWmmaQueueFill() {
 DAGNode* CDNA5ReadyQueue::bestDsRead() const {
     DAGNode* picked = nullptr;
     const bool spreadOn = dsSpreadOn();
+    // dagFeatures.releaseOnEitherAxis: among the released loads, one that needs no va_vdst now
+    // goes before one that still waits.
+    const bool preferFree =
+        waitAlu_ && getPassContext().getPassFeatureConfig().dagFeatures.releaseOnEitherAxis;
+    auto waits = [&](DAGNode* n) { return preferFree && waitAlu_->query(*n->inst).vaVdst >= 0; };
     for (int pass = 0; pass < 2 && !picked; ++pass) {
         for (DAGNode* n : localReadQueue) {
             if (pass == 0 && spreadOn && !dsSpread_.released(n->id, wmmaIssuedCountThisRegion_))
                 continue;
-            if (!picked || n->dsReadPriority < picked->dsReadPriority) picked = n;
+            if (!picked || std::make_pair(waits(n), n->dsReadPriority) <
+                               std::make_pair(waits(picked), picked->dsReadPriority))
+                picked = n;
         }
     }
     return picked;
@@ -2831,7 +2864,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         const bool nonFillerPickable =
             smallestPickable != nullptr &&
             (pickKind == kGlobalRead || pickKind == kLocalRead || pickKind == kPrefetch ||
-             (isCriticalFiller(smallestPickable) && criticalMayIssue()) || memWorkFitsWindow_);
+             (isCriticalFiller(smallestPickable) && criticalMayIssue()) || memWorkFitsWindow_ ||
+             tailFillPick_);
         const bool quotaClosedWindow =
             activeWmmaNode_ != nullptr && fillQuotaMet() && !nonFillerPickable;
         // Too little queued WMMA work to hide a non-WMMA stall: the next WMMA goes first, while
