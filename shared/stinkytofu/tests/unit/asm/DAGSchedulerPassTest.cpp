@@ -2252,9 +2252,9 @@ TEST_F(DAGSchedulerPassTest, MsbAffinity_SameBankPreferredAmongEqualPriority) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
 
-    // Anchor establishes currentMsb_=0; then a bank-1 op (smaller id) and a
-    // bank-0 op (larger id). Plain id-order picks bank-1 next; affinity pulls
-    // bank-0 ahead.
+    // Anchor establishes word 0 on the MSB tracker; then a bank-1 op (smaller id)
+    // and a bank-0 op (larger id). Plain id-order picks bank-1 next; affinity
+    // pulls bank-0 ahead.
     createVAddInBlock(body, arch, /*dst=*/10, /*src0=*/11, /*src1=*/12);
     StinkyInstruction* bank1 = createVAddInBlock(body, arch, /*dst=*/260, /*src0=*/261,
                                                  /*src1=*/262);
@@ -2274,7 +2274,7 @@ TEST_F(DAGSchedulerPassTest, MsbAffinity_SameBankPreferredAmongEqualPriority) {
     ASSERT_GE(bank0Pos, 0);
     ASSERT_GE(bank1Pos, 0);
     EXPECT_LT(bank0Pos, bank1Pos)
-        << "same-bank VALU (matching currentMsb_) must be scheduled before the "
+        << "same-bank VALU (served by the word in force) must be scheduled before the "
            "different-bank "
            "VALU despite its larger DAG id, so no s_set_vgpr_msb switch is "
            "inserted between them";

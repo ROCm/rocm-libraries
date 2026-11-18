@@ -783,11 +783,9 @@ static void scheduleRegionWithMovableSideEffects(
         });
     }
 
-    // MSB-affinity tiebreak input (see DAGNode::requiredMsb); -1 = no MSB opinion.
-    for (unsigned i = 0; i < regionSize; ++i) {
-        auto [msbVal, msbHasVgpr] = computeRequiredMsb(dagNodes[i].inst);
-        dagNodes[i].requiredMsb = msbHasVgpr ? msbVal : -1;
-    }
+    // MSB-affinity tiebreak input (see DAGNode::msbRequirement).
+    for (unsigned i = 0; i < regionSize; ++i)
+        dagNodes[i].msbRequirement = requiredVgprMsb(*dagNodes[i].inst);
 
     // Scheduler-policy ordering requests are merged straight into the register-dependency
     // DAG, same as any other edge. A candidate edge is dropped when it would form a cycle

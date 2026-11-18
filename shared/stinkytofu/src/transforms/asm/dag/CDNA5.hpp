@@ -682,10 +682,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // VALU remained to fill the gap.
     int pendingFillerVNops_ = 0;
 
-    // VGPR-MSB bank currently in effect (mirrors InsertVgprMsbPass); updated on
-    // issue, reset per region. pickFreeBest prefers a free candidate matching it.
-    // -1 = unknown.
-    int currentMsb_ = -1;
+    // VGPR-MSB bank word in effect, on the tracker InsertVgprMsbPass emits by;
+    // stepped on issue, reset per region. pickFreeBest prefers a free candidate
+    // it serves.
+    VgprMsbTracker msbTracker_;
 
     // Region ds_read totals: the relief paces against cumulative progress, so it needs the
     // region's totals as well as what has issued so far.
@@ -1278,8 +1278,8 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     touchOperands(*node->inst);
     updateWMMAStatus(node);
     stampDataReady(*node->inst);
-    // Advance the tracked MSB bank; ops with no opinion (-1) leave it unchanged.
-    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
+    // Advance the tracked MSB word; ops with no opinion leave it unchanged.
+    msbTracker_.step(node->msbRequirement);
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     return node;
 }
@@ -1496,10 +1496,11 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         if (wait > 0 && (!allowHiddenStall || !(hiddenInWindow || hiddenBeforeFirstWmma))) continue;
         const int elapse = nodeElapseKey(n);
         // MSB bank affinity: a tiebreak BELOW the free/hazard tier and ABOVE elapse
-        // — prefer a same-bank candidate to avoid an s_set_vgpr_msb switch. Inert
-        // when currentMsb_ == -1 (nothing matches), so unchanged behavior until a
-        // real tie.
-        const int aff = (n->requiredMsb != -1 && n->requiredMsb == currentMsb_) ? 1 : 0;
+        // — prefer a candidate the word in force serves, to avoid an s_set_vgpr_msb
+        // switch. Inert while no word is known (nothing is served), so unchanged
+        // behavior until a real tie.
+        const int aff =
+            (n->msbRequirement.needed() && msbTracker_.satisfies(n->msbRequirement)) ? 1 : 0;
         // Producer first: the earlier its need-by window, the sooner it goes.
         const int needBy = n->id < needByWindow_.size() ? needByWindow_[n->id] : INT_MAX;
         // A filler whose s_wait_alu a later slot would drop ranks last (fillerYieldsSlot); then
@@ -1599,7 +1600,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // (B) elapse: record the timeline touch for all its operands.
     stampDataReady(*node->inst, queueDelay);
     touchOperands(*node->inst);
-    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
+    msbTracker_.step(node->msbRequirement);
     stampPipeOpGates(*node->inst);
     return node;
 }
@@ -3100,7 +3101,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     clock_ = 0;
     // Per-region: MSB state is not carried across a region boundary (side-effect
     // cut).
-    currentMsb_ = -1;
+    msbTracker_.reset();
     // Clear per-region node ptr; it dangles into the previous region's freed
     // DAGNodeList.
     resetActiveWindow();

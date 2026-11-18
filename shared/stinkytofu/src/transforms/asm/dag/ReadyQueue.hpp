@@ -32,6 +32,7 @@
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
@@ -92,9 +93,9 @@ struct DAGNode {
     // CDNA5ReadyQueue holds these behind the WMMA two before their first consumer.
     // Set by the pre-scan in scheduleRegionWithMovableSideEffects.
     bool feedsWmma = false;
-    // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB
+    // The s_set_vgpr_msb word this op needs (requiredVgprMsb); not needed() = no MSB
     // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
-    int requiredMsb = -1;
+    VgprMsbRequirement msbRequirement;
     // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
     bool handshakeBarrier = false;
     unsigned sccChainId = 0;
