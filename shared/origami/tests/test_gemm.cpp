@@ -27,6 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <limits>
 #include "common.hpp"
 
 using Catch::Approx;
@@ -187,6 +188,76 @@ TEST_CASE("GEMM: compute_tile_latency", "[gemm]") {
       REQUIRE(tile_latency_large > tile_latency_small);
     }
   }
+}
+
+// gfx1151 (Strix Halo, 40 CUs) as Origami derives it from the device: the W4A16
+// Stream-K terms are priced with its MALL bandwidth.
+static origami::hardware_t make_w4a16_gfx1151_hardware() {
+  return origami::hardware_t(origami::hardware_t::architecture_t::gfx1151,
+                             40,
+                             65536,
+                             786432,
+                             1,
+                             851.72,
+                             755.63,
+                             215.0,
+                             2097152,
+                             2.9,
+                             2,
+                             std::make_tuple(0.0, 0.22, 0.0));
+}
+
+TEST_CASE("GEMM: W4A16 tiles pay the in-kernel dequantize", "[gemm][w4a16]") {
+  auto config = make_config(64, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+  auto tile   = [&](const origami::hardware_t& hardware, origami::data_type_t mi_dtype) {
+    auto problem    = make_problem(4096, 4096, 4096);
+    problem.a_dtype = origami::data_type_t::Int4;
+    problem.b_dtype = problem.c_dtype = problem.d_dtype = problem.mi_dtype = mi_dtype;
+    return origami::gemm::compute_tile_latency(
+        problem, hardware, config, origami::gemm::context_t(problem, hardware, config));
+  };
+  // Same tile and traffic: the bf16 dequantize (rounded f32 products) takes about
+  // twice the VALU of the fp16 one (packed halves).
+  const auto gfx1151 = make_w4a16_gfx1151_hardware();
+  REQUIRE(tile(gfx1151, origami::data_type_t::BFloat16) > tile(gfx1151, origami::data_type_t::Half));
+  // The W4A16 model is gfx1151's only: other architectures are left as they were.
+  const auto gfx950 = make_hardware(950);
+  REQUIRE(tile(gfx950, origami::data_type_t::BFloat16) == tile(gfx950, origami::data_type_t::Half));
+}
+
+TEST_CASE("GEMM: W4A16 Stream-K sharing tiles is not charged whole waves", "[gemm][w4a16]") {
+  auto hardware = make_w4a16_gfx1151_hardware();
+  auto latency  = [&](size_t m, int stream_k) {
+    auto problem    = make_problem(m, 1536, 2048);
+    problem.a_dtype = origami::data_type_t::Int4;
+    problem.num_cus = 40;
+    auto config     = make_config(256, 96, 64, 16, 16, 16, false, 1, 2, 0, 0, stream_k);
+    config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    config.workspace_size_per_elem_c = 4;
+    return origami::gemm::compute_total_latency(problem, hardware, config);
+  };
+  // 64 tiles on 40 CUs: data parallel runs a second, mostly idle wave; Stream-K
+  // shares 1.6 tiles per CU (measured 2x faster on gfx1151).
+  REQUIRE(latency(1024, 3) < latency(1024, 0));
+  // 256 tiles (6.4 per CU): launched data parallel either way, no Stream-K advantage
+  // to model.
+  REQUIRE(latency(1024 * 4, 3) >= 0.9 * latency(1024 * 4, 0));
+}
+
+TEST_CASE("GEMM: W4A16 Stream-K charges the partial tiles of a split", "[gemm][w4a16]") {
+  auto hardware = make_w4a16_gfx1151_hardware();
+  auto latency  = [&](size_t mt_m, size_t mt_n) {
+    auto problem    = make_problem(896, 128, 4864);
+    problem.a_dtype = origami::data_type_t::Int4;
+    problem.num_cus = 40;
+    auto config     = make_config(mt_m, mt_n, 64, 16, 16, 16, false, 1, 2, 0, 0, 3);
+    config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    config.workspace_size_per_elem_c = 4;
+    return origami::gemm::compute_total_latency(problem, hardware, config);
+  };
+  // 896x128 output on 40 CUs: 7 tiles of 128x128 split six ways each against 28
+  // tiles of 64x64 shared over the CUs; the split was measured 2.3x slower on gfx1151.
+  REQUIRE(latency(128, 128) > latency(64, 64));
 }
 
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
