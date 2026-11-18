@@ -16,6 +16,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <type_traits>
@@ -173,6 +175,90 @@ miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason);
 // the status MIOpen returns for one, and returns it. Call only from a catch
 // block.
 miopenStatus_t RecordCurrentException() noexcept;
+
+// Finds or builds the graph for `key`. `populate` fills in a new graph, `build(graph)`
+// finalizes it in hipDNN, and `failureOf` turns what `build` returned into a recorded
+// failure, or nullopt. They are parameters so that tests can stand in for hipDNN.
+//
+// The mutex is held across the build on purpose: a build can take seconds, but it happens
+// once per problem, and serializing it is simpler than letting two threads race to build the
+// same graph.
+template <typename Graph, typename Cache, typename Build, typename FailureOf>
+std::pair<std::shared_ptr<Graph>, miopenStatus_t>
+AcquireGraphWith(Cache& cache,
+                 std::mutex& mutex,
+                 const PlanKey& key,
+                 const std::function<bool(Graph&)>& populate,
+                 Build&& build,
+                 FailureOf&& failureOf)
+{
+    const std::lock_guard<std::mutex> lock(mutex);
+
+    if(const auto* cached = cache.Find(key))
+        return {*cached, miopenStatusSuccess};
+
+    auto graph = std::make_shared<Graph>();
+    if(!populate(*graph))
+        return {nullptr,
+                RecordFailure(miopenStatusUnsupportedOp,
+                              "could not build a hipDNN graph for this problem")};
+
+    const auto built = CallInsideHipdnn([&] { return build(*graph); });
+    // Checked before caching: a graph built during a re-entry is not worth reusing.
+    if(const auto failure = FailureOfGuardedCall(built, failureOf))
+        return {nullptr, *failure};
+
+    cache.Insert(key, graph);
+    return {graph, miopenStatusSuccess};
+}
+
+// Runs a built graph under `mutex`. `queryWorkspace(needed)` reports the bytes needed,
+// `ensureWorkspace(bytes)` returns a buffer owned by the handle or null, `execute` runs the
+// graph on the given workspace, `recordEnd` marks the end of the work and returns whether it
+// worked, and `failureOf` turns what hipDNN returned into a recorded failure, or nullopt.
+template <typename QueryWorkspace,
+          typename EnsureWorkspace,
+          typename Execute,
+          typename RecordEnd,
+          typename FailureOf>
+miopenStatus_t RunGraphWith(std::mutex& mutex,
+                            void* callerWorkspace,
+                            size_t callerWorkspaceSize,
+                            QueryWorkspace&& queryWorkspace,
+                            EnsureWorkspace&& ensureWorkspace,
+                            Execute&& execute,
+                            RecordEnd&& recordEnd,
+                            FailureOf&& failureOf)
+{
+    const std::lock_guard<std::mutex> lock(mutex);
+
+    int64_t needed = 0;
+    if(const auto failure = failureOf(queryWorkspace(needed)))
+        return *failure;
+
+    void* workspace = callerWorkspace;
+    if(needed > 0 &&
+       (callerWorkspace == nullptr || callerWorkspaceSize < static_cast<size_t>(needed)))
+    {
+        workspace = ensureWorkspace(static_cast<size_t>(needed));
+        if(workspace == nullptr)
+            return RecordFailure(miopenStatusAllocFailed, "hipDNN workspace allocation failed");
+    }
+
+    const auto executed = CallInsideHipdnn([&] { return execute(workspace); });
+    // Recorded even when execute failed, because it may have queued work first, so it comes
+    // before the failure is reported.
+    const bool recorded = recordEnd();
+    if(const auto failure = FailureOfGuardedCall(executed, failureOf))
+        return *failure;
+    if(!recorded)
+        return RecordFailure(miopenStatusInternalError,
+                             "could not record the end of the hipDNN work on the MIOpen "
+                             "handle's stream");
+
+    ClearForwardedFailure();
+    return miopenStatusSuccess;
+}
 
 using PopulateGraphFn = std::function<bool(hipdnn_frontend::graph::Graph&)>;
 using VariantPack     = std::unordered_map<int64_t, void*>;

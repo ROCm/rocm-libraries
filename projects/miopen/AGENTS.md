@@ -172,8 +172,9 @@ python3 -m pytest script/test_check_public_abi.py script/test_check_plugin_reent
   test_check_wrapper_abi test_miopen_wrapper_libs test_run_forwarding_parity \
   test_compare_forwarding_runs test_forwarding_parity_gpu_labels test_check_wrapper_registration)
 # Wrapper-ON builds, after building miopen-tests (the libraries, forwarding_failure_probe,
-# and the fake hipDNN backend); no GPU needed. wrapper_reentry_macro runs the miopen_gtest
-# (or, in a discrete build, test_wrapper_routing) re-entry tests with forwarding on:
+# and the fake hipDNN backend). Only wrapper_reentry_macro needs a device: a visible one, but no
+# compute. It runs the miopen_gtest (or, in a discrete build, test_wrapper_routing) re-entry
+# tests with forwarding on:
 ctest --test-dir build --output-on-failure --no-tests=error \
   -R '^(wrapper_abi_check|forwarding_failure_modes|wrapper_reentry_macro|test_forwarding_parity_scripts)$'
 # Wrapper-ON superbuild with the provider: the miopen-with-provider preset plus

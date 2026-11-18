@@ -240,36 +240,16 @@ std::optional<miopenStatus_t> FailureOfHipdnnResult(const fe::Error& error)
     return RecordHipdnnFailure(error);
 }
 
-miopenStatus_t RecordSuccess()
-{
-    ClearForwardedFailure();
-    return miopenStatusSuccess;
-}
-
-// Held across build() on purpose. A build can take seconds, but it happens once
-// per distinct problem and serializing it is far simpler than letting two
-// threads race to build the same graph.
 std::pair<GraphPtr, miopenStatus_t>
 AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t hipdnnHandle)
 {
-    const std::lock_guard<std::mutex> lock(PlanMutex());
-
-    if(const GraphPtr* cached = PlanCache().Find(key))
-        return {*cached, miopenStatusSuccess};
-
-    GraphPtr graph = std::make_shared<fe::graph::Graph>();
-    if(!populate(*graph))
-        return {nullptr,
-                RecordFailure(miopenStatusUnsupportedOp,
-                              "could not build a hipDNN graph for this problem")};
-
-    const auto built = CallInsideHipdnn([&] { return graph->build(hipdnnHandle); });
-    // Checked before caching: a graph built during a re-entry is not worth reusing.
-    if(const auto failure = FailureOfGuardedCall(built, FailureOfHipdnnResult))
-        return {nullptr, *failure};
-
-    PlanCache().Insert(key, graph);
-    return {graph, miopenStatusSuccess};
+    return AcquireGraphWith<fe::graph::Graph>(
+        PlanCache(),
+        PlanMutex(),
+        key,
+        populate,
+        [&](fe::graph::Graph& graph) { return graph.build(hipdnnHandle); },
+        FailureOfHipdnnResult);
 }
 
 miopenStatus_t RunGraph(HandleState& state,
@@ -278,34 +258,19 @@ miopenStatus_t RunGraph(HandleState& state,
                         void* callerWorkspace,
                         size_t callerWorkspaceSize)
 {
-    const std::lock_guard<std::mutex> lock(state.mutex);
-
-    int64_t needed = 0;
-    if(const fe::Error error = graph->get_workspace_size(needed); !error.is_good())
-        return RecordHipdnnFailure(error);
-
-    void* workspace = callerWorkspace;
-    if(needed > 0 &&
-       (callerWorkspace == nullptr || callerWorkspaceSize < static_cast<size_t>(needed)))
-    {
-        if(!state.EnsureWorkspace(static_cast<size_t>(needed)))
-            return RecordFailure(miopenStatusAllocFailed, "hipDNN workspace allocation failed");
-        workspace = state.workspace;
-    }
-
-    const auto executed = CallInsideHipdnn(
-        [&] { return graph->execute(*state.hipdnnHandle, variantPack, workspace); });
-    // Recorded even when execute failed, because it may have queued work first, so it comes
-    // before the failure is reported.
-    const bool recorded = hipEventRecord(state.lastWork, state.stream) == hipSuccess;
-    if(const auto failure = FailureOfGuardedCall(executed, FailureOfHipdnnResult))
-        return *failure;
-    if(!recorded)
-        return RecordFailure(miopenStatusInternalError,
-                             "could not record the end of the hipDNN work on the MIOpen "
-                             "handle's stream");
-
-    return RecordSuccess();
+    return RunGraphWith(
+        state.mutex,
+        callerWorkspace,
+        callerWorkspaceSize,
+        [&](int64_t& needed) { return graph->get_workspace_size(needed); },
+        [&](size_t bytes) -> void* {
+            return state.EnsureWorkspace(bytes) ? state.workspace : nullptr;
+        },
+        [&](void* workspace) {
+            return graph->execute(*state.hipdnnHandle, variantPack, workspace);
+        },
+        [&] { return hipEventRecord(state.lastWork, state.stream) == hipSuccess; },
+        FailureOfHipdnnResult);
 }
 
 } // namespace

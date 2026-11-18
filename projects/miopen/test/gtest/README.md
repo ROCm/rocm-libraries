@@ -231,10 +231,12 @@ call with `miopenStatusInternalError` (`ScopedHipdnnCall` and `RejectReentrantCa
 `src/private/hipdnn_graph.cpp`, checked in `MIOPEN_WRAPPER_FORWARD`). These tests cover it:
 
 - `CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard, the
-  failure it records, the trace line, and the helpers `AcquireGraph` and `RunGraph` use to report
-  a re-entry (`CallInsideHipdnn` opens the scope, `FailureOfGuardedCall` puts a re-entry ahead of
-  hipDNN's result). They run with the other routing tests and, like every `CPU_` test in
-  `miopen_gtest`, need a visible device.
+  failure it records, the trace line, and the two steps `AcquireGraph` and `RunGraph` are made of
+  (`AcquireGraphWith` and `RunGraphWith`, which take the hipDNN calls as parameters). The steps
+  run against a stand-in for hipDNN, and a re-entry is a call to `RejectReentrantCall` from inside
+  its build or execute. They check that a re-entry fails the call even when hipDNN succeeded,
+  outranks hipDNN's own failure, and is never cached. They run with the other routing tests and,
+  like every `CPU_` test in `miopen_gtest`, need a visible device.
 - `CPU_HipdnnEraseOutsideLock_NONE.*` test the helper that releases a handle's hipDNN state
   without holding the map lock. The plugin's handle destructor takes that lock again (when the
   plugin is built against the public library), which would deadlock `miopenDestroy`.
@@ -268,3 +270,8 @@ call with `miopenStatusInternalError` (`ScopedHipdnnCall` and `RejectReentrantCa
 `script/check_public_abi.py check-plugin` checks a plugin binary without running it. The provider
 registers it for the plugin it builds (must pass) and for the stand-in (must fail), and the flag-on
 workflow's provider job runs both. It is never given a plugin built elsewhere.
+
+No pull-request lane builds the wrapper, so none of these run automatically. The flag-on workflow
+(`miopen-wrapper-flag-on.yml`, manual dispatch) builds the wrapper and runs the two plugin ABI
+entries in its provider job. The routing, macro and GPU entries run wherever MIOpen's ctest suite
+runs on hardware with the wrapper flag on.

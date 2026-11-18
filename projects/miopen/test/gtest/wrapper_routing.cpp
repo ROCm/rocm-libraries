@@ -24,6 +24,10 @@
 
 #include <climits>
 #include <cstdlib>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <streambuf>
@@ -31,6 +35,8 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace miopen {
 namespace wrapper {
@@ -1102,6 +1108,338 @@ TEST(CPU_WrapperRoutingReentry_NONE, WithoutAReentryHipdnnsResultDecides)
     ASSERT_TRUE(failure.has_value());
     EXPECT_EQ(*failure, miopenStatusBadParm);
     EXPECT_FALSE(hipdnn::FailureOfGuardedCall(worked, map).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// The two steps AcquireGraph and RunGraph are made of, with a stand-in for hipDNN. A plugin
+// that re-enters the wrapper is a call to RejectReentrantCall from inside the build or the
+// execute.
+// ---------------------------------------------------------------------------
+
+namespace graph_steps {
+
+// Drops what the failures print to stderr, even if an assertion ends the test early.
+class SilencedStderr
+{
+public:
+    SilencedStderr() { testing::internal::CaptureStderr(); }
+    ~SilencedStderr() { static_cast<void>(testing::internal::GetCapturedStderr()); }
+    SilencedStderr(const SilencedStderr&)            = delete;
+    SilencedStderr& operator=(const SilencedStderr&) = delete;
+};
+
+struct FakeGraph
+{
+};
+
+class FakeCache
+{
+public:
+    const std::shared_ptr<FakeGraph>* Find(const hipdnn::PlanKey& key) const
+    {
+        for(const auto& entry : entries_)
+            if(entry.first == key)
+                return &entry.second;
+        return nullptr;
+    }
+    void Insert(const hipdnn::PlanKey& key, std::shared_ptr<FakeGraph> graph)
+    {
+        entries_.emplace_back(key, std::move(graph));
+    }
+    size_t Size() const { return entries_.size(); }
+
+private:
+    std::vector<std::pair<hipdnn::PlanKey, std::shared_ptr<FakeGraph>>> entries_;
+};
+
+// What a call into hipDNN returns here: 0 worked, anything else failed.
+std::optional<miopenStatus_t> FailureOf(int result)
+{
+    if(result == 0)
+        return std::nullopt;
+    return miopenStatusBadParm;
+}
+
+constexpr const char* kEntryPoint = "miopenConvolutionForward";
+
+struct Acquire
+{
+    FakeCache cache;
+    std::mutex mutex;
+    hipdnn::PlanKey key;
+    std::function<bool(FakeGraph&)> populate = [](FakeGraph&) { return true; };
+    int builds                               = 0;
+
+    template <typename Build>
+    std::pair<std::shared_ptr<FakeGraph>, miopenStatus_t> Run(Build&& build)
+    {
+        return hipdnn::AcquireGraphWith<FakeGraph>(
+            cache, mutex, key, populate, std::forward<Build>(build), FailureOf);
+    }
+};
+
+struct Run
+{
+    std::mutex mutex;
+    int64_t needed             = 0;
+    int workspaceQueries       = 0;
+    int ensures                = 0;
+    int executions             = 0;
+    int recordedEnds           = 0;
+    bool inHipdnnDuringExecute = false;
+    void* handleBuffer         = reinterpret_cast<void*>(0x2000);
+    void* executedOn           = nullptr;
+
+    template <typename Execute>
+    miopenStatus_t Go(Execute&& execute,
+                      void* callerWorkspace  = nullptr,
+                      size_t callerSize      = 0,
+                      int queryResult        = 0,
+                      bool recordEndSucceeds = true)
+    {
+        return hipdnn::RunGraphWith(
+            mutex,
+            callerWorkspace,
+            callerSize,
+            [&](int64_t& out) {
+                ++workspaceQueries;
+                out = needed;
+                return queryResult;
+            },
+            [&](size_t) -> void* {
+                ++ensures;
+                return handleBuffer;
+            },
+            [&](void* workspace) {
+                ++executions;
+                executedOn            = workspace;
+                inHipdnnDuringExecute = hipdnn::InHipdnnCall();
+                return execute();
+            },
+            [&] {
+                ++recordedEnds;
+                return recordEndSucceeds;
+            },
+            FailureOf);
+    }
+};
+
+} // namespace graph_steps
+
+TEST(CPU_WrapperRoutingReentry_NONE, ABuiltGraphIsCachedAndBuiltOnce)
+{
+    graph_steps::Acquire acquire;
+    const auto build = [&](graph_steps::FakeGraph&) {
+        ++acquire.builds;
+        return 0;
+    };
+
+    const auto first  = acquire.Run(build);
+    const auto second = acquire.Run(build);
+
+    EXPECT_EQ(first.second, miopenStatusSuccess);
+    ASSERT_NE(first.first, nullptr);
+    EXPECT_EQ(second.first, first.first);
+    EXPECT_EQ(acquire.builds, 1);
+    EXPECT_EQ(acquire.cache.Size(), 1u);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, TheBuildRunsInsideAHipdnnCall)
+{
+    graph_steps::Acquire acquire;
+    bool inside = false;
+
+    acquire.Run([&](graph_steps::FakeGraph&) {
+        inside = hipdnn::InHipdnnCall();
+        return 0;
+    });
+
+    EXPECT_TRUE(inside);
+    EXPECT_FALSE(hipdnn::InHipdnnCall());
+}
+
+// A plugin that swallows the error it was given makes hipDNN report success.
+TEST(CPU_WrapperRoutingReentry_NONE, AReentryDuringABuildFailsTheCallAndIsNotCached)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Acquire acquire;
+
+    const auto result = acquire.Run([](graph_steps::FakeGraph&) {
+        hipdnn::RejectReentrantCall(graph_steps::kEntryPoint);
+        return 0;
+    });
+
+    EXPECT_EQ(result.second, miopenStatusInternalError);
+    EXPECT_EQ(result.first, nullptr);
+    EXPECT_EQ(acquire.cache.Size(), 0u);
+    miopenStatus_t recorded = miopenStatusSuccess;
+    EXPECT_TRUE(hipdnn::LastForwardedFailure(&recorded));
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AReentryDuringABuildOutranksHipdnnsOwnFailure)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Acquire acquire;
+
+    const auto result = acquire.Run([](graph_steps::FakeGraph&) {
+        hipdnn::RejectReentrantCall(graph_steps::kEntryPoint);
+        return 1;
+    });
+
+    EXPECT_EQ(result.second, miopenStatusInternalError);
+    EXPECT_EQ(acquire.cache.Size(), 0u);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AHipdnnBuildFailureIsReportedAndNotCached)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Acquire acquire;
+
+    const auto result = acquire.Run([](graph_steps::FakeGraph&) { return 1; });
+
+    EXPECT_EQ(result.second, miopenStatusBadParm);
+    EXPECT_EQ(result.first, nullptr);
+    EXPECT_EQ(acquire.cache.Size(), 0u);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AProblemThatCannotBePopulatedIsNeverBuilt)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Acquire acquire;
+    acquire.populate = [](graph_steps::FakeGraph&) { return false; };
+
+    const auto result = acquire.Run([&](graph_steps::FakeGraph&) {
+        ++acquire.builds;
+        return 0;
+    });
+
+    EXPECT_EQ(result.second, miopenStatusUnsupportedOp);
+    EXPECT_EQ(acquire.builds, 0);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AGraphRunsInsideAHipdnnCallAndClearsEarlierFailures)
+{
+    const graph_steps::SilencedStderr silenced;
+    hipdnn::ClearForwardedFailure();
+    graph_steps::Run run;
+    void* const callerBuffer = reinterpret_cast<void*>(0x1000);
+
+    // An earlier forwarded failure must not outlive a call that worked.
+    static_cast<void>(hipdnn::RecordFailure(miopenStatusBadParm, "earlier"));
+    const auto status = run.Go([] { return 0; }, callerBuffer, 64);
+
+    miopenStatus_t recorded = miopenStatusSuccess;
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_TRUE(run.inHipdnnDuringExecute);
+    EXPECT_FALSE(hipdnn::InHipdnnCall());
+    EXPECT_FALSE(hipdnn::LastForwardedFailure(&recorded));
+    EXPECT_EQ(run.recordedEnds, 1);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AReentryDuringAnExecuteFailsTheCallEvenIfHipdnnSucceeded)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Run run;
+
+    const auto status = run.Go([] {
+        hipdnn::RejectReentrantCall(graph_steps::kEntryPoint);
+        return 0;
+    });
+
+    EXPECT_EQ(status, miopenStatusInternalError);
+    miopenStatus_t recorded = miopenStatusSuccess;
+    EXPECT_TRUE(hipdnn::LastForwardedFailure(&recorded));
+    EXPECT_EQ(recorded, miopenStatusInternalError);
+    // The work it queued is still marked on the handle's stream.
+    EXPECT_EQ(run.recordedEnds, 1);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AReentryDuringAnExecuteOutranksHipdnnsOwnFailure)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Run run;
+
+    const auto status = run.Go([] {
+        hipdnn::RejectReentrantCall(graph_steps::kEntryPoint);
+        return 1;
+    });
+
+    EXPECT_EQ(status, miopenStatusInternalError);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AHipdnnExecuteFailureIsReportedAfterTheEndIsMarked)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Run run;
+
+    const auto status = run.Go([] { return 1; });
+
+    EXPECT_EQ(status, miopenStatusBadParm);
+    EXPECT_EQ(run.recordedEnds, 1);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AWorkspaceQueryFailureStopsBeforeTheExecute)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Run run;
+
+    const auto status = run.Go([] { return 0; }, nullptr, 0, 1);
+
+    EXPECT_EQ(status, miopenStatusBadParm);
+    EXPECT_EQ(run.executions, 0);
+    EXPECT_EQ(run.recordedEnds, 0);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, ACallersWorkspaceIsUsedOnlyWhenItIsBigEnough)
+{
+    const graph_steps::SilencedStderr silenced;
+    void* const callerBuffer = reinterpret_cast<void*>(0x1000);
+    graph_steps::Run big;
+    big.needed = 64;
+    graph_steps::Run small;
+    small.needed = 64;
+
+    EXPECT_EQ(big.Go([] { return 0; }, callerBuffer, 64), miopenStatusSuccess);
+    EXPECT_EQ(big.executedOn, callerBuffer);
+    EXPECT_EQ(big.ensures, 0);
+
+    EXPECT_EQ(small.Go([] { return 0; }, callerBuffer, 63), miopenStatusSuccess);
+    EXPECT_EQ(small.executedOn, small.handleBuffer);
+    EXPECT_EQ(small.ensures, 1);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, ARunThatCannotGetItsWorkspaceIsNeverExecuted)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Run run;
+    run.needed       = 64;
+    run.handleBuffer = nullptr;
+
+    const auto status = run.Go([] { return 0; });
+
+    EXPECT_EQ(status, miopenStatusAllocFailed);
+    EXPECT_EQ(run.executions, 0);
+    hipdnn::ClearForwardedFailure();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, AnEndThatCannotBeMarkedFailsTheCall)
+{
+    const graph_steps::SilencedStderr silenced;
+    graph_steps::Run run;
+
+    const auto status = run.Go([] { return 0; }, nullptr, 0, 0, false);
+
+    EXPECT_EQ(status, miopenStatusInternalError);
+    hipdnn::ClearForwardedFailure();
 }
 
 // ---------------------------------------------------------------------------
