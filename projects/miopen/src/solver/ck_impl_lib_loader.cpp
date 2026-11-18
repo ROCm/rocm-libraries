@@ -216,10 +216,18 @@ const CkImplLibLoader& CkImplLibLoader::Get(const std::string& device_name)
 }
 
 #ifndef _WIN32
+std::string GfxNameFromTargetVersion(unsigned long long target_version)
+{
+    if(target_version == 0)
+        return {};
+    std::ostringstream name;
+    name << "gfx" << target_version / 10000 << std::hex << (target_version / 100) % 100
+         << target_version % 100;
+    return name.str();
+}
+
 std::vector<std::string> GetKfdDeviceNames()
 {
-    // gfx_target_version is major * 10000 + minor * 100 + stepping, and the name spells minor
-    // and stepping as hex digits (90010 is gfx90a). CPU nodes report 0.
     std::vector<std::string> names;
     std::error_code ec;
     for(const auto& node : miopen::fs::directory_iterator{"/sys/class/kfd/kfd/topology/nodes", ec})
@@ -231,13 +239,9 @@ std::vector<std::string> GetKfdDeviceNames()
         {
             if(key != "gfx_target_version")
                 continue;
-            if(value != 0)
-            {
-                std::ostringstream name;
-                name << "gfx" << value / 10000 << std::hex << (value / 100) % 100 << value % 100;
-                if(std::find(names.begin(), names.end(), name.str()) == names.end())
-                    names.push_back(name.str());
-            }
+            auto name = GfxNameFromTargetVersion(value);
+            if(!name.empty() && std::find(names.begin(), names.end(), name) == names.end())
+                names.push_back(std::move(name));
             break;
         }
     }

@@ -135,8 +135,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   extracting all of them for every device when `miopenCreate` loads the library. `miopenCreate`
   no longer extracts them, and this stops a process that never runs a CK kernel from filling the
   comgr cache with the CK code objects. When MIOpen is loaded after the GPU runtime has started,
-  or on Windows, handle creation still loads the library. Set `MIOPEN_DEBUG_CK_EARLY_LOAD=0` to
-  restore the previous behavior.
+  or on Windows, handle creation still loads the library. A process that loads MIOpen but never
+  creates a handle now also maps the CK library. Set `MIOPEN_DEBUG_CK_EARLY_LOAD=0` to turn the
+  early load off and restore the previous behavior.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
