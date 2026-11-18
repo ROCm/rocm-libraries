@@ -113,6 +113,12 @@ extern "C" {
 *  \note
 *  This routine does not support batched computation.
 *
+*  \note
+*  For the Blocked ELL format, the rows and columns of \p mat_B must equal those of \p mat_A. When they
+*  are not multiples of \p ell_block_dim, the result has a partial last block row or column, which
+*  \ref rocsparse_spmm does not support. To multiply the result with \ref rocsparse_spmm, pad the dense
+*  matrix with zeros to whole blocks before the conversion.
+*
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.
 *  @param[in]

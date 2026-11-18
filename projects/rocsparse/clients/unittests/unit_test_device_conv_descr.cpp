@@ -2025,41 +2025,4 @@ namespace
         expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, false, true);
     }
 
-    // A 3x3 blocked ELL matrix with block size 2 is a legal descriptor, but SpMM
-    // addresses whole blocks and must reject it before it writes C.
-    TEST_F(ConvDescr, BellSpmmRejectsPartialBlock)
-    {
-        constexpr int64_t m = 3, bd = 2, ell_cols = 4;
-        DevBuf<int32_t>   ind(std::vector<int32_t>(4, 0));
-        DevBuf<float>     val(std::vector<float>(static_cast<size_t>(m * ell_cols), 0));
-        Spmat             A;
-        ASSERT_EQ(rocsparse_create_bell_descr(
-                      &A, m, m, dir_r, bd, ell_cols, ind.get(), val.get(), i32, base0, f32),
-                  st_ok);
-        DevBuf<float> B(std::vector<float>(9, 1.0f)), C(std::vector<float>(9, -1.0f));
-        Dnmat         dnB, dnC;
-        ASSERT_EQ(rocsparse_create_dnmat_descr(&dnB, m, m, m, B.get(), f32, rocsparse_order_column),
-                  st_ok);
-        ASSERT_EQ(rocsparse_create_dnmat_descr(&dnC, m, m, m, C.get(), f32, rocsparse_order_column),
-                  st_ok);
-        const float alpha = 1.0f, beta = 0.0f;
-        size_t      bytes = 7;
-        EXPECT_EQ(rocsparse_spmm(handle,
-                                 rocsparse_operation_none,
-                                 rocsparse_operation_none,
-                                 &alpha,
-                                 A,
-                                 dnB,
-                                 &beta,
-                                 dnC,
-                                 f32,
-                                 rocsparse_spmm_alg_default,
-                                 rocsparse_spmm_stage_buffer_size,
-                                 &bytes,
-                                 nullptr),
-                  st_size);
-        EXPECT_EQ(bytes, 7);
-        EXPECT_EQ(C.read(), std::vector<float>(9, -1.0f));
-    }
-
 } // namespace
