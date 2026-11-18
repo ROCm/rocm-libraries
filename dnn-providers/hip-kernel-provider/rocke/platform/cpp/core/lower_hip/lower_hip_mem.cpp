@@ -182,7 +182,17 @@ static rocke_status_t _op_tile_smem_store(rocke_h_lowerer_t* lw, const rocke_op_
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "smem store before smem_alloc was lowered");
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 2);
-    rocke_h_emitf(lw, "%s[%s] = %s;", storage, idx_str, rocke_h_name(lw, value));
+    /* A one-lane vector (from smem_store_vN with n=1, say) is stored as its one
+     * element, as the LLVM lowering's <1 x T> store does; HIP has no implicit
+     * conversion from a vector to its element, so read lane 0. */
+    const bool one_lane_vector
+        = value->type && value->type->kind == ROCKE_TYPE_VECTOR && value->type->count == 1;
+    rocke_h_emitf(lw,
+                  "%s[%s] = %s%s;",
+                  storage,
+                  idx_str,
+                  rocke_h_name(lw, value),
+                  one_lane_vector ? "[0]" : "");
     return lw->status;
 }
 
