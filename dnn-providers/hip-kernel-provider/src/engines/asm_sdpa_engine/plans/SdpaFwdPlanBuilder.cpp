@@ -5,6 +5,7 @@
 #include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "core/Utils.hpp"
+#include "plans/SdpaFwdLaunchParams.hpp"
 #include "plans/SdpaFwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
@@ -329,21 +330,40 @@ static bool wouldFwdByteStridesFitUint32(
     return ok;
 }
 
-static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
+unsigned int SdpaFwdPlanBuilder::maxThreadsPerBlock(const fmha_v3_fwdConfig& config) const
 {
-    if(archId == "gfx942")
+    return static_cast<unsigned int>(config.max_flat_workgroup_size);
+}
+
+// A kernel launched with more threads per block than its code object's
+// max_flat_workgroup_size fails at hipModuleLaunchKernel. The block comes from
+// the row's head dims, which equal the graph's (the row lookup matches them
+// exactly), so it is the block computeFwdLaunchParams launches with in batch
+// and group mode alike.
+std::optional<std::string>
+    SdpaFwdPlanBuilder::launchLimitViolation(const fmha_v3_fwdConfig& config) const
+{
+    const unsigned int blockDimX = fwdBlockDimX(static_cast<unsigned int>(config.hdim_q),
+                                                static_cast<unsigned int>(config.hdim_v));
+    const unsigned int maxThreads = maxThreadsPerBlock(config);
+    if(blockDimX <= maxThreads)
     {
-        auto pos = coName.rfind('/');
-        if(isMi308)
-        {
-            coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
-        }
-        else
-        {
-            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
-        }
+        return std::nullopt;
     }
-    return asm_kernels::getAsmKernelTocKey(coName);
+    return "Kernel " + config.knl_name + " accepts at most " + std::to_string(maxThreads)
+           + " threads per block but is launched with " + std::to_string(blockDimX);
+}
+
+// isApplicable's launch-limit decline, kept out of isApplicable, which sits at
+// clang-tidy's readability-function-size limit.
+bool SdpaFwdPlanBuilder::acceptsLaunchBlock(const fmha_v3_fwdConfig& config) const
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const auto violation = launchLimitViolation(config);
+    HIP_KERNEL_RETURN_FALSE_IF(violation.has_value(), *violation);
+    return true;
 }
 
 bool SdpaFwdPlanBuilder::isApplicable(
@@ -687,7 +707,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                        inputBytes * cfg_fmha_fwd.at(key).ts_qo),
         "Forward Ts product overflows the uint32_t s_Ts kernarg field");
 
-    return true;
+    // Decline a kernel that cannot take the block it would be launched with, so
+    // the graph falls through to another engine instead of failing at launch.
+    return acceptsLaunchBlock(cfg_fmha_fwd.at(key));
 }
 
 size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
@@ -917,10 +939,17 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
     config = cfg_fmha_fwd.at(kernelKey);
 
+    if(const auto launchViolation = launchLimitViolation(config))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "SdpaFwdPlanBuilder::buildPlan: "
+                                                           + *launchViolation);
+    }
+
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
     // Load kernel module from kpack archive
-    auto tocKey = getKernelTocKey(config.co_name, deviceString, isMi308);
+    auto tocKey = asm_kernels::getFwdKernelTocKey(config.co_name, deviceString, isMi308);
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
 
