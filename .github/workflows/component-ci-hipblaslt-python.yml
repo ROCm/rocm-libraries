@@ -1,13 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# hipBLASLt's opt-in Python bindings (projects/hipblaslt/python/), following Review A's lane
-# plan (Decision 9, AIHPBLAS-5274):
+# hipBLASLt's opt-in Python bindings (projects/hipblaslt/python/). The lanes:
 #   - Linux CPU and Linux gfx942 GPU, on every PR that changes the bindings or the public headers;
 #   - gfx950, with the ci:run-gfx950 label;
 #   - Windows CPU, non-blocking and never a required check;
 #   - Windows GPU (gfx1151), only when the lanes themselves change or on a manual run.
-# Every lane installs the TheRock nightly pinned below (Decision 11) into a fresh venv,
+# Every lane installs the TheRock nightly pinned below into a fresh venv,
 # builds the bindings against it, and runs their tests with
 # projects/hipblaslt/python/scripts/ci_lane.sh.
 name: "Component CI: hipBLASLt Python bindings"
@@ -31,7 +30,7 @@ permissions:
 
 env:
   # The one place the bindings' ROCm is pinned. Bump it deliberately, and switch to
-  # --latest-release once TheRock#9530 is fixed (Review A, Decision 11).
+  # --latest-release once TheRock#9530 is fixed.
   HIPBLASLT_PY_ROCM_VERSION: "10.3.0a20261116"
   PYTHONDONTWRITEBYTECODE: "1"
 
@@ -79,7 +78,7 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          # The public headers too: the enum coverage test reads the PR's own.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include
@@ -109,7 +108,7 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          # The public headers too: the enum coverage test reads the PR's own.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include
@@ -144,7 +143,7 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          # The public headers too: the enum coverage test reads the PR's own.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include
@@ -175,7 +174,7 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          # The public headers too: the enum coverage test reads the PR's own.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include
@@ -209,7 +208,7 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads develop's (Decision 6).
+          # The public headers too: the enum coverage test reads the PR's own.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include

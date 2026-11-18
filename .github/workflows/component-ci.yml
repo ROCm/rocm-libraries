@@ -135,8 +135,8 @@ jobs:
       - tensilelite-coverage
       - logic-corpus
       - hipblaslt-rocjitsu-scripts
-      # hipblaslt-python joins once its Linux lanes have 20 green runs (Review A, Decision 9);
-      # until then they're informational, and a failure shows on the lane, not the summary.
+      # hipblaslt-python joins once its Linux lanes have 20 green runs; until then they're
+      # informational, and a failure shows on the lane, not the summary.
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

@@ -719,10 +719,9 @@ tracked as a gap.
   `projects/hipblaslt/python/` or the public headers change. They build the opt-in bindings
   against a pinned TheRock nightly and run their pytest suite: Linux CPU and gfx942 on every such
   pull request, gfx950 with the `ci:run-gfx950` label, and Windows. The Linux lanes become trusted
-  gates after 20 green runs each (pull requests and `develop` pushes, at most one flake), per
-  Review A's Decision 9 ([AIHPBLAS-5274](https://amd-hub.atlassian.net/browse/AIHPBLAS-5274)).
-  The Windows lanes stay informational for good. Until then the bindings job isn't part of
-  `Component CI Summary`, so a failure shows on its own lane
+  gates after 20 green runs each (pull requests and `develop` pushes, at most one flake); until
+  then the bindings job isn't part of `Component CI Summary`, so a failure shows on its own lane.
+  The Windows lanes stay informational for good
 
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
@@ -1920,7 +1919,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | No CI lane runs TSAN yet, and there is no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | AIHPBLAS-5035 |
 | Multi-GPU tests cover one feature, fused GEMM plus all-to-all, on two gfx950 GPUs | Low | High if hit | Math CI's `precheckin` runs the `*multi_gpu*` cases on pull requests | AIHPBLAS-4625 |
 | Three parallel enum-to-string tables can drift | Low | Medium | None automated | AIHPBLAS-3558 |
-| The Python bindings lanes test against an installed hipBLASLt (a pinned TheRock nightly), so a library behavior change that breaks the bindings is caught later, once the lanes' ROCm picks it up. API and enum drift is still caught on the PR that causes it | Medium | Medium | The lanes run when the public headers change, and the bindings' enum checks read the PR's own headers. Revisit at the bindings' close-out review, per Review A's Decision 13 | AIHPBLAS-5274 |
+| The Python bindings lanes test against an installed hipBLASLt (a pinned TheRock nightly), so a library behavior change that breaks the bindings is caught later, once the lanes' ROCm picks it up. API and enum drift is still caught on the PR that causes it | Medium | Medium | The lanes run when the public headers change, and the bindings' enum checks read the PR's own headers | AIHPBLAS-5268 |
 
 ## Owners and Review Cadence
 
