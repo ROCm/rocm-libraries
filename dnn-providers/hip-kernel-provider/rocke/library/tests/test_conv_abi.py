@@ -2716,9 +2716,10 @@ def test_aot_grid_caps_accumulator_registers(monkeypatch):
 
 def test_cache_applies_runtime_launch_limits(tmp_path):
     """Rules that depend on the launch-time problem, not on the binary: the
-    per-axis grid cap, and the depthwise (cpg == 1) refusal. The grouped
-    implicit-GEMM dgrad binary has no depthwise path; depthwise dgrad runs on
-    the direct depthwise kernels instead."""
+    per-axis grid cap, and the depthwise (cpg == 1) refusal.
+    identity_supports_problem refuses depthwise (cpg == 1) for the grouped
+    implicit-GEMM dgrad binary; depthwise dgrad runs on the direct depthwise
+    kernels."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache(tmp_path, _ARCH)
@@ -2770,9 +2771,9 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     assert not ok and "depthwise" in why
 
     # A split-K binary serves the same problems: grouped is still accepted and
-    # depthwise is still refused. (The even-cpg rule for a split-K 16-bit dX
-    # atomic lives in the spec validator and resolver, covered by
-    # test_conv_split_k.py; supports_problem does not check it.)
+    # depthwise is still refused. The even-cpg rule for a split-K 16-bit dX
+    # atomic lives in the spec validator (covered by test_conv_split_k.py);
+    # supports_problem does not check it.
     split_k_dgrad = KernelIdentity(
         direction="dgrad",
         tile_m=64,

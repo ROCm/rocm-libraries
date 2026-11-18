@@ -13,12 +13,12 @@ __all__ = ["pin_child_rootdir"]
 def pin_child_rootdir(suite: Path) -> Path:
     """Make ``suite`` the rootdir of a pytest started on a file inside it.
 
-    Without a config file in or above the suite, pytest takes the common
-    ancestor of its arguments as the rootdir and then looks upward for one:
-    a suite under ``/tmp/pytest-of-<user>/...`` finds none, and the child
-    collects ``.`` from a directory that holds other users' files. Any entry it
-    cannot read (``/tmp/latest``, an editor's auth socket) raises
-    ``PermissionError``. An empty ``pytest.ini`` stops the search at ``suite``.
+    pytest looks for a config file from the suite upward and takes the first
+    one's folder as the rootdir. Under ``/tmp/pytest-of-<user>/...`` that search
+    can reach another user's ``/tmp/pyproject.toml`` (or ``pytest.ini``,
+    ``tox.ini``, ``setup.cfg``), so the child runs with ``/tmp`` as its rootdir
+    and collecting there raises ``PermissionError`` on entries it cannot read.
+    A one-line ``pytest.ini`` in ``suite`` stops the search there.
     """
     (suite / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     return suite

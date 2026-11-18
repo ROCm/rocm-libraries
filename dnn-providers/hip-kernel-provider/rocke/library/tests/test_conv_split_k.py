@@ -247,7 +247,9 @@ def test_override_holds_a_fixed_16bit_atomic_to_its_limit():
     assert (r32.split_k, r32.two_stage) == (over, False)
 
 
-def test_dgrad_explicit_and_unfitted_arch_unchanged():
+def test_dgrad_explicit_and_unfitted_arch_unchanged_below_the_atomic_cap():
+    # A 16-bit CK degree above ATOMIC_16BIT_MAX_SPLIT_K is covered by the
+    # fallback tests below.
     kw = {
         "arch": "gfx90a",
         "dtype": "bf16",
@@ -447,7 +449,6 @@ def test_dgrad_fallback_holds_a_16bit_atomic_to_its_limit(dtype):
     """An unfitted arch (gfx942) resolves dgrad through the CK formula; a 16-bit
     dX atomic must stay within ATOMIC_16BIT_MAX_SPLIT_K there too."""
     result = _fallback_dgrad(dtype)
-    assert result.split_k <= ATOMIC_16BIT_MAX_SPLIT_K
     assert result.split_k == ATOMIC_16BIT_MAX_SPLIT_K
     assert result.requested > ATOMIC_16BIT_MAX_SPLIT_K
 
