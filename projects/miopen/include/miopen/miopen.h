@@ -148,8 +148,10 @@ MIOPEN_EXPORT miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size
  * This function creates a MIOpen handle. This is called at the very start to initialize the MIOpen
  * environment.
  *
- * @note When MIOpen is built with Composable Kernel support, the first handle created for a given
- * GPU architecture in a process loads the CK dynamic library.
+ * @note When MIOpen is built with Composable Kernel support, the CK dynamic library of each GPU
+ * architecture in the system is loaded on Linux together with MIOpen, if no GPU runtime has
+ * started in the process at that point. Otherwise the first handle created for a given GPU
+ * architecture in a process loads it.
  *
  * @param handle     A pointer to a MIOpen handle type (output)
  *
@@ -163,8 +165,10 @@ MIOPEN_EXPORT miopenStatus_t miopenCreate(miopenHandle_t* handle);
  *
  * The HIP backend uses a hipStream_t type for the stream.
  *
- * @note When MIOpen is built with Composable Kernel support, the first handle created for a given
- * GPU architecture in a process loads the CK dynamic library.
+ * @note When MIOpen is built with Composable Kernel support, the CK dynamic library of each GPU
+ * architecture in the system is loaded on Linux together with MIOpen, if no GPU runtime has
+ * started in the process at that point. Otherwise the first handle created for a given GPU
+ * architecture in a process loads it.
  *
  * @param handle     A pointer to a MIOpen handle type (output)
  * @param stream      An accelerator queue type (input)

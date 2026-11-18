@@ -64,6 +64,12 @@ inline std::string GetCurrentDeviceName()
 #endif
 }
 
+#ifndef _WIN32
+/// Names ("gfx942") of the GPUs in the kernel driver (KFD) topology, read without starting the
+/// HIP runtime. Empty when the topology cannot be read.
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetKfdDeviceNames();
+#endif
+
 class CkImplLibLoader
 {
 public:

@@ -55,6 +55,8 @@ namespace {
 
 // Eagerly load the per-architecture Composable Kernel dynamic library so the
 // one-time dlopen cost is paid at handle creation instead of on first CK call.
+// On Linux the library file is usually mapped already, together with MIOpen (see
+// LoadComposableKernelEarly in ck_impl_lib_loader.cpp), and opening it here does not load it again.
 // The loader caches per process and never throws, so this is safe to call
 // unconditionally during construction. Takes the device name by value (rather
 // than the handle) so it can be called from the constructor without invoking the

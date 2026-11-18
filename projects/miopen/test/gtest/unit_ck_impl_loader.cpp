@@ -174,6 +174,22 @@ TEST(GPU_CkImplLoader_FP16, LoaderStripsDeviceSuffix)
         << "Suffixed and bare device names should resolve to the same cached loader";
 }
 
+#ifndef _WIN32
+// MIOpen loads the CK library of each GPU in the KFD topology when MIOpen itself is loaded. The
+// name derived there must be the one the HIP runtime reports, or that early load picks the wrong
+// library and handle creation then loads the right one.
+TEST(GPU_CkImplLoader_FP16, KfdDeviceNamesContainCurrentDevice)
+{
+    auto device_name = GetCurrentDeviceName();
+    ASSERT_FALSE(device_name.empty());
+    device_name = device_name.substr(0, device_name.find(':'));
+
+    const auto names = miopen::solver::GetKfdDeviceNames();
+    EXPECT_NE(std::find(names.begin(), names.end(), device_name), names.end())
+        << "KFD topology does not list " << device_name;
+}
+#endif
+
 #endif // MIOPEN_BACKEND_HIP
 
 // -- CPU tests (no GPU required) ----------------------------------------------

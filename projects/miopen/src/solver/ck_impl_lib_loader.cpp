@@ -16,6 +16,12 @@
 #include <cstdlib>
 #include <type_traits>
 
+#ifndef _WIN32
+#include <fstream>
+#include <sstream>
+#include <system_error>
+#endif
+
 #ifdef _WIN32
 // clang-format off
 #include <windows.h>
@@ -25,6 +31,7 @@
 #endif
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CK_LIB_PATH)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_EARLY_LOAD)
 
 namespace miopen {
 namespace solver {
@@ -99,6 +106,12 @@ miopen::fs::path GetOwningModuleDirectory()
     return {};
 }
 
+#ifndef _WIN32
+// Keep symbols local to avoid accidental global symbol collisions and
+// preserve RTLD_NODELETE to match the existing unload behavior.
+constexpr int ck_dlopen_flags = RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE;
+#endif
+
 void* OpenDynamicLibrary(const miopen::fs::path& library_path)
 {
     MIOPEN_LOG_I("Loading Composable Kernel dynamic library: " << library_path.string());
@@ -106,11 +119,8 @@ void* OpenDynamicLibrary(const miopen::fs::path& library_path)
     const auto native_path = library_path.wstring();
     return static_cast<void*>(LoadLibraryW(native_path.c_str()));
 #else
-    // Keep symbols local to avoid accidental global symbol collisions and
-    // preserve RTLD_NODELETE to match the existing unload behavior.
-    constexpr int flags    = RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE;
     const auto native_path = library_path.string();
-    return dlopen(native_path.c_str(), flags);
+    return dlopen(native_path.c_str(), ck_dlopen_flags);
 #endif
 }
 
@@ -204,6 +214,98 @@ const CkImplLibLoader& CkImplLibLoader::Get(const std::string& device_name)
     }
     return *it->second;
 }
+
+#ifndef _WIN32
+std::vector<std::string> GetKfdDeviceNames()
+{
+    // gfx_target_version is major * 10000 + minor * 100 + stepping, and the name spells minor
+    // and stepping as hex digits (90010 is gfx90a). CPU nodes report 0.
+    std::vector<std::string> names;
+    std::error_code ec;
+    for(const auto& node : miopen::fs::directory_iterator{"/sys/class/kfd/kfd/topology/nodes", ec})
+    {
+        std::ifstream properties{node.path() / "properties"};
+        std::string key;
+        unsigned long long value = 0;
+        while(properties >> key >> value)
+        {
+            if(key != "gfx_target_version")
+                continue;
+            if(value != 0)
+            {
+                std::ostringstream name;
+                name << "gfx" << value / 10000 << std::hex << (value / 100) % 100 << value % 100;
+                if(std::find(names.begin(), names.end(), name.str()) == names.end())
+                    names.push_back(name.str());
+            }
+            break;
+        }
+    }
+    return names;
+}
+
+namespace {
+
+/// True when this process already has the GPU kernel driver open, that is, when a GPU runtime
+/// has started.
+bool IsKfdOpen()
+{
+    std::error_code ec;
+    for(const auto& entry : miopen::fs::directory_iterator{"/proc/self/fd", ec})
+    {
+        std::error_code link_ec;
+        if(miopen::fs::read_symlink(entry.path(), link_ec) == "/dev/kfd")
+            return true;
+    }
+    return false;
+}
+
+/// Loads the CK library of each GPU in the system while MIOpen itself is being loaded, which in
+/// most applications is before the HIP runtime starts. The HIP runtime extracts the code
+/// objects of a fat binary registered before it starts when a kernel of that fat binary is
+/// first used, and those of one registered after it starts at once and for every device. For
+/// the CK library the second case extracts every code object of the library.
+///
+/// This only maps the library, from the directories CkImplLibLoader searches first, and keeps it
+/// mapped (RTLD_NODELETE). CkImplLibLoader::Get at handle creation then opens the same file, which
+/// is already mapped. It does not log and reads MIOPEN_CK_LIB_PATH without caching,
+/// so environment variables an application sets after loading MIOpen still apply. When it does
+/// not load the library (Windows, a GPU runtime already started, MIOPEN_DEBUG_CK_EARLY_LOAD=0,
+/// another library path at handle creation), handle creation loads it as before.
+__attribute__((constructor)) void LoadComposableKernelEarly()
+{
+    try
+    {
+        if(env::disabled(MIOPEN_DEBUG_CK_EARLY_LOAD) || IsKfdOpen())
+            return;
+        const auto env_path = env::getEnvironmentVariable(MIOPEN_CK_LIB_PATH.GetName());
+        const auto lib_dir  = GetOwningModuleDirectory();
+        for(const auto& name : GetKfdDeviceNames())
+        {
+            const miopen::fs::path filename{MakeLibraryFilename(name)};
+            for(const auto& dir :
+                {env_path ? miopen::fs::path{*env_path} : miopen::fs::path{}, lib_dir})
+            {
+                std::error_code ec;
+                if(dir.empty() || !miopen::fs::exists(dir / filename, ec))
+                    continue;
+                void* handle = dlopen((dir / filename).string().c_str(), ck_dlopen_flags);
+                if(handle != nullptr)
+                {
+                    dlclose(handle);
+                    break;
+                }
+            }
+        }
+    }
+    catch(...) // NOLINT(bugprone-empty-catch)
+    {
+        // An exception must not leave a library constructor. Handle creation loads the library.
+    }
+}
+
+} // namespace
+#endif
 
 // -- Construction / Destruction -----------------------------------------------
 
