@@ -56,6 +56,7 @@ from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
     direct_lds_dma_mfma_caps_reason,
+    DIRECT_PERSISTENT_BLOCKS,
     I32_MAX,
     DirectConvProblem,
     _buf_store_vN,
@@ -73,7 +74,7 @@ _WAVE = 64
 _CK = 64  # channels per chunk
 _BX = 256  # pixels per block tile
 _XT = 4  # 16-pixel MFMA tiles per wave
-PERSIST = 256  # blocks of the persistent grid (one per gfx950 CU)
+PERSIST = DIRECT_PERSISTENT_BLOCKS  # blocks of the persistent grid (one per gfx950 CU)
 ROT = 97  # per-round rotation of the item walk
 
 

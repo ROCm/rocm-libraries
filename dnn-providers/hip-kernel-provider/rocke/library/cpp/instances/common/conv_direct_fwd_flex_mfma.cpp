@@ -33,7 +33,7 @@ namespace
 constexpr int kCK = 64; /* channels per chunk */
 constexpr int kBX = 256; /* pixels per block tile */
 constexpr int kXT = 4; /* 16-pixel MFMA tiles per wave */
-constexpr int kPersist = 256; /* blocks of the persistent grid */
+constexpr int kPersist = ROCKE_DIRECT_PERSISTENT_BLOCKS; /* blocks of the persistent grid */
 constexpr int kRot = 97; /* per-round rotation of the item walk */
 constexpr int kWaves = 8;
 constexpr int64_t kOob = ((int64_t)1 << 31) - 1;
