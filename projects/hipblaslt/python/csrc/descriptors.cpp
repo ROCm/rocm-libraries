@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Handle, MatmulDesc, MatrixLayout and Preference, with one table-driven attribute API (Review A,
-// Decision 3). hipBLASLt checks only that a buffer is at least as big as the attribute, copies
+// Handle, MatmulDesc, MatrixLayout and Preference, with one table-driven attribute API.
+// hipBLASLt checks only that a buffer is at least as big as the attribute, copies
 // sizeof(attribute) bytes, and accepts most values unchecked, so the table is what stops a
 // wrong-size or out-of-range value from reaching the library.
 #include "descriptors.hpp"
@@ -34,7 +34,7 @@ namespace hipblaslt_py
         int count = 0;
         if(hipGetDeviceCount(&count) != hipSuccess || count <= 0)
             throw HipblasLtError("no HIP device is visible, and hipblasLtCreate would end the "
-                                 "process without one (ROCM-33629)");
+                                 "process without one");
     }
 
     Handle::Handle()
@@ -548,6 +548,6 @@ void init_descriptors(nb::module_& m)
                 hipblasLtDestroy(h);
             return static_cast<int>(s);
         },
-        "Test hook: call hipblasLtCreate with no device check, for the ROCM-33629 regression "
-        "test. Without a device it currently ends the process.");
+        "Test hook: call hipblasLtCreate with no device check, for the regression test of its "
+        "exit() without a device.");
 }

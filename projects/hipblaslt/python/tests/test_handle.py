@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Handle lifetime, and the device check that guards against ROCM-33629."""
+"""Handle lifetime, and the device check that keeps hipblasLtCreate from ending the process."""
 
 import os
 import subprocess
@@ -39,14 +39,14 @@ def test_handle_without_a_device_raises():
         """
     )
     assert r.returncode == 0, r.stderr[-2000:]
-    assert "raised:" in r.stdout and "ROCM-33629" in r.stdout
+    assert "raised:" in r.stdout and "no HIP device is visible" in r.stdout
 
 
 # ROCM-33629: hipblasLtCreate calls exit(EXIT_FAILURE) when there's no device
 # (library/src/amd_detail/hipblaslt.cpp, through CHECK_HIP_ERROR), so a caller can't recover.
 # This asserts the fixed behavior, an error status, and is quarantined until the fix lands.
-# Time-box: review at the bindings' close-out (Review D). Delete this marker in the PR that
-# fixes ROCM-33629.
+# Time-box: revisit by the next ROCm release. Delete this marker in the PR that fixes
+# ROCM-33629.
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,

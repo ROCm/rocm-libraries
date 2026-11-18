@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Descriptors and the table-driven attribute API (Review A, Decision 3). No GPU needed.
+"""Descriptors and the table-driven attribute API. No GPU needed.
 
 hipBLASLt checks only that an attribute buffer is big enough, copies sizeof(attribute) bytes, and
 accepts most values unchecked. So the bindings' type table is the only guard against a wrong-size
