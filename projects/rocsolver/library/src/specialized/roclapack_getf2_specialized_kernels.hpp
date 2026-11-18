@@ -252,36 +252,54 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
 
     // shared memory (for communication between threads in group)
     extern __shared__ double lmem[];
-    T* x;
-    T* y;
-    S* sval;
-    I* sidx;
+    T* x{};
+    T* y{};
+    S* sval{};
+    I* sidx{};
 
     {
-        size_t const size_x = bdx * sizeof(T);
-        size_t const size_y = n * sizeof(T);
-        size_t const size_sval = bdx * sizeof(S);
-        size_t const size_sidx = bdx * sizeof(I);
+        auto const len_x = bdx;
+        auto const len_y = n;
+        auto const len_sval = bdx;
+        auto const len_sidx = bdx;
 
-        // ----------------------------------------------------------
-        // extra padding to ensure array sidx is aligned to sizeof(I)
-        // when using int64_t
-        // ----------------------------------------------------------
-        size_t const size_xys = size_x + size_y + size_sval;
-        bool const is_aligned = (size_xys % sizeof(I)) == 0;
-        size_t const size_ipad = (is_aligned) ? 0 : (sizeof(I) - (size_xys % sizeof(I)));
+        if constexpr(sizeof(T) <= sizeof(I))
+        {
+            //  -----------------------------------
+            //  sizeof(S) <= sizeof(T) <= sizeof(I)
+            //
+            //  declare sidx[] first
+            //  -----------------------------------
+            sidx = reinterpret_cast<I*>(&(lmem[0]));
+            x = reinterpret_cast<T*>(sidx + len_sidx);
+            y = reinterpret_cast<T*>(x + len_x);
+            sval = reinterpret_cast<S*>(y + len_y);
+        }
+        else if constexpr(sizeof(I) <= sizeof(S))
+        {
+            //  -----------------------------------
+            //  sizeof(I) <= sizeof(S) <= sizeof(T)
+            //
+            //  declare sidx[] last
+            //  -----------------------------------
 
-        std::byte* pfree = reinterpret_cast<std::byte*>(&(lmem[0]));
-        x = reinterpret_cast<T*>(pfree);
-        pfree += size_x;
-        y = reinterpret_cast<T*>(pfree);
-        pfree += size_y;
-        sval = reinterpret_cast<S*>(pfree);
-        pfree += size_sval;
-
-        pfree += size_ipad;
-        sidx = reinterpret_cast<I*>(pfree);
-        pfree += size_sidx;
+            x = reinterpret_cast<T*>(&(lmem[0]));
+            y = reinterpret_cast<T*>(x + len_x);
+            sval = reinterpret_cast<S*>(y + len_y);
+            sidx = reinterpret_cast<I*>(sval + len_sval);
+        }
+        else if constexpr((sizeof(S) <= sizeof(I)) && (sizeof(I) <= sizeof(T)))
+        {
+            //  -----------------------------------
+            //  sizeof(S) <= sizeof(I) <= sizeof(T)
+            //
+            //  declare sidx[] before sval[]
+            //  -----------------------------------
+            x = reinterpret_cast<T*>(&(lmem[0]));
+            y = reinterpret_cast<T*>(x + len_x);
+            sidx = reinterpret_cast<I*>(y + len_y);
+            sval = reinterpret_cast<S*>(sidx + len_sidx);
+        }
     }
 
     __shared__ T val;
@@ -752,20 +770,17 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
     {
         auto const bdx = dimx;
 
-        size_t const size_x = bdx * sizeof(T);
-        size_t const size_y = n * sizeof(T);
-        size_t const size_sval = bdx * sizeof(S);
-        size_t const size_sidx = bdx * sizeof(I);
+        auto const len_x = bdx;
+        auto const len_y = n;
+        auto const len_sval = bdx;
+        auto const len_sidx = bdx;
 
-        // ----------------------------------------------------------
-        // extra padding to ensure array sidx is aligned to sizeof(I)
-        // when using int64_t
-        // ----------------------------------------------------------
-        size_t const size_xys = size_x + size_y + size_sval;
-        bool const is_aligned = (size_xys % sizeof(I)) == 0;
-        size_t const size_ipad = (is_aligned) ? 0 : (sizeof(I) - (size_xys % sizeof(I)));
+        size_t const size_x = len_x * sizeof(T);
+        size_t const size_y = len_y * sizeof(T);
+        size_t const size_sval = len_sval * sizeof(S);
+        size_t const size_sidx = len_sidx * sizeof(I);
 
-        size_t lmemsize = size_x + size_y + size_sval + size_ipad + size_sidx;
+        size_t const lmemsize = size_x + size_y + size_sval + size_sidx;
 #ifndef NDEBUG
         {
             const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
