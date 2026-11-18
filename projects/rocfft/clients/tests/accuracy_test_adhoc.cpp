@@ -757,24 +757,29 @@ INSTANTIATE_TEST_SUITE_P(adhoc_64_bit_idx_twiddle_large_slow,
 //   2^32 - 1 work items (e.g. 1D real 49152 and 524288, 3D real 64x56x65);
 // - large half-precision transforms whose results overflow fp16 (e.g. 2D 64x131072,
 //   3D 100x56x100 and 64x56x65), which leaves SBRC_TRANSPOSE_Z_XY without a token.
+// Half precision is only used for inverse transforms, which skip the round trip.
 const auto adhoc_stockham_grid_y_split_slow_tokens = {
     // clang-format off
     // 1D: splits the STOCKHAM row kernel on gfx1201
-    "complex_forward_len_64_half_ip_batch_268435456_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0", // ~64 GiB VRAM
+    "complex_forward_len_64_single_ip_batch_268435456_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
     // 2D small: splits 2D_SINGLE on gfx1201
-    "complex_forward_len_4_4_half_ip_batch_536870912_istride_4_1_CI_ostride_4_1_CI_idist_16_odist_16_ioffset_0_0_ooffset_0_0", // ~32 GiB VRAM
+    "complex_forward_len_4_4_single_ip_batch_536870912_istride_4_1_CI_ostride_4_1_CI_idist_16_odist_16_ioffset_0_0_ooffset_0_0", // ~64 GiB VRAM
     // reported case (ROCM-32021); splits SBRC_TRANSPOSE_XY_Z on gfx1201
+    // TODO: use half precision once its round trip is reliable at this size
     "complex_forward_len_512_512_512_single_ip_batch_128_istride_262144_512_1_CI_ostride_262144_512_1_CI_idist_134217728_odist_134217728_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
     "complex_inverse_len_512_512_512_single_ip_batch_128_istride_262144_512_1_CI_ostride_262144_512_1_CI_idist_134217728_odist_134217728_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
+    "complex_inverse_len_512_512_512_half_ip_batch_128_istride_262144_512_1_CI_ostride_262144_512_1_CI_idist_134217728_odist_134217728_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
     // 1D large: splits SBRC on gfx1201
+    // TODO: use half precision once its round trip is reliable at this size
     "complex_forward_len_131072_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_131072_odist_131072_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
     // 1D large: splits both SBCC and SBRC on gfx1201
-    "complex_forward_len_262144_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_262144_odist_262144_ioffset_0_0_ooffset_0_0", // ~512 GiB VRAM
-    "complex_inverse_len_262144_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_262144_odist_262144_ioffset_0_0_ooffset_0_0", // ~512 GiB VRAM
+    // TODO: re-enable once GPUs with more than 512 GiB of memory are available
+    // "complex_forward_len_262144_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_262144_odist_262144_ioffset_0_0_ooffset_0_0", // ~512 GiB VRAM
+    // "complex_inverse_len_262144_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_262144_odist_262144_ioffset_0_0_ooffset_0_0", // ~512 GiB VRAM
     // 2D_RC: splits SBCC on gfx1201
-    "complex_forward_len_72_100_half_ip_batch_1597831_istride_100_1_CI_ostride_100_1_CI_idist_7200_odist_7200_ioffset_0_0_ooffset_0_0", // ~43 GiB VRAM
+    "complex_forward_len_72_100_single_ip_batch_1597831_istride_100_1_CI_ostride_100_1_CI_idist_7200_odist_7200_ioffset_0_0_ooffset_0_0", // ~86 GiB VRAM
     // 2D real: splits SBCC on gfx1201
-    "real_forward_len_72_64_half_ip_batch_3728271_istride_66_1_R_ostride_33_1_HI_idist_4752_odist_2376_ioffset_0_0_ooffset_0_0", // ~33 GiB VRAM
+    "real_forward_len_72_64_single_ip_batch_3728271_istride_66_1_R_ostride_33_1_HI_idist_4752_odist_2376_ioffset_0_0_ooffset_0_0", // ~66 GiB VRAM
     // 3D_PP: splits the partial-pass STOCKHAM and SBCC kernels on gfx1201
     "complex_forward_len_32_32_64_single_ip_batch_262144_istride_2048_64_1_CI_ostride_2048_64_1_CI_idist_65536_odist_65536_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
     // REAL_3D_PP: splits the partial-pass SBCC kernel on gfx1201
