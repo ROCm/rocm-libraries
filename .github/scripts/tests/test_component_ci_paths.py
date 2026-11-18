@@ -17,6 +17,7 @@ from component_ci import (
     COMPONENTS,
     EXCLUSION_EXCEPTIONS,
     EXCLUSIONS,
+    HIPBLASLT_PYTHON_ALL_LANES_PATHS,
     INFRA_PATHS,
     detect_changed_components,
 )
@@ -29,6 +30,7 @@ class ComponentCIPathsTest(unittest.TestCase):
         patterns.update(INFRA_PATHS)
         for table in (EXCLUSIONS, EXCLUSION_EXCEPTIONS):
             patterns.update(path for group in table.values() for path in group)
+        patterns.update(HIPBLASLT_PYTHON_ALL_LANES_PATHS)
 
         # Git can list the complete tree even in component CI's sparse checkout.
         tracked = subprocess.run(
