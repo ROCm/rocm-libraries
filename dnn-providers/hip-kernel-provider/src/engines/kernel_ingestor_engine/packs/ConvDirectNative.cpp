@@ -687,8 +687,9 @@ int64_t rowsLdsBytes(const Config& config)
     if(config.cf != 0)
     {
         // Raw stage: per halo row bc channel rows of the 8-column runs covering the halo from
-        // its 8-aligned start; plus one channels-last stage.
-        const int64_t runs = (7 + tileColumns + haloReach + 7) / 8;
+        // its 8-aligned start (an even count: whole 16-column transpose blocks); plus one
+        // channels-last stage.
+        const int64_t runs = ((7 + tileColumns + haloReach + 7) / 8 + 1) / 2 * 2;
         return haloRows * config.bc * runs * 16
                + haloRows * (tileColumns + haloReach) * config.bc * operandBytes;
     }

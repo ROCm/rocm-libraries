@@ -9,8 +9,8 @@ SPDX-License-Identifier:  MIT
 
 ## At a glance
 - **What:** direct convolution with every filter tap run as a small GEMM over an LDS-staged input window. Two kernel kinds: the halo tile (`mma`, `fma`) and `rows`, hipconv's filter-row-reuse form with LDS DMA and a persistent tile walk.
-- **Covers:** forward and backward data. fp32, fp16 and bf16; a three-bf16 fp32 form in the `CONV_DIRECT_FWD/BWD_TF32` sibling engines. Any activation layout: channels-last is native; packed channels-first 16-bit 2-D graphs run in place on gfx950 (`rows` `cf`) and are staged elsewhere; other layouts are staged. 2-D and 3-D only: 1-D graphs are declined.
-- **Geometry limits:** filters 3x3, 5x5, 7x7, 1x7, 7x1, 3x3x3 and 5x5x5, fixed at compile time. Groups 1, stride 1, dilation 1. Any padding, asymmetric included, and both convolution modes.
+- **Covers:** forward and backward data. fp32, fp16 and bf16; a three-bf16 fp32 form in the `CONV_DIRECT_FWD/BWD_TF32` sibling engines. Any activation layout: channels-last is native; packed channels-first 16-bit 2-D graphs run in place on gfx950 (`rows` `cf`) and are staged elsewhere; other layouts are staged. 2-D and 3-D; 1-D graphs (and 2-D ones of one row) under 1 x S filters on the `rows` line configs.
+- **Geometry limits:** filters 3x3, 5x5, 7x7, 1x7, 7x1, 3x3x3 and 5x5x5, and 1x3, 1x5, 1x7 and 1x11 on one-row images, fixed at compile time. Groups 1, stride 1. Dilation 1, or the dilation a `rows` config fixes: 2 and 4 for 2-D 3x3, 3 and 5 for one-row 1 x S (an axis the filter does not span takes any dilation). Any padding, asymmetric included, and both convolution modes.
 - **Large tensors:** served past 2 GiB as long as one forward-form input image stays under 2 GiB (32-bit offsets inside an image, 64-bit image bases).
 - **Arches:** MFMA on gfx908 to gfx950 and WMMA on gfx11/gfx12, both on the implicit-GEMM core's atoms. FMA micro-tiles everywhere, gfx906 included, as the floor and the exact-fp32 path on RDNA. `rows` runs on gfx950 (16-byte LDS DMA) and on gfx908, gfx90a and gfx942 (dword LDS DMA); its channels-first form `cf` on gfx950 only.
 - **Wins when:** dense stride-1 3x3 and 3x3x3 layers with 16-bit channels-last data (diffusion VAEs and UNets, video VAEs). On RDNA it also wins exact-fp32 3-D layers, where MIOpen falls back to naive or GEMM kernels.
@@ -18,9 +18,9 @@ SPDX-License-Identifier:  MIT
   - the largest NHWC bf16 VAE maps on gfx950 (384² to 1024², 4-8 images) trail `ConvHipConv` by 1.01-1.03x;
   - 384-channel 3x3x3 layers on gfx90a and gfx942 trail CK's 3-D grouped forward by 1.09-1.16x;
   - NCHW 16-bit 3x3 usually goes to `CONV_WINOGRAD`;
-  - anything strided, dilated or grouped goes to `CONV_IGEMM`.
+  - anything strided or grouped, and dilations the `rows` configs do not fix (DeepLab's 6-36), go to `CONV_IGEMM`.
 - **Precision:** fp32 accumulation of exact products, rounded once at the store (split-C sums fp32 partials in a fixed order). Deterministic. No numerical note on the exact engines; the TF32 siblings report `TENSOR_CORE`.
-- **Instances:** 586 exact configs, 293 per direction: 145 halo-tile MMA, 96 `rows`, 8 channels-first `rows` (`cf`), 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
+- **Instances:** 1062 exact configs, 531 per direction: 169 halo-tile MMA, 174 2-D and 3-D `rows` (56 of them channels-first `cf`, 28 dilated), 144 `rows` line tiles, 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K2 is our fastest engine: 1.49x gfx950, 1.23x gfx942, 1.22x gfx90a, 1.03x gfx908, 2.16x gfx906, 2.80x gfx1201, 3.88x gfx1100. MIOpen ran in search mode.
 
 ## Why it exists
@@ -60,6 +60,12 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
 - One raw stage (the next chunk's DMA overlaps the steps) and one channels-last stage; two barriers a chunk.
 - The epilogue stores channels-first: 16 lanes write 16 consecutive columns of a channel row.
 
+**Dilated rows (`dil`, 2-D).** A config fixes the filter dilation d. The halo grows by (R - 1) d rows and (S - 1) d columns, filter row r of output row p reads halo row p + r d, and each step's columns shift by s d, so a dilated 3x3 layer still stages its input once per channel chunk for all nine taps. With d up to the wave's rows the step's input fragments are one run of PW + (R - 1) d rows; past them, R separate runs of PW. Backward data pads dy by (R - 1) d - p. The halo bound keeps d at 2 and 4 for 3x3 (32-channel chunks on gfx950, 16 on the 64 KiB parts); larger dilations stay on `CONV_IGEMM`.
+
+**Line tiles (`line`, one-row images).** For 1-D graphs and 2-D graphs of one row under a 1 x S filter (audio convolutions). A 2-D rows tile on a one-row image leaves every row but one idle, and its weight fragments then serve one MFMA each. A line tile is instead wp x pw segments of 16 wq columns of the row, end to end, staged as one halo line of the tile plus the filter's reach (S - 1) d; segment p reads at column offset 16 wq p, and output row p of the step loop is segment p. Each weight fragment serves the wave's 8 segments and the staged line serves every tap. Channels-first (16-bit, in place, rows of whole 16-byte runs) and channels-last; dilation fixed per config (1, 3, 5).
+
+**Narrow channels.** 32- and 64-wide output blocks (fn 1 and 2) at 32-channel chunks on gfx950 and 16-channel chunks on the dword-DMA parts, channels-last and channels-first: on K <= 64 layers a 128-wide block leaves half or more of every MFMA idle, and on C <= 64 reductions (backward data of K <= 64 layers) a 64-channel chunk half of every step.
+
 ## Implementation design
 - **Kernel structure.**
   - Halo tile: `WM x WN` waves of the atom, or a 256-thread FMA block. The halo is double-buffered with one barrier per chunk, and the next chunk's halo loads issue after the first weight loads so in-order `vmcnt` never stalls them.
@@ -75,13 +81,13 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
 - **Host gates (every field).** Everything the naive engine's parser gates, plus:
   - direction forward or backward data;
   - fp32/fp16/bf16, with x, w and y of one type;
-  - spatial rank 2 or 3, groups 1, stride 1 and dilation 1 on every axis;
+  - spatial rank 2 or 3 (or 1, a one-row image), groups 1, stride 1 on every axis, one dilation of the axes the filter spans (1 in 3-D);
   - a filter in the instantiated set;
   - n, c, k, extents, filter and padding within 32 bits;
   - one forward-form input image under 2^31 bytes.
 
   Per config, the kernel match also requires:
-  - direction, dtype and filter equal to the graph's;
+  - direction, dtype, filter and dilation equal to the graph's; line configs take one-row images only, and only they take 1-D graphs;
   - the atom runs on the device and takes the graph's element type (three-bf16 only for fp32 graphs);
   - the ship list names the device; `rows` LDS fits the device (160 KiB gfx950, 64 KiB elsewhere);
   - `cf`: gfx950, 16-bit, 2-D, no ping-pong, unfold, split-C or staged epilogue; both activations packed channels-first and input rows of whole 16-byte runs;
@@ -90,10 +96,10 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
 - **Planner.**
   - Halo tile: picks `tw`, then the largest `th` whose halo fits the compile-time LDS bound, minimizing padded pixel slots plus halo loads. Depth is split until there are 4 (ring) or 8 blocks per dispatch unit (`DeviceUnits.hpp`: CUs on gfx9, WGPs on gfx10+).
   - Split-C, halo tile: only below 2 blocks per unit, with at least 2 chunks per split and at most 16 splits. A grid that needs no split declines the split config; its split-0 twin runs the same tile in one launch.
-  - `rows` tiles are fixed, and the grid is min(tiles, units). Rows split-C runs only where the tiles leave three quarters of the units idle: it measured 1.4x on n1 c640 64², but 0.7-0.9x at 128-250 tiles.
-  - gfx950 16-bit rows tiles smaller than 16 x 32 x 128 decline past 8 persistent rounds, where the large tile is ahead.
+  - `rows` tiles are fixed, and the grid is min(tiles, units). A line tile is wp pw x 16 wq columns of the row. Rows split-C runs only where the tiles leave three quarters of the units idle: it measured 1.4x on n1 c640 64², but 0.7-0.9x at 128-250 tiles.
+  - gfx950 16-bit rows tiles smaller than 16 x 32 x 128 decline past 8 persistent rounds, where the large tile is ahead. Tiles compare by the output channels they compute: on K < 128 the reference tile's columns past K are idle, so a tile as wide as K is not smaller.
 - **Workspace.** In order: staged activations (none for `cf`), formatted weights, the three-bf16 input copy, then split partials. Each region is 256-byte aligned. Non-channels-last activations go through K1's tiled transpose (packed channels-first) or a strided copy. The weight pre-pass runs on every execution; its 16-byte form costs about 0.016 ms on a 384x384x27 bf16 filter on gfx1201.
-- **Catalog.** The knobs are the atom, filter, `bm/bn/bc`, waves, `vec`, `ring`, `bl`, `split`, FMA `tm/tn/nt/pipe`, and rows `pw/fn/wp/wq/wk/pp/epi/un/cf`. Configs exist because they won a measured cell. The K-fill tiles are 16-, 32- and 96-wide, for K <= 16 to-RGB heads and K = 32 / 96 VAE layers. The 192-wide bf16 tiles on gfx90a are for Wan VAE's K = 192 / 384. The 48-wide rows tiles are for 48² / 96² maps.
+- **Catalog.** The knobs are the atom, filter, `bm/bn/bc`, waves, `vec`, `ring`, `bl`, `split`, FMA `tm/tn/nt/pipe`, and rows `pw/fn/wp/wq/wk/pp/epi/un/cf/dil/line`. Configs exist because they won a measured cell. The dilated and line tiles cover DeepLab's dilation 2 / 4 stages and HiFi-GAN-style 3-, 7- and 11-tap stacks at dilation 1, 3 and 5. The K-fill tiles are 16-, 32- and 96-wide, for K <= 16 to-RGB heads and K = 32 / 96 VAE layers. The 192-wide bf16 tiles on gfx90a are for Wan VAE's K = 192 / 384. The 48-wide rows tiles are for 48² / 96² maps.
 - **Codegen choices.**
   - On gfx950 and RDNA, weights are read by buffer loads: the lane's column is the vector offset and the step a wave-uniform scalar offset, so a load needs no VALU address math. Measured gain about 3.9% weighted on gfx1201.
   - Rows recompute lane-derived values from an opaque, masked lane id, so the compiler does not hoist dozens of invariants into live registers.
@@ -153,7 +159,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - gfx90a/gfx942 384-channel 3x3x3 forward against CK (1.09-1.16x);
   - gfx908 bf16, which runs on the half-rate 16x16x8 atom: `rows` reaches 60-66 TFLOP/s (65-72% of the atom's peak) against CK's 72-78%, so CK keeps most large bf16 layers. gfx908 fp32 is mixed.
   - On gfx942, the 16-bit `rows` tiles (no ping-pong) take most 2-D 3x3 layers from the halo tile in a kernel-only sweep, but for only about 7% of the weighted time. 3x3x3 `rows` tiles measure slower there and do not ship.
-- **Coverage gaps:** no 1-D, no generic tier for other filter sizes, and images past 2 GiB are declined. `CONV_IGEMM` is the floor for all of these; it reads 1-D channels-first (N C L) graphs in place on its `cfx` configs.
+- **Coverage gaps:** 1-D only under 1 x 3/5/7/11 filters (line tiles), dilation only where a `rows` config fixes it, no generic tier for other filter sizes, and images past 2 GiB are declined. `CONV_IGEMM` is the floor for all of these; it reads 1-D channels-first (N C L) graphs in place on its `cfx` configs.
 
 ## Numerical precision
 - Every config accumulates in fp32. 16-bit products are exact in the atoms, and fp32 runs exact on the fp32 MFMA atoms (CDNA) or FMA (everywhere). The output is rounded once to its type. Split-C writes fp32 partials and rounds once in an in-order reduce.

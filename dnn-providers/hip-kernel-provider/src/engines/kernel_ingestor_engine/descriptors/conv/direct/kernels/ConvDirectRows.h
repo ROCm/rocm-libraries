@@ -1724,7 +1724,8 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
     constexpr int G = BC / GE;
     constexpr int ROWG = HW * G;
     constexpr int NG = HH * ROWG; // channels-last granules
-    constexpr int RUNS = (7 + HW + 7) / 8; // raw runs per channel row
+    // Raw runs per channel row, even: whole 16-column transpose blocks.
+    constexpr int RUNS = ((7 + HW + 7) / 8 + 1) / 2 * 2;
     constexpr int XW = RUNS * 8;
     constexpr int NSLOT = HH * BC * RUNS; // raw 16-byte slots
     constexpr int KK = BC / KA;

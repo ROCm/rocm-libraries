@@ -213,6 +213,7 @@ TEST(TestConvDirectForm, OneRowImagesTakeLineFiltersAndTheirDilation)
     auto line = baseShape();
     line.input = {40};
     line.filter = {7};
+    line.stride = {1};
     line.dilation = {3};
     line.prePadding = line.postPadding = {9};
     const auto oneD = parse(specFor(line, ConvDirection::FORWARD));
@@ -1012,6 +1013,11 @@ TEST(TestConvDirectKernelMatch, LineConfigsServeOneRowImages)
     cf.epi = 0;
     EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(cf, "HALF"))),
               32 * ((7 + 562 + 7) / 8) * 16 + 562 * 32 * 2);
+    // 1 x 11 undilated: (7 + 522 + 7) / 8 = 67 runs, rounded up to whole 16-column blocks.
+    auto cf1 = cf;
+    cf1.dil = 1;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(cf1, "HALF"))),
+              32 * 68 * 16 + 522 * 32 * 2);
     // Not on a two-row image, nor at another dilation or width.
     auto twoRows = row;
     twoRows.input = {2, 64};

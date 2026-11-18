@@ -878,7 +878,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 reach = (c["s"] - 1) * c["dil"]
                 lds = 2 * hh * c["un"] * (cols // c["un"] + reach) * c["bc"] * eb
                 if c["cf"]:
-                    runs = (7 + cols + reach + 7) // 8
+                    runs = ((7 + cols + reach + 7) // 8 + 1) // 2 * 2
                     lds = lds // 2 + hh * c["bc"] * runs * 16
                 limit = 160 * 1024 if archs <= {"gfx950"} else 64 * 1024
                 assert lds <= limit, (c, archs, lds)
