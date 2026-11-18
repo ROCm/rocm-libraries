@@ -204,6 +204,7 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.dws = kernel.getIntMetadata("dws");
     c.pb = kernel.getIntMetadata("pb");
     c.math = kernel.getIntMetadata("math");
+    c.flat = kernel.metadata.count("flat") != 0 ? kernel.getIntMetadata("flat") : 0;
     return c;
 }
 
@@ -1188,9 +1189,10 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 23> KNOBS{
-        "atom_id", "loop", "layout", "bk",  "bc", "bq",    "fr",  "s",  "sw",  "dw", "wk",  "wc",
-        "tk",      "tc",   "vec",    "xcd", "ns", "align", "bpu", "wq", "dws", "pb", "math"};
+    static constexpr std::array<const char*, 24> KNOBS{
+        "atom_id", "loop",  "layout", "bk", "bc",  "bq", "fr",   "s",
+        "sw",      "dw",    "wk",     "wc", "tk",  "tc", "vec",  "xcd",
+        "ns",      "align", "bpu",    "wq", "dws", "pb", "math", "flat"};
     std::array<std::set<std::vector<int64_t>>, 3> seen;
     for(const auto& kernel : catalog())
     {
