@@ -13,8 +13,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Optimizations
 
 * Added autotuned gfx950 (MI355X) configs for the following device algorithms:
-  * `adjacent_find`, `histogram`, `merge`, `partition` (flag, predicate, three-way, two-way flag, two-way predicate), `radix_sort` (block sort), `reduce`, `reduce_by_key`, `run_length_encode`, `run_length_encode_non_trivial_runs`, `scan`, `scan_by_key`, `search_n`, `segmented_radix_sort`, `segmented_reduce`, `segmented_topk`, `select` (flag, predicate, predicated flag, unique, unique by key), `topk`, `transform`, and `transform` (pointer).
-* Retuned the gfx950 config for the `radix_sort` onesweep variant.
+  * `adjacent_find`, `merge`, `partition` (flag, predicate, three-way, two-way flag, two-way predicate), `radix_sort` (block sort), `reduce`, `run_length_encode`, `run_length_encode_non_trivial_runs`, `scan`, `scan_by_key`, `search_n`, `segmented_reduce`, `select` (flag, predicate, predicated flag, unique, unique by key), `transform`, and `transform` (pointer).
 
 ### Removed
 
@@ -30,6 +29,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * `binary_search` (`device_binary_search.hpp`).
   * `lower_bound` (`device_lower_bound.hpp`).
   * `upper_bound` (`device_upper_bound.hpp`).
+* TODO: Retune the gfx950 configs for the following algorithms. Their autotuned configs were invalid, so they are kept at the previous configs for now. Retune them after the tuner and benchmark fixes in #15571 are merged:
+  * `histogram` (`device_histogram.hpp`). The benchmark did not pass the tuned config to rocPRIM, so every candidate ran the default config.
+  * `segmented_topk` (`device_segmented_topk_air.hpp`). The benchmark used `k = 0`, so rocPRIM returned without launching a kernel.
+  * `topk` (`device_topk_air.hpp`). Tuned before the fix to `choose_pivot_bin`.
+  * `segmented_radix_sort` (`device_segmented_radix_sort.hpp`). The tuner did not limit the shared memory of the warp sorts, so a config needed more than 64 KiB and broke builds for targets that rocPRIM doesn't recognize. The tuner now checks this limit.
+  * `reduce_by_key` (`device_reduce_by_key.hpp`). Tuned only for integer value types, so floating-point value types got no tuned config. The tuner now also tunes `double`, `float`, and `rocprim::half` values.
+  * `radix_sort` onesweep variant (`device_radix_sort_onesweep.hpp`). The tuner's shared memory check let oversized configs through.
 
 ### Resolved Issues
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
