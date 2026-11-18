@@ -11,7 +11,9 @@
 #include "../../src/private/erase_outside_lock.hpp"
 #include "../../src/private/insert_outside_lock.hpp"
 
+#include <cstddef>
 #include <memory>
+#include <new>
 #include <unordered_map>
 
 namespace {
@@ -52,6 +54,57 @@ struct Probe
     Observation& observation_;
 };
 
+// Throws std::bad_alloc from the Nth allocation after `failIn` is set (1 is the next one), to
+// reach the points where a map insert can fail part-way.
+int failIn = 0;
+
+template <typename T>
+struct FailingAllocator
+{
+    using value_type = T;
+
+    FailingAllocator() = default;
+    template <typename U>
+    FailingAllocator(const FailingAllocator<U>&)
+    {
+    }
+
+    T* allocate(std::size_t n)
+    {
+        if(failIn > 0 && --failIn == 0)
+            throw std::bad_alloc();
+        return std::allocator<T>().allocate(n);
+    }
+    void deallocate(T* p, std::size_t n) { std::allocator<T>().deallocate(p, n); }
+
+    template <typename U>
+    bool operator==(const FailingAllocator<U>&) const
+    {
+        return true;
+    }
+    template <typename U>
+    bool operator!=(const FailingAllocator<U>&) const
+    {
+        return false;
+    }
+};
+
+struct LockProbe
+{
+    LockProbe(const TrackingMutex& mutex, Observation& observation)
+        : mutex_(mutex), observation_(observation)
+    {
+    }
+    ~LockProbe()
+    {
+        observation_.destroyed         = true;
+        observation_.heldWhenDestroyed = mutex_.held;
+    }
+
+    const TrackingMutex& mutex_;
+    Observation& observation_;
+};
+
 } // namespace
 
 // The destructor of a hipDNN handle's state can end in a call that takes the same lock, so
@@ -59,8 +112,8 @@ struct Probe
 TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysTheValueAfterReleasingTheMutex)
 {
     TrackingMutex mutex;
-    Probe::Map map;
     Observation observation;
+    Probe::Map map;
     map[1] = std::make_unique<Probe>(mutex, map, observation);
 
     miopen::wrapper::EraseDestroyingOutsideLock(map, mutex, 1);
@@ -73,9 +126,9 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysTheValueAfterReleasingTheMutex)
 TEST(CPU_HipdnnEraseOutsideLock_NONE, TheEntryIsGoneBeforeTheValueIsDestroyed)
 {
     TrackingMutex mutex;
-    Probe::Map map;
     Observation observation;
     Observation other;
+    Probe::Map map;
     map[1] = std::make_unique<Probe>(mutex, map, observation);
     map[2] = std::make_unique<Probe>(mutex, map, other);
 
@@ -91,8 +144,8 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, TheEntryIsGoneBeforeTheValueIsDestroyed)
 TEST(CPU_HipdnnEraseOutsideLock_NONE, AMissingKeyChangesNothing)
 {
     TrackingMutex mutex;
-    Probe::Map map;
     Observation observation;
+    Probe::Map map;
     map[1] = std::make_unique<Probe>(mutex, map, observation);
 
     miopen::wrapper::EraseDestroyingOutsideLock(map, mutex, 2);
@@ -107,9 +160,9 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, AMissingKeyChangesNothing)
 TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysALosingCandidateAfterReleasingTheMutex)
 {
     TrackingMutex mutex;
-    Probe::Map map;
     Observation winner;
     Observation loser;
+    Probe::Map map;
     map[1] = std::make_unique<Probe>(mutex, map, winner);
 
     const bool inserted = miopen::wrapper::InsertDestroyingLoserOutsideLock(
@@ -126,8 +179,8 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysALosingCandidateAfterReleasingTheM
 TEST(CPU_HipdnnEraseOutsideLock_NONE, StoresACandidateWhenTheKeyIsFree)
 {
     TrackingMutex mutex;
-    Probe::Map map;
     Observation observation;
+    Probe::Map map;
 
     auto candidate           = std::make_unique<Probe>(mutex, map, observation);
     const Probe* const probe = candidate.get();
@@ -139,4 +192,40 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, StoresACandidateWhenTheKeyIsFree)
     EXPECT_FALSE(mutex.held);
     ASSERT_EQ(map.count(1), 1u);
     EXPECT_EQ(map.at(1).get(), probe);
+}
+
+// A throwing allocation must not make the insert destroy the candidate under the lock. The
+// failing allocation is walked across every allocation the insert makes, so the test does not
+// depend on how the map grows.
+TEST(CPU_HipdnnEraseOutsideLock_NONE, AnInsertThatThrowsNeverDestroysTheCandidateUnderTheLock)
+{
+    using FailingMap =
+        std::unordered_map<int,
+                           std::unique_ptr<LockProbe>,
+                           std::hash<int>,
+                           std::equal_to<int>,
+                           FailingAllocator<std::pair<const int, std::unique_ptr<LockProbe>>>>;
+    int threw = 0;
+    for(int allocation = 1; allocation <= 4; ++allocation)
+    {
+        TrackingMutex mutex;
+        Observation observation;
+        FailingMap map;
+        failIn = allocation;
+        try
+        {
+            miopen::wrapper::InsertDestroyingLoserOutsideLock(
+                map, mutex, 1, std::make_unique<LockProbe>(mutex, observation));
+        }
+        catch(const std::bad_alloc&)
+        {
+            ++threw;
+        }
+        failIn = 0;
+
+        EXPECT_FALSE(mutex.held) << "allocation " << allocation;
+        if(observation.destroyed)
+            EXPECT_FALSE(observation.heldWhenDestroyed) << "allocation " << allocation;
+    }
+    EXPECT_GT(threw, 0);
 }
