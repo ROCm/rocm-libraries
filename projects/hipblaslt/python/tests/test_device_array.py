@@ -56,7 +56,7 @@ def test_mapping_itemsizes_match_the_cpp_side():
 
 
 def test_dtype_mismatch_is_refused_through_core():
-    # The prototype checked only in its Python wrapper, so this call went straight through.
+    # The check must live in C++: a check only in the Python wrapper lets this call through.
     with pytest.raises(
         ValueError, match="float16 array can't go into a DataType.R_32F"
     ):
