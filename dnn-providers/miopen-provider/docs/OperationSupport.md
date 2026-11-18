@@ -115,9 +115,10 @@ The following table lists all operations currently supported in hipDNN:
 > output layout that does not overlap but breaks this rule, such as dims [3, 2] with strides
 > [2, 3], is declined. Not supported: MUL_NO_ZEROS (MIOpen has no equivalent), BFP16 (MIOpen's
 > legacy reduce kernels have no bf16 support), deterministic reduction (`is_deterministic`),
-> in-place execution, and tensors whose lengths, strides, element count or memory extent in bytes
-> exceed INT32_MAX. A reduction to a single output element is further limited to 1,073,741,568
-> (about 2^30) input elements.
+> in-place execution, pass-by-value tensors (a runtime host scalar or a value baked into the
+> graph), and tensors whose lengths, strides, element count or memory extent in bytes exceed
+> INT32_MAX. A reduction to a single output element is further limited to 1,073,741,568 (about
+> 2^30) input elements.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
