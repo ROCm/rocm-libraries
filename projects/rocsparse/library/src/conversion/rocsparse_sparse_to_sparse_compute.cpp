@@ -933,6 +933,25 @@ FUNCTION_CONVERT(bsr, bsr)
                                       source_->data_type != target_->data_type);
         }
 
+        // The conversion into the intermediate CSR matrix supports block dimensions up to 256
+        // and not these value types. Refuse them before the intermediate is allocated.
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented, source_->block_dim > 256);
+        switch(source_->data_type)
+        {
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        }
+        default:
+        {
+            break;
+        }
+        }
+
         // The conversion kernels need sorted blocks.
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                                   source_->descr->storage_mode != rocsparse_storage_mode_sorted);

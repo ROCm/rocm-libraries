@@ -917,6 +917,57 @@ namespace
         }
     }
 
+    // A re-block of a source with a block dimension larger than 256, or with i8, u8, u32,
+    // f16 or bf16 values, returns rocsparse_status_not_implemented in permissive mode. The
+    // intermediate CSR matrix of the large cases would not fit in device memory, so the
+    // status shows that the conversion is refused before the intermediate is allocated.
+    TEST_F(ConvSpmat, SparseToSparseBsrReblockUnsupported)
+    {
+        DevBuf<int64_t> ptr(std::vector<int64_t>{0, 1}), ind(std::vector<int64_t>{0});
+        DevBuf<double>  val(std::vector<double>(300 * 300, 1.0));
+        struct Case
+        {
+            const char*        what;
+            int64_t            mb_s, nnzb, bd_s, bd;
+            rocsparse_datatype type;
+        };
+        const int64_t big     = int64_t(1) << 15;
+        const Case    cases[] = {
+            {"one 300 x 300 block", 1, 1, 300, 1, f64},
+            {"one 50000 x 50000 block", 1, 1, 50000, 1, f64},
+            {"2^30 2 x 2 i8 blocks", big, big * big, 2, 4, rocsparse_datatype_i8_r},
+            {"2^30 2 x 2 u8 blocks", big, big * big, 2, 4, rocsparse_datatype_u8_r},
+            {"2^30 2 x 2 u32 blocks", big, big * big, 2, 4, rocsparse_datatype_u32_r},
+            {"2^30 2 x 2 f16 blocks", big, big * big, 2, 4, rocsparse_datatype_f16_r},
+            {"2^30 2 x 2 bf16 blocks", big, big * big, 2, 4, rocsparse_datatype_bf16_r},
+        };
+        for(const Case& c : cases)
+        {
+            SCOPED_TRACE(c.what);
+            const int64_t mb = (c.mb_s * c.bd_s + c.bd - 1) / c.bd;
+            Spmat         source, target;
+            ASSERT_EQ(rocsparse_create_bsr_descr(&source,
+                                                 c.mb_s,
+                                                 c.mb_s,
+                                                 c.nnzb,
+                                                 dir_r,
+                                                 c.bd_s,
+                                                 ptr,
+                                                 ind,
+                                                 val,
+                                                 i64,
+                                                 i64,
+                                                 base0,
+                                                 c.type),
+                      st_ok);
+            ASSERT_EQ(rocsparse_create_bsr_descr(
+                          &target, mb, mb, 1, dir_r, c.bd, ptr, ind, val, i64, i64, base0, c.type),
+                      st_ok);
+            EXPECT_EQ(analysis_status(handle, source, target, true),
+                      rocsparse_status_not_implemented);
+        }
+    }
+
     // A 4 x 4 matrix in 2 x 2 blocks (0,0), (0,1) and (1,1), converted to a BSR target with
     // 1 x 1 blocks that declares the same 2 x 2 block grid, or 4 block rows and 2 block
     // columns: the target cannot hold the matrix, so the conversion returns
@@ -1030,7 +1081,10 @@ namespace
     // The intermediate CSR matrix of a re-block keeps the source index types: with 32-bit
     // column indices, a matrix with more than 2^31 - 1 columns, and with 32-bit row
     // offsets, more than 2^31 - 1 stored entries, return rocsparse_status_type_mismatch in
-    // the analysis buffer size stage, before the source arrays are read.
+    // the analysis buffer size stage, before the source arrays are read. The stored entry
+    // limit is checked both by the re-block and by every conversion through an intermediate
+    // CSR matrix, before the intermediate is allocated: the second case pins the status,
+    // not which of the two checks returns it.
     TEST_F(ConvSpmat, SparseToSparseBsrReblock32BitLimits)
     {
         DevBuf<int32_t> ptr(4), ind(4);
