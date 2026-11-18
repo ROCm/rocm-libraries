@@ -114,15 +114,19 @@ def plsinStoreDataTypes(kernel) -> bool:
 
     bf16 input stays out: there the accumulators do crowd the pack ring.
 
-    Answerable at any point, including on a half-built solution dict.
+    Answerable at any point, including on a half-built solution dict. Unlike
+    plsinDataTypes, which is only ever reached through isMxf4SubtilePath's
+    guard, Naming calls this one directly, so it carries its own.
     """
-    pt = kernel["ProblemType"]
-
     def _mxIn(dt):
         return dt.isFloat4() or dt.isFloat8()
 
-    return _mxIn(pt["DataTypeA"]) and _mxIn(pt["DataTypeB"]) \
-        and pt["DestDataType"].isBFloat16()
+    try:
+        pt = kernel["ProblemType"]
+        return _mxIn(pt["DataTypeA"]) and _mxIn(pt["DataTypeB"]) \
+            and pt["DestDataType"].isBFloat16()
+    except (KeyError, TypeError, AttributeError):
+        return False
 
 
 def isPlsinSubtilePath(kernel) -> bool:
