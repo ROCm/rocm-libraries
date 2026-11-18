@@ -12,9 +12,9 @@
 #include "OperationsDir.hpp"
 
 #include <algorithm>
-#include <fstream>
 #include <set>
 #include <string>
+#include <vector>
 
 /// @file TestRegimeLabel.cpp
 /// @brief Which population a problem is reported under.
@@ -29,12 +29,37 @@ namespace
 
 OperationMetadata shippedSdpa()
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return parsed.metadata.value_or(OperationMetadata{});
+    return test::shippedOperation("sdpa_fwd");
+}
+
+/// The single parameter most inline declarations here need.
+const char* const GROUPS = R"({"groups": {"type": "int64"}})";
+
+/// Loads an operation `toy` over @p parameters (a JSON object), with the graph builder every
+/// inline declaration here names. @p members adds top-level members, e.g. a `"regime_label"`.
+MetadataLoad loadToy(const std::string& parameters, const std::string& members = {})
+{
+    auto declaration = nlohmann::json::parse(R"({
+      "schema_version": "0.1",
+      "operation": "toy",
+      "stratification_axis": "arithmetic_intensity",
+      "graph_builder": {
+        "function": "createValidLayernormFpropGraph",
+        "source": "hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp",
+        "arguments": []
+      }
+    })");
+    declaration["parameters"] = nlohmann::json::parse(parameters);
+    if(!members.empty())
+    {
+        // A named object: `items()` over a temporary dangles.
+        const auto extra = nlohmann::json::parse("{" + members + "}");
+        for(const auto& [key, value] : extra.items())
+        {
+            declaration[key] = value;
+        }
+    }
+    return parseOperationMetadata(declaration);
 }
 
 /// Multi-head by default, so the grouping facet stays fixed in the phase and context cases.
@@ -93,22 +118,11 @@ TEST(TestRegimeLabel, ClausesCascadeSoLaterOnesNeedNotRestateTheEarlier)
 TEST(TestRegimeLabel, AnUnmatchedPointTakesTheDeclaredOtherwiseLabel)
 {
     // An unlabelled population is not actionable, so the declaration must name it.
-    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
-      "schema_version": "0.1",
-      "operation": "toy",
-      "stratification_axis": "arithmetic_intensity",
-      "graph_builder": {
-        "function": "createValidLayernormFpropGraph",
-        "source": "hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp",
-        "arguments": []
-      },
-      "parameters": {"groups": {"type": "int64"}},
-      "regime_label": [
+    const auto load = loadToy(GROUPS, R"("regime_label": [
         {"name": "grouping",
          "labels": [{"label": "single", "when": {"==": ["$q.groups", 1]}}],
          "otherwise": "grouped"}
-      ]
-    })"));
+      ])");
     ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
 
     EXPECT_EQ(regimeLabel(*load.metadata, ProblemPoint{{"groups", int64_t{1}}}), "single");
@@ -119,20 +133,12 @@ TEST(TestRegimeLabel, ThreeFacetsJoinInDeclarationOrder)
 {
     // Declaration order, not map order: "prefill_short_mha" is what readers and the manifest
     // column expect.
-    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
-      "schema_version": "0.1",
-      "operation": "toy_sdpa",
-      "stratification_axis": "arithmetic_intensity",
-      "graph_builder": {
-        "function": "createValidLayernormFpropGraph",
-        "source": "hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp",
-        "arguments": []
-      },
-      "parameters": {
+    const auto load = loadToy(
+        R"({
         "seqlen_q": {"type": "int64"}, "seqlen_k": {"type": "int64"},
         "heads": {"type": "int64"}, "heads_kv": {"type": "int64"}
-      },
-      "regime_label": [
+      })",
+        R"("regime_label": [
         {"name": "phase",
          "labels": [
            {"label": "decode", "when": {"==": ["$q.seqlen_q", 1]}},
@@ -147,8 +153,7 @@ TEST(TestRegimeLabel, ThreeFacetsJoinInDeclarationOrder)
            {"label": "mha", "when": {"==": ["$q.heads", "$q.heads_kv"]}},
            {"label": "mqa", "when": {"==": ["$q.heads_kv", 1]}}],
          "otherwise": "gqa"}
-      ]
-    })"));
+      ])");
     ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
 
     const auto label = [&load](int64_t sq, int64_t sk, int64_t hq, int64_t hkv) {
@@ -167,22 +172,11 @@ TEST(TestRegimeLabel, ThreeFacetsJoinInDeclarationOrder)
 TEST(TestRegimeLabel, AnAxisOverAnUndeclaredParameterIsALoadError)
 {
     // §4.4 check, as for constraints: otherwise every point falls into "otherwise".
-    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
-      "schema_version": "0.1",
-      "operation": "toy",
-      "stratification_axis": "arithmetic_intensity",
-      "graph_builder": {
-        "function": "createValidLayernormFpropGraph",
-        "source": "hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp",
-        "arguments": []
-      },
-      "parameters": {"groups": {"type": "int64"}},
-      "regime_label": [
+    const auto load = loadToy(GROUPS, R"("regime_label": [
         {"name": "phase",
          "labels": [{"label": "decode", "when": {"==": ["$q.seqlen_q", 1]}}],
          "otherwise": "other"}
-      ]
-    })"));
+      ])");
 
     ASSERT_FALSE(load.errors.empty());
     EXPECT_NE(load.errors.front().find("seqlen_q"), std::string::npos) << load.errors.front();
@@ -190,17 +184,7 @@ TEST(TestRegimeLabel, AnAxisOverAnUndeclaredParameterIsALoadError)
 
 TEST(TestRegimeLabel, AnOperationThatNamesNoPopulationsGetsAnEmptyLabel)
 {
-    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
-      "schema_version": "0.1",
-      "operation": "toy",
-      "stratification_axis": "arithmetic_intensity",
-      "graph_builder": {
-        "function": "createValidLayernormFpropGraph",
-        "source": "hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp",
-        "arguments": []
-      },
-      "parameters": {"groups": {"type": "int64"}}
-    })"));
+    const auto load = loadToy(GROUPS);
     ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
 
     EXPECT_TRUE(load.metadata->regimeLabel.empty());
@@ -343,7 +327,13 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
 
     EXPECT_TRUE(found.problems.empty());
     EXPECT_TRUE(found.saturated);
-    EXPECT_LE(found.proposed, static_cast<int64_t>(request.maxCombinations) * request.probeBudget);
+    // `maxCombinations` bounds the strided sample; the combinations that make every categorical
+    // value appear at least once come on top of it.
+    size_t totalCombinations = 0;
+    const auto lanes = detail::categoricalCombinations(
+                           metadata.parameters, request.maxCombinations, totalCombinations)
+                           .size();
+    EXPECT_LE(found.proposed, static_cast<int64_t>(lanes) * request.probeBudget);
 }
 
 TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)
@@ -378,3 +368,187 @@ TEST(TestRegimeFocus, AFloorIsAskedOfEveryRegimeNoQuotaNames)
     EXPECT_EQ(floors.size(), declaredRegimeLabels(metadata).size() - 1);
     EXPECT_EQ(floors.at("decode_long_gqa").pins, (std::map<std::string, int64_t>{{"seqlen_q", 1}}));
 }
+
+namespace
+{
+
+/// A form of a shipped attention declaration, over the point `sdpaPoint` builds.
+ProblemPoint sdpaFormPoint(const std::string& form, int64_t seqlenQ = 2048)
+{
+    auto point = sdpaPoint(seqlenQ, 2048);
+    point["form"] = form;
+    return point;
+}
+
+/// The forms of @p metadata, as its own `form` parameter declares them.
+std::vector<std::string> declaredForms(const OperationMetadata& metadata)
+{
+    const auto* form = metadata.find("form");
+    return form == nullptr ? std::vector<std::string>{} : form->values;
+}
+
+/// Each shipped attention declaration (forward and backward), whose forms differ in number.
+class TestShippedForms : public ::testing::TestWithParam<std::string>
+{
+protected:
+    static OperationMetadata metadata()
+    {
+        return test::shippedOperation(GetParam());
+    }
+};
+
+} // namespace
+
+TEST_P(TestShippedForms, TheDeclarationNamesTheFormAndLeavesTheRegimeAlone)
+{
+    const auto metadata = TestShippedForms::metadata();
+    ASSERT_EQ(metadata.formLabel.size(), 1U);
+    EXPECT_EQ(metadata.formLabel.front().name, "form");
+    const auto forms = declaredForms(metadata);
+    ASSERT_FALSE(forms.empty());
+
+    // Forms cross regimes: every form of one problem shape is the same regime, so no regime
+    // name (or quota keyed on one) changes when the form does.
+    const auto plain = regimeLabel(metadata, sdpaFormPoint("plain"));
+    for(const auto& form : forms)
+    {
+        EXPECT_EQ(regimeLabel(metadata, sdpaFormPoint(form)), plain) << form;
+        EXPECT_EQ(formQuotaKeys(metadata, sdpaFormPoint(form)),
+                  std::vector<std::string>{"form:" + form});
+    }
+    EXPECT_EQ(plain, "prefill_short_mha");
+    EXPECT_EQ(declaredRegimeLabels(metadata).size(), 4U * 2U * 3U);
+}
+
+TEST(TestFormLabel, AFormAxisOverAnUndeclaredParameterIsALoadError)
+{
+    const auto load = loadToy(GROUPS, R"("form_label": [
+        {"name": "form",
+         "labels": [{"label": "padded", "when": {"==": ["$q.form", "padded"]}}],
+         "otherwise": "plain"}
+      ])");
+
+    ASSERT_FALSE(load.errors.empty());
+    EXPECT_NE(load.errors.front().find("form_label"), std::string::npos) << load.errors.front();
+    EXPECT_NE(load.errors.front().find("form"), std::string::npos) << load.errors.front();
+}
+
+TEST(TestFormLabel, ALabelWithAColonCouldReadAsAFormKeyAndIsRefused)
+{
+    const auto load = loadToy(GROUPS, R"("regime_label": [
+        {"name": "phase",
+         "labels": [{"label": "form:padded", "when": {"==": ["$q.groups", 1]}}],
+         "otherwise": "other"}
+      ])");
+
+    ASSERT_FALSE(load.errors.empty());
+    EXPECT_NE(load.errors.front().find("form:padded"), std::string::npos) << load.errors.front();
+}
+
+namespace
+{
+
+/// A `form` enum of three values labelled by @p labels, a clause per entry, `plain` otherwise.
+MetadataLoad loadFormOver(const std::string& clauses)
+{
+    return loadToy(R"({"form": {"type": "enum", "values": ["plain", "padded", "bias"]}})",
+                   R"("form_label": [{"name": "form", "labels": [)" + clauses
+                       + R"(], "otherwise": "plain"}])");
+}
+
+std::string equalsClause(const std::string& value)
+{
+    return R"({"label": ")" + value + R"(", "when": {"==": ["$q.form", ")" + value + R"("]}})";
+}
+
+} // namespace
+
+TEST(TestFormLabel, AnEnumAxisWithAClauseForEveryValueButOtherwiseLoads)
+{
+    const auto load = loadFormOver(equalsClause("padded") + "," + equalsClause("bias"));
+    EXPECT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+}
+
+TEST(TestFormLabel, AnEnumValueTheAxisNeitherLabelsNorMakesOtherwiseIsALoadError)
+{
+    // A form added to the enum and not to the labels would read as `plain`, and a floor on it
+    // would never be asked.
+    const auto load = loadFormOver(equalsClause("padded"));
+
+    ASSERT_FALSE(load.ok());
+    EXPECT_NE(load.errors.front().find("'bias'"), std::string::npos) << load.errors.front();
+}
+
+TEST(TestFormLabel, AClauseComparingAValueTheEnumDoesNotDeclareIsALoadError)
+{
+    // A misspelt clause never matches, so the form it names would be labelled `plain`.
+    const auto load = loadFormOver(equalsClause("padded") + "," + equalsClause("bias") + ","
+                                   + equalsClause("paded"));
+
+    ASSERT_FALSE(load.ok());
+    EXPECT_NE(load.errors.front().find("'paded'"), std::string::npos) << load.errors.front();
+}
+
+TEST_P(TestShippedForms, EveryLabelOfTheAxisCompilesToAFocusKeyedAxisColonLabel)
+{
+    const auto metadata = TestShippedForms::metadata();
+    const auto floors = formFloors(metadata);
+
+    std::set<std::string> keys;
+    for(const auto& floor : floors)
+    {
+        keys.insert(floor.first);
+    }
+    std::set<std::string> declared;
+    for(const auto& form : declaredForms(metadata))
+    {
+        declared.insert("form:" + form);
+    }
+    ASSERT_FALSE(declared.empty());
+    EXPECT_EQ(keys, declared);
+
+    const auto& padded = floors.at("form:padded");
+    EXPECT_EQ(padded.label, "padded");
+    EXPECT_EQ(padded.formAxis, "form");
+    EXPECT_EQ(padded.categoricalPins.at("form"), ParameterValue(std::string("padded")));
+    EXPECT_TRUE(padded.pins.empty());
+
+    // `otherwise` implies only negations, so it pins nothing and the label check decides.
+    EXPECT_TRUE(floors.at("form:plain").categoricalPins.empty());
+}
+
+TEST_P(TestShippedForms, ALabelTheAxisDoesNotDeclareIsRefused)
+{
+    const auto metadata = TestShippedForms::metadata();
+    std::string error;
+    EXPECT_FALSE(compileFormFocus(metadata, "form", "paged", error).has_value());
+    EXPECT_NE(error.find("paged"), std::string::npos) << error;
+    error.clear();
+    EXPECT_FALSE(compileFormFocus(metadata, "layout", "padded", error).has_value());
+    EXPECT_NE(error.find("layout"), std::string::npos) << error;
+}
+
+TEST_P(TestShippedForms, AFocusedSearchReturnsOnlyPointsOfThatForm)
+{
+    const auto metadata = TestShippedForms::metadata();
+    const auto floors = formFloors(metadata);
+    for(const auto* form : {"padded", "plain"})
+    {
+        const auto found = exploreRegime(metadata,
+                                         floors.at(std::string("form:") + form),
+                                         focusRequest(),
+                                         6,
+                                         SERVES_EVERYTHING,
+                                         {},
+                                         {});
+        ASSERT_FALSE(found.problems.empty()) << form;
+        for(const auto& point : found.problems)
+        {
+            EXPECT_EQ(std::get<std::string>(point.at("form")), form);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedForms,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
