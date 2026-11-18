@@ -118,7 +118,6 @@ jobs:
     uses: ./.github/workflows/component-ci-hipblaslt-python.yml
     with:
       docker_image: ${{ needs.changes.outputs.docker-image }}
-      linux_runner: ${{ needs.changes.outputs.linux-runner }}
       windows_runner: ${{ needs.changes.outputs.windows-runner }}
       all_lanes: ${{ needs.changes.outputs.hipblaslt-python-all-lanes }}
 
@@ -136,7 +135,8 @@ jobs:
       - tensilelite-coverage
       - logic-corpus
       - hipblaslt-rocjitsu-scripts
-      - hipblaslt-python
+      # hipblaslt-python joins once its Linux lanes have 20 green runs (Review A, Decision 9);
+      # until then they're informational, and a failure shows on the lane, not the summary.
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

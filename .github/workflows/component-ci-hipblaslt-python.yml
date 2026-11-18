@@ -18,9 +18,6 @@ on:
       docker_image:
         type: string
         required: true
-      linux_runner:
-        type: string
-        required: true
       windows_runner:
         type: string
         required: true
@@ -73,7 +70,8 @@ jobs:
   linux-cpu:
     name: Linux CPU
     needs: plan
-    runs-on: ${{ inputs.linux_runner }}
+    # Downloads a built ROCm and runs pytest; it doesn't need the shared build pool.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     container:
       image: ${{ inputs.docker_image }}
