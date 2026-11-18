@@ -339,7 +339,7 @@ foreach(_t ${_ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TEST_RELPATHS})
          " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
 endforeach()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_runtime_layout_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TESTS} -m \"not gpu\" -v -rs --timeout=60)\n")
+       "add_test(rocke_library_attention_runtime_layout_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TESTS} -m \"not gpu\" -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_runtime_layout_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
