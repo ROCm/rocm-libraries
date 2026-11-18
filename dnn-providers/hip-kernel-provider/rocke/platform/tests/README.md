@@ -31,7 +31,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library python tests/test_rocke.p
 
 That command covers one test file. A default `python tests/run_all.py` additionally
 runs the corpus validity/domain gates and the full pytest suite, including a
-`ROCKE_BACKEND=both` pass when the extension is importable. Report the actual
+`ROCKE_BACKEND=both` pass when the extension is importable, and the backend
+access-width gate, a compile check kept out of pytest discovery. Report the actual
 command and any disabled or skipped stages; a runner invocation with
 `--no-pytest` or `--no-gate` establishes only its enabled stages.
 

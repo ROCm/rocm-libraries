@@ -836,13 +836,18 @@ if(ROCKE_INSTALL_TESTS)
       # check_backend_access_width.py compiles a few copy kernels through COMGR
       # and reads their disassembly. A host module that does that is kept out of
       # ordinary test discovery (TESTING.md, section 5.0.1), so this entry names
-      # the file. The provider categories tier it as standard: it guards
-      # performance, not correctness.
+      # the file; tests/run_all.py runs the same file as a stage of its own. The
+      # provider categories tier it as standard: it guards performance, not
+      # correctness. Unlike the entries above it takes the compiler requirement
+      # policy: it checks nothing without the tools, so where ROCM_PATH supplies
+      # them a missing tool fails it instead of skipping every case.
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_tiling_backend_width_pytest_environment \${_rocke_tiling_pytest_environment})\n"
+             "list(APPEND _rocke_tiling_backend_width_pytest_environment \${_rocke_compiler_requirement_environment})\n"
              "add_test(rocke_tiling_backend_width_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}/check_backend_access_width.py\" ${_rocke_tiling_pytest_options})\n"
              "set_tests_properties(rocke_tiling_backend_width_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;standard\"\n"
-             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  ENVIRONMENT \"\${_rocke_tiling_backend_width_pytest_environment}\"\n"
              "  TIMEOUT 120)\n")
     endif()
 

@@ -114,6 +114,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--build-root",
             str(tmp_path),
             "--config",
@@ -201,6 +202,7 @@ def test_ctest_readiness_and_failure_propagation(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -243,6 +245,7 @@ def test_only_a_successful_unfiltered_arch_domain_gate_suppresses_pytest_delegat
         "--no-gate",
         "--no-ir-validity",
         "--no-both",
+        "--no-backend-width",
         "--build-root",
         str(tmp_path),
     ]
@@ -316,6 +319,7 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--pytest-target",
             selected,
             "--build-root",
@@ -333,6 +337,51 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
     assert len(pytest_calls) == 2
     assert all(expected in command for command in pytest_calls)
     assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("gate_rc", [0, 1])
+def test_backend_width_gate_runs_its_named_check_with_the_entrys_pytest_timeout(
+    runner, monkeypatch, tmp_path, gate_rc
+):
+    """The check is outside pytest discovery, so the runner names its file as a stage of its own
+    and keeps its installed CTest entry's per-test bound; a failing check fails the run.
+    """
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, gate_rc)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert runner.main() == gate_rc
+    [command] = calls
+    check = Path(command[-3])
+    assert check.name == "check_backend_access_width.py" and check.is_file()
+    assert command[-7:] == [
+        "-m",
+        "pytest",
+        "-c",
+        str(runner.TESTS / "pytest.ini"),
+        str(check),
+        "-rs",
+        f"--timeout={runner.BACKEND_WIDTH_TEST_TIMEOUT_S}",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -355,6 +404,7 @@ def test_corpus_selectors_label_the_overall_result_focused(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -403,6 +453,7 @@ def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -624,6 +675,7 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--build-root",
             str(tmp_path),
         ],

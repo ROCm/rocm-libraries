@@ -17,10 +17,12 @@ run kept scalar by an odd row stride; and, as the control, an f16 run the layer 
 Every case's stores are per element. A tile that may overhang its tensor masks each load on its
 own and is not covered here.
 
-It needs COMGR, llvm-objdump and llvm-readelf (it skips without them) but no GPU. It compiles,
-so it is not part of ordinary test discovery: its installed CTest entry names this file
-(``rocke_tiling_backend_width_pytest``, standard tier). It checks the LLVM version of the COMGR
-it runs with; the failures it guards against differ by version.
+It needs COMGR, llvm-objdump and llvm-readelf but no GPU. Without them it skips, or fails under
+``ROCKE_REQUIRE_COMPILER_TOOLS=1``, which its installed CTest entry sets where ROCM_PATH supplies
+the tools. It compiles, so it is not part of ordinary test discovery: its installed CTest entry
+(``rocke_tiling_backend_width_pytest``, standard tier) and a stage of ``tests/run_all.py`` name
+this file. It checks the LLVM version of the COMGR it runs with; the failures it guards against
+differ by version.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from rocke.helpers.compile import compile_kernel
 from rocke.helpers.tiling.coalescing_probe import achieved_widths
 from rocke.helpers.tiling.emit import planned_global_access_units
 from rocke.tests.comgr import require_comgr_target
+from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.llc import find_llvm_tool
 
 from ._copy_kernels import CopyCase, copy_kernel
@@ -94,11 +97,11 @@ _CASES = [
 @pytest.fixture(scope="module")
 def llvm_tools() -> tuple[str, str]:
     """llvm-objdump and llvm-readelf, checked once with COMGR's gfx942 target; skips without
-    them."""
+    them, or fails under ``ROCKE_REQUIRE_COMPILER_TOOLS=1``."""
     require_comgr_target(_ARCH)
     objdump, readelf = find_llvm_tool("llvm-objdump"), find_llvm_tool("llvm-readelf")
     if objdump is None or readelf is None:
-        pytest.skip("llvm-objdump or llvm-readelf is not available")
+        require_tools_or_skip("llvm-objdump or llvm-readelf is not available")
     return objdump, readelf
 
 

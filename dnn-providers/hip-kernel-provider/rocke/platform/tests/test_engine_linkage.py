@@ -464,7 +464,12 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert width_check[configuration + 1 : width_check.index("-v")] == [
             f"{tiling_tree}/check_backend_access_width.py"
         ]
+        # tests/run_all.py runs the same file as a stage of its own, under the
+        # same per-test bound.
+        run_all = load_driver("rocke_run_all", PLATFORM / "tests" / "run_all.py")
+        assert width_check[-1] == f"--timeout={run_all.BACKEND_WIDTH_TEST_TIMEOUT_S}"
         expected_tiling_environment = {"PYTHONPATH": package_root}
+        expected_backend_width_environment: dict[str, str] = {}
         library_pythonpath = os.pathsep.join(
             (f"{test_ctest_rel}tests/library", package_root)
         )
@@ -509,6 +514,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_platform_environment.update(compiler_environment)
             expected_tiling_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
+            expected_backend_width_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
             expected_counted_isa_environment.update(compiler_environment)
 
@@ -518,8 +524,15 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert "rocke_pytest_other" in platform_pytest_parts
         for part in [*platform_pytest_parts, "rocke_ctest_shard_pytest"]:
             assert environment_for(tests, part) == expected_platform_environment
-        for name in [*tiling_entries, "rocke_tiling_backend_width_pytest"]:
+        for name in tiling_entries:
             assert environment_for(tests, name) == expected_tiling_environment
+        # The width check takes the tiling environment plus the compiler
+        # requirement policy, so it fails rather than skips where the tools
+        # should be.
+        assert environment_for(tests, "rocke_tiling_backend_width_pytest") == {
+            **expected_tiling_environment,
+            **expected_backend_width_environment,
+        }
         if has_library:
             assert (
                 environment_for(tests, "rocke_library_mla_pytest")
