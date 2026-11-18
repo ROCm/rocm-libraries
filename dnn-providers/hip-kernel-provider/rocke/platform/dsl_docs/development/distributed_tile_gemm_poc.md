@@ -8,9 +8,10 @@ fixed, aligned, panel-packed prototype scope. Stage 3a adds a CPU-tested,
 host-only same-stack unfused baseline and multi-rank replay runner. Their focused
 four-GPU correctness gate passed on `gfx942`; the `gfx950` lane was allocation-
 blocked and remains pending. Stage 3b adds paired opt-in source-grouped/interleaved
-work assignment and bounded CTA grids, with CPU/parity/compiler coverage. New
-schedule hardware correctness, measured characterization, bandwidth, and
-communication/compute overlap remain unvalidated.
+work assignment and bounded CTA grids, with CPU/parity/compiler coverage. A
+separate focused four-GPU `gfx942` correctness gate for the scheduled variants
+passed. The `gfx950` hardware gates remain pending; measured characterization,
+bandwidth, and communication/compute overlap remain unvalidated.
 
 ## Goal and agreed scope
 
@@ -410,13 +411,16 @@ paths. A cap bounds submitted workgroups, not physical residency, link traffic,
 outstanding requests, or communication/compute overlap. See the
 [scheduled work methodology](../../python/rocke/examples/common/peer_gemm/README.md#stage-3b-opt-in-finite-work-assignment).
 
-**Next hardware proposal:** separately authorize correctness-only replay of the
-new schedules on four `gfx942` GPUs before timing/profiling; retain the pending
-legacy `gfx950` gate. Exercise both orders, uncapped and bounded grids, one-CTA
-and non-dividing CTA caps, both dtypes/placements, and repeated all-rank launches.
-The legacy four-GPU pass does not validate new emitted schedules. Eight-GPU
-expansion, A-tile reuse across output-column tiles, actual traffic/wait attribution,
-and performance/overlap experiments remain subsequent work.
+**Stage 3b hardware status:** a separate focused four-GPU `gfx942` gate passed
+both orders, uncapped/one-CTA/non-dividing caps, both dtypes and all placements,
+two aligned geometries, and single/repeated fused and matched-baseline launches.
+Exact bits, guards/immutability, baseline intermediates, untouched fused staging,
+all-rank completion, retention isolation, and teardown passed. No measurements
+were taken. The new-schedule result does not rely on the earlier legacy pass.
+Keep the `gfx950` gates explicit and pending; do not replay passed gates without
+an independent reason. Separately authorize timing/profiling on the validated
+scope before drawing conclusions about traffic, waiting, resource use, or overlap.
+Eight-GPU expansion and A-tile reuse across output-column tiles remain subsequent work.
 
 **Gate:** reproducible evidence identifying where the direct-peer schedule
 spends work/waits and whether staging or separate communication roles are worth
@@ -510,14 +514,14 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 - [x] Validate both paths with the new runner on four `gfx942` GPUs (Stage 3a gate).
 - [ ] Complete the allocation-blocked four-GPU `gfx950` Stage 3a gate.
 - [x] Add paired source-grouped/interleaved and bounded-CTA work assignment (Stage 3b implementation).
-- [ ] Hardware-validate new scheduled variants before measuring them (Stage 3b gate).
+- [x] Validate the focused scheduled variants on four `gfx942` GPUs (Stage 3b correctness gate).
+- [ ] Validate scheduled variants on `gfx950` when a separate allocation is authorized.
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
 - [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
 
-**Immediate next action:** separately authorize the new scheduled variants'
-four-GPU `gfx942` correctness-only gate; do not replay the already-passed legacy
-lane unnecessarily. Preserve completed Stage 1/2 and Stage 3a `gfx942` evidence,
-and keep the allocation-blocked `gfx950` gate explicit. Timing/profiling follows
-new-schedule correctness; keep achieved software-performance values in-session
-or protected AMD Confluence, never repository artifacts. Do not claim overlap
-or improvements before evidence establishes them.
+**Immediate next action:** separately authorize bounded timing/profiling of the
+validated `gfx942` scheduled variants against their matched same-stack baselines.
+Preserve completed correctness evidence and keep the allocation-blocked `gfx950`
+gates explicit. Keep achieved software-performance values in-session or protected
+AMD Confluence, never repository artifacts. A correctness pass is not evidence of
+an improvement, physical traffic bounds, or communication/compute overlap.

@@ -60,7 +60,7 @@ eight-rank fan-in or bandwidth claim; see the
 | `gemm_multi_abd` | ✅ | ✅ | ❌ | needs `cshuffle` epilogue (not on WMMA) |
 | `mfma_gemm` | ❌ | ✅ | ❌ | needs f16 16x16x32 kpack atom (CDNA4) |
 | `peer_gemm` | ✅ | ✅ | ❌ | fixed aligned pointer-selected panels; two-GPU correctness on both targets and four-GPU baseline/runner on gfx942 verified |
-| `peer_gemm_scheduled` | ✅ | ✅ | ❌ | opt-in source-grouped/interleaved work and bounded CTA grids; offline compilation verified, hardware gate pending |
+| `peer_gemm_scheduled` | ✅ | ✅ | ❌ | opt-in source-grouped/interleaved work and bounded CTA grids; offline compilation on both targets and focused four-GPU gfx942 correctness verified; gfx950 hardware gate pending |
 | `streamk_gemm` | ✅ | ✅ | ❌ | MFMA stream-K reduction path |
 | `block_scale_gemm` | ✅ | ✅ | ❌ | MFMA quantized GEMM |
 | `mx_gemm` | ✅ | ✅ | ❌ | MFMA microscaling GEMM |

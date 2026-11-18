@@ -251,10 +251,17 @@ python -m rocke.examples.common.peer_gemm.run --devices 0,1,2,3 --arch gfx942 --
 
 CPU tests establish ownership/progress and packed-ABI host reconstruction;
 LLVM/IR parity and offline compilation establish program/compilation agreement.
-**The scheduled variants have not been hardware-validated or measured.** The
-legacy four-GPU `gfx942` result does not validate them. New schedule correctness
-experiments need separate approval before timing/profiling. Input-tile reuse
-across output-column tiles and physical traffic/wait attribution remain later
+A separate focused **four-GPU `gfx942` scheduled-variant correctness gate passed**:
+both orders, uncapped and one-CTA/non-dividing caps, both dtypes, all placements,
+two aligned geometries, and single/repeated fused and matched-baseline launches.
+Exact output bits, allocation guards, immutable inputs/tables, baseline
+intermediates, untouched fused staging, all-rank completion, retention isolation,
+and teardown passed. This is independent of the earlier legacy gate.
+
+The scheduled family remains hardware-unvalidated on `gfx950`. **No timings,
+traffic/resource profiles, improvements, or overlap have been established.**
+Timing/profiling on the validated target still needs separate approval. Input-tile
+reuse across output-column tiles and physical traffic/wait attribution remain later
 Stage 3 work; Stage 4 requires evidence justifying staging or separate roles.
 
 ### Timing and traffic interpretation
