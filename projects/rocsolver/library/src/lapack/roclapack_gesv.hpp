@@ -163,7 +163,7 @@ rocblas_status rocsolver_gesv_template(rocblas_handle handle,
     rocsolver_workspace_helper* getrf_work = work_helper->get_nested("getrf");
     rocsolver_workspace_helper* phase2_work = work_helper->get_nested("phase2");
     rocsolver_workspace_helper* getrs_work = phase2_work->get_nested("getrs");
-    T* copyB = (T*)(*phase2_work)["copyB"];
+    T* copyB = phase2_work->at<T>("copyB");
 
     // constants in host memory
     const rocblas_int copyblocksx = (n - 1) / BS2 + 1;
@@ -176,7 +176,7 @@ rocblas_status rocsolver_gesv_template(rocblas_handle handle,
     // save elements of B that will be overwritten by GETRS for cases where info is nonzero
     ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocksx, copyblocksy, batch_count),
                             dim3(BS2, BS2), 0, stream, copymat_to_buffer, n, nrhs, B, shiftB, ldb,
-                            strideB, (T*)copyB, info_mask(info));
+                            strideB, copyB, info_mask(info));
 
     // solve AX = B, overwriting B with X
     rocsolver_getrs_template<BATCHED, STRIDED, T>(handle, rocblas_operation_none, n, nrhs, A,
@@ -186,7 +186,7 @@ rocblas_status rocsolver_gesv_template(rocblas_handle handle,
     // restore elements of B that were overwritten by GETRS in cases where info is nonzero
     ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocksx, copyblocksy, batch_count),
                             dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, nrhs, B, shiftB, ldb,
-                            strideB, (T*)copyB, info_mask(info));
+                            strideB, copyB, info_mask(info));
 
     return rocblas_status_success;
 }

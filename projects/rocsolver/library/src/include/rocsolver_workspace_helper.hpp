@@ -52,7 +52,7 @@ ROCSOLVER_BEGIN_NAMESPACE
    General workflow:
    [In _getMemorySize method] Call assign_sizes to inform the helper about the sizes of all workspace arrays
    (except the scalars array). If necessary, call add_scalars (to add the optional scalars array) and/or
-   set_optim_mem. If the function will have nested functions, optionally call set_nested_capacity with the
+   set_trsm_optim_mem. If the function will have nested functions, optionally call set_nested_capacity with the
    number of nested functions that require a workspace helper. Then call add_nested for each of these nested
    functions and populate the nested helper with workspace sizes.
 
@@ -67,13 +67,21 @@ ROCSOLVER_BEGIN_NAMESPACE
 class rocsolver_workspace_helper
 {
 private:
-    bool has_scalars_r, has_scalars_c, optim_mem;
-    size_t num_excl, size_excl, size_shared;
-    std::unordered_map<std::string, size_t> indices, n_indices;
-    std::vector<std::byte*> pointers;
-    std::vector<size_t> sizes;
-    std::vector<std::unique_ptr<rocsolver_workspace_helper>> nested;
+    bool optim_mem; // tracks value of optim_mem for TRSM
+    bool has_scalars_r,
+        has_scalars_c; // indicates if real or complex scalars are required by this helper
+    size_t num_excl; // the number of workspace arrays that are "exclusive" (not shared with nested functions)
+    size_t size_excl,
+        size_shared; // the total size of workspaces tracked by this helper (not counting nested helpers)
+    std::unordered_map<std::string, size_t> indices; // maps workspace names to indices for pointers and sizes
+    std::unordered_map<std::string, size_t> n_indices; // maps nested helper names to indices for nested
+    std::vector<std::byte*> pointers; // stores the workspace array pointers
+    std::vector<size_t> sizes; // stores the workspace array sizes
+    std::vector<std::unique_ptr<rocsolver_workspace_helper>> nested; // stores the nested workspace helpers
 
+    /* Populates the pointers array using the pointer to the array of real scalars (if applicable), the pointer
+       to the array of complex scalars (if applicable), and by partitioning the remainder of the buffer pointed
+       to by curr_ptr. */
     void assign_buffer(std::byte* scalars_r, std::byte* scalars_c, std::byte* curr_ptr)
     {
         pointers.clear();
@@ -97,17 +105,21 @@ private:
             nested[i]->assign_buffer(scalars_r, scalars_c, nested_ptr);
     }
 
-    size_t get_internal_size(bool* has_scalars_r, bool* has_scalars_c)
+    /* Returns the total amount of device memory required by the workspaces assigned to this helper and its
+       nested helpers (excluding scalars). Also determines if scalars are requested by this helper or any of
+       its nested helpers. */
+    size_t get_internal_size(bool* has_nested_scalars_r, bool* has_nested_scalars_c)
     {
         if(this->has_scalars_r)
-            *has_scalars_r = 1;
+            *has_nested_scalars_r = 1;
         if(this->has_scalars_c)
-            *has_scalars_c = 1;
+            *has_nested_scalars_c = 1;
 
         size_t shared = this->size_shared;
 
         for(size_t i = 0; i < nested.size(); i++)
-            shared = std::max(shared, nested[i]->get_internal_size(has_scalars_r, has_scalars_c));
+            shared = std::max(
+                shared, nested[i]->get_internal_size(has_nested_scalars_r, has_nested_scalars_c));
 
         return this->size_excl + shared;
     }
@@ -217,7 +229,7 @@ public:
     {
         auto it = indices.find(name);
         if(it == indices.end())
-            return -1;
+            throw fmt::format("Workspace size {} could not be found", name);
         else
             return sizes[it->second];
     }
@@ -254,7 +266,7 @@ public:
     {
         auto it = n_indices.find(name);
         if(it == n_indices.end())
-            return nullptr;
+            throw fmt::format("Nested helper {} could not be found", name);
         else
             return nested[it->second].get();
     }
@@ -269,19 +281,19 @@ public:
         hipStream_t stream;
         rocblas_get_stream(handle, &stream);
 
-        bool has_scalars_r = 0;
-        bool has_scalars_c = 0;
+        bool has_nested_scalars_r = 0;
+        bool has_nested_scalars_c = 0;
         size_t size_scalars_r = 0;
         size_t size_scalars_c = 0;
-        size_t size_mem = get_internal_size(&has_scalars_r, &has_scalars_c);
+        size_t size_mem = get_internal_size(&has_nested_scalars_r, &has_nested_scalars_c);
 
-        if(has_scalars_r)
+        if(has_nested_scalars_r)
         {
             size_scalars_r = sizeof(S) * 3;
             size_scalars_r
                 = ceildiv(size_scalars_r, ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
         }
-        if(has_scalars_c)
+        if(has_nested_scalars_c)
         {
             size_scalars_c = sizeof(T) * 3;
             size_scalars_c
@@ -298,10 +310,10 @@ public:
         assign_buffer(scalars_r, scalars_c, curr_ptr);
 
         // initialize scalars
-        if(has_scalars_r)
+        if(has_nested_scalars_r)
             ROCSOLVER_LAUNCH_KERNEL(iota_n<S>, dim3(1), dim3(IOTA_MAX_THDS), 0, stream,
                                     (S*)scalars_r, 3, -1);
-        if(has_scalars_c)
+        if(has_nested_scalars_c)
             ROCSOLVER_LAUNCH_KERNEL(iota_n<T>, dim3(1), dim3(IOTA_MAX_THDS), 0, stream,
                                     (T*)scalars_c, 3, -1);
 
@@ -309,18 +321,20 @@ public:
     }
     /* Gets a pointer to the workspace array at position i, whose size is >= the assigned size at position i.
        Only called after assign_buffer. */
-    void* operator[](size_t i)
+    template <typename T>
+    T* at(size_t i)
     {
-        return pointers[i + has_scalars_r + has_scalars_c];
+        return (T*)pointers[i + has_scalars_r + has_scalars_c];
     }
     /* Gets a pointer to the named workspace array. Only called after assign_buffer. */
-    void* operator[](const std::string& name)
+    template <typename T>
+    T* at(const std::string& name)
     {
         auto it = indices.find(name);
         if(it == indices.end())
-            return nullptr;
+            throw fmt::format("Workspace {} could not be found", name);
         else
-            return pointers[it->second + has_scalars_r + has_scalars_c];
+            return (T*)pointers[it->second + has_scalars_r + has_scalars_c];
     }
 
     /* Sets a value indicating that the function requires the device-side scalar array. Only called before
@@ -330,7 +344,7 @@ public:
     {
         using S = decltype(std::real(T{}));
 
-        if constexpr(std::is_same<T, S>::value)
+        if constexpr(!rocblas_is_complex<T>)
             this->has_scalars_r = 1;
         else
             this->has_scalars_c = 1;
@@ -341,7 +355,7 @@ public:
     {
         using S = decltype(std::real(T{}));
 
-        if constexpr(std::is_same<T, S>::value)
+        if constexpr(!rocblas_is_complex<T>)
         {
             if(has_scalars_r && pointers.size() > 0)
                 return (T*)pointers[0];
@@ -358,12 +372,12 @@ public:
     }
 
     /* Sets a value indicating if the optimal amount of memory for TRSM is available. May be called anytime. */
-    void set_optim_mem(bool optim_mem)
+    void set_trsm_optim_mem(bool optim_mem)
     {
         this->optim_mem = optim_mem;
     }
     /* Gets a value indicating if the optimal amount of memory for TRSM is available. May be called anytime. */
-    bool get_optim_mem()
+    bool get_trsm_optim_mem()
     {
         return this->optim_mem;
     }
@@ -402,7 +416,6 @@ public:
         std::string s;
 
         s += fmt::format("Num Sizes: {}\n", sizes.size());
-
         for(size_t i = 0; i < sizes.size(); i++)
         {
             // find the array name
@@ -427,6 +440,33 @@ public:
                 s += " shared";
 
             s += "\n";
+        }
+
+        if(nested.size() > 0)
+        {
+            bool unused = 0;
+
+            s += fmt::format("Num Nested: {}\n", nested.size());
+            for(size_t i = 0; i < nested.size(); i++)
+            {
+                // find the helper name
+                std::string name;
+                for(auto it : n_indices)
+                {
+                    if(it.second == i)
+                    {
+                        name = it.first;
+                        break;
+                    }
+                }
+
+                if(name.length() > 0)
+                    s += fmt::format("  {} {}: {} bytes\n", i, name,
+                                     nested[i]->get_internal_size(&unused, &unused));
+                else
+                    s += fmt::format("  {}: {} bytes\n", i,
+                                     nested[i]->get_internal_size(&unused, &unused));
+            }
         }
 
         s += fmt::format("Total Size (Self): {}\n", size_excl + size_shared);

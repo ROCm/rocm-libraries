@@ -606,7 +606,7 @@ void rocsolver_getrf_getMemorySize(rocblas_handle handle,
             size_work4 = std::max(size_work4, w4);
         }
 
-        work_helper->set_optim_mem(opt1 && opt2);
+        work_helper->set_trsm_optim_mem(opt1 && opt2);
         work_helper->assign_sizes({{"iipiv", size_iipiv}},
                                   {{"work1", size_work1},
                                    {"work2", size_work2},
@@ -671,12 +671,12 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
 
     // prepare workspace
     rocsolver_workspace_helper* getf2_work = work_helper->get_nested("getf2");
-    const bool optim_mem = work_helper->get_optim_mem();
-    I* iipiv = (I*)(*work_helper)["iipiv"];
-    void* work1 = (void*)(*work_helper)["work1"];
-    void* work2 = (void*)(*work_helper)["work2"];
-    void* work3 = (void*)(*work_helper)["work3"];
-    void* work4 = (void*)(*work_helper)["work4"];
+    const bool optim_mem = work_helper->get_trsm_optim_mem();
+    I* iipiv = work_helper->at<I>("iipiv");
+    void* work1 = work_helper->at<void>("work1");
+    void* work2 = work_helper->at<void>("work2");
+    void* work3 = work_helper->at<void>("work3");
+    void* work4 = work_helper->at<void>("work4");
 
     I jb, dimx, dimy;
     I nextpiv, mm, nn;

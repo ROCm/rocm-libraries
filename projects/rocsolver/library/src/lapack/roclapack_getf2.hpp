@@ -622,8 +622,8 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
 
     // prepare workspace
     T* scalars = work_helper->get_scalars<T>();
-    T* pivotval = (T*)(*work_helper)["pivotval"];
-    I* pivotidx = (I*)(*work_helper)["pivotidx"];
+    T* pivotval = work_helper->at<T>("pivotval");
+    I* pivotidx = work_helper->at<I>("pivotidx");
 
     // prepare kernels
     I singular_thds = getf2_get_checksingularity_blksize(n);

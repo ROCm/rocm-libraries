@@ -117,7 +117,7 @@ void rocsolver_getrs_getMemorySize(rocblas_handle handle,
                                             &size_work1, &size_work2, &size_work3, &size_work4,
                                             &optim_mem, lda, ldb, inca, incb);
 
-    work_helper->set_optim_mem(optim_mem);
+    work_helper->set_trsm_optim_mem(optim_mem);
     work_helper->assign_sizes(
         {},
         {{"work1", size_work1}, {"work2", size_work2}, {"work3", size_work3}, {"work4", size_work4}});
@@ -159,11 +159,11 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     // prepare workspace
-    const bool optim_mem = work_helper->get_optim_mem();
-    void* work1 = (void*)(*work_helper)["work1"];
-    void* work2 = (void*)(*work_helper)["work2"];
-    void* work3 = (void*)(*work_helper)["work3"];
-    void* work4 = (void*)(*work_helper)["work4"];
+    const bool optim_mem = work_helper->get_trsm_optim_mem();
+    void* work1 = work_helper->at<void>("work1");
+    void* work2 = work_helper->at<void>("work2");
+    void* work3 = work_helper->at<void>("work3");
+    void* work4 = work_helper->at<void>("work4");
 
     if(trans == rocblas_operation_none)
     {
