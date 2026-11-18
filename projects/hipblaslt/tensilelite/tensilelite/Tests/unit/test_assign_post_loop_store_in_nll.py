@@ -111,6 +111,11 @@ _DISABLE_CASES = [
     ("spills, no large tile", dict(MIWaveTile=[10, 8])),
     ("store overflows VGPR",  dict(MIWaveTile=[4, 16])),
     ("MX skew overflows SGPR", dict(MIWaveTile=[2, 16])),
+    # fp8 operand fragments are twice fp4's for the same MI shape, so the
+    # deeper unroll runs out of registers where fp4 does not.
+    ("fp8 at DepthU 256",     dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   DepthU=256)),
 ]
 
 
@@ -136,6 +141,12 @@ _STILL_ELIGIBLE_CASES = [
                                            ProblemType={"MXBlockA": 0, "MXBlockB": 0})),
     # Only the atomic StreamK reduction is excluded.
     ("StreamK without atomics", dict(StreamK=3, StreamKAtomic=0)),
+    # The depth hold is fp8-only and one-sided: it must not reach fp4 at any
+    # depth, and it must not disable fp8 at the depth it was measured on.
+    ("fp4 at DepthU 256",     dict(DepthU=256)),
+    ("fp8 at DepthU 128",     dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   DepthU=128)),
 ]
 
 
@@ -166,6 +177,22 @@ def test_subsumed_arms():
     # with no NLL is disabled whichever one runs.
     assert resolve(PrefetchGlobalRead=0) is False
     assert resolve(PostLoopStoreInNll=True, PrefetchGlobalRead=0) is False
+
+
+def test_depth_hold_tolerates_a_state_with_no_depth():
+    """The gate is driven with states that carry no ``DepthU`` at all.
+
+    Every other arm reads only keys the baseline above provides, which is why
+    the depth hold is the first one able to raise rather than answer. It did:
+    reading ``state["DepthU"]`` threw ``KeyError`` for any config whose operand
+    types already failed, because that is exactly when the short-circuit in
+    front of it stops shielding the read.
+
+    An unknown depth is not a reason to hold, so these stay eligible.
+    """
+    assert resolve() is True
+    assert resolve(ProblemType={"DataTypeA": DataType("float8"),
+                                "DataTypeB": DataType("float8")}) is True
 
 
 def test_absent_key_is_defaulted_then_gated():

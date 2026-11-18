@@ -2433,7 +2433,11 @@ class Solution(collections.abc.Mapping):
       # than emit as a dropped shell. Hold fp8 to the shallower unroll until
       # the deeper one has a bound derived rather than sampled. fp4 keeps its
       # existing scope at every DepthU.
-      fp8DepthFits = plsinDataTypes(state) or state["DepthU"] <= 128
+      # DepthU is read with a default because the gate also runs on solutions
+      # that do not carry one -- pre-tuned logic entries, and the sparse states
+      # the arm tests drive it with. An unknown depth is not a reason to hold:
+      # the hold applies where the deeper unroll is known to be in play.
+      fp8DepthFits = plsinDataTypes(state) or state.get("DepthU", 0) <= 128
       registerFail = ((not spillFree)
                       or (not storeFitsVgpr)
                       or (not mxBlockScaleSgprFits)
