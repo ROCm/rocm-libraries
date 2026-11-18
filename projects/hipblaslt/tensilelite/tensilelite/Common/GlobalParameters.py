@@ -560,6 +560,8 @@ defaultBenchmarkCommonParameters = [
     {"StaggerU": [32]},  # recommend [0,32]
     {"StaggerUStride": [256]},  # recommend 256 for V10,V20
     {"StaggerUMapping": [0]},  # recommend [0,1]
+    {"WorkGroupPhaseStagger": [0]},
+    {"WorkGroupPhaseStaggerBit": [3]},
     {"MagicDivAlg": [2]},
     {"GlobalSplitU": [1]},
     {"GlobalSplitUAlgorithm": ["MultipleBuffer"]},

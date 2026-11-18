@@ -256,6 +256,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
+    # WorkGroupPhaseStagger=0 emits nothing, so naming it would rename every kernel; its
+    # bit only matters with a delay.
+    if state.get("WorkGroupPhaseStagger", 0):
+      requiredParametersTemp.update(("WorkGroupPhaseStagger", "WorkGroupPhaseStaggerBit"))
+    else:
+      requiredParametersTemp.difference_update(("WorkGroupPhaseStagger", "WorkGroupPhaseStaggerBit"))
+
     # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
     if state.get("ClusterAIDMapping", -1) != -1:
       requiredParametersTemp.add("ClusterAIDMapping")

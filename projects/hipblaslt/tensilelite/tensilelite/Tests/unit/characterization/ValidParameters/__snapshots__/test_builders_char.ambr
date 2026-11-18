@@ -1545,6 +1545,8 @@
     'WorkGroupMapping',
     'WorkGroupMappingXCC',
     'WorkGroupMappingXCCGroup',
+    'WorkGroupPhaseStagger',
+    'WorkGroupPhaseStaggerBit',
     'WorkGroupReduction',
     'WorkQueueStealing',
   ])
@@ -3149,6 +3151,24 @@
         1,
       ]),
       'len': 1025,
+      'type': 'list',
+    }),
+    'WorkGroupPhaseStagger': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 512,
+      'type': 'list',
+    }),
+    'WorkGroupPhaseStaggerBit': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 16,
       'type': 'list',
     }),
     'WorkGroupReduction': dict({

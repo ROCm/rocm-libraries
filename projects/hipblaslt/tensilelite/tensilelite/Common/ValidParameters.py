@@ -727,6 +727,14 @@ validParameters = { # we need to make sure this matches develop
     #    tiles start reading their summation dim parms.
     #  - StaggerU requires BufferLoad==1 and is silently ignored if BufferLoad==0
     "StaggerU": [0, 2, 4, 8, 16, 32, 64],
+    # Workgroup phase stagger: workgroups whose id has bit WorkGroupPhaseStaggerBit set sleep
+    # WorkGroupPhaseStagger * 64 cycles (s_sleep) before their first instruction. When the grid
+    # is two workgroups per WGP, workgroup i and i + numWGPs share one, start together and run
+    # the same barrier-separated phases in step, so their idle VALU slots line up; delaying one
+    # by a fraction of a loop iteration lets its WMMAs fill the other's dequantize/barrier gaps.
+    # 0 disables it. The bit is log2 of the number of WGPs (3 on 16-CU gfx1150).
+    "WorkGroupPhaseStagger": list(range(0, 512)),
+    "WorkGroupPhaseStaggerBit": list(range(0, 16)),
     # Stride in bytes for each staggeru 'click'.
     # 256 is recommended since this is the width of memory channel (on gfx803,gfx900,gf906) - so
     # each click will start in a new memory channel and spread traffic among the 16 available channels.
