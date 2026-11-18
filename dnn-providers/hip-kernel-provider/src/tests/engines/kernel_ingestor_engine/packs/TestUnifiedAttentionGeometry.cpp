@@ -17,8 +17,8 @@
 
 /**
  * @file TestUnifiedAttentionGeometry.cpp
- * @brief The arch-neutral unified-attention geometry: what another architecture's pack
- *        (e.g. a future gfx942 pack) inherits by supplying its own UnifiedAttentionArchTraits.
+ * @brief The arch-neutral unified-attention geometry: what each architecture's pack
+ *        inherits by supplying its own UnifiedAttentionArchTraits.
  *
  * The gfx950 values are pinned in TestGfx950AttentionUnified2DGeometry /
  * TestGfx950AttentionUnified3DGeometry; this suite pins what the traits change -- the wave
@@ -37,6 +37,14 @@ namespace
 constexpr UnifiedAttentionArchTraits Q_MAJOR_WAVE32{
     "gfxtest", 32, true, 0x7FFF0000, {16, 32, 64}, 8, 8, {1, 2, 4, 4}, {16, 32}};
 
+/// Block sizes listed out of order, smallest last.
+constexpr UnifiedAttentionArchTraits UNSORTED_BLOCKS{
+    "gfxtest", 64, false, 0x7FFF0000, {64, 32, 8}, 16, 8, {1, 2, 4, 8}, {16, 32}};
+
+/// Two block sizes in the three-slot array: the unused slot is zero.
+constexpr UnifiedAttentionArchTraits TWO_BLOCKS{
+    "gfxtest", 64, false, 0x7FFF0000, {16, 32}, 16, 8, {1, 2, 4, 8}, {16, 32}};
+
 } // namespace
 
 /// D128 4 warps x 16 rows, Hq 8 / Hkv 2 (block_q 16), batch 2 x Sq 512: total_q 1024,
@@ -46,6 +54,48 @@ TEST(TestUnifiedAttentionGeometry, Gfx950IsKvMajorWave64)
     const auto g = unifiedAttention2DLaunchGeometry(
         GFX950_UNIFIED_ATTENTION_TRAITS, 4, 16, 8, 2, 512, 2, "k");
     EXPECT_EQ(g, (UnifiedAttentionLaunchGeometry{2, 66, 1, 256}));
+}
+
+/// gfx942 launches the same grid and CTA as gfx950: both are wave64 and kv-major.
+TEST(TestUnifiedAttentionGeometry, Gfx942IsKvMajorWave64)
+{
+    const auto g = unifiedAttention2DLaunchGeometry(
+        GFX942_UNIFIED_ATTENTION_TRAITS, 4, 16, 8, 2, 512, 2, "k");
+    EXPECT_EQ(g, (UnifiedAttentionLaunchGeometry{2, 66, 1, 256}));
+    EXPECT_EQ(GFX942_UNIFIED_ATTENTION_TRAITS.kvBufferBytes,
+              GFX950_UNIFIED_ATTENTION_TRAITS.kvBufferBytes);
+}
+
+/// The smallest block size bounds which Skv any candidate can cut into whole blocks.
+TEST(TestUnifiedAttentionGeometry, SmallestBlockSizeIsTheMinimumOfTheTraits)
+{
+    static_assert(unifiedAttentionSmallestBlockSize(GFX950_UNIFIED_ATTENTION_TRAITS) == 16);
+    static_assert(unifiedAttentionSmallestBlockSize(GFX942_UNIFIED_ATTENTION_TRAITS) == 16);
+    static_assert(unifiedAttentionSmallestBlockSize(UNSORTED_BLOCKS) == 8);
+    static_assert(unifiedAttentionSmallestBlockSize(TWO_BLOCKS) == 16);
+    EXPECT_EQ(unifiedAttentionSmallestBlockSize(GFX950_UNIFIED_ATTENTION_TRAITS),
+              GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL);
+}
+
+/// The unused slot of a two-size array is zero, and a zero is no block size: the predicate
+/// must not admit it, or a caller could reach `tileSize % blockSize` with 0.
+TEST(TestUnifiedAttentionGeometry, BlockSizePredicateRejectsTheUnusedZeroSlotAndNegatives)
+{
+    EXPECT_TRUE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 16));
+    EXPECT_TRUE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 32));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 64));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, 0));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(TWO_BLOCKS, -16));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(GFX942_UNIFIED_ATTENTION_TRAITS, 0));
+    EXPECT_FALSE(isSupportedUnifiedAttentionBlockSize(GFX950_UNIFIED_ATTENTION_TRAITS, 0));
+}
+
+/// Only gfx950 ships LSE-on kernels: gfx942's graph match declines a stats output.
+TEST(TestUnifiedAttentionGeometry, OnlyGfx950ServesAStatsOutput)
+{
+    static_assert(GFX950_UNIFIED_ATTENTION_TRAITS.servesStats);
+    static_assert(!GFX942_UNIFIED_ATTENTION_TRAITS.servesStats);
+    EXPECT_TRUE(Q_MAJOR_WAVE32.servesStats);
 }
 
 /// The same launch on a q-major wave32 target: the axes swap and the CTA halves.

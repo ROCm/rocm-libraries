@@ -63,7 +63,7 @@ else()
     endif()
 endif()
 
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(composable_kernel_INCLUDES ${HIPTENSOR_CK_INCLUDE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
 
 # ABI export-surface guard. Host-only (no GPU): runs scripts/check_exported_symbols.py over the
 # built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The
@@ -409,6 +409,34 @@ function(add_hiptensor_unit_test)
     file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"${BINARY_NAME} regression\" PROPERTIES SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
 
 endfunction()
+
+# Compile test sources shared by several test executables once, as an object library, instead of
+# once per executable. Configured like the test executables above, minus the per-executable
+# HIPTENSOR_TEST_YAML_INCLUDE define: only the leaf sources (through the *_test_helpers.hpp
+# headers) read the bundled YAML config, so shared sources must not include those headers.
+function(add_hiptensor_test_objects TARGET_NAME)
+    add_library(${TARGET_NAME} OBJECT ${ARGN})
+    target_compile_options(${TARGET_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+    target_link_libraries(${TARGET_NAME} PRIVATE hip::device hiptensor::host_reference
+                          hiptensor::hiptensor hiptensor_llvm GTest::gtest)
+    hiptensor_test_set_host_only_sources(${ARGN})
+    target_include_directories(${TARGET_NAME} PRIVATE
+                               ${CMAKE_CURRENT_SOURCE_DIR}
+                               ${composable_kernel_INCLUDES}
+                               ${PROJECT_SOURCE_DIR}/library/include
+                               ${PROJECT_SOURCE_DIR}/library/src/include
+                               ${PROJECT_SOURCE_DIR}/library/src
+                               ${PROJECT_SOURCE_DIR}/test
+                               ${PROJECT_BINARY_DIR}/include/hiptensor
+                               ${PROJECT_BINARY_DIR}/include)
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${TARGET_NAME} PRIVATE -Wno-ignored-attributes)
+    endif()
+endfunction()
+
+# Every test executable links these: pass the objects, not the sources, to the test functions.
+add_hiptensor_test_objects(hiptensor_test_common_objects ${HIPTENSOR_COMMON_TEST_SOURCES})
+set(HIPTENSOR_COMMON_TEST_SOURCES $<TARGET_OBJECTS:hiptensor_test_common_objects>)
 
 add_subdirectory(00_unit)
 add_subdirectory(01_contraction)

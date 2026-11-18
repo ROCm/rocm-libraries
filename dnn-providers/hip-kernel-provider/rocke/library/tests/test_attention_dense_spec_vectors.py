@@ -237,6 +237,31 @@ _CASES: tuple[dict, ...] = (
     dict(paged=True, block_size=16, num_kv_blocks=64, persistent=True),
     dict(paged=True, block_size=16, num_kv_blocks=64, head_size=64),
     dict(paged=True, block_size=16, num_kv_blocks=64),
+    # Paged tile fit: too few rows per page, then a page that is no multiple of them.
+    dict(paged=True, block_size=16, num_kv_blocks=64, block_m=32),
+    dict(paged=True, block_size=32, num_kv_blocks=64, block_n=96, seqlen_kv=576),
+    # Paged needs whole KV tiles (a ragged spec gets past the base tile rule).
+    dict(paged=True, block_size=16, num_kv_blocks=64, ragged=True, seqlen_kv=544),
+    dict(paged=True, block_size=16, num_kv_blocks=64, causal=False),
+    dict(paged=True, block_size=16, num_kv_blocks=64, causal_bottom_right=True),
+    # Swizzled Head-first auto order: contiguous takes it, paged keeps bt_hkv_minor.
+    dict(
+        seqlen_q=8192,
+        seqlen_kv=8192,
+        num_query_heads=256,
+        num_kv_heads=256,
+        causal=True,
+    ),
+    dict(
+        seqlen_q=8192,
+        seqlen_kv=8192,
+        num_query_heads=256,
+        num_kv_heads=256,
+        causal=True,
+        paged=True,
+        block_size=16,
+        num_kv_blocks=512,
+    ),
     dict(
         use_sinks=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
     ),
@@ -818,18 +843,20 @@ def _reject_sites() -> tuple[set, set]:
     check that shares ``_aligned_causal_error`` with another still needs its
     own case).
 
-    Divisions a case must make raise ``ZeroDivisionError``: the two paged ones in
-    ``__post_init__`` (``block_n // num_waves`` and ``block_size %
-    rows_per_wave``), which the C port mirrors as its two "division by zero"
-    rejects."""
+    Divisions a case must make raise ``ZeroDivisionError``: the two paged ones
+    (``block_n // num_waves`` and ``block_size % rows_per_wave``), which the C
+    port mirrors as its two "division by zero" rejects. They and the tile rejects
+    live in ``paged_tile_check``, which ``__post_init__`` calls; its
+    ``return False, ...`` lines count as reject sites."""
     import ast
 
+    import kernels.common._attention_dense_paged as paged_mod
     import kernels.common.attention_dense_decode as decode_mod
     import kernels.common.attention_dense_spec as spec_mod
 
     sites = set()
     divisions = set()
-    for mod in (spec_mod, decode_mod):
+    for mod in (spec_mod, decode_mod, paged_mod):
         path = inspect.getsourcefile(mod)
         tree = ast.parse(Path(path).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -839,19 +866,25 @@ def _reject_sites() -> tuple[set, set]:
                 sites |= {
                     (path, n.lineno) for n in ast.walk(node) if isinstance(n, ast.Raise)
                 }
+            elif mod is paged_mod and node.name == "paged_tile_check":
+                sites |= {
+                    (path, n.lineno)
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Return)
+                    and isinstance(n.value, ast.Tuple)
+                    and isinstance(n.value.elts[0], ast.Constant)
+                    and n.value.elts[0].value is False
+                }
                 divisions |= {
                     (path, n.lineno)
                     for n in ast.walk(node)
                     if isinstance(n, ast.BinOp)
                     and isinstance(n.op, (ast.FloorDiv, ast.Mod))
                     and (
-                        (
+                        isinstance(n.right, ast.BinOp)
+                        or (
                             isinstance(n.right, ast.Name)
                             and n.right.id == "rows_per_wave"
-                        )
-                        or (
-                            isinstance(n.right, ast.Attribute)
-                            and n.right.attr == "num_waves"
                         )
                     )
                 }
@@ -893,7 +926,9 @@ def test_cases_reach_every_reject_site():
     decides on its own (as the varlen and paged pair-decode rows do)."""
     # Unreachable in both engines: __post_init__ already rejects any dtype other
     # than bf16 / fp16 before the paged block, so no spec reaches this re-check.
-    unreachable = ("paged not yet implemented for dtype",)
+    # The C struct's ``paged`` is a bool, so the Python-only type check has no
+    # C counterpart.
+    unreachable = ("paged not yet implemented for dtype", "paged must be a bool")
     all_sites, divisions = _reject_sites()
     sites = {
         (path, line)

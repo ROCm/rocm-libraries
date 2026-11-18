@@ -99,8 +99,11 @@ const vector<vector<int64_t>> large_matrix_size_range_64 = {
 
 const vector<int64_t> large_n_size_range_64 = {64, 98, 130, 220, 400};
 
-// for weekly_lapack tests
-// each matrix_size_range is a {m, lda}
+// for weekly_lapack tests (form problems directly)
+template <typename I>
+const static vector<geqrf_tuple<I>> very_large_problem_range = {
+    {{220, 220}, 16384},
+};
 const vector<vector<int>> large_batch_size_range = {
     {33, 33},
 };
@@ -700,6 +703,9 @@ TEST_P(GEQRF_LARGE_BATCH_64, ptr_batched__double_complex)
 {
     run_tests<true, false, rocblas_double_complex>();
 }
+// INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+//                          GEQR2,
+//                          ValuesIn((very_large_problem_range<rocblas_int>)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GEQR2,
@@ -709,6 +715,8 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GEQR2,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(n_size_range)));
 
+INSTANTIATE_TEST_SUITE_P(weekly_lapack, GEQRF, ValuesIn((very_large_problem_range<rocblas_int>)));
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GEQRF,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(large_n_size_range)));
@@ -716,6 +724,10 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GEQRF,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(n_size_range)));
+
+// INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+//                          GEQR2_64,
+//                          ValuesIn((very_large_problem_range<int64_t>)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GEQR2_64,
@@ -725,6 +737,8 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GEQR2_64,
                          Combine(ValuesIn(matrix_size_range_64), ValuesIn(n_size_range_64)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack, GEQRF_64, ValuesIn((very_large_problem_range<int64_t>)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GEQRF_64,
