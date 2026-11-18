@@ -41,6 +41,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -92,8 +93,8 @@ bool wmmaToWmmaOverlap(const StinkyInstruction& prod, const StinkyInstruction& c
 // In-place WMMA accumulation (gfx1250). A WMMA that takes the previous WMMA's D
 // through the C fast-forward path must write a different accumulator, unless its
 // type allows the same one under InPlaceRule. Only WMMAs count toward "previous".
-// Detection only: switching the accumulator needs a free register range that this
-// pass cannot pick.
+// A broken rule stops codegen: switching the accumulator needs a free register
+// range that this pass cannot pick.
 //===----------------------------------------------------------------------===//
 
 enum class InPlaceRule {
@@ -206,45 +207,56 @@ std::vector<const StinkyInstruction*> inBlockChain(BasicBlock& bb, const StinkyI
     return chain;
 }
 
+// Null reason: allowed. Unconfirmed: a paired chain from another block, which the
+// check cannot follow.
+struct Verdict {
+    const char* reason = nullptr;
+    bool confirmed = true;
+};
+
 // Pairs are chain positions (0,1), (2,3), ... `wmma` needs different A and B from
 // the rest of its pair and from the previous pair, and a pair needs both halves.
-const char* pairedViolation(BasicBlock& bb, const StinkyInstruction& wmma) {
+Verdict pairedVerdict(BasicBlock& bb, const StinkyInstruction& wmma) {
     const auto chain = inBlockChain(bb, wmma);
-    if (chain.size() < 2) return "the pairs continue from another block and cannot be checked";
+    if (chain.size() < 2)
+        return {"the pairs continue from another block and cannot be checked", false};
     const size_t pos = chain.size() - 1;
     const size_t pairStart = pos - pos % 2;
     for (size_t i = pairStart < 2 ? 0 : pairStart - 2; i < pos; ++i)
         if (!differentAB(*chain[i], wmma))
-            return "needs different A and B from its pair and the previous pair";
+            return {"needs different A and B from its pair and the previous pair"};
     if (pos % 2 == 0) {
         const StinkyInstruction* next = adjacentWmmaInBlock(wmma, /*forward=*/true);
-        if (!next || !accumulatesInPlace(wmma, *next)) return "must be paired with the next WMMA";
+        if (!next || !accumulatesInPlace(wmma, *next)) return {"must be paired with the next WMMA"};
     }
-    return nullptr;
+    return {};
 }
 
-const char* inPlaceViolation(BasicBlock& bb, const StinkyInstruction& prev,
-                             const StinkyInstruction& wmma) {
+Verdict inPlaceVerdict(BasicBlock& bb, const StinkyInstruction& prev,
+                       const StinkyInstruction& wmma) {
     const InPlaceRule rule = inPlaceRule(wmma);
     if (rule == InPlaceRule::Forbidden || rule != inPlaceRule(prev))
-        return "switch the accumulator";
-    if (rule == InPlaceRule::Allowed) return nullptr;
-    if (abOverlap(prev) || abOverlap(wmma)) return "A and B of one WMMA must not overlap";
+        return {"switch the accumulator"};
+    if (rule == InPlaceRule::Allowed) return {};
+    if (abOverlap(prev) || abOverlap(wmma)) return {"A and B of one WMMA must not overlap"};
     if (rule == InPlaceRule::DifferentAB)
-        return differentAB(prev, wmma) ? nullptr : "needs different A and B";
-    return pairedViolation(bb, wmma);
+        return differentAB(prev, wmma) ? Verdict{} : Verdict{"needs different A and B"};
+    return pairedVerdict(bb, wmma);
 }
 
-void warnInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma) {
+void checkInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma) {
     for (const StinkyInstruction* prev : prevWmmas(bb, wmma)) {
         if (!accumulatesInPlace(*prev, wmma)) continue;
-        const char* violation = inPlaceViolation(bb, *prev, wmma);
-        if (!violation) continue;
-        std::cerr << "[InsertCoexecHazardPass] warning: WMMA in function \"" << func.getName()
-                  << "\" block \"" << bb.getLabel()
-                  << "\" accumulates the previous WMMA's D in place: " << violation << "\n";
+        const Verdict verdict = inPlaceVerdict(bb, *prev, wmma);
+        if (!verdict.reason) continue;
+        std::cerr << "[InsertCoexecHazardPass] " << (verdict.confirmed ? "error" : "warning")
+                  << ": WMMA in function \"" << func.getName() << "\" block \"" << bb.getLabel()
+                  << "\" accumulates the previous WMMA's D in place: " << verdict.reason << "\n";
         prev->dump(std::cerr);
         wmma.dump(std::cerr);
+        if (verdict.confirmed)
+            report_fatal_error("InsertCoexecHazardPass: in-place WMMA accumulation in '" +
+                               func.getName() + "': " + verdict.reason);
         return;
     }
 }
@@ -406,7 +418,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
 
                 int toInsert = 0;
                 if (isXDLWMMA(*inst)) {
-                    warnInPlaceAccumulation(func, bb, *inst);
+                    checkInPlaceAccumulation(func, bb, *inst);
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::WMMA,
                                                             /*consumerIsWmma=*/true));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::TRANS,
