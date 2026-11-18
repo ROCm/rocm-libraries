@@ -47,20 +47,20 @@ rocblas_status rocsolver_geblttrf_npvt_interleaved_batched_impl(rocblas_handle h
                                                                 const rocblas_int ldc,
                                                                 const rocblas_stride strideC,
                                                                 rocblas_int* info,
-                                                                const rocblas_int batch_count)
+                                                                const rocblas_int batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("geblttrf_npvt_interleaved_batched", "--nb", nb, "--nblocks", nblocks,
                         "--inca", inca, "--lda", lda, "--strideA", strideA, "--incb", incb, "--ldb",
                         ldb, "--strideB", strideB, "--incc", incc, "--ldc", ldc, "--strideC",
-                        strideC, "--batch_count", batch_count);
+                        strideC, "--batch_count", batch_count_arg);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
     rocblas_status st = rocsolver_geblttrf_npvt_argCheck(handle, nb, nblocks, lda, ldb, ldc, A, B,
-                                                         C, info, batch_count, inca, incb, incc);
+                                                         C, info, batch_count_arg, inca, incb, incc);
     if(st != rocblas_status_continue)
         return st;
 
@@ -69,11 +69,15 @@ try
     rocblas_int shiftB = 0;
     rocblas_int shiftC = 0;
 
+    // split batch
+    rocblas_int const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    rocblas_int const batch_count_split = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
     // memory workspace sizes:
     rocsolver_workspace_helper work_helper;
     rocsolver_geblttrf_npvt_getMemorySize<false, true, T>(
         handle, nb, nblocks, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB, C,
-        shiftC, incc, ldc, strideC, info, batch_count, &work_helper);
+        shiftC, incc, ldc, strideC, info, batch_count_split, &work_helper);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, work_helper.get_total_size<T>());
@@ -86,10 +90,23 @@ try
 
     ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
-    // Execution
-    return rocsolver_geblttrf_npvt_template<false, true, T>(
-        handle, nb, nblocks, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB, C,
-        shiftC, incc, ldc, strideC, info, batch_count, &work_helper);
+    for(rocblas_int isweep = 0; isweep < nsweep; isweep++)
+    {
+        rocblas_int const bid = isweep * batch_count_split;
+        rocblas_int const batch_count = std::min(batch_count_arg - bid, batch_count_split);
+
+        auto const A_sweep = (A == nullptr) ? nullptr : A + bid * strideA;
+        auto const B_sweep = (B == nullptr) ? nullptr : B + bid * strideB;
+        auto const C_sweep = (C == nullptr) ? nullptr : C + bid * strideC;
+        auto const info_sweep = (info == nullptr) ? nullptr : info + bid;
+
+        // Execution
+        ROCBLAS_CHECK(rocsolver_geblttrf_npvt_template<false, true, T>(
+            handle, nb, nblocks, A_sweep, shiftA, inca, lda, strideA, B_sweep, shiftB, incb, ldb,
+            strideB, C_sweep, shiftC, incc, ldc, strideC, info_sweep, batch_count, &work_helper));
+    }
+
+    return rocblas_status_success;
 }
 catch(...)
 {
