@@ -93,8 +93,8 @@ tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-o
 
 ### Rebuilding after C++ changes
 
-`invoke build-client` builds the tensilelite-client executable only — it does
-**not** rebuild the rocisa Python module (`_rocisa.so`).  If you edit rocisa or
+`invoke build-client` builds the tensilelite-client executable and its tensilelite-gpu-probe
+helper only — it does **not** rebuild the rocisa Python module (`_rocisa.so`).  If you edit rocisa or
 stinkytofu C++ sources you must re-run `invoke rocisa` for those changes to
 take effect in Python:
 

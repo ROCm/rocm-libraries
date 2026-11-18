@@ -158,6 +158,18 @@ target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
 target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
 
+# Warm-up helper: after a GPU fault the first process doing real GPU work can
+# compute wrong results. It stays independent of the client's libraries on purpose.
+add_executable(tensilelite-gpu-probe "${CMAKE_CURRENT_SOURCE_DIR}/gpu_probe.cpp")
+target_include_directories(tensilelite-gpu-probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(tensilelite-gpu-probe PRIVATE hip::device hip::host)
+set_target_properties(tensilelite-gpu-probe
+    PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+)
+
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
     target_link_libraries(tensilelite-client PRIVATE rocprofiler-sdk)
@@ -186,7 +198,7 @@ option(TENSILELITE_CLIENT_FORCE_RPATH
 if(TENSILELITE_CLIENT_FORCE_RPATH AND UNIX AND NOT APPLE)
     find_program(TENSILELITE_PATCHELF patchelf)
     if(TENSILELITE_PATCHELF)
-        foreach(_client IN ITEMS tensilelite-client cpu-gemm-driver)
+        foreach(_client IN ITEMS tensilelite-client cpu-gemm-driver tensilelite-gpu-probe)
             add_custom_command(TARGET ${_client} POST_BUILD
                 COMMAND sh -c "r=$(\"$0\" --print-rpath \"$1\") || exit 1; [ -z \"$r\" ] || exec \"$0\" --force-rpath --set-rpath \"$r\" \"$1\""
                         "${TENSILELITE_PATCHELF}" "$<TARGET_FILE:${_client}>"

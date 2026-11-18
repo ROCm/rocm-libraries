@@ -1015,7 +1015,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     if(TENSILELITE_ENABLE_CLIENT)
         install(
-            TARGETS tensilelite-client
+            TARGETS tensilelite-client tensilelite-gpu-probe
             RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
             COMPONENT tests
         )

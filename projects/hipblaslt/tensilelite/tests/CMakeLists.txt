@@ -39,6 +39,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AKernArg_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AProblem_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GpuProbe_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HipUtilsCopyTensor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HybridAssignmentPolicy_test.cpp"
@@ -122,6 +123,14 @@ target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(tensilelite-tests
     PRIVATE
         BENCHMARK_DB_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data/benchmark_db")
+
+# The probe exit-code tests run the built executable.
+if(TARGET tensilelite-gpu-probe)
+    target_compile_definitions(tensilelite-tests
+        PRIVATE
+            GPU_PROBE_PATH="$<TARGET_FILE:tensilelite-gpu-probe>")
+    add_dependencies(tensilelite-tests tensilelite-gpu-probe)
+endif()
 
 target_link_libraries(tensilelite-tests
     PUBLIC

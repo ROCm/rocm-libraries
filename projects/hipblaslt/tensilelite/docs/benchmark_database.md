@@ -141,6 +141,52 @@ LEFT JOIN init_configs cc ON cc.id = r.caused_by_problem_id
 WHERE r.status IN (4, 5) ORDER BY s.library_index, c.problem_index;
 ```
 
+## Results and CSV
+
+`tensilelite.BenchmarkDatabase` reads the database from Python. `formatSummary(summarize("run.db"))` formats the state of a run:
+
+```
+benchmark database: 18 pairs: 14 PASS, 0 FAILURE, 1 UNKNOWN, 0 NOT_BENCHMARKED, 3 INDIRECTLY_FAILED, 0 INDIRECT_VERIFICATION_FAILURE, 0 NOT_SELECTED
+pairs left UNKNOWN (the client died while running them):
+  problem 0, solution 4 <solution name>
+pairs not launched because their solution crashed, faulted or hung on another problem:
+  solution 4 <solution name>: 3 pairs, caused by problem 0
+sessions that died: 1
+```
+
+Sections list the `UNKNOWN` pairs, the `FAILED` pairs, the `INDIRECTLY_FAILED` and `INDIRECT_VERIFICATION_FAILURE` pairs per solution and causing problem, the tainted failures (failed right after a session that died) and the sessions that died. `NOT_SELECTED` pairs are only counted, at the end of the first line: they are neither failures nor passes. A section with no pairs is omitted.
+
+```python
+from contextlib import closing
+from tensilelite.BenchmarkDatabase import RunStatus, getPairs, openDatabase
+
+with closing(openDatabase("run.db")) as connection:
+    for pair in getPairs(connection, [RunStatus.UNKNOWN]):
+        print(pair.problemIndex, pair.libraryIndex, pair.sessionId)
+```
+
+Main functions: `openDatabase`, `getPairs`, `getSessions`, `countPairsByStatus`, `summarize`, `formatSummary`, `writeResultsCsv`.
+
+`writeResultsCsv` writes the results CSV from the database. The CSV has the layout and values of the client's own results CSV, and is byte-identical to it for a run that finished in a single session with every pair passed. It writes a temporary file and replaces the CSV atomically, from a single read snapshot. A pair that is not `PASS` has the cell `-1`, except a `NOT_SELECTED` pair, whose cell is empty as in the client's CSV because the client never visited it. A stored value that cannot be read raises `BenchmarkDatabaseError`. With `csv-export-extra-cols`, the best-of columns (winner, best time, bandwidth) consider only `PASS` pairs here, whereas the client also folds in a pair that failed verification after its timing was reported, so those columns can differ for runs with verification failures.
+
+The client adds a CSV column the first time it visits a solution, writes the header after the first problem and every row with the columns known after its problem. `writeResultsCsv` reproduces that: a `NOT_SELECTED` pair is not visited and creates no column, so with prediction a solution first selected by a later problem has a cell without a header, and the rows before it are shorter. With `csv-merge-same-problems` every row has all columns, the late ones empty where unvisited. Solutions with the same name share one column. The one inexact part is the order of the columns that the same problem adds for the first time: the reader uses the library index order, which is the client's order without prediction, while a prediction run visits the solutions in the order of its ranking, which the database does not store.
+
+### CSV parity test
+
+The gtest `BenchmarkCsvParity*` (`tests/BenchmarkCsvParity_test.cpp`) and `Tests/unit/test_benchmark_csv_parity.py` share the fixtures in `tests/data/benchmark_db`: scenarios `default`, `merge`, `extra_cols`, `cu_efficiency`, `prediction` (pairs the iterator did not select), `late_columns` and `late_columns_merge` (solutions first visited by a later problem), each with a golden `<name>.csv` and a dump `<name>.db.txt`. The gtest checks that the client's CSV and database for a scripted run equal the fixtures, and the Python test checks that `writeResultsCsv` writes the golden CSV from the dump, both byte for byte. The one deliberate deviation concerns pairs that were never reached: the gtest replays them as `SKIPPED_BY_DB` (cell `-1`), while a real client leaves the cell empty and the Python reader writes `-1`. A `NOT_SELECTED` pair is not reported in the gtest. To change a fixture, copy the text the gtest prints on a mismatch over the file and check the Python test.
+
+## GPU warm-up probe
+
+`tensilelite-gpu-probe [--device-idx N]` is a standalone tool built with the client and installed in the tests component under `libexec/hipblaslt/tensilelite` when `HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS` is enabled. It is independent of the client libraries. After a GPU memory fault the first process that does real GPU work can compute wrong results. The probe does that work on the chosen device (default 0): it allocates two 128 MiB buffers, runs a copy kernel, reads the result back and verifies it, so the next client starts on a healthy device.
+
+| Exit status | Meaning |
+|-------------|---------|
+| 0 | Verified; prints `gpu probe passed on device <N> (128 MiB copy verified)`. |
+| 1 | HIP error or mismatch; prints `gpu probe failed on device <N>: <reason>` on stderr. |
+| 2 | Usage error; prints `usage: <program> [--device-idx N]` on stderr. |
+
+The gtests `GpuProbeArgs*` and `GpuProbeExitCode*` check its argument parsing and exit codes without a GPU (the exit-code tests need only the HIP runtime library).
+
 ## Build requirements
 
 SQLite is required. CMake looks for the ROCm sysdeps config package in `${ROCM_PATH}/lib/rocm_sysdeps` first, then the system `libsqlite3`; configure fails if neither is found. With `msgpack-cxx` or `msgpackc-cxx` the host stores specs as msgpack, otherwise as YAML; the configure output has a status line for it. A client built against a host with neither writer rejects `--benchmark-db`.

@@ -37,4 +37,5 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/Reference.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CSVStackFile.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GpuProbeArgs.hpp"
 )

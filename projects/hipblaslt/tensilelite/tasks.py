@@ -224,7 +224,7 @@ def install_stinkytofu(c, mode="auto", gpu_targets=None, rebuild=False):
     help={
         "clean": "Remove the client build directory before building.",
         "configure": "Run CMake configuration for the client.",
-        "build": "Build the tensilelite-client executable.",
+        "build": "Build tensilelite-client and the tensilelite-gpu-probe helper.",
         "build_dir": "Path to client build dir.",
         "build_type": "CMake build type (e.g. Release, Debug).",
         "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101).",

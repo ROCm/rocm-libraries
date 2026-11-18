@@ -8,6 +8,10 @@
 // and that the database that the DatabaseReporter fills in the same run equals <name>.db.txt.
 // So the golden CSV is what the client writes for the run, and <name>.db.txt is the database that
 // holds the same results.
+// Tests/unit/test_benchmark_csv_parity.py checks the same fixtures against the Python writer
+// (tensilelite.BenchmarkDatabase.writeResultsCsv), which writes -1 for pairs that were never
+// reached and an empty cell for NotSelected pairs. It visits the solutions of a problem in library
+// index order, as the scripted run does.
 //
 // The scripted run mimics the per-pair loop of client/main.cpp with the real recording API
 // (BenchmarkSession, classifyPair, PairRecorder), and sends every report to both reporters:
