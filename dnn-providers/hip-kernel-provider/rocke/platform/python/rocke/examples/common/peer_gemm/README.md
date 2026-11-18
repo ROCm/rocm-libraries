@@ -118,8 +118,18 @@ CPU tests cover:
 
 The host numerical model is not GPU execution. Independent C++ builder/binding
 and LLVM byte-identity checks validate the emitted program; offline COMGR
-compilation validates code-object generation. Neither proves peer GEMM numerical
-correctness, bandwidth, or overlap on hardware.
+compilation validates code-object generation. Neither alone proves peer GEMM
+numerical correctness, bandwidth, or overlap on hardware.
+
+Separate focused two-GPU Slurm runs passed on `gfx942` and `gfx950`. They exercised
+F16/BF16, fixed integral/dyadic matrix cases, all four placement variants, and
+repeated launches on both ranks. Output bits matched the CPU FP32 reference from
+actual quantized operands and the declared output conversion. Output guards,
+unused outputs, inputs, pointer tables, and retained-argument isolation checks
+also passed. Panel-packed scatter was reconstructed into the logical C shard.
+
+This is correctness evidence for that two-rank, fixed-aligned scope, not an
+eight-rank fan-in, arbitrary-tail, large-offset, bandwidth, or overlap claim.
 
 Run from `rocke/platform/` in the development environment:
 
@@ -129,11 +139,11 @@ python tools/check_byte_identity.py --only peer_gemm --build-root <build-directo
 ```
 
 Repeat engine checks for supported LLVM flavors and retain only qualitative
-methodology in the repository. Hardware validation needs a separately authorized
-allocation with a direct CPU reference from the actual quantized operands,
+methodology in the repository. Replaying or expanding hardware validation needs
+a separately authorized allocation with a direct CPU reference from the actual quantized operands,
 local controls, both input/output placement modes, exact ownership checks, and
 all-rank completion before readback.
 
 See the [distributed-tile plan](../../../../../dsl_docs/development/distributed_tile_gemm_poc.md)
-for stage status and the separate pending hardware gates. Do not interpret the
-Stage 1 copy result as validation of this new MFMA kernel.
+for stage status and subsequent scheduling experiments. Stage 1 copy and Stage 2
+MFMA correctness were validated independently; neither establishes overlap.

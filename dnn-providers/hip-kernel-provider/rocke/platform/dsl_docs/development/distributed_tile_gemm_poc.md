@@ -2,9 +2,10 @@
 
 **Status:** Stage 0 runtime support, Stage 1 peer-copy builders, and the Stage 2
 direct-peer GEMM panel prototype are implemented. CPU, compiler, and engine-parity
-checks passed. Stage 1's basic peer-copy gate passed on `gfx950`; its `gfx942`
-lane is queued. Stage 2 development proceeded without waiting for that lane;
-the new fused MFMA kernels are not yet hardware-validated on either target.
+checks passed. Stage 1's basic peer-copy gate and Stage 2's focused two-GPU
+numerical gate passed on both `gfx942` and `gfx950`. Stage 2 coverage is the
+fixed, aligned, panel-packed prototype scope; multi-peer scheduling, bandwidth,
+and communication/compute overlap remain unvalidated.
 
 ## Goal and agreed scope
 
@@ -257,11 +258,12 @@ byte-identical output compared with the Stage 0 Python source.
 Completed checks include CPU interpretation of actual IR, independent C++
 builder/binding comparisons, full family parity across supported LLVM flavors,
 canonical IR/verifier parity, and offline COMGR compilation for both dtypes and
-targets. Two-GPU hardware checks also passed on `gfx950`: both peer directions,
-F16/BF16, aligned/clipped layouts, repeated launches, exact bits and guards,
-source immutability, and device-scoped retained-argument isolation. The `gfx942`
-execution lane could not obtain an allocation within the bounded wait; it was
-cancelled before execution and is not counted as a pass.
+targets. Two-GPU hardware checks also passed on both `gfx942` and `gfx950`:
+both peer directions, F16/BF16, aligned/clipped layouts, repeated launches,
+exact bits and guards, source immutability, and device-scoped retained-argument
+isolation. Earlier `gfx942` allocation attempts were cancelled before execution;
+they were not passes. A later queued job completed, and its existing evidence
+was retrieved and verified without rerunning the lane.
 
 The module installation did not expose COMGR release metadata through the helper.
 The external validation adapter confirmed the release using explicit matching
@@ -339,11 +341,22 @@ CPU numerical reconstruction tests cover logical distributed output and
 panel-packed layout. A canonical IR test also proves the compute body equals
 the existing MFMA GEMM body after pointer substitution. Independent builder and
 binding checks, full LLVM-flavor parity, snapshots, and offline COMGR compilation
-pass; they are not evidence of GPU numerical correctness or overlap.
+pass; those checks alone are not evidence of GPU numerical correctness or overlap.
 
-Development proceeded before the queued Stage 1 `gfx942` gate completed. That
-choice does not turn the pending copy lane or either new fused-kernel lane into
-a hardware pass. See the
+Separate focused two-GPU Slurm runs subsequently passed on both targets. They
+covered F16/BF16, integral and dyadic inputs, local controls, gather + GEMM,
+GEMM + scatter, and the combined path, with repeated launches on both ranks.
+Output bits matched a CPU FP32 product from the actual quantized operands and
+the declared output conversion. Guards and unused outputs were unchanged,
+inputs and pointer tables remained immutable, and retained arguments stayed
+isolated between execution devices.
+
+This validates numerical correctness for the tested fixed-shape, two-rank scope,
+including panel-packed scatter reconstruction. It is not validation of arbitrary
+tails, eight-rank fan-in, large physical offsets, a publication/reuse protocol,
+bandwidth, or compute overlap. Stage 2 development had proceeded before the
+queued Stage 1 `gfx942` lane completed; that lane has now passed independently.
+See the
 [direct-peer GEMM methodology](../../python/rocke/examples/common/peer_gemm/README.md)
 for the exact layout/lifetime contract and the next validation scope.
 
@@ -449,14 +462,14 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 - [x] Audit peer/runtime and IR requirements and add CPU-tested runtime support (Stage 0).
 - [x] Implement minimal paired peer-copy builders and CPU/compiler/parity tests (Stage 1).
 - [x] Validate mapped-peer tile reads/writes on `gfx950` hardware (Stage 1).
-- [ ] Obtain an allocation and validate the `gfx942` hardware lane (Stage 1 gate).
+- [x] Validate the `gfx942` peer-copy hardware lane (Stage 1 gate).
 - [x] Add parity-tested direct-peer GEMM panel variants (Stage 2 implementation).
-- [ ] Validate the fused GEMM variants numerically on hardware (Stage 2 gate).
+- [x] Validate the focused two-GPU fused GEMM variants on both targets (Stage 2 gate).
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
 - [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
 
-**Immediate next action:** review/commit the Stage 2 prototype and separately
-authorize focused GPU numerical validation for the new kernels. Preserve the
-independent queued Stage 1 `gfx942` job and passed `gfx950` copy evidence; neither
-validates Stage 2. Do not make overlap or throughput claims before the new
-numerical/ownership checks and later scheduling measurements.
+**Immediate next action:** design and separately authorize the Stage 3
+multi-peer scheduling experiments against the same-stack unfused baseline.
+Preserve the completed Stage 1 and Stage 2 correctness evidence. Keep measured
+software-performance results outside the repository and do not claim overlap
+or throughput improvements before those experiments establish them.

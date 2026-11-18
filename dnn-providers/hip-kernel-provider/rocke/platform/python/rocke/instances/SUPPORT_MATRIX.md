@@ -42,9 +42,8 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 `peer_tile_copy` deliberately restricts its initial contract to `gfx942` and
 `gfx950`. Its cells record successful offline compilation. The basic two-GPU
-peer-read/write execution gate has also passed on `gfx950`; `gfx942` execution
-is still pending an allocation. Neither is an eight-rank fan-in or bandwidth
-claim; see the
+peer-read/write execution gate has also passed on both targets. This is not an
+eight-rank fan-in or bandwidth claim; see the
 [peer-copy methodology](../examples/common/peer_tile_copy/README.md).
 
 ---
@@ -60,7 +59,7 @@ claim; see the
 | `gemm_multi_d` | ✅ | ✅ | ❌ | needs `cshuffle` epilogue (not on WMMA) |
 | `gemm_multi_abd` | ✅ | ✅ | ❌ | needs `cshuffle` epilogue (not on WMMA) |
 | `mfma_gemm` | ❌ | ✅ | ❌ | needs f16 16x16x32 kpack atom (CDNA4) |
-| `peer_gemm` | ✅ | ✅ | ❌ | fixed aligned pointer-selected panels; compiled, not GPU-validated |
+| `peer_gemm` | ✅ | ✅ | ❌ | fixed aligned pointer-selected panels; focused two-GPU correctness verified |
 | `streamk_gemm` | ✅ | ✅ | ❌ | MFMA stream-K reduction path |
 | `block_scale_gemm` | ✅ | ✅ | ❌ | MFMA quantized GEMM |
 | `mx_gemm` | ✅ | ✅ | ❌ | MFMA microscaling GEMM |

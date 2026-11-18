@@ -6,13 +6,14 @@ Python and C++ implementations use the same scalar, masked global-memory IR.
 
 **Current evidence:** CPU logical-access tests, independent builder/binding
 parity, offline COMGR compilation, and successful two-GPU peer reads/writes on
-`gfx950`. Hardware checks covered both directions, F16/BF16, aligned/clipped
-layouts, exact bits/guards, source immutability, repeated launches, and retained
-argument isolation. `gfx942` execution is pending an allocation; a queued lane
-cancelled before execution is not validation.
+`gfx942` and `gfx950`. Hardware checks covered both directions, F16/BF16,
+aligned/clipped layouts, exact bits/guards, source immutability, repeated launches,
+and retained argument isolation. Earlier allocation attempts cancelled before
+execution were not counted; the later queued `gfx942` run completed and its
+existing evidence was retrieved and verified.
 
-**Not established:** `gfx942` peer execution, a reusable tile publication
-protocol, bandwidth, large physical-offset stress, or compute overlap.
+**Not established:** a reusable tile publication protocol, bandwidth,
+large physical-offset stress, or compute overlap.
 
 ## Operation and placement
 
@@ -105,7 +106,7 @@ check its LLVM and canonical-IR snapshots. Preserve existing golden entries:
 `run_diff.py --record-golden --only ...` replaces an entire snapshot key rather
 than merging a family and must not be used to add this family.
 
-## Hardware gate to resume on gfx942
+## Hardware validation replay
 
 1. Obtain an explicitly authorized allocation with two GPUs on the target.
 2. Record device identities, directed peer capability, partition modes, and the
