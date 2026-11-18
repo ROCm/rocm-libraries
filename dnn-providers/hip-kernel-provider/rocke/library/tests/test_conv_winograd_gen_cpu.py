@@ -203,10 +203,13 @@ def test_kernels_build(case):
 
     p, ay, ax = _CASES[case]
     spec = WG.WinogradGenSpec(problem=p, ax_y=WG.WinoAxis(*ay), ax_x=WG.WinoAxis(*ax))
+    built = []
     for st in WG.transform_stages(spec):
         assert min(st.grid) > 0
-        with skip_where_compiler_refuses_processor():
-            compile_kernel(st.build(spec, arch="gfx1250"), arch="gfx1250")
+        built.append(st.build(spec, arch="gfx1250"))
+    with skip_where_compiler_refuses_processor():
+        for kernel in built:
+            compile_kernel(kernel, arch="gfx1250")
 
 
 def test_k3_taps_spec():
