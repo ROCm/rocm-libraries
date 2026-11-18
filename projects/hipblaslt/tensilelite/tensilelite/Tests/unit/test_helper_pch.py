@@ -9,6 +9,7 @@ import shutil
 import stat
 import time
 from pathlib import Path
+from shlex import join
 
 import pytest
 
@@ -29,6 +30,9 @@ for a in "$@"; do
   case "$a" in
     --version) cat "$dir/version.txt"; exit 0;;
     "-###") echo "clang version 22" >&2
+            if [ -e "$dir/compile_job.txt" ]; then
+              cat "$dir/compile_job.txt" >&2; exit 0
+            fi
             inc=$(cat "$dir/hip_include.txt")
             printf ' "/x/clang" "-cc1" "-idirafter" "%s" "-include" "%s" "-x" "hip" "-"\n' \
               "$inc" "__clang_hip_runtime_wrapper.h" >&2
@@ -156,6 +160,46 @@ def test_key_covers_every_compile_argument(fakeDriver):
         _compiler(fakeDriver, asan=True), ["gfx950"]
     )
     assert _key(_compiler(fakeDriver), ["gfx950"]) != _key(_compiler(fakeDriver), ["gfx950:xnack+"])
+
+
+@pytest.mark.parametrize(
+    "option, joined",
+    [
+        ("-I", True),
+        ("-I", False),
+        ("-isystem", True),
+        ("-isystem", False),
+        ("-cxx-isystem", False),
+        ("-iquote", True),
+        ("-idirafter", True),
+        ("-internal-isystem", False),
+        ("-internal-externc-isystem", False),
+        ("-resource-dir", False),
+    ],
+)
+def test_key_tracks_header_directory_changes(fakeDriver, tmp_path, option, joined):
+    compiler = _compiler(fakeDriver)
+    keys = []
+    for name in ("first include", "second include"):
+        directory = str(tmp_path / name)
+        args = [option + directory] if joined else [option, directory]
+        (fakeDriver / "compile_job.txt").write_text(' "/x/clang" "-cc1" ' + join(args) + "\n")
+        keys.append(_key(compiler, ["gfx950"]))
+    assert keys[0] != keys[1]
+
+
+@pytest.mark.parametrize("joined", [True, False])
+def test_key_resolves_relative_header_directories(fakeDriver, tmp_path, monkeypatch, joined):
+    args = ["-Iinclude"] if joined else ["-cxx-isystem", "include"]
+    (fakeDriver / "compile_job.txt").write_text(' "/x/clang" "-cc1" ' + join(args) + "\n")
+    compiler = _compiler(fakeDriver)
+    keys = []
+    for name in ("first", "second"):
+        directory = tmp_path / name
+        directory.mkdir()
+        monkeypatch.chdir(directory)
+        keys.append(_key(compiler, ["gfx950"]))
+    assert keys[0] != keys[1]
 
 
 # =========================================================================== #
@@ -365,10 +409,81 @@ def test_no_pch_compiles_once(fakeDriver, tmp_path, monkeypatch):
     assert len(compiles) == 1 and "-include-pch" not in compiles[0]
 
 
+@pytest.mark.parametrize("error", [PermissionError, FileNotFoundError])
+def test_inaccessible_cache_compiles_without_a_pch(fakeDriver, tmp_path, monkeypatch, error):
+    """An optional cache must not fail a build when permissions change or eviction races."""
+    cacheDir = tmp_path / "pch_cache"
+    cacheDir.mkdir()
+    iterdir = Path.iterdir
+
+    def cacheIterdir(path):
+        if path == cacheDir:
+            raise error("cannot read PCH cache")
+        return iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", cacheIterdir)
+    pchPath, objPath = _compileHelpers(_compiler(fakeDriver), tmp_path)
+    assert pchPath is None
+    assert objPath.read_text() == "obj\n"
+    compiles = _calls(fakeDriver, "Kernels.cpp")
+    assert len(compiles) == 1 and "-include-pch" not in compiles[0]
+    assert _pchBuilds(fakeDriver) == []
+
+
+@pytest.mark.parametrize("job", [' "/x/clang" "-cc1" "-I"', "unrecognized driver output"])
+def test_unusable_header_search_query_compiles_without_a_pch(fakeDriver, tmp_path, job):
+    (fakeDriver / "compile_job.txt").write_text(job + "\n")
+    pchPath, objPath = _compileHelpers(_compiler(fakeDriver), tmp_path)
+    assert pchPath is None
+    assert objPath.read_text() == "obj\n"
+    assert len(_calls(fakeDriver, "Kernels.cpp")) == 1
+    assert _pchBuilds(fakeDriver) == []
+
+
 # =========================================================================== #
 # The real compiler
 # =========================================================================== #
 REAL_COMPILER = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "bin" / "amdclang++"
+
+
+@pytest.mark.skipif(not REAL_COMPILER.exists(), reason="needs a ROCm amdclang++")
+@pytest.mark.parametrize("environment", ["CPATH", "CPLUS_INCLUDE_PATH"])
+@pytest.mark.parametrize("relative", [False, True])
+def test_real_compiler_uses_new_header_search_paths(tmp_path, monkeypatch, environment, relative):
+    """A still-valid PCH from another include path can silently retain the old header value."""
+    for name in ("CPATH", "CPLUS_INCLUDE_PATH", "C_INCLUDE_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TENSILE_HELPER_PCH_DIR", str(tmp_path / "pch_cache"))
+    monkeypatch.delenv("TENSILE_DISABLE_HELPER_PCH", raising=False)
+    monkeypatch.delenv("Tensile_CXX_COMPILER_LAUNCHER", raising=False)
+    monkeypatch.setattr(HKP, "_rejections", {})
+    compiler = Component.Compiler(str(REAL_COMPILER), "sha1")
+    pch = HKP.HelperKernelPch()
+    paths = []
+    for name, value in (("first", 1), ("second", 2)):
+        directory = tmp_path / name
+        headers = directory / "include" / "hip"
+        headers.mkdir(parents=True)
+        (headers / "hip_fp8.h").write_text(
+            "#ifndef PCH_TEST_HEADER\n#define PCH_TEST_HEADER\n"
+            "#include_next <hip/hip_fp8.h>\n"
+            f"#define PCH_TEST_VALUE {value}\n#endif\n"
+        )
+        monkeypatch.chdir(directory)
+        monkeypatch.setenv(environment, "include" if relative else str(directory / "include"))
+        paths.append(pch.get(compiler, ["gfx950"]))
+        assert paths[-1] is not None
+    assert paths[0] != paths[1]
+    source = tmp_path / "Kernels.cpp"
+    source.write_text(
+        "#include <hip/hip_fp8.h>\nstatic_assert(PCH_TEST_VALUE == 2);\n"
+        "__global__ void k(int* p) { *p = PCH_TEST_VALUE; }\n"
+    )
+    args = (str(tmp_path), ["gfx950"], str(source))
+    # Compile directly: a stale value must fail the assertion, not pass via the retry fallback.
+    compiler(*args, str(tmp_path / "with_pch.o"), pch_path=str(paths[1]))
+    compiler(*args, str(tmp_path / "plain.o"))
+    assert pch.get(compiler, ["gfx950"]) == paths[1]
 
 
 @pytest.mark.skipif(not REAL_COMPILER.exists(), reason="needs a ROCm amdclang++")

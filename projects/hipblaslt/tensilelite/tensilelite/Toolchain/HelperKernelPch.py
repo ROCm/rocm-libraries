@@ -48,13 +48,34 @@ _HEADER_SEARCH_OPTIONS = frozenset(
         "-resource-dir",
         "-internal-isystem",
         "-internal-externc-isystem",
+        "-c-isystem",
+        "-cxx-isystem",
+        "-objc-isystem",
+        "-objcxx-isystem",
         "-isystem",
         "-idirafter",
         "-iquote",
         "-I",
+        "-F",
+        "-iframework",
+        "-iframeworkwithsysroot",
+        "-internal-iframework",
+        "-isysroot",
         "-include",
+        "-imacros",
     )
 )
+# Clang emits CPATH as -I<path>; other driver arguments can use joined spellings too.
+_JOINED_HEADER_SEARCH_OPTIONS = (
+    "-iframeworkwithsysroot",
+    "-iframework",
+    "-isystem",
+    "-idirafter",
+    "-iquote",
+    "-F",
+    "-I",
+)
+_HEADER_FILE_OPTIONS = frozenset(("-include", "-imacros"))
 
 
 def _compilerVersion(compilerPath) -> str:
@@ -76,12 +97,28 @@ def _headerSearchPaths(pchArgs: List[str]) -> List[str]:
     for line in out.splitlines():
         if not line.startswith(' "'):
             continue
-        args = split(line)
-        for option, value in zip(args, args[1:]):
-            if option in _HEADER_SEARCH_OPTIONS:
-                paths.append(
-                    f"{option} {os.path.realpath(value) if os.path.isabs(value) else value}"
+        args = iter(split(line))
+        for arg in args:
+            if arg in _HEADER_SEARCH_OPTIONS:
+                option = arg
+                value = next(args, None)
+                if value is None:
+                    raise ValueError(f"Missing header search argument for {option}")
+            else:
+                option = next(
+                    (option for option in _JOINED_HEADER_SEARCH_OPTIONS if arg.startswith(option)),
+                    None,
                 )
+                if option is None:
+                    continue
+                value = arg[len(option):]
+            # Directory paths are relative to the compiler's working directory. Bare forced
+            # includes (e.g. __clang_hip_runtime_wrapper.h) are looked up in the search paths.
+            if option not in _HEADER_FILE_OPTIONS or os.path.isabs(value):
+                value = os.path.realpath(value)
+            paths.append(f"{option} {value}")
+    if not paths:
+        raise ValueError("No header search paths found in the compiler job")
     return paths
 
 
@@ -131,7 +168,11 @@ class HelperKernelPch:
         self.enabled = not disabled
         self.dir = Path(os.environ.get("TENSILE_HELPER_PCH_DIR", str(self._DEFAULT_DIR)))
         if self.enabled:
-            _evictStale(self.dir, self._MAX_AGE_DAYS)
+            try:
+                _evictStale(self.dir, self._MAX_AGE_DAYS)
+            except OSError as err:
+                self.enabled = False
+                print1(f"# Helper kernel PCH not used, cannot access {self.dir}: {err}")
 
     def get(self, compiler, targets: List[str]) -> Optional[Path]:
         """The PCH for compiling `targets` with `compiler`, built and stored on a miss.
@@ -149,7 +190,7 @@ class HelperKernelPch:
             key = _computePchKey(
                 pchArgs, targets, _compilerVersion(compiler.path), _headerSearchPaths(pchArgs)
             )
-        except (OSError, CalledProcessError) as err:
+        except (OSError, CalledProcessError, ValueError) as err:
             print1(f"# Helper kernel PCH not used, querying the compiler failed: {err}")
             return None
         with _rejectionsLock:
