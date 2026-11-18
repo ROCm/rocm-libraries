@@ -278,8 +278,10 @@ std::optional<Plan> planFor(const NarrowShape& shape,
         const int64_t rs2 = divUp(rs, 2);
         const int64_t ds2 = divUp(ds, 2);
         // The read cost a halving adds: halo / extent.
-        const double rowCost = rs > 4 ? static_cast<double>(rowHalo + rs2) / rs2 : 1e9;
-        const double planeCost = ds > 1 ? static_cast<double>(planeHalo + ds2) / ds2 : 1e9;
+        const double rowCost
+            = rs > 4 ? static_cast<double>(rowHalo + rs2) / static_cast<double>(rs2) : 1e9;
+        const double planeCost
+            = ds > 1 ? static_cast<double>(planeHalo + ds2) / static_cast<double>(ds2) : 1e9;
         if(rowCost <= planeCost)
         {
             rs = rs2;
@@ -335,7 +337,7 @@ std::optional<Plan> planFor(const NarrowShape& shape,
     plan.ncp = static_cast<int>(ncp);
     plan.ldsBytes = static_cast<int>(lds);
     plan.prepareGrid = divUp(prepared, 256);
-    plan.workspaceBytes = static_cast<size_t>(prepared) * (valu ? 4 : es);
+    plan.workspaceBytes = static_cast<size_t>(prepared) * static_cast<size_t>(valu ? 4 : es);
     auto& a = plan.args;
     for(size_t i = 0; i < 5; ++i)
     {
