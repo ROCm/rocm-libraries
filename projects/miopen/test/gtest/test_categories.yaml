@@ -35,6 +35,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_Kthvalue_*"
   - "*/GPU_LayerNormTest*"
   - "*/GPU_LayoutTransposeTest_*"
+  - "*/GPU_BatchedTransposeKernels*"
   - "*/GPU_Lrn*"
   - "*/GPU_MultiMarginLoss_*"
   - "*/GPU_ConvNonpack*"
