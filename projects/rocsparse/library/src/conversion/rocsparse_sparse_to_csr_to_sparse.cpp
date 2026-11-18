@@ -206,7 +206,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                                                              source_->idx_base,
                                                              source_->data_type));
 
-        // The source and target attributes must match those of the intermediate.
+        // rocsparse_mat_descr_are_same requires the intermediate to match the source; the
+        // storage mode stays sorted because the conversion kernels need sorted input.
         intermediate->descr->type      = source_->descr->type;
         intermediate->descr->fill_mode = source_->descr->fill_mode;
         intermediate->descr->diag_type = source_->descr->diag_type;
