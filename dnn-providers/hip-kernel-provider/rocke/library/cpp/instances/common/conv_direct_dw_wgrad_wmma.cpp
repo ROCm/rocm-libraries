@@ -219,8 +219,8 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
         /* byte offsets are i32 and masked lanes use INT32_MAX, which is past
          * the buffer only while it is smaller than that. */
         const long long hw = (long long)p->H * p->W;
-        const long long ow = (long long)rocke_direct_conv_problem_Ho(p)
-                             * rocke_direct_conv_problem_Wo(p);
+        const long long ow
+            = (long long)rocke_direct_conv_problem_Ho(p) * rocke_direct_conv_problem_Wo(p);
         const long long big = 2LL * p->N * (hw > ow ? hw : ow) * p->groups;
         if(big > INT32_MAX)
         {
