@@ -91,9 +91,11 @@ repos:
         # Opted out of the formatting hooks, but still scanned by the security
         # gate below. Anchored here and aliased onto the other hooks that would
         # otherwise pick these up from the top level exclude.
+        # hipBLASLt's Python bindings (projects/hipblaslt/python/) started clean, so
+        # they opt back in here and in the other hipBLASLt excludes below.
         exclude: &opted_out_but_scanned |
           (?x)
-          projects/hipblaslt/.*|
+          projects/hipblaslt/(?!python/).*|
           projects/hipsparse/.*|
           projects/rocsparse/.*|
           shared/tensile/.*|
@@ -105,7 +107,7 @@ repos:
       - id: check-yaml
         exclude: |
           (?x)
-          projects/hipblaslt/.*|
+          projects/hipblaslt/(?!python/).*|
           projects/hipsparse/.*|
           projects/rocsparse/.*|
           shared/tensile/.*|
@@ -123,7 +125,7 @@ repos:
         # under a descriptor set's heuristics/. Each is regenerated, never edited by hand.
         exclude: |
           (?x)
-          projects/hipblaslt/.*|
+          projects/hipblaslt/(?!python/).*|
           shared/tensile/.*|
           ^projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_(fp16|bf16)\.instances\.json$|
           ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd_aot/gfx950_conv_fwd_aot_(fp16|bf16)_(mem_(plain|unroll|async)|compv[34]_(plain|unroll)|direct)\.kdp\.json$|
@@ -423,7 +425,7 @@ repos:
       - id: cmake-lint
         exclude: |
           (?x)
-          projects/hipblaslt/.*|
+          projects/hipblaslt/(?!python/).*|
           projects/hipsparse/.*|
           projects/rocsparse/.*|
           shared/tensile/.*|

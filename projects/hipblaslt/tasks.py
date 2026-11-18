@@ -453,6 +453,10 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
         "build_dir": "Override the build directory.",
         "rocm_path": "Override the ROCm installation path.",
         "clean": "Remove the build directory before configuring (default: incremental).",
+        "python": (
+            "Also build the opt-in Python bindings (python/) against this hipBLASLt, and "
+            "pip-install them into the Python environment that is running invoke."
+        ),
         "fortran_compiler": (
             "Fortran compiler for --clients (path or name: flang, gfortran, "
             "/opt/rocm/llvm/bin/flang). Default: FC, else CMAKE_Fortran_COMPILER, "
@@ -500,6 +504,7 @@ def build(
     fortran_compiler=None,
     gemm_a2a_fusion=False,
     emit_occupancy_probe=False,
+    python=False,
 ):
     _supported_distros()
 
@@ -805,6 +810,14 @@ def build(
             _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
         elif distro in ("sles", "opensuse-leap"):
             _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
+
+    # ---------------------------------------------------------------------------
+    # Optional: Python bindings (opt-in; never part of the default build)
+    # ---------------------------------------------------------------------------
+    if python:
+        hipblaslt_root = rocm_s if relocatable else (ROOT_PATH / "hipblaslt-install").as_posix()
+        env = {"ROCM_PATH": rocm_s, "hipblaslt_ROOT": hipblaslt_root}
+        c.run(f'"{sys.executable}" -m pip install "{(ROOT_PATH / "python").as_posix()}"', env=env)
 
 
 # ---------------------------------------------------------------------------
