@@ -431,12 +431,12 @@ ResampleFwdConfig resolve(const IGraph& opGraph)
         }
 
         // Workaround for ALMIOPEN-3295 (see Workarounds.hpp): MIOpen's BFLOAT16 max pooling
-        // can select a padded position and write an index outside the window.
+        // can select a padded position and write an index outside the input.
         if(WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding))
         {
-            decline("max pooling with generate_index on BFLOAT16 tensors requires zero padding "
-                    "until MIOpen issue ALMIOPEN-3295 is fixed; MIOpen can select a padded "
-                    "position and write an index outside the window");
+            decline("max pooling with generate_index on BFLOAT16 tensors requires zero padding (a "
+                    "known MIOpen limitation); MIOpen can select a padded position and write an "
+                    "index outside the input");
         }
 
         if(*indexUid == x.uid || *indexUid == y.uid)
