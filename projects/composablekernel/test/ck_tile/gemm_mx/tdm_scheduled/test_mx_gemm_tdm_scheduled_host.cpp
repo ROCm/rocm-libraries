@@ -264,4 +264,16 @@ TEST(MxGemmTdmScheduledHost, PolicyRejectsInvalidProblems)
     EXPECT_STREQ((Default::Validate<Cluster8x4>()), "cluster_size");
 }
 
+// K plus the loads' lookahead, (4 + 1) tiles of 256 at GL2 distance 4, must fit in i32: K at most
+// 2^31 - 1 - 1280. M = N = 32 keeps the scales under 2^31 bytes at that K.
+TEST(MxGemmTdmScheduledHost, KLimit)
+{
+    using P    = ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 32, 32, 256, 2, 2, 16, 1, 1>;
+    using Pipe = PipelineOf<P, ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false>>;
+    const auto* k_long = ck_tile::mx_tdm_scheduled_reason_message(MxTdmScheduledReason::KLong);
+    const char* below  = Pipe::GetUnsupportedReason(32, 32, 2147482336);
+    EXPECT_TRUE(below == nullptr || std::string(below) != k_long) << below;
+    EXPECT_STREQ(Pipe::GetUnsupportedReason(32, 32, 2147482368), k_long);
+}
+
 } // namespace

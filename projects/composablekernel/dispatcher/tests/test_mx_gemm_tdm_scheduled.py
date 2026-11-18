@@ -66,6 +66,20 @@ class TestTuning(unittest.TestCase):
         self.assertEqual(reason({"tail_steps": 4}), "tail_steps")
         self.assertEqual(reason({"cluster_dim": [8, 4]}), "cluster_size")
 
+    def test_k_limit(self):
+        # K plus (4 + 1) tiles of 256 must fit in i32; M = N = 32 keeps the
+        # scales under 2^31.
+        tile = {**TILE, "tile_m": 32, "tile_n": 32, "tile_k": 256, "warp_tile_m": 16}
+        t = {"cluster_dim": [1, 1], "split_b_lds_read": False}
+
+        def reason(K):
+            return sched.spec_from_tile(
+                tile, t, a_dtype="fp8", out_dtype="fp16", M=32, N=32, K=K
+            ).validate()
+
+        self.assertNotEqual(reason(2147482336), "k_long")
+        self.assertEqual(reason(2147482368), "k_long")
+
     def test_cpp_spelling(self):
         t = {
             "cluster_dim": [2, 2],

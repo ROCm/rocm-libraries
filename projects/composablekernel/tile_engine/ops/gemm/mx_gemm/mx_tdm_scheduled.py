@@ -75,6 +75,7 @@ REASONS = (
     "tile_atoms",
     "scale_span",
     "k_short",
+    "k_long",
     "split_b_read",
     "gl2_distance",
     "cluster_dim",
@@ -556,6 +557,10 @@ class MxTdmScheduledSpec:
                 return "scale_span"
             if self.K < self.tile_k:
                 return "k_short"
+            # The loads look max(gl2_prefetch_distance, 2) + 1 tiles past K in i32.
+            lookahead = (max(self.gl2_prefetch_distance, 2) + 1) * self.tile_k
+            if self.K > I32_SPAN - 1 - lookahead:
+                return "k_long"
         if self.split_b_lds_read and (not self.prefetch_lds_read or rn % 2):
             return "split_b_read"
         if self.gl2_prefetch_distance != 0 and not 2 <= self.gl2_prefetch_distance <= 8:

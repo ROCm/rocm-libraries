@@ -293,6 +293,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         const long_index_t span_m  = integer_least_multiple(long_index_t{M}, kTileM);
         const long_index_t span_n  = integer_least_multiple(long_index_t{N}, kTileN);
         const long_index_t mn_span = span_m > span_n ? span_m : span_n;
+        // The refill loads two tiles ahead and the GL2 prefetch kGl2Distance; both compute their
+        // K in i32 before clamping it to K.
+        constexpr long_index_t kKLookahead =
+            long_index_t{(kGl2Distance > 2 ? kGl2Distance : 2) + 1} * kTileK;
         if(M <= 0 || N <= 0 || K <= 0)
             reason = R::ShapePositive;
         else if(K % 32)
@@ -301,6 +305,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             reason = R::ScaleSpan;
         else if(K < kTileK)
             reason = R::KShort;
+        else if(long_index_t{K} > numeric<index_t>::max() - kKLookahead)
+            reason = R::KLong;
         else if(integer_divide_ceil(N, kTileN) % kClusterX ||
                 integer_divide_ceil(M, kTileM) % kClusterY)
             reason = R::ClusterGrid;
