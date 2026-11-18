@@ -52,6 +52,7 @@
 #include "utility.hpp"
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/LongPath.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -1888,6 +1889,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT:
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_BF16;
@@ -2002,6 +2007,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
                         matmulDesc->scaleBType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
+                        matmulDesc->scaleBType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
                         matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Scalar;
@@ -2434,6 +2443,11 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                     }
                     else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
                             == RocblasltContractionProblem::ScalingFormat::Block_32_BF16)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT;
@@ -2566,6 +2580,11 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                             == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+                    }
+                    else if(matmulDesc->scaleBType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
                     }
                     else if(matmulDesc->scaleBType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)
@@ -3068,6 +3087,13 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
         void* betaf  = (void*)beta;
         auto  prob   = construct_rocblaslt_problem(
             handle, matmul_descr, matA, matB, matC, matD, alphaf, betaf, algo->max_workspace_bytes);
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+            return gate;
+        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+           gate != rocblaslt_status_success)
+            return gate;
+#endif
         status = isSolutionSupported(handle, prob, gemmData, algo, workspaceSizeInBytes);
 
         if(status != rocblaslt_status_success)
@@ -3224,6 +3250,7 @@ rocblaslt_status
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
+        bool layoutRuledOut = false;
         if(requestedAlgoCount > 0)
         {
             status = getBestSolutions(prob,
@@ -3233,7 +3260,8 @@ rocblaslt_status
                                       override_success ? &heuristicResultsArray[1]
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
-                                      pref->max_workspace_bytes);
+                                      pref->max_workspace_bytes,
+                                      &layoutRuledOut);
         }
 
         // Tag the top Tensile result with the hint it was ranked for so a launch
@@ -3268,8 +3296,10 @@ rocblaslt_status
             matmul_desc->bias = nullptr;
         log_api(__func__, "returnAlgoCount", *returnAlgoCount);
 
-        // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > *returnAlgoCount
+        // Try to get size independent solutions from getAllSolutions(). Its
+        // search loads every shard of the operation, so it is skipped when the
+        // MX scale layout rule emptied the ranked list.
+        if(requestedAlgoCount > *returnAlgoCount && !layoutRuledOut
            && topUpWithSizeIndependentSolutions(handle,
                                                 prob,
                                                 tensile_data,
@@ -3477,6 +3507,7 @@ rocblaslt_status
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
 
+        bool layoutRuledOut = false;
         if(requestedAlgoCount - override_result.size() > 0)
             status
                 = getBestSolutions(handle,
@@ -3484,7 +3515,8 @@ rocblaslt_status
                                    gemmData,
                                    workspaceLimit,
                                    override_success ? requestedAlgoCount - 1 : requestedAlgoCount,
-                                   results);
+                                   results,
+                                   &layoutRuledOut);
 
         if(override_success)
         {
@@ -3496,8 +3528,9 @@ rocblaslt_status
 
         int duplicated_counts = 0;
 
-        // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > results.size())
+        // Try to get size independent solutions from getAllSolutions(), unless
+        // the MX scale layout rule emptied the ranked list, as above.
+        if(requestedAlgoCount > results.size() && !layoutRuledOut)
         {
             // If the #-returned < #-requested, we'll call getAll. But in that case we
             // don't need GridBased or Prediction, which are already returned above, so
@@ -3671,12 +3704,12 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
         if(relpath)
         {
             auto full_path = p / (*relpath);
-            if(std::filesystem::exists(full_path))
+            if(std::filesystem::exists(TensileLite::longPathSafe(full_path.string())))
                 return full_path;
             return {};
         }
 
-        if(std::filesystem::exists(p))
+        if(std::filesystem::exists(TensileLite::longPathSafe(p.string())))
             return p;
         return {};
     };

@@ -2,11 +2,11 @@
   "compute_data_type": "float",
   "intermediate_data_type": "${case.intermediate_data_type}",
   "io_data_type": "${case.io_data_type}",
-  "is_override_shape_enabled": false,
+  "is_override_shape_enabled": "${case.override_shape}",
   "name": "ConvolutionForwardTest",
   "nodes": [
     {
-      "compute_data_type": "float",
+      "compute_data_type": "${case.attributes.conv_compute}",
       "inputs": {
         "w_tensor_uid": 1,
         "x_tensor_uid": 2
@@ -16,11 +16,11 @@
         "y_tensor_uid": 0
       },
       "parameters": {
-        "conv_mode": "CROSS_CORRELATION",
-        "dilation": "${case.attributes.parameters__dilation}",
-        "post_padding": "${case.attributes.parameters__post_padding}",
-        "pre_padding": "${case.attributes.parameters__pre_padding}",
-        "stride": "${case.attributes.parameters__stride}"
+        "conv_mode": "${case.attributes.conv_mode}",
+        "dilation": "${case.attributes.dilation}",
+        "post_padding": "${case.attributes.post_padding}",
+        "pre_padding": "${case.attributes.pre_padding}",
+        "stride": "${case.attributes.stride}"
       },
       "type": "ConvolutionFwdAttributes"
     }

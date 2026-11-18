@@ -351,7 +351,7 @@ struct rocfft_plan_description_t
      * 
      * - Usage of multiple I/O fields in descriptors is reported as unsupported;
      * 
-     * - I/O array types are not planar if the corresponding field(s) are set;
+     * - I/O array types are not planar if any (input or output) field is set;
      * 
      * - I/O array types are consistent with the expected data types;
      * 
@@ -528,10 +528,15 @@ struct rocfft_plan_t
     // was set up
     bool BuildMultiDevicePlan();
 
+    // Returns `true` iff a communication-free plan was set up, i.e., outside of standard,
+    // single-device usage, every input brick pairs with a same-location output brick of
+    // identical batch range (and buffer, if in-place)
+    bool BuildEmbarrassinglyParallelPlan();
+
 #ifdef ROCFFT_RCCL_ENABLE
     // populate the rccl communicator from the description's local devices,
-    // before any plan-building path is chosen,  empty when not applicable.
-    // any failure is swallowed internally, leaving rccl empty so
+    // before any communicating plan-building path is chosen, empty when not
+    // applicable. any failure is swallowed internally, leaving rccl empty so
     // the caller falls back to the P2P / A2A paths
     void InitRCCLCommunicator() noexcept;
 #endif

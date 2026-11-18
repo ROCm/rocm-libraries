@@ -100,6 +100,16 @@ static int make_cfg(int idx, rocke_direct_dw_fwd_wmma_spec_t* s, const char** ar
         s->problem = make_problem(5, 2, "bf16", 64, 20, 37, -1);
         knobs(s, 16, 8, 1, 4);
         return 0;
+    case 12:
+        s->problem = make_problem(3, 1, "bf16", 64, 20, 37, -1);
+        s->problem.KW = 5;
+        knobs(s, 4, 6, 2, 2);
+        return 0;
+    case 13:
+        s->problem = make_problem(1, 3, "fp16", 64, 20, 37, -1);
+        s->problem.KW = 7;
+        knobs(s, 2, 4, 1, 2);
+        return 0;
     default:
         return -1;
     }

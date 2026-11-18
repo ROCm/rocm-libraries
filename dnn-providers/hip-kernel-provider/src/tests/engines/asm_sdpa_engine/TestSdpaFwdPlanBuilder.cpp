@@ -22,10 +22,14 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdPlan.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaFwdUnservedAttributeCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -95,6 +99,26 @@ protected:
     Handle _handle;
 };
 
+// Every vendored forward kernel accepts the block it is launched with, so the
+// launch-limit decline is driven by reporting a smaller limit for each kernel.
+class SdpaFwdPlanBuilderWithMaxThreads : public SdpaFwdPlanBuilder
+{
+public:
+    explicit SdpaFwdPlanBuilderWithMaxThreads(unsigned int maxThreads)
+        : _maxThreads(maxThreads)
+    {
+    }
+
+protected:
+    unsigned int maxThreadsPerBlock(const fmha_v3_fwdConfig& /*config*/) const override
+    {
+        return _maxThreads;
+    }
+
+private:
+    unsigned int _maxThreads;
+};
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
 {
     // Create a batchnorm inference graph - this does not use SDPA attributes
@@ -120,7 +144,9 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         bool causalMask = false,
                         bool overrideShapeEnabled = false,
                         hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
-                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                        hipdnn_test_sdk::utilities::CuSeqLenSides cuSeqLenSides
+                        = hipdnn_test_sdk::utilities::CuSeqLenSides::NONE)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -147,7 +173,53 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         paddingMask,
         causalMask,
         overrideShapeEnabled,
-        mmaCoreMode);
+        mmaCoreMode,
+        cuSeqLenSides);
+}
+
+// No ASM forward kernel implements cu_seq_len_*. padding_mask stays false so only the
+// cu_seq_len reject can decline the graph.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    auto baseline = createSdpaFwdGraph(dims, dims);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baselineWrapper(
+        baseline.GetBufferPointer(), baseline.GetSize());
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, baselineWrapper));
+
+    // Each side alone must decline the graph, not only both together.
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV, CuSeqLenSides::BOTH})
+    {
+        SCOPED_TRACE(static_cast<int>(sides));
+        auto withCuSeqLen = createSdpaFwdGraph(dims,
+                                               dims,
+                                               DataType::BFLOAT16,
+                                               DataType::FLOAT,
+                                               /*withAttnMask=*/false,
+                                               /*withScale=*/false,
+                                               /*withStats=*/false,
+                                               /*alibiMask=*/false,
+                                               /*paddingMask=*/false,
+                                               /*causalMask=*/false,
+                                               /*overrideShapeEnabled=*/false,
+                                               DataType::UNSET,
+                                               sides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuWrapper(
+            withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, cuWrapper));
+    }
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
@@ -330,6 +402,33 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAlignment)
 
     const GraphTest aligned{createSdpaFwdGraph(), "All tensors 16-byte aligned"};
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, aligned.graphWrapper())) << aligned.message;
+}
+
+// The decline sits exactly at the block each kernel is launched with: hd192x128
+// kernels launch 256 threads and the others 512, in batch and group mode.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesKernelBelowLaunchBlock)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    for(const auto& config : getConfigsForArch(deviceString, cfg_fmha_fwd))
+    {
+        const GraphTest test{configToCompatibleGraph(config), config.co_name};
+        const unsigned int blockDimX = fwdBlockDimX(static_cast<unsigned int>(config.hdim_q),
+                                                    static_cast<unsigned int>(config.hdim_v));
+        EXPECT_TRUE(
+            SdpaFwdPlanBuilderWithMaxThreads(blockDimX).isApplicable(_handle, test.graphWrapper()))
+            << test.message;
+        EXPECT_FALSE(SdpaFwdPlanBuilderWithMaxThreads(blockDimX - 1U)
+                         .isApplicable(_handle, test.graphWrapper()))
+            << test.message;
+    }
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
@@ -856,6 +955,277 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Attention scale range
+// =============================================================================
+
+TEST(TestSdpaPlanUtils, IsSupportedAttnScaleRequiresFinitePositiveNormalFloat)
+{
+    for(const auto& [scale, name] : unsupportedAttnScales())
+    {
+        EXPECT_FALSE(plan_utils::isSupportedAttnScale(scale)) << name;
+    }
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        EXPECT_TRUE(plan_utils::isSupportedAttnScale(scale)) << name;
+    }
+}
+
+TEST(TestSdpaPlanUtils, AttnScaleTextDistinguishesNormalBoundary)
+{
+    const float smallestNormal = std::numeric_limits<float>::min();
+    EXPECT_NE(plan_utils::attnScaleToString(smallestNormal),
+              plan_utils::attnScaleToString(std::nextafter(smallestNormal, 0.0F)));
+}
+
+// Exercise the DOUBLE tensor read in both baked forms, plus the pure runtime
+// read. The next double above FLT_MAX must decline even if a cast rounds it down.
+TEST(TestSdpaPlanUtils, DoubleAttnScaleChecksRangeBeforeNarrowing)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto scaleOf = [](double scale, bool runtimeWithDefault) {
+        const auto builder = withDoubleScaleTensor(createSdpaFwdGraph(), scale, runtimeWithDefault);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        return plan_utils::attnScaleBeforeExecute(
+            graphWrapper.nodeWrappers().front()->attributesAs<SdpaAttributes>(),
+            graphWrapper.getTensorMap());
+    };
+
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        SCOPED_TRACE(name);
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            const auto narrowed = scaleOf(scale, runtimeWithDefault);
+            ASSERT_TRUE(narrowed.has_value());
+            EXPECT_FALSE(plan_utils::isSupportedAttnScale(*narrowed));
+        }
+    }
+
+    // Ordinary values and both float endpoints remain usable as DOUBLE tensors.
+    // A double just below FLT_MIN rounds to FLT_MIN: the lower bound applies to
+    // the actual float kernarg, not the original double.
+    std::vector<std::pair<double, float>> accepted;
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        accepted.emplace_back(static_cast<double>(scale), scale);
+    }
+    accepted.emplace_back(
+        std::nextafter(static_cast<double>(std::numeric_limits<float>::min()), 0.0),
+        std::numeric_limits<float>::min());
+    for(const auto& [scale, expected] : accepted)
+    {
+        SCOPED_TRACE(scale);
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            EXPECT_EQ(scaleOf(scale, runtimeWithDefault), expected);
+        }
+        double hostScale = scale;
+        const hipdnnPluginDeviceBuffer_t buffer{1, &hostScale};
+        const hipdnn_plugin_sdk::ScalarOperand operand{1, DataType::DOUBLE, true, 0.0};
+        EXPECT_EQ(plan_utils::resolveSupportedAttnScale(operand, &buffer, 1, "test"), expected);
+    }
+}
+
+// The scale isApplicable checks is the one execute will pass to the kernel.
+TEST(TestSdpaPlanUtils, AttnScaleBeforeExecute)
+{
+    const auto scaleOf = [](const flatbuffers::FlatBufferBuilder& builder) {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto& attrs
+            = graphWrapper.nodeWrappers()
+                  .front()
+                  ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+        return plan_utils::attnScaleBeforeExecute(attrs, graphWrapper.getTensorMap());
+    };
+
+    EXPECT_EQ(scaleOf(createSdpaFwdGraph()), 1.0F) << "unset attn_scale_value";
+    EXPECT_EQ(scaleOf(withAttnScale(createSdpaFwdGraph(), AttnScaleSource::ATTRIBUTE, 0.5F)), 0.5F);
+    EXPECT_EQ(scaleOf(withAttnScale(createSdpaFwdGraph(), AttnScaleSource::CONSTANT_TENSOR, 0.25F)),
+              0.25F);
+    EXPECT_EQ(scaleOf(withAttnScale(
+                  createSdpaFwdGraph(), AttnScaleSource::RUNTIME_TENSOR_WITH_DEFAULT, 0.125F)),
+              0.125F);
+    EXPECT_FALSE(scaleOf(createSdpaFwdGraphWithRuntimePbvScale()).has_value())
+        << "pure runtime scale tensor";
+    EXPECT_THROW(scaleOf(withUnreadableScaleTensor(createSdpaFwdGraph())),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// Scales the kernels mishandle, from attn_scale_value, a constant scale tensor or
+// the default of a runtime scale tensor, and a scale tensor whose value cannot be
+// read. On gfx942 a negative scale or -0.0 gave NaN O and Inf LSE even with no
+// mask, and 0 or 1e-40 did with a bottom-right causal mask or S_kv = 200.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsUnsupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    for(const auto& [scale, scaleName] : unsupportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            declineTests.emplace_back(withAttnScale(createSdpaFwdGraph(), source, scale),
+                                      attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            declineTests.emplace_back(
+                withDoubleScaleTensor(createSdpaFwdGraph(), scale, runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
+    declineTests.emplace_back(withUnreadableScaleTensor(createSdpaFwdGraph()),
+                              "FP8_E4M3 constant scale tensor");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// Finite, positive, normal scales from every source, the unset default (1.0), and
+// a pure runtime scale tensor, which execute checks.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> acceptTests;
+    acceptTests.emplace_back(createSdpaFwdGraph(), "unset attn_scale_value");
+    for(const auto& [scale, scaleName] : supportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            acceptTests.emplace_back(withAttnScale(createSdpaFwdGraph(), source, scale),
+                                     attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            acceptTests.emplace_back(
+                withDoubleScaleTensor(
+                    createSdpaFwdGraph(), static_cast<double>(scale), runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
+    acceptTests.emplace_back(createSdpaFwdGraphWithRuntimePbvScale(), "pure runtime scale tensor");
+
+    for(const auto& test : acceptTests)
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// A forward plan for a [1, 1, 128, 128] bf16 problem, with no loaded kernel, whose
+// scale is a pure runtime pass-by-value tensor. Launching it fails with
+// INTERNAL_ERROR, so BAD_PARAM shows that execute threw before the launch.
+constexpr int64_t K_FWD_RUNTIME_SCALE_UID = 5;
+const std::vector<int64_t> K_FWD_TENSOR_UIDS = {1, 2, 3, 4};
+
+SdpaFwdPlan createFwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType scaleType
+                                          = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+{
+    constexpr unsigned int K_ROW = 128;
+    constexpr unsigned int K_HEAD = 128 * 128;
+
+    SdpaFwdParams params{};
+    params.qUid = 1;
+    params.kUid = 2;
+    params.vUid = 3;
+    params.oUid = 4;
+    params.batchSize = 1;
+    params.numHeadsQ = 1;
+    params.numHeadsKv = 1;
+    params.seqLenQ = 128;
+    params.seqLenKv = 128;
+    params.headDimQk = 128;
+    params.headDimV = 128;
+    params.qStrideSeq = K_ROW;
+    params.qStrideRow = K_ROW;
+    params.qStrideHead = K_HEAD;
+    params.qStrideBatch = K_HEAD;
+    params.kStrideSeq = K_ROW;
+    params.kStrideHead = K_HEAD;
+    params.kStrideBatch = K_HEAD;
+    params.vStrideSeq = K_ROW;
+    params.vStrideHead = K_HEAD;
+    params.vStrideBatch = K_HEAD;
+    params.oStrideSeq = K_ROW;
+    params.oStrideHead = K_HEAD;
+    params.oStrideBatch = K_HEAD;
+    params.tileSizeQo = 128;
+    params.archString = "gfx942";
+    params.maskType = plan_utils::MaskType::NO_MASK;
+    params.attnScale
+        = hipdnn_plugin_sdk::ScalarOperand{K_FWD_RUNTIME_SCALE_UID, scaleType, true, 0.0};
+    return {std::make_shared<HipModuleGuard>(), params};
+}
+
+// A pure runtime scale tensor's value arrives only at execute, so execute returns
+// BAD_PARAM for an unsupported one, before the launch.
+TEST(TestSdpaFwdPlanExecute, RejectsUnsupportedRuntimeAttnScale)
+{
+    const SdpaFwdPlan plan = createFwdPlanWithRuntimeScale();
+    for(const auto& [scale, name] : unsupportedAttnScales())
+    {
+        EXPECT_EQ(
+            executeWithRuntimeScale(plan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+    const SdpaFwdPlan doublePlan
+        = createFwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        EXPECT_EQ(executeWithRuntimeScale(
+                      doublePlan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+                  HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+}
+
+// A supported runtime scale passes the check and reaches the launch, which fails
+// because the plan has no kernel.
+TEST(TestSdpaFwdPlanExecute, PassesSupportedRuntimeAttnScaleToLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const SdpaFwdPlan plan = createFwdPlanWithRuntimeScale();
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        EXPECT_EQ(
+            executeWithRuntimeScale(plan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR)
+            << name;
+    }
+
+    // Clear the HIP error state left by the intentional failed launch, or the
+    // HipErrorHandler listener fails this test for it.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
 }
 
 // =============================================================================
@@ -1707,10 +2077,10 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
          {K_U32_DIM_LIMIT, 8, 256, 128}},
         {"nhead_q at UINT32_MAX",
          {4, K_U32_DIM_LIMIT, 256, 128},
-         {4, 8, 256, 128},
-         {4, 8, 256, 128}},
+         {4, 1, 256, 128},
+         {4, 1, 256, 128}},
         {"nhead_kv at UINT32_MAX",
-         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT, 256, 128},
          {4, K_U32_DIM_LIMIT, 256, 128},
          {4, K_U32_DIM_LIMIT, 256, 128}},
         {"seqlen_q at INT32_MAX", {4, 8, K_I32_DIM_LIMIT, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
@@ -1748,10 +2118,10 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimit
          {K_U32_DIM_LIMIT + 1, 8, 256, 128}},
         {"nhead_q one past UINT32_MAX",
          {4, K_U32_DIM_LIMIT + 1, 256, 128},
-         {4, 8, 256, 128},
-         {4, 8, 256, 128}},
+         {4, 1, 256, 128},
+         {4, 1, 256, 128}},
         {"nhead_kv one past UINT32_MAX",
-         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
          {4, K_U32_DIM_LIMIT + 1, 256, 128},
          {4, K_U32_DIM_LIMIT + 1, 256, 128}},
         {"seqlen_q one past INT32_MAX",
@@ -2062,6 +2432,41 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsOnEmptyKernelKey)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+// buildPlan refuses a kernel that cannot take its launch block, before loading
+// it, rather than leaving the failure to hipModuleLaunchKernel in execute.
+TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsForKernelBelowLaunchBlock)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // hd128 kernels are launched with 512 threads.
+    auto builder = createSdpaFwdGraph({4, 8, 256, 128});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                        builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    Context context;
+
+    // A kernel that cannot be loaded also throws HipdnnPluginException, so the
+    // message tells the two apart.
+    try
+    {
+        SdpaFwdPlanBuilderWithMaxThreads(511U).buildPlan(_handle, gw, dummyCfg, context);
+        FAIL() << "buildPlan accepted a kernel limited to 511 threads per block";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("accepts at most 511 threads per block"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
 // =============================================================================
 // initializeExecutionSettings
 // =============================================================================
@@ -2076,6 +2481,252 @@ TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettingsIsNoOp)
     Settings settings;
     // Must not throw or log an error — forward has no knobs.
     EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(_handle, gw, dummyCfg, settings));
+}
+
+// =============================================================================
+// Attributes the forward kernels do not serve
+// =============================================================================
+
+class TestSdpaFwdUnservedAttributes : public ::testing::TestWithParam<SdpaFwdUnservedAttributeCase>
+{
+protected:
+    SdpaFwdPlanBuilder _planBuilder;
+    Handle _handle;
+
+    bool servedArch()
+    {
+        const std::string deviceString
+            = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+        return deviceString == "gfx942" || deviceString == "gfx950";
+    }
+};
+
+TEST_F(TestSdpaFwdUnservedAttributes, UnmutatedGraphIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = createSdpaFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+}
+
+class TestSdpaFwdInertAttributes : public TestSdpaFwdUnservedAttributes
+{
+};
+
+TEST_P(TestSdpaFwdInertAttributes, IsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+}
+
+TEST_P(TestSdpaFwdUnservedAttributes, IsNotApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Attributes,
+                         TestSdpaFwdUnservedAttributes,
+                         ::testing::ValuesIn(asmUnservedFwdAttributeCases()),
+                         [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
+                             return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Attributes,
+                         TestSdpaFwdInertAttributes,
+                         ::testing::ValuesIn(asmInertFwdAttributeCases()),
+                         [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
+                             return info.param.name;
+                         });
+
+// =============================================================================
+// Graphs whose operands disagree, or whose tensor metadata no kernel reads
+// =============================================================================
+
+// The shape predicate the contract test below reaches through isApplicable, run on the host:
+// a GQA graph (8 query heads over 4 key/value heads) with each case changing one extent.
+TEST(TestSdpaFwdShapeConsistency, DeclinesOperandsThatDisagreeOnShape)
+{
+    const auto hasConsistentShapes
+        = [](const std::function<void(std::vector<int64_t> & q,
+                                      std::vector<int64_t> & k,
+                                      std::vector<int64_t> & v,
+                                      std::vector<int64_t> & o)>& mutateDims) {
+              auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+                  createSdpaFwdGraph({4, 8, 256, 128}, {4, 4, 256, 128}),
+                  [&mutateDims](GraphT& graph) {
+                      auto& attrs = sdpa::detail::getSdpaAttributes(graph);
+                      mutateDims(findTensorByUid(graph, attrs.q_tensor_uid).dims,
+                                 findTensorByUid(graph, attrs.k_tensor_uid).dims,
+                                 findTensorByUid(graph, attrs.v_tensor_uid).dims,
+                                 findTensorByUid(graph, attrs.o_tensor_uid).dims);
+                  });
+              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                  builder.GetBufferPointer(), builder.GetSize());
+              const auto& attrs
+                  = graph.nodeWrappers()
+                        .front()
+                        ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+              const auto& tensors = graph.getTensorMap();
+              return plan_utils::hasConsistentFwdShapes(*tensors.at(attrs.q_tensor_uid()),
+                                                        *tensors.at(attrs.k_tensor_uid()),
+                                                        *tensors.at(attrs.v_tensor_uid()),
+                                                        *tensors.at(attrs.o_tensor_uid()));
+          };
+
+    // Accepted: the legal GQA graph, equal head sizes at another width, a GQA ratio of 1, and a
+    // K/V sequence length different from Q's.
+    EXPECT_TRUE(hasConsistentShapes([](auto&, auto&, auto&, auto&) {}));
+    EXPECT_TRUE(hasConsistentShapes([](auto& q, auto& k, auto&, auto&) { q[3] = k[3] = 64; }));
+    EXPECT_TRUE(hasConsistentShapes([](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 8; }));
+    EXPECT_TRUE(hasConsistentShapes([](auto&, auto& k, auto& v, auto&) { k[2] = v[2] = 512; }));
+
+    using DimsMutation = std::function<void(std::vector<int64_t> & q,
+                                            std::vector<int64_t> & k,
+                                            std::vector<int64_t> & v,
+                                            std::vector<int64_t> & o)>;
+    const std::vector<std::pair<std::string, DimsMutation>> declined = {
+        {"KHeadSizeDiffersFromQ", [](auto&, auto& k, auto&, auto&) { k[3] = 64; }},
+        {"KHeadSizeExceedsQ", [](auto&, auto& k, auto&, auto&) { k[3] = 256; }},
+        {"QueryHeadsNotAMultipleOfKvHeads",
+         [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 3; }},
+        {"VHeadsDifferFromKHeads", [](auto&, auto&, auto& v, auto&) { v[1] = 2; }},
+        {"KBatchDiffersFromQBatch", [](auto&, auto& k, auto&, auto&) { k[0] = 2; }},
+        {"OHeadSizeDiffersFromVHeadSize", [](auto&, auto&, auto&, auto& o) { o[3] = 64; }},
+        {"KvHeadsExceedQueryHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 16; }},
+        {"ZeroKvHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 0; }},
+        {"VSequenceDiffersFromKSequence", [](auto&, auto&, auto& v, auto&) { v[2] = 128; }},
+        {"VBatchDiffersFromQBatch", [](auto&, auto&, auto& v, auto&) { v[0] = 2; }},
+        {"OBatchDiffersFromQBatch", [](auto&, auto&, auto&, auto& o) { o[0] = 2; }},
+        {"OHeadsDifferFromQHeads", [](auto&, auto&, auto&, auto& o) { o[1] = 4; }},
+        {"OSequenceDiffersFromQSequence", [](auto&, auto&, auto&, auto& o) { o[2] = 128; }},
+        // Every operand agrees on the zero, so only the positive-extent rule declines them.
+        {"ZeroBatch", [](auto& q, auto& k, auto& v, auto& o) { q[0] = k[0] = v[0] = o[0] = 0; }},
+        {"ZeroQueryLength", [](auto& q, auto&, auto&, auto& o) { q[2] = o[2] = 0; }},
+        {"ZeroKeyValueLength", [](auto&, auto& k, auto& v, auto&) { k[2] = v[2] = 0; }},
+        {"ZeroQkHeadSize", [](auto& q, auto& k, auto&, auto&) { q[3] = k[3] = 0; }},
+        {"ZeroVHeadSize", [](auto&, auto&, auto& v, auto& o) { v[3] = o[3] = 0; }},
+    };
+    for(const auto& [name, mutateDims] : declined)
+    {
+        SCOPED_TRACE(name);
+        EXPECT_FALSE(hasConsistentShapes(mutateDims));
+    }
+}
+
+class TestSdpaFwdGraphContract : public ::testing::Test
+{
+protected:
+    SdpaFwdPlanBuilder _planBuilder;
+    Handle _handle;
+
+    bool servedArch()
+    {
+        const std::string deviceString
+            = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+        return deviceString == "gfx942" || deviceString == "gfx950";
+    }
+
+    bool isApplicable(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_handle, graph);
+    }
+};
+
+// A GQA graph the engine serves (8 query heads over 4 key/value heads), with each case
+// changing one extent or one tensor property the kernel's addressing relies on. The frontend
+// rejects these graphs; the raw backend does not.
+TEST_F(TestSdpaFwdGraphContract, DeclinesOperandsThatDisagreeOnShape)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+
+    const auto base = [] { return createSdpaFwdGraph({4, 8, 256, 128}, {4, 4, 256, 128}); };
+    ASSERT_TRUE(isApplicable(base()));
+
+    using DimsMutation = std::function<void(std::vector<int64_t> & q,
+                                            std::vector<int64_t> & k,
+                                            std::vector<int64_t> & v,
+                                            std::vector<int64_t> & o)>;
+    const std::vector<std::pair<std::string, DimsMutation>> cases = {
+        {"QueryHeadsNotAMultipleOfKvHeads",
+         [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 3; }},
+        {"KvHeadsExceedQueryHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 16; }},
+        {"ZeroKvHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 0; }},
+        {"VHeadsDifferFromKHeads", [](auto&, auto&, auto& v, auto&) { v[1] = 2; }},
+        {"VSequenceDiffersFromKSequence", [](auto&, auto&, auto& v, auto&) { v[2] = 128; }},
+        {"VBatchDiffersFromQBatch", [](auto&, auto&, auto& v, auto&) { v[0] = 2; }},
+        {"KBatchDiffersFromQBatch", [](auto&, auto& k, auto&, auto&) { k[0] = 2; }},
+        {"KHeadSizeDiffersFromQ", [](auto&, auto& k, auto&, auto&) { k[3] = 64; }},
+        {"OBatchDiffersFromQBatch", [](auto&, auto&, auto&, auto& o) { o[0] = 2; }},
+        {"OHeadsDifferFromQHeads", [](auto&, auto&, auto&, auto& o) { o[1] = 4; }},
+        {"OSequenceDiffersFromQSequence", [](auto&, auto&, auto&, auto& o) { o[2] = 128; }},
+        {"OHeadSizeDiffersFromVHeadSize", [](auto&, auto&, auto&, auto& o) { o[3] = 64; }},
+        {"ZeroQuerySequence", [](auto& q, auto&, auto&, auto& o) { q[2] = o[2] = 0; }},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        const auto& mutateDims = testCase.second;
+        SCOPED_TRACE(testCase.first);
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            base(), [&mutateDims](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                auto& attrs = sdpa::detail::getSdpaAttributes(graph);
+                auto& q = findTensorByUid(graph, attrs.q_tensor_uid).dims;
+                auto& k = findTensorByUid(graph, attrs.k_tensor_uid).dims;
+                auto& v = findTensorByUid(graph, attrs.v_tensor_uid).dims;
+                auto& o = findTensorByUid(graph, attrs.o_tensor_uid).dims;
+                mutateDims(q, k, v, o);
+            });
+        EXPECT_FALSE(isApplicable(builder));
+    }
+}
+
+TEST_F(TestSdpaFwdGraphContract, DeclinesARaggedOffsetMultiplierOnATensorWithoutRaggedOffset)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    ASSERT_TRUE(isApplicable(createSdpaFwdGraph()));
+
+    for(const char* name : {"q", "k", "v", "o"})
+    {
+        SCOPED_TRACE(name);
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            createSdpaFwdGraph(), [name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                findTensor(graph, name).ragged_offset_multiplier = 2;
+            });
+        EXPECT_FALSE(isApplicable(builder));
+    }
 }
 
 } // namespace

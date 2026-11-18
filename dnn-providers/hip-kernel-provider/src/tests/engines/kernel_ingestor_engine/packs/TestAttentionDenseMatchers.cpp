@@ -405,6 +405,34 @@ TEST_P(TestAttentionDenseMatch, DeclinesEachOperandOfAnotherRankOrAZeroExtent)
     }
 }
 
+TEST_P(TestAttentionDenseMatch, DeclinesEachOperandDeclaringTooLittleAlignment)
+{
+    // Both arches declare q/k/v/o `align 16`, so both hold every operand to 16. A graph that
+    // declares no alignment already gets 16 from the schema, so only an explicit
+    // under-declaration is turned away. 24 is turned away too: it clears 16 but is not a
+    // multiple of it, so only every other such pointer would land right.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE("uid " + std::to_string(uid));
+        for(const int64_t bytes : {1, 2, 4, 8, 24})
+        {
+            auto spec = baseGraph();
+            spec.alignmentUid = uid;
+            spec.alignmentBytes = bytes;
+            const auto decline = loggedDecline(arch(), spec);
+            EXPECT_EQ(decline.cause, "alignment") << bytes << ": " << decline.detail;
+        }
+
+        for(const int64_t bytes : {16, 32, 256})
+        {
+            auto spec = baseGraph();
+            spec.alignmentUid = uid;
+            spec.alignmentBytes = bytes;
+            EXPECT_TRUE(matchGraph(arch(), spec).has_value()) << bytes;
+        }
+    }
+}
+
 TEST_P(TestAttentionDenseMatch, DeclinesMixedOperandDataTypes)
 {
     for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
