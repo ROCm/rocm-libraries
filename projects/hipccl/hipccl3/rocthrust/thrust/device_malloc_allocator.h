@@ -34,6 +34,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
 
+#include <new>
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
@@ -142,7 +143,7 @@ public:
   {
     if (cnt > this->max_size())
     {
-      std::__throw_bad_alloc();
+      throw std::bad_alloc();
     } // end if
 
     return pointer(device_malloc<T>(cnt));
