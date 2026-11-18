@@ -507,11 +507,11 @@ TEST_F(PrecondTridiagonal, strided_batch_medium_sizes)
 }
 
 // The medium path puts one block per tile of 8 right-hand sides, or per system of
-// the batch, on grid.y. A grid.y limit of 1 to 3 forces the grid-stride kernels,
-// with several tiles per block and a partial last step: 51 right-hand sides are 7
-// tiles, the last one partial, and 7 systems. m = 135000 also runs them in the
+// the batch, on grid.y. A grid.y limit of 1 to 3 splits the forward and backward
+// kernels into several launches, with a partial last chunk: 51 right-hand sides are
+// 7 tiles, the last one partial, and 7 systems. m = 135000 also splits them in the
 // recursion on the reduced system of 1056 rows.
-TEST_F(PrecondTridiagonal, medium_grid_stride_grid_y)
+TEST_F(PrecondTridiagonal, medium_chunked_grid_y)
 {
     for(const int limit : {1, 2, 3})
     {
