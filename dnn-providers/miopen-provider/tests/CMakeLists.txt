@@ -29,6 +29,7 @@ add_executable(
     engines/plans/TestMiopenBinaryPointwiseChecks.cpp
     engines/plans/TestMiopenBinaryPointwisePlan.cpp
     engines/plans/TestMiopenBinaryPointwisePlanBuilder.cpp
+    engines/plans/TestMiopenConvApplicabilityChecks.cpp
     engines/plans/TestMiopenConvBwdPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
@@ -39,6 +40,7 @@ add_executable(
     engines/plans/TestMiopenReductionChecks.cpp
     engines/plans/TestMiopenReductionPlan.cpp
     engines/plans/TestMiopenReductionPlanBuilder.cpp
+    engines/plans/TestMiopenUnaryActivationChecks.cpp
     engines/plans/TestMiopenUnaryActivationPlanBuilder.cpp
     engines/TestMiopenEngine.cpp
     main.cpp
