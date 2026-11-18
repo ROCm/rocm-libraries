@@ -1804,7 +1804,12 @@ def test_request_hash_is_stable_across_processes():
         "    strides={'v': (1, 2, 3, 1), 'q': (4, 5, 6, 1)}, scale=0.25)\n"
         "print(stable_json_hash(r.normalized()))\n"
     )
-    env = dict(os.environ, PYTHONHASHSEED="12345")
+    from rocke.tests.subprocess_launcher import rocke_subprocess_env
+
+    env = rocke_subprocess_env(
+        dict(os.environ, PYTHONHASHSEED="12345"),
+        python_paths=(Path(__file__).resolve().parents[1],),
+    )
     out = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,

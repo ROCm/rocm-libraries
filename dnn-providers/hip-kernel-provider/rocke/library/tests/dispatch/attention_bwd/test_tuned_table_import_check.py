@@ -20,6 +20,7 @@ import types
 from pathlib import Path
 
 import pytest
+from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 from dispatch.attention_bwd import dense_tuning, gfx950_tuning, routing, tuned_tables
 from dispatch.attention_bwd import tuning_common as tc
@@ -136,11 +137,12 @@ def test_a_bad_shipped_entry_fails_the_package_import(tmp_path):
     head, tail = src.split(anchor)
     tail = tail.replace("): {\n", '): {\n        "no_such_knob": 1,\n', 1)
     path.write_text(head + anchor + tail, encoding="utf-8")
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(tmp_path), str(LIBRARY)] + env.get("PYTHONPATH", "").split(os.pathsep)
+    # The copy first, then the real library: the child must import the copy's
+    # ``dispatch`` and this checkout's ``rocke``.
+    env = rocke_subprocess_env(
+        {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        python_paths=(tmp_path, LIBRARY),
     )
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
     code = "import dispatch; print(dispatch.__file__); import dispatch.attention_bwd"
     bad = subprocess.run(
         [sys.executable, "-c", code],
