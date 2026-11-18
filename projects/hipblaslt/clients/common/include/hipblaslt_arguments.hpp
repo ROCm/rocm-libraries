@@ -246,8 +246,8 @@ struct Arguments
     float   skip_slow_solution_ratio;
     // Uniform-order request for the client handle: -1=unspecified, 0=off, 1=on.
     int32_t uniform_summation_order;
-    // Nonzero makes the inputs uniform along M and checks that every row of D is bitwise equal.
-    int32_t row_uniform_check;
+    // Directions in which the inputs are made uniform and D is checked to be bitwise uniform.
+    hipblaslt_uniform_check uniform_check;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -389,7 +389,7 @@ struct Arguments
     OPER(use_gpu_timer) SEP          \
     OPER(skip_slow_solution_ratio) SEP\
     OPER(uniform_summation_order) SEP\
-    OPER(row_uniform_check) SEP      \
+    OPER(uniform_check) SEP          \
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \

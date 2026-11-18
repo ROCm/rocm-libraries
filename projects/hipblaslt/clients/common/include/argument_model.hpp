@@ -28,7 +28,7 @@
 
 #include "efficiency_monitor.hpp"
 #include "hipblaslt_arguments.hpp"
-#include "row_uniform.hpp"
+#include "uniform_check.hpp"
 #include <fstream>
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <string>
@@ -181,7 +181,7 @@ public:
                   double                      max_ulp = 0.0,
                   double                      avg_ulp = 0.0,
                   const hipblaslt_bench::TimingResult& timing = {},
-                  const RowUniformResult&              row_uniform = {})
+                  const UniformCheckResult&            row_uniform = {})
     {
         hipblaslt_internal_ostream name_list;
         hipblaslt_internal_ostream value_list;
@@ -341,11 +341,11 @@ public:
         }
 
         // After the tuning-file write, so tuning files keep their columns.
-        if(row_uniform.status != RowUniformResult::Status::off)
+        if(row_uniform.status != UniformCheckResult::Status::off)
         {
             print("row_uniform", row_uniform.status_name());
-            print("row_uniform_bad_cols", row_uniform.bad_cols);
-            print("row_uniform_first_row", row_uniform.first_row);
+            print("row_uniform_bad_cols", row_uniform.bad);
+            print("row_uniform_first_row", row_uniform.first);
         }
 
         str << name_list << "\n" << value_list << std::endl;
