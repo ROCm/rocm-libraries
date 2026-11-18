@@ -4,7 +4,9 @@
 direct-peer GEMM panel prototype are implemented. CPU, compiler, and engine-parity
 checks passed. Stage 1's basic peer-copy gate and Stage 2's focused two-GPU
 numerical gate passed on both `gfx942` and `gfx950`. Stage 2 coverage is the
-fixed, aligned, panel-packed prototype scope; multi-peer scheduling, bandwidth,
+fixed, aligned, panel-packed prototype scope. Stage 3a adds a CPU-tested,
+host-only same-stack unfused baseline and multi-rank replay runner; their
+hardware correctness gate is still pending. Multi-peer scheduling, bandwidth,
 and communication/compute overlap remain unvalidated.
 
 ## Goal and agreed scope
@@ -378,9 +380,29 @@ comparable local GEMM → rocKE scatter kernel. Keep input/output placement,
 precision, shapes, and timing boundaries equivalent. No RCCL installation is
 required for the baseline.
 
+**Stage 3a implementation:** the host-only `peer_gemm_pipeline` planner queues
+existing rocKE panel-copy kernels around the same pointer-selected GEMM code
+object used by the fused path. Gather materializes full local A; scatter
+materializes local C before disjoint placement into the same panel-packed final
+layout. Local panels are copied as well and separately distinguished from peer
+payload in logical accounting. No new SSA, C++ emitter, or communication library
+is introduced. The HIP + NumPy runner checks encoded-operand reference output,
+allocation/staging guards, immutable inputs/tables, and all-rank completion.
+Its CPU packed-ABI models are not hardware validation. The
+[replay methodology](../../python/rocke/examples/common/peer_gemm/README.md#stage-3a-same-stack-baseline-and-replay-runner)
+describes correctness-only reports and separately opt-in timing boundaries.
+
+**Next bounded hardware proposal:** four execution GPUs on each target, both
+dtypes, all four placements, two aligned geometries, and single/repeated
+iterations for both fused and unfused paths. Authorize this correctness-only
+allocation separately; do not measure performance or submit an eight-GPU lane
+before the new baseline and runner pass that gate. Source-order/interleaved,
+bounded-work, and input-reuse scheduling changes remain subsequent Stage 3 work.
+
 **Gate:** reproducible evidence identifying where the direct-peer schedule
-spends work/waits and whether local staging is worth implementing. A fused
-variant may be slower; do not claim a gain from fewer launches alone.
+spends work/waits and whether staging or separate communication roles are worth
+implementing in the fused kernel. Baseline staging is not a Stage 4 protocol.
+A fused variant may be slower; do not claim a gain from fewer launches alone.
 
 ### Stage 4 — Optional staged/overlapped pipeline
 
@@ -465,11 +487,14 @@ queued, skipped, or compile-only lane is not a passed hardware test.
 - [x] Validate the `gfx942` peer-copy hardware lane (Stage 1 gate).
 - [x] Add parity-tested direct-peer GEMM panel variants (Stage 2 implementation).
 - [x] Validate the focused two-GPU fused GEMM variants on both targets (Stage 2 gate).
+- [x] Add the CPU-tested same-stack unfused baseline and replay runner (Stage 3a).
+- [ ] Validate both paths with the new runner on four GPUs per target (Stage 3a gate).
 - [ ] Characterize multi-peer schedules against the same-stack baseline (Stage 3).
 - [ ] Decide whether a staged protocol is justified; implement only if needed (Stage 4).
 
-**Immediate next action:** design and separately authorize the Stage 3
-multi-peer scheduling experiments against the same-stack unfused baseline.
-Preserve the completed Stage 1 and Stage 2 correctness evidence. Keep measured
-software-performance results outside the repository and do not claim overlap
-or throughput improvements before those experiments establish them.
+**Immediate next action:** separately authorize the bounded four-GPU Stage 3a
+correctness-only gate for the fused path and new unfused baseline/runner.
+Preserve the completed Stage 1 and Stage 2 correctness evidence. Scheduling and
+performance experiments follow that gate; keep measured software-performance
+results in-session or in protected AMD Confluence, outside repository artifacts,
+and do not claim overlap or throughput improvements before evidence establishes them.

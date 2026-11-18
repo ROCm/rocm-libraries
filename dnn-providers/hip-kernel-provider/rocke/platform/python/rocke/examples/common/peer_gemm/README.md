@@ -144,6 +144,89 @@ a separately authorized allocation with a direct CPU reference from the actual q
 local controls, both input/output placement modes, exact ownership checks, and
 all-rank completion before readback.
 
+## Stage 3a: same-stack baseline and replay runner
+
+The host-only [pipeline planner](../../../instances/common/peer_gemm_pipeline.py)
+uses the existing peer-copy and peer-GEMM families. It introduces no new device
+SSA, lowerer, communication library, or GEMM implementation. The fused path and
+baseline use the **same GEMM code object** and output conversion:
+
+```text
+fused:   peer A → existing GEMM → final local/peer C
+unfused: gather copies → full local A → same GEMM → local C → scatter copies
+```
+
+For gather, the baseline copies one complete A panel per source into local
+staging, including the execution rank's own panel. For scatter, it computes the
+full column shard locally and copies one panel to every row owner, including its
+own local destination. Those local copies are included in launch/byte accounting;
+this baseline does not silently optimize them away. Replicated input omits the
+gather phase; local output omits the scatter phase. With `p` ranks the baseline
+uses `1 + p * gather_enabled + p * scatter_enabled` launches per rank, versus one
+fused launch. These are algorithmic counts, not evidence of a performance gain.
+
+Each rank queues its copies, GEMM, and copies on its own default stream. Stream
+FIFO orders that rank's local producers and consumers without an inter-phase host
+barrier. All source A/B panels are immutable and uploaded before any rank queues
+work. Scatter destinations remain disjoint. The runner waits for **every execution
+rank** before readback, reset, module unload, free, or mapping removal. Partial
+enqueue and drain failures preserve potentially live allocation/event owners;
+failed teardown does not publish a successful correctness report.
+
+The [HIP + NumPy runner](../../../benchmark/gemm/peer_runner.py) validates exact
+output bits against FP32 reference products of the encoded operands, checks all
+allocation guards (including staging), and verifies immutable inputs/tables.
+It uses deterministic synthetic dyadic inputs, not customer/model data. CPU tests
+exercise its packed-ABI host model at one, two, four, and eight ranks; these are
+**mock-only tests, not multi-GPU numerical validation**. The new baseline and
+runner still require independent hardware correctness gates.
+
+Run the correctness-only entry point inside a separately authorized GPU allocation,
+from `rocke/platform/` with `PYTHONPATH=python`:
+
+```text
+python -m rocke.examples.common.peer_gemm.run --devices 0,1,2,3 --arch gfx942 --dtype f16 --rows 32 --cols 32 --k 64 --inputs gather --outputs scatter --repeats 3 --correctness-output <correctness-report.json>
+```
+
+Use the allocation's visible HIP ordinals and matching `gfx942`/`gfx950` target.
+Repeat for both dtypes and all four input/output placements; include single-iteration
+and repeated-iteration checks and more than one aligned geometry. The CLI does not
+submit Slurm jobs or import PyTorch. Its report contains checks, shapes, placements,
+launch counts, and logical workload bytes, **not achieved software-performance values**.
+
+### Timing and traffic interpretation
+
+Timing is opt-in via `--measure-samples`; it is disabled in correctness jobs. After
+both paths pass validation, `--warmup` queues untimed iterations, and measured
+samples alternate path order to avoid a fixed-order comparison. Setup, compilation,
+allocation, table upload, validation, and warmup are outside the measured boundary.
+
+- Host makespan starts before the first rank's start-event record and ends after
+  all execution streams drain. It includes Python submission and wait overhead;
+  it is not an isolated device-kernel latency or a global GPU timestamp.
+- Each rank's device duration brackets its entire selected stream path, including
+  baseline copies. Pair events only on the same device; do not subtract timestamps
+  from different GPUs.
+- Logical copy bytes distinguish local copies from peer payload. They are not
+  measured transactions, duplicated-load counts, achieved bandwidth, or cache/link
+  counters. The fused GEMM may reread A for different output-column tiles.
+- Staging byte counts describe the baseline's materialized intermediates. The
+  shared comparison fixture allocates resources for both paths; its allocation
+  footprint is not the minimum memory requirement of the fused path.
+
+Measurements are returned in memory and printed separately for in-session use.
+Retain them only in protected, access-controlled AMD Confluence—not repository
+files, redirected logs, commit messages, or public reports. Resource usage, wait
+attribution, actual/duplicated traffic, bounded peer work, input-tile reuse, and
+communication/compute overlap remain subsequent experiments. The initial z-panel
+geometry does not establish dispatch order or overlap.
+
+CPU-only replay checks:
+
+```text
+python -m pytest tests/instances/test_peer_gemm_pipeline.py tests/instances/test_peer_gemm_run.py python/rocke/benchmark/gemm/tests/test_peer_runner.py
+```
+
 See the [distributed-tile plan](../../../../../dsl_docs/development/distributed_tile_gemm_poc.md)
 for stage status and subsequent scheduling experiments. Stage 1 copy and Stage 2
 MFMA correctness were validated independently; neither establishes overlap.
