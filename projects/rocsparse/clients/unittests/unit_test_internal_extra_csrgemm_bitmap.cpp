@@ -172,8 +172,9 @@ namespace
     template <typename T>
     T value(int re, int im)
     {
-        if constexpr(std::is_same_v<T, rocsparse_float_complex>
-                     || std::is_same_v<T, rocsparse_double_complex>)
+        if constexpr(std::is_same_v<
+                         T,
+                         rocsparse_float_complex> || std::is_same_v<T, rocsparse_double_complex>)
         {
             return T(re, im);
         }
