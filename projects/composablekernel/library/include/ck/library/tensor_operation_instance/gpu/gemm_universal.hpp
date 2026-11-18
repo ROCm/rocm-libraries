@@ -358,7 +358,7 @@ struct DeviceOperationInstanceFactory<
             }
         }
 #endif
-#if(defined(CK_ENABLE_FP16) && defined(CK_ENABLE_FP8))
+#if(defined(CK_ENABLE_FP16) && defined(CK_ENABLE_FP8) && defined(CK_USE_XDL_FP8))
         if constexpr(is_same_v<ADataType, half_t> && is_same_v<BDataType, f8_t> &&
                      is_same_v<CDataType, half_t>)
         {
