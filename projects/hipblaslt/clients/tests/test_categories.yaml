@@ -20,6 +20,11 @@
 #   known-bug case before registration, including per-GPU ones, so no registered test
 #   carries the known_bug token; the tiers below still exclude it.
 #
+#   The fast_check cases in stress and sdc_hunt also check the filter themselves
+#   (SKIP_UNLESS_SELECTED_BY_FILTER): both skip under a filter that selects
+#   nothing in particular (none, "*", or exclusions only), and the sdc_hunt ones
+#   also skip unless a positive pattern contains "sdc_hunt".
+#
 #   multi_gpu is the exception: it has no entries in data/, and its tests are
 #   plain gtest suites that carry the token in the suite name. It is deliberately
 #   not folded into the tiers below, all of which run on single-GPU runners where
