@@ -409,13 +409,31 @@ def load(build_lib_dir: str, build_bin_dir: str) -> LoadInfo:
 
 
 def check_after_import(info: LoadInfo, core) -> None:
-    """The checks that need _core: companion libraries, and the build the bindings expect."""
-    platform = sys.platform
-    loaded = loaded_libraries()
-    check_companions(info.path, loaded, platform)
-    if not os.environ.get(LIBRARY_ENV):
-        msg = version_mismatch_warning(
-            core._built_library_version(), core._loaded_library_version(), info.path
-        )
-        if msg:
-            warnings.warn(msg, HipblasLtLoadWarning, stacklevel=3)
+    """The check that needs _core loaded: companion libraries from the same build."""
+    global _library, _built_version
+    _library, _built_version = info, core._built_library_version()
+    check_companions(info.path, loaded_libraries(), sys.platform)
+
+
+_library: LoadInfo | None = None
+_built_version: tuple[int, str] | None = None
+_version_checked = False
+
+
+def check_loaded_version(loaded: tuple[int, str]) -> None:
+    """Warn, once per process, if the loaded hipBLASLt isn't the build the bindings expect.
+
+    Called with the version and git revision the first Handle() reads. hipblasLtGetVersion and
+    hipblasLtGetGitRevision need a handle, and creating one at import would allocate GPU memory
+    in every process that imports the package; hipblasLtCreate also exits the process when that
+    allocation fails.
+    """
+    global _version_checked
+    if _version_checked or _library is None or _built_version is None:
+        return
+    _version_checked = True
+    if os.environ.get(LIBRARY_ENV):
+        return
+    msg = version_mismatch_warning(_built_version, loaded, _library.path)
+    if msg:
+        warnings.warn(msg, HipblasLtLoadWarning, stacklevel=2)

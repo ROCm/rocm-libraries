@@ -14,7 +14,9 @@ import pytest
 import hipblaslt
 from hipblaslt import _build_info
 
-_HEADER = os.path.join(_build_info.INCLUDE_DIR, "hipblas-common", "hipblas-common.h")
+_HEADER = os.path.join(
+    _build_info.HIPBLAS_COMMON_INCLUDE_DIR, "hipblas-common", "hipblas-common.h"
+)
 _ENUM = re.compile(r"typedef\s+enum\s*\{(?P<body>[^}]*)\}\s*hipblasStatus_t\s*;", re.S)
 _VALUE = re.compile(r"\b(HIPBLAS_STATUS_\w+)\s*=\s*(\d+)")
 

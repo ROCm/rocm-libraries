@@ -69,7 +69,7 @@ NB_MODULE(_core, m)
     m.def("_loaded_library_version",
           &loaded_library_version,
           "(version, git revision) of the hipBLASLt loaded in this process, or None without a "
-          "device.");
+          "device. Creates and destroys a handle, so import never calls it.");
     m.def(
         "_raise_test_status",
         [](int code) {
