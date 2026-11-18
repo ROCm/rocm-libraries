@@ -81,6 +81,11 @@ using rocblas_handle_ptr = MIOPEN_MANAGE_PTR(rocblas_handle, rocblas_destroy_han
 using hipblasLt_handle_ptr = MIOPEN_MANAGE_PTR(hipblasLtHandle_t, hipblasLtDestroy);
 #endif
 
+/// Fraction of device memory one allocation may take: of total memory for
+/// Handle::GetMaxMemoryAllocSize, and of free memory for a workspace budget. The rest leaves room
+/// for the allocator's rounding and for library handle state.
+inline constexpr double UsableMemoryFraction = 0.85;
+
 struct MIOPEN_EXPORT Handle : miopenHandle
 {
     friend class TargetProperties;
@@ -189,6 +194,9 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 
     mutable std::size_t m_MaxMemoryAllocSizeCached = 0;
     virtual std::size_t GetMaxMemoryAllocSize() const;
+    /// Device memory free right now on the handle's device (hipMemGetInfo); 0 when it cannot be
+    /// read. Not cached, so it tracks allocations made since the handle was created.
+    virtual std::size_t GetAvailableMemory() const;
     virtual bool CooperativeLaunchSupported() const;
 
     std::string GetDeviceName() const;

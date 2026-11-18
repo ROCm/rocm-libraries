@@ -158,7 +158,11 @@ class TestCshuffleWmma(unittest.TestCase):
                 shuf = replace(base, trait=replace(base.trait, epilogue="cshuffle"))
                 ok, why = is_valid_spec(shuf, arch=arch)
                 self.assertFalse(ok, f"cshuffle must stay gated on {arch}")
-                self.assertIn("epilogue", why)
+                self.assertEqual(
+                    why,
+                    f"WMMA path does not support the 'cshuffle' epilogue on {arch} "
+                    "(supported on: gfx1250)",
+                )
 
     def test_cshuffle_widens_the_global_c_stores(self):
         """The point of the LDS round-trip: scalar global stores become vectors.
@@ -319,6 +323,33 @@ class TestCshuffleWmma(unittest.TestCase):
             "the op.family dispatch in the cshuffle staging step is not "
             "load-bearing and could regress undetected",
         )
+
+    def test_default_and_cshuffle_share_the_wmma_scatter(self):
+        """Both epilogues walk the accumulator through one helper.
+
+        The default epilogue used to carry its own copy of the walk. A wrapper
+        that forwards to the real helper leaves the kernel unchanged, so the
+        call count is the only thing this asserts: one walk per build, for
+        either epilogue, with or without the padded store guard.
+        """
+        from unittest import mock
+
+        from rocke.instances.common import gemm_universal as gemm
+
+        for epilogue, pad in (
+            ("default", False),
+            ("default", True),
+            ("cshuffle", False),
+        ):
+            with self.subTest(epilogue=epilogue, pad=pad):
+                spec = _spec(epilogue=epilogue, pad=pad)
+                with mock.patch.object(
+                    gemm,
+                    "_emit_wmma_acc_scatter",
+                    wraps=gemm._emit_wmma_acc_scatter,
+                ) as scatter:
+                    gemm.build_universal_gemm(spec, arch=ARCH)
+                self.assertEqual(scatter.call_count, 1)
 
     def test_pad_n_forfeits_the_wide_store(self):
         """``pad_n`` decomposes the wide store back into guarded scalars.

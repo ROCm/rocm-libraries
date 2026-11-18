@@ -909,11 +909,6 @@ TYPED_TEST(matrix_csr, iterative_lu_solve_of_an_upper_triangular_matrix)
     auto in  = make_vector(TypeParam::backend, b);
     auto out = make_vector(TypeParam::backend, std::vector<T>(U.n, T(0)));
 
-    if(TypeParam::backend == Backend::Host)
-    {
-        KNOWN_BUG("the iteration count of the L solve becomes the limit of the U solve");
-    }
-
     A->ItLUAnalyse();
     ASSERT_TRUE(A->ItLUSolve(100, 1e-14, true, *in, out.get()));
     A->ItLUAnalyseClear();
@@ -943,12 +938,6 @@ TYPED_TEST(matrix_csr, iterative_ll_solve)
     ASSERT_NE(A, nullptr);
     auto in  = make_vector(TypeParam::backend, b);
     auto inv = make_vector(TypeParam::backend, inv_diag);
-
-    // Float does not reach 1e-14, so both solves run to the limit and the bug does not show
-    if(TypeParam::backend == Backend::Host && !std::is_same_v<T, float>)
-    {
-        KNOWN_BUG("the iteration count of the L solve becomes the limit of the L^T solve");
-    }
 
     A->ItLLAnalyse();
 
@@ -1094,8 +1083,6 @@ TYPED_TEST(matrix_csr, connectivity_order_sorts_the_rows_by_their_non_zeros)
     std::vector<int> p = values_of(*perm);
     ASSERT_TRUE(is_permutation(p));
 
-    KNOWN_BUG("it returns perm[new] = old instead of the perm[old] = new that Permute takes");
-
     Csr<T> sorted = permuted(ref, p);
     for(int i = 1; i < sorted.n; ++i)
     {
@@ -1185,6 +1172,51 @@ TYPED_TEST(matrix_csr, maximal_independent_set)
     }
 }
 
+// On a nonsymmetric pattern a row can couple to a member of the set that is not coupled to
+// it. The set is independent and maximal in the pattern of A + A^T, and its members take the
+// first size positions. Row i + 1 of the lower bidiagonal matrix couples to row i only, and
+// the lower triangle of general(8) also couples row 6 to row 1.
+TYPED_TEST(matrix_csr, maximal_independent_set_of_a_nonsymmetric_pattern)
+{
+    using T = typename TypeParam::value_type;
+    const Csr<T> matrices[]
+        = {filtered(general<T>(6), [](int i, int j, T) { return j == i || j == i - 1; }),
+           filtered(general<T>(8), [](int i, int j, T) { return j <= i; })};
+
+    for(const Csr<T>& ref : matrices)
+    {
+        SCOPED_TRACE("n " + std::to_string(ref.n));
+        auto A = this->make(ref);
+        ASSERT_IN_LOOP(A != nullptr);
+
+        int  size = 0;
+        auto perm = make_vector(TypeParam::backend, std::vector<int>());
+        ASSERT_IN_LOOP(A->MaximalIndependentSet(size, perm.get()));
+
+        std::vector<int> p = values_of(*perm);
+        ASSERT_IN_LOOP(is_permutation(p));
+        EXPECT_EQ(size, ref.n / 2);
+
+        const Csr<T> At = transposed(ref);
+        for(int i = 0; i < ref.n; ++i)
+        {
+            bool in_set  = p[i] < size;
+            bool coupled = false;
+            for(const Csr<T>* B : {&ref, &At})
+            {
+                for(PtrType j = B->row_offset[i]; j < B->row_offset[i + 1]; ++j)
+                {
+                    if(B->col[j] != i && p[B->col[j]] < size)
+                    {
+                        coupled = true;
+                    }
+                }
+            }
+            EXPECT_NE(in_set, coupled) << "row " << i;
+        }
+    }
+}
+
 // Rows without a diagonal entry move to the end, both groups keep their order
 TYPED_TEST(matrix_csr, zero_block_permutation)
 {
@@ -1214,11 +1246,6 @@ TYPED_TEST(matrix_csr, symbolic_power)
     for(int p = 2; p <= 10; ++p)
     {
         SCOPED_TRACE("power " + std::to_string(p));
-
-        if(p > 8 && TypeParam::backend == Backend::Host)
-        {
-            KNOWN_BUG("above 8 it gives the pattern of A^(p+1)");
-        }
 
         auto A = this->make(ref);
         ASSERT_IN_LOOP(A != nullptr);
@@ -1296,22 +1323,7 @@ TYPED_TEST(matrix_csr, create_from_map)
     }
 
     SCOPED_TRACE("unassigned nodes");
-    const std::vector<int> map         = {0, 2, -1, 1, 0, 2, 1, -1, 0};
-    const int              n           = static_cast<int>(map.size());
-    const Csr<T>           restriction = restriction_of(map);
-
-    // The rows are counted over all nodes, so the sizes and the row offsets are right
-    auto R = this->empty();
-    ASSERT_TRUE(R->CreateFromMap(*make_vector(TypeParam::backend, map), n, m));
-    const Csr<T> created = csr_of(*R);
-    EXPECT_EQ(created.n, m);
-    EXPECT_EQ(created.m, n);
-    EXPECT_EQ(created.row_offset, restriction.row_offset);
-
-    KNOWN_BUG("with unassigned nodes the fill loop stops at nnz and indexes by node");
-
-    expect_same(created, restriction);
-    expect_created(map);
+    expect_created({0, 2, -1, 1, 0, 2, 1, -1, 0});
 }
 
 // Into an empty matrix and into one of the same size
@@ -1723,6 +1735,17 @@ TYPED_TEST(host_matrix_csr, check_accepts_valid_and_unsorted_matrices)
     std::swap(ref.col[0], ref.col[1]);
     std::swap(ref.val[0], ref.val[1]);
     EXPECT_TRUE(ref.host_csr()->Check());
+
+    // A last row without entries starts at nnz, so its first column index would be past
+    // the column indices. Only a build with ASAN reports a Check that reads it
+    Csr<T> trailing(3);
+    trailing.add(0, T(1));
+    trailing.add(2, T(2));
+    trailing.end_row();
+    trailing.add(1, T(3));
+    trailing.end_row();
+    trailing.end_row();
+    EXPECT_TRUE(trailing.host_csr()->Check());
 }
 
 TYPED_TEST(host_matrix_csr, check_rejects_invalid_column_indices)
@@ -1735,8 +1758,6 @@ TYPED_TEST(host_matrix_csr, check_rejects_invalid_column_indices)
     Csr<T> negative = general<T>(8);
     negative.col[0] = -1;
     EXPECT_FALSE(negative.host_csr()->Check());
-
-    KNOWN_BUG("a column index equal to the number of columns passes");
 
     Csr<T> outside                      = general<T>(8);
     outside.col[outside.col.size() - 1] = outside.m;
@@ -1762,8 +1783,6 @@ TYPED_TEST(host_matrix_csr, check_rejects_invalid_row_offsets_and_values)
         EXPECT_FALSE(A.host_csr()->Check()) << bad;
     }
 
-    KNOWN_BUG("Check compares the values with +infinity only");
-
     Csr<T> A = general<T>(8);
     A.val[3] = -std::numeric_limits<T>::infinity();
     EXPECT_FALSE(A.host_csr()->Check());
@@ -1783,6 +1802,45 @@ TYPED_TEST(host_matrix_csr, check_accepts_matrices_without_entries)
 
     HostMatrixCSR<T> unallocated(descriptor());
     EXPECT_TRUE(unallocated.Check());
+}
+
+namespace
+{
+    template <typename P>
+    class host_matrix_csr_values : public TypedBackendTest<P>
+    {
+    };
+}
+
+TYPED_TEST_SUITE(host_matrix_csr_values, HostOnly<FloatingTypes>, TypedName);
+
+// A stored zero is valid, an infinite or NaN real or imaginary part is not
+TYPED_TEST(host_matrix_csr_values, check_accepts_zeros_and_rejects_nan_and_infinity)
+{
+    using T     = typename TypeParam::value_type;
+    using R     = real_t<T>;
+    const R inf = std::numeric_limits<R>::infinity();
+    const R nan = std::numeric_limits<R>::quiet_NaN();
+
+    Csr<T> A(2);
+    A.add(0, T(1));
+    A.add(1, T(0));
+    A.end_row();
+    A.add(1, T(2));
+    A.end_row();
+    EXPECT_TRUE(A.host_csr()->Check());
+
+    std::vector<T> bad = {T(inf), T(-inf), T(nan)};
+    if constexpr(is_complex_v<T>)
+    {
+        bad.insert(bad.end(), {T(0, inf), T(0, -inf), T(0, nan)});
+    }
+    for(const T& v : bad)
+    {
+        Csr<T> B = A;
+        B.val[1] = v;
+        EXPECT_FALSE(B.host_csr()->Check()) << v;
+    }
 }
 
 TYPED_TEST(host_matrix_csr, info_names_the_class)
@@ -1841,8 +1899,6 @@ TYPED_TEST(host_matrix_csr, operations_on_a_matrix_without_entries_change_nothin
 TYPED_TEST(host_matrix_csr, transpose_of_a_matrix_without_entries_swaps_the_sizes)
 {
     using T = typename TypeParam::value_type;
-
-    KNOWN_BUG("the transpose of a matrix without entries keeps the sizes");
 
     HostMatrixCSR<T> A(descriptor());
     A.AllocateCSR(0, 3, 5);
@@ -2084,5 +2140,25 @@ TEST(host_matrix_csr_DeathTest, ic_factorize_of_a_row_without_a_diagonal_ends_th
         auto A        = from_dense(3, 3, D).host_csr();
         auto inv_diag = host_vector(std::vector<double>(3, 0.0));
         EXPECT_FATAL_ERROR(A->ICFactorize(inv_diag.get()), "host_matrix_csr\\.cpp");
+    }
+}
+
+// Without the inverse diagonal, LLSolve divides by the diagonal of every row
+TEST(host_matrix_csr_DeathTest, ll_solve_of_a_row_without_a_diagonal_asserts)
+{
+    for(double upper : {-1.0, 0.0})
+    {
+        SCOPED_TRACE(upper != 0.0 ? "an entry above the diagonal" : "only an entry below it");
+        // clang-format off
+        const std::vector<double> D = {
+             4, -1,     0,
+            -1,  0, upper,
+             0, upper,  4,
+        };
+        // clang-format on
+        auto A   = from_dense(3, 3, D).host_csr();
+        auto in  = host_vector(std::vector<double>(3, 1.0));
+        auto out = host_vector(std::vector<double>(3, 0.0));
+        EXPECT_ASSERT_DEATH(A->LLSolve(*in, out.get()), "col\\[diag_idx\\] == ai");
     }
 }

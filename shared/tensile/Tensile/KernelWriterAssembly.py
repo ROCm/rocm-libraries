@@ -23,7 +23,7 @@
 ################################################################################
 
 from . import Code
-from .Common import gfxName, globalParameters, getCOVFromParam, isGfx12, tPrint, printExit, printWarning, roundUp
+from .Common import gfxName, globalParameters, getCOVFromParam, isGfx12, isUnprobedAsmCaps, tPrint, printExit, printWarning, roundUp
 from .Component import Component
 from .KernelWriter import KernelWriter
 from .SolutionStructs import isPackedIndex
@@ -876,6 +876,9 @@ class KernelWriterAssembly(KernelWriter):
 
     # ISA version, such as 803
     self.version = kernel["ISA"]
+    if isUnprobedAsmCaps(globalParameters["AsmCaps"][self.version]):
+      printExit(f"ISA {gfxName(self.version)} has a kernel but its assembler capabilities "
+                "were not probed; add it to the requested architectures.")
     if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
       defaultIsa = (9,0,0)
       print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)

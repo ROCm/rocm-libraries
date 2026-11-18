@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+import argparse
 import os
 
 import pandas as pd
@@ -203,3 +204,14 @@ def GenerateSummations(userArgs):
         finalLogic = os.path.join(outputFinal, logicFileBaseName)
 
         copyfile(localFinalLogic, finalLogic)
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="tensilelite generate-summations",
+        description="Generate summation models for existing library logic.",
+    )
+    parser.add_argument("logic_path", help="directory containing input library logic")
+    parser.add_argument("output_path", help="directory for generated models and artifacts")
+    args = parser.parse_args(argv)
+    GenerateSummations([args.logic_path, args.output_path])
+    return 0

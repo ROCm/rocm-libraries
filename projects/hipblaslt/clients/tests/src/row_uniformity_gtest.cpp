@@ -215,6 +215,14 @@ namespace
         return hardware;
     }
 
+    // The CU count library logic is selected by, or 0 when the device cannot
+    // be described.
+    int currentCUCount()
+    {
+        const auto* gpu = dynamic_cast<const TensileLite::AMDGPU*>(currentHardware().get());
+        return gpu != nullptr ? gpu->computeUnitCount : 0;
+    }
+
     // The solution record behind an enumerated algorithm, or null with a
     // populated reason. This is metadata only: getSolutionByIndex pulls in a
     // placeholder's .dat on demand and never touches the code objects.
@@ -1058,8 +1066,8 @@ namespace
 
         // Unlike checkRowUniformity, needs no witness with the mode off: the
         // default heuristic picks run once with the mode on and must either be
-        // row-uniform or refused cleanly. With gfx950Pick, the first pick on
-        // gfx950 must be a kernel whose name starts with it; elsewhere a
+        // row-uniform or refused cleanly. With gfx950Pick, the first pick on a
+        // 256-CU gfx950 must be a kernel whose name starts with it; elsewhere a
         // problem with no pick is skipped.
         void checkDefaultPicksUniform(const Problem& problem, const char* gfx950Pick = nullptr)
         {
@@ -1070,11 +1078,22 @@ namespace
 
             int        enumeratedCount = 0;
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
-            const bool gfx950          = gpuArchName().rfind("gfx950", 0) == 0;
-            if(candidates.empty() && gfx950Pick != nullptr && !gfx950)
+            // The logic that routes these shapes to the gfx950 skinny kernels
+            // declares CUCount: 256, so other CU counts (MI350P, compute
+            // partitions) keep the Tensile picks. Rows for another CU count in
+            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml
+            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml
+            // that route here need expectPick to cover that count too.
+            const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
+            if(gfx950Pick != nullptr && gfx950)
+                ASSERT_NE(currentCUCount(), 0)
+                    << "TensileLite cannot describe this gfx950, so the test cannot tell whether "
+                       "the skinny-kernel logic applies";
+            const bool expectPick = gfx950Pick != nullptr && gfx950 && currentCUCount() == 256;
+            if(candidates.empty() && gfx950Pick != nullptr && !expectPick)
                 GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
-            if(gfx950Pick != nullptr && gfx950)
+            if(expectPick)
             {
                 const std::string pick = harness.solutionName(candidates.front());
                 ASSERT_EQ(pick.rfind(gfx950Pick, 0), 0u)
@@ -1108,9 +1127,10 @@ namespace
     }
 
     // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
-    // custom.config. Library logic routes these shapes to them, so on gfx950
-    // the default pick must be one of them: when uniform summation order
-    // refused them (#14010), nothing failed, they just stopped being picked.
+    // custom.config. Library logic routes these shapes to them on 256-CU gfx950,
+    // so there the default pick must be one of them: when uniform summation
+    // order refused them (#14010), nothing failed, they just stopped being
+    // picked. Other devices check that their default picks keep rows uniform.
     // A is TN and D takes A's type, as the kernels require.
     TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16_4096x1x4096)
     {
@@ -1178,6 +1198,7 @@ namespace
         int64_t     k;
         const char* gfx950Pick;
         bool        tiledB;
+        int64_t     m = 4096;
     };
 
     // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
@@ -1224,12 +1245,13 @@ namespace
     // depends on the summation order, by more than D's bf16 precision.
     // A second run on the same data lowers those two blocks' scales into the small
     // range. Every partial sum is then exact in fp32 in any order, so sampled D must
-    // equal the exact dot product rounded to bf16.
+    // equal the exact dot product rounded to bf16. The matmul_mx_fp6_tile128x4* entries
+    // of matmul_gtest.yaml check all of D exactly, in the pre_checkin and nightly tiers.
     TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
     {
         const MXFp6Case&  c       = GetParam();
         const bool        e3m2    = c.type == HIP_R_6F_E3M2;
-        constexpr int64_t m       = 4096;
+        const int64_t     m       = c.m;
         constexpr int64_t n       = 4096;
         const int64_t     k       = c.k;
         const int64_t     kBlocks = k / 32;
@@ -1237,7 +1259,7 @@ namespace
         const int64_t     large1  = kBlocks / 2;
         constexpr int     one     = 127;
         // One kernel per registered K and B order: the pick must be the one built for them.
-        const std::string kTag           = "_4096x4096x" + std::to_string(k) + "_";
+        const std::string kTag = "_" + std::to_string(m) + "x4096x" + std::to_string(k) + "_";
         auto              isExpectedPick = [&](const std::string& pick) {
             return pick.rfind(c.gfx950Pick, 0) == 0 && pick.find(kTag) != std::string::npos
                    && (pick.find("_Acanonical_") == std::string::npos) == c.tiledB;
@@ -1599,6 +1621,12 @@ namespace
         RowUniformity,
         RowUniformityMXFp6_smoke,
         ::testing::Values(
+            MXFp6Case{"E2M3_K2048", HIP_R_6F_E2M3, 2048, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{"E3M2_K2048", HIP_R_6F_E3M2, 2048, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{
+                "E2M3_M32768_K6144", HIP_R_6F_E2M3, 6144, "rocke_gemm_mx_e2m3_e2m3_", true, 32768},
+            MXFp6Case{
+                "E3M2_M32768_K6144", HIP_R_6F_E3M2, 6144, "rocke_gemm_mx_e3m2_e3m2_", true, 32768},
             MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{
                 "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false},

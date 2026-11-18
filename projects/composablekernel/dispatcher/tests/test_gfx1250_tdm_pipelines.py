@@ -12,6 +12,7 @@ budgets, generated kernel headers, the Python sweep gate and the C++ enums.
 Run: python3 -m pytest tests/test_gfx1250_tdm_pipelines.py -v
 """
 
+import itertools
 import json
 import shutil
 import subprocess
@@ -35,12 +36,16 @@ from arch_filter import (  # noqa: E402
     ValidationResult,
 )
 from arch_specs_generated import get_lds_limit  # noqa: E402
+import codegen_common as cc  # noqa: E402
 from codegen_common import (  # noqa: E402
-    COMP_TDM_PC_BATCHED_REJECT_REASON,
     COMP_TDM_PC_WARP_K_REJECT_REASON,
+    COMP_TDM_V3_BATCHED_REJECT_REASON,
     CommonTypeMappings,
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
     comp_tdm_pc_acc_reject_reason,
+    comp_tdm_pc_ring_reject_reason,
+    pipeline_ring_suffix,
+    split_pipeline_ring,
     GFX1250_COMPV5_REJECT_REASON,
     GEMM_TDM_CSHUFFLE_PIPELINES,
     STREAMK_GFX1250_PIPELINES,
@@ -48,6 +53,7 @@ from codegen_common import (  # noqa: E402
     gfx1250_comp_async_8bit_warp_tile_mn_rejected,
     gfx1250_pipeline_reject_reason,
     streamk_trait_reject_reason,
+    tdm_pipeline_epilogue as epi_of,
     TDM_PAD_REJECT_REASON,
 )
 
@@ -79,7 +85,7 @@ class TestArchFilter(unittest.TestCase):
 
     def test_tdm_valid_on_gfx1250(self):
         for pipe in TDM_PIPELINES:
-            self.assertTrue(self._valid("gfx1250", pipeline=pipe, epilogue="tdm"))
+            self.assertTrue(self._valid("gfx1250", pipeline=pipe, epilogue=epi_of(pipe)))
 
     def test_tdm_rejected_off_gfx1250(self):
         for arch in ("gfx942", "gfx950", "gfx90a"):
@@ -311,15 +317,14 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
 
     def test_tdm_rejects_any_pad(self):
         for pipe in TDM_PIPELINES:
-            self.assertTrue(self._valid(pipeline=pipe, epilogue="tdm", **self.PADS_FFF))
+            epi = epi_of(pipe)
+            self.assertTrue(self._valid(pipeline=pipe, epilogue=epi, **self.PADS_FFF))
             for name in ("pad_m", "pad_n", "pad_k"):
                 pads = dict(self.PADS_FFF, **{name: True})
                 self.assertFalse(
-                    self._valid(pipeline=pipe, epilogue="tdm", **pads), (pipe, name)
+                    self._valid(pipeline=pipe, epilogue=epi, **pads), (pipe, name)
                 )
-            self.assertFalse(
-                self._valid(pipeline=pipe, epilogue="tdm", **self.PADS_TTT)
-            )
+            self.assertFalse(self._valid(pipeline=pipe, epilogue=epi, **self.PADS_TTT))
 
     def test_tdm_scheduler_and_epilogue(self):
         if te is not None:
@@ -327,15 +332,18 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
                 GEMM_TDM_CSHUFFLE_PIPELINES, te.GEMM_TDM_CSHUFFLE_PIPELINES
             )
         for pipe in TDM_PIPELINES:
-            for epi in ("cshuffle", "default"):
-                # Plain GEMM also pairs comp_tdm_pc with cshuffle; spelled out so that
-                # widening GEMM_TDM_CSHUFFLE_PIPELINES needs a test change.
-                want = epi == "cshuffle" and pipe == "comp_tdm_pc"
+            for epi in ("cshuffle", "default", "tdm"):
+                # Plain GEMM pairs each TDM pipeline with epi_of(pipe), and also
+                # comp_tdm_pc with cshuffle (spelled out so that widening
+                # GEMM_TDM_CSHUFFLE_PIPELINES needs a test change).
+                want = epi == epi_of(pipe) or (
+                    epi == "cshuffle" and pipe == "comp_tdm_pc"
+                )
                 self.assertEqual(
                     self._valid(pipeline=pipe, epilogue=epi), want, (pipe, epi)
                 )
             self.assertFalse(
-                self._valid(pipeline=pipe, epilogue="tdm", scheduler="interwave")
+                self._valid(pipeline=pipe, epilogue=epi_of(pipe), scheduler="interwave")
             )
         # The tdm epilogue needs a TDM pipeline on every arch.
         for arch in ("gfx950", "gfx1250"):
@@ -394,7 +402,8 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
     def test_tdm_fp32_rcr_only(self):
         fp32 = dict(datatype_a="fp32", datatype_b="fp32", datatype_c="fp32")
         fp32.update(warp_tile_k=4, epilogue="tdm", **self.PADS_FFF)
-        for pipe in TDM_PIPELINES:
+        # comp_tdm_v3 takes no fp32 at all (TestCompTdmV3).
+        for pipe in set(TDM_PIPELINES) - {"comp_tdm_v3"}:
             self.assertTrue(self._valid(pipeline=pipe, layout="rcr", **fp32), pipe)
             for layout in ("rrr", "crr", "ccr"):
                 self.assertFalse(
@@ -596,7 +605,7 @@ class TestTypeMappings(unittest.TestCase):
 class TestLdsBudget(unittest.TestCase):
     def test_tdm_shares_comp_async_budget(self):
         for arch in ("gfx942", "gfx950", "gfx1250"):
-            for pipe in ("comp_tdm", "comp_tdm_v2"):
+            for pipe in ("comp_tdm", "comp_tdm_v2", "comp_tdm_v3"):
                 self.assertEqual(
                     get_lds_limit(arch, pipe), get_lds_limit(arch, "comp_async")
                 )
@@ -785,8 +794,8 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         _, names = self._gen("gfx1250", "batched")
         self.assertTrue(any("_comp_tdm_tdm_" in n for n in names))
         self.assertTrue(any("_comp_tdm_v2_tdm_" in n for n in names))
-        # BatchedGemmKernel does not arm the producer/consumer barriers.
-        self.assertFalse(any("_comp_tdm_pc_" in n for n in names))
+        # BatchedGemmKernel arms the producer/consumer barriers.
+        self.assertTrue(any("_comp_tdm_pc_tdm_" in n for n in names))
 
     def test_gfx1250_batched_comp_async_epilogue_double_smem(self):
         out, names = self._gen("gfx1250", "batched")
@@ -884,6 +893,182 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         # Stream-K's persistent kernel hosts the comp_tdm_pc ring too.
         tdm_pc = [n for n in tdm if "_comp_tdm_pc_" in n]
         self.assertTrue(any("_False_False_False_True_" in n for n in tdm_pc))
+
+
+class TestCompTdmPcRing(unittest.TestCase):
+    """comp_tdm_pc NumSlots/PublishLag: "comp_tdm_pc_s{S}l{L}" pipeline variants."""
+
+    RING_CONFIG = {
+        "tile_config": dict(TestUnifiedCodegenGolden.CONFIG["tile_config"], warp_m=[2]),
+        "trait_config": dict(
+            TestUnifiedCodegenGolden.CONFIG["trait_config"],
+            pipeline=["comp_tdm_pc", "comp_tdm_pc_s2l1", "comp_tdm_pc_s4l0"],
+            epilogue=["tdm"],
+            pad_m=[False],
+            pad_n=[False],
+            pad_k=[False],
+            persistent=[False],
+        ),
+    }
+
+    def test_split_pipeline_ring(self):
+        self.assertEqual(split_pipeline_ring("comp_tdm_pc"), ("comp_tdm_pc", 0, 0))
+        self.assertEqual(split_pipeline_ring("comp_tdm_pc_s2l1"), ("comp_tdm_pc", 2, 1))
+        # The policy default keeps the default (suffix-free) name.
+        self.assertEqual(split_pipeline_ring("comp_tdm_pc_s4l0"), ("comp_tdm_pc", 0, 0))
+        self.assertEqual(split_pipeline_ring("comp_tdm_s2l1"), ("comp_tdm_s2l1", 0, 0))
+        self.assertEqual(split_pipeline_ring("compv3"), ("compv3", 0, 0))
+        self.assertEqual(pipeline_ring_suffix(0, 0), "")
+        self.assertEqual(pipeline_ring_suffix(3, 2), "_s3l2")
+
+    @unittest.skipIf(te is None, "tile_engine not present")
+    def test_matches_tile_engine(self):
+        for name in (
+            "comp_tdm_pc",
+            "comp_tdm_pc_s2l1",
+            "comp_tdm_pc_s4l0",
+            "comp_tdm_pc_s5l4",
+            "comp_tdm_pc_s1l0",
+            "comp_tdm_pc_s6l0",
+            "comp_tdm_pc_s3l3",
+            "comp_tdm_v2",
+        ):
+            ring = split_pipeline_ring(name)
+            self.assertEqual(te.split_pipeline_ring(name), ring, name)
+            self.assertEqual(
+                bool(te.pipeline_ring_reject_reason(name)),
+                bool(comp_tdm_pc_ring_reject_reason(*ring)),
+                name,
+            )
+
+    def test_ring_reject_reason(self):
+        for slots, lag in ((0, 0), (2, 0), (2, 1), (4, 3), (5, 4)):
+            self.assertEqual(
+                comp_tdm_pc_ring_reject_reason("comp_tdm_pc", slots, lag), ""
+            )
+        for slots, lag in ((1, 0), (6, 0), (3, 3), (2, -1), (0, 1)):
+            self.assertTrue(
+                comp_tdm_pc_ring_reject_reason("comp_tdm_pc", slots, lag), (slots, lag)
+            )
+        self.assertIn("only apply to", comp_tdm_pc_ring_reject_reason("comp_tdm", 2, 1))
+
+    def test_gate_checks_ring(self):
+        args = dict(
+            num_waves=4, warp_tile_k=32, dtype_a="fp16", dtype_b="fp16", layout="rcr"
+        )
+        ok = gfx1250_pipeline_reject_reason(
+            "gfx1250", "comp_tdm_pc", "tdm", "intrawave", ring=(3, 1), **args
+        )
+        self.assertEqual(ok, "")
+        bad = gfx1250_pipeline_reject_reason(
+            "gfx1250", "comp_tdm_pc", "tdm", "intrawave", ring=(6, 0), **args
+        )
+        self.assertIn("num_slots=6", bad)
+        # A ring on a pipeline outside the gfx1250 gate is still rejected.
+        self.assertIn(
+            "only apply to",
+            gfx1250_pipeline_reject_reason(
+                "gfx942", "compv3", "cshuffle", "intrawave", ring=(2, 0), **args
+            ),
+        )
+
+    def test_lds_budget_follows_slots(self):
+        # fp16 rcr 256x128x128 on 4x2x1 waves needs 104416B per slot: over the
+        # default ring's 81920B, under 327680 / 3 and 327680 / 2.
+        tile = dict(TDM_TILE, tile_m=256, tile_n=128, tile_k=128, warp_m=4)
+        filt = ArchFilter("gfx1250")
+        kw = dict(tile, pipeline="comp_tdm_pc", epilogue="tdm")
+        self.assertFalse(filt.is_kernel_valid(**kw))
+        self.assertFalse(filt.is_kernel_valid(**kw, num_slots=4))
+        self.assertTrue(filt.is_kernel_valid(**kw, num_slots=3))
+        self.assertTrue(filt.is_kernel_valid(**kw, num_slots=2))
+
+    def test_codegen_emits_ring_policy(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "cfg.json"
+            cfg.write_text(json.dumps(self.RING_CONFIG))
+            out = Path(td) / "out"
+            names = _run_codegen(out, "gfx1250", "standard", cfg)
+            # s4l0 is the default ring and folds into the plain comp_tdm_pc kernel.
+            self.assertEqual(len(names), 2, names)
+            ring = [n for n in names if n.endswith("_s2l1.hpp")]
+            self.assertEqual(len(ring), 1, names)
+            text = (out / ring[0]).read_text()
+            self.assertIn(
+                "GemmPipelineAgBgCrCompTDMProducerConsumer<UniversalGemmProblem, "
+                "GemmPipelineAgBgCrCompTDMProducerConsumerPolicy<2, 1>>",
+                text,
+            )
+            self.assertIn("#define GEMM_KEY_NUM_SLOTS 2", text)
+            self.assertIn("#define GEMM_KEY_PUBLISH_LAG 1", text)
+            wrapper = (
+                out / "dispatcher_wrappers" / f"dispatcher_wrapper_{ring[0]}"
+            ).read_text()
+            self.assertIn("key.algorithm.num_slots = 2;", wrapper)
+            self.assertIn("key.algorithm.publish_lag = 1;", wrapper)
+            default = next(n for n in names if n not in ring)
+            self.assertNotIn(
+                "GemmPipelineAgBgCrCompTDMProducerConsumerPolicy",
+                (out / default).read_text(),
+            )
+
+    def test_expand_sweep_names_match_codegen(self):
+        import gemm_utils
+
+        cfg = {
+            section: {k: {"values": v} for k, v in entries.items()}
+            for section, entries in self.RING_CONFIG.items()
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "cfg.json"
+            path.write_text(json.dumps(cfg))
+            got = gemm_utils.expand_sweep(str(path), "gfx1250", "fp16", "rcr")
+            self.assertEqual(
+                sorted((c.num_slots, c.publish_lag) for c in got), [(0, 0), (2, 1)]
+            )
+            ring = next(c for c in got if c.num_slots)
+            self.assertEqual(ring.pipeline, "comp_tdm_pc")
+            self.assertEqual(
+                ring.to_codegen_json()["trait_config"]["pipeline"], ["comp_tdm_pc_s2l1"]
+            )
+            cg = Path(td) / "cg.json"
+            cg.write_text(json.dumps(self.RING_CONFIG))
+            names = _run_codegen(Path(td) / "out", "gfx1250", "standard", cg)
+        self.assertEqual(sorted(f"{c.name}.hpp" for c in got), names)
+
+    def test_expand_sweep_lds_follows_slots(self):
+        import gemm_utils
+
+        tile = dict(
+            tile_m=[256],
+            tile_n=[128],
+            tile_k=[128],
+            warp_m=[4],
+            warp_n=[2],
+            warp_k=[1],
+            warp_tile_m=[16],
+            warp_tile_n=[16],
+            warp_tile_k=[32],
+        )
+        trait = dict(
+            pipeline=["comp_tdm_pc", "comp_tdm_pc_s3l1", "comp_tdm_pc_s6l0"],
+            epilogue=["tdm"],
+            scheduler=["intrawave"],
+            pad_m=[False],
+            pad_n=[False],
+            pad_k=[False],
+            persistent=[False],
+        )
+        cfg = {
+            "tile_config": {k: {"values": v} for k, v in tile.items()},
+            "trait_config": {k: {"values": v} for k, v in trait.items()},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "cfg.json"
+            path.write_text(json.dumps(cfg))
+            got = gemm_utils.expand_sweep(str(path), "gfx1250", "fp16", "rcr")
+        # The default ring overflows LDS and six slots exceed the named barriers.
+        self.assertEqual([(c.num_slots, c.publish_lag) for c in got], [(3, 1)])
 
 
 class TestStreamKCodegen(unittest.TestCase):
@@ -1061,6 +1246,198 @@ class TestStreamKTraitRejectReason(unittest.TestCase):
         self.assertIn("not supported for stream_k", reason("comp_async", "cshuffle"))
 
 
+class TestCompTdmV3(unittest.TestCase):
+    """comp_tdm_v3 in the bridge: the gate (the Tile Engine rules), its own
+    [4, 4, 1] wave map, the type maps, LDS budget and compile flag, and the
+    generated plain and Stream-K headers."""
+
+    CONFIG = {
+        "tile_config": {
+            "tile_m": [256],
+            "tile_n": [256],
+            "tile_k": [64],
+            "warp_m": [2, 4],
+            "warp_n": [2, 4],
+            "warp_k": [1],
+            "warp_tile_m": [16],
+            "warp_tile_n": [16],
+            "warp_tile_k": [32],
+        },
+        "trait_config": {
+            "pipeline": ["comp_tdm_v3"],
+            "epilogue": ["cshuffle", "tdm"],
+            "scheduler": ["intrawave"],
+            "pad_m": [False],
+            "pad_n": [False],
+            "pad_k": [False],
+            "persistent": [False, True],
+        },
+        "streamk_config": {"reduction_strategy": ["atomic", "linear", "tree"]},
+    }
+
+    @staticmethod
+    def _gate(epi="cshuffle", waves=(2, 2, 1), dtype="bf16", layout="rcr",
+              variant="standard", persist=False, pads=(False, False, False),
+              arch="gfx1250"):
+        return gfx1250_pipeline_reject_reason(
+            arch, "comp_tdm_v3", epi, "intrawave",
+            num_waves=waves[0] * waves[1] * waves[2], warp_tile_k=32,
+            dtype_a=dtype, dtype_b=dtype, layout=layout,
+            variant_supported=variant in ("standard", "batched", "stream_k"),
+            variant_name=variant, persistent=persist, pads=pads,
+            batched=variant == "batched", warp_k=waves[2],
+            streamk=variant == "stream_k", waves=waves,
+        )
+
+    def test_gate(self):
+        for dtype, layout, waves in itertools.product(
+            ("fp16", "bf16"), ("rcr", "rrr", "crr", "ccr"), ((2, 2, 1), (4, 4, 1))
+        ):
+            self.assertEqual(self._gate(dtype=dtype, layout=layout, waves=waves), "")
+        for dtype in ("fp8", "bf8"):
+            self.assertEqual(self._gate(dtype=dtype), "")
+            for layout in ("rrr", "crr", "ccr"):
+                self.assertIn("8-bit", self._gate(dtype=dtype, layout=layout))
+        for dtype in ("fp32", "int8"):
+            self.assertIn("fp8/bf8 or fp16/bf16", self._gate(dtype=dtype))
+        for waves in ((4, 2, 1), (2, 4, 1), (4, 1, 1), (1, 2, 2)):
+            self.assertIn("wave maps", self._gate(waves=waves))
+        # K sub-tiles are whole warp-tile K steps: tile_k / warp_tile_k is a power of two.
+        for tile_k, ok in ((64, True), (128, True), (256, True), (192, False), (96, False)):
+            reason = cc.comp_tdm_v3_reject_reason("bf16", "bf16", tile_k=tile_k, warp_tile_k=32)
+            self.assertEqual(reason == "", ok, (tile_k, reason))
+        self.assertIn(
+            "power of two",
+            cc.comp_tdm_v3_reject_reason("fp8", "fp8", tile_k=384, warp_tile_k=128),
+        )
+        self.assertIn("requires epilogue=cshuffle", self._gate(epi="tdm"))
+        self.assertIn("persistent", self._gate(persist=True))
+        self.assertEqual(self._gate(variant="batched"), COMP_TDM_V3_BATCHED_REJECT_REASON)
+        self.assertIn("requires gfx1250", self._gate(arch="gfx950"))
+        self.assertEqual(self._gate(pads=(True, False, False)), TDM_PAD_REJECT_REASON)
+        # Stream-K takes either epilogue (the reduction decides) and persistence.
+        self.assertIn("comp_tdm_v3", STREAMK_GFX1250_PIPELINES)
+        for epi, persist in itertools.product(("cshuffle", "tdm"), (False, True)):
+            self.assertEqual(
+                self._gate(epi, (4, 4, 1), variant="stream_k", persist=persist), ""
+            )
+
+    def test_wave_maps(self):
+        shared = [[2, 2, 1], [4, 2, 1]]
+        for arch in ("gfx1250", "gfx1250:xnack-"):
+            self.assertIn([4, 4, 1], cc.pipeline_warp_combos("comp_tdm_v3", arch, shared))
+        for pipe, arch in (("comp_tdm", "gfx1250"), ("comp_tdm_v3", "gfx950")):
+            self.assertEqual(cc.pipeline_warp_combos(pipe, arch, shared), shared)
+        tile = dict(TDM_TILE, tile_m=256, tile_n=256, warp_m=4, warp_n=4)
+        filt = ArchFilter("gfx1250")
+        self.assertTrue(filt.is_kernel_valid(pipeline="comp_tdm_v3", epilogue="cshuffle", **tile))
+        self.assertFalse(filt.is_kernel_valid(pipeline="comp_tdm", epilogue="tdm", **tile))
+        if te is not None:
+            self.assertEqual(
+                te.PIPELINE_EXTRA_WARP_COMBINATIONS, cc.PIPELINE_EXTRA_WARP_COMBINATIONS
+            )
+            self.assertEqual(te.TDM_PIPELINE_EPILOGUE, cc.TDM_PIPELINE_EPILOGUE)
+
+    def test_c_layout_gate_and_sweep(self):
+        from gemm_utils import expand_sweep
+
+        config = (
+            TE_GEMM_DIR / "gemm_universal" / "configs" / "gfx1250_bf16_comp_tdm_v3.json"
+        )
+        for dtype, layout in itertools.product(
+            ("fp16", "bf16"), ("rrr", "rcr", "crr", "ccr", "rrc", "rcc", "crc", "ccc")
+        ):
+            expected = layout.endswith("r")
+            with self.subTest(dtype=dtype, layout=layout):
+                reason = cc.comp_tdm_v3_reject_reason(dtype, dtype, layout=layout)
+                self.assertEqual(not reason, expected)
+                self.assertEqual(
+                    te.gfx1250_tdm_v3_reject_reason(
+                        "comp_tdm_v3", dtype, dtype, 4, 4, 1, layout=layout
+                    ),
+                    reason,
+                )
+                self.assertEqual(
+                    te.is_tile_config_valid(
+                        256,
+                        256,
+                        64,
+                        4,
+                        4,
+                        1,
+                        16,
+                        16,
+                        32,
+                        dtype,
+                        dtype,
+                        dtype,
+                        "comp_tdm_v3",
+                        layout,
+                        "gfx1250",
+                        kernel_name_prefix="gemm_universal",
+                    ),
+                    expected,
+                )
+                for variant in ("standard", "stream_k"):
+                    self.assertEqual(
+                        not self._gate(dtype=dtype, layout=layout, variant=variant),
+                        expected,
+                    )
+                    if variant == "stream_k" and not expected:
+                        with self.assertRaisesRegex(ValueError, "row-major C"):
+                            expand_sweep(str(config), "gfx1250", dtype, layout, variant)
+                    else:
+                        kernels = expand_sweep(
+                            str(config), "gfx1250", dtype, layout, variant
+                        )
+                        self.assertEqual(len(kernels), 2 if expected else 0, variant)
+
+    def test_maps_lds_and_flags(self):
+        m = CommonTypeMappings
+        self.assertEqual(m.PIPELINE_TO_CK["comp_tdm_v3"], "GemmPipelineAgBgCrCompTDMV3")
+        self.assertEqual(m.PIPELINE_TO_BASE["comp_tdm_v3"], "BaseGemmPipelineAgBgCrCompTDM")
+        self.assertEqual(m.PIPELINE_TO_DISPATCHER["comp_tdm_v3"], "Pipeline::CompTDMV3")
+        self.assertEqual(get_lds_limit("gfx1250", "comp_tdm_v3"), 163840)
+        self.assertEqual(
+            cc.PIPELINE_EXTRA_COMPILE_FLAGS["comp_tdm_v3"],
+            ("-mllvm", "-enable-post-misched=1"),
+        )
+        if te is not None:
+            self.assertEqual(te.PIPELINE_SMEM_SLOTS["comp_tdm_v3"], 2)
+
+    def test_generated_headers(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "cfg.json"
+            cfg.write_text(json.dumps(self.CONFIG))
+            out = Path(td) / "std"
+            names = _run_codegen(out, "gfx1250", "standard", cfg)
+            # Plain GEMM: CShuffle, non-persistent, on 2x2x1 and 4x4x1 only.
+            self.assertEqual(len(names), 2, names)
+            self.assertTrue(any("_4x4x1_" in n for n in names), names)
+            text = (out / names[0]).read_text()
+            self.assertIn("GemmPipelineAgBgCrCompTDMV3<", text)
+            self.assertIn("GemmTile1DPartitioner<TileShape>", text)
+            self.assertIn("CShuffleEpilogue<", text)
+            self.assertIn("static constexpr bool DoubleSmemBuffer = true;", text)
+            wrapper = (out / "dispatcher_wrappers" / f"dispatcher_wrapper_{names[0]}")
+            self.assertIn("Pipeline::CompTDMV3", wrapper.read_text())
+            out = Path(td) / "sk"
+            names = _run_codegen(out, "gfx1250", "stream_k", cfg)
+            # 2 wave maps x persistent on/off x (CShuffle atomic/linear/tree + TDM
+            # linear/tree).
+            self.assertEqual(len(names), 20, names)
+            for persistent in ("True", "False"):
+                self.assertTrue(any(f"_False_{persistent}_256x256x64_4x4x1_" in n for n in names))
+            text = (out / names[0]).read_text()
+            self.assertIn("ck_tile::StreamKKernel<SkStreamKTilePartitioner, SkGemmPipeline", text)
+            self.assertIn("GemmPipelineAgBgCrCompTDMV3<SkUniversalGemmProblem>", text)
+            self.assertIn("MakeKargs(args, budget_pct)", text)
+            self.assertIn("budget_pct < 1 || budget_pct > 100", text)
+            self.assertIn("SkKernelArgs(args, budget_wgs, kargs.num_xccs, num_cu)", text)
+            self.assertIn("else if (StreamKGemmKernel::GetWorkSpaceSize(kargs) > 0)", text)
+            self.assertIn("else if (flags_bytes > 0)", text)
+
+
 class TestGemmUtilsSweepGate(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1112,7 +1489,8 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
     def test_tdm_pc_rules(self):
         self.assertTrue(self._ok("comp_tdm_pc", "tdm"))
         self.assertTrue(self._ok("comp_tdm_pc", "tdm", waves=(4, 2, 1)))
-        self.assertFalse(self._ok("comp_tdm_pc", "tdm", variant="batched"))
+        # BatchedGemmKernel arms the producer/consumer named barriers.
+        self.assertTrue(self._ok("comp_tdm_pc", "tdm", variant="batched"))
         # Plain GEMM also takes cshuffle (split-K), still not batched or persistent.
         self.assertTrue(self._ok("comp_tdm_pc", "cshuffle"))
         self.assertFalse(self._ok("comp_tdm_pc", "cshuffle", variant="batched"))
@@ -1128,21 +1506,6 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
             self._ok("comp_tdm_pc", "tdm", waves=(4, 2, 1), tile_mn=(256, 256))
         )
         self.assertTrue(self._ok("comp_tdm", "tdm", tile_mn=(256, 256)))
-        self.assertEqual(
-            gfx1250_pipeline_reject_reason(
-                "gfx1250",
-                "comp_tdm_pc",
-                "tdm",
-                "intrawave",
-                4,
-                32,
-                "fp16",
-                "fp16",
-                "rcr",
-                batched=True,
-            ),
-            COMP_TDM_PC_BATCHED_REJECT_REASON,
-        )
 
     def _async(self, *args, **kw):
         return self._ok("comp_async", *args, pad_m=True, pad_n=True, pad_k=True, **kw)
@@ -1161,11 +1524,10 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
 
     def test_tdm_pad_rule(self):
         for pipe in TDM_PIPELINES:
-            self.assertTrue(
-                self._ok(pipe, "tdm", pad_m=False, pad_n=False, pad_k=False)
-            )
+            epi = epi_of(pipe)
+            self.assertTrue(self._ok(pipe, epi, pad_m=False, pad_n=False, pad_k=False))
             for pad in ("pad_m", "pad_n", "pad_k"):
-                self.assertFalse(self._ok(pipe, "tdm", **{pad: True}), (pipe, pad))
+                self.assertFalse(self._ok(pipe, epi, **{pad: True}), (pipe, pad))
         # comp_async requires full padding; legacy pipelines are unaffected.
         self.assertTrue(self._async())
         self.assertFalse(self._ok("comp_async"))
@@ -1297,7 +1659,9 @@ class TestExpandSweepGfx1250Waves(unittest.TestCase):
 
 _CPP_PROBE = r"""
 #include "ck_tile/dispatcher/arch_specs_generated.hpp"
+#include "ck_tile/dispatcher/kernel_key.hpp"
 #include <cstdio>
+#include <string>
 using namespace ck_tile::dispatcher;
 using arch_specs::GpuArch;
 
@@ -1310,6 +1674,8 @@ static_assert(static_cast<int>(Pipeline::CompAsync) == 10, "");
 static_assert(static_cast<int>(Pipeline::CompTDMV1) == 11, "");
 static_assert(static_cast<int>(Pipeline::CompTDMV2) == 12, "");
 static_assert(static_cast<int>(Pipeline::CompTDMPC) == 13, "");
+static_assert(static_cast<int>(Pipeline::PreShuffleTDM) == 14, "");
+static_assert(static_cast<int>(Pipeline::CompTDMV3) == 15, "");
 static_assert(static_cast<int>(Epilogue::CShuffle) == 2, "");
 static_assert(static_cast<int>(Epilogue::BiasActivation) == 5, "");
 static_assert(static_cast<int>(Epilogue::Tdm) == 6, "");
@@ -1322,6 +1688,11 @@ int main()
     CHECK(to_string(Pipeline::CompTDMV1) == "comp_tdm");
     CHECK(to_string(Pipeline::CompTDMV2) == "comp_tdm_v2");
     CHECK(to_string(Pipeline::CompTDMPC) == "comp_tdm_pc");
+    CHECK(to_string(Pipeline::CompTDMV3) == "comp_tdm_v3");
+    CHECK(string_to_pipeline("comp_tdm_v3") == Pipeline::CompTDMV3);
+    CHECK(arch_specs::get_lds_capacity(GpuArch::GFX_1250, Pipeline::CompTDMV3) == 163840);
+    CHECK(arch_specs::is_trait_unsupported(Pipeline::CompTDMV3, Epilogue::CShuffle, Scheduler::Interwave));
+    CHECK(!arch_specs::is_trait_unsupported(Pipeline::CompTDMV3, Epilogue::CShuffle, Scheduler::Intrawave));
     CHECK(to_string(Epilogue::Tdm) == "tdm");
     CHECK(string_to_pipeline("comp_async") == Pipeline::CompAsync);
     CHECK(string_to_pipeline("comp_tdm") == Pipeline::CompTDMV1);
@@ -1345,6 +1716,17 @@ int main()
     CHECK(!arch_specs::is_trait_unsupported(Pipeline::CompTDMV1, Epilogue::Tdm, Scheduler::Intrawave));
     CHECK(arch_specs::is_trait_unsupported(Pipeline::CompTDMPC, Epilogue::Tdm, Scheduler::Interwave));
     CHECK(!arch_specs::is_trait_unsupported(Pipeline::CompTDMPC, Epilogue::Tdm, Scheduler::Intrawave));
+    // A non-default comp_tdm_pc ring follows the vector widths, as pipeline_ring_suffix().
+    KernelKey key{};
+    key.algorithm.pipeline = Pipeline::CompTDMPC;
+    const std::string base = key.encode_identifier();
+    CHECK(base.find("_s") == std::string::npos);
+    key.algorithm.num_slots   = 2;
+    key.algorithm.publish_lag = 1;
+    CHECK(key.encode_identifier() == base + "_s2l1");
+    KernelKey other = key;
+    other.algorithm.publish_lag = 0;
+    CHECK(!(key == other));
     return fails == 0 ? 0 : 1;
 }
 """
