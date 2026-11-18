@@ -11,6 +11,8 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <typeindex>
 #include <string_view>
@@ -780,10 +782,12 @@ bool IsCKSplitKSupportedGeneric(const ProblemDescriptionType& problem,
 #endif
 }
 
+/// The largest workspace any instance needs at any split_k for the problem: what the CK
+/// backward-weights solvers report from GetWorkspaceSize(), so that every configuration fits.
 template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
-size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
+size_t ComputeCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
 {
     const auto args                = CKArgsType{problem};
     std::size_t max_workspace_size = 0;
@@ -811,6 +815,36 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
 
     MIOPEN_LOG_I("Max workspace size reported by CK: " << max_workspace_size);
     return max_workspace_size;
+}
+
+/// ComputeCKSplitkMaxWorkspaceSize, memoized per process (CKProblemCache: bounded, and bypassed
+/// with MIOPEN_DEBUG_CK_PROBLEM_CACHE=0): every GetWorkspaceSize() and Find of the problem asks
+/// for it, and computing it runs CK's argument check and workspace query for every instance at
+/// every split_k. The key is the current HIP device ordinal (CK's argument check reads that
+/// device's arch, see IsCKApplicable) and the problem as the perf-db keys it plus the alpha/beta
+/// case, which together hold everything CKArgsType and the large-tensor filter derive from it.
+template <typename DeviceOpType,
+          typename CKArgsType,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
+{
+    int device = 0;
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(hipGetDevice(&device) != hipSuccess)
+        return ComputeCKSplitkMaxWorkspaceSize<DeviceOpType, CKArgsType>(problem);
+#endif
+    std::ostringstream key;
+    key << device << ';';
+    problem.Serialize(key);
+    key << ';' << static_cast<int>(problem.GetAlphaBetaCase());
+    static CKProblemCache<std::unordered_map<std::string, std::size_t>> memo;
+    return memo
+        .GetOrCompute(key.str(),
+                      [&] {
+                          return std::optional<std::size_t>{
+                              ComputeCKSplitkMaxWorkspaceSize<DeviceOpType, CKArgsType>(problem)};
+                      })
+        .value_or(0);
 }
 
 #define WORKAROUND_CK_ISSUE_1184 1

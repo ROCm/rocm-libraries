@@ -410,9 +410,10 @@ std::vector<FlagProblem> FlagProblems()
     return problems;
 }
 
-/// The CK backward-weights solvers take their default configuration from DefaultConfigCache on
-/// every query after the first for a problem. The configuration a cache hit returns must be the
-/// one computed without the cache, and must run with the same workspace.
+/// The CK backward-weights solvers take their untuned configuration (AI heuristics or default)
+/// from DefaultConfigCache, and their maximum workspace from a per-problem memo, on every query
+/// after the first for a problem. What a cache hit returns must be what is computed without the
+/// caches, and the configuration must run with the same workspace.
 class FindDbWorkspaceDefaultCacheTest : public FindDbWorkspaceTest,
                                         public ::testing::TestWithParam<ConvShape>
 {
@@ -441,19 +442,25 @@ private:
             GTEST_SKIP() << solver.SolverDbId() << " is not applicable";
 
         std::optional<decltype(solver.GetDefaultPerformanceConfig(ctx, problem))> uncached;
+        std::size_t uncached_max_ws = 0;
         {
             ScopedEnvironment<bool> no_cache(MIOPEN_DEBUG_CK_PROBLEM_CACHE, false);
-            uncached = solver.GetDefaultPerformanceConfig(ctx, problem);
+            uncached        = solver.GetDefaultPerformanceConfig(ctx, problem);
+            uncached_max_ws = solver.GetWorkspaceSize(ctx, problem);
         }
         // Two queries with the cache on: the second is a hit whatever earlier tests cached.
-        std::ignore     = solver.GetDefaultPerformanceConfig(ctx, problem);
-        const auto hit  = solver.GetDefaultPerformanceConfig(ctx, problem);
-        const auto name = solver.SolverDbId();
+        std::ignore       = solver.GetDefaultPerformanceConfig(ctx, problem);
+        const auto hit    = solver.GetDefaultPerformanceConfig(ctx, problem);
+        std::ignore       = solver.GetWorkspaceSize(ctx, problem);
+        const auto max_ws = solver.GetWorkspaceSize(ctx, problem);
+        const auto name   = solver.SolverDbId();
 
         ASSERT_FALSE(uncached->kernel_id.empty()) << name;
         EXPECT_EQ(hit.kernel_id, uncached->kernel_id) << name;
+        EXPECT_EQ(hit.split_k, uncached->split_k) << name;
         EXPECT_EQ(hit.UseTF32(), uncached->UseTF32()) << name;
         EXPECT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, hit)) << name;
+        EXPECT_EQ(max_ws, uncached_max_ws) << name;
 
         const auto from_hit      = solver.GetSolution(ctx, problem, hit);
         const auto from_uncached = solver.GetSolution(ctx, problem, *uncached);
