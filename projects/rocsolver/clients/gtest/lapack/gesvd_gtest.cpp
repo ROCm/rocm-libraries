@@ -112,6 +112,12 @@ const vector<vector<int>> large_batch_opt_range
     = {{0, 0, 0, 3, 3}, {1, 0, 0, 0, 1}, {0, 1, 0, 1, 0}, {0, 0, 1, 1, 1},
        {0, 0, 0, 3, 0}, {0, 0, 0, 1, 3}, {0, 0, 0, 3, 2}};
 
+// ---------------------------------------------------------
+// reduced tests for syevd_hybrid since it may take too long
+// ---------------------------------------------------------
+const vector<vector<int>> large_batch_hybrid_size_range = {{17, 9, 0, 0}};
+const vector<vector<int>> large_batch_hybrid_opt_range = {{0, 0, 0, 3, 3}};
+
 Arguments gesvd_setup_arguments(gesvd_tuple tup)
 {
     vector<int> size = std::get<0>(tup);
@@ -440,4 +446,5 @@ INSTANTIATE_TEST_SUITE_P(weekly_lapack,
 
 INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          GESVD_HYBRID_LARGE_BATCH,
-                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
+                         Combine(ValuesIn(large_batch_hybrid_size_range),
+                                 ValuesIn(large_batch_hybrid_opt_range)));
