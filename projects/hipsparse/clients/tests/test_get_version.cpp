@@ -121,9 +121,10 @@ TEST_P(get_git_revision, returns_revision)
     ASSERT_EQ(std::sscanf(numbers, "%d.%d.%d)", &major, &minor, &patch), 3);
 #else
     ASSERT_EQ(std::sscanf(numbers, "%d.%d.%d-", &major, &minor, &patch), 3);
+    // A build without Git metadata leaves ROCSPARSE_VERSION_TWEAK empty, so
+    // the text after the hyphen may be empty, as in "(rocSPARSE 5.2.0-)".
     const char* backend_revision = std::strchr(numbers, '-');
     ASSERT_NE(backend_revision, nullptr);
-    EXPECT_NE(backend_revision[1], ')');
 #endif
     EXPECT_GE(major, 0);
     EXPECT_GE(minor, 0);
