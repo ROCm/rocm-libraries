@@ -177,9 +177,11 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
         }
         return catalogs;
     }();
-    return s_catalogs[direction == ConvDirection::BACKWARD_WEIGHTS ? 2
-                      : direction == ConvDirection::BACKWARD_DATA  ? 1
-                                                                   : 0];
+    if(direction == ConvDirection::BACKWARD_WEIGHTS)
+    {
+        return s_catalogs[2];
+    }
+    return s_catalogs[direction == ConvDirection::BACKWARD_DATA ? 1 : 0];
 }
 
 void forEachIndex(const std::vector<int64_t>& dims,
@@ -462,7 +464,8 @@ void runCase(const DeviceCase& deviceCase)
     Tensor<T> y(spec.y.dims, spec.y.strides);
     constexpr unsigned int SEED = 4321;
     Tensor<T>& in = backward ? y : x;
-    Tensor<T>& out = weights ? w : backward ? x : y;
+    Tensor<T>& convOut = backward ? x : y;
+    Tensor<T>& out = weights ? w : convOut;
     in.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     if(weights)
     {

@@ -548,7 +548,7 @@ std::optional<WrwPlan> planWrw(const WrwShape& shape,
     }
     // Vector loads of a lane's pixel run: channels-first rows of whole runs.
     bool vectorIn = !valu && nchw && atom->kpl * es >= 4 && shape.in[2] % atom->kpl == 0
-                    && shape.inAlign >= std::min<int64_t>(atom->kpl * es, 16);
+                    && shape.inAlign >= std::min<int64_t>(static_cast<int64_t>(atom->kpl) * es, 16);
     for(const size_t axis : {size_t{0}, size_t{1}, size_t{2}, size_t{3}})
     {
         vectorIn = vectorIn && shape.is.at(axis) % atom->kpl == 0;

@@ -285,9 +285,12 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     }
     const int reported = context.deviceProperties.warpSize;
     const auto base = hipdnn_plugin_sdk::stripArchFeatures(arch);
-    const int wave = reported == 32 || reported == 64
-                         ? reported
-                         : (base.size() >= 5 && base.substr(0, 4) == "gfx1" ? 32 : 64);
+    // The reported wave size, else the architecture's (RDNA 32, CDNA 64).
+    int wave = base.size() >= 5 && base.substr(0, 4) == "gfx1" ? 32 : 64;
+    if(reported == 32 || reported == 64)
+    {
+        wave = reported;
+    }
     auto plan = planFor(problem->shape,
                         *config,
                         wave,
