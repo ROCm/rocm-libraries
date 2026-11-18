@@ -17,9 +17,12 @@
 //   A     false          -            -                    naive evaluated (flag off)
 //   B     true           false        -                    naive evaluated (no non-naive exists)
 //   C     true           true         false                naive evaluated (non-naive all failed)
-//   D     true           true         true                 naive timed — may pass or be skipped
+//   D     true           true         true                 naive skipped by the run time bound,
+//                                                          or timed: may pass or be skipped
 //
-// Tests cover paths A, B, and D. Path C requires fault injection.
+// Tests cover all four paths. Path C is reached without fault injection: Find runs without a
+// workspace, so MIOPEN_DEBUG_FIND_ONLY_SOLVER=GemmFwdRest;ConvDirectNaiveConvFwd leaves a
+// non-naive solver that is rejected for lack of workspace next to naive.
 //
 // CaptureAfterATimedOutNaiveEvaluationSucceeds covers issue #12121: a naive
 // evaluation abandoned by find must not break a later HIP graph capture.
@@ -72,14 +75,15 @@ struct ScopedFindDb
     bool prev_;
 };
 
+template <class T = float>
 std::vector<std::string> RunFind(miopenHandle_t handle, size_t max_solutions = 8)
 {
-    tensor<float> x{1, 64, 14, 14};
-    tensor<float> w{64, 64, 3, 3};
+    tensor<T> x{1, 64, 14, 14};
+    tensor<T> w{64, 64, 3, 3};
 
     miopen::ConvolutionDescriptor conv{
         2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
-    tensor<float> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
+    tensor<T> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
 
     miopenProblem_t problem = nullptr;
     EXPECT_EQ(miopenCreateConvProblem(&problem, &conv, miopenProblemDirectionForward),
@@ -122,6 +126,67 @@ bool IsWinogradOnlyArch(const miopen::Handle& handle)
 {
     const auto name = handle.GetDeviceName();
     return name == "gfx900" || name == "gfx906" || name == "gfx908";
+}
+
+std::string Join(const std::vector<std::string>& names)
+{
+    std::string all_names;
+    for(const auto& s : names)
+        all_names += (all_names.empty() ? "" : ", ") + s;
+    return all_names;
+}
+
+struct FoundSolvers
+{
+    std::vector<std::string> solvers;
+    std::string log; // what the library logged at Info level during the Find
+};
+
+// RunFind with the library's Info log captured: it records which naive solvers are evaluated and
+// why one is skipped.
+template <class T = float>
+FoundSolvers
+RunFindLogged(miopenHandle_t handle, int log_level_value = 5, size_t max_solutions = 64)
+{
+    FoundSolvers found;
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, log_level_value);
+    testing::internal::CaptureStderr();
+    found.solvers = RunFind<T>(handle, max_solutions);
+    found.log     = testing::internal::GetCapturedStderr();
+    return found;
+}
+
+// EvaluateInvokers() logged that the run time bound alone dropped a naive solver.
+bool LogShowsBoundSkip(const std::string& log)
+{
+    return log.find("run time lower bound") != std::string::npos;
+}
+
+// EvaluateInvokers() started to evaluate a naive solver, which builds and launches it.
+bool LogShowsNaiveEvaluation(const std::string& log)
+{
+    std::istringstream lines{log};
+    for(std::string line; std::getline(lines, line);)
+        if(line.find("Evaluating Solver:") != std::string::npos &&
+           line.find("Naive") != std::string::npos)
+            return true;
+    return false;
+}
+
+// A naive kernel was looked up or built before the first solver evaluation. The precompile step
+// does that for every solver in the list, so this tells whether naive was in it. Needs the Info2
+// log level, which logs the kernel lookups.
+bool LogShowsNaiveKernelBeforeFirstEvaluation(const std::string& log)
+{
+    std::istringstream lines{log};
+    for(std::string line; std::getline(lines, line);)
+    {
+        if(line.find("Evaluating Solver:") != std::string::npos)
+            return false;
+        if(line.find("naive_conv") != std::string::npos)
+            return true;
+    }
+    return false;
 }
 
 /// Device buffers for a forward convolution, allocated outside any capture.
@@ -203,8 +268,10 @@ TEST(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
     ASSERT_FALSE(solvers.empty()) << "miopenFindSolutions returned no results with timeout enabled";
 }
 
-// With MIOPEN_NAIVE_TIMEOUT_FACTOR=1 (0.01x budget), the wall-clock deadline expires
-// before the naive kernel can finish. Naive must be absent from the results.
+// With MIOPEN_NAIVE_TIMEOUT_FACTOR=1 (0.01x budget) the run time lower bound of the naive solver
+// is far above its budget, so Find skips it before building or launching it. Naive must be absent
+// from the results, and the log must show that the bound made the decision: no naive solver was
+// evaluated and the skip is reported as a bound skip, not as a timeout.
 TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
 {
     auto& handle_ref      = get_handle();
@@ -216,16 +283,187 @@ TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
 
     ScopedFindDb no_cache;
     ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, true);
     ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
-    auto solvers = RunFind(handle);
+    const auto found = RunFindLogged(handle);
 
-    ASSERT_FALSE(solvers.empty()) << "miopenFindSolutions returned no results";
-    const bool any_naive = std::any_of(solvers.begin(), solvers.end(), IsNaive);
-    std::string all_names;
-    for(const auto& s : solvers)
-        all_names += (all_names.empty() ? "" : ", ") + s;
-    EXPECT_FALSE(any_naive) << "Naive solver should have been short-circuited with 1% budget"
-                            << "; got: [" << all_names << "]";
+    ASSERT_FALSE(found.solvers.empty()) << "miopenFindSolutions returned no results";
+    const bool any_naive = std::any_of(found.solvers.begin(), found.solvers.end(), IsNaive);
+    EXPECT_FALSE(any_naive) << "Naive solver should have been skipped with 1% budget" << "; got: ["
+                            << Join(found.solvers) << "]";
+    EXPECT_TRUE(LogShowsBoundSkip(found.log)) << "the skip did not come from the run time bound";
+    EXPECT_FALSE(LogShowsNaiveEvaluation(found.log))
+        << "a naive solver was built and launched although its bound exceeds the budget";
+}
+
+// With a budget of 1000x the best non-naive time the bound is far below it. Find must not skip the
+// naive solver: it is evaluated and returned. This fails if the skip fires whenever a non-naive
+// solver succeeded, or if the comparison of bound and budget is the wrong way round.
+TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenBoundIsBelowBudget)
+{
+    auto& handle_ref      = get_handle();
+    miopenHandle_t handle = &handle_ref;
+
+    if(IsWinogradOnlyArch(handle_ref))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << handle_ref.GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, true);
+    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 100000);
+    const auto found = RunFindLogged(handle);
+
+    ASSERT_FALSE(found.solvers.empty()) << "miopenFindSolutions returned no results";
+    EXPECT_FALSE(LogShowsBoundSkip(found.log)) << "naive was skipped although its bound is far "
+                                                  "below the budget";
+    EXPECT_TRUE(LogShowsNaiveEvaluation(found.log));
+    const bool any_naive = std::any_of(found.solvers.begin(), found.solvers.end(), IsNaive);
+    EXPECT_TRUE(any_naive) << "Expected the naive solver in the results with a 1000x budget"
+                           << "; got: [" << Join(found.solvers) << "]";
+}
+
+// MIOPEN_NAIVE_BOUND_SKIP=0 restores the behavior without the bound: with a 1% budget the naive
+// solver is built and launched, and the timeout abandons it.
+TEST(GPU_NaiveTimeout_FP32, NaiveTimedOutWhenBoundSkipDisabled)
+{
+    auto& handle_ref      = get_handle();
+    miopenHandle_t handle = &handle_ref;
+
+    if(IsWinogradOnlyArch(handle_ref))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << handle_ref.GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, false);
+    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
+    const auto found = RunFindLogged(handle);
+
+    ASSERT_FALSE(found.solvers.empty()) << "miopenFindSolutions returned no results";
+    EXPECT_FALSE(LogShowsBoundSkip(found.log));
+    EXPECT_TRUE(LogShowsNaiveEvaluation(found.log))
+        << "with the bound off the naive solver must be built and launched";
+    const bool any_naive = std::any_of(found.solvers.begin(), found.solvers.end(), IsNaive);
+    EXPECT_FALSE(any_naive) << "the timeout should have abandoned naive with 1% budget"
+                            << "; got: [" << Join(found.solvers) << "]";
+}
+
+// The precompile step builds the kernels of every solver in the list in parallel before the
+// evaluation starts. Naive stays out of it while the bound can still skip it. These two tests read
+// the kernel lookups in the Info2 log. Each uses a data type no other test in this file runs, so
+// the lookup has not been done earlier in the process and cached in memory.
+TEST(GPU_NaiveTimeout_FP32, NaiveNotPrecompiledWhenBoundCanSkipIt)
+{
+    auto& handle_ref      = get_handle();
+    miopenHandle_t handle = &handle_ref;
+
+    if(IsWinogradOnlyArch(handle_ref))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << handle_ref.GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, true);
+    const auto found = RunFindLogged<bfloat16>(handle, 6);
+
+    const bool any_non_naive = std::any_of(
+        found.solvers.begin(), found.solvers.end(), [](const auto& s) { return !IsNaive(s); });
+    if(!any_non_naive)
+        GTEST_SKIP() << "no non-naive solver for this problem on " << handle_ref.GetDeviceName();
+
+    EXPECT_FALSE(LogShowsNaiveKernelBeforeFirstEvaluation(found.log))
+        << "naive was in the precompile although its bound can skip it";
+}
+
+// MIOPEN_NAIVE_BOUND_SKIP=0 puts naive back into the precompile.
+TEST(GPU_NaiveTimeout_FP32, NaivePrecompiledWhenBoundSkipDisabled)
+{
+    auto& handle_ref      = get_handle();
+    miopenHandle_t handle = &handle_ref;
+
+    if(IsWinogradOnlyArch(handle_ref))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << handle_ref.GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, false);
+    const auto found = RunFindLogged<half_float::half>(handle, 6);
+
+    const bool any_non_naive = std::any_of(
+        found.solvers.begin(), found.solvers.end(), [](const auto& s) { return !IsNaive(s); });
+    if(!any_non_naive)
+        GTEST_SKIP() << "no non-naive solver for this problem on " << handle_ref.GetDeviceName();
+
+    EXPECT_TRUE(LogShowsNaiveKernelBeforeFirstEvaluation(found.log))
+        << "the naive kernel was not looked up before the first evaluation";
+}
+
+// Path C. The legacy Find entry point takes the caller's workspace, and here it is null. A solver
+// that needs a workspace is rejected for lack of one, so no non-naive solver succeeds. Naive is
+// then evaluated even though its bound is above its 1% budget: the bound and the timeout only
+// apply once a non-naive solver has succeeded. The solver filter leaves one workspace user next
+// to naive. (miopenFindSolutions provides its own workspace and cannot reach this path.)
+TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverNeedsWorkspace)
+{
+    auto& handle_ref      = get_handle();
+    miopenHandle_t handle = &handle_ref;
+
+    if(IsWinogradOnlyArch(handle_ref))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << handle_ref.GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, true);
+    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
+    ScopedEnvironment<std::string> only(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                        std::string{"GemmFwdRest;ConvDirectNaiveConvFwd"});
+
+    tensor<float> x{1, 64, 14, 14};
+    tensor<float> w{64, 64, 3, 3};
+    miopen::ConvolutionDescriptor conv{
+        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
+    tensor<float> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
+
+    ConvBuffers buffers;
+    ASSERT_EQ(hipMalloc(&buffers.x, x.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&buffers.w, w.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&buffers.y, y.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMemset(buffers.x, 0, x.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMemset(buffers.w, 0, w.desc.GetNumBytes()), hipSuccess);
+
+    miopenConvAlgoPerf_t perf[8];
+    int returned = 0;
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 5);
+    testing::internal::CaptureStderr();
+    const auto status     = miopenFindConvolutionForwardAlgorithm(handle,
+                                                              &x.desc,
+                                                              buffers.x,
+                                                              &w.desc,
+                                                              buffers.w,
+                                                              &conv,
+                                                              &y.desc,
+                                                              buffers.y,
+                                                              8,
+                                                              &returned,
+                                                              perf,
+                                                              nullptr,
+                                                              0,
+                                                              false);
+    const std::string log = testing::internal::GetCapturedStderr();
+
+    if(log.find("workspace required") == std::string::npos)
+        GTEST_SKIP() << "no non-naive candidate that needs a workspace on "
+                     << handle_ref.GetDeviceName() << ", path C is not reached";
+
+    ASSERT_EQ(status, miopenStatusSuccess);
+    ASSERT_GE(returned, 1) << "naive must be evaluated when every non-naive solver failed (path C)";
+    for(int i = 0; i < returned; ++i)
+        EXPECT_EQ(perf[i].fwd_algo, miopenConvolutionFwdAlgoDirect) << "result " << i;
+    EXPECT_TRUE(LogShowsNaiveEvaluation(log));
+    EXPECT_FALSE(LogShowsBoundSkip(log));
 }
 
 // Regression for issue #12121. With a 1% budget the naive evaluation is
