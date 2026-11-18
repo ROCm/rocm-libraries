@@ -351,6 +351,11 @@ if( NOT "${HIPFFT_LINKED_VERSION}" STREQUAL ""
       PRIVATE
       hip::hipfft
       )
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
+      target_compile_definitions( ${c_src}_c PRIVATE __HIP_PLATFORM_NVIDIA__)
+    else()
+      target_link_libraries( ${c_src}_c PRIVATE hip::host )
+    endif()
   endforeach()
 else()
   message( STATUS
