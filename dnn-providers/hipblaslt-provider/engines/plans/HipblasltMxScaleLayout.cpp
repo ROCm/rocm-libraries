@@ -18,11 +18,6 @@ namespace
 constexpr float ALPHA = 1.f;
 constexpr float BETA = 0.f;
 
-int64_t roundUp(int64_t value, int64_t multiple)
-{
-    return ((value + multiple - 1) / multiple) * multiple;
-}
-
 uint32_t ceilDiv(uint32_t value, uint32_t divisor)
 {
     return (value + divisor - 1) / divisor;
@@ -88,10 +83,13 @@ size_t mxScaleBytes(MxScaleFormat format, int64_t mn, int64_t kBlocks)
     switch(format)
     {
     case MxScaleFormat::SWIZZLED_GFX950:
-        return static_cast<size_t>(roundUp(mn, mx_scale_relayout::GFX950_TILE_MN)
-                                   * roundUp(kBlocks, mx_scale_relayout::GFX950_TILE_KB));
+        return hipblaslt_utils::alignUp(static_cast<size_t>(mn), mx_scale_relayout::GFX950_TILE_MN)
+               * hipblaslt_utils::alignUp(static_cast<size_t>(kBlocks),
+                                          mx_scale_relayout::GFX950_TILE_KB);
     case MxScaleFormat::SWIZZLED_GFX1250:
-        return static_cast<size_t>(mn * roundUp(kBlocks, mx_scale_relayout::GFX1250_GROUP_KB));
+        return static_cast<size_t>(mn)
+               * hipblaslt_utils::alignUp(static_cast<size_t>(kBlocks),
+                                          mx_scale_relayout::GFX1250_GROUP_KB);
     case MxScaleFormat::NATURAL:
     default:
         return static_cast<size_t>(mn * kBlocks);
@@ -142,11 +140,13 @@ MxScalePrep::MxScalePrep(
     {
         _method = Method::RELAYOUT_KERNEL;
         const bool gfx950 = format == MxScaleFormat::SWIZZLED_GFX950;
-        _outMn
-            = static_cast<uint32_t>(gfx950 ? roundUp(mn, mx_scale_relayout::GFX950_TILE_MN) : mn);
-        _outKb = static_cast<uint32_t>(roundUp(kBlocks,
-                                               gfx950 ? mx_scale_relayout::GFX950_TILE_KB
-                                                      : mx_scale_relayout::GFX1250_GROUP_KB));
+        _outMn = static_cast<uint32_t>(
+            gfx950 ? hipblaslt_utils::alignUp(static_cast<size_t>(mn),
+                                              mx_scale_relayout::GFX950_TILE_MN)
+                   : static_cast<size_t>(mn));
+        _outKb = static_cast<uint32_t>(hipblaslt_utils::alignUp(
+            static_cast<size_t>(kBlocks),
+            gfx950 ? mx_scale_relayout::GFX950_TILE_KB : mx_scale_relayout::GFX1250_GROUP_KB));
         _tilesK = ceilDiv(_outKb, mx_scale_relayout::TILE);
         _blocks = ceilDiv(_outMn, mx_scale_relayout::TILE) * _tilesK;
         _kernel = relayoutKernel(format);
@@ -224,11 +224,9 @@ std::pair<const void*, const void*> MxScalePrep::runPair(const MxScalePrep& a,
         batch.tilesKFirst = a._tilesK;
         batch.tilesKSecond = b._tilesK;
         batch.firstBlockOfSecond = a._blocks;
-        // A copy with the pair's grid: a plan's preparations are shared by concurrent
-        // execute() calls.
-        auto kernel = *a._kernel;
-        kernel.setGridSize(a._blocks + b._blocks);
-        kernel.launch(stream, batch);
+        // The pair's grid is passed at launch: a plan's preparations, and their Kernel,
+        // are shared by concurrent execute() calls.
+        a._kernel->launchWithGridX(stream, a._blocks + b._blocks, batch);
         return {workspaceA, workspaceB};
     }
     return {a.run(handle, stream, sourceA, workspaceA), b.run(handle, stream, sourceB, workspaceB)};

@@ -1,8 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <future>
 #include <memory>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -103,6 +105,46 @@ TEST(TestGpuProgramCache, SameKeySharesOneProgram)
     const auto second = getProgram(relayout::SOURCE_NAME, {"-std=c++17"});
     EXPECT_EQ(first, second);
     EXPECT_NE(getProgram(relayout::SOURCE_NAME, {"-std=c++17", "-DUNUSED_TEST_MACRO=1"}), first);
+}
+
+// Concurrent first requests for one key wait for a single compile and share its
+// Program. The key is new to the process, so the first request compiles.
+TEST(TestGpuProgramCache, ConcurrentRequestsShareOneProgram)
+{
+    SKIP_IF_NO_DEVICES();
+    constexpr size_t THREADS = 8;
+    const std::vector<std::string> options{"-std=c++17", "-DCONCURRENT_REQUESTS_TEST=1"};
+    std::vector<std::shared_ptr<const Program>> programs(THREADS);
+    std::vector<std::string> errors(THREADS);
+    std::promise<void> go;
+    const std::shared_future<void> start = go.get_future().share();
+    std::vector<std::thread> threads;
+    threads.reserve(THREADS);
+    for(size_t i = 0; i < THREADS; ++i)
+    {
+        threads.emplace_back([&, i] {
+            start.wait();
+            try
+            {
+                programs[i] = getProgram(relayout::SOURCE_NAME, options);
+            }
+            catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+            {
+                errors[i] = e.what();
+            }
+        });
+    }
+    go.set_value();
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+    for(size_t i = 0; i < THREADS; ++i)
+    {
+        EXPECT_TRUE(errors[i].empty()) << "thread " << i << ": " << errors[i];
+        EXPECT_EQ(programs[i], programs[0]) << "thread " << i;
+    }
+    EXPECT_NE(programs[0], nullptr);
 }
 
 // A failed compile is not cached: each request compiles and fails again, and other keys

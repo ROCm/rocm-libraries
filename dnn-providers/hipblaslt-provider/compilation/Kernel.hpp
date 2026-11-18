@@ -32,11 +32,21 @@ public:
     {
         std::array<void*, sizeof...(Args)> kernelParams
             = {const_cast<void*>(static_cast<const void*>(&args))...};
-        launchImpl(stream, kernelParams.data());
+        launchImpl(stream, _gridX, kernelParams.data());
+    }
+
+    // As launch(), with `gridX` blocks along x in place of the configured grid size, so
+    // a shared Kernel can launch a different grid without being copied or changed.
+    template <typename... Args>
+    void launchWithGridX(hipStream_t stream, unsigned int gridX, Args&&... args) const
+    {
+        std::array<void*, sizeof...(Args)> kernelParams
+            = {const_cast<void*>(static_cast<const void*>(&args))...};
+        launchImpl(stream, gridX, kernelParams.data());
     }
 
 private:
-    void launchImpl(hipStream_t stream, void** kernelParams) const;
+    void launchImpl(hipStream_t stream, unsigned int gridX, void** kernelParams) const;
 
     hipFunction_t _function = nullptr;
     std::string _name;

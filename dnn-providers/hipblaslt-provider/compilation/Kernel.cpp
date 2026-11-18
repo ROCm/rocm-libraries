@@ -36,10 +36,10 @@ void Kernel::setSharedMemBytes(unsigned int bytes)
     _sharedMemBytes = bytes;
 }
 
-void Kernel::launchImpl(hipStream_t stream, void** kernelParams) const
+void Kernel::launchImpl(hipStream_t stream, unsigned int gridX, void** kernelParams) const
 {
     const auto result = hipModuleLaunchKernel(_function,
-                                              _gridX,
+                                              gridX,
                                               _gridY,
                                               _gridZ,
                                               _blockX,

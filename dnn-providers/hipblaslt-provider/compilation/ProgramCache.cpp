@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 
 #include "HipblasltUtils.hpp"
 #include "ProgramCache.hpp"
@@ -35,10 +36,8 @@ std::shared_ptr<const Program> getProgram(const std::string& sourceName,
         return it->second;
     }
 
-    hipDeviceProp_t properties{};
-    THROW_ON_HIP_FAILURE(hipGetDeviceProperties(&properties, device));
     auto compileOptions = options;
-    compileOptions.push_back(std::string("--offload-arch=") + properties.gcnArchName);
+    compileOptions.push_back("--offload-arch=" + hipdnn_plugin_sdk::getDeviceArch(nullptr));
     auto program = std::make_shared<const Program>(sourceName, compileOptions);
     s_programs.emplace(std::move(key), program);
     return program;
