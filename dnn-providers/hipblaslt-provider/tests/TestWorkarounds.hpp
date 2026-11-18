@@ -28,14 +28,15 @@
 // declines non-TN layouts there itself.
 //
 // SKIP_IF_WORKAROUND_ISSUE_13715() skips the positive MX tests that use the
-// canonical layout. TestGpuHipblasltMxMatmulPlanBuilder.IsApplicableRejectsOnGfx1250
-// pins the decline, and IsApplicableAcceptsOnlyKContiguousOnGfx1250 covers the
-// supported layout. If hipBLASLt ever ships non-TN gfx1250 MX kernels, check
-// their scale layout before relaxing the provider's TN-only rule.
+// canonical layout. TestMxGraphConstraints.SwizzledScaleFormatsNeedKContiguousOperands
+// tests the provider's TN-only rule without a device, and
+// IsApplicableAcceptsKContiguousOnGfx1250 covers the supported layout. If hipBLASLt
+// ever ships non-TN gfx1250 MX kernels, check their scale layout before relaxing the
+// provider's TN-only rule.
 //
-// To remove after the fix: `git grep WORKAROUND_ISSUE_13715` finds the macro, its
-// call sites (including the integration test) and the pinning test; `git grep 13715`
-// also finds the provider's TN-only rule in HipblasltMxMatmulPlanBuilder.cpp, the
+// To remove after the fix: `git grep WORKAROUND_ISSUE_13715` finds the macro and its
+// call sites (including the integration test); `git grep 13715` also finds the
+// provider's TN-only rule in HipblasltMxMatmulPlanBuilder.cpp and its test, the
 // gfx950-only skips of the M/N-contiguous execute tests and the provider doc.
 // ----------------------------------------------------------------------------
 
@@ -66,13 +67,12 @@
     } while(0)
 #endif
 
-#define SKIP_IF_WORKAROUND_ISSUE_13715()                                              \
-    do                                                                                \
-    {                                                                                 \
-        if(::hipblaslt_plugin_test::isGfx1250Target(                                  \
-               ::hipdnn_test_sdk::utilities::currentDeviceArch()))                    \
-        {                                                                             \
-            GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for transA=N, " \
-                            "transB=T on gfx1250";                                    \
-        }                                                                             \
+#define SKIP_IF_WORKAROUND_ISSUE_13715()                                             \
+    do                                                                               \
+    {                                                                                \
+        if(::hipblaslt_plugin_test::isGfx1250Target(                                 \
+               ::hipdnn_test_sdk::utilities::currentDeviceArch()))                   \
+        {                                                                            \
+            GTEST_SKIP() << "[#13715] no MX GEMM for transA=N, transB=T on gfx1250"; \
+        }                                                                            \
     } while(0)

@@ -400,12 +400,12 @@ std::string scalePrepCaseName(const ::testing::TestParamInfo<ScalePrepCase>& inf
 }
 } // namespace
 
-// K-contiguous operands: every format.
+// Swizzled formats (K-contiguous operands only): the relayout kernel pads and tiles
+// by shape, so they run over the whole shape grid.
 INSTANTIATE_TEST_SUITE_P(
     ,
     TestGpuMxScaleLayout,
-    ::testing::Combine(::testing::Values(MxScaleFormat::NATURAL,
-                                         MxScaleFormat::SWIZZLED_GFX950,
+    ::testing::Combine(::testing::Values(MxScaleFormat::SWIZZLED_GFX950,
                                          MxScaleFormat::SWIZZLED_GFX1250),
                        ::testing::Values(MxOrder::K_CONTIGUOUS, MxOrder::MN_CONTIGUOUS),
                        ::testing::Values(MxOrder::K_CONTIGUOUS),
@@ -413,14 +413,25 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values<int64_t>(1, 3, 4, 5, 8, 12, 16, 33, 65, 128)),
     scalePrepCaseName);
 
-// M/N-contiguous operands (the default NT layout): rocRoller reads the scale in the
-// operand's order, so a K-contiguous scale is transposed to [kBlocks][mn].
-INSTANTIATE_TEST_SUITE_P(
-    MnContiguousOperand,
-    TestGpuMxScaleLayout,
-    ::testing::Combine(::testing::Values(MxScaleFormat::NATURAL),
-                       ::testing::Values(MxOrder::K_CONTIGUOUS, MxOrder::MN_CONTIGUOUS),
-                       ::testing::Values(MxOrder::MN_CONTIGUOUS),
-                       ::testing::Values<int64_t>(1, 16, 17, 32, 48, 64, 96, 256, 1000),
-                       ::testing::Values<int64_t>(1, 3, 4, 5, 8, 12, 16, 33, 65, 128)),
-    scalePrepCaseName);
+// Natural scales are passed through, or transposed by one hipblasLtMatrixTransform
+// into the operand's order (rocRoller reads a scale in its operand's order). Only a
+// vector (mn or kBlocks of 1) changes that choice, so a few shapes cover it.
+INSTANTIATE_TEST_SUITE_P(KContiguousOperand,
+                         TestGpuMxScaleLayout,
+                         ::testing::Combine(::testing::Values(MxScaleFormat::NATURAL),
+                                            ::testing::Values(MxOrder::K_CONTIGUOUS,
+                                                              MxOrder::MN_CONTIGUOUS),
+                                            ::testing::Values(MxOrder::K_CONTIGUOUS),
+                                            ::testing::Values<int64_t>(1, 17, 96),
+                                            ::testing::Values<int64_t>(1, 5, 33)),
+                         scalePrepCaseName);
+
+INSTANTIATE_TEST_SUITE_P(MnContiguousOperand,
+                         TestGpuMxScaleLayout,
+                         ::testing::Combine(::testing::Values(MxScaleFormat::NATURAL),
+                                            ::testing::Values(MxOrder::K_CONTIGUOUS,
+                                                              MxOrder::MN_CONTIGUOUS),
+                                            ::testing::Values(MxOrder::MN_CONTIGUOUS),
+                                            ::testing::Values<int64_t>(1, 17, 96),
+                                            ::testing::Values<int64_t>(1, 5, 33)),
+                         scalePrepCaseName);

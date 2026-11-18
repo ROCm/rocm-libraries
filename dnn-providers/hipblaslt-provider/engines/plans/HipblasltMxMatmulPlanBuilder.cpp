@@ -446,41 +446,13 @@ void checkHipblasltConstraints(
     }
 }
 
-/// Device-dependent layout rule. The swizzled scale formats run on hipBLASLt's
-/// Tensile kernels, which only exist for hipBLAS TN (both of our operands
-/// K-contiguous). On gfx1250 that is the only backend, so other layouts are
-/// declined here with a clear reason rather than by an empty heuristic.
-void checkLayoutForScaleFormat(const TensorWrapper& tXA,
-                               const TensorWrapper& tXB,
-                               MxScaleFormat scaleFormat)
-{
-    if(scaleFormat == MxScaleFormat::NATURAL)
-    {
-        return;
-    }
-    if(packedMxOrder(tXA, 1) != MxOrder::K_CONTIGUOUS
-       || packedMxOrder(tXB, 2) != MxOrder::K_CONTIGUOUS)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            std::string("MX matmul: scale format ") + toString(scaleFormat)
-                + " (hipBLASLt Tensile) needs K-contiguous A (row-major) and B (column-major); "
-                  "hipBLASLt has no MX kernel for other layouts (#13715)");
-    }
-}
-
 /// The scale format for this device (see selectMxScaleFormat), checked against
 /// the operand layouts.
-MxScaleFormat
-    resolveScaleFormat(const HipdnnEnginePluginHandle& handle,
-                       const BlockScaleDequantizeAttributes& deqAttrA,
-                       const BlockScaleDequantizeAttributes& deqAttrB,
-                       const std::unordered_map<int64_t, const TensorAttributes*>& tensorMap)
+MxScaleFormat resolveScaleFormat(const HipdnnEnginePluginHandle& handle,
+                                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {
-    const auto tXA = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.x_tensor_uid());
-    const auto tXB = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.x_tensor_uid());
     const auto scaleFormat = selectMxScaleFormat(handle);
-    checkLayoutForScaleFormat(tXA, tXB, scaleFormat);
+    checkMxLayoutForScaleFormat(graph, scaleFormat);
     return scaleFormat;
 }
 
@@ -515,9 +487,9 @@ std::unique_ptr<MxMatmulPlan>
                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
-    const auto& tensorMap = opGraph.getTensorMap();
-    const auto scaleFormat = resolveScaleFormat(handle, deqAttrA, deqAttrB, tensorMap);
-    return createMxMatmulPlan(handle, deqAttrA, deqAttrB, matmulAttr, tensorMap, scaleFormat);
+    const auto scaleFormat = resolveScaleFormat(handle, opGraph);
+    return createMxMatmulPlan(
+        handle, deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap(), scaleFormat);
 }
 
 } // namespace
@@ -526,6 +498,28 @@ void checkMxGraphConstraints(const hipdnn_flatbuffers_sdk::flatbuffer_utilities:
 {
     auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(graph);
     checkConstraints(graph, deqAttrA, deqAttrB, matmulAttr, graph.getTensorMap());
+}
+
+void checkMxLayoutForScaleFormat(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                                 MxScaleFormat scaleFormat)
+{
+    if(scaleFormat == MxScaleFormat::NATURAL)
+    {
+        return;
+    }
+    auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(graph);
+    const auto& tensorMap = graph.getTensorMap();
+    const auto tXA = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.x_tensor_uid());
+    const auto tXB = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.x_tensor_uid());
+    if(packedMxOrder(tXA, 1) != MxOrder::K_CONTIGUOUS
+       || packedMxOrder(tXB, 2) != MxOrder::K_CONTIGUOUS)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string("MX matmul: scale format ") + toString(scaleFormat)
+                + " (hipBLASLt Tensile) needs K-contiguous A (row-major) and B (column-major); "
+                  "hipBLASLt has no MX kernel for other layouts (#13715)");
+    }
 }
 
 bool HipblasltMxMatmulPlanBuilder::isApplicable(

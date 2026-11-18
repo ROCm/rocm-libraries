@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "HipblasltMxScaleLayout.hpp"
 #include "PlanBuilderInterface.hpp"
 
 namespace hipblaslt_plugin
@@ -12,6 +13,12 @@ namespace hipblaslt_plugin
 // shapes, operand, scale and output layouts, alignment and block size. Throws
 // HipdnnPluginException(BAD_PARAM) with the reason for the first rule the graph breaks.
 void checkMxGraphConstraints(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph);
+
+// The layout rule of a scale format, also needing no device. The swizzled formats run
+// on hipBLASLt's Tensile kernels, which exist only for K-contiguous A and B (hipBLAS
+// TN, #13715); other layouts are declined with HipdnnPluginException(BAD_PARAM).
+void checkMxLayoutForScaleFormat(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                                 MxScaleFormat scaleFormat);
 
 class HipblasltMxMatmulPlanBuilder : public IPlanBuilder
 {

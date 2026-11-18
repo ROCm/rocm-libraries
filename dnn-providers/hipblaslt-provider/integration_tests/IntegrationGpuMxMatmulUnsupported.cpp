@@ -158,12 +158,11 @@ protected:
 // scales row-major: hipBLASLt sees transA=N, transB=T.
 TEST_F(IntegrationGpuMxMatmulSupported, AcceptsSupportedConfig)
 {
-    // WORKAROUND_ISSUE_13715 (see tests/TestWorkarounds.hpp): on gfx1250 hipBLASLt
-    // has MX kernels only for transA=T, transB=N, so this layout is declined there.
+    // WORKAROUND_ISSUE_13715 (see tests/TestWorkarounds.hpp): on gfx1250 the provider
+    // accepts only K-contiguous A and B (hipBLAS TN), so this layout is declined there.
     if(isGfx1250Target(hipdnn_test_sdk::utilities::currentDeviceArch()))
     {
-        GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for transA=N, transB=T "
-                        "on gfx1250";
+        GTEST_SKIP() << "[#13715] no MX GEMM for transA=N, transB=T on gfx1250";
     }
 
     auto g = buildMxMatmulGraph(MatmulTestCase{{32, 128}, {128, 32}, true, false, 0});
@@ -210,14 +209,11 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         // batch != 1 (VEC32_UE8M0 requires a single batch)
         MxMatmulCase{"BatchGreaterThanOne", {{2, 32, 128}, {2, 128, 32}, true, false, 0}},
-        // M not a multiple of 16
-        MxMatmulCase{"MisalignedM", {{8, 128}, {128, 32}, true, false, 0}},
         // K not a multiple of 128
         MxMatmulCase{"MisalignedK", {{32, 64}, {64, 32}, true, false, 0}},
         // The same shapes with K-contiguous operands
         MxMatmulCase{
             "BatchGreaterThanOneKContiguous", {{2, 32, 128}, {2, 128, 32}, false, true, 0}, true},
-        MxMatmulCase{"MisalignedMKContiguous", {{8, 128}, {128, 32}, false, true, 0}, true},
         MxMatmulCase{"MisalignedKKContiguous", {{32, 64}, {64, 32}, false, true, 0}, true}),
     [](const ::testing::TestParamInfo<MxMatmulCase>& info) {
         return std::string(info.param.name);

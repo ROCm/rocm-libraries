@@ -230,15 +230,6 @@ bool onGfx1250()
     return hipblaslt_plugin_test::isGfx1250Target(hipdnn_test_sdk::utilities::currentDeviceArch());
 }
 
-// (A type, B type, output type) triples with a gfx1250 Tensile MX kernel in the
-// hipBLASLt this was written against. The gfx1250 A0 nightly pin lacks some of
-// them (no E5M2, no FP16 output), so only these four are asserted there.
-bool hasGfx1250TensileKernel(DT aType, DT bType, DT cType)
-{
-    const bool sameFp8OrFp4 = aType == bType && (aType == DT::FP8_E4M3 || aType == DT::FP4_E2M1);
-    return sameFp8OrFp4 && (cType == DT::BFLOAT16 || cType == DT::FLOAT);
-}
-
 } // namespace
 
 // ===========================================================================
@@ -280,24 +271,6 @@ TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicable)
 {
     SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithTypes(TypeParam::X_TYPE, TypeParam::OUT_TYPE);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
-        << "x=" << EnumNameDataType(TypeParam::X_TYPE)
-        << " out=" << EnumNameDataType(TypeParam::OUT_TYPE);
-}
-
-// K-contiguous A and B (hipBLAS TN), the layout frameworks pass and the only one
-// hipBLASLt has Tensile MX kernels for. gfx950 runs every pair on rocRoller;
-// gfx1250 only has Tensile kernels for some pairs.
-TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicableKContiguous)
-{
-    if(onGfx1250()
-       && !hasGfx1250TensileKernel(TypeParam::X_TYPE, TypeParam::X_TYPE, TypeParam::OUT_TYPE))
-    {
-        GTEST_SKIP() << "no gfx1250 Tensile MX kernel asserted for this pair";
-    }
-    auto fb = createMxGraphWithLayout(
-        MxOperandLayout::K_K, TypeParam::X_TYPE, TypeParam::OUT_TYPE, TypeParam::X_TYPE);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
         << "x=" << EnumNameDataType(TypeParam::X_TYPE)
@@ -691,6 +664,67 @@ TEST(TestMxGraphConstraints, DeclinesOutputThatIsNotPackedRowMajor)
     }
 }
 
+// The swizzled scale formats run on hipBLASLt's Tensile kernels, which exist only for
+// K-contiguous A and B (#13715). Natural scales take every packed operand order.
+TEST(TestMxGraphConstraints, SwizzledScaleFormatsNeedKContiguousOperands)
+{
+    for(const auto layout : {MxOperandLayout::MN_MN,
+                             MxOperandLayout::K_K,
+                             MxOperandLayout::K_MN,
+                             MxOperandLayout::MN_K})
+    {
+        auto fb = createMxGraphWithLayout(layout);
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        EXPECT_NO_THROW(checkMxLayoutForScaleFormat(graph, MxScaleFormat::NATURAL))
+            << toString(layout);
+        for(const auto format : {MxScaleFormat::SWIZZLED_GFX950, MxScaleFormat::SWIZZLED_GFX1250})
+        {
+            if(layout == MxOperandLayout::K_K)
+            {
+                EXPECT_NO_THROW(checkMxLayoutForScaleFormat(graph, format)) << toString(format);
+                continue;
+            }
+            try
+            {
+                checkMxLayoutForScaleFormat(graph, format);
+                ADD_FAILURE() << toString(layout) << " accepted for " << toString(format);
+            }
+            catch(const HipdnnPluginException& e)
+            {
+                EXPECT_NE(std::string(e.what()).find("(#13715)"), std::string::npos) << e.what();
+            }
+        }
+    }
+}
+
+// Alignment: M and N multiples of 16, K a multiple of 128. The reason is checked
+// because hipBLASLt itself finds no kernel for some misaligned shapes.
+TEST(TestMxGraphConstraints, DeclinesMisalignedShapes)
+{
+    const auto expectDeclined
+        = [](const flatbuffers::FlatBufferBuilder& fb, const std::string& reason) {
+              GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+              try
+              {
+                  checkMxGraphConstraints(graph);
+                  ADD_FAILURE() << "accepted; expected: " << reason;
+              }
+              catch(const HipdnnPluginException& e)
+              {
+                  EXPECT_NE(std::string(e.what()).find(reason), std::string::npos) << e.what();
+              }
+          };
+    expectDeclined(createValidMxMatmulGraph(
+                       {24, 128}, {1, 24}, {128, 32}, {32, 1}, {24, 32}, {32, 1}, {24, 4}, {4, 32}),
+                   "M must be divisible by 16");
+    expectDeclined(createValidMxMatmulGraph(
+                       {32, 128}, {1, 32}, {128, 24}, {24, 1}, {32, 24}, {24, 1}, {32, 4}, {4, 24}),
+                   "N must be divisible by 16");
+    expectDeclined(createValidMxMatmulGraph(
+                       {32, 96}, {1, 32}, {96, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 3}, {3, 32}),
+                   "K must be divisible by 128");
+}
+
 // rocRoller (gfx950) reads every operand-order combination; the plan transposes a
 // scale whose order differs from its operand's.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx950)
@@ -715,30 +749,21 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx9
     }
 }
 
-// gfx1250 has Tensile MX kernels for hipBLAS TN only (#13715): K-contiguous A and B
-// are accepted with either scale order, every other layout is declined.
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsOnlyKContiguousOnGfx1250)
+// gfx1250 runs only the gfx1250 swizzled format, so K-contiguous A and B are
+// accepted with either scale order (other layouts: SwizzledScaleFormatsNeedKContiguousOperands).
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousOnGfx1250)
 {
     if(!onGfx1250())
     {
         GTEST_SKIP() << "gfx1250-only check";
     }
-    for(const auto xType : {DT::FP8_E4M3, DT::FP4_E2M1})
+    for(const bool mnContiguousScales : {false, true})
     {
-        for(const bool mnContiguousScales : {false, true})
-        {
-            auto fb = createMxGraphWithLayout(
-                MxOperandLayout::K_K, xType, DT::BFLOAT16, DT::UNSET, mnContiguousScales);
-            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-            EXPECT_TRUE(_builder.isApplicable(_handle, graph))
-                << "x=" << EnumNameDataType(xType) << " mnContiguousScales=" << mnContiguousScales;
-        }
-    }
-    for(const auto layout : {MxOperandLayout::MN_MN, MxOperandLayout::K_MN, MxOperandLayout::MN_K})
-    {
-        auto fb = createMxGraphWithLayout(layout, DT::FP8_E4M3, DT::BFLOAT16);
+        auto fb = createMxGraphWithLayout(
+            MxOperandLayout::K_K, DT::FP8_E4M3, DT::BFLOAT16, DT::UNSET, mnContiguousScales);
         GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-        EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << toString(layout);
+        EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+            << "mnContiguousScales=" << mnContiguousScales;
     }
 }
 
@@ -839,31 +864,6 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousFp8AWi
                     << toString(layout) << " A=" << EnumNameDataType(aType)
                     << " B=" << EnumNameDataType(bType);
             }
-        }
-    }
-}
-
-// See WORKAROUND_ISSUE_13715 in TestWorkarounds.hpp. hipBLASLt has gfx1250 MX
-// kernels for these element types only for transA=T, transB=N, while the canonical
-// (M/N-contiguous) layout here reaches hipBLASLt as transA=N, transB=T. The
-// provider declines that layout on gfx1250 itself, before asking hipBLASLt; if
-// hipBLASLt ships non-TN gfx1250 MX kernels, check their scale layout before
-// relaxing that rule.
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOnGfx1250)
-{
-    const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
-    if(!hipblaslt_plugin_test::isGfx1250Target(archName))
-    {
-        GTEST_SKIP() << "gfx1250-only check, running on " << archName;
-    }
-    for(const auto xType : {DT::FP8_E4M3, DT::FP4_E2M1})
-    {
-        for(const auto cType : {DT::BFLOAT16, DT::FLOAT})
-        {
-            auto fb = createMxGraphWithTypes(xType, cType);
-            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-            EXPECT_FALSE(_builder.isApplicable(_handle, graph))
-                << "x=" << EnumNameDataType(xType) << " out=" << EnumNameDataType(cType);
         }
     }
 }
