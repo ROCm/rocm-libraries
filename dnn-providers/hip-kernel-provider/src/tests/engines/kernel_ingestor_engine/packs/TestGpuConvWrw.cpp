@@ -591,18 +591,18 @@ std::vector<DeviceCase> deviceCases()
             {int64_t{10} * 12 * 26, 1, int64_t{12} * 26, 26});
     for(auto& deviceCase : cases)
     {
-        static const std::set<std::string> ON_GFX908{"Nhwc3x3ThreeOutputChannels",
-                                                     "Nhwc1x1FiveOutputChannels",
-                                                     "ThreeDNhwc3x3x3ThreeOutputChannels",
-                                                     "Stem7x7Stride2",
-                                                     "Stem7x7Stride2K64",
-                                                     "Stem3x3Stride1C5",
-                                                     "Stem3x3Stride2ThreeD",
-                                                     "Stem7x7Stride2Nhwc",
-                                                     "Stem3x3Stride2NhwcOneChannel",
-                                                     "Stem3x3Stride1C5Nhwc",
-                                                     "Stem3x3Stride2ThreeDNhwc"};
-        deviceCase.gfx908 = deviceCase.genericOnly || ON_GFX908.count(deviceCase.name) != 0;
+        static const std::set<std::string> s_onGfx908{"Nhwc3x3ThreeOutputChannels",
+                                                      "Nhwc1x1FiveOutputChannels",
+                                                      "ThreeDNhwc3x3x3ThreeOutputChannels",
+                                                      "Stem7x7Stride2",
+                                                      "Stem7x7Stride2K64",
+                                                      "Stem3x3Stride1C5",
+                                                      "Stem3x3Stride2ThreeD",
+                                                      "Stem7x7Stride2Nhwc",
+                                                      "Stem3x3Stride2NhwcOneChannel",
+                                                      "Stem3x3Stride1C5Nhwc",
+                                                      "Stem3x3Stride2ThreeDNhwc"};
+        deviceCase.gfx908 = deviceCase.genericOnly || s_onGfx908.count(deviceCase.name) != 0;
     }
     return cases;
 }
