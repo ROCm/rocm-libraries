@@ -145,7 +145,7 @@ namespace
             }
         }
 
-        DeviceMem(const DeviceMem&)            = delete;
+        DeviceMem(const DeviceMem&) = delete;
         DeviceMem& operator=(const DeviceMem&) = delete;
 
         void upload(const void* host, size_t n)
@@ -373,7 +373,7 @@ namespace
             }
         }
 
-        CaptureGuard(const CaptureGuard&)            = delete;
+        CaptureGuard(const CaptureGuard&) = delete;
         CaptureGuard& operator=(const CaptureGuard&) = delete;
     };
 
