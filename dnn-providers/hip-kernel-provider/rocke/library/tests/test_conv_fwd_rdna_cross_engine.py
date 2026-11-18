@@ -124,19 +124,24 @@ _REFUSED = (
         "group_fast_raster does not support the wavelet pipeline",
     ),
     (
-        # chiplet_swizzle is an MFMA-only knob: on gfx1201 the WMMA gate
-        # refuses it first, so the case runs on a wave64 gfx950 spec.
-        "gfr_chiplet_swizzle",
+        "gfr_split_k",
+        dict(group_fast_raster=True, groups=2, split_k=2),
+        _ARCH,
+        "group_fast_raster does not support split-K",
+    ),
+    (
+        # Another target: the arch gate (the knob is gfx12 RDNA only) refuses it
+        # before any knob-specific check.
+        "gfr_gfx950",
         dict(
             group_fast_raster=True,
             groups=2,
-            chiplet_swizzle=True,
             wave_size=64,
             tile_k=64,
             warp_tile_k=32,
         ),
         "gfx950",
-        "group_fast_raster does not support chiplet_swizzle",
+        "group_fast_raster is enabled only on the gfx12 RDNA targets",
     ),
 )
 

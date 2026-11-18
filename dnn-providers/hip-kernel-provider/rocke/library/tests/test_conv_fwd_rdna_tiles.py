@@ -65,7 +65,7 @@ class TestFwdRegtPrefetch(unittest.TestCase):
             "gfx950",
         )
         self.assertFalse(ok)
-        self.assertIn("WMMA", why)
+        self.assertIn("gfx12 RDNA", why)
         ok, why = is_valid_spec(_fwd(regt_prefetch=1, pipeline="wavelet"), "gfx1201")
         self.assertFalse(ok)
         for mode in (2, 3):

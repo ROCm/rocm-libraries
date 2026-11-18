@@ -899,15 +899,13 @@ def is_valid_spec_for_problem(
     return True, "ok"
 
 
-def fwd_regt_prefetch_reason(
-    spec: ImplicitGemmConvSpec, family: str, target=None
-) -> Optional[str]:
+def fwd_regt_prefetch_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]:
     """Why ``spec.regt_prefetch`` cannot be built, or ``None``.
 
     The register-prefetch K loop replaces the plain ``mem`` loop of the sync
     coalesced loaders. It is written for (and only built on) the gfx12 RDNA
     targets, whose in-loop LDS-only barrier keeps the prefetch in flight;
-    ``target`` (an ``ArchTarget``) gates that when given.
+    the arch restriction is :func:`fwd_rdna4_knob_reason`'s.
     """
     if not spec.regt_prefetch:
         return None
@@ -915,11 +913,6 @@ def fwd_regt_prefetch_reason(
         return f"regt_prefetch (fwd) must be 0 or 1 (got {spec.regt_prefetch})"
     if family != "wmma":
         return "regt_prefetch (fwd) is enabled only on WMMA (wave32) targets"
-    if target is not None and target.target_family != "gfx12_rdna":
-        return (
-            "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets "
-            f"(got {target.target_family})"
-        )
     if spec.pipeline != "mem":
         return f"regt_prefetch is the 'mem' pipeline's K loop (got {spec.pipeline!r})"
     if spec.split_k_cluster:
@@ -930,9 +923,9 @@ def fwd_regt_prefetch_reason(
 def fwd_rdna4_knob_reason(spec: ImplicitGemmConvSpec, target=None) -> Optional[str]:
     """Why a gfx12-RDNA-only forward knob cannot be built on ``target``, or ``None``.
 
-    ``uniform_k_decode``, ``lds_swizzle`` and ``group_fast_raster`` are written
-    for, and only checked on, the gfx12 RDNA targets (gfx1200 / gfx1201 /
-    gfx12-generic), the same set as ``regt_prefetch``. Other WMMA targets
+    ``uniform_k_decode``, ``regt_prefetch``, ``lds_swizzle`` and
+    ``group_fast_raster`` are written for, and only checked on, the gfx12 RDNA
+    targets (gfx1200 / gfx1201 / gfx12-generic). Other WMMA targets
     (gfx11, gfx1250) and the MFMA targets are refused. ``target`` (an
     ``ArchTarget``) gates that when given.
     """
@@ -940,6 +933,7 @@ def fwd_rdna4_knob_reason(spec: ImplicitGemmConvSpec, target=None) -> Optional[s
         return None
     for flag, label in (
         (spec.uniform_k_decode, "uniform_k_decode"),
+        (spec.regt_prefetch, "regt_prefetch (fwd)"),
         (spec.lds_swizzle, "lds_swizzle"),
         (spec.group_fast_raster, "group_fast_raster"),
     ):
@@ -973,7 +967,6 @@ def fwd_group_fast_raster_reason(spec: ImplicitGemmConvSpec) -> Optional[str]:
         return None
     for flag, label in (
         (spec.split_k > 1 or spec.split_k_cluster > 0, "split-K (z carries the slice)"),
-        (spec.chiplet_swizzle, "chiplet_swizzle (it remaps blockIdx.y)"),
         (spec.pipeline == "wavelet", "the wavelet pipeline"),
     ):
         if flag:
@@ -1224,7 +1217,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         ):
             if flag:
                 return False, f"uniform_k_decode does not support {label}"
-    _why = fwd_regt_prefetch_reason(spec, family, target)
+    _why = fwd_regt_prefetch_reason(spec, family)
     if _why is not None:
         return False, _why
     if spec.lds_swizzle:

@@ -1171,8 +1171,8 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     return true;
 }
 
-/* Python fwd_rdna4_knob_reason: uniform_k_decode, lds_swizzle and
- * group_fast_raster are built for the gfx12 RDNA targets only. */
+/* Python fwd_rdna4_knob_reason: uniform_k_decode, regt_prefetch, lds_swizzle
+ * and group_fast_raster are built for the gfx12 RDNA targets only. */
 static bool rocke_conv_fwd_rdna4_knob_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                          const char* arch,
                                          char* reason,
@@ -1186,6 +1186,7 @@ static bool rocke_conv_fwd_rdna4_knob_ok(const rocke_implicit_gemm_conv_spec_t* 
         const char* label;
     } flags[] = {
         {s->uniform_k_decode, "uniform_k_decode"},
+        {s->regt_prefetch != 0, "regt_prefetch (fwd)"},
         {s->lds_swizzle, "lds_swizzle"},
         {s->group_fast_raster, "group_fast_raster"},
     };
@@ -1213,10 +1214,10 @@ static bool rocke_conv_fwd_rdna4_knob_ok(const rocke_implicit_gemm_conv_spec_t* 
 }
 
 /* Python fwd_regt_prefetch_reason: why spec.regt_prefetch cannot be built
- * (false + reason), or true. Built for the gfx12 RDNA targets only. */
+ * (false + reason), or true. The gfx12-RDNA-only restriction is
+ * rocke_conv_fwd_rdna4_knob_ok's. */
 static bool rocke_conv_fwd_regt_prefetch_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                             const char* family,
-                                            const char* arch,
                                             char* reason,
                                             size_t reason_cap)
 {
@@ -1231,19 +1232,6 @@ static bool rocke_conv_fwd_regt_prefetch_ok(const rocke_implicit_gemm_conv_spec_
     {
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "regt_prefetch (fwd) is enabled only on WMMA (wave32) targets");
-    }
-    if(arch != NULL)
-    {
-        const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
-        const char* tf = (target != NULL) ? target->target_family : NULL;
-        if(target != NULL && (tf == NULL || strcmp(tf, "gfx12_rdna") != 0))
-        {
-            ROCKE_SPEC_FAIL(reason,
-                            reason_cap,
-                            "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets "
-                            "(got %s)",
-                            tf != NULL ? tf : "None");
-        }
     }
     if(s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
     {
@@ -1548,7 +1536,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             }
         }
     }
-    if(!rocke_conv_fwd_regt_prefetch_ok(s, family, arch, reason, reason_cap))
+    if(!rocke_conv_fwd_regt_prefetch_ok(s, family, reason, reason_cap))
     {
         return false;
     }
@@ -1581,7 +1569,6 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             const char* label;
         } gfr_flags[] = {
             {s->split_k > 1 || s->split_k_cluster > 0, "split-K (z carries the slice)"},
-            {s->chiplet_swizzle, "chiplet_swizzle (it remaps blockIdx.y)"},
             {s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0, "the wavelet pipeline"},
         };
         for(size_t i = 0; i < sizeof(gfr_flags) / sizeof(gfr_flags[0]); ++i)

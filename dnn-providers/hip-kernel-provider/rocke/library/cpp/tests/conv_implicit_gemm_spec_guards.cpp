@@ -118,9 +118,8 @@ void gfr_wavelet(rocke_implicit_gemm_conv_spec_t* s, const char**)
     s->group_fast_raster = true;
     s->pipeline = "wavelet";
 }
-/* The three RDNA4-only knobs on the other targets: gfx11 WMMA, gfx1250 WMMA
- * (16x16x32 atom) and a CDNA MFMA target. chiplet_swizzle is MFMA-only, so
- * gfx1201's WMMA gate would refuse it first; on gfx950 the arch gate now does. */
+/* The RDNA4-only knobs on the other targets: gfx11 WMMA, gfx1250 WMMA
+ * (16x16x32 atom) and a CDNA MFMA target. */
 void ukd_gfx1151(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
 {
     *arch = "gfx1151";
@@ -132,7 +131,7 @@ void lxs_gfx1250(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
     s->warp_tile_k = 32;
     s->lds_swizzle = true;
 }
-void gfr_chiplet_swizzle(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
+void gfr_gfx950(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
 {
     *arch = "gfx950";
     s->problem.groups = 2;
@@ -140,8 +139,17 @@ void gfr_chiplet_swizzle(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
     s->wave_size = 64;
     s->tile_k = 64;
     s->warp_tile_k = 32;
-    s->chiplet_swizzle = true;
     s->group_fast_raster = true;
+}
+void rtp_gfx1100(rocke_implicit_gemm_conv_spec_t* s, const char** arch)
+{
+    *arch = "gfx1100";
+    s->regt_prefetch = 1;
+}
+void gfr_split_k(rocke_implicit_gemm_conv_spec_t* s, const char**)
+{
+    s->group_fast_raster = true;
+    s->split_k = 2;
 }
 
 void run(const Case& c)
@@ -249,7 +257,7 @@ int main()
         {91, "uniform_k_decode does not support the pointwise fast path"},
         {95, "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets (got gfx12_cdna)"},
         {100, "lds_swizzle sets the LDS layout itself (no lds_layout / lds_k_pad)"},
-        {105, "group_fast_raster does not support split-K (z carries the slice)"},
+        {105, "group_fast_raster is enabled only on the gfx12 RDNA targets (got gfx12_cdna)"},
     };
     for(const Case& c : cases)
         run(c);
@@ -265,9 +273,15 @@ int main()
          "regt_prefetch does not combine with split_k_cluster"},
         {"lxs_tile_k_48", lxs_tile_k_48, "lds_swizzle needs tile_k in 16/32/64/128 (got 48)"},
         {"gfr_wavelet", gfr_wavelet, "group_fast_raster does not support the wavelet pipeline"},
-        {"gfr_chiplet_swizzle",
-         gfr_chiplet_swizzle,
+        {"gfr_split_k",
+         gfr_split_k,
+         "group_fast_raster does not support split-K (z carries the slice)"},
+        {"gfr_gfx950",
+         gfr_gfx950,
          "group_fast_raster is enabled only on the gfx12 RDNA targets (got gfx950)"},
+        {"rtp_gfx1100",
+         rtp_gfx1100,
+         "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets (got gfx11_rdna)"},
         {"ukd_gfx1151",
          ukd_gfx1151,
          "uniform_k_decode is enabled only on the gfx12 RDNA targets (got gfx11_rdna)"},
