@@ -2108,7 +2108,6 @@ rocsparse_status rocsparse_spilu0_descr_destroy(rocsparse_handle       handle,
  *  -     \ref rocsparse_spilu0_input_boost_enable is a host \p int32_t. Set to 1 to enable and 0 to disable.
  *  -     \ref rocsparse_spilu0_input_boost_value is a pointer to a scalar of value type of A. Its device mode is determined from the \ref rocsparse_handle. No batched boost values can be specified.
  *  -     \ref rocsparse_spilu0_input_boost_tolerance is a double pointer. Its device mode is determined from the \ref rocsparse_handle. No batched boost tolerances can be specified.
- *  -     A diagonal entry that is exactly zero after the optional boost, for example because the boost value is zero, is reported as a zero pivot. If the boost tolerance is negative, no value is replaced.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.

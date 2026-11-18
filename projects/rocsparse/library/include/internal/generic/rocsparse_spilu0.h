@@ -95,6 +95,12 @@ rocsparse_status rocsparse_spilu0_buffer_size(rocsparse_handle            handle
 *  \f]
 *  for each entry found in the matrix \f$A\f$.
 *
+*  \note
+*  While the numeric boost is enabled (\ref rocsparse_spilu0_input_boost_enable), no \ref rocsparse_singularity_numeric_near is reported.
+*  A diagonal entry that is exactly zero after the optional boost, for example because the boost value is zero, is reported as \ref rocsparse_singularity_numeric_exact,
+*  whatever its value before the boost, through \ref rocsparse_spilu0_output_singularity and \ref rocsparse_spilu0_output_singularity_position of \ref rocsparse_spilu0_get_output.
+*  If the boost tolerance is negative, no value is replaced.
+*
 *  Performing the above operation requires two stages, the stage \ref rocsparse_spilu0_stage_analysis and the stage \ref rocsparse_spilu0_stage_compute.
 *  The stage \ref rocsparse_spilu0_stage_analysis is required to perform the stage \ref rocsparse_spilu0_stage_compute and only needs to be called once for a given sparse matrix \f$A\f$, while the stage \ref rocsparse_spilu0_stage_compute can be repeatedly used with different matrices \f$A\f$ that have the same sparsity pattern.
 *

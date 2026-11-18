@@ -143,6 +143,11 @@ rocsparse_status rocsparse_csrilu0_get_tolerance(rocsparse_handle   handle,
 *  \p position can be in host or device memory. If no singular pivot has been found,
 *  \p position is set to -1.
 *
+*  \note
+*  While numeric boost is enabled (see \ref rocsparse_scsrilu0_numeric_boost "rocsparse_Xcsrilu0_numeric_boost()"),
+*  a near numerical zero is not reported. A diagonal entry that is exactly zero after the optional
+*  boost is still reported, as by \ref rocsparse_csrilu0_zero_pivot.
+*
 *  \note rocsparse_csrilu0_singular_pivot() is a blocking function. It might influence
 *  performance negatively.
 *
