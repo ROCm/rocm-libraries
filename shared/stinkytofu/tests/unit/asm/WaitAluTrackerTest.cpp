@@ -397,6 +397,34 @@ TEST_F(WaitAluTrackerTest, UntilFreeWritesIgnoresTheAddressRead) {
     EXPECT_EQ(t.untilFreeWrites(*insts[3], WaitAluHideOp::Wmma), 0);
 }
 
+// freeAfter: the planned tail must itself be wait-free and must make the consumer free. After a
+// v_mov (v300, outside the WMMAs' destinations) and the 8/8 form's lead of 5 matrix ops, the
+// address read needs 7 more VALUs; 7 ready v_adds confirm, 6 do not, and a tail holding a VALU
+// that overwrites the address of an in-flight ds_load (its own vm_vsrc wait) is refused.
+TEST_F(WaitAluTrackerTest, FreeAfterConfirmsATailOfValus) {
+    std::string body = "  v300 = \"st.v_mov_b32\"(v301) { issueCycles = 1, latencyCycles = 1 }\n" + wmmas(5);
+    for (int i = 0; i < 7; ++i)
+        body += "  v" + std::to_string(100 + i) + " = \"st.v_add_f32\"(v250, v251) { issueCycles = 1, latencyCycles = 5 }\n";
+    body += "  v260 = \"st.ds_load_b32\"(v300) " + std::string(kDsAttrs) + "\n";
+    body += "  v261 = \"st.ds_load_b32\"(v262) " + std::string(kDsAttrs) + "\n";
+    body += "  v262 = \"st.v_add_f32\"(v264, v251) { issueCycles = 1, latencyCycles = 5 }\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 16u);
+    WaitAluTracker t = makeTracker();
+    for (size_t i = 0; i < 6; ++i) t.commit(*insts[i]);
+    const StinkyInstruction& ds = *insts[13];
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Valu), 7);
+    std::vector<const StinkyInstruction*> tail(insts.begin() + 6, insts.begin() + 13);
+    EXPECT_TRUE(t.freeAfter(ds, tail));
+    tail.pop_back();
+    EXPECT_FALSE(t.freeAfter(ds, tail));
+    // v262's ds_load in flight: the v_add overwriting v262 needs a vm_vsrc wait itself.
+    t.commit(*insts[14]);
+    std::vector<const StinkyInstruction*> bad(insts.begin() + 6, insts.begin() + 12);
+    bad.push_back(insts[15]);
+    EXPECT_FALSE(t.freeAfter(ds, bad));
+}
+
 // A rule only VALUs satisfy (the f64 capacity set) behind each WMMA: one VALU per WMMA needs 12
 // WMMAs, two need 6, none never.
 TEST_F(WaitAluTrackerTest, RequiredGapCountsValusForAValuOnlyRule) {

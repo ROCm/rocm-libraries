@@ -1,0 +1,56 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --InsertWaitAluPass=enableESM2TrackValuVsrc --wait-alu-scoreboard --enable-esm2-track-valu-vsrc --mix-tail-fill --print-output
+#
+# Tail fill (dagFeatures.mixTailFill): a ds_load the scoreboard would still put an s_wait_alu before,
+# which a few more VALUs free, is held while those VALUs go ahead of it in the VALU slots, past the
+# filler quota; it issues once it needs no wait.
+#
+# Three paced ds_loads over twelve fp8 WMMAs (released at WMMA 0, 4, 8). The third reads v0, written
+# by WMMA #0: at its release 7 matrix ops have issued behind the producer, so the 8/8 form's mixed
+# rule (lead 5, tail 7) has 2 of its 7 tail slots filled by matrix ops and needs 5 VALUs. Without the
+# knob the load issues at once behind "s_wait_alu va_vdst = 7" and the nine v_adds trickle in one
+# per window after it; with it, at least five v_adds go first and no s_wait_alu is emitted between
+# the second and the third load.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @tail_fill_valus_go_ahead_of_the_load
+# CHECK: v[104:107] = "st.ds_load_b128"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.v_add_f32"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.v_add_f32"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.v_add_f32"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.v_add_f32"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.v_add_f32"
+# CHECK-NOT: s_wait_alu
+# CHECK: v[108:111] = "st.ds_load_b128"
+st.func @tail_fill_valus_go_ahead_of_the_load() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[16:23]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[24:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[32:39]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[40:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[48:55]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[56:63]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[64:71]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[72:79]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[80:87]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[88:95]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.v_add_f32"(v250, v251) { issueCycles = 1, latencyCycles = 5 }
+  v201 = "st.v_add_f32"(v252, v253) { issueCycles = 1, latencyCycles = 5 }
+  v202 = "st.v_add_f32"(v254, v255) { issueCycles = 1, latencyCycles = 5 }
+  v203 = "st.v_add_f32"(v256, v257) { issueCycles = 1, latencyCycles = 5 }
+  v204 = "st.v_add_f32"(v258, v259) { issueCycles = 1, latencyCycles = 5 }
+  v205 = "st.v_add_f32"(v260, v261) { issueCycles = 1, latencyCycles = 5 }
+  v206 = "st.v_add_f32"(v262, v263) { issueCycles = 1, latencyCycles = 5 }
+  v207 = "st.v_add_f32"(v264, v265) { issueCycles = 1, latencyCycles = 5 }
+  v208 = "st.v_add_f32"(v266, v267) { issueCycles = 1, latencyCycles = 5 }
+  v[100:103] = "st.ds_load_b128"(v500) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[104:107] = "st.ds_load_b128"(v500) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[108:111] = "st.ds_load_b128"(v0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

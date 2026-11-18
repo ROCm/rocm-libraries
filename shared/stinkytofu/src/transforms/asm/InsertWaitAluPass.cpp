@@ -2005,6 +2005,19 @@ int WaitAluTracker::requiredGap(const StinkyInstruction& producer,
                           op == WaitAluHideOp::Wmma ? valusPerWmma : 0);
 }
 
+bool WaitAluTracker::freeAfter(const StinkyInstruction& inst,
+                               const std::vector<const StinkyInstruction*>& before,
+                               const StinkyInstruction* formWmma) const {
+    WaitcntBrackets sb = impl_->sb;
+    latchFormIfUnset(sb, formWmma);
+    for (const StinkyInstruction* b : before) {
+        const Wait wait = computeWaitForInst(*b, sb, impl_->keyer);
+        if (!isNoWait(wait, CT_VA_VDST) || !isNoWait(wait, CT_VM_VSRC)) return false;
+        stepInstruction(sb, *b, impl_->keyer);
+    }
+    return isNoWait(computeWaitForInst(inst, sb, impl_->keyer), CT_VA_VDST);
+}
+
 void WaitAluTracker::commit(const StinkyInstruction& inst) {
     stepInstruction(impl_->sb, inst, impl_->keyer);
 }

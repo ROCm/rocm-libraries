@@ -213,6 +213,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--merge-barrier-threshold=") ||
                 arg == "--enable-wmma-hide-budget-prescan" ||
                 arg == "--enable-esm2-track-valu-vsrc" || arg == "--war-gate-via-tracker" ||
+                arg == "--mix-tail-fill" ||
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
                 arg == "--wait-alu-scoreboard" || arg == "--ds-address-plan" ||
                 arg.starts_with("--prefetch-lead-wmmas=") ||
@@ -646,6 +647,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
         } else if (a == "--war-gate-via-tracker") {
             passFeatureConfig.dagFeatures.warGateViaTracker = true;
+        } else if (a == "--mix-tail-fill") {
+            passFeatureConfig.dagFeatures.mixTailFill = true;
         } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
             passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
         } else if (a == "--wait-alu-scoreboard") {

@@ -193,6 +193,11 @@ struct PassFeatureConfig {
         /// issued, instead of the pipe-op distance (warGateWmmas). Needs waitAluScoreboard and
         /// enableESM2TrackValuVsrc.
         bool warGateViaTracker = false;
+        /// Mirrors ModuleOptions::MixTailFill. A non-VALU pick that would still carry a va_vdst
+        /// wait which a few more VALUs drop (the tail of a form's mixed rule once its lead
+        /// issued, or a no-order rule; WaitAluTracker::untilFree with Valu) is preceded by that
+        /// many ready VALUs (CDNA5ReadyQueue::mixTailFiller). Needs waitAluScoreboard.
+        bool mixTailFill = false;
     };
 
     LoopConfig loopConfig;

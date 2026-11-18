@@ -23,6 +23,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 
@@ -104,6 +105,11 @@ class STINKYTOFU_EXPORT WaitAluTracker {
     int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
                     WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr,
                     int valusPerWmma = 0) const;
+    /// Whether `inst` needs no va_vdst wait once `before` have issued in that order, each of them
+    /// itself needing no s_wait_alu; `formWmma` as in untilFree(). Verifies a planned filler tail.
+    bool freeAfter(const StinkyInstruction& inst,
+                   const std::vector<const StinkyInstruction*>& before,
+                   const StinkyInstruction* formWmma = nullptr) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
     void commit(const StinkyInstruction& inst);
 

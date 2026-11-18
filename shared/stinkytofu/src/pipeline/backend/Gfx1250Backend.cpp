@@ -215,6 +215,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.warGateWmmas = moduleOptions.WarGateWmmas;
                 passFeatureConfig.dagFeatures.warGateViaTracker =
                     moduleOptions.EnableESM2 && moduleOptions.WarGateViaTracker;
+                passFeatureConfig.dagFeatures.mixTailFill =
+                    moduleOptions.EnableESM2 && moduleOptions.MixTailFill;
                 if (moduleOptions.DsReadOrder >= 0)
                     passFeatureConfig.dagFeatures.dsReadOrder =
                         static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
