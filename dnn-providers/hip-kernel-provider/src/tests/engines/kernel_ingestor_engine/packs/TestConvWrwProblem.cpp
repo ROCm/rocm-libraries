@@ -2542,9 +2542,9 @@ TEST(TestConvWrwFold, ViewIsTheStrideOneProblemOverFoldedChannels)
     ASSERT_TRUE(view.has_value());
     const auto& v = view->base.args;
     // Channels-first, staged shifted by 4 mod 8 = 4: 24 channels by 8 phases, ceil(260 / 8) = 33
-    // positions, 16 / 8 = 2 taps at padding (4 - 4) / 8 = 0.
+    // positions padded to whole 8-half vectors (40), 16 / 8 = 2 taps at padding (4 - 4) / 8 = 0.
     EXPECT_EQ(v.c, 24 * 8);
-    EXPECT_EQ(v.inSpatial[2], 33);
+    EXPECT_EQ(v.inSpatial[2], 40);
     EXPECT_EQ(v.outSpatial[2], problem->base.args.outSpatial[2]);
     EXPECT_EQ(v.filter[2], 2);
     EXPECT_EQ(v.stride[2], 1);
@@ -2554,8 +2554,8 @@ TEST(TestConvWrwFold, ViewIsTheStrideOneProblemOverFoldedChannels)
     EXPECT_TRUE(view->folded);
     // Staged packed N (C s) D H U.
     EXPECT_EQ(v.xStrides[4], 1);
-    EXPECT_EQ(v.xStrides[1], 33);
-    EXPECT_EQ(v.xStrides[0], 24 * 8 * 33);
+    EXPECT_EQ(v.xStrides[1], 40);
+    EXPECT_EQ(v.xStrides[0], 24 * 8 * 40);
     // Channels-last x is the folded layout already (s C elements a folded position), in place:
     // 256 / 8 positions, ceil(12 / 8) + ceil(4 / 8) = 3 taps at padding 1, no shift.
     const auto nhwc = conv_wrw::widthFoldOf(*parse(specOf(foldShape(true))));
@@ -2632,13 +2632,13 @@ TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
     EXPECT_EQ(f.wk, 24 * 16); // K C S
     EXPECT_EQ(f.wc, 16);
     EXPECT_EQ(f.wtap, 1);
-    // The staged x after the partials: 2 images x 24 channels x 33 positions x 8 phases.
+    // The staged x after the partials: 2 images x 24 channels x 40 positions x 8 phases.
     EXPECT_GE(launch->foldOffset,
               static_cast<size_t>(launch->reduce.splits)
                   * static_cast<size_t>(launch->reduce.partialElems) * 4);
-    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + 2 * 24 * 33 * 8 * 2);
+    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + 2 * 24 * 40 * 8 * 2);
     EXPECT_EQ(launch->foldArgs.rows, 2 * 24);
-    EXPECT_EQ(launch->foldArgs.u, 33);
+    EXPECT_EQ(launch->foldArgs.u, 40);
     EXPECT_EQ(launch->foldArgs.shift, 4);
     EXPECT_EQ(launch->foldArgs.width, 256);
     // One tile of 2048 / 8 = 256 positions a row.

@@ -517,6 +517,13 @@ EXTRA_TILES = {
     # fp32's 32-position windows at dilation 24 / 36 overflow 64 KiB: 16 positions.
     ("mfma32_f32", ("3x3d12", "3x3d24", "3x3d36")): [(64, 64, 2, 2, 16)],
     ("mfma32_", ("1x16s8",)): [(64, 32, 2, 1, 16)],
+    # The width fold's 1x2 rows over C x s channels (HiFi-GAN 1x16 stride 8): wide channel tiles
+    # on the 32 x 32 atoms every CDNA part runs (the gfx950 pack is at its size cap).
+    ("mfma32_", ("1x2",)): [
+        (128, 128, 4, 2, 64),
+        (128, 128, 4, 2, 32),
+        (256, 64, 4, 2, 64),
+    ],
     ("mfma16_f32", ("3x3s2r1", "2x2s2r1")): [(32, 32, 2, 2, 32)],
     # RDNA 3x3 (deeplab dilations, unet2d), measured on gfx1100: 32-position tiles, up to 128 x 64.
     (

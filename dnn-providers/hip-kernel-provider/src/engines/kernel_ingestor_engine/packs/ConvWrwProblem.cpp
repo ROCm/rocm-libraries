@@ -755,14 +755,19 @@ std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem)
     }
     // Staged: shifted by the padding's phase, exactly S / s taps. In place: ceil-padded.
     const int64_t shift = staged ? pad % s : 0;
-    const int64_t u = staged ? divUp(width + shift, s) : width / s;
+    const int64_t reach = staged ? divUp(width + shift, s) : width / s;
     const int64_t pre = staged ? (pad - shift) / s : divUp(pad, s);
     const int64_t fw = staged ? filterW / s : divUp(filterW - pad, s) + pre;
     const auto channels = pack_features::checkedMultiply(a.c, s);
-    // The folded output width is dy's: u + pre + post - fw + 1 with a padding past the end of at
-    // least 0 (every dy position's window starts inside the folded row's reach).
-    const int64_t post = a.outSpatial[2] - u - pre + fw - 1;
-    if(!channels.has_value() || *channels > INT_LIMIT || u < 1 || fw < 1 || post < 0)
+    // The folded output width is dy's: reach + pre + post - fw + 1 with a padding past the end
+    // of at least 0 (every dy position's window starts inside the folded row's reach).
+    const int64_t post = a.outSpatial[2] - reach - pre + fw - 1;
+    // The staged rows are padded to whole 16-byte vectors (ConvWrwFoldX's stores); the extra
+    // positions are zero and no dy position reads them.
+    const int64_t vector = 16 / problem.elementBytes;
+    const int64_t u = staged ? divUp(reach, vector) * vector : reach;
+    if(!channels.has_value() || *channels > INT_LIMIT || reach < 1 || fw < 1 || post < 0
+       || u > INT_LIMIT)
     {
         return std::nullopt;
     }
@@ -910,7 +915,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             }
             // The staged x' (ceil((L + shift) / s) positions a row by s phases), by tiles of
             // K3_FOLD_TILE x elements of one row.
-            const int64_t tilePositions = K3_FOLD_TILE / s;
+            const int64_t tilePositions
+                = K3_FOLD_TILE / s / (16 / problem.elementBytes) * (16 / problem.elementBytes);
             const auto blocks
                 = pack_features::checkedMultiply(*rows, divUp(f.inSpatial[2], tilePositions));
             const auto stagedBytes = pack_features::checkedProduct(

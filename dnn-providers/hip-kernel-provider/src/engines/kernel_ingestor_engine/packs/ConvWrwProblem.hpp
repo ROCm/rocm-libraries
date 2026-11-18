@@ -202,7 +202,8 @@ struct WrwProblem
  * folded channel j C + c at position u: the view has C s input channels at unit width stride;
  * depth and height are unchanged.
  * - Channels-first x is staged (ConvWrwFoldX) shifted by the padding's phase r = p mod s (p the
- *   width padding): S / s folded taps at padding (p - r) / s over ceil((L + r) / s) positions.
+ *   width padding): S / s folded taps at padding (p - r) / s over ceil((L + r) / s) positions,
+ *   rounded up to whole 16-byte vectors (zero, read by no dy position).
  * - Channels-last x is read in place (its width stride becomes s C), so its width L must be a
  *   multiple of s: ceil((S - p) / s) + ceil(p / s) folded taps at padding ceil(p / s), the taps
  *   reaching outside the filter dropped by the fold reduce.

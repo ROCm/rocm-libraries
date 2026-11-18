@@ -4458,34 +4458,79 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
 }
 
 /// The width fold's staging (ConvWrwFoldX, channels-first x): a block takes a tile of one row
-/// of x, K3_FOLD_TILE / s folded positions by s phases, reads it contiguously (zero outside the
-/// row, shifted by `shift`) into LDS and writes each phase's run of positions contiguously to
-/// folded channel j C + c of the same row. A bitwise copy.
+/// of x, `tu` folded positions by s phases (K3_FOLD_TILE elements at most), reads it into LDS
+/// (zero outside the row, shifted by `shift`) and writes each phase's run of positions to folded
+/// channel j C + c of the same row. Rows of whole 16-byte vectors (x's width and the folded
+/// width, which the host pads to whole vectors) move by 16-byte loads and stores; any other row
+/// element by element. A bitwise copy.
 template <class T>
 __device__ inline void k3FoldX(const K3FoldArgs& a)
 {
-    __shared__ T tile[K3_FOLD_TILE];
-    const int tu = K3_FOLD_TILE / a.s; // folded positions a tile
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    typedef typename K1Raw<16>::type Vec;
+    __shared__ __attribute__((aligned(16))) T tile[K3_FOLD_TILE + VEC];
+    const int tu = K3_FOLD_TILE / a.s / VEC * VEC; // folded positions a tile, whole vectors
     const long long tilesPerRow = (a.u + tu - 1) / tu;
     const long long row = blockIdx.x / tilesPerRow;
     const int u0 = static_cast<int>(blockIdx.x - row * tilesPerRow) * tu;
     const int un = a.u - u0 < tu ? a.u - u0 : tu;
     const T* x = static_cast<const T*>(a.x) + row * a.width;
     const long long first = static_cast<long long>(u0) * a.s - a.shift;
-    for(int e = static_cast<int>(threadIdx.x); e < un * a.s; e += blockDim.x)
+    const int span = un * a.s;
+    const bool vec = a.width % VEC == 0 && a.u % VEC == 0;
+    int off = 0;
+    if(vec)
     {
-        const long long p = first + e;
-        tile[e] = p >= 0 && p < a.width ? x[p] : T{};
+        // The aligned run of vectors covering [first, first + span): off elements before first.
+        const long long base = first >= 0 ? first / VEC * VEC : -((-first + VEC - 1) / VEC) * VEC;
+        off = static_cast<int>(first - base);
+        const int vectors = (off + span + VEC - 1) / VEC;
+        for(int v = static_cast<int>(threadIdx.x); v < vectors; v += blockDim.x)
+        {
+            const long long p = base + static_cast<long long>(v) * VEC;
+            Vec raw{};
+            if(p >= 0 && p < a.width)
+                raw = *reinterpret_cast<const Vec*>(x + p);
+            *reinterpret_cast<Vec*>(tile + v * VEC) = raw;
+        }
+    }
+    else
+    {
+        for(int e = static_cast<int>(threadIdx.x); e < span; e += blockDim.x)
+        {
+            const long long p = first + e;
+            tile[e] = p >= 0 && p < a.width ? x[p] : T{};
+        }
     }
     k1LdsBarrier();
     const long long chanRows = static_cast<long long>(a.c) * a.planes; // rows of one image
     const long long n = row / chanRows;
     const long long rest = row - n * chanRows; // c planes + dh
     T* xf = static_cast<T*>(a.xf) + (n * a.s * chanRows + rest) * a.u + u0;
-    for(int e = static_cast<int>(threadIdx.x); e < un * a.s; e += blockDim.x)
+    const long long phaseStride = chanRows * a.u;
+    if(vec)
     {
-        const int j = e / un, u = e - j * un;
-        xf[static_cast<long long>(j) * chanRows * a.u + u] = tile[u * a.s + j];
+        // A thread a run of VEC positions of one phase: one 16-byte store.
+        const int runs = un / VEC;
+        for(int e = static_cast<int>(threadIdx.x); e < runs * a.s; e += blockDim.x)
+        {
+            const int j = e / runs, u = (e - j * runs) * VEC;
+            T v[VEC];
+#pragma unroll
+            for(int k = 0; k < VEC; ++k)
+                v[k] = tile[off + (u + k) * a.s + j];
+            Vec raw;
+            __builtin_memcpy(&raw, v, sizeof(raw));
+            *reinterpret_cast<Vec*>(xf + j * phaseStride + u) = raw;
+        }
+    }
+    else
+    {
+        for(int e = static_cast<int>(threadIdx.x); e < span; e += blockDim.x)
+        {
+            const int j = e / un, u = e - j * un;
+            xf[j * phaseStride + u] = tile[u * a.s + j];
+        }
     }
 }
 

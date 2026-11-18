@@ -1,5 +1,5 @@
 outs:
-- md5: 44080567159cd001ed8d51eae8b86dce
+- md5: de9e0dbfff412d042d601b05e9238937
   size: 294895
   hash: md5
   path: conv_wrw_bf16_rdna12.kdp.json
