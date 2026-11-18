@@ -214,7 +214,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg == "--enable-wmma-hide-budget-prescan" ||
                 arg == "--enable-esm2-track-valu-vsrc" ||
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
-                arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
+                arg == "--wait-alu-scoreboard" || arg == "--ds-address-plan" ||
+                arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
@@ -647,6 +648,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
         } else if (a == "--wait-alu-scoreboard") {
             passFeatureConfig.dagFeatures.waitAluScoreboard = true;
+        } else if (a == "--ds-address-plan") {
+            passFeatureConfig.dagFeatures.dsAddressPlan = true;
         } else if (a.starts_with("--prefetch-lead-wmmas=")) {
             passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
         } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {

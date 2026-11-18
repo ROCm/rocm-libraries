@@ -812,6 +812,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // order; remainingDs_ is cleared as loads are scheduled.
     std::vector<int> wmmaPosByNode_;
     std::vector<bool> remainingDs_;
+    // Planning gap estimate: VALU fillers per WMMA window (onInitRegion).
+    int planValusPerWindow_ = 0;
+    mutable std::unordered_map<uint64_t, int> dsGapCache_;
     std::vector<WmmaQueueWindow> regionWmmaWindows_;
     std::unordered_map<const StinkyInstruction*, unsigned> regionNodeId_;
 
@@ -926,6 +929,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
         }
         return false;
     }
+    // The ds_loads still to issue that `node` feeds, directly or through fillers.
+    template <typename Fn>
+    void forEachRemainingDs(const DAGNode* node, int depth, Fn&& fn) const {
+        if (regionDag_ == nullptr || node->id >= regionDag_->graph.size()) return;
+        for (unsigned succ : regionDag_->graph[node->id]) {
+            const DAGNode& s = regionDag_->nodes[succ];
+            if (succ < remainingDs_.size() && remainingDs_[succ]) fn(succ);
+            else if (depth > 0 && (isVectorALU(*s.inst) || isScalarALU(*s.inst)))
+                forEachRemainingDs(&s, depth - 1, fn);
+        }
+    }
+    // dagFeatures.dsAddressPlan: the window by which `node` must issue so the ds_loads it feeds
+    // need no va_vdst at their pacer window; INT_MAX when it feeds none.
+    int dsAddressNeedBy(const DAGNode* node) const;
     // Whether `node` (directly, or through up to `depth` ALU ops) feeds an op a higher level
     // places: a ds, VMEM, prefetch or tensor_load. Fillers and WMMAs do not count.
     bool feedsPlacedOp(const DAGNode* node, int depth) const {
@@ -1031,6 +1048,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool promotePrefetchAddressValu();
     bool promotePrefetchAtWindow();
     bool promoteWmmaQueueFill();
+    bool promoteDsAddressValu();
     bool loopHeadQueueFillPolicyAllowsBurst();
     bool issuableNow(DAGNode* node) const;
     DAGNode* bestDsRead() const;
@@ -1829,6 +1847,7 @@ void CDNA5ReadyQueue::decidePromote() {
         {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAddressValu},
         {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAtWindow},
         {PlacementLevel::WmmaQueue, &CDNA5ReadyQueue::promoteWmmaQueueFill},
+        {PlacementLevel::DsPacer, &CDNA5ReadyQueue::promoteDsAddressValu},
     };
     static_assert(std::is_sorted(std::begin(kRules), std::end(kRules),
                                  [](const auto& a, const auto& b) { return a.first < b.first; }),
@@ -1901,6 +1920,50 @@ bool CDNA5ReadyQueue::promotePrefetchAddressValu() {
             if (!feedsPrefetch(n, 2) || !issuableNow(n)) continue;
             best = n;
             bestKind = kind;
+        }
+    }
+    if (!best) return false;
+    promote(PromotePhase::NonWmmaFill, best, bestKind);
+    return true;
+}
+
+int CDNA5ReadyQueue::dsAddressNeedBy(const DAGNode* node) const {
+    int need = INT_MAX;
+    forEachRemainingDs(node, 2, [&](unsigned ds) {
+        // The pacer's window as of now: loads cannot issue before the WMMAs already issued.
+        const int window = dsSpread_.plannedIssueWindow(ds, wmmaIssuedCountThisRegion_);
+        if (window < 0) return;
+        auto [it, fresh] = dsGapCache_.try_emplace((uint64_t(node->id) << 32) | ds, 0);
+        if (fresh)
+            it->second = std::max(0, waitAlu_->requiredGap(*node->inst, *regionDag_->nodes[ds].inst,
+                                                           WaitAluHideOp::Wmma, formWmma_,
+                                                           planValusPerWindow_));
+        need = std::min(need, window - it->second);
+    });
+    return need;
+}
+
+// A filler feeding a ds_load whose need-by has come (dagFeatures.dsAddressPlan): it goes now,
+// earliest need-by first, when it needs no s_wait_alu itself and a slot is free.
+bool CDNA5ReadyQueue::promoteDsAddressValu() {
+    if (!getPassContext().getPassFeatureConfig().dagFeatures.dsAddressPlan || !waitAlu_ ||
+        !dsSpreadOn() || !criticalMayIssue())
+        return false;
+    DAGNode* best = nullptr;
+    int bestKind = -1;
+    int bestNeed = INT_MAX;
+    for (int kind : {kValu, kOther}) {
+        for (DAGNode* n : kind == kValu ? valuQueue : otherQueue) {
+            if (!issuableNow(n) || waitAlu_->query(*n->inst).any()) continue;
+            const int need = dsAddressNeedBy(n);
+            if (need == INT_MAX || wmmaIssuedCountThisRegion_ < need) continue;
+            // A need-by already behind: as for a prefetch, promoting in a single-stage loop
+            // only takes a released ds_load's slot.
+            if (need < 0 && singleStageLoop()) continue;
+            if (best && need >= bestNeed) continue;
+            best = n;
+            bestKind = kind;
+            bestNeed = need;
         }
     }
     if (!best) return false;
@@ -3113,6 +3176,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     valuFillQuotaPerWindow_ = 0;
     wmmaPosByNode_.clear();
     remainingDs_.clear();
+    dsGapCache_.clear();
     regionWmmaWindows_.clear();
     regionNodeId_.clear();
 
@@ -4250,6 +4314,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // va_vdst; 0 when no count of WMMAs hides it. Each window is taken to carry the VALU filler
     // quota, at most the co-issue slots one WMMA window has.
     const int valusPerWindow = std::min(valuFillQuotaPerWindow_, regionCoIssueSlots_);
+    planValusPerWindow_ = valusPerWindow;
     std::unordered_map<uint64_t, int> gapCache;
     auto gapWmmas = [&](unsigned id, unsigned succ) {
         if (!waitAlu_) return 0;
