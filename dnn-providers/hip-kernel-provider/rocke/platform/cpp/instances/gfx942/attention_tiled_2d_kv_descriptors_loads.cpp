@@ -830,7 +830,8 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
         return;
 
     /* Rows past the sequence load zero (_attention_kv_seq_tail); the i64 page
-     * copies keep the per-lane bound (measured faster there). */
+     * copies keep the per-lane bound: there the wave-uniform one adds a scalar
+     * compare and select per copy plus registers, and decode is slower. */
     rocke_kv_v_tile_bound_t v_bound;
     rocke_kv_v_tile_bound_init(&v_bound,
                                b,

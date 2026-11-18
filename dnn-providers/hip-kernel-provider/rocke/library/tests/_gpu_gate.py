@@ -27,7 +27,7 @@ def gpu_arch() -> str | None:
         import torch
     except Exception:  # noqa: BLE001 - torch is optional
         return None
-    if not torch.cuda.is_available():
+    if not torch.version.hip or not torch.cuda.is_available():
         return None
     try:
         from rocke.runtime.hip_module import get_device_arch

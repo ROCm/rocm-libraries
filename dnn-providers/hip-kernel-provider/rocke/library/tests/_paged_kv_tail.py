@@ -14,6 +14,7 @@ outside the cache. A fault poisons the HIP context and an out-of-bounds read can
 from __future__ import annotations
 
 import concurrent.futures as cf
+import importlib
 import multiprocessing as mp
 import os
 import threading
@@ -72,10 +73,15 @@ def poison(k, v, table, kv_lens, bs, mode):
     return torch.cat([table, extra], 1).contiguous()
 
 
-def _run_case(conn, fn, case, env):
-    # Set before anything imports torch: the allocator reads its configuration at init.
+def _run_case(conn, fn_ref, case, env):
+    # ``env`` holds PyTorch allocator settings, not kernel knobs. Torch reads them once, when it
+    # first initializes the GPU, and importing a test module can do that (a skip marker that
+    # queries the device). So they are set first and the case function comes by name: unpickling
+    # it would import its module before this line.
     os.environ.update(env or {})
     try:
+        module, name = fn_ref
+        fn = getattr(importlib.import_module(module), name)
         conn.send(("ok", fn(case)))
     except BaseException:  # noqa: BLE001 - reported to the parent
         conn.send(("error", traceback.format_exc()))
@@ -84,10 +90,15 @@ def _run_case(conn, fn, case, env):
 
 
 def spawn_results(jobs, env=None):
-    """Run ``{key: (fn, case)}`` each in its own fresh spawned process, at most ``MAX_WORKERS``
-    at a time, and yield ``{key: future}`` (read them with ``result``). A case gets
-    ``CASE_TIMEOUT_S`` from its start; then its process is killed. ``env``: variables each
-    process sets for itself. Use from a module-scoped fixture."""
+    """Run ``{key: (fn, case)}`` (``fn`` a module-level function) each in its own fresh spawned
+    process, at most ``MAX_WORKERS`` at a time, and yield ``{key: future}`` (read them with
+    ``result``). A case gets ``CASE_TIMEOUT_S`` from its start; then its process is killed.
+    ``env``: PyTorch allocator settings each process sets before torch initializes the GPU
+    (e.g. no expandable segments, so that an over-read past an allocation faults whatever the
+    caller's environment says). Use from a module-scoped fixture.
+    """
+    for fn, _ in jobs.values():
+        assert "." not in fn.__qualname__, f"{fn.__qualname__}: not module-level"
     ctx = mp.get_context("spawn")  # fork after the parent touched the GPU is unsafe
     futures = {key: cf.Future() for key in jobs}
     pending = list(jobs.items())
@@ -111,7 +122,10 @@ def spawn_results(jobs, env=None):
             while pending and len(running) < MAX_WORKERS:
                 key, (fn, case) = pending.pop(0)
                 parent_end, child_end = ctx.Pipe(duplex=False)
-                proc = ctx.Process(target=_run_case, args=(child_end, fn, case, env))
+                fn_ref = (fn.__module__, fn.__qualname__)
+                proc = ctx.Process(
+                    target=_run_case, args=(child_end, fn_ref, case, env)
+                )
                 proc.start()
                 child_end.close()
                 running[key] = (proc, parent_end, time.monotonic() + CASE_TIMEOUT_S)

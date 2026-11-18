@@ -2977,7 +2977,8 @@ def build_unified_attention_2d_tiled(
         elif PAGE_COPIES:
             blocks, pages = _tile_copy_pages(kv_tile_idx)
         # Rows past the sequence load zero: see _attention_kv_seq_tail. The i64
-        # page copies keep the per-lane bound (measured faster there).
+        # page copies keep the per-lane bound: there the wave-uniform one adds a
+        # scalar compare and select per copy plus registers, and decode is slower.
         v_bound = (
             VTileBound(
                 b,

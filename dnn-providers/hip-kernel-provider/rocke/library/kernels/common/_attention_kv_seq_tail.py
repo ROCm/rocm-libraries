@@ -124,10 +124,10 @@ class VTileBound:
 
     A copy of whole rows takes its row as the lane's first row plus an immediate: one
     subtraction per tile, one compare with an immediate per copy. With one row per copy every
-    lane's row is 0 and the bound is wave-uniform (unless ``uniform`` is off, where the per-lane
-    form measured faster). With ``in_row``, a copy inside one row (``head_size`` a multiple of
-    the copy) is bounded by the call's row, wave-uniform. Otherwise each lane bounds its own
-    row.
+    lane's row is 0 and the bound is wave-uniform unless ``uniform`` is off (for kernels where
+    its scalar compare per copy costs more than it saves). With ``in_row``, a copy inside one
+    row (``head_size`` a multiple of the copy) is bounded by the call's row, wave-uniform.
+    Otherwise each lane bounds its own row.
     """
 
     def __init__(

@@ -15,6 +15,8 @@ from _gpu_gate import gpu_arch, requires_gpu
 from _paged_kv_tail import TOL, own_blocks, poison, result, spawn_selected
 from test_gfx942_gqa_head_fold_numeric import _load_windowed_harness
 
+pytestmark = pytest.mark.gpu
+
 ARCH = gpu_arch()
 # Claimed cache size that switches the default spec to 64-bit K/V addressing (the tensors stay
 # small: the kernel only addresses the sequences' own blocks).

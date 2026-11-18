@@ -36,6 +36,8 @@ from kernels.common import attention_unified as au
 from _gpu_gate import requires_gpu
 from _paged_kv_tail import TOL, own_blocks, poison, result, spawn_selected
 
+pytestmark = pytest.mark.gpu
+
 _4WARP_SPEC = "gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm"
 
 
@@ -298,8 +300,9 @@ D128_DECODE_PINNED = [
 
 
 def _without_expandable_segments(conf):
-    # Q's allocation must end at its segment's end; expandable segments map more memory behind it,
-    # and the over-read would no longer fault.
+    # Q's allocation must end at its segment's end; expandable segments (off by default, but the
+    # caller's environment may turn them on) map more memory behind it, and the over-read would
+    # no longer fault.
     keep = [
         o
         for o in (conf or "").split(",")
