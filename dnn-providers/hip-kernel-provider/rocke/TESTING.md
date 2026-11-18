@@ -591,7 +591,7 @@ performing comparisons**:
 
 | Execution class | Environment and oracle | Verdict |
 |---|---|---|
-| **Developer pre-merge gate** | Unfiltered `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. `--only`, `--only-ir`, and `--pytest-target` are focused iteration selectors and do not produce this complete verdict. |
+| **Developer pre-merge gate** | Unfiltered `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → backend access-width gate → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. `--only`, `--only-ir`, and `--pytest-target` are focused iteration selectors and do not produce this complete verdict. |
 | **Installed host CI** | Selected CTests from the relocated provider artifact, including platform and explicitly enrolled library pytest cohorts | Blocking when selected. Registration alone is not enrollment. |
 | **Installed pinned-reference GPU CI** | One independently qualified reference CTest per published operation/architecture pair | Blocking on its matching required lane; missing hardware, qualification, bundle, or comparisons fails. Other processors' entries skip. |
 | **Legacy/manual GPU numeric** | Live NumPy/Torch reference tests and diagnostic harnesses not covered by a required pinned lane | Opt-in or capability-skipped; a skip proves no kernel correctness. |
@@ -600,7 +600,7 @@ performing comparisons**:
 **Two entrypoints with different environments and selection.** [`run_all.py`](platform/tests/run_all.py) is
 the **developer** runner (guard → byte identity → IR validity → arch-domain
 warning gate → platform pytest → differential pytest when `rocke_engine` is
-importable → CTest). **CI does not run
+importable → backend access-width gate → CTest). **CI does not run
 `run_all.py`** — it runs
 **ctest** against the installed artifact, after the component script installs
 the packaged wheels. Its registered pytest entries include the platform suite
@@ -994,13 +994,14 @@ checks that the parts split `tests/` by directory with no directory in two
 parts.
 
 The tiling package's tests (`rocke/tests/helpers/tiling`) live outside `tests/`
-and run in three entries of their own:
+and run in four entries of their own:
 
 | Entry | Runs | Tier | CI jobs that run it |
 |---|---|---|---|
 | `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | pull-request, develop push and nightly |
 | `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | pull-request, develop push and nightly |
 | `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | nightly only |
+| `rocke_tiling_backend_width_pytest` | `check_backend_access_width.py`, a compile check outside discovery (section 5.0.1) | standard | pull-request when it runs the standard tier, and nightly |
 
 The tree's `conftest.py` says which tests carry the `gpu` marker. TheRock picks
 the tier per run: pull-request CI runs `ctest -L '^standard$'` or `-L
@@ -1016,6 +1017,9 @@ package, from `platform/`:
 ```bash
 PYTHONPATH=$(pwd)/python python -m pytest python/rocke/tests/helpers/tiling/visualization -q
 ```
+
+`tests/run_all.py` does run the backend access-width check, as a stage of its
+own. Its CTest entry takes the compiler requirement policy (section 5.1.4).
 
 Use a clean runtime environment with no editable source installs, no binding
 build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
@@ -1101,7 +1105,7 @@ it changes skip/fail semantics.
 
 The current installed compiler-tool contract is:
 
-| Runtime environment | Compiler paths injected | MLA compiler checks required |
+| Runtime environment | Compiler paths injected | Compiler checks required (MLA, backend access width) |
 |---|---:|---:|
 | Linux with `ROCM_PATH` | yes | yes |
 | Linux without `ROCM_PATH` | no | no |
@@ -1110,7 +1114,9 @@ The current installed compiler-tool contract is:
 The table describes values added by the generated manifest. CTest still passes
 through its parent process environment, so a caller that explicitly exports
 `ROCKE_REQUIRE_COMPILER_TOOLS=1` opts into strict checks independently of this
-automatic policy.
+automatic policy. Under it a test that needs COMGR to build for an arch the loaded
+COMGR does not list (an older ROCm lacks the newest targets) fails rather than
+skips, as it does when a tool is missing.
 
 These are native-host contracts. Linux tests must not pretend to cover Windows
 by patching Python platform values. If a Windows TheRock lane must require the
