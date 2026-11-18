@@ -326,8 +326,8 @@ class Compiler(Component):
     __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str,
              pch_path: Optional[str]=None):
         Invokes the compiler on the provided arguments, with a precompiled header if given
-    pchArgs(self, target_list: List[str]):
-        The command that builds a precompiled header for target_list from stdin to stdout
+    pchArgs(self, target_list: List[str], preprocess: bool=False):
+        The command that builds or preprocesses the PCH source from stdin to stdout
     buildPch(self, target_list: List[str], source: bytes, pchPath: Union[Path, str]):
         Builds a precompiled header of source for target_list into pchPath
     """
@@ -363,25 +363,33 @@ class Compiler(Component):
     def _targetArgs(self, target_list: List[str]) -> List[str]:
         return [f"--offload-arch={compilerTargetOf(gfx, self.path)}" for gfx in target_list]
 
-    def pchArgs(self, target_list: List[str]) -> List[str]:
-        """The command that builds a precompiled header for target_list from stdin to stdout.
+    def pchArgs(self, target_list: List[str], *, preprocess: bool=False,
+                include_path: Optional[str]=None) -> List[str]:
+        """The command that builds or preprocesses the PCH source from stdin to stdout.
 
-        The same arguments as a compile for target_list, minus -I and the files: clang refuses a
+        The same arguments as a compile for target_list, minus the files: clang refuses a
         PCH built with another target, -O or -std, and silently keeps a -D the PCH was built
         with in a compile that does not define it.
+
+        Preprocessing retains macro definitions as well as expanded header contents, so the
+        cache can detect changed header lookup and macros that affect the later helper source.
         """
+        includeArgs = [] if include_path is None else ["-I", include_path]
+        actionArgs = ["-E", "-dD"] if preprocess else [
+            "-fpch-instantiate-templates", "-Xclang", "-emit-pch", "-fsyntax-only"
+        ]
         return [
-            *(self.default_args), *self._targetArgs(target_list),
-            "-fpch-instantiate-templates", "-Xclang", "-emit-pch", "-fsyntax-only", "-"
+            *(self.default_args), *includeArgs, *self._targetArgs(target_list), *actionArgs, "-"
         ]
 
-    def buildPch(self, target_list: List[str], source: bytes, pchPath: Union[Path, str]):
+    def buildPch(self, target_list: List[str], source: bytes, pchPath: Union[Path, str],
+                 *, include_path: Optional[str]=None):
         """Builds a precompiled header of source for target_list into pchPath.
 
         Raises:
             RuntimeError: If building the precompiled header fails.
         """
-        args = self.pchArgs(target_list)
+        args = self.pchArgs(target_list, include_path=include_path)
         desc = "Building the HIP header precompiled header (.h -> .pch)"
         print2(f"{desc}: {' '.join(map(str, args))}")
         with open(pchPath, "wb") as pch:
