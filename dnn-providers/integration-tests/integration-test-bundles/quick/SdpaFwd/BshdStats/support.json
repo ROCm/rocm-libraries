@@ -1,5 +1,17 @@
 {
   "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
     "hipkernel:Gfx950AttentionUnified2D": [
       {
         "cases": [
