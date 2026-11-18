@@ -249,6 +249,7 @@ def _arch_facts(args) -> list[tuple[str, int, str]]:
     from kernels.common import conv_direct_fwd_gstream_wmma as gstream
     from kernels.common import conv_direct_fwd_tapouter_wmma as tapouter
     from kernels.common import conv_direct_fwd_wmma as fwd_wmma
+    from kernels.common import conv_fwd_small_wmma as small
     from kernels.common import conv_fwd_wmma_gate as gate
 
     path = args.rocke_root / "platform/python/rocke/core/arch/data/arch_specs.json"
@@ -266,6 +267,10 @@ def _arch_facts(args) -> list[tuple[str, int, str]]:
         ("GSTREAM_VGPR_BUDGET", gstream.GSTREAM_VGPR_BUDGET, "gstream_wmma"),
         ("TAPOUTER_VGPR_BUDGET", tapouter.TAPOUTER_VGPR_BUDGET, "tapouter_wmma"),
         ("FWD_WMMA_VGPR_BUDGET", fwd_wmma.FWD_WMMA_VGPR_BUDGET, "direct_fwd_wmma"),
+        ("POLY_ZERO_LANE_CH", fwd_wmma.POLY_ZERO_LANE_CH, "direct_fwd_wmma"),
+        ("SMALL_WMMA_VGPR_BUDGET", small.SMALL_WMMA_VGPR_BUDGET, "small_wmma"),
+        ("SMALLC_MAX_C", small.SMALLC_MAX_C, "small_wmma"),
+        ("SMALLK_MAX_K", small.SMALLK_MAX_K, "small_wmma"),
     ]
 
 

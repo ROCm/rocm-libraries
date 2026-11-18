@@ -25,9 +25,12 @@
  * Neither validator checks for an empty output; a zero padded tile grid is the
  * efficiency's ZeroDivisionError, a refusal too.
  *
+ * SMALL_WMMA_VGPR_BUDGET, SMALLC_MAX_C and SMALLK_MAX_K are pinned by static_assert in
+ * TestGfx1250ConvFwdAotGeometry against the generated vector header, as are the gfx1250
+ * limits listed in Gfx1250ConvFwdGstreamWmma.hpp.
+ *
  * Unchecked agreements (restated by hand): the knob defaults of FwdSmallcWmmaSpec and
- * FwdSmallkWmmaSpec, SMALL_WMMA_VGPR_BUDGET = 448, SMALLC_MAX_C = 4, SMALLK_MAX_K = 8, and the
- * gfx1250 limits listed in Gfx1250ConvFwdGstreamWmma.hpp.
+ * FwdSmallkWmmaSpec.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd
 {

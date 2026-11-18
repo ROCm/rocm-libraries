@@ -25,6 +25,10 @@ inline constexpr int64_t CH_PAD = 8; ///< conv_fwd_wmma_gate.CH_PAD
 inline constexpr int64_t GSTREAM_VGPR_BUDGET = 448; ///< gstream_wmma
 inline constexpr int64_t TAPOUTER_VGPR_BUDGET = 512; ///< tapouter_wmma
 inline constexpr int64_t FWD_WMMA_VGPR_BUDGET = 512; ///< direct_fwd_wmma
+inline constexpr int64_t POLY_ZERO_LANE_CH = 8; ///< direct_fwd_wmma
+inline constexpr int64_t SMALL_WMMA_VGPR_BUDGET = 448; ///< small_wmma
+inline constexpr int64_t SMALLC_MAX_C = 4; ///< small_wmma
+inline constexpr int64_t SMALLK_MAX_K = 8; ///< small_wmma
 
 /// N, C, K, H, W, Y, X, groups, stride h/w, pad h/w, dilation h/w, bf16.
 inline constexpr std::array<std::array<int32_t, 15>, 4082> PROBLEMS = {{

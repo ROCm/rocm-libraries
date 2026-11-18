@@ -34,8 +34,9 @@
  * - the spec defaults: depthwise block_w 8, block_waves 1, cpl 1; tiled block_w 8,
  *   block_h 4, block_waves 1, unroll_rows false, cpl 1; col block_w 1, block_waves 1,
  *   block_h 16, max_live_f32 none; spatial block_waves 1;
- * - gfx1250's arch_specs.json limits: wave 32, max_threads_per_block 1024, vgprs 256
- *   (the col live-f32 budget is vgprs * 3 / 8 = 96);
+ * - gfx1250's vgprs 256 (the col live-f32 budget is vgprs * 3 / 8 = 96); its wave size and
+ *   max_threads_per_block are pinned by static_assert in TestGfx1250ConvFwdAotGeometry
+ *   against the generated vector header;
  * - I32_MAX, _DW_MAX_KH/_DW_MAX_KW 32, _DW_MAX_PRELOAD_TAPS 200, _DW_CPL_MAX_ACC 192,
  *   _DW_TILED_REG_BUDGET 256, _DW_TILED_UNROLL_MAX_FMAS 6144;
  * - channel_totals_reason, forward_padding_reason, dilation_reason, pad_w_reason,

@@ -19,8 +19,11 @@
  * direct_spec_for_problem's tile-efficiency floor after the validator. The WMMA forward
  * gate, the validator tail and the Python arithmetic come from Gfx1250ConvFwdGstreamWmma.hpp.
  *
- * Unchecked agreements (restated by hand): DirectFwdTapOuterSpec's knob defaults,
- * TAPOUTER_VGPR_BUDGET = 512, and the gfx1250 limits listed in Gfx1250ConvFwdGstreamWmma.hpp.
+ * TAPOUTER_VGPR_BUDGET and the gfx1250 limits listed in Gfx1250ConvFwdGstreamWmma.hpp are
+ * pinned by static_assert in TestGfx1250ConvFwdAotGeometry against the generated vector
+ * header.
+ *
+ * Unchecked agreements (restated by hand): DirectFwdTapOuterSpec's knob defaults.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd
 {

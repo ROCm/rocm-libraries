@@ -42,6 +42,10 @@ static_assert(port::CH_PAD == pinned::CH_PAD);
 static_assert(port::GSTREAM_VGPR_BUDGET == pinned::GSTREAM_VGPR_BUDGET);
 static_assert(port::TAPOUTER_VGPR_BUDGET == pinned::TAPOUTER_VGPR_BUDGET);
 static_assert(port::direct_fwd_wmma::VGPR_BUDGET == pinned::FWD_WMMA_VGPR_BUDGET);
+static_assert(port::direct_fwd_wmma::POLY_ZERO_LANE_CH == pinned::POLY_ZERO_LANE_CH);
+static_assert(port::SMALL_WMMA_VGPR_BUDGET == pinned::SMALL_WMMA_VGPR_BUDGET);
+static_assert(port::SMALLC_MAX_C == pinned::SMALLC_MAX_C);
+static_assert(port::SMALLK_MAX_K == pinned::SMALLK_MAX_K);
 
 namespace
 {

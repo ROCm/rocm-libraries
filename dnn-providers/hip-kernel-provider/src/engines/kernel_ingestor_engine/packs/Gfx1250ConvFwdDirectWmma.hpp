@@ -28,17 +28,19 @@
  * members here, named as in Python. Every knob of the spec is ported, with the dataclass's
  * defaults when the instance does not spell one.
  *
+ * Pinned by static_assert in TestGfx1250ConvFwdAotGeometry against the generated vector
+ * header (arch_specs.json and the builders' constants): WMMA_K, CH_PAD, FWD_WMMA_VGPR_BUDGET,
+ * POLY_ZERO_LANE_CH, and gfx1250's wave size, threads per block and LDS capacity.
+ *
  * Unchecked agreements (restated by hand, pinned only by the golden vectors):
  * - The spec defaults: waves_k 2, waves_p 4, tiles_k 4, tiles_p 4, tile_w 16, tile_n 1,
  *   ck 32, stages 2, wave_size 32, pack_groups 1, pp_group 1, every flag off, sched None.
- * - conv_fwd_wmma_gate: WMMA_K = 32, CH_PAD = 8, the halo extent
+ * - conv_fwd_wmma_gate: the halo extent
  *   `stride * (tile - 1) + (k - 1) * dil + 1`, the phase-split halo columns and lead columns,
  *   problem_dims_reason (N, H, W, groups, cpg, kpg, KH, KW >= 1), pad_w_reason
  *   (pad_w >= -1), the i32 tensor-byte and i32 block-id limits (I32_MAX = 2**31 - 1).
- * - gfx1250's arch facts (core/arch/data/arch_specs.json): wave32, TDM and the fp16 / bf16
- *   16x16x32 fp32 WMMA atom present (so those gate checks always pass), 1024 threads per
- *   block, 327680 B of LDS per workgroup.
- * - FWD_WMMA_VGPR_BUDGET = 512, POLY_ZERO_LANE_CH = 8, the 0xFFFF TDM descriptor limit.
+ * - gfx1250's TDM and the fp16 / bf16 16x16x32 fp32 WMMA atom being present (so those gate
+ *   checks always pass), and the 0xFFFF TDM descriptor limit.
  * - The scheduler strategies of rocke.core.codegen_policy.SchedulerStrategy (checked at
  *   parse: the strategy is a knob, so an unknown one would refuse every problem).
  * - The tile-efficiency floor 0.5 of direct_spec_for_problem.
