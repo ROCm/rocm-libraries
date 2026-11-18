@@ -115,9 +115,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   between builds.
 * [Conv] Skip a naive convolution solver before building and launching it when a run-time lower
   bound already exceeds its existing find timeout budget. This prevents work that the timeout
-  would abandon from continuing on the GPU and slowing the next call. The bound assumes the naive
-  kernel reaches at most 10 percent of the device's fp32 FMA peak. Set ``MIOPEN_NAIVE_BOUND_SKIP=0``
-  to disable the lower-bound shortcut.
+  would abandon from continuing on the GPU and slowing the next call. The bound counts only the
+  filter taps that read inside the input and assumes the naive kernel reaches at most 10 percent of
+  the device's fp32 FMA peak. While the bound is on, Find also leaves a naive solver out of its
+  parallel precompile when another solver is available, and builds it only if it is evaluated. Set
+  ``MIOPEN_NAIVE_BOUND_SKIP=0`` to disable the shortcut and precompile naive solvers as before.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
