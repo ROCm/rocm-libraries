@@ -3779,36 +3779,45 @@ rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
 // where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
 // (modified rocblas_trmvn_kernel from rocBLAS)
 // (grid = dim3(ceil(m / DIM_X), 1, batch_count), block = dim3(DIM_X, DIM_Y))
-template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T, typename V, typename U1, typename U2, typename U3>
+template <rocblas_int DIM_X,
+          rocblas_int DIM_Y,
+          bool LOWER,
+          bool UNIT,
+          typename T,
+          typename I,
+          typename V,
+          typename U1,
+          typename U2,
+          typename U3>
 ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
-    rocsolver_tzmvn_kernel(rocblas_int m,
-                           rocblas_int n,
+    rocsolver_tzmvn_kernel(I m,
+                           I n,
                            V alpha,
                            U1 __restrict__ AA,
-                           const rocblas_int shiftA,
-                           const rocblas_int lda,
+                           const rocblas_stride shiftA,
+                           const I lda,
                            const rocblas_stride strideA,
                            U2 __restrict__ xx,
                            const rocblas_stride shiftX,
-                           const rocblas_int incx,
+                           const I incx,
                            const rocblas_stride strideX,
                            V beta,
                            U3 __restrict__ yy,
                            const rocblas_stride shiftY,
-                           const rocblas_int incy,
+                           const I incy,
                            const rocblas_stride strideY)
 {
-    rocblas_int bid = hipBlockIdx_z;
-    rocblas_int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    I bid = hipBlockIdx_z;
+    I tid = threadIdx.x + threadIdx.y * blockDim.x;
 
     // tx corresponds to row in block, good for memory coalescing
     // ty corresponds to column
-    rocblas_int tx = threadIdx.x;
-    rocblas_int ty = threadIdx.y;
+    I tx = threadIdx.x;
+    I ty = threadIdx.y;
 
-    rocblas_int row = blockIdx.x * DIM_X + tx;
+    I row = blockIdx.x * DIM_X + tx;
 
-    rocblas_int dim = std::min(m, n);
+    I dim = std::min(m, n);
 
     // select batch instance
     T a = load_scalar(alpha, bid, 0);
@@ -3830,7 +3839,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     }
 
     // multiply and sum across columns
-    for(rocblas_int col = ty; col < n; col += DIM_Y)
+    for(I col = ty; col < n; col += DIM_Y)
     {
         if(row < m && ((!LOWER && col > row) || (LOWER && col < row)))
             res_A += A[row + col * lda] * x[col * incx];
@@ -3858,29 +3867,29 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
 //    y := alpha * A^H * x + beta * y, (CONJ = true)
 // where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
 // (grid = dim3(n, 1, batch_count), block = dim3(DIM_X))
-template <rocblas_int DIM_X, bool LOWER, bool UNIT, bool CONJ, typename T, typename V, typename U1, typename U2, typename U3>
-ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(rocblas_int m,
-                                                                      rocblas_int n,
+template <rocblas_int DIM_X, bool LOWER, bool UNIT, bool CONJ, typename T, typename I, typename V, typename U1, typename U2, typename U3>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(I m,
+                                                                      I n,
                                                                       V alpha,
                                                                       U1 __restrict__ AA,
-                                                                      const rocblas_int shiftA,
-                                                                      const rocblas_int lda,
+                                                                      const rocblas_stride shiftA,
+                                                                      const I lda,
                                                                       const rocblas_stride strideA,
                                                                       U2 __restrict__ xx,
                                                                       const rocblas_stride shiftX,
-                                                                      const rocblas_int incx,
+                                                                      const I incx,
                                                                       const rocblas_stride strideX,
                                                                       V beta,
                                                                       U3 __restrict__ yy,
                                                                       const rocblas_stride shiftY,
-                                                                      const rocblas_int incy,
+                                                                      const I incy,
                                                                       const rocblas_stride strideY)
 {
-    rocblas_int bid = blockIdx.z;
-    rocblas_int tx = threadIdx.x;
+    I bid = blockIdx.z;
+    I tx = threadIdx.x;
 
     // col of A and element of y
-    rocblas_int col = blockIdx.x;
+    I col = blockIdx.x;
 
     // select batch instance
     T a = load_scalar(alpha, bid, 0);
@@ -3897,7 +3906,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(rocblas_in
     int constexpr MAX_WARPS = 32;
     __shared__ T sdata[MAX_WARPS];
 
-    for(rocblas_int row = tx; row < m; row += DIM_X)
+    for(I row = tx; row < m; row += DIM_X)
     {
         if((!LOWER && col > row) || (LOWER && col < row))
         {

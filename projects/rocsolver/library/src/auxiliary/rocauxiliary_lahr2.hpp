@@ -67,17 +67,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
                           T* __restrict__ tauA,
                           const rocblas_stride strideT)
 {
-    int bid = hipBlockIdx_z;
-    int bidr = hipBlockIdx_x;
-    int bidc = hipBlockIdx_y;
-    int tidr = hipThreadIdx_x;
-    int tidc = hipThreadIdx_y;
-    int groupsr = hipGridDim_x;
-    int groupsc = hipGridDim_y;
-    int totalthsr = groupsr * DIM_X;
-    int totalthsc = groupsc * DIM_Y;
-    int idc = bidc * DIM_Y + tidc;
-    int idr = bidr * DIM_X + tidr;
+    I bid = hipBlockIdx_z;
+    I bidr = hipBlockIdx_x;
+    I bidc = hipBlockIdx_y;
+    I tidr = hipThreadIdx_x;
+    I tidc = hipThreadIdx_y;
+    I groupsr = hipGridDim_x;
+    I groupsc = hipGridDim_y;
+    I totalthsr = groupsr * DIM_X;
+    I totalthsc = groupsc * DIM_Y;
+    I idc = bidc * DIM_Y + tidc;
+    I idr = bidr * DIM_X + tidr;
 
     // select batch instance
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
@@ -99,14 +99,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
         operation:
             y = t * (A1 * x1 - A2 * x2)
     ------------------------ */
-    int m = mm - k;
-    int n1 = mm - k - c;
-    int n2 = c;
+    I m = mm - k;
+    I n1 = mm - k - c;
+    I n2 = c;
     T* y = Y + idx2D(k, c, ldy);
     T* A1 = A + idx2D(k, c + 1, lda);
-    int lda1 = lda;
+    I lda1 = lda;
     T* A2 = Y + idx2D(k, 0, ldy);
-    int lda2 = ldy;
+    I lda2 = ldy;
     T* x1 = A + idx2D(k + c, c, lda);
     T* x2 = F + idx2D(0, c, ldf);
     T* t = tau + c;
@@ -116,17 +116,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     __shared__ T acs[DIM_X * DIM_Y];
     T ac;
 
-    for(int i = idr; i < m; i += totalthsr)
+    for(I i = idr; i < m; i += totalthsr)
     {
         ac = 0;
 
-        for(int j = idc; j < n1; j += totalthsc)
+        for(I j = idc; j < n1; j += totalthsc)
         {
             // A1 * x1
             ac += A1[i + j * lda1] * x1[j];
         }
 
-        for(int j = idc; j < n2; j += totalthsc)
+        for(I j = idc; j < n2; j += totalthsc)
         {
             // A2 * x2
             ac -= A2[i + j * lda2] * x2[j];
@@ -136,7 +136,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
         __syncthreads();
 
         // group reduction
-        for(int r = DIM_Y / 2; r > 0; r /= 2)
+        for(rocblas_int r = DIM_Y / 2; r > 0; r /= 2)
         {
             if(tidc < r)
             {
@@ -153,7 +153,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
 
 /***** Scale current column and set diag of triangular factor kernel *****/
 /*************************************************************************/
-template <int MAX_THDS, typename T, typename I, typename U>
+template <rocblas_int MAX_THDS, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
                                                                       U __restrict__ FA,
                                                                       const rocblas_stride shiftF,
@@ -357,7 +357,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
             // w = V^H * b
             constexpr rocblas_int TZMVT_DIM_X = BS1;
-            ROCSOLVER_LAUNCH_KERNEL((rocsolver_tzmvt_kernel<TZMVT_DIM_X, true, true, true, T>),
+            ROCSOLVER_LAUNCH_KERNEL((rocsolver_tzmvt_kernel<TZMVT_DIM_X, true, true, true, T, I>),
                                     dim3(j, 1, batch_count), dim3(TZMVT_DIM_X), 0, stream, n - k, j,
                                     one, A, shiftA + idx2D(k, 0, lda), lda, strideA, A,
                                     shiftA + idx2D(k, j, lda), 1, strideA, zero, work_vec, 0, 1,
@@ -371,17 +371,16 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
             // b -= V * w
             constexpr rocblas_int TZMVN_DIM_X = 64;
             constexpr rocblas_int TZMVN_DIM_Y = ROCSOLVER_ASAN_VALUE(4, 16);
-            ROCSOLVER_LAUNCH_KERNEL((rocsolver_tzmvn_kernel<TZMVN_DIM_X, TZMVN_DIM_Y, true, true, T>),
-                                    dim3((n - k - 1) / TZMVN_DIM_X + 1, 1, batch_count),
-                                    dim3(TZMVN_DIM_X, TZMVN_DIM_Y), 0, stream, n - k, j, neg_one, A,
-                                    shiftA + idx2D(k, 0, lda), lda, strideA, work_vec, 0, 1,
-                                    stride_work, one, A, shiftA + idx2D(k, j, lda), 1, strideA);
+            ROCSOLVER_LAUNCH_KERNEL(
+                (rocsolver_tzmvn_kernel<TZMVN_DIM_X, TZMVN_DIM_Y, true, true, T, I>),
+                dim3((n - k - 1) / TZMVN_DIM_X + 1, 1, batch_count), dim3(TZMVN_DIM_X, TZMVN_DIM_Y),
+                0, stream, n - k, j, neg_one, A, shiftA + idx2D(k, 0, lda), lda, strideA, work_vec,
+                0, 1, stride_work, one, A, shiftA + idx2D(k, j, lda), 1, strideA);
 
             // Restore A(k+j-1, j-1) = beta saved from the previous iteration
             ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1), dim3(1, 1, 1), 0,
                                     stream, (S*)beta, 0, stride_beta, A,
-                                    shiftA + idx2D(k + j - 1, j - 1, lda), lda, strideA,
-                                    (I)1);
+                                    shiftA + idx2D(k + j - 1, j - 1, lda), lda, strideA, (I)1);
         }
 
         // --------------------------------------------------------------------
@@ -390,7 +389,8 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         // --------------------------------------------------------------------
         rocsolver_larfg_template(handle, n - k - j, A, shiftA + idx2D(k + j, j, lda), (S*)beta, 0,
                                  stride_beta, A, shiftA + idx2D(std::min(k + j + 1, n - 1), j, lda),
-                                 (I)1, strideA, tau + j, strideT, batch_count, (T*)work_workArr, norms);
+                                 (I)1, strideA, tau + j, strideT, batch_count, (T*)work_workArr,
+                                 norms);
 
         // --------------------------------------------------------------------
         // Compute Y(k:n-1, j)
