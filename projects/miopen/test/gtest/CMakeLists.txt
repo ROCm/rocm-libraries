@@ -515,9 +515,23 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${CMAKE_CURRENT_SOURCE_DIR};PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 
+  # The plugins sit beside libMIOpen in the build tree, so a build that makes plugin targets
+  # must also contain them here; --require-plugins turns a missing one into a failure rather
+  # than a skipped check. The packaged entry below leaves it off: an installed test layout
+  # may carry no plugin. ck_impl makes no targets when no GPU target has CK support.
+  set(MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS)
+  if(MIOPEN_USE_COMPOSABLEKERNEL)
+    get_property(MIOPEN_CK_PLUGIN_TARGETS DIRECTORY ${PROJECT_SOURCE_DIR}/src/ck_impl
+      PROPERTY BUILDSYSTEM_TARGETS)
+    if(MIOPEN_CK_PLUGIN_TARGETS)
+      set(MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS --require-plugins)
+    endif()
+  endif()
+
   miopen_add_wrapper_check(wrapper_abi_check
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/check_wrapper_abi.py
       --lib-dir $<TARGET_FILE_DIR:MIOpen>
+      ${MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS}
       --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
       --wrapper-only ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt
       --public-header ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h

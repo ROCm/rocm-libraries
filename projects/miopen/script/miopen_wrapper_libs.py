@@ -106,8 +106,9 @@ def resolve_pair(lib_dirs, windows=ON_WINDOWS):
 def find_ck_plugins(lib_dir, windows=ON_WINDOWS):
     """Return the CK grouped-convolution plugins installed beside the libraries.
 
-    Empty when MIOpen was built without CK. Windows DLLs are not listed: the ABI
-    check reads ELF plugins only, since a DLL's missing import fails the link.
+    Empty when MIOpen was built without CK, when CK is on but no plugin was built
+    or installed beside the libraries, and always on Windows: the ABI check reads
+    ELF plugins only, since a DLL's missing import fails the link.
     """
     if windows:
         return []

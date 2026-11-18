@@ -989,7 +989,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # src/private/routing.cpp to either hipDNN or its renamed _impl symbol in
     # MIOpen_private. PUBLIC linkage propagates the implementation's include
     # directories and link interface to consumers of the wrapper, so existing
-    # consumers (driver, tests, CK plugins) that link MIOpen keep resolving
+    # consumers (driver, tests) that link MIOpen keep resolving
     # MIOpen's internal C++ symbols against libMIOpen_private.so.
     add_library(MIOpen
         ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
@@ -1043,7 +1043,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # references must resolve at link time. This turns a stub that calls an _impl
     # function the private library does not define (a hand-written stub for a
     # name missing from the rename list, say) from a runtime failure into a link
-    # error. A miopen.h entry point whose generated files are stale is not caught
+    # error. An entry point whose generated files are stale is not caught
     # here, because no stub refers to it; generate_wrapper_sources.py --check and
     # check_public_abi.py check-wrapper catch that.
     if(NOT WIN32 AND NOT APPLE)

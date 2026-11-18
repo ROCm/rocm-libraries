@@ -310,7 +310,7 @@ repos:
       #   pre-commit run --hook-stage manual miopen-wrapper-sources-regenerate --all-files
       # to get the pinned clang-format without installing it yourself.
       - id: miopen-wrapper-sources-regenerate
-        name: Regenerate MIOpen wrapper sources from miopen.h
+        name: Regenerate MIOpen wrapper sources from miopen.h and miopen_internal.h
         entry: python projects/miopen/script/generate_wrapper_sources.py
         language: python
         additional_dependencies: *miopen_clang_format
@@ -319,9 +319,10 @@ repos:
 
       # The checks above read C declarations with hand-rolled parsers rather
       # than a compiler. These are those parsers' own tests. They work on string
-      # fixtures, so they run here -- where pre-commit provides pytest in an
-      # isolated environment -- rather than in the MIOpen component CI job,
-      # which installs no Python packages.
+      # fixtures, apart from one test that compiles a small shared object with
+      # the C compiler (it is skipped where there is none), so they run here --
+      # where pre-commit provides pytest in an isolated environment -- rather
+      # than in the MIOpen component CI job, which installs no Python packages.
       - id: miopen-public-private-header-check-tests
         name: MIOpen public/private header check self-tests
         entry: python -m pytest projects/miopen/script/test_check_public_abi.py projects/miopen/script/test_generate_wrapper_sources.py -q

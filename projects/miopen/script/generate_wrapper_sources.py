@@ -33,7 +33,7 @@ parse error, no usable clang-format, or a refused write (see below).
 To give an entry point custom behaviour, move its stub from
 wrapper_passthrough.cpp into wrapper.cpp, edit it, and rerun this script; it
 skips every entry point wrapper.cpp already defines, but refuses one whose stub
-signature differs from miopen.h.
+signature differs from the declaration in miopen.h or miopen_internal.h.
 
 wrapper.cpp also holds the stubs of the wrapper's own functions, declared in
 include_wrapper/miopen/hipdnn_forwarding.h instead of miopen.h. Only a flag-on
@@ -179,7 +179,7 @@ PASSTHROUGH_EXPLANATION = """\
 // edit it, and rerun the generator.
 //
 // This file is compiled without the rename header, so it sees the public names
-// from <miopen/miopen.h>.
+// declared in <miopen/miopen.h> and <miopen/miopen_internal.h>.
 """
 
 PASSTHROUGH_GUARDS = """\
@@ -284,9 +284,10 @@ def hand_written_stubs(
     ``wrapper_only`` names the functions declared in hipdnn_forwarding.h, whose
     stubs are hand-written by definition.
 
-    A stub whose signature differs from miopen.h is refused. Only a flag-on
-    build compiles wrapper.cpp, so otherwise the mismatch would surface there,
-    long after the miopen.h change merged.
+    A stub whose signature differs from the declaration in miopen.h or
+    miopen_internal.h is refused. Only a flag-on build compiles wrapper.cpp, so
+    otherwise the mismatch would surface there, long after the header change
+    merged.
     """
     protos, _forwards, _dispatches = parse_wrapper(wrapper_source)
     # parse_wrapper cannot see a body that contains a nested block. Leaving such
@@ -697,7 +698,7 @@ def run(args: argparse.Namespace) -> int:
         if current is None:
             print(f"FAIL: {relpath} does not exist")
         else:
-            print(f"FAIL: {relpath} differs from what miopen.h generates:")
+            print(f"FAIL: {relpath} differs from what the headers generate:")
             print(unified_diff(current, text, relpath), end="")
     for relpath in skipped:
         print(

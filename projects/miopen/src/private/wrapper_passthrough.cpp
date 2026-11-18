@@ -20,7 +20,7 @@
 // edit it, and rerun the generator.
 //
 // This file is compiled without the rename header, so it sees the public names
-// from <miopen/miopen.h>.
+// declared in <miopen/miopen.h> and <miopen/miopen_internal.h>.
 
 // If the rename header ever reached this file (say, because -include or
 // MIOPEN_BUILDING_PRIVATE were widened from PRIVATE to PUBLIC on the private

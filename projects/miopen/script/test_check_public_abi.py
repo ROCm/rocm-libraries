@@ -10,15 +10,17 @@ Running the check against a tree that is already correct only exercises the
 passing path.
 
 The binary checks are covered the same way, against a stand-in that answers the
-three questions they ask of a shared object. It deliberately skips the ELF
-parser: that reads a real libMIOpen.so on every packaging build, so it is
-covered by construction, whereas the conditions the checks exist to catch (a
-stale half of a build, an entry point renamed with no stub) appear in no working
-tree. The PE parser is tested directly, on images built here: only Windows runs
-read a real DLL, and few of those select the ABI check.
+three questions they ask of a shared object. It mostly skips the ELF parser:
+that reads a real libMIOpen.so on every packaging build, so it is covered by
+construction, whereas the conditions the checks exist to catch (a stale half of a
+build, an entry point renamed with no stub) appear in no working tree. One test
+does compile a small shared object, to check that the parser lists what a real
+plugin leaves undefined; it is skipped without Linux and a C compiler. The PE
+parser is tested directly, on images built here: only Windows runs read a real
+DLL, and few of those select the ABI check.
 
-Everything works on string fixtures and stand-ins, so no build, toolchain or GPU
-is needed and the module runs in a lint lane:
+Otherwise everything works on string fixtures and stand-ins, so no build,
+toolchain or GPU is needed and the module runs in a lint lane:
 
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
@@ -2024,6 +2026,7 @@ def test_an_array_parameter_is_rejected_rather_than_compared_by_name():
 # --------------------------------------------------------------------------
 
 PLAIN_REFERENCE = "miopenConvolutionABBackwardWeightsGetWorkSpaceSize"
+IMPL_REFERENCE = PLAIN_REFERENCE + "_impl"
 
 
 def plugin_lib(
@@ -2032,38 +2035,96 @@ def plugin_lib(
     return FakeLibrary(name, undefined=undefined, naming=naming)
 
 
-def test_a_plugin_that_calls_the_impl_names_passes(capsys):
+def check_plugins(monkeypatch, *libs):
+    """Run check_plugins_renamed on stand-ins, which must have distinct names."""
+    by_path = {str(lib.path): lib for lib in libs}
+    monkeypatch.setattr(abi, "open_library", lambda path, what: by_path[path])
+    return abi.check_plugins_renamed(list(by_path))
+
+
+def test_a_plugin_that_calls_the_impl_names_passes(monkeypatch, capsys):
     lib = plugin_lib(
-        (PLAIN_REFERENCE + "_impl", "hipMalloc", "_ZN6miopen6HandleC1Ev", "miopen_log")
+        (IMPL_REFERENCE, "hipMalloc", "_ZN6miopen6HandleC1Ev", "miopen_log")
     )
-    assert abi.check_plugins_renamed([lib]) is True
+    assert check_plugins(monkeypatch, lib) is True
     assert "PASS: 1 CK plugin(s) reference only _impl" in capsys.readouterr().out
 
 
-def test_a_plugin_that_calls_a_plain_name_fails_and_names_it(capsys):
+def test_a_plugin_that_calls_a_plain_name_fails_and_names_it(monkeypatch, capsys):
     lib = plugin_lib((PLAIN_REFERENCE, "miopenCreate_impl"))
-    assert abi.check_plugins_renamed([lib]) is False
+    assert check_plugins(monkeypatch, lib) is False
     out = capsys.readouterr().out
     assert f"libMIOpenCKGroupedConv_gfx90a.so: {PLAIN_REFERENCE}\n" in out
     assert "miopen_apply_private_rename" in out
 
 
-def test_one_bad_plugin_among_several_fails(capsys):
-    good = plugin_lib(
-        (PLAIN_REFERENCE + "_impl",), name="libMIOpenCKGroupedConv_gfx942.so"
-    )
+def test_one_bad_plugin_among_several_fails(monkeypatch, capsys):
+    good = plugin_lib((IMPL_REFERENCE,), name="libMIOpenCKGroupedConv_gfx942.so")
     bad = plugin_lib((PLAIN_REFERENCE,))
-    assert abi.check_plugins_renamed([good, bad]) is False
+    assert check_plugins(monkeypatch, good, bad) is False
     out = capsys.readouterr().out
     assert "libMIOpenCKGroupedConv_gfx90a.so" in out
     assert "libMIOpenCKGroupedConv_gfx942.so" not in out
 
 
-def test_a_dll_plugin_is_skipped_not_judged(capsys):
+@pytest.mark.parametrize("bad_position", [0, 1, 2])
+def test_a_bad_plugin_fails_wherever_it_is_in_the_list(
+    bad_position, monkeypatch, capsys
+):
+    names = [f"libMIOpenCKGroupedConv_gfx{a}.so" for a in ("908", "90a", "942")]
+    libs = [
+        plugin_lib((PLAIN_REFERENCE if i == bad_position else IMPL_REFERENCE,), name=n)
+        for i, n in enumerate(names)
+    ]
+    assert check_plugins(monkeypatch, *libs) is False
+    out = capsys.readouterr().out
+    assert f"  {names[bad_position]}: {PLAIN_REFERENCE}" in out
+    for i, name in enumerate(names):
+        assert (name in out) is (i == bad_position)
+
+
+def test_every_bad_plugin_is_reported_not_only_the_first(monkeypatch, capsys):
+    first = plugin_lib((PLAIN_REFERENCE,), name="libMIOpenCKGroupedConv_gfx90a.so")
+    good = plugin_lib((IMPL_REFERENCE,), name="libMIOpenCKGroupedConv_gfx908.so")
+    last = plugin_lib((PLAIN_REFERENCE,), name="libMIOpenCKGroupedConv_gfx942.so")
+    assert check_plugins(monkeypatch, first, good, last) is False
+    out = capsys.readouterr().out
+    assert "libMIOpenCKGroupedConv_gfx90a.so" in out
+    assert "libMIOpenCKGroupedConv_gfx942.so" in out
+    assert "gfx908" not in out
+
+
+def test_several_good_plugins_are_all_counted(monkeypatch, capsys):
+    libs = [
+        plugin_lib((IMPL_REFERENCE,), name=f"libMIOpenCKGroupedConv_gfx{a}.so")
+        for a in ("908", "90a", "942")
+    ]
+    assert check_plugins(monkeypatch, *libs) is True
+    assert "PASS: 3 CK plugin(s)" in capsys.readouterr().out
+
+
+def test_only_one_plugin_is_open_at_a_time(monkeypatch):
+    """Each plugin holds its whole file in memory, and they run to hundreds of MiB."""
+    open_now = [0]
+
+    class Tracked(FakeLibrary):
+        def __del__(self):
+            open_now[0] -= 1
+
+    def open_one(path, what):
+        assert open_now[0] == 0, "the previous plugin is still held"
+        open_now[0] += 1
+        return Tracked(path, undefined=(IMPL_REFERENCE,))
+
+    monkeypatch.setattr(abi, "open_library", open_one)
+    assert abi.check_plugins_renamed(["a.so", "b.so", "c.so"]) is True
+
+
+def test_a_dll_plugin_is_skipped_not_judged(monkeypatch, capsys):
     lib = plugin_lib(
         (PLAIN_REFERENCE,), naming=abi.PE_NAMING, name="MIOpenCKGroupedConv_gfx90a.dll"
     )
-    assert abi.check_plugins_renamed([lib]) is True
+    assert check_plugins(monkeypatch, lib) is True
     assert (
         "SKIP: MIOpenCKGroupedConv_gfx90a.dll is not an ELF file"
         in capsys.readouterr().out
@@ -2092,9 +2153,44 @@ def test_check_wrapper_passes_a_renamed_plugin(tmp_path, monkeypatch, capsys):
         good_wrapper(),
         good_private(),
         extra=("--plugin", "plugin.so"),
-        plugins={"plugin.so": plugin_lib((PLAIN_REFERENCE + "_impl",))},
+        plugins={"plugin.so": plugin_lib((IMPL_REFERENCE,))},
     )
     assert result == 0
+    assert "PASS: 1 CK plugin(s)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", ["a.so", "b.so"])
+def test_check_wrapper_checks_every_plugin_given(bad, tmp_path, monkeypatch, capsys):
+    plugins = {
+        name: plugin_lib((PLAIN_REFERENCE if name == bad else IMPL_REFERENCE,))
+        for name in ("a.so", "b.so")
+    }
+    result = run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        good_wrapper(),
+        good_private(),
+        extra=("--plugin", "a.so", "--plugin", "b.so"),
+        plugins=plugins,
+    )
+    assert result == 1
+    out = capsys.readouterr().out
+    assert f"  {bad}: {PLAIN_REFERENCE}" in out
+    assert out.count(PLAIN_REFERENCE) == 1
+
+
+def test_a_good_plugin_does_not_hide_a_failed_library_check(
+    tmp_path, monkeypatch, capsys
+):
+    result = run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        good_wrapper(),
+        good_private(soname="libMIOpen_private.so.2"),
+        extra=("--plugin", "plugin.so"),
+        plugins={"plugin.so": plugin_lib((IMPL_REFERENCE,))},
+    )
+    assert result == 1
     assert "PASS: 1 CK plugin(s)" in capsys.readouterr().out
 
 
@@ -2117,4 +2213,4 @@ def test_the_elf_reader_lists_what_a_real_plugin_leaves_undefined(tmp_path):
     undefined = lib.undefined_dynamic_symbols()
     assert {"miopenPlain", "miopenRenamed_impl"} <= undefined
     assert "defined_here" not in undefined
-    assert abi.check_plugins_renamed([lib]) is False
+    assert abi.check_plugins_renamed([str(plugin)]) is False

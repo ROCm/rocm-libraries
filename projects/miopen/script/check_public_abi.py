@@ -1528,7 +1528,23 @@ def check_impl_superset(wrapper: Library, private: Library) -> bool:
     return False
 
 
-def check_plugins_renamed(plugins: list[Library]) -> bool:
+def plain_entry_points(path: str) -> list[str] | None:
+    """Return the plugin's plain-named MIOpen entry points, or None for a DLL.
+
+    The library is opened here, so it is released on return; check_plugins_renamed
+    then holds at most one plugin's bytes at a time, however many there are.
+    """
+    plugin = open_library(path, "CK plugin")
+    if plugin.naming is not ELF_NAMING:
+        return None
+    return sorted(
+        s
+        for s in plugin.undefined_dynamic_symbols()
+        if PUBLIC_API_RE.match(s) and not s.endswith("_impl")
+    )
+
+
+def check_plugins_renamed(paths: list[str]) -> bool:
     """A CK plugin must call MIOpen's C entry points by their _impl names.
 
     The private library exports only those. A plugin built without the rename
@@ -1538,18 +1554,14 @@ def check_plugins_renamed(plugins: list[Library]) -> bool:
     """
     offenders: dict[str, list[str]] = {}
     checked = 0
-    for plugin in plugins:
-        if plugin.naming is not ELF_NAMING:
-            print(f"SKIP: {Path(plugin.path).name} is not an ELF file")
+    for path in paths:
+        plain = plain_entry_points(path)
+        if plain is None:
+            print(f"SKIP: {Path(path).name} is not an ELF file")
             continue
         checked += 1
-        plain = sorted(
-            s
-            for s in plugin.undefined_dynamic_symbols()
-            if PUBLIC_API_RE.match(s) and not s.endswith("_impl")
-        )
         if plain:
-            offenders[Path(plugin.path).name] = plain
+            offenders[Path(path).name] = plain
     if not offenders:
         print(f"PASS: {checked} CK plugin(s) reference only _impl entry points")
         return True
@@ -1863,7 +1875,7 @@ def cmd_check_wrapper(args) -> int:
         ok &= check_impl_superset(lib, private)
 
     if args.plugin:
-        ok &= check_plugins_renamed([open_library(p, "CK plugin") for p in args.plugin])
+        ok &= check_plugins_renamed(args.plugin)
 
     print(f"wrapper public-abi symbol check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1

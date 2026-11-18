@@ -16,7 +16,8 @@
 // private library's definitions are renamed to _impl by force-including
 // miopen_private_rename.h, so these stubs are the only definitions of the public
 // miopenFoo names. This file is compiled without that rename header, so it sees
-// the public names from <miopen/miopen.h>.
+// the public names declared in <miopen/miopen.h> and
+// <miopen/miopen_internal.h>.
 //
 // To give an entry point custom behaviour, move its stub from
 // wrapper_passthrough.cpp into this file, edit it, and rerun

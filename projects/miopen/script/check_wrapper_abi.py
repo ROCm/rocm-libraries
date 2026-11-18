@@ -4,13 +4,17 @@
 """Gate the exported ABI of a hipDNN wrapper build.
 
 This is the command behind its own ctest entry, separate from the forwarding
-parity harness in run_forwarding_parity.py. It only reads the two built libraries
--- it never loads or executes them -- so unlike the parity harness it needs no GPU,
-and is registered wherever MIOPEN_ENABLE_HIPDNN_WRAPPER is on regardless of whether
-one is available.
+parity harness in run_forwarding_parity.py. It only reads the built libraries
+(MIOpen, MIOpen_private and any CK plugins beside them) -- it never loads or
+executes them -- so unlike the parity harness it needs no GPU, and is registered
+wherever MIOPEN_ENABLE_HIPDNN_WRAPPER is on regardless of whether one is available.
+
+The CK plugin check runs only when a libMIOpenCKGroupedConv_*.so sits beside the
+libraries, and never on Windows. With none it is skipped, unless --require-plugins
+turns that into a failure.
 
 Registered from both the build tree and an installed one, which differ only in
-where the two libraries and --public-header sit; the defaults below suit the
+where the libraries and --public-header sit; the defaults below suit the
 installed layout, where everything but --public-header lands beside this script.
 """
 
@@ -33,9 +37,16 @@ def main(argv=None, windows=ON_WINDOWS):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--lib-dir",
-        help="directory holding the MIOpen and MIOpen_private libraries; defaults "
-        "to the install prefix's lib*/ on Linux and bin/ on Windows, found from "
-        "this script's location",
+        help="directory holding the MIOpen and MIOpen_private libraries and any CK "
+        "plugins; defaults to the install prefix's lib*/ on Linux and bin/ on "
+        "Windows, found from this script's location",
+    )
+    parser.add_argument(
+        "--require-plugins",
+        action="store_true",
+        help="fail when no CK plugin sits beside the libraries instead of skipping "
+        "the plugin check. For a build that is expected to produce plugins; an "
+        "installed layout may legitimately carry none. Ignored on Windows",
     )
     parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
     parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")
@@ -89,6 +100,16 @@ def main(argv=None, windows=ON_WINDOWS):
     plugins = find_ck_plugins(wrapper_lib.parent, windows)
     for plugin in plugins:
         command += ["--plugin", plugin]
+    if not plugins and args.require_plugins and not windows:
+        print(
+            f"FAIL: no libMIOpenCKGroupedConv_*.so beside {wrapper_lib.parent}, but "
+            "--require-plugins was given. Either the CK plugin targets are not "
+            "built (build MIOpen_with_plugins or the whole project, not only "
+            "MIOpen and MIOpen_private) or the plugins are in another directory "
+            "than the libraries.",
+            flush=True,
+        )
+        return 1
     if not plugins:
         print("no CK plugins beside the libraries; the plugin check is not run")
     print(f"+ {' '.join(str(a) for a in command)}", flush=True)

@@ -44,8 +44,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 SKIP = 77
 
-# Tried in order when --compiler is not given. Any C++ driver that runs the
-# linker will do.
+# Tried in order, after $CXX, when --compiler is not given. Any C++ driver that
+# runs the linker will do.
 COMPILER_CANDIDATES = ("c++", "clang++", "g++")
 
 # Linker messages: an undefined symbol, and a linker that rejects the GNU ld

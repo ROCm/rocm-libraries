@@ -113,12 +113,54 @@ class WrapperAbiCheckTest(unittest.TestCase):
         argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
         self.assertEqual(argv[argv.index("--plugin") + 1], str(plugin))
 
+    def test_every_plugin_is_forwarded_and_the_no_plugin_note_is_absent(self):
+        plugins = [
+            self.tree / "lib" / f"libMIOpenCKGroupedConv_{arch}.so"
+            for arch in ("gfx90a", "gfx942")
+        ]
+        for plugin in plugins:
+            plugin.touch()
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        forwarded = [argv[i + 1] for i, a in enumerate(argv) if a == "--plugin"]
+        self.assertEqual(forwarded, [str(p) for p in plugins])
+        self.assertNotIn("plugin check is not run", result.stdout)
+
     def test_no_plugin_option_is_passed_when_there_are_no_plugins(self):
         result = self.run_harness(self.tree)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
         self.assertNotIn("--plugin", argv)
         self.assertIn("plugin check is not run", result.stdout)
+
+    def test_required_plugins_that_are_missing_fail_the_run(self):
+        """A build that should have plugins must not pass by finding none."""
+        result = self.run_harness(self.tree, "--require-plugins")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("--require-plugins", result.stdout)
+        self.assertFalse((self.tree / "fake_abi_check.argv").exists())
+
+    def test_required_plugins_that_are_present_pass(self):
+        (self.tree / "lib" / "libMIOpenCKGroupedConv_gfx90a.so").touch()
+        result = self.run_harness(self.tree, "--require-plugins")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        self.assertIn("--plugin", argv)
+
+    def test_required_plugins_are_not_demanded_on_windows(self):
+        """Plugin DLLs are never checked, so there is nothing to require."""
+        (self.tree / "lib" / "MIOpen.dll").touch()
+        (self.tree / "lib" / "MIOpen_private.dll").touch()
+        argv = [
+            "--lib-dir",
+            str(self.tree / "lib"),
+            "--abi-check",
+            str(self.tree / "fake_abi_check.py"),
+            "--require-plugins",
+        ]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(check_wrapper_abi.main(argv, windows=True), 0)
 
     def test_symbol_lists_are_forwarded_to_the_abi_check(self):
         baseline = self.tree / "baseline.txt"

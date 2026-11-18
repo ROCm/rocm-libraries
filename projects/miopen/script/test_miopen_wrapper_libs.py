@@ -134,8 +134,11 @@ class LinuxLayoutTest(unittest.TestCase):
             "libMIOpenCKGroupedConv_gfx90a.so",
             "libMIOpenCKGroupedConv_gfx90a.so.bak",
             "libMIOpen.so.1.0",
+            "libMIOpen.so",
+            "libMIOpen_private.so",
         ):
             (self.lib / name).touch()
+        (self.lib / "libMIOpenCKGroupedConv_gfx1100.so").mkdir()
         self.assertEqual(
             [p.name for p in find_ck_plugins(self.lib, windows=False)],
             ["libMIOpenCKGroupedConv_gfx90a.so", "libMIOpenCKGroupedConv_gfx942.so"],
