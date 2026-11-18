@@ -41,8 +41,8 @@
 #include "device/ScopedDevice.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
-#include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
 
 /// @file ConvDgradAotNative.cpp
 /// hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot: shape-generic AOT

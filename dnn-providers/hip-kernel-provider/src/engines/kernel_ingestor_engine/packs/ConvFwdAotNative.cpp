@@ -37,10 +37,10 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdAotSelection.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx1250ConvFwdGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
-#include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
 
 /**
  * @file ConvFwdAotNative.cpp
