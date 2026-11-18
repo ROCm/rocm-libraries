@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipdnn_graph.hpp"
+#include "hipdnn_profiling.h"
 #include "hipdnn_types.hpp"
 
 #include "lru_cache.hpp"
@@ -318,11 +319,14 @@ struct GraphRun
 
 // Runs `runs` in order. They share one workspace, big enough for any of them,
 // and one scratch after it, so each run sees the scratch at the same address.
+// With `kernelTime` set, each run is timed and it receives their total device
+// time, or 0 if any run gave no usable measurement.
 miopenStatus_t RunGraphs(HandleState& state,
                          const std::vector<GraphRun>& runs,
                          void* callerWorkspace,
                          size_t callerWorkspaceSize,
-                         size_t scratchBytes)
+                         size_t scratchBytes,
+                         float* kernelTime)
 {
     const std::lock_guard<std::mutex> lock(state.mutex);
 
@@ -353,12 +357,27 @@ miopenStatus_t RunGraphs(HandleState& state,
         workspace = state.workspace;
     }
 
+    float total = 0.0f;
+    bool timed  = true;
     for(const GraphRun& run : runs)
     {
         if(scratch != nullptr && run.bindScratch != nullptr && *run.bindScratch)
             (*run.bindScratch)(*run.variantPack, scratch);
-        const fe::Error error =
-            run.graph->execute(*state.hipdnnHandle, *run.variantPack, workspace);
+        fe::Error error;
+        if(kernelTime != nullptr)
+        {
+            fe::ExecutionTiming timing;
+            error = run.graph->execute_timed_ext(
+                *state.hipdnnHandle, *run.variantPack, workspace, timing);
+            if(timing.elapsedMs)
+                total += *timing.elapsedMs;
+            else
+                timed = false;
+        }
+        else
+        {
+            error = run.graph->execute(*state.hipdnnHandle, *run.variantPack, workspace);
+        }
         // Recorded even when execute failed, because it may have queued work first.
         const bool recorded = hipEventRecord(state.lastWork, state.stream) == hipSuccess;
         if(!error.is_good())
@@ -369,6 +388,8 @@ miopenStatus_t RunGraphs(HandleState& state,
                                  "handle's stream");
     }
 
+    if(kernelTime != nullptr)
+        *kernelTime = timed ? total : 0.0f;
     return RecordSuccess();
 }
 
@@ -418,7 +439,24 @@ miopenStatus_t RunCachedRequests(miopenHandle_t handle,
         runs.push_back({graph, request.variantPack, request.bindScratch});
     }
 
-    return RunGraphs(*state, runs, workspace, workspaceSize, scratchBytes);
+    // A forwarded call runs on hipDNN's handle, not on `handle`, so with
+    // profiling on it is timed here and the time stored on `handle`.
+    bool profiling = false;
+    if(miopenWrapperIsProfilingEnabled(handle, &profiling) != miopenStatusSuccess)
+        return RecordFailure(miopenStatusInternalError,
+                             "could not read the MIOpen handle's profiling state");
+    if(!profiling)
+        return RunGraphs(*state, runs, workspace, workspaceSize, scratchBytes, nullptr);
+
+    float kernelTime = 0.0f;
+    const miopenStatus_t status =
+        RunGraphs(*state, runs, workspace, workspaceSize, scratchBytes, &kernelTime);
+    if(status != miopenStatusSuccess)
+        return status;
+    if(miopenWrapperSetKernelTime(handle, kernelTime) != miopenStatusSuccess)
+        return RecordFailure(miopenStatusInternalError,
+                             "could not store the kernel time on the MIOpen handle");
+    return status;
 }
 
 } // namespace

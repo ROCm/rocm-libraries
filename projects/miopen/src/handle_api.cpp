@@ -28,6 +28,10 @@
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 
+#ifdef MIOPEN_BUILDING_PRIVATE
+#include "private/hipdnn_profiling.h"
+#endif
+
 extern "C" const char* miopenGetErrorString(miopenStatus_t error)
 {
     switch(error)
@@ -120,3 +124,20 @@ extern "C" miopenStatus_t miopenEnableProfiling(miopenHandle_t handle, bool enab
 {
     return miopen::try_([&] { miopen::deref(handle).EnableProfiling(enable); });
 }
+
+#ifdef MIOPEN_BUILDING_PRIVATE
+extern "C" miopenStatus_t miopenWrapperIsProfilingEnabled(miopenHandle_t handle, bool* enabled)
+{
+    return miopen::try_(
+        [&] { miopen::deref(enabled) = miopen::deref(handle).IsProfilingEnabled(); });
+}
+
+extern "C" miopenStatus_t miopenWrapperSetKernelTime(miopenHandle_t handle, float time)
+{
+    return miopen::try_([&] {
+        const auto& h = miopen::deref(handle);
+        h.ResetKernelTime();
+        h.AccumKernelTime(time);
+    });
+}
+#endif

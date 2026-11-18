@@ -1856,25 +1856,22 @@ const BN2DTestCase& ProfilingCase()
     return profiling_case;
 }
 
-// Records whether the call left a kernel time on the handle, which MIOpen does for
-// every call it serves while profiling is on. The caller resets the time first, so
+// Checks that the call left a kernel time on the handle, which both paths do for
+// every call they serve while profiling is on. The caller resets the time first, so
 // one left by an earlier call does not count.
 void RecordKernelTime(const miopen::Handle& handle, const std::string& case_name)
 {
     const float ms      = handle.GetKernelTime();
     const bool recorded = ms > 0.0f;
     hs::RecordParityFlag("kernel_time_recorded_" + case_name, recorded);
-    if(!hs::ForwardingEnabled())
-        EXPECT_TRUE(recorded) << case_name << ": " << ms << " ms";
+    EXPECT_TRUE(recorded) << case_name << ": " << ms << " ms";
 }
 
 // With profiling on, MIOpen times the kernels it launches on the handle, and
 // miopenGetKernelTime returns their time. The provider launches a forwarded call's
-// kernels on its own MIOpen handle, so nothing is timed on the caller's handle and
-// the time stays 0 (ALMIOPEN-3382). The test records the outcome in both modes and
-// expects a time only in the disabled one. Once ALMIOPEN-3382 is fixed, the enabled
-// run records a time too, and its line in known_forwarding_divergences.txt no
-// longer matches.
+// kernels on its own MIOpen handle, so the shim times the hipDNN execute on the
+// caller's stream and writes the time to the caller's handle (ALMIOPEN-3382). The
+// test expects a time in both modes.
 TEST(GPU_HipdnnShimBNProfiling_FP32, KernelTimeOnCallerHandle)
 {
     const hs::OwnedHandleOnStream owned_handle(get_handle().GetStream());
