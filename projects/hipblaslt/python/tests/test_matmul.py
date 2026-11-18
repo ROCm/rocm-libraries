@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""heuristic() and matmul() against NumPy, and the quiet failures matmul() now refuses.
+"""heuristic() and matmul() against NumPy, and the quiet failures matmul() refuses.
 
 hipBLASLt is column-major. A column-major matrix S (r x c) is stored here as the C-contiguous
 host array S.T, with MatrixLayout(type, r, c, ld=r).
@@ -148,8 +148,8 @@ def test_beta_and_c(handle):
 
 
 def test_compute_64f_takes_double_alpha_and_beta(handle):
-    # 1/3 and 1/7 aren't representable in fp32. Passed as float (the prototype's bug), the fp64
-    # GEMM reads 8 bytes from a 4-byte value and returns garbage.
+    # 1/3 and 1/7 aren't representable in fp32. Passed as float, the fp64 GEMM would read 8 bytes
+    # from a 4-byte value and return garbage.
     p = Problem(np.float64, 64, 48, 32, seed=3)
     alpha, beta = 1 / 3, 1 / 7
     out = p.run(handle, p.heuristic(handle)[0], alpha=alpha, beta=beta)
@@ -258,8 +258,7 @@ def test_operand_type_must_match_its_layout(handle):
 
 
 def test_operand_must_be_big_enough_for_its_layout(handle):
-    # Spike 2 saw a too-large size overwrite the next allocation; a too-small buffer is the same
-    # bug from the other side.
+    # A buffer smaller than its layout lets hipBLASLt write past its end.
     p = Problem(np.float32, 8, 8, 8)
     p.dd = c.DeviceArray.empty([7, 8], p.t)
     with pytest.raises(
