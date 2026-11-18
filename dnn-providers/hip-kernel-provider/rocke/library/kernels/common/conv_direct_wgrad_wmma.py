@@ -50,6 +50,7 @@ from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
+    I32_MAX,
     _io_type,
     dilation_reason,
     problem_dims_reason,
@@ -210,6 +211,15 @@ def wgrad_wmma_arch_reason(arch: str, dtype: str):
     return None, target
 
 
+def wgrad_wmma_dest_bytes_reason(nbytes: int, what: str) -> str | None:
+    """Why the fp32 destination (``what``, ``nbytes`` bytes) cannot be
+    addressed: the kernels keep it behind a 32-bit buffer descriptor and
+    ``D_bytes`` kernarg, so a larger one wraps its byte offsets."""
+    if nbytes > I32_MAX:
+        return f"{what} of {nbytes} B exceeds the 32-bit buffer size"
+    return None
+
+
 def wgrad_wmma_lds_reason(lds: int, target, arch: str) -> str | None:
     """Why ``lds`` bytes of staging do not fit the arch's LDS capacity (None
     when they fit). Tuning ceilings belong to the AOT grid, not here."""
@@ -237,6 +247,8 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, "stride 1 only"
     if p.Ho < 1 or p.Wo < 1:
         return False, f"empty output {p.Ho}x{p.Wo}"
+    if p.PAD < 0:
+        return False, f"PAD >= 0 (got {p.PAD})"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
     why = one_padding_reason(p)  # the kernel offsets columns by PAD
@@ -244,6 +256,13 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, why
     if p.total_c % 8 or p.total_k % 8:
         return False, "C and K must be multiples of 8 (16-byte chunks)"
+    why = wgrad_wmma_dest_bytes_reason(
+        4 * p.total_k * p.KH * p.KW * p.total_c, "fp32 dW"
+    )
+    if why is not None:
+        return False, why
+    if spec.waves_k < 1 or spec.waves_c < 1:
+        return False, "waves_k and waves_c >= 1"
     if spec.waves_k * spec.waves_c not in (2, 4, 8, 16):
         return False, "2, 4, 8 or 16 waves"
     if spec.tiles_k not in (1, 2, 4) or spec.tiles_c not in (1, 2, 4):

@@ -1033,6 +1033,9 @@ DW_WGRAD_WMMA_TARGET_BLOCKS = (512, 1024)
 DW_WGRAD_WMMA_PREFETCH = (True, False)
 # Scratch replicas its atomics spread over (folded by the wgrad reduce).
 DW_WGRAD_WMMA_WS_REPLICAS = 64
+# The 1xK filters also cache a single-replica form that adds straight into
+# dW: a batch run as several chunks needs a kernel whose launches sum (the
+# two-stage form's reduce overwrites dW). Prefetching variants only.
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
 # waves_c) arrangements, (prefetch, row_unroll) pipelines, rows per segment,
@@ -2863,6 +2866,16 @@ def _knob_grid(
                 ws_replicas=DW_WGRAD_WMMA_WS_REPLICAS,
                 prefetch=pf,
             )
+            if one_row and pf:
+                yield dict(
+                    wave_size=32,
+                    waves=waves,
+                    tile_q=tq,
+                    rows=rows,
+                    target_blocks=tb,
+                    ws_replicas=1,
+                    prefetch=pf,
+                )
     else:
         raise ValueError(f"unknown direct conv variant {variant!r}")
 

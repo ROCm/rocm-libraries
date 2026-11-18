@@ -69,6 +69,11 @@ _REJECTED = (
         "pad_w must be -1 (PAD) or a column padding of at least 0 (got -2)",
     ),
     (dict(PAD=-1), {}, "degenerate geometry"),
+    (
+        dict(N=1, H=7, W=7, C=342400, PAD=0),
+        {},
+        "fp32 replicated scratch of 4295065600 B exceeds the 32-bit buffer size",
+    ),
     (dict(H=4, PAD=0), {}, "degenerate geometry"),
     (dict(dil_h=2, PAD=6), {}, "this direct conv kernel has no dilation (got 2x1)"),
     ({}, dict(wave_size=64), "the WMMA 16x16x32 lane maps are wave32"),
@@ -147,8 +152,11 @@ class TestDwWgradWmmaSpec(unittest.TestCase):
     def test_aot_grid(self):
         specs = _aot_specs()
         # 7x7 PAD 0 / 3: 2 waves x 3 tile_q x 2 rows x 2 tb x 2 prefetch;
-        # 1x31: 2 waves x 3 tile_q x 1 rows x 2 tb x 2 prefetch; two dtypes.
-        self.assertEqual(len(specs), 2 * (2 * 48 + 24))
+        # 1x31: 2 waves x 3 tile_q x 1 rows x 2 tb x 2 prefetch, plus the
+        # single-replica (accumulate-into-dW) form with prefetch; two dtypes.
+        self.assertEqual(len(specs), 2 * (2 * 48 + 24 + 12))
+        direct = [s for s in specs if s.ws_replicas == 1 and s.problem.KH == 1]
+        self.assertEqual(len(direct), 2 * 12)
         for spec in specs:
             self.assertIsNone(_reason(spec, "gfx1250"), spec.kernel_name())
         self.assertTrue(any(s.problem.PAD_W != s.problem.PAD for s in specs))
@@ -277,3 +285,18 @@ def test_activation_bound_refuses_an_oversized_input():
     big = _problem(N=4, H=512, W=512, C=1024, KH=7, PAD=0)
     ok, why = is_valid_dw_wgrad_wmma_spec(DwWgradWmmaSpec(problem=big), "gfx1250")
     assert not ok and "i32 byte offsets" in why
+
+
+def test_one_row_grid_caches_a_form_that_adds_into_dw():
+    """A batch run as several chunks needs a kernel whose launches sum into
+    dW: the 1x31 grid holds single-replica specs (no scratch, no reduce), the
+    two-stage form keeps its scratch."""
+    from kernels.conv.direct_variants import direct_wgrad_workspaces
+
+    one_row = [s for s in _aot_specs() if s.problem.KH == 1]
+    single = [s for s in one_row if s.ws_replicas == 1]
+    assert single and len(single) < len(one_row)
+    for spec in single:
+        assert direct_wgrad_workspaces(VARIANT, spec) == {}
+    for spec in set(one_row) - set(single):
+        assert direct_wgrad_workspaces(VARIANT, spec)

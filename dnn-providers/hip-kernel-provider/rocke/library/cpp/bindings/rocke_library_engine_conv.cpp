@@ -2351,8 +2351,8 @@ py::tuple conv_direct_grouped_wgrad_wmma_describe(const py::dict& d, const std::
     char name[512];
     int grid[3] = {0, 0, 0};
     int block[3] = {0, 0, 0};
-    long n_parts = 0, ws_bytes = 0;
-    long long taps = 0, chans = 0;
+    long n_parts = 0;
+    long long ws_bytes = 0, taps = 0, chans = 0;
     bool ok = rocke_grouped_wgrad_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
     if(rocke_grouped_wgrad_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
         name[0] = '\0';

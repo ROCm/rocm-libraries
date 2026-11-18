@@ -54,6 +54,7 @@ from kernels.common.conv_direct_grouped import (
 from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
 from kernels.common.conv_direct_wgrad_wmma import (
     wgrad_wmma_arch_reason,
+    wgrad_wmma_dest_bytes_reason,
     wgrad_wmma_lds_reason,
 )
 
@@ -165,6 +166,8 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
         return False, "stride 1 only"
     if p.Ho < 1 or p.Wo < 1:
         return False, f"empty output {p.Ho}x{p.Wo}"
+    if p.PAD < 0:
+        return False, f"PAD >= 0 (got {p.PAD})"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
     why = one_padding_reason(p)  # the kernel offsets columns by PAD
@@ -182,6 +185,9 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
         return False, "target_blocks >= 1"
     if spec.stages not in (2, 3, 4):
         return False, "stages in 2..4"
+    why = wgrad_wmma_dest_bytes_reason(spec.workspace_bytes(), "fp32 partial slots")
+    if why is not None:
+        return False, why
     why, target = wgrad_wmma_arch_reason(arch, p.dtype)
     if why is None:
         why = wgrad_wmma_lds_reason(spec.lds_bytes(), target, arch)

@@ -127,10 +127,12 @@ extern "C" long long
     return rocke_direct_conv_problem_total_k(&s->problem);
 }
 
-extern "C" long rocke_grouped_wgrad_wmma_workspace_bytes(const rocke_grouped_wgrad_wmma_spec_t* s)
+extern "C" long long
+    rocke_grouped_wgrad_wmma_workspace_bytes(const rocke_grouped_wgrad_wmma_spec_t* s)
 {
-    return (long)rocke_grouped_wgrad_wmma_n_partitions(s) * rocke_grouped_wgrad_wmma_fold_taps(s)
-           * rocke_direct_conv_problem_total_k(&s->problem) * 4;
+    return (long long)rocke_grouped_wgrad_wmma_n_partitions(s)
+           * rocke_grouped_wgrad_wmma_fold_taps(s) * rocke_direct_conv_problem_total_k(&s->problem)
+           * 4;
 }
 
 extern "C" void rocke_grouped_wgrad_wmma_launch_geometry(const rocke_grouped_wgrad_wmma_spec_t* s,
@@ -212,6 +214,11 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
                  (long long)rocke_direct_conv_problem_Wo(p));
         why = msg;
     }
+    else if(p->PAD < 0)
+    {
+        snprintf(msg, sizeof msg, "PAD >= 0 (got %d)", p->PAD);
+        why = msg;
+    }
     else if(p->PAD > p->KH - 1 || p->PAD > p->KW - 1)
     {
         why = "PAD <= K - 1";
@@ -249,6 +256,9 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
         rocke_spec_set_reason(reason, reason_cap, why);
         return false;
     }
+    if(wgrad_wmma_dest_bytes_over(
+           rocke_grouped_wgrad_wmma_workspace_bytes(s), "fp32 partial slots", reason, reason_cap))
+        return false;
     const rocke_archtarget_t* target
         = wgrad_wmma_arch_target(arch, problem_is_bf16(p), reason, reason_cap);
     if(target == NULL)

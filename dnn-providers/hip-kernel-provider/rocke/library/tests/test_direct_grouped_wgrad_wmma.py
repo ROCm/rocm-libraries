@@ -102,6 +102,7 @@ _REJECTED = (
     (dict(kpg=8), {}, "cpg = kpg in (4, 8)"),
     (dict(dtype="fp32"), {}, "fp16/bf16 only"),
     (dict(stride=2), {}, "stride 1 only"),
+    (dict(PAD=-1), {}, "PAD >= 0 (got -1)"),
     (dict(PAD=3), {}, "PAD <= K - 1"),
     (dict(KW=1, PAD=1), {}, "PAD <= K - 1"),
     (dict(KH=1, KW=3, PAD=1), {}, "PAD <= K - 1"),
@@ -110,6 +111,12 @@ _REJECTED = (
     (dict(C=24), {}, "C must be a multiple of 16 (whole packed tiles)"),
     (dict(dil=2), {}, "this direct conv kernel has no dilation (got 2x2)"),
     (dict(C=8 * 2**28), {}, "must fit in i32"),  # groups * cpg past i32
+    # The partial slots (fp32) past the 32-bit buffer size.
+    (
+        dict(N=64, H=32, W=32, cpg=8, C=16384),
+        dict(rows_per_chunk=1, target_blocks=1048576),
+        "fp32 partial slots of 9663676416 B exceeds the 32-bit buffer size",
+    ),
     ({}, dict(waves_c=3), "waves_c in (1, 2, 4, 8)"),
     ({}, dict(waves_c=0), "waves_c in (1, 2, 4, 8)"),
     ({}, dict(q_steps=0), "q_steps in 1..4"),

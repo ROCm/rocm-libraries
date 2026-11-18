@@ -67,6 +67,7 @@ from kernels.common.conv_direct_grouped import (
     pad_w_reason,
 )
 from kernels.common.conv_direct_wgrad_wmma import (
+    wgrad_wmma_dest_bytes_reason,
     wgrad_wmma_lds_reason,
     wgrad_wmma_wave_shape_reason,
 )
@@ -210,6 +211,11 @@ def dw_wgrad_wmma_reason(spec: DwWgradWmmaSpec) -> str:
         return f"rows must be a positive even number (got {spec.rows})"
     if spec.target_blocks < 1 or spec.ws_replicas < 1:
         return "target_blocks and ws_replicas must be >= 1"
+    why = wgrad_wmma_dest_bytes_reason(
+        4 * spec.ws_replicas * p.groups * p.KH * p.KW, "fp32 replicated scratch"
+    )
+    if why is not None:
+        return why
     steps = spec.rows // 2 * spec.tile_q // 4 * spec.tiles
     if steps > 1024:
         return f"{steps} unrolled WMMAs per item exceed 1024 (smaller rows / tile_q)"

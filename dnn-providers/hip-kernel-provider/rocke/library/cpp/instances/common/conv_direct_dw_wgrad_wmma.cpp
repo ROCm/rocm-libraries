@@ -246,6 +246,11 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
         rocke_spec_set_reason(reason, cap, "target_blocks and ws_replicas must be >= 1");
         return true;
     }
+    if(rocke_dwg::wgrad_wmma_dest_bytes_over(4LL * spec->ws_replicas * p->groups * p->KH * p->KW,
+                                             "fp32 replicated scratch",
+                                             reason,
+                                             cap))
+        return true;
     const long long steps
         = (long long)(spec->rows / 2) * spec->tile_q / 4 * rocke_direct_dw_wgrad_wmma_tiles(spec);
     if(steps > ROCKE_DW_WGRAD_WMMA_MAX_STEPS)

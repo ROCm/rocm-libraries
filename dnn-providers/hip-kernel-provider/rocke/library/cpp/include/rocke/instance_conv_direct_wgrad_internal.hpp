@@ -490,6 +490,21 @@ inline bool wgrad_wmma_lds_over(long long lds,
     return false;
 }
 
+/* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_dest_bytes_reason: true
+ * (with `reason` set) when the fp32 destination `what` of `nbytes` bytes
+ * exceeds the 32-bit buffer size (D_bytes kernarg, i32 byte offsets). */
+inline bool
+    wgrad_wmma_dest_bytes_over(long long nbytes, const char* what, char* reason, size_t reason_cap)
+{
+    if(nbytes > 2147483647LL)
+    {
+        rocke_spec_set_reasonf(
+            reason, reason_cap, "%s of %lld B exceeds the 32-bit buffer size", what, nbytes);
+        return true;
+    }
+    return false;
+}
+
 } // namespace rocke_dwg
 
 #endif /* ROCKE_INSTANCE_CONV_DIRECT_WGRAD_INTERNAL_HPP */

@@ -281,6 +281,11 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
                                (long long)rocke_direct_conv_problem_Wo(p));
         return false;
     }
+    if(p->PAD < 0)
+    {
+        rocke_spec_set_reasonf(reason, reason_cap, "PAD >= 0 (got %d)", p->PAD);
+        return false;
+    }
     if(p->PAD > p->KH - 1 || p->PAD > p->KW - 1)
     {
         rocke_spec_set_reason(reason, reason_cap, "PAD <= K - 1");
@@ -295,6 +300,17 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
             reason, reason_cap, "C and K must be multiples of 8 (16-byte chunks)");
         return false;
     }
+    if(spec->waves_k < 1 || spec->waves_c < 1)
+    {
+        rocke_spec_set_reason(reason, reason_cap, "waves_k and waves_c >= 1");
+        return false;
+    }
+    if(rocke_dwg::wgrad_wmma_dest_bytes_over(4LL * rocke_direct_conv_problem_total_k(p) * p->KH
+                                                 * p->KW * rocke_direct_conv_problem_total_c(p),
+                                             "fp32 dW",
+                                             reason,
+                                             reason_cap))
+        return false;
     int nw = spec->waves_k * spec->waves_c;
     if(nw != 2 && nw != 4 && nw != 8 && nw != 16)
     {
