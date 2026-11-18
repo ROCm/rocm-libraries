@@ -55,6 +55,7 @@ from rocke.core.ir import VectorType
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    direct_lds_dma_mfma_caps_reason,
     I32_MAX,
     DirectConvProblem,
     _buf_store_vN,
@@ -131,20 +132,20 @@ class FwdFlexMfmaSpec:
 def fwd_flex_mfma_reason(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> "str | None":
     p = spec.problem
     target = ArchTarget.from_gfx(arch)
-    if target.wave_size != 64 or spec.wave_size != 64:
-        return "fwd_flex_mfma is a wave64 MFMA kernel"
-    if target.async_lds_max_dwords < 4:
-        return f"fwd_flex_mfma needs the 16-byte LDS DMA (absent on {arch})"
+    if p.dtype not in ("fp16", "bf16"):
+        return "fp16/bf16 only"
+    why = direct_lds_dma_mfma_caps_reason(
+        target,
+        arch,
+        family="fwd_flex_mfma",
+        bf16=p.dtype == "bf16",
+        wave_size=spec.wave_size,
+    )
+    if why is not None:
+        return why
     stage = (_BX + spec.bk) * _CK * 2
     if not target.fits_lds(2 * stage):
         return f"LDS {2 * stage} B > {target.lds_capacity_bytes}"
-    if p.dtype not in ("fp16", "bf16"):
-        return "fp16/bf16 only"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     why = problem_dims_reason(p)
     if why is not None:
         return why

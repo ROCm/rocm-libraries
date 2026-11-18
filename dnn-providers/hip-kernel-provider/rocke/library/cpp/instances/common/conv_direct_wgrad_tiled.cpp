@@ -409,20 +409,11 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "stride-1 algorithm (got stride=%d)", p->stride);
     }
-    if(target->wave_size != 64 || !target->memory.has_ds_read_tr)
+    if(rocke_direct_lds_dma_mfma_caps_reason(
+           target, arch, "wgrad_tiled", 64, true, problem_is_bf16(p), msg, sizeof msg))
     {
-        ROCKE_SPEC_FAIL(
-            reason, reason_cap, "needs wave64 + ds_read_b64_tr_b16 (absent on %s)", arch);
-    }
-    if(rocke_archtarget_async_lds_max_dwords(target) < 4)
-    {
-        ROCKE_SPEC_FAIL(reason, reason_cap, "needs 16-byte buffer_load_lds (absent on %s)", arch);
-    }
-    const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
-    if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
-    {
-        ROCKE_SPEC_FAIL(reason, reason_cap, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
+        rocke_spec_set_reason(reason, reason_cap, msg);
+        return false;
     }
     auto in124 = [](int v) { return v == 1 || v == 2 || v == 4; };
     if(!in124(s->wave_k16) || !in124(s->wave_c16))

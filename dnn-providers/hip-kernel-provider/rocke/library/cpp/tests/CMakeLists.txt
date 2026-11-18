@@ -46,6 +46,25 @@ install(TARGETS rocke_conv_implicit_gemm_spec_guards
 set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
              rocke_conv_implicit_gemm_spec_guards)
 
+# The capability gate the gfx950 LDS-DMA MFMA direct validators share (fwd pp,
+# dgrad pp, fwd flex, tiled wgrad), pinned to Python's texts one capability at
+# a time.
+add_executable(rocke_conv_direct_pp_mfma_host conv_direct_pp_mfma_host.cpp)
+target_link_libraries(rocke_conv_direct_pp_mfma_host PRIVATE rocke_library_core)
+if(UNIX)
+  target_link_libraries(rocke_conv_direct_pp_mfma_host PRIVATE m)
+endif()
+add_test(NAME rocke_conv_direct_pp_mfma_host
+         COMMAND rocke_conv_direct_pp_mfma_host)
+set_tests_properties(rocke_conv_direct_pp_mfma_host PROPERTIES LABELS "ckc;unit;host")
+rocke_cxx_test_installed_name(_rocke_installed_name rocke_conv_direct_pp_mfma_host)
+set_target_properties(rocke_conv_direct_pp_mfma_host
+                      PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+install(TARGETS rocke_conv_direct_pp_mfma_host
+        RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+             rocke_conv_direct_pp_mfma_host)
+
 # The C++ validator of the gfx950 ping-pong direct forward: CI does not build
 # the rocke_library_engine extension, so its refusal texts are pinned to
 # Python's here.

@@ -219,38 +219,25 @@ bool pp_is_valid_spec(
     }
     const rocke_direct_conv_problem_t* p = s.problem;
     long lds = pp_lds_bytes(s);
-    const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
     const char* why = NULL;
     bool bk_ok = false;
     for(int i = 0; i < f.n_block_ks; ++i)
     {
         bk_ok = bk_ok || s.block_k == f.block_ks[i];
     }
-    if(target->wave_size != 64 || s.wave_size != 64)
-    {
-        ROCKE_ERR_SNPRINTF(msg, sizeof msg, "%s is a wave64 MFMA kernel", f.family);
-        why = msg;
-    }
-    else if(f.needs_ds_read_tr && !target->memory.has_ds_read_tr)
-    {
-        ROCKE_ERR_SNPRINTF(
-            msg, sizeof msg, "%s needs ds_read_b64_tr_b16 (absent on %s)", f.family, arch);
-        why = msg;
-    }
-    else if(rocke_archtarget_async_lds_max_dwords(target) < 4)
-    {
-        ROCKE_ERR_SNPRINTF(
-            msg, sizeof msg, "%s needs the 16-byte LDS DMA (absent on %s)", f.family, arch);
-        why = msg;
-    }
-    else if(!problem_dtype_ok(p))
+    if(!problem_dtype_ok(p))
     {
         why = "fp16/bf16 only";
     }
-    else if(!rocke_mma_catalog_has_shape(
-                rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
+    else if(rocke_direct_lds_dma_mfma_caps_reason(target,
+                                                  arch,
+                                                  f.family,
+                                                  s.wave_size,
+                                                  f.needs_ds_read_tr,
+                                                  problem_is_bf16(p),
+                                                  msg,
+                                                  sizeof msg))
     {
-        ROCKE_ERR_SNPRINTF(msg, sizeof msg, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
         why = msg;
     }
     else if(rocke_direct_problem_dims_reason(p, msg, sizeof msg))

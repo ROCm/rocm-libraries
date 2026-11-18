@@ -56,6 +56,7 @@ from rocke.core.ir import F32, I64, IRBuilder, KernelDef, Value, VectorType
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    direct_lds_dma_mfma_caps_reason,
     I32_MAX,
     DirectConvProblem,
     _buf_store_vN,
@@ -188,19 +189,18 @@ def pp_mfma_reason(
     """
     p = spec.problem
     target = ArchTarget.from_gfx(arch)
-    if target.wave_size != 64 or spec.wave_size != 64:
-        return f"{family} is a wave64 MFMA kernel"
-    if needs_ds_read_tr and not target.memory.has_ds_read_tr:
-        return f"{family} needs ds_read_b64_tr_b16 (absent on {arch})"
-    if target.async_lds_max_dwords < 4:
-        return f"{family} needs the 16-byte LDS DMA (absent on {arch})"
     if p.dtype not in ("fp16", "bf16"):
         return "fp16/bf16 only"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
+    why = direct_lds_dma_mfma_caps_reason(
+        target,
+        arch,
+        family=family,
+        bf16=p.dtype == "bf16",
+        wave_size=spec.wave_size,
+        needs_ds_read_tr=needs_ds_read_tr,
+    )
+    if why is not None:
+        return why
     why = problem_dims_reason(p)
     if why is not None:
         return why

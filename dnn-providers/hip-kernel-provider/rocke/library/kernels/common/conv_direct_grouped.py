@@ -70,7 +70,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.arch import MmaOp
 from rocke.core.ir import (
@@ -874,6 +874,39 @@ def problem_dims_reason(p: "DirectConvProblem") -> Optional[str]:
         value = getattr(p, name)
         if value < 1:
             return f"{name} must be >= 1 (got {value})"
+    return None
+
+
+def direct_lds_dma_mfma_caps_reason(
+    target: Any,
+    arch: str,
+    *,
+    family: str,
+    bf16: bool,
+    wave_size: int = 64,
+    needs_ds_read_tr: bool = False,
+) -> Optional[str]:
+    """Why an arch lacks what the LDS-DMA MFMA direct kernels need, or ``None``.
+
+    One gate for every kernel that stages through the 16-byte LDS DMA and runs
+    ``mfma_f32_16x16x32`` (fwd pp / flex, dgrad pp, tiled wgrad). Checked in
+    this order: wave64 target and kernel, the transposing LDS read when
+    ``needs_ds_read_tr``, the 16-byte LDS DMA, then the 16x16x32 MFMA of the
+    operand dtype. ``family`` names the kernel in the reasons. The caller has
+    already checked the dtype is fp16 or bf16. C twin:
+    ``rocke_direct_lds_dma_mfma_caps_reason``.
+    """
+    if target.wave_size != 64 or wave_size != 64:
+        return f"{family} is a wave64 MFMA kernel"
+    if needs_ds_read_tr and not target.memory.has_ds_read_tr:
+        return f"{family} needs ds_read_b64_tr_b16 (absent on {arch})"
+    if target.async_lds_max_dwords < 4:
+        return f"{family} needs the 16-byte LDS DMA (absent on {arch})"
+    ab = "bf16" if bf16 else "f16"
+    if not target.mma.has_shape(
+        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+    ):
+        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     return None
 
 

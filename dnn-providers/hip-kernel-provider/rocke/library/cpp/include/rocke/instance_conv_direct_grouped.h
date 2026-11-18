@@ -66,6 +66,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 
@@ -164,6 +165,22 @@ bool rocke_direct_channel_totals_reason(const rocke_direct_conv_problem_t* p,
 bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
                                       char* why,
                                       size_t why_cap);
+
+/* direct_lds_dma_mfma_caps_reason: the one capability gate of the LDS-DMA MFMA
+ * direct kernels (fwd pp / flex, dgrad pp, tiled wgrad); twin of Python's
+ * direct_lds_dma_mfma_caps_reason. Returns true (and writes the reason) when
+ * `target` is not wave64 or `wave_size` != 64 ("<family> is a wave64 MFMA
+ * kernel"), lacks the transposing LDS read while `needs_ds_read_tr`, lacks the
+ * 16-byte LDS DMA, or lacks mfma_f32_16x16x32 for the operand dtype (`bf16`
+ * picks bf16, else f16), in that order. The caller has checked the dtype. */
+bool rocke_direct_lds_dma_mfma_caps_reason(const rocke_arch_target_t* target,
+                                           const char* arch,
+                                           const char* family,
+                                           int wave_size,
+                                           bool needs_ds_read_tr,
+                                           bool bf16,
+                                           char* why,
+                                           size_t why_cap);
 
 /* The problem's dtype, NULL read as "fp16" (see the dtype field). */
 const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p);

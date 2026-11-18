@@ -269,6 +269,43 @@ bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
     return false;
 }
 
+/* direct_lds_dma_mfma_caps_reason: declared in rocke/instance_conv_direct_grouped.h. */
+bool rocke_direct_lds_dma_mfma_caps_reason(const rocke_arch_target_t* target,
+                                           const char* arch,
+                                           const char* family,
+                                           int wave_size,
+                                           bool needs_ds_read_tr,
+                                           bool bf16,
+                                           char* why,
+                                           size_t why_cap)
+{
+    if(target->wave_size != 64 || wave_size != 64)
+    {
+        rocke_spec_set_reasonf(why, why_cap, "%s is a wave64 MFMA kernel", family);
+        return true;
+    }
+    if(needs_ds_read_tr && !target->memory.has_ds_read_tr)
+    {
+        rocke_spec_set_reasonf(
+            why, why_cap, "%s needs ds_read_b64_tr_b16 (absent on %s)", family, arch);
+        return true;
+    }
+    if(rocke_archtarget_async_lds_max_dwords(target) < 4)
+    {
+        rocke_spec_set_reasonf(
+            why, why_cap, "%s needs the 16-byte LDS DMA (absent on %s)", family, arch);
+        return true;
+    }
+    const char* ab = bf16 ? "bf16" : "f16";
+    if(!rocke_mma_catalog_has_shape(
+           rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
+    {
+        rocke_spec_set_reasonf(why, why_cap, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
+        return true;
+    }
+    return false;
+}
+
 /* dilation_reason(p): declared in rocke/instance_conv_direct_grouped.h. */
 bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap)
 {
