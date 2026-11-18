@@ -721,7 +721,8 @@ tracked as a gap.
   pull request, gfx950 with the `ci:run-gfx950` label, and Windows. The Linux lanes become trusted
   gates after 20 green runs each (pull requests and `develop` pushes, at most one flake), per
   Review A's Decision 9 ([AIHPBLAS-5274](https://amd-hub.atlassian.net/browse/AIHPBLAS-5274)).
-  The Windows lanes stay informational for good
+  The Windows lanes stay informational for good. Until then the bindings job isn't part of
+  `Component CI Summary`, so a failure shows on its own lane
 
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
