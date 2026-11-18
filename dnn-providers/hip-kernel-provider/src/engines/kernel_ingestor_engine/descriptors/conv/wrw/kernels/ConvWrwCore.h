@@ -4510,11 +4510,13 @@ __device__ inline void k3FoldX(const K3FoldArgs& a)
     const long long phaseStride = chanRows * a.u;
     if(vec)
     {
-        // A thread a run of VEC positions of one phase: one 16-byte store.
+        // A thread a run of VEC positions of one phase: one 16-byte store. Phases fastest across
+        // the threads, so a wave's LDS reads spread over the banks (runs fastest put every
+        // thread's read VEC s elements apart, on the same few banks).
         const int runs = un / VEC;
         for(int e = static_cast<int>(threadIdx.x); e < runs * a.s; e += blockDim.x)
         {
-            const int j = e / runs, u = (e - j * runs) * VEC;
+            const int j = e % a.s, u = e / a.s * VEC;
             T v[VEC];
 #pragma unroll
             for(int k = 0; k < VEC; ++k)
