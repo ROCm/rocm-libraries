@@ -68,6 +68,7 @@
 namespace ck_tile {
 __device__ unsigned long long ck_tile_exp_clk[kExpClkSlots];
 __device__ unsigned long long ck_tile_exp_fill[kExpFillSlots];
+__device__ unsigned long long ck_tile_exp_bar[kExpBarSlots];
 } // namespace ck_tile
 #endif
 
@@ -771,6 +772,35 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
                 lead[op].push_back(ws - is);
                 stall[op].push_back(wd - ws);
             }
+        }
+        // top-of-tile barrier waits of every wave (skip the first and last 2 of a wave)
+        std::vector<unsigned long long> bs(ck_tile::kExpBarSlots);
+        BENCH_HIP_CHECK(hipMemcpyFromSymbol(bs.data(),
+                                            HIP_SYMBOL(ck_tile::ck_tile_exp_bar),
+                                            bs.size() * sizeof(unsigned long long)));
+        std::vector<double> bw[2]; // [wave parity]
+        const size_t per_wave_b = static_cast<size_t>(ck_tile::kExpFillTiles) * 2;
+        for(size_t w = 0; w + per_wave_b <= bs.size(); w += per_wave_b)
+        {
+            const size_t par = (w / per_wave_b) % 2;
+            size_t nb        = 0;
+            while(nb < static_cast<size_t>(ck_tile::kExpFillTiles) && bs[w + nb * 2] != 0 &&
+                  bs[w + nb * 2 + 1] != 0)
+                ++nb;
+            for(size_t t = 2; t + 2 < nb; ++t)
+                if(bs[w + t * 2 + 1] >= bs[w + t * 2])
+                    bw[par].push_back(static_cast<double>(bs[w + t * 2 + 1] - bs[w + t * 2]));
+        }
+        for(int par = 0; par < 2; ++par)
+        {
+            std::vector<double> v = bw[par];
+            std::sort(v.begin(), v.end());
+            std::printf("{\"type\":\"barwait\",\"waves\":\"%s\",\"n\":%zu,\"med\":%.0f,"
+                        "\"p90\":%.0f}\n",
+                        par == 0 ? "even(A issuers)" : "odd(B issuers)",
+                        v.size(),
+                        v.empty() ? 0.0 : v[v.size() / 2],
+                        v.empty() ? 0.0 : v[v.size() * 9 / 10]);
         }
         for(int op = 0; op < 2; ++op)
             std::printf("{\"type\":\"fill\",\"bench\":\"%s\",\"op\":\"%s\",\"fills\":%zu,"

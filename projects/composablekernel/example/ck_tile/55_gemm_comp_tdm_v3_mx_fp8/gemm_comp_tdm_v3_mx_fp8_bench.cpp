@@ -71,6 +71,7 @@
 namespace ck_tile {
 __device__ unsigned long long ck_tile_exp_clk[kExpClkSlots];
 __device__ unsigned long long ck_tile_exp_fill[kExpFillSlots];
+__device__ unsigned long long ck_tile_exp_bar[kExpBarSlots];
 } // namespace ck_tile
 #endif
 
@@ -825,6 +826,35 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
                 stall[op].push_back(wd - ws);
             }
         }
+        // top-of-tile barrier waits of every wave (skip the first and last 2 of a wave)
+        std::vector<unsigned long long> bs(ck_tile::kExpBarSlots);
+        BENCH_HIP_CHECK(hipMemcpyFromSymbol(bs.data(),
+                                            HIP_SYMBOL(ck_tile::ck_tile_exp_bar),
+                                            bs.size() * sizeof(unsigned long long)));
+        std::vector<double> bw[2]; // [wave parity]
+        const size_t per_wave_b = static_cast<size_t>(ck_tile::kExpFillTiles) * 2;
+        for(size_t w = 0; w + per_wave_b <= bs.size(); w += per_wave_b)
+        {
+            const size_t par = (w / per_wave_b) % 2;
+            size_t nb        = 0;
+            while(nb < static_cast<size_t>(ck_tile::kExpFillTiles) && bs[w + nb * 2] != 0 &&
+                  bs[w + nb * 2 + 1] != 0)
+                ++nb;
+            for(size_t t = 2; t + 2 < nb; ++t)
+                if(bs[w + t * 2 + 1] >= bs[w + t * 2])
+                    bw[par].push_back(static_cast<double>(bs[w + t * 2 + 1] - bs[w + t * 2]));
+        }
+        for(int par = 0; par < 2; ++par)
+        {
+            std::vector<double> v = bw[par];
+            std::sort(v.begin(), v.end());
+            std::printf("{\"type\":\"barwait\",\"waves\":\"%s\",\"n\":%zu,\"med\":%.0f,"
+                        "\"p90\":%.0f}\n",
+                        par == 0 ? "even(A issuers)" : "odd(B issuers)",
+                        v.size(),
+                        v.empty() ? 0.0 : v[v.size() / 2],
+                        v.empty() ? 0.0 : v[v.size() * 9 / 10]);
+        }
         for(int op = 0; op < 2; ++op)
             std::printf("{\"type\":\"fill\",\"bench\":\"%s\",\"op\":\"%s\",\"fills\":%zu,"
                         "\"lat\":%.0f,\"lead\":%.0f,\"stall\":%.0f}\n",
@@ -883,23 +913,51 @@ template <bool TdmEpi, typename CDataType>
 int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
 {
 #if defined(CK_EX55_FOCUS)
-    // EXPERIMENT: -DCK_EX55_FOCUS builds only the B0 focus instances (a few-minute build instead of
-    // every tile): 256x256x256, warps 2x2, 16x16x128 warp tile, cluster 2x1 or 4x1, 8x4 placement,
-    // tdm epilogue.
+    // EXPERIMENT: -DCK_EX55_FOCUS builds only the sweep set (a few-minute build instead of every
+    // tile): 256x256x256, warps 2x2, warp tile 16 or 32, tdm epilogue, and
+    //   -cluster=1x1                  no cluster
+    //   -cluster=2x1|4x1 -place=default|8x4   B shared along M (8x4: XCD-region placement)
+    //   -cluster=2x2|4x4              A and B shared (CK's cluster partitioner)
     if constexpr(TdmEpi)
     {
-        const std::string cluster = arg.get_str("cluster");
+        const std::string cl = arg.get_str("cluster");
+        const std::string pl = arg.get_str("place");
+        const std::string wt = arg.get_str("wt");
         if(arg.get_str("tile") == "256x256x256" && arg.get_str("warps") == "2x2" &&
-           arg.get_str("wt") == "16" && arg.get_str("place") == "8x4" &&
-           (cluster == "2x1" || cluster == "4x1"))
-            return cluster == "4x1"
-                       ? run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 4, 1, 8, 4>>(arg,
-                                                                                               name)
-                       : run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 2, 1, 8, 4>>(
-                             arg, name);
+           (wt == "16" || wt == "32"))
+        {
+            auto go = [&](auto w_) -> int {
+                constexpr ck_tile::index_t W = decltype(w_)::value;
+                if(cl == "1x1" && pl == "default")
+                    return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W>>(arg, name);
+                if(cl == "2x1" && pl == "default")
+                    return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 2, 1>>(arg,
+                                                                                          name);
+                if(cl == "4x1" && pl == "default")
+                    return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 4, 1>>(arg,
+                                                                                          name);
+                if(cl == "2x1" && pl == "8x4")
+                    return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 2, 1, 8, 4>>(
+                        arg, name);
+                if(cl == "4x1" && pl == "8x4")
+                    return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 4, 1, 8, 4>>(
+                        arg, name);
+                if(cl == "2x2" && pl == "default")
+                    return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 2, 2>>(arg,
+                                                                                          name);
+                if(cl == "4x4" && pl == "default")
+                    return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 4, 4>>(arg,
+                                                                                          name);
+                return -1;
+            };
+            const int rc = wt == "16" ? go(ck_tile::number<16>{}) : go(ck_tile::number<32>{});
+            if(rc != -1)
+                return rc;
+        }
     }
-    std::printf("CK_EX55_FOCUS build: only -tile=256x256x256 -warps=2x2 -wt=16 -cluster=2x1|4x1 "
-                "-place=8x4 -epilogue=tdm\n");
+    std::printf(
+        "CK_EX55_FOCUS build: only -tile=256x256x256 -warps=2x2 -wt=16|32 -epilogue=tdm with "
+        "-cluster=1x1|2x2|4x4 (-place=default), or -cluster=2x1|4x1 -place=default|8x4\n");
     return 2;
 #else
     const std::string tile    = arg.get_str("tile");

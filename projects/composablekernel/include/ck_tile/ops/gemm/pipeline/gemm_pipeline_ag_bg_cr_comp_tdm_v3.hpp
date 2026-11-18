@@ -38,6 +38,22 @@ CK_TILE_DEVICE void exp_clk_stamp(index_t half)
 inline constexpr index_t kExpFillTiles = 272;
 inline constexpr index_t kExpFillSlots = 256 * 16 * kExpFillTiles * 3;
 extern __device__ unsigned long long ck_tile_exp_fill[kExpFillSlots];
+// Per top-of-tile barrier wait of every wave: (start, end) shader cycles at
+// (((workgroup * 16 + wave) * kExpFillTiles + tile) * 2 + kind).
+inline constexpr index_t kExpBarSlots = 256 * 16 * kExpFillTiles * 2;
+extern __device__ unsigned long long ck_tile_exp_bar[kExpBarSlots];
+CK_TILE_DEVICE void exp_bar_stamp(index_t kind, index_t tile)
+{
+    unsigned long long c;
+    asm volatile("s_get_shader_cycles_u64 %0" : "=s"(c));
+    const index_t wg =
+        static_cast<index_t>(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+    const index_t slot = ((wg * 16 + get_warp_id()) * kExpFillTiles + tile) * 2 + kind;
+    if(get_lane_id() == 0 && tile < kExpFillTiles && slot < kExpBarSlots)
+    {
+        ck_tile_exp_bar[slot] = c;
+    }
+}
 CK_TILE_DEVICE void exp_fill_stamp(index_t kind, index_t fill)
 {
     unsigned long long c;
@@ -1018,6 +1034,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 #if defined(CK_TILE_EXP_CLK)
                 index_t exp_fill_idx = 0; // this wave's fills issued / published so far
                 index_t exp_pub_idx  = 0;
+                index_t exp_bar_idx  = 0; // this wave's top-of-tile barrier waits so far
 #endif
                 auto fill_stage = [&](auto f) {
                     constexpr index_t s = decltype(f)::value;
@@ -1374,7 +1391,14 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     }
                     else
                     {
+#if defined(CK_TILE_EXP_CLK)
+                        exp_bar_stamp(0, exp_bar_idx);
                         workgroup_barrier_wait();
+                        exp_bar_stamp(1, exp_bar_idx);
+                        ++exp_bar_idx;
+#else
+                        workgroup_barrier_wait();
+#endif
                     }
                     if constexpr(!kRefillAfterArrive && decltype(has_next)::value)
                     {
