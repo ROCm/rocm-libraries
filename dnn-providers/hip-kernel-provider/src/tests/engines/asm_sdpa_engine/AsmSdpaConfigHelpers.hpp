@@ -61,6 +61,20 @@ struct GraphTestCase
     /// Group mode only: the per-batch lengths of the offset and cumulative length tables. The
     /// batch count must match the set's.
     GroupLengths groupLengths = GroupLengths::STANDARD;
+    /// High logit-magnitude fill for fp8 cases (ALMIOPEN-3392). When set, Q and K are drawn
+    /// from U[-absMax, absMax] and V from U[-1, 1], each with its own seed (seed, seed + 1,
+    /// seed + 2), and the q and k descales are filled with `descale` (the v descale keeps
+    /// its default). Unset: every input is drawn from U[-1, 1] with one shared seed.
+    struct QkStress
+    {
+        float absMax;
+        float descale;
+    };
+    std::optional<QkStress> qkStress;
+    /// ASM_SDPA_ENGINE declines this graph while its vendored kernel is defective
+    /// (ALMIOPEN-3392, AITER issue #7593). A decline passes; once the engine accepts
+    /// the graph, its result must match the reference.
+    bool mayDeclineForKernelDefect = false;
 
     std::string name;
     std::string arch;
@@ -154,6 +168,14 @@ inline constexpr const char* K_CU_SEQ_LEN_KV_NAME = "cu_seq_len_kv";
 /// place of the cumulative tables (only the first, with GraphTestCase::sharedCuSeqLen).
 inline constexpr const char* K_SEQ_LEN_Q_NAME = "seq_len_q";
 inline constexpr const char* K_SEQ_LEN_KV_NAME = "seq_len_kv";
+/// Names buildSdpaFwdGraph gives the Q, K and V inputs and, for fp8, their per-tensor
+/// descales, so the integration fixture can select each by name when filling it.
+inline constexpr const char* K_Q_TENSOR_NAME = "q";
+inline constexpr const char* K_K_TENSOR_NAME = "k";
+inline constexpr const char* K_V_TENSOR_NAME = "v";
+inline constexpr const char* K_DESCALE_Q_TENSOR_NAME = "descale_q";
+inline constexpr const char* K_DESCALE_K_TENSOR_NAME = "descale_k";
+inline constexpr const char* K_DESCALE_V_TENSOR_NAME = "descale_v";
 
 /// An SDPA forward graph together with its STATS output attribute.
 struct SdpaFwdGraph
