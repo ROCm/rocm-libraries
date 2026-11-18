@@ -516,7 +516,9 @@ cmake --build build/ --parallel
 
 When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out.
 
-Tests tagged `[nn][tilewright]` need the downloaded weights. The tests read them from `shared/origami/data/nn/tilewright/gfx950/` (set at configure time) and call `SKIP()` when they are missing, so a checkout without weights reports those tests as skipped rather than failed. `SKIP()` needs Catch2 3.3 or newer. Tests that do not load weights, such as the `rank_options_t` defaults and the `nn_inference_requested` check, always run.
+Most `[nn][tilewright]` tests use a small model that is checked in under `tests/fixtures/tilewright/`, so they run on any checkout. It has three cells and two routing splits, a smart-K whitelist on one cell, and weights chosen so that a config's score is `log2(mt[axis]) / max(|temperature|, 0.1) + offset`. The tests check the loader, routing, the smart-K tiers, `force_cell`, sort order and the architecture check against that formula. `tests/fixtures/gen_tiny_twrec.py` writes the fixture. Run it only to change the model, and commit the regenerated files.
+
+The remaining `[nn][tilewright]` tests load the real gfx950 weights. The tests read them from `shared/origami/data/nn/tilewright/gfx950/` (set at configure time) and call `SKIP()` when they are missing, so a checkout without weights reports those tests as skipped rather than failed. `SKIP()` needs Catch2 3.3 or newer. Tests that do not load weights, such as the `rank_options_t` defaults and the `nn_inference_requested` check, always run.
 
 ## Debug Logging
 

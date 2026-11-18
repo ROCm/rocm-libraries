@@ -32,15 +32,68 @@ namespace {
 #define ORIGAMI_TEST_TW_WEIGHTS_DIR ""
 #endif
 
+#ifndef ORIGAMI_TEST_TW_FIXTURE_DIR
+#define ORIGAMI_TEST_TW_FIXTURE_DIR ""
+#endif
 
-// Copy of the gfx950 BBS manifest in a scratch directory with its feature_names_hash replaced.
+// The checked-in tiny model in tests/fixtures/tilewright, written by fixtures/gen_tiny_twrec.py.
+// Its score has a closed form, see expected_score() and the generator's header.
+constexpr const char* kFixtureStem = "tiny_gfx950_stem";
+constexpr const char* kFixtureName = "tiny_gfx950";
+
+// Cells of the fixture, in manifest order.
+constexpr int kCellA = 0;  // M <= 2048:               prefers mt.m, temperature 1, offset 0
+constexpr int kCellB = 1;  // M > 2048, N <= 2048:     prefers mt.n, temperature 2, offset 100
+constexpr int kCellC = 2;  // M > 2048, N > 2048:      prefers mt.k, temperature 1, offset 200
+
+// score = log2(mt[axis]) / max(|temperature|, 0.1) + offset, exact for power-of-two tiles.
+double expected_score(int cell, const origami::config_t& c) {
+  switch (cell) {
+    case kCellA: return std::log2(static_cast<double>(c.mt.m));
+    case kCellB: return std::log2(static_cast<double>(c.mt.n)) / 2.0 + 100.0;
+    case kCellC: return std::log2(static_cast<double>(c.mt.k)) + 200.0;
+    default: return std::numeric_limits<double>::quiet_NaN();
+  }
+}
+
+// Loads the fixture through the index, as hipBLASLt does, and unloads it on destruction.
+class FixtureModel {
+ public:
+  FixtureModel()
+      : handle_(origami::nn::load_models_for_logic(kFixtureStem, ORIGAMI_TEST_TW_FIXTURE_DIR)
+                    .tilewright) {}
+  ~FixtureModel() { origami::nn::unload_model(handle_); }
+  FixtureModel(const FixtureModel&)            = delete;
+  FixtureModel& operator=(const FixtureModel&) = delete;
+  origami::nn::model_handle_t handle() const { return handle_; }
+
+  origami::rank_options_t options(origami::inference_mode_t mode = origami::inference_mode_t::nn) const {
+    origami::rank_options_t o;
+    o.inference  = mode;
+    o.nn_backend = origami::nn_backend_t::tilewright;
+    o.nn_model   = handle_;
+    return o;
+  }
+
+ private:
+  origami::nn::model_handle_t handle_;
+};
+
+// A feasible bf16 config on gfx950. The mi shape and cache hints are the same for every tile, so
+// they match the smart-K signatures in the fixture.
+origami::config_t fixture_config(size_t mt_m, size_t mt_n, size_t mt_k) {
+  return make_config(mt_m, mt_n, mt_k, 16, 16, 32, false, 1, 6, 0, 0);
+}
+
+
+// Copy of the fixture manifest in a scratch directory with its feature_names_hash replaced.
 // The weights sidecar is linked, not copied. The directory is removed on destruction.
 class ScratchManifest {
  public:
   explicit ScratchManifest(const std::string& new_hash) {
     namespace fs = std::filesystem;
-    const std::string stem = "gfx950_Cijk_Alik_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs";
-    const fs::path src     = fs::path(ORIGAMI_TEST_TW_WEIGHTS_DIR);
+    const std::string stem = kFixtureName;
+    const fs::path src     = fs::path(ORIGAMI_TEST_TW_FIXTURE_DIR);
     dir_                   = fs::temp_directory_path() /
              ("origami_nn_hash_" + std::to_string(std::chrono::steady_clock::now()
                                                       .time_since_epoch()
@@ -110,8 +163,6 @@ TEST_CASE("NN: nn_inference_requested follows the resolved mode", "[nn]") {
 }
 
 TEST_CASE("NN: a missing index lookup is cached", "[nn][tilewright]") {
-  SKIP_UNLESS_TW_WEIGHTS();
-
   // A loadable manifest in a scratch directory that has no index yet.
   ScratchManifest good(origami::nn::features::gemm_tilewright::feature_names_hash);
   const std::filesystem::path manifest(good.path());
@@ -140,8 +191,6 @@ TEST_CASE("NN: a missing index lookup is cached", "[nn][tilewright]") {
 
 TEST_CASE("NN: a rejected manifest shared by two stems gives no model for either",
           "[nn][tilewright]") {
-  SKIP_UNLESS_TW_WEIGHTS();
-
   // The failed load is remembered, so the second stem does not parse the manifest again; the
   // observable result is that both stems report no model.
   ScratchManifest bad("0000000000000000");
@@ -270,19 +319,14 @@ TEST_CASE("NN: load_models_for_logic loads gfx950 tilewright weights", "[nn][til
 
 TEST_CASE("NN: load_models_for_logic falls back to ORIGAMI_NN_WEIGHTS_DIR when hint_dir empty",
           "[nn][tilewright]") {
-  SKIP_UNLESS_TW_WEIGHTS();
-
-  ScopedEnvVar weights_dir_env("ORIGAMI_NN_WEIGHTS_DIR", ORIGAMI_TEST_TW_WEIGHTS_DIR);
-  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
-                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
-  const auto models      = origami::nn::load_models_for_logic(logic_stem, "");
+  ScopedEnvVar weights_dir_env("ORIGAMI_NN_WEIGHTS_DIR", ORIGAMI_TEST_TW_FIXTURE_DIR);
+  const auto models = origami::nn::load_models_for_logic(kFixtureStem, "");
   REQUIRE(models.tilewright >= 0);
+  origami::nn::unload_model(models.tilewright);
 }
 
 TEST_CASE("NN: load_model rejects a manifest with a mismatched feature hash",
           "[nn][tilewright]") {
-  SKIP_UNLESS_TW_WEIGHTS();
-
   // Control: an unmodified hash loads, so the rejection below is due to the hash alone.
   ScratchManifest matching(origami::nn::features::gemm_tilewright::feature_names_hash);
   const origami::nn::model_handle_t ok = origami::nn::load_model(matching.path());
@@ -294,41 +338,35 @@ TEST_CASE("NN: load_model rejects a manifest with a mismatched feature hash",
 }
 
 TEST_CASE("NN: a model for another architecture is not used", "[nn][tilewright]") {
-  SKIP_UNLESS_TW_WEIGHTS();
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);  // a gfx950 model
 
-  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
-                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
-  const auto models      = origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR);
-  REQUIRE(models.tilewright >= 0);  // a gfx950 model
+  auto problem = make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  std::vector<origami::config_t> configs = {
+      fixture_config(128, 128, 64),
+      fixture_config(256, 256, 32),
+  };
+
+  // Control: the same model scores the same problem on gfx950, so the fallback below is due to
+  // the architecture alone.
+  const auto scored =
+      origami::rank_configs(problem, make_hardware(950), configs, fixture.options());
+  REQUIRE(std::isfinite(scored.front().score));
 
   const auto hardware = make_hardware(942);
-  auto problem = make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
-  problem.a_dtype  = origami::data_type_t::BFloat16;
-  problem.b_dtype  = origami::data_type_t::BFloat16;
-  problem.c_dtype  = origami::data_type_t::BFloat16;
-  problem.d_dtype  = origami::data_type_t::BFloat16;
-  problem.mi_dtype = origami::data_type_t::BFloat16;
-
-  std::vector<origami::config_t> configs = {
-      make_config(128, 128, 128, 32, 32, 32, false, 1, 6, 0, 0),
-      make_config(352, 224, 64, 32, 32, 32, false, 1, 6, 0, 0),
-  };
 
   const auto analytical = origami::rank_configs(problem, hardware, configs, origami::rank_options_t{});
   REQUIRE_FALSE(analytical.empty());
 
-  origami::rank_options_t options;
-  options.nn_backend     = origami::nn_backend_t::tilewright;
-  options.library_models = &models;
-
   // nn_fallback declines the gfx950 model on gfx942 and returns the analytical ranking.
-  options.inference = origami::inference_mode_t::nn_fallback;
+  auto options        = fixture.options(origami::inference_mode_t::nn_fallback);
   const auto fallback = origami::rank_configs(problem, hardware, configs, options);
   REQUIRE(fallback.size() == analytical.size());
   for (std::size_t i = 0; i < fallback.size(); ++i) {
     REQUIRE(fallback[i].config.mt.m == analytical[i].config.mt.m);
     REQUIRE(fallback[i].config.mt.n == analytical[i].config.mt.n);
     REQUIRE(fallback[i].latency == analytical[i].latency);
+    REQUIRE(std::isnan(fallback[i].score));
   }
 
   // nn has no fallback, so the mismatch is an error.
@@ -415,13 +453,9 @@ TEST_CASE("NN: is_kernel_feasible cache-hint gate", "[nn]") {
   REQUIRE(origami::nn::filter::is_kernel_feasible(problem, hardware, good_hints) == true);
 }
 
-TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
-  SKIP_UNLESS_TW_WEIGHTS();
-
-  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
-                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
+TEST_CASE("NN: unload_model releases model info and payload", "[nn][tilewright]") {
   const origami::nn::model_handle_t handle =
-      origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR).tilewright;
+      origami::nn::load_models_for_logic(kFixtureStem, ORIGAMI_TEST_TW_FIXTURE_DIR).tilewright;
   REQUIRE(handle >= 0);
   REQUIRE(origami::nn::model_info(handle) != nullptr);
 
@@ -430,7 +464,7 @@ TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
 
   const auto hardware                    = make_hardware(950);
   const auto problem                     = make_problem(1024, 3072, 2048);
-  std::vector<origami::config_t> configs = {make_config(128, 128, 128)};
+  std::vector<origami::config_t> configs = {fixture_config(128, 128, 64)};
 
   origami::rank_options_t options;
   options.inference  = origami::inference_mode_t::nn;
@@ -440,18 +474,14 @@ TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
 }
 
 TEST_CASE("NN: unload_model while ranking is in flight", "[nn][tilewright]") {
-  SKIP_UNLESS_TW_WEIGHTS();
-
-  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
-                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
   const origami::nn::model_handle_t handle =
-      origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR).tilewright;
+      origami::nn::load_models_for_logic(kFixtureStem, ORIGAMI_TEST_TW_FIXTURE_DIR).tilewright;
   REQUIRE(handle >= 0);
 
   const auto hardware                    = make_hardware(950);
   const auto problem                     = make_problem(1024, 3072, 2048);
-  std::vector<origami::config_t> configs = {make_config(128, 128, 128),
-                                            make_config(256, 256, 64)};
+  std::vector<origami::config_t> configs = {fixture_config(128, 128, 64),
+                                            fixture_config(256, 256, 32)};
 
   origami::rank_options_t options;
   options.inference  = origami::inference_mode_t::nn_fallback;
@@ -478,42 +508,242 @@ TEST_CASE("NN: unload_model while ranking is in flight", "[nn][tilewright]") {
   REQUIRE(origami::nn::model_info(handle) == nullptr);
 }
 
-TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
-  SKIP_UNLESS_TW_WEIGHTS();
+// The tests below use the checked-in fixture, so they run on any machine. The fixture's score is
+// log2(mt[axis]) / max(|temperature|, 0.1) + offset for the cell that routing picks; see
+// expected_score() and fixtures/gen_tiny_twrec.py.
 
-  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
-                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
-  const origami::nn::model_handle_t handle =
-      origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR).tilewright;
-  REQUIRE(handle >= 0);
+TEST_CASE("NN fixture: loads through the index and reports its structure", "[nn][tilewright]") {
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
 
+  const origami::nn::model_info_t* info = origami::nn::model_info(fixture.handle());
+  REQUIRE(info != nullptr);
+  REQUIRE(info->backend == origami::nn::backend_id_t::tilewright_v1);
+  REQUIRE(info->arch == "gfx950");
+  REQUIRE(info->features.feature_names_hash ==
+          origami::nn::features::gemm_tilewright::feature_names_hash);
+  REQUIRE(info->features.query_dim == 55);
+  REQUIRE(info->features.item_dim == 12);
+  REQUIRE(info->features.interaction_dim == 37);
+  REQUIRE(info->n_cells == 3);
+  REQUIRE(info->n_splits == 2);
+}
+
+TEST_CASE("NN fixture: scores follow the closed form and are sorted best first",
+          "[nn][tilewright]") {
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
   const auto hardware = make_hardware(950);
-  auto problem = make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
-  problem.a_dtype  = origami::data_type_t::BFloat16;
-  problem.b_dtype  = origami::data_type_t::BFloat16;
-  problem.c_dtype  = origami::data_type_t::BFloat16;
-  problem.d_dtype  = origami::data_type_t::BFloat16;
-  problem.mi_dtype = origami::data_type_t::BFloat16;
 
-  std::vector<origami::config_t> configs = {
-      make_config(128, 128, 128, 16, 16, 32, false, 1, 6, 0, 0),
-      make_config(352, 224, 64, 32, 32, 32, false, 1, 6, 0, 0),
+  // Cell A. Both tiles are on its smart-K whitelist, with distinct scores log2(mt.m).
+  const auto problem = make_problem(1024, 4096, 4096);
+  const std::vector<origami::config_t> configs = {
+      fixture_config(128, 128, 64),  // 7
+      fixture_config(256, 256, 32),  // 8
   };
 
-  origami::rank_options_t routed;
-  routed.inference  = origami::inference_mode_t::nn;
-  routed.nn_backend = origami::nn_backend_t::tilewright;
-  routed.nn_model   = handle;
+  const auto results = origami::rank_configs(problem, hardware, configs, fixture.options());
+  REQUIRE(results.size() == configs.size());
+  REQUIRE(results[0].config.mt.m == 256);
+  REQUIRE(results[1].config.mt.m == 128);
+  for (const auto& r : results) {
+    REQUIRE(std::isnan(r.latency));
+    REQUIRE(r.score == Catch::Approx(expected_score(kCellA, r.config)));
+  }
+  REQUIRE(results[0].score > results[1].score);
+}
 
-  origami::rank_options_t forced = routed;
-  forced.nn.force_cell           = 0;
+TEST_CASE("NN fixture: routing picks the cell from the splits", "[nn][tilewright]") {
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
+  const auto hardware = make_hardware(950);
 
-  const auto routed_results = origami::rank_configs(problem, hardware, configs, routed);
-  const auto forced_results = origami::rank_configs(problem, hardware, configs, forced);
+  // One tile that every cell can score, so the offset in the score identifies the cell.
+  const std::vector<origami::config_t> configs = {fixture_config(256, 256, 32)};
 
-  REQUIRE_FALSE(routed_results.empty());
-  REQUIRE_FALSE(forced_results.empty());
-  REQUIRE(std::isfinite(forced_results.front().score));
+  struct Case {
+    size_t m, n, k;
+    int cell;
+    const char* why;
+  };
+  const Case cases[] = {
+      {1024, 4096, 4096, kCellA, "M below the first split"},
+      {2048, 4096, 4096, kCellA, "the M threshold is inclusive"},
+      {2049, 1024, 4096, kCellB, "M just above the first split, N below the second"},
+      {4096, 1024, 4096, kCellB, "the missing N <= 2048 cell resolves to its parent"},
+      {4096, 2048, 4096, kCellB, "the N threshold is inclusive"},
+      {4096, 2049, 4096, kCellC, "N just above the second split"},
+      {2049, 4096, 4096, kCellC, "M just above the first split, N above the second"},
+      {8192, 8192, 4096, kCellC, "M and N far above both splits"},
+  };
+  for (const Case& c : cases) {
+    INFO(c.why << ": M=" << c.m << " N=" << c.n << " K=" << c.k);
+    const auto results = origami::rank_configs(
+        make_problem(c.m, c.n, c.k), hardware, configs, fixture.options());
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].score == Catch::Approx(expected_score(c.cell, configs[0])));
+  }
+}
+
+TEST_CASE("NN fixture: each cell scores along its own axis and temperature", "[nn][tilewright]") {
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
+  const auto hardware = make_hardware(950);
+
+  // A tile that differs from the next one on every axis. In each cell the winner is the tile
+  // that is larger on that cell's preferred axis (A: mt.m, B: mt.n, C: mt.k).
+  const std::vector<origami::config_t> configs = {
+      fixture_config(256, 64, 32),   // large m
+      fixture_config(64, 256, 32),   // large n
+      fixture_config(64, 64, 128),   // large k
+  };
+  struct Case {
+    size_t m, n;
+    int cell;
+    size_t winner;
+  };
+  const Case cases[] = {
+      {1024, 4096, kCellA, 0},
+      {4096, 1024, kCellB, 1},
+      {4096, 4096, kCellC, 2},
+  };
+  for (const Case& c : cases) {
+    INFO("cell " << c.cell);
+    // Rank with the whitelist off so every feasible tile is scored in every cell.
+    auto options                          = fixture.options();
+    options.nn.use_smart_k_whitelist      = false;
+    const auto results =
+        origami::rank_configs(make_problem(c.m, c.n, 4096), hardware, configs, options);
+    REQUIRE(results.size() == configs.size());
+    REQUIRE(results.front().config.mt.m == configs[c.winner].mt.m);
+    REQUIRE(results.front().config.mt.n == configs[c.winner].mt.n);
+    REQUIRE(results.front().config.mt.k == configs[c.winner].mt.k);
+    for (const auto& r : results) {
+      REQUIRE(r.score == Catch::Approx(expected_score(c.cell, r.config)));
+    }
+  }
+}
+
+TEST_CASE("NN fixture: smart-K whitelist tiers the candidates", "[nn][tilewright]") {
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
+  const auto hardware = make_hardware(950);
+
+  // Cell A. The first tile is not on the whitelist, and it would score highest.
+  const auto problem                           = make_problem(1024, 4096, 4096);
+  const origami::config_t off_list             = fixture_config(512, 64, 32);  // score 9
+  const origami::config_t on_list_low          = fixture_config(128, 128, 64);  // score 7
+  const origami::config_t on_list_high         = fixture_config(256, 256, 32);  // score 8
+  const std::vector<origami::config_t> configs = {off_list, on_list_low, on_list_high};
+
+  SECTION("only the whitelisted tiles are scored; the rest follow unscored") {
+    const auto results = origami::rank_configs(problem, hardware, configs, fixture.options());
+    REQUIRE(results.size() == 3);
+    REQUIRE(results[0].config.mt.m == 256);
+    REQUIRE(results[1].config.mt.m == 128);
+    REQUIRE(results[0].score == Catch::Approx(8.0));
+    REQUIRE(results[1].score == Catch::Approx(7.0));
+    // The tile off the whitelist keeps its place after the scored ones and has no score.
+    REQUIRE(results[2].config.mt.m == 512);
+    REQUIRE(std::isnan(results[2].score));
+    REQUIRE(std::isnan(results[2].latency));
+  }
+
+  SECTION("min_scored scores the tiles off the whitelist after the whitelisted ones") {
+    auto options        = fixture.options();
+    options.nn.min_scored = 3;
+    const auto results  = origami::rank_configs(problem, hardware, configs, options);
+    REQUIRE(results.size() == 3);
+    // Tier one is sorted, then tier two is appended; the list is not sorted as a whole, so the
+    // off-list tile, which scores highest, comes last.
+    REQUIRE(results[0].score == Catch::Approx(8.0));
+    REQUIRE(results[1].score == Catch::Approx(7.0));
+    REQUIRE(results[2].config.mt.m == 512);
+    REQUIRE(results[2].score == Catch::Approx(9.0));
+  }
+
+  SECTION("switching the whitelist off scores every feasible tile and sorts them all") {
+    auto options                     = fixture.options();
+    options.nn.use_smart_k_whitelist = false;
+    const auto results               = origami::rank_configs(problem, hardware, configs, options);
+    REQUIRE(results.size() == 3);
+    REQUIRE(results[0].config.mt.m == 512);
+    REQUIRE(results[0].score == Catch::Approx(9.0));
+    REQUIRE(results[1].score == Catch::Approx(8.0));
+    REQUIRE(results[2].score == Catch::Approx(7.0));
+  }
+
+  SECTION("a cell with no whitelist scores every feasible tile") {
+    // Cell B has an empty smart-K list, so nothing is filtered out.
+    const auto results = origami::rank_configs(
+        make_problem(4096, 1024, 4096), hardware, configs, fixture.options());
+    REQUIRE(results.size() == 3);
+    for (const auto& r : results) {
+      REQUIRE(r.score == Catch::Approx(expected_score(kCellB, r.config)));
+    }
+  }
+
+  SECTION("a whitelist that matches no feasible tile falls back to scoring all of them") {
+    // Cell C lists one tile that none of these configs uses.
+    const auto results = origami::rank_configs(
+        make_problem(4096, 4096, 4096), hardware, configs, fixture.options());
+    REQUIRE(results.size() == 3);
+    for (const auto& r : results) {
+      REQUIRE(r.score == Catch::Approx(expected_score(kCellC, r.config)));
+    }
+  }
+}
+
+TEST_CASE("NN fixture: rank_options force_cell overrides routing", "[nn][tilewright]") {
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
+  const auto hardware = make_hardware(950);
+
+  const std::vector<origami::config_t> configs = {fixture_config(256, 256, 32)};
+  const auto problem                           = make_problem(1024, 4096, 4096);  // routes to A
+
+  auto routed = fixture.options();
+  REQUIRE(origami::rank_configs(problem, hardware, configs, routed)[0].score ==
+          Catch::Approx(expected_score(kCellA, configs[0])));
+
+  for (const int cell : {kCellA, kCellB, kCellC}) {
+    INFO("force_cell " << cell);
+    auto forced           = fixture.options();
+    forced.nn.force_cell  = cell;
+    const auto results    = origami::rank_configs(problem, hardware, configs, forced);
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].score == Catch::Approx(expected_score(cell, configs[0])));
+  }
+
+  // An index that is not a cell scores nothing, which nn reports as an error.
+  auto out_of_range          = fixture.options();
+  out_of_range.nn.force_cell = 3;
+  REQUIRE_THROWS_AS(origami::rank_configs(problem, hardware, configs, out_of_range),
+                    std::runtime_error);
+}
+
+TEST_CASE("NN fixture: a problem with no cell is unscored", "[nn][tilewright]") {
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
+  const auto hardware = make_hardware(950);
+
+  // M <= 128 is the "Small" tier, which the fixture has no cell or split for.
+  const auto problem                           = make_problem(64, 4096, 4096);
+  const std::vector<origami::config_t> configs = {fixture_config(128, 128, 64),
+                                                  fixture_config(256, 256, 32)};
+
+  // Nothing is scored, so nn has no result to return.
+  REQUIRE_THROWS_AS(origami::rank_configs(problem, hardware, configs, fixture.options()),
+                    std::runtime_error);
+
+  // nn_fallback falls back to the analytical ranking, with a latency and no score.
+  const auto results = origami::rank_configs(
+      problem, hardware, configs, fixture.options(origami::inference_mode_t::nn_fallback));
+  REQUIRE(results.size() == configs.size());
+  for (const auto& r : results) {
+    REQUIRE(std::isfinite(r.latency));
+    REQUIRE(std::isnan(r.score));
+  }
 }
 
 namespace {
