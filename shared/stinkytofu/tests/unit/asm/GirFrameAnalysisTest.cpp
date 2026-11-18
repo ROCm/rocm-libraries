@@ -168,6 +168,45 @@ TEST(GirFrameAnalysisTest, LoopWrapStillUsesUnreducedGenerationSpan) {
     EXPECT_NE(raw, hazards.hazards.end());
 }
 
+/// The test above at EVERY ring depth: the write that next refills the slab the read took is
+/// `-span mod ring` nodes on -- a whole lap at ring 2, one node at ring 3, two at ring 4. The
+/// depth is a number the contract states, so imposing the unreduced span assumes one.
+TEST(GirFrameAnalysisTest, LoopWrapKeepsTheNodeDistanceAtEveryRingDepth) {
+    for (int ring = 2; ring <= 6; ++ring) {
+        const int span = 2;
+        // The next refill of that slab, in nodes: a whole lap when the generations land together.
+        const int expected = (ring - span % ring) % ring == 0 ? ring : (ring - span % ring) % ring;
+        Function function("loop_wrap_ring_" + std::to_string(ring));
+        setFunctionArch(function, GfxArchID::Gfx1250);
+        BasicBlock* loop = function.createBasicBlock("loop");
+        function.addEdge(loop, loop);
+
+        StinkyInstruction* read = createDsReadB128InBlock(loop, GfxArchID::Gfx1250, 0, 20);
+        read->addModifier<GirActionData>(GirActionData{
+            0, 0, GirActionKind::Ds, {GirAccessData{false, 0, ring, 0, span, -1, false}}});
+        StinkyInstruction* copy = createTensorLoadInBlock(loop, GfxArchID::Gfx1250, 0, 8);
+        copy->addModifier<GirActionData>(GirActionData{
+            1, 1, GirActionKind::Tensor, {GirAccessData{true, 0, ring, 0, 0, -1, false}}});
+        function.setStringMetaData(
+            kGirFrameContractKey, "gir-frame-contract\ngen 0  ring=" + std::to_string(ring) +
+                                      " entry=0\nincoming  dst=1 src=1 gen=0 value=1 relative=1\n");
+
+        AnalysisManager analyses;
+        registerAllAnalyses(analyses);
+        const auto& frames = analyses.getResult<GirFrameAnalysis>(function);
+        const auto& hazards = analyses.getResult<GirFrameHazardAnalysis>(function);
+        auto raw = std::find_if(hazards.hazards.begin(), hazards.hazards.end(),
+                                [&](const GirFrameHazard& hazard) {
+                                    return hazard.kind == GirHazardKind::RAW &&
+                                           hazard.producer == copy && hazard.consumer == read;
+                                });
+        ASSERT_NE(raw, hazards.hazards.end()) << "ring " << ring;
+        EXPECT_EQ(raw->gap, expected) << "ring " << ring;
+        const GirPlanFenceCoverage plan = buildGirPlanFenceCoverage(frames, hazards);
+        EXPECT_TRUE(plan.byHazard[raw - hazards.hazards.begin()].hasHazardPath) << "ring " << ring;
+    }
+}
+
 TEST(GirFrameAnalysisTest, EntranceIdentitySurvivesSamePhaseJoin) {
     Function function("same_phase_join");
     setFunctionArch(function, GfxArchID::Gfx1250);

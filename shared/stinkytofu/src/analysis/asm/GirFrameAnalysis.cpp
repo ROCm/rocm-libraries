@@ -996,7 +996,9 @@ GirFrameHazardAnalysis::Result GirFrameHazardAnalysis::run(Function& function,
         // block. If the producer already precedes the consumer, 0 is the real same-trip gap for
         // both same- and cross-agent hazards; a barrier does not turn logical generation distance
         // into execution distance or retire the producer's completion counter.
-        if (producer.inst->getParent() == consumer.inst->getParent() &&
+        // Only a reported 0 is repaired: the span is a GENERATION count the graph need not
+        // spell in that many nodes, so it may not override a distance the walk realized.
+        if (gap == 0 && producer.inst->getParent() == consumer.inst->getParent() &&
             producerSpec.genId == consumerSpec.genId &&
             producer.instructionIndex >= consumer.instructionIndex &&
             producerSpec.absoluteGeneration < 0 && consumerSpec.absoluteGeneration < 0) {
