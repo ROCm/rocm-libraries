@@ -173,11 +173,17 @@ struct GirFrameAnalysis {
         GirFrameEdges edges;
         std::vector<GirAccessOccurrence> occurrences;
         std::set<std::pair<const BasicBlock*, const BasicBlock*>> backEdges;
+        /// Which GIR block an asm block lowered from, named by its canonical anchor action.
+        /// Lowering may split one GIR block across several asm blocks -- a conditionally-issued
+        /// movement branches over itself -- and those seams are not frame-graph distance.
+        std::unordered_map<const BasicBlock*, uint64_t> girBlockOf;
 
         bool empty() const {
             return !contract.loaded;
         }
         bool isBackEdge(const BasicBlock* from, const BasicBlock* to) const;
+        /// Whether \p from -> \p to stays within one GIR block, so a hazard must not age over it.
+        bool insideOneGirBlock(const BasicBlock* from, const BasicBlock* to) const;
         const std::vector<GirFrame>& frames(const BasicBlock* block) const;
     };
 

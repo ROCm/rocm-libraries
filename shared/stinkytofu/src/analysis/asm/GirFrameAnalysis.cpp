@@ -266,15 +266,20 @@ std::unordered_map<GirFrameNode, HazardState, GirFrameNodeHash> reachingHazards(
         work.pop_back();
         auto touches = occurrences.find(node);
         static const std::vector<const GirAccessOccurrence*> empty;
-        HazardState aged =
-            stepHazards(walkHazards(node, touches == occurrences.end() ? empty : touches->second,
-                                    incoming[node], frames.contract, registry));
+        // Distance is counted in GIR blocks, so a hazard ages on the EDGE: an edge that stays
+        // inside one GIR block is lowering, not a trip, and must leave the distance alone.
+        HazardState walked =
+            walkHazards(node, touches == occurrences.end() ? empty : touches->second,
+                        incoming[node], frames.contract, registry);
+        HazardState aged = stepHazards(walked);
         auto successors = frames.edges.find(node);
         if (successors == frames.edges.end()) continue;
         for (const GirFrameNode& successor : successors->second) {
             auto target = incoming.find(successor);
             if (target == incoming.end()) continue;
-            if (mergeHazardState(target->second, aged)) work.push_back(successor);
+            const HazardState& outgoing =
+                frames.insideOneGirBlock(node.block, successor.block) ? walked : aged;
+            if (mergeHazardState(target->second, outgoing)) work.push_back(successor);
         }
     }
     return incoming;
@@ -481,6 +486,16 @@ bool GirFrameAnalysis::Result::isBackEdge(const BasicBlock* from, const BasicBlo
     return backEdges.contains({from, to});
 }
 
+bool GirFrameAnalysis::Result::insideOneGirBlock(const BasicBlock* from,
+                                                 const BasicBlock* to) const {
+    // The back edge IS the rotation, never a seam, however the two ends happen to be named.
+    if (isBackEdge(from, to)) return false;
+    auto source = girBlockOf.find(from);
+    auto target = girBlockOf.find(to);
+    if (source == girBlockOf.end() || target == girBlockOf.end()) return false;
+    return source->second == target->second;
+}
+
 const std::vector<GirFrame>& GirFrameAnalysis::Result::frames(const BasicBlock* block) const {
     static const std::vector<GirFrame> empty;
     auto it = blockFrames.find(const_cast<BasicBlock*>(block));
@@ -504,7 +519,6 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
     result.contract = *encoded;
 
     std::unordered_map<StinkyInstruction*, size_t> instructionIndex;
-    std::unordered_map<BasicBlock*, uint64_t> blockAnchor;
     std::unordered_map<BasicBlock*, uint64_t> blockAnchorOrder;
     std::unordered_map<BasicBlock*, std::unordered_set<uint64_t>> blockActions;
     std::unordered_map<uint64_t, std::unordered_set<BasicBlock*>> anchorBlocks;
@@ -539,10 +553,10 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
                 anchorBlocks[canonical].insert(&block);
                 auto [order, inserted] = blockAnchorOrder.emplace(&block, action->actionId);
                 if (inserted) {
-                    blockAnchor[&block] = canonical;
+                    result.girBlockOf[&block] = canonical;
                 } else if (action->actionId > order->second) {
                     order->second = action->actionId;
-                    blockAnchor[&block] = canonical;
+                    result.girBlockOf[&block] = canonical;
                 }
             }
         }
@@ -706,8 +720,8 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
         auto blockNeeds = requiredValues.find(successor);
         if (blockNeeds == requiredValues.end()) return true;
         uint64_t outgoingAction = node.incomingAction;
-        auto anchor = blockAnchor.find(node.block);
-        if (anchor != blockAnchor.end()) outgoingAction = anchor->second;
+        auto anchor = result.girBlockOf.find(node.block);
+        if (anchor != result.girBlockOf.end()) outgoingAction = anchor->second;
         auto source = blockNeeds->second.find(outgoingAction);
         if (source == blockNeeds->second.end()) return true;
         for (const auto& [genId, allowed] : source->second)
@@ -719,8 +733,8 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
         GirFrame next =
             advanceFrame(node.frame, node.block, successor, loops, genLoops, result.contract);
         uint64_t outgoingAction = node.incomingAction;
-        auto anchor = blockAnchor.find(node.block);
-        if (anchor != blockAnchor.end()) outgoingAction = anchor->second;
+        auto anchor = result.girBlockOf.find(node.block);
+        if (anchor != result.girBlockOf.end()) outgoingAction = anchor->second;
         auto blockIncoming = incomingValues.find(successor);
         if (blockIncoming != incomingValues.end()) {
             auto source = blockIncoming->second.find(outgoingAction);
@@ -906,8 +920,9 @@ static GirHazardFenceCover coverOfHazard(
         const bool atConsumer = step.node.block == hazard.consumer->getParent() &&
                                 step.node.frame == hazard.consumerFrame;
 
-        if (step.gap == hazard.gap) {
-            if (!atConsumer || hazard.consumerIndex < step.begin) continue;
+        // At the target gap but not yet at the consumer the walk must FALL THROUGH, not stop: a
+        // successor inside the same GIR block costs nothing, so the consumer is still reachable.
+        if (step.gap == hazard.gap && atConsumer && hazard.consumerIndex >= step.begin) {
             scan(step, hazard.consumerIndex, true);
             cover.hasHazardPath = true;
             if (!step.anchor) {
@@ -934,7 +949,9 @@ static GirHazardFenceCover coverOfHazard(
         auto successors = frames.edges.find(step.node);
         if (successors == frames.edges.end()) continue;
         for (const GirFrameNode& successor : successors->second) {
-            Step next{step.producerNode, successor,     0, step.gap + 1, step.anchor,
+            const int advance = frames.insideOneGirBlock(step.node.block, successor.block) ? 0 : 1;
+            if (step.gap + advance > hazard.gap) continue;
+            Step next{step.producerNode, successor,     0, step.gap + advance, step.anchor,
                       step.anchorNode,   step.anchorGap};
             if (seen.insert(keyOf(next)).second) work.push_back(std::move(next));
         }

@@ -542,3 +542,60 @@ TEST(GirFrameAnalysisTest, ContractParserRejectsWhatItCannotMeanExactly) {
                  "incoming  dst=1 src=1 gen=0 value=1 relative\n"));
     EXPECT_TRUE(rejected("gir-frame-contract\ngen 0 7  ring=2 entry=0\n"));
 }
+
+// Lowering may split ONE GIR block across several asm blocks -- a conditionally-issued movement
+// branches over itself, as the sparse metadata load does under wave separation.  The frame
+// contract never names that seam, so the distance between two touches must be counted in GIR
+// blocks: crossing it is not a trip.  Counting asm blocks aged a single trip twice, and at ring 2
+// that reads as a whole period, which retires a producer that is still in flight.
+TEST(GirFrameAnalysisTest, ASeamInsideOneGirBlockIsNotDistance) {
+    Function function("seam");
+    setFunctionArch(function, GfxArchID::Gfx1250);
+    BasicBlock* pre = function.createBasicBlock("pre");
+    BasicBlock* head = function.createBasicBlock("head");
+    BasicBlock* guarded = function.createBasicBlock("guarded");
+    BasicBlock* join = function.createBasicBlock("join");
+    function.addEdge(pre, head);
+    function.addEdge(head, guarded);
+    function.addEdge(head, join);
+    function.addEdge(guarded, join);
+    function.addEdge(join, head);
+
+    // Every action anchors on 0, so all three blocks lower from one GIR block.
+    StinkyInstruction* write = createTensorLoadInBlock(head, GfxArchID::Gfx1250, 0, 8);
+    write->addModifier<GirActionData>(
+        GirActionData{0, 0, GirActionKind::Tensor, {GirAccessData{true, 0, 2, 0, 0, -1, true}}});
+    StinkyInstruction* guardedWrite = createTensorLoadInBlock(guarded, GfxArchID::Gfx1250, 16, 24);
+    guardedWrite->addModifier<GirActionData>(
+        GirActionData{1, 0, GirActionKind::Tensor, {GirAccessData{true, 1, 2, 0, 0, -1, true}}});
+    StinkyInstruction* read = createDsReadB128InBlock(join, GfxArchID::Gfx1250, 0, 20);
+    read->addModifier<GirActionData>(
+        GirActionData{2, 0, GirActionKind::Ds, {GirAccessData{false, 0, 2, 0, 0, -1, true}}});
+    function.setStringMetaData(kGirFrameContractKey,
+                               "gir-frame-contract\n"
+                               "gen 0  ring=2 entry=0\n"
+                               "incoming  dst=0 src=0 gen=0 value=1 relative=1\n");
+    setFunctionNumWaves(function, 2);
+
+    AnalysisManager analyses;
+    registerAllAnalyses(analyses);
+    const auto& frames = analyses.getResult<GirFrameAnalysis>(function);
+    EXPECT_TRUE(frames.insideOneGirBlock(head, guarded));
+    EXPECT_TRUE(frames.insideOneGirBlock(head, join));
+    EXPECT_TRUE(frames.insideOneGirBlock(guarded, join));
+    // The back edge IS the rotation; freeing it stops the trip from counting at all.
+    EXPECT_TRUE(frames.isBackEdge(join, head));
+    EXPECT_FALSE(frames.insideOneGirBlock(join, head));
+    // `pre` lowers from no GIR block, so nothing about it is inside one.
+    EXPECT_FALSE(frames.insideOneGirBlock(pre, head));
+
+    std::set<int> gaps;
+    for (const GirFrameHazard& hazard :
+         analyses.getResult<GirFrameHazardAnalysis>(function).hazards)
+        if (hazard.kind == GirHazardKind::RAW && hazard.producer == write &&
+            hazard.consumer == read)
+            gaps.insert(hazard.gap);
+    // The write and the read run on the same trip with two seams between them, so 0 and only 0 --
+    // counting asm blocks reported 1 on the short arm and 2 on the guarded one.
+    EXPECT_EQ(gaps, (std::set<int>{0}));
+}
