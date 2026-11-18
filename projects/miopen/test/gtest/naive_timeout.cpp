@@ -401,11 +401,11 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimedOutWhenBoundSkipDisabled)
 
 // The precompile step builds the kernels of every solver in the list in parallel before the
 // evaluation starts. Naive stays out of it while the bound can still skip it. These two tests read
-// the kernel lookups in the Info2 log. Each uses a data type no other test in this file runs, so
-// the lookup has not been done earlier in the process and cached in memory.
+// the kernel lookups in the Info2 log. A new handle keeps earlier tests from hiding those lookups
+// through the handle's program cache, even when tests run in a different order.
 TEST(GPU_NaiveTimeout_FP32, NaiveNotPrecompiledWhenBoundCanSkipIt)
 {
-    auto& handle_ref      = get_handle();
+    miopen::Handle handle_ref;
     miopenHandle_t handle = &handle_ref;
 
     if(IsWinogradOnlyArch(handle_ref))
@@ -429,7 +429,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveNotPrecompiledWhenBoundCanSkipIt)
 // MIOPEN_NAIVE_BOUND_SKIP=0 puts naive back into the precompile.
 TEST(GPU_NaiveTimeout_FP32, NaivePrecompiledWhenBoundSkipDisabled)
 {
-    auto& handle_ref      = get_handle();
+    miopen::Handle handle_ref;
     miopenHandle_t handle = &handle_ref;
 
     if(IsWinogradOnlyArch(handle_ref))
@@ -491,6 +491,8 @@ TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenOtherAlgorithmsNeedWorkspace)
 // workspace. Naive must then be evaluated and returned: the bound and the timeout apply only
 // once a non-naive solver has succeeded, and until then there is no best time to measure against.
 // The test skips where ConvHipConv is not a candidate for the problem (not gfx950 for example).
+// A zero timeout budget makes an accidental cutoff when no non-naive solver succeeded
+// deterministically drop naive, instead of relying on overflow from FLT_MAX.
 TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverOfItsAlgorithmFails)
 {
     auto& handle_ref      = get_handle();
@@ -503,23 +505,27 @@ TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverOfItsAlgorithmF
     ScopedFindDb no_cache;
     ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
     ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, true);
-    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
+    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 0);
     ScopedEnvironment<std::string> only(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
                                         std::string{"ConvHipConv;ConvDirectNaiveConvFwd"});
 
     LegacyFind found;
     ASSERT_NO_FATAL_FAILURE(RunLegacyFindWithoutWorkspace<half_float::half>(handle, found));
 
-    const auto rejected = found.log.find("Solver <ConvHipConv>, workspace required");
-    if(rejected == std::string::npos)
+    // Where ConvHipConv is not a candidate the Direct algorithm holds naive alone (path B), so Find
+    // still succeeds and evaluates naive. Check that first, so a broken setup fails here instead of
+    // skipping.
+    ASSERT_EQ(found.status, miopenStatusSuccess);
+    ASSERT_GE(found.returned, 1) << "naive must be evaluated when every non-naive solver failed";
+    ASSERT_TRUE(LogShowsNaiveEvaluation(found.log));
+
+    if(found.log.find("[EvaluateInvokers] Solver <ConvHipConv>, workspace required") ==
+       std::string::npos)
         GTEST_SKIP() << "ConvHipConv is not a candidate for this problem on "
                      << handle_ref.GetDeviceName() << ", path C is not reached";
 
-    ASSERT_EQ(found.status, miopenStatusSuccess);
-    ASSERT_GE(found.returned, 1) << "naive must be evaluated when every non-naive solver failed";
     for(int i = 0; i < found.returned; ++i)
         EXPECT_EQ(found.perf[i].fwd_algo, miopenConvolutionFwdAlgoDirect) << "result " << i;
-    EXPECT_TRUE(LogShowsNaiveEvaluation(found.log));
     EXPECT_FALSE(LogShowsBoundSkip(found.log));
     EXPECT_EQ(found.log.find("Skipped naive solver"), std::string::npos)
         << "naive was dropped although no non-naive solver had succeeded";
