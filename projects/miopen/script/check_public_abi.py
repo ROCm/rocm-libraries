@@ -50,6 +50,10 @@ forwarding, so they are in no baseline.
   9. Optionally (``--needed-baseline``), the full DT_NEEDED list matches a
      committed baseline. Opt-in because it names ROCm soversions and the
      platform's loader, so it changes with routine ROCm updates.
+ 10. With ``--plugin`` (repeatable), each CK plugin references MIOpen's C entry
+     points only by their ``_impl`` names. A plugin compiled without the
+     private rename still links and loads where the wrapper is already in the
+     process, so only its undefined symbols show it. ELF only.
 
 Both gates also read a Windows build's DLLs (MIOpen.dll and MIOpen_private.dll; the
 wrapper's import table must not name hipdnn_backend.dll). The DLL name in the export
@@ -315,6 +319,34 @@ class Elf:
             if bind not in (STB_GLOBAL, STB_WEAK, STB_GNU_UNIQUE):
                 continue
             if sym_type not in (STT_FUNC, STT_GNU_IFUNC):
+                continue
+            names.add(self._cstr(strtab["offset"] + st_name).split("@", 1)[0])
+        return names
+
+    def undefined_dynamic_symbols(self) -> set[str]:
+        """Names this object leaves for the dynamic loader to resolve.
+
+        Strips any ``@VERSION`` suffix, as defined_dynamic_functions() does.
+        """
+        dynsym = self._section(SHT_DYNSYM)
+        if dynsym is None:
+            raise AbiError(f"no .dynsym section in {self.path} (stripped or static?)")
+        strtab = self.sections[dynsym["link"]]
+        entsize = dynsym["entsize"] or (24 if self.is64 else 16)
+
+        names: set[str] = set()
+        for off in range(dynsym["offset"], dynsym["offset"] + dynsym["size"], entsize):
+            if self.is64:
+                st_name, st_info, _other, st_shndx, _val, _size = self._unpack(
+                    "IBBHQQ", off
+                )
+            else:
+                st_name, _val, _size, st_info, _other, st_shndx = self._unpack(
+                    "IIIBBH", off
+                )
+            if st_shndx != SHN_UNDEF or st_name == 0:
+                continue
+            if st_info >> 4 not in (STB_GLOBAL, STB_WEAK):
                 continue
             names.add(self._cstr(strtab["offset"] + st_name).split("@", 1)[0])
         return names
@@ -662,6 +694,15 @@ call it. Only entry points declared in miopen.h or miopen_internal.h are renamed
 and the wrapper's stubs are generated from the same declarations, so the
 generated files are stale: rerun
 projects/miopen/script/generate_wrapper_sources.py.""".rstrip()
+
+PLUGIN_REMEDY = """
+A CK plugin must call MIOpen's C entry points by their _impl names: with the
+split on, libMIOpen_private.so exports only those. A plain name resolves only in a
+process that has already loaded the wrapper, and fails to load (undefined symbol)
+in one that has just the private library. Compile the plugin with the same rename
+as MIOpen_private: miopen_apply_private_rename() in
+projects/miopen/src/CMakeLists.txt, called from
+projects/miopen/src/ck_impl/CMakeLists.txt.""".rstrip()
 
 PROVIDER_REMEDY = """
 --require-provider was passed, so the provider's MiopenApi.hpp must be readable
@@ -1487,6 +1528,38 @@ def check_impl_superset(wrapper: Library, private: Library) -> bool:
     return False
 
 
+def check_plugins_renamed(plugins: list[Library]) -> bool:
+    """A CK plugin must call MIOpen's C entry points by their _impl names.
+
+    The private library exports only those. A plugin built without the rename
+    still links, since plugins are not linked with --no-undefined, and loads
+    wherever the wrapper is already in the process, so nothing else notices.
+    DLLs are skipped: a Windows link fails on the missing import anyway.
+    """
+    offenders: dict[str, list[str]] = {}
+    checked = 0
+    for plugin in plugins:
+        if plugin.naming is not ELF_NAMING:
+            print(f"SKIP: {Path(plugin.path).name} is not an ELF file")
+            continue
+        checked += 1
+        plain = sorted(
+            s
+            for s in plugin.undefined_dynamic_symbols()
+            if PUBLIC_API_RE.match(s) and not s.endswith("_impl")
+        )
+        if plain:
+            offenders[Path(plugin.path).name] = plain
+    if not offenders:
+        print(f"PASS: {checked} CK plugin(s) reference only _impl entry points")
+        return True
+    print("FAIL: CK plugins reference MIOpen entry points by their plain name:")
+    for name, symbols in sorted(offenders.items()):
+        print(f"  {name}: {', '.join(symbols)}")
+    print(PLUGIN_REMEDY)
+    return False
+
+
 def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
     """No installed header may name an entry point by its private spelling.
 
@@ -1789,6 +1862,9 @@ def cmd_check_wrapper(args) -> int:
         ok &= check_coversioned(lib, private)
         ok &= check_impl_superset(lib, private)
 
+    if args.plugin:
+        ok &= check_plugins_renamed([open_library(p, "CK plugin") for p in args.plugin])
+
     print(f"wrapper public-abi symbol check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
@@ -2057,6 +2133,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional committed DT_NEEDED baseline (Linux only; an error for a DLL); "
         "when given, the full runtime dependency list must match it exactly. The "
         "private-library and hipDNN-backend entries are checked either way",
+    )
+    p.add_argument(
+        "--plugin",
+        action="append",
+        default=[],
+        help="path to a CK plugin library (repeatable); when given, it must reference "
+        "MIOpen's C entry points only by their _impl names",
     )
     p.set_defaults(func=cmd_check_wrapper)
 

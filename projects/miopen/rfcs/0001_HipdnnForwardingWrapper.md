@@ -234,8 +234,9 @@ Once the hipDNN MIOpen-provider plugin links `libMIOpen_private.so.1` and calls 
 - `libMIOpen_private.so` SOVERSION bumps **in lockstep with `libMIOpen.so` SOVERSION**, on the same release cadence, out of the same source tree. They are never released independently. The two libraries' `<X>` and `<Y>` in `.so.<X>.<Y>` always match.
 - The SOVERSION bumps whenever either (a) the public C API in `<miopen/miopen.h>` has an ABI-incompatible change (the existing MIOpen policy) or (b) any `_impl` signature in `<miopen/miopen_impl.h>` has an ABI-incompatible change. Because the two headers are kept in sync (§4.6), in practice these reduce to the same trigger.
 - Adding new entry points (e.g. `miopenGetLastForwardedError()` from §6.1) is an additive change and does not bump SOVERSION — same policy the public library already follows.
+- **The ABI is not frozen until the first release that ships the wrapper.** Until then an `_impl` name can be added, renamed or removed without a SOVERSION bump, as long as every in-tree consumer (the hipDNN MIOpen provider, the CK grouped-convolution plugins and the tests) is rebuilt from the same tree. `wrapper_abi_check` fails if a built CK plugin references an entry point by its plain name instead of its `_impl` name.
 
-**Version-skew matrix for `{wrapper, private, provider plugin}`.**
+**Version-skew matrix for `{wrapper, private, provider plugin}`** (applies once the ABI is frozen).
 
 | Scenario | Behavior |
 |---|---|

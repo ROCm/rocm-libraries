@@ -74,10 +74,10 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
-- **`wrapper_abi_check`, `wrapper_bare_link_check` and `forwarding_failure_modes` get the same split.** They need no GPU,
-  but on an architecture that `test_categories.yaml` declares, the runner selects
-  `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only tier labels does not match. Each
-  therefore also has one entry per `ex_gpu_*` label, such as
+- **`wrapper_abi_check`, `wrapper_bare_link_check` and `forwarding_failure_modes` get the same
+  split.** They need no GPU, but on an architecture that `test_categories.yaml` declares, the
+  runner selects `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only tier labels does
+  not match. Each therefore also has one entry per `ex_gpu_*` label, such as
   `wrapper_abi_check_ex_gpu_gfx110X`, so TheRock's GPU jobs run them. `miopen_add_wrapper_check`
   registers the build-tree entries and `miopen_append_installed_wrapper_check` the packaged ones.
   Select the bare entry by name with `ctest -R '^wrapper_abi_check$'`.
@@ -117,8 +117,10 @@ and on `PATH` on Windows.
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
 two built libraries. It also checks the wrapper's list of required shared libraries
 (`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
-hipDNN backend is opened on first use rather than required at load time. The full list is
-also committed as `test/public_abi/wrapper_needed.baseline` (Linux only), but the ctest entry
+hipDNN backend is opened on first use rather than required at load time. It also fails if a
+`libMIOpenCKGroupedConv_*.so` beside the libraries references a MIOpen entry point by its plain
+name instead of its `_impl` name; a build without CK skips this. The full list is also
+committed as `test/public_abi/wrapper_needed.baseline` (Linux only), but the ctest entry
 does not compare against it, because it names ROCm soversions and the x86-64 loader and would
 fail on every ROCm update. To compare it by hand, pass `--needed-baseline
 test/public_abi/wrapper_needed.baseline` to `script/check_wrapper_abi.py`. On Windows it reads

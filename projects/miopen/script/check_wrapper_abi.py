@@ -19,7 +19,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from miopen_wrapper_libs import ON_WINDOWS, default_lib_dirs, resolve_pair
+from miopen_wrapper_libs import (
+    ON_WINDOWS,
+    default_lib_dirs,
+    find_ck_plugins,
+    resolve_pair,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -81,6 +86,11 @@ def main(argv=None, windows=ON_WINDOWS):
         command += ["--needed-baseline", args.needed_baseline]
     if args.public_header:
         command += ["--public-header", args.public_header]
+    plugins = find_ck_plugins(wrapper_lib.parent, windows)
+    for plugin in plugins:
+        command += ["--plugin", plugin]
+    if not plugins:
+        print("no CK plugins beside the libraries; the plugin check is not run")
     print(f"+ {' '.join(str(a) for a in command)}", flush=True)
     return subprocess.run([str(a) for a in command]).returncode
 

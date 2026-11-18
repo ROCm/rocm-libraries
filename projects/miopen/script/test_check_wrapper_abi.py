@@ -105,6 +105,21 @@ class WrapperAbiCheckTest(unittest.TestCase):
             str(self.tree / "lib" / "libMIOpen_private.so.1.0"),
         )
 
+    def test_ck_plugins_beside_the_libraries_are_forwarded_to_the_abi_check(self):
+        plugin = self.tree / "lib" / "libMIOpenCKGroupedConv_gfx90a.so"
+        plugin.touch()
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        self.assertEqual(argv[argv.index("--plugin") + 1], str(plugin))
+
+    def test_no_plugin_option_is_passed_when_there_are_no_plugins(self):
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        self.assertNotIn("--plugin", argv)
+        self.assertIn("plugin check is not run", result.stdout)
+
     def test_symbol_lists_are_forwarded_to_the_abi_check(self):
         baseline = self.tree / "baseline.txt"
         wrapper_only = self.tree / "wrapper_only.txt"
