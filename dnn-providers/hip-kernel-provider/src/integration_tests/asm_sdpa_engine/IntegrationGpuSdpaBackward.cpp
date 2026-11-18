@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -235,16 +236,43 @@ protected:
             .setBand(_leftBound, _rightBound, _topLeftAlignment)
             .setLse(&shallowStats);
 
-        // A sink large enough to move the Stats well past the tolerance: the Stats must carry
-        // it, as the backward kernels read the sink only through them.
+        // A sink that holds most of every row's softmax mass, so the Stats move well past the
+        // tolerance: the backward kernels read the sink only through the Stats. It is sized from
+        // the data, one above the head's largest sink-free LSE, because the LSE grows with the
+        // sequence length and the score scale.
         std::optional<ShallowTensor<float>> shallowSink;
         if(_sinkAttr)
         {
+            std::vector<DataType> scratchO(oTensor.elementSpace());
+            ShallowTensor<DataType> shallowScratchO(
+                scratchO.data(), oTensor.dims(), oTensor.strides());
+            std::vector<float> freeLse(
+                static_cast<size_t>(statsDims[0] * statsDims[1] * statsDims[2]));
+            ShallowTensor<float> shallowFreeLse(freeLse.data(), statsDims, statsStrides);
+            SdpaFwdOptions<float> freeOptions;
+            freeOptions.setScale(_attnScaleValue)
+                .setBand(_leftBound, _rightBound, _topLeftAlignment)
+                .setLse(&shallowFreeLse);
+            CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
+                shallowQ, shallowK, shallowV, shallowScratchO, freeOptions);
+
             auto& sinkTensor = bundle.getTensor(_sinkAttr->get_uid());
             auto* sinkValues = static_cast<float*>(sinkTensor.rawHostData());
+            const auto rowsPerHead = static_cast<size_t>(statsDims[2]);
             for(size_t head = 0; head < sinkTensor.elementSpace(); ++head)
             {
-                sinkValues[head] = 6.0F + 0.5F * static_cast<float>(head);
+                float largestLse = -std::numeric_limits<float>::infinity();
+                for(int64_t b = 0; b < statsDims[0]; ++b)
+                {
+                    const auto first
+                        = (static_cast<size_t>(b) * static_cast<size_t>(statsDims[1]) + head)
+                          * rowsPerHead;
+                    for(size_t row = 0; row < rowsPerHead; ++row)
+                    {
+                        largestLse = std::max(largestLse, freeLse[first + row]);
+                    }
+                }
+                sinkValues[head] = largestLse + 1.0F;
             }
             sinkTensor.markHostModified();
             shallowSink.emplace(sinkTensor.rawHostData(), sinkTensor.dims(), sinkTensor.strides());
@@ -410,13 +438,9 @@ protected:
             }
             VerificationRun run;
             ASSERT_NO_FATAL_FAILURE(this->prepareVerification(sinkContext, 0, run));
-            // Poison the gradients so an element the kernels do not write fails the comparison.
-            run.gpuBundle.sentinelFillOutputTensors();
-            ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, graph, this->_handle));
 
-            // The reference above carries the sink in its Stats. Without the sink the same
-            // inputs must give gradients that differ by far more than the tolerance, or the
-            // comparison could not tell a sink-inclusive Stats from a sink-free one.
+            // The same inputs without the sink. The forward runs before any graph, so the check
+            // below is on the inputs the engine and the reference both receive.
             const auto cpuShallow = [&run](int64_t uid) {
                 auto& tensor = run.cpuBundle.getTensor(uid);
                 return std::make_unique<ShallowTensor<DataType>>(
@@ -428,15 +452,39 @@ protected:
             const auto dORef = cpuShallow(dO->get_uid());
             hipdnn_data_sdk::utilities::Tensor<DataType> oFree(oDims);
             hipdnn_data_sdk::utilities::Tensor<float> lseFree(statsDims);
-            hipdnn_data_sdk::utilities::Tensor<DataType> dqFree(testCase.qDims);
-            hipdnn_data_sdk::utilities::Tensor<DataType> dkFree(testCase.kDims);
-            hipdnn_data_sdk::utilities::Tensor<DataType> dvFree(testCase.vDims);
             SdpaFwdOptions<float> freeFwdOptions;
             freeFwdOptions.setScale(testCase.attnScaleValue)
                 .setBand(testCase.leftBound, testCase.rightBound, testCase.topLeftAlignment)
                 .setLse(&lseFree);
             CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
                 *qRef, *kRef, *vRef, oFree, freeFwdOptions);
+
+            // The Stats both sides read must carry the sink: a sink-free Stats would make the
+            // engine and the reference agree without exercising the sink at all.
+            {
+                auto& bundleStats = run.cpuBundle.getTensor(stats->get_uid());
+                const auto* sinkStats = static_cast<const float*>(bundleStats.rawHostData());
+                const auto* freeLse = lseFree.memory().hostData();
+                float largestShift = 0.0F;
+                for(size_t i = 0; i < lseFree.elementSpace(); ++i)
+                {
+                    largestShift = std::max(largestShift, std::abs(sinkStats[i] - freeLse[i]));
+                }
+                ASSERT_GT(largestShift, 0.1F)
+                    << "the Stats fed to the backward do not carry the sink: Stats[0] = "
+                    << sinkStats[0] << ", sink-free LSE[0] = " << freeLse[0];
+            }
+
+            // Poison the gradients so an element the kernels do not write fails the comparison.
+            run.gpuBundle.sentinelFillOutputTensors();
+            ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, graph, this->_handle));
+
+            // Without the sink the same inputs must give gradients that differ by far more than
+            // the tolerance, or the comparison could not tell a sink-inclusive Stats from a
+            // sink-free one.
+            hipdnn_data_sdk::utilities::Tensor<DataType> dqFree(testCase.qDims);
+            hipdnn_data_sdk::utilities::Tensor<DataType> dkFree(testCase.kDims);
+            hipdnn_data_sdk::utilities::Tensor<DataType> dvFree(testCase.vDims);
             SdpaBwdOptions<float> freeBwdOptions;
             freeBwdOptions.setScale(testCase.attnScaleValue)
                 .setBand(testCase.leftBound, testCase.rightBound, testCase.topLeftAlignment)
@@ -453,7 +501,9 @@ protected:
                                          float>(
                 *qRef, *kRef, *vRef, oFree, *dORef, dqFree, dkFree, dvFree, freeBwdOptions);
 
-            const auto separates
+            // The largest difference from the sink-free gradient, as a fraction of the
+            // sink-inclusive reference's largest element.
+            const auto separation
                 = [&run](int64_t uid,
                          const hipdnn_data_sdk::utilities::Tensor<DataType>& withoutSink) {
                       auto& reference = run.cpuBundle.getTensor(uid);
@@ -469,12 +519,15 @@ protected:
                           largest = std::max(largest, std::abs(a));
                           largestDiff = std::max(largestDiff, std::abs(a - b));
                       }
-                      return static_cast<double>(largestDiff)
-                             > 4.0 * K_SINK_REL_TOLERANCE * static_cast<double>(largest);
+                      return largest > 0.0F ? static_cast<double>(largestDiff / largest) : 0.0;
                   };
-            ASSERT_TRUE(separates(dq->get_uid(), dqFree)) << "dQ does not depend on the sink";
-            ASSERT_TRUE(separates(dk->get_uid(), dkFree)) << "dK does not depend on the sink";
-            ASSERT_TRUE(separates(dv->get_uid(), dvFree)) << "dV does not depend on the sink";
+            const double bar = 4.0 * K_SINK_REL_TOLERANCE;
+            const double dqSeparation = separation(dq->get_uid(), dqFree);
+            const double dkSeparation = separation(dk->get_uid(), dkFree);
+            const double dvSeparation = separation(dv->get_uid(), dvFree);
+            EXPECT_GT(dqSeparation, bar) << "dQ barely depends on the sink";
+            EXPECT_GT(dkSeparation, bar) << "dK barely depends on the sink";
+            EXPECT_GT(dvSeparation, bar) << "dV barely depends on the sink";
             return;
         }
 
