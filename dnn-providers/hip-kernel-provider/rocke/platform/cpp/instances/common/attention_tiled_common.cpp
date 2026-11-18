@@ -19,7 +19,6 @@
  * never reads build N's freed arena.
  */
 
-#include <stdarg.h>
 #include <stdio.h>
 
 #include "rocke/error.hpp"
@@ -27,26 +26,6 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t, calculate_x */
 #include "rocke/instance_attention_tiled_common_internal.h"
 #include "rocke/ir.h"
-
-/* ------------------------------------------------------------- error latch */
-
-/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
- * entry boundary catches it and records status + message on the builder, so the
- * C ABI is unchanged. [[noreturn]] keeps the existing
- * `return (T*)rocke_attn_tiled_set_err(...)` call sites valid -- the cast/return is
- * simply never reached. */
-[[noreturn]] static void*
-    rocke_attn_tiled_set_err(rocke_ir_builder_t* b, rocke_status_t st, const char* fmt, ...)
-{
-    (void)b;
-    char msg[ROCKE_ERR_MSG_CAP];
-    va_list ap;
-    va_start(ap, fmt);
-    (void)vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
-    msg[sizeof(msg) - 1] = '\0';
-    ckc::raise_status(st, msg);
-}
 
 /* ------------------------------------------------------ _C32_DIST (cached) */
 /* make_static_tile_distribution(make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16()))
@@ -85,7 +64,7 @@ static const rocke_tile_distribution_t* rocke_attn2d_c32_dist(rocke_ir_builder_t
     atom = rocke_mfma_atom("f16", 32, 32, 16);
     if(atom == NULL)
     {
-        rocke_attn_tiled_set_err(b, ROCKE_ERR_VALUE, "_C32_DIST: no f16 32x32x16 MFMA atom");
+        ckc::raise_status(ROCKE_ERR_VALUE, "_C32_DIST: no f16 32x32x16 MFMA atom");
         return NULL;
     }
     enc = rocke_make_c_warp_dstr_encoding(b, atom);
@@ -122,8 +101,10 @@ rocke_value_t* rocke__mfma_32x32_c_row(rocke_ir_builder_t* b, rocke_value_t* lan
     /* if not (0 <= elem_idx < 16): raise ValueError */
     if(!(elem_idx >= 0 && elem_idx < 16))
     {
-        return (rocke_value_t*)rocke_attn_tiled_set_err(
-            b, ROCKE_ERR_VALUE, "mfma_32x32x16 elem_idx must be 0..15, got %d", elem_idx);
+        /* Raised as a ckc::Error; the public entry boundary records it on b. */
+        ckc::raise_status(
+            ROCKE_ERR_VALUE,
+            ckc::format_error("mfma_32x32x16 elem_idx must be 0..15, got %d", elem_idx).c_str());
     }
 
     dist = rocke_attn2d_c32_dist(b);
