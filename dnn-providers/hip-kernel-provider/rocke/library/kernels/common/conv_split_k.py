@@ -44,8 +44,8 @@ atomic whenever it can be built, else the workspace, else no split. The kernel
 builders and the benchmark, which used to feed the CK formula unmerged
 per-group dims, get it on the launched geometry (merged dims, launched group
 count). For dgrad the CK-formula auto degree of a 16-bit dtype is also held to
-:data:`ATOMIC_16BIT_MAX_SPLIT_K` (dgrad has no workspace to move to); the wgrad
-CK-formula path is not.
+:data:`ATOMIC_16BIT_MAX_SPLIT_K`; the wgrad CK-formula path (``atomic_cap=False``)
+is not.
 
 ``override`` forces the degree of an auto request: ``1`` forces no split, an
 integer ``n >= 2`` forces that degree, held to what the kernel can build --

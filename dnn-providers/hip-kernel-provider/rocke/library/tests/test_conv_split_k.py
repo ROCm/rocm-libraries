@@ -4,8 +4,8 @@
 
 CPU-only. Covers the conv-specific limits (reduction availability, the 16-bit
 atomic cap, merged groups, gridDim.z), the override and explicit paths, and
-that an arch without a fitted cost model resolves exactly as the previous
-CK-formula rule did.
+that an arch without a fitted cost model resolves as the previous CK-formula
+rule did, except that a 16-bit dgrad degree is held to the atomic cap.
 """
 
 from __future__ import annotations
