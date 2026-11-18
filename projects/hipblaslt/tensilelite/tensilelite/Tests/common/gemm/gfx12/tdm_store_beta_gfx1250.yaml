@@ -28,12 +28,12 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # beta != 0, every TDMStoreInst level with AdaptiveGemm and SourceSwap 0 and 1 and
+  # beta != 0, TDMStoreInst off and on with AdaptiveGemm and SourceSwap 0 and 1 and
   # TDMInst 0 and 3: the TDM block loads C with tensor_load_to_lds bounded by
   # tensor_dim. The second size has a leading dimension larger than M, a multiple
   # of 8, and the next two give C and D different leading dimensions, of which
   # only one is a multiple of 8, so that the columns of C or of D do not start
-  # 16-byte aligned there, as where ldd = M = 511: level 3 loads and stores those
+  # 16-byte aligned there, as where ldd = M = 511: with it on it loads and stores those
   # tiles through the TDM block too. The last two leave one column in N, which only
   # the first wave loads and stores: at M = 511 the last tile has a WorkGroup0
   # offset, and at M = 253 the tile ends inside a store vector, so tensor_dim0
@@ -109,8 +109,8 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: relu]
   ########################################
-  # Non-atomic StreamK=3 at every level that uses the TDM block: whole tiles and the
-  # tiles completed by the fixup read C in the TDM block on the paths of the level;
+  # Non-atomic StreamK=3 with it on: whole tiles and the
+  # tiles completed by the fixup read C in the TDM block on every path;
   # with K=1600 every workgroup stores two tiles. In the 32-batch sizes the last
   # element of a batch lies inside a store vector, so tensor_dim clips the C load
   # and the D store mid-vector, where a buffer load of C only partly in range
@@ -142,9 +142,9 @@ BenchmarkProblems:
           - Exact: [505, 509, 32, 64, 520, 520, 64, 64]
           - Exact: [505, 257, 32, 64, 520, 520, 64, 64]
   ########################################
-  # bf16 at store vector width 1 on every TDMStoreInst level, with AdaptiveGemm 0 and 1:
-  # the store-width cascade has one masked block, which levels 1 and 2 store through
-  # the TDM block, reading each C element back with a 2-byte DS load, and level 3 adds
+  # bf16 at store vector width 1 with TDMStoreInst off and on, with AdaptiveGemm 0 and 1:
+  # the store-width cascade has one masked block, which with it on stores through
+  # the TDM block, reading each C element back with a 2-byte DS load, together with
   # the NonEdge path. The sizes have M-edge-only, N-edge-only, corner and interior
   # tiles and a leading dimension larger than M.
   ########################################
@@ -172,10 +172,10 @@ BenchmarkProblems:
           - Exact: [512, 509, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
   ########################################
-  # fp16 output at every TDMStoreInst level: the TDM block reads C back from the staged
+  # fp16 output with TDMStoreInst off and on: the TDM block reads C back from the staged
   # tile with 16-byte loads, and at store vector width 1 with one ds_load_u16 or
   # ds_load_u16_d16_hi per element, the odd ones into the high half of their VGPR.
-  # At width 1 levels 1 to 3 store the one masked block through the TDM block.
+  # At width 1 the switch stores the one masked block through the TDM block.
   ########################################
   -
     - <<: *problem_type_bf16
@@ -202,7 +202,7 @@ BenchmarkProblems:
           - Exact: [253, 257, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
   ########################################
-  # StoreVectorWidth 4 at every level that uses the TDM block, which then stages and
+  # StoreVectorWidth 4 with it on, where the TDM block then stages and
   # reads back 8-byte vectors. The sizes have NonEdge, M-edge, N-edge and corner
   # workgroups and a leading dimension larger than M.
   ########################################
@@ -1117,7 +1117,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 256]
   ########################################
   # int32 D from int32 accumulators, which the TDM block stages as 4-byte elements like fp32 D, at every
-  # TDMStoreInst level on the setup of i8ii_gfx1250.yaml: i8 inputs, ScaleAlphaVec and the activations.
+  # TDMStoreInst off and on over the setup of i8ii_gfx1250.yaml: i8 inputs, ScaleAlphaVec and the activations.
   ########################################
   -
     - # ProblemType
@@ -1192,7 +1192,7 @@ BenchmarkProblems:
   ########################################
   # bf8 D converted from fp32 accumulators and int8 D from int32 accumulators: 1-byte elements, which the
   # TDM block stages with ds_store_b8 at store vector width 1 and reads back with ds_load_u8, at every
-  # TDMStoreInst level on bf8 and int8 inputs. M is odd and ldd = 136, so the columns of D do not start
+  # TDMStoreInst off and on over bf8 and int8 inputs. M is odd and ldd = 136, so the columns of D do not start
   # 16-byte aligned.
   ########################################
   -
@@ -1256,7 +1256,7 @@ BenchmarkProblems:
   ########################################
   # fp64 D on a VALU kernel as f64_gfx1250.yaml builds and complex float D on a WMMA kernel as cgemm_gfx1250.yaml
   # builds: 8-byte elements, which the TDM block stages from their register pairs, with ds_store_b64 at store vector
-  # width 1, at every TDMStoreInst level.
+  # width 1, with TDMStoreInst off and on.
   ########################################
   -
     - # ProblemType
@@ -1322,7 +1322,7 @@ BenchmarkProblems:
   ########################################
   # fp16 D converted from fp32 accumulators on the setup of every bf16 D problem above but the store hints and
   # the bias types: the TDM block stages each fp16 element from the low half of its own register and reads odd C
-  # elements back with ds_load_u16_d16_hi, at every level and path of those problems.
+  # elements back with ds_load_u16_d16_hi, on every path of those problems with it on.
   ########################################
   - - {OperationType: GEMM, DataType: h, DestDataType: h, ComputeDataType: s, HighPrecisionAccumulate: true, UseBeta: true,
       Batched: true, TransposeA: true, TransposeB: false}
@@ -1755,7 +1755,7 @@ BenchmarkProblems:
         - Exact: [384, 125, 2, 128, 400, 400, 128, 128]
   ########################################
   # Bias, ScaleAlphaVec and hipblaslt_all with ActivationFuncCall at store vector widths 8 and 1: the activation
-  # subroutine runs between the conversions and the staging of the TDM block at every level.
+  # subroutine runs between the conversions and the staging of the TDM block with it on.
   ########################################
   - - {OperationType: GEMM, DataType: b, DestDataType: b, ComputeDataType: s, HighPrecisionAccumulate: true,
       UseBeta: true, Batched: true, TransposeA: true, TransposeB: false, UseBias: 1,
@@ -1844,7 +1844,7 @@ BenchmarkProblems:
         - - {Enum: none}
         - - {Enum: Gelu}
   ########################################
-  # Develop's Gradient setup with E as input (fp16_use_e_gfx1250.yaml, without CompactLoopStore) at every level.
+  # Develop's Gradient setup with E as input (fp16_use_e_gfx1250.yaml, without CompactLoopStore), off and on.
   ########################################
   - - {OperationType: GEMM, DataType: h, DestDataType: h, ComputeDataType: s, Gradient: true,
       UseE: true, Activation: false, HighPrecisionAccumulate: true, TransposeA: false,
