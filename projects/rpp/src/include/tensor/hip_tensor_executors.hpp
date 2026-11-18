@@ -630,13 +630,6 @@ RppStatus hip_exec_bilateral_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
                                            RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                            rpp::Handle& handle);
 
-template <typename T>
-RppStatus hip_exec_bilateral_filter_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
-                                                 RpptDescPtr dstDescPtr, Rpp32f* stdDevSpaceTensor,
-                                                 Rpp32f* stdDevRangeTensor, Rpp32u kernelSize,
-                                                 RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
-                                                 rpp::Handle& handle);
-
 /**************************************** GEOMETRIC AUGMENTATIONS
  * ****************************************/
 

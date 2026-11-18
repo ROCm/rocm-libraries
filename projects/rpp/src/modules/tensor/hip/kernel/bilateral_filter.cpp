@@ -179,17 +179,6 @@ RppStatus hip_exec_bilateral_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
     return RPP_SUCCESS;
 }
 
-template <typename T>
-RppStatus hip_exec_bilateral_filter_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
-                                                 RpptDescPtr dstDescPtr, Rpp32f* stdDevSpaceTensor,
-                                                 Rpp32f* stdDevRangeTensor, Rpp32u kernelSize,
-                                                 RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
-                                                 rpp::Handle& handle) {
-    return hip_exec_bilateral_filter_tensor(srcPtr, srcDescPtr, dstPtr, dstDescPtr,
-                                            stdDevSpaceTensor, stdDevRangeTensor, kernelSize,
-                                            roiTensorPtrSrc, roiType, handle);
-}
-
 template RppStatus hip_exec_bilateral_filter_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,
                                                            Rpp32f*, Rpp32f*, Rpp32u, RpptROIPtr,
                                                            RpptRoiType, rpp::Handle&);
@@ -205,23 +194,3 @@ template RppStatus hip_exec_bilateral_filter_tensor<Rpp32f>(Rpp32f*, RpptDescPtr
 template RppStatus hip_exec_bilateral_filter_tensor<Rpp8s>(Rpp8s*, RpptDescPtr, Rpp8s*, RpptDescPtr,
                                                            Rpp32f*, Rpp32f*, Rpp32u, RpptROIPtr,
                                                            RpptRoiType, rpp::Handle&);
-
-template RppStatus hip_exec_bilateral_filter_single_image<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*,
-                                                                 RpptDescPtr, Rpp32f*, Rpp32f*,
-                                                                 Rpp32u, RpptROIPtr, RpptRoiType,
-                                                                 rpp::Handle&);
-
-template RppStatus hip_exec_bilateral_filter_single_image<half>(half*, RpptDescPtr, half*,
-                                                                RpptDescPtr, Rpp32f*, Rpp32f*,
-                                                                Rpp32u, RpptROIPtr, RpptRoiType,
-                                                                rpp::Handle&);
-
-template RppStatus hip_exec_bilateral_filter_single_image<Rpp32f>(Rpp32f*, RpptDescPtr, Rpp32f*,
-                                                                  RpptDescPtr, Rpp32f*, Rpp32f*,
-                                                                  Rpp32u, RpptROIPtr, RpptRoiType,
-                                                                  rpp::Handle&);
-
-template RppStatus hip_exec_bilateral_filter_single_image<Rpp8s>(Rpp8s*, RpptDescPtr, Rpp8s*,
-                                                                 RpptDescPtr, Rpp32f*, Rpp32f*,
-                                                                 Rpp32u, RpptROIPtr, RpptRoiType,
-                                                                 rpp::Handle&);

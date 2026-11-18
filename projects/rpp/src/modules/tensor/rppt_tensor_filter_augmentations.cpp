@@ -822,81 +822,36 @@ RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
-        if (srcDescPtr->n == 1 && dstDescPtr->n == 1) {
-            if ((srcDescPtr->dataType == RpptDataType::U8) &&
-                (dstDescPtr->dataType == RpptDataType::U8)) {
-                return hip_exec_bilateral_filter_single_image(
-                    static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
-                    static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                    stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType,
-                    handle);
-            } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
-                       (dstDescPtr->dataType == RpptDataType::F16)) {
-                return hip_exec_bilateral_filter_single_image(
-                    reinterpret_cast<half*>(static_cast<Rpp8u*>(srcPtr) +
-                                            srcDescPtr->offsetInBytes),
-                    srcDescPtr,
-                    reinterpret_cast<half*>(static_cast<Rpp8u*>(dstPtr) +
-                                            dstDescPtr->offsetInBytes),
-                    dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
-                    roiType, handle);
-            } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
-                       (dstDescPtr->dataType == RpptDataType::F32)) {
-                return hip_exec_bilateral_filter_single_image(
-                    reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
-                                              srcDescPtr->offsetInBytes),
-                    srcDescPtr,
-                    reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
-                                              dstDescPtr->offsetInBytes),
-                    dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
-                    roiType, handle);
-            } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
-                       (dstDescPtr->dataType == RpptDataType::I8)) {
-                return hip_exec_bilateral_filter_single_image(
-                    static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
-                    static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                    stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType,
-                    handle);
-            } else
-                return RPP_ERROR_NOT_IMPLEMENTED;
+        if ((srcDescPtr->dataType == RpptDataType::U8) &&
+            (dstDescPtr->dataType == RpptDataType::U8)) {
+            return hip_exec_bilateral_filter_tensor(
+                static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
+                   (dstDescPtr->dataType == RpptDataType::F16)) {
+            return hip_exec_bilateral_filter_tensor(
+                reinterpret_cast<half*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<half*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
+                roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
+                   (dstDescPtr->dataType == RpptDataType::F32)) {
+            return hip_exec_bilateral_filter_tensor(
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
+                roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
+                   (dstDescPtr->dataType == RpptDataType::I8)) {
+            return hip_exec_bilateral_filter_tensor(
+                static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType, handle);
         } else {
-            if ((srcDescPtr->dataType == RpptDataType::U8) &&
-                (dstDescPtr->dataType == RpptDataType::U8)) {
-                return hip_exec_bilateral_filter_tensor(
-                    static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
-                    static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                    stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType,
-                    handle);
-            } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
-                       (dstDescPtr->dataType == RpptDataType::F16)) {
-                return hip_exec_bilateral_filter_tensor(
-                    reinterpret_cast<half*>(static_cast<Rpp8u*>(srcPtr) +
-                                            srcDescPtr->offsetInBytes),
-                    srcDescPtr,
-                    reinterpret_cast<half*>(static_cast<Rpp8u*>(dstPtr) +
-                                            dstDescPtr->offsetInBytes),
-                    dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
-                    roiType, handle);
-            } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
-                       (dstDescPtr->dataType == RpptDataType::F32)) {
-                return hip_exec_bilateral_filter_tensor(
-                    reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
-                                              srcDescPtr->offsetInBytes),
-                    srcDescPtr,
-                    reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
-                                              dstDescPtr->offsetInBytes),
-                    dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
-                    roiType, handle);
-            } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
-                       (dstDescPtr->dataType == RpptDataType::I8)) {
-                return hip_exec_bilateral_filter_tensor(
-                    static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
-                    static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                    stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType,
-                    handle);
-            } else {
-                return RPP_ERROR_INCOMPATIBLE_BACKEND;
-            }
+            return RPP_ERROR_NOT_IMPLEMENTED;
         }
     }
 #endif
