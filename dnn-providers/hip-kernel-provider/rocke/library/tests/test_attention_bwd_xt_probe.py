@@ -53,12 +53,15 @@ import tempfile
 from collections import defaultdict
 from pathlib import Path
 
-if __name__ == "__main__":  # child process: make the library importable
+if __name__ == "__main__":  # run by hand: make the library importable
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform" / "python"))
 
 import pytest
 from rocke.core.ir import F16, I32, IRBuilder, PtrType
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 from kernels.common._attention_bwd_lds import (
     LDS_LINE_BYTES,
@@ -385,6 +388,7 @@ def test_conflict_counter_matches_predictor_on_device():
     if prof is None:
         pytest.skip("rocprofv3 not found")
     pytest.importorskip("numpy")
+    library = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory() as tmp:
         cmd = [
             prof,
@@ -398,14 +402,17 @@ def test_conflict_counter_matches_predictor_on_device():
             "-o",
             "xtprobe",
             "--",
-            sys.executable,
-            str(Path(__file__).resolve()),
-            "--run-probe",
-            arch,
+            *rocke_python_command(Path(__file__).resolve(), "--run-probe", arch),
         ]
         # cwd: rocprofv3 writes its counter buffers to ./.rocprofv3 even with -d
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=900, check=False, cwd=tmp
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=900,
+            check=False,
+            cwd=tmp,
+            env=rocke_subprocess_env(python_paths=(library,)),
         )
         assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-4000:]
         sums = _parse_counter_csv(Path(tmp))
