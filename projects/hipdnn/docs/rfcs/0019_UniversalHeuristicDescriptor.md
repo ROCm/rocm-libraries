@@ -1702,7 +1702,7 @@ the trainer, and the runtime compute the same number.
    | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
    | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
    | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
-   | `GdnAttributes`, `KdaAttributes` | `8·T·HO·V·K` | Four `V × K` products per token and output head (`S k`, the rank-one correction, `v kᵀ`, `S q`); decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
+   | `GdnAttributes`, `KdaAttributes` | `6·T·HO·V·K` | Three `V × K` products per token and output head: `S k`, the rank-one update `β (v − S k) kᵀ` (`S (I − β k kᵀ) + β v kᵀ` is `S` plus that one product), and `S q`; decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
    | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
 
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,

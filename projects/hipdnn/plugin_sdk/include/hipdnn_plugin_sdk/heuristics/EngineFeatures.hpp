@@ -228,13 +228,19 @@ std::optional<KeyExtent> denseKeys(const Graph& graph, const TAttention& op)
     return KeyExtent{k->dims()->Get(2)};
 }
 
-/// The keys per sequence an SDPA forward node declares, inferred as cuDNN and the test SDK
-/// references (`sdpaPagedMaxSeqKv`) do. Either K or V may be paged alone, each side with its
-/// own table [B, 1, pages, 1] and block size. The keys are `max_seq_len_kv` when stated; else
-/// an unpaged K's, then V's, sequence extent; else the attention mask's last extent; else
-/// rng_dump's; else the smaller of the paged sides' pages x block size. Nullopt when they
-/// cannot be read, exceed a paged side's capacity or differ from an unpaged side's extent: the
-/// work is then unknown. The bench writes `seq_len_kv` and `cu_seq_len_kv` from the same keys.
+/// The keys per sequence an SDPA forward node declares, inferred in the order of cuDNN's
+/// `infer_s_kv` and the test SDK references' `sdpaPagedMaxSeqKv`. Either K or V may be paged
+/// alone, each side with its own table [B, 1, pages, 1] and block size. The keys are
+/// `max_seq_len_kv` when stated; else an unpaged K's, then V's, sequence extent; else the
+/// attention mask's last extent; else rng_dump's; else the smaller of the paged sides' pages x
+/// block size. Nullopt when they cannot be read, exceed a paged side's capacity or differ from
+/// an unpaged side's extent: the work is then unknown. On every layout `sdpaPagedMaxSeqKv`
+/// accepts the keys are the same. It counts a superset: it does not require `seq_len_q` and
+/// `seq_len_kv`, an INT32 table of shape [B, 1, pages, 1], a table of exactly
+/// ceil(keys / block size) pages, or a mask as wide as the keys or 1, so a table wider than the
+/// keys counts the keys, and a mask broadcast over the keys (last extent 1) on two paged sides
+/// gives one key, as `infer_s_kv` does. The bench writes `seq_len_kv` and `cu_seq_len_kv` from
+/// the same keys.
 inline std::optional<KeyExtent>
     keyExtent(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
 {
@@ -627,9 +633,10 @@ inline std::optional<double>
 }
 
 /// The delta-rule recurrence's multiply-adds per token and output head: S k, the rank-one
-/// correction, v k^T and S q, each V x K; decay and gating are elementwise and not counted.
-/// q [T, H, K] and o [T, HO, V] are token-packed, so how the tokens split into sequences
-/// does not change it.
+/// update (v - S k) k^T, which carries both the correction and the write since
+/// S (I - beta k k^T) + beta v k^T = S + beta (v - S k) k^T, and S q, each V x K; decay and
+/// gating are elementwise and not counted. q [T, H, K] and o [T, HO, V] are token-packed, so
+/// how the tokens split into sequences does not change it.
 template <typename TRecurrence>
 std::optional<double> deltaRuleFlops(const Graph& graph, const TRecurrence& op)
 {
@@ -640,7 +647,7 @@ std::optional<double> deltaRuleFlops(const Graph& graph, const TRecurrence& op)
     {
         return std::nullopt;
     }
-    return 8.0 * static_cast<double>(q->dims()->Get(0)) * static_cast<double>(o->dims()->Get(1))
+    return 6.0 * static_cast<double>(q->dims()->Get(0)) * static_cast<double>(o->dims()->Get(1))
            * static_cast<double>(o->dims()->Get(2)) * static_cast<double>(q->dims()->Get(2));
 }
 

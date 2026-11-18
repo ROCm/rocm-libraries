@@ -1176,7 +1176,8 @@ GraphT pagedGraph(const SdpaAttributesT& sdpa,
 
 // The keys of a paged node are inferred as cuDNN and the references (sdpaPagedMaxSeqKv) do:
 // either side may be paged alone with its own block size, and the keys never exceed what a
-// paged side holds.
+// paged side holds. The work model counts a superset of the layouts the references accept; the
+// last two cases are layouts they decline, pinned so that the superset stays a decision.
 TEST(TestEngineFeatures, PagedKeysAreInferredAsTheReferencesDo)
 {
     const auto paged = [](bool pageK, bool pageV) {
@@ -1282,6 +1283,17 @@ TEST(TestEngineFeatures, PagedKeysAreInferredAsTheReferencesDo)
     cases.push_back({"a maximum an unpaged V does not hold",
                      pagedGraph(kWithMax, {6, 2, 4, 16}, {2, 2, 10, 32}, {2, 1, 3, 1}),
                      std::nullopt});
+    // K's table has 3 pages of 4 where V's 6 keys need ceil(6 / 4) = 2: the references
+    // decline a table wider than the keys, the work model counts V's keys.
+    cases.push_back({"a table wider than the keys",
+                     pagedGraph(paged(true, false), {6, 2, 4, 16}, {2, 2, 6, 32}, {2, 1, 3, 1}),
+                     flopsFor(6)});
+    // A mask broadcast over the keys (last extent 1) on two paged sides is one key, as cuDNN's
+    // infer_s_kv reads it; the references decline its 3-page tables.
+    cases.push_back(
+        {"a broadcast mask over several pages",
+         pagedGraph(bothWithMask, {6, 2, 4, 16}, {6, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}),
+         flopsFor(1)});
     for(const auto& [name, graph, flops] : cases)
     {
         SCOPED_TRACE(name);
@@ -2011,7 +2023,7 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single({{1, 32, 128}, {1, 32, 64}, {4}, {4, 64, 128}}, moe);
          },
          524288.0},
-        // 8 * T (16) * HO (4) * V (6) * K (8).
+        // 6 * T (16) * HO (4) * V (6) * K (8): S k, the rank-one update and S q.
         {[] {
              GdnAttributesT gdn;
              gdn.q_tensor_uid = 1;
@@ -2024,7 +2036,7 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single({{16, 2, 8}, {16, 2, 8}, {16, 4, 6}, {16, 4}, {16, 4}, {3}, {16, 4, 6}},
                            gdn);
          },
-         24576.0},
+         18432.0},
         {[] {
              KdaAttributesT kda;
              kda.q_tensor_uid = 1;
@@ -2037,7 +2049,7 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single(
                  {{16, 2, 8}, {16, 2, 8}, {16, 4, 6}, {16, 4, 8}, {16, 4}, {3}, {16, 4, 6}}, kda);
          },
-         24576.0},
+         18432.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)
