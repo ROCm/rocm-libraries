@@ -47,6 +47,16 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
+# Batched BSR SpMM is not supported. Every stage must return not_implemented when
+# the batch count of A, B or C is not 1, for block_dim 1 and 2, and leave C
+# untouched; the unbatched control is checked against the exact product. The test
+# builds its own matrices, so it ignores the index/precision below.
+- name: spmm_bsr_extra_batched_not_implemented
+  category: quick
+  function: spmm_bsr_extra
+  indextype: *i32
+  precision: *single_only_precisions
+
 ##############################
 # Quick
 ##############################

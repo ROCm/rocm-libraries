@@ -770,6 +770,10 @@ namespace rocsparse
 
         case rocsparse_format_bsr:
         {
+            ROCSPARSE_CHECKARG(4, mat_A, mat_A->batch_count != 1, rocsparse_status_not_implemented);
+            ROCSPARSE_CHECKARG(5, mat_B, mat_B->batch_count != 1, rocsparse_status_not_implemented);
+            ROCSPARSE_CHECKARG(7, mat_C, mat_C->batch_count != 1, rocsparse_status_not_implemented);
+
             rocsparse_bsrmm_alg bsrmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2bsrmm_alg(alg, bsrmm_alg)));
 
