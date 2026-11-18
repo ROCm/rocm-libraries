@@ -409,6 +409,57 @@ TEST_F(PrecondGeneric, spilu0_numeric_boost_to_zero_is_exact_singularity)
     });
 }
 
+// The BSR path: two block rows of dimension 2, block (0,0) = I, the off-diagonal blocks
+// zero, and block (1,1) = I except its last diagonal entry, 0. Boosting it to 0 and a
+// negative tolerance leave it zero, reported as numeric_exact at block row 1; boosting
+// to 5 repairs it.
+TEST_F(PrecondGeneric, spilu0_bsr_numeric_boost_to_zero_is_exact_singularity)
+{
+    struct boost_case
+    {
+        const char*           name;
+        double                tol;
+        double                val;
+        rocsparse_singularity want;
+    };
+    const std::vector<boost_case> cases = {
+        {"boost to 0", 0.5, 0.0, rocsparse_singularity_numeric_exact},
+        {"negative tolerance", -1.0, 5.0, rocsparse_singularity_numeric_exact},
+        {"boost to 5", 0.5, 5.0, rocsparse_singularity_none},
+    };
+    for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            for(const auto& c : cases)
+            {
+                SCOPED_TRACE(::testing::Message() << c.name << " base " << static_cast<int>(base));
+                bsr_matrix<T> bsr;
+                bsr.mb        = 2;
+                bsr.block_dim = 2;
+                bsr.ptr       = {0, 2, 4};
+                bsr.ind       = {0, 1, 0, 1};
+                for(const double x : {1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0})
+                    bsr.val.push_back(make_value<T>(x));
+                dev_bsr<T> d;
+                d.init(bsr, base);
+                ASSERT_NE(d.A, nullptr);
+                run_options opt;
+                opt.boost     = true;
+                opt.boost_tol = c.tol;
+                opt.boost_val = c.val;
+                run_result<T> out;
+                run_factorization<Kind::ilu, T>(handle, d.A, d.val, 1, opt, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                ASSERT_EQ(out.singularity.size(), 1u);
+                EXPECT_EQ(out.singularity[0], c.want);
+                EXPECT_EQ(out.position[0],
+                          c.want == rocsparse_singularity_none ? -1 : position_in_base(1, base));
+            }
+        });
+    }
+}
+
 TEST_F(PrecondGeneric, spildlt0_numeric_boost)
 {
     for_all_types([&](auto tag) { check_ildlt_boost<decltype(tag)>(handle); });
