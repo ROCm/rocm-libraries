@@ -27,6 +27,7 @@
 #include <climits>
 #include <cstdint>
 #include <iostream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -87,17 +88,79 @@ bool wmmaToWmmaOverlap(const StinkyInstruction& prod, const StinkyInstruction& c
     return false;
 }
 
-// The consumer takes the producer's D through the C fast-forward path and writes it
-// back to the same registers. gfx1250 requires such a back-to-back WMMA to write a
-// different accumulator. Every same-accumulator chain counts, including the f8/f4
-// and f16 shapes that may be permitted.
+//===----------------------------------------------------------------------===//
+// In-place WMMA accumulation (gfx1250). A WMMA that takes the previous WMMA's D
+// through the C fast-forward path must write a different accumulator, unless its
+// type allows the same one under InPlaceRule. Only WMMAs count toward "previous".
+// Detection only: switching the accumulator needs a free register range that this
+// pass cannot pick.
+//===----------------------------------------------------------------------===//
+
+enum class InPlaceRule {
+    Forbidden,
+    DifferentAB,  // K=128 f8xf8, f8xf4, f4xf8, f6xf4, f4xf6
+    Paired,       // f16, bf16, iu8, 16x16x128 f4xf4: WMMAs pair up, one 2xK tile each
+    Allowed,      // 32x16x128 f4
+};
+
+enum class SmallFloat { F8, F6, F4 };
+
+SmallFloat smallFloat(MatrixFmt fmt) {
+    if (fmt == MatrixFmt::FP6 || fmt == MatrixFmt::BF6) return SmallFloat::F6;
+    if (fmt == MatrixFmt::FP4) return SmallFloat::F4;
+    return SmallFloat::F8;  // NONE selects FP8
+}
+
+InPlaceRule inPlaceRule(const StinkyInstruction& wmma) {
+    const std::string_view m(wmma.getHwInstDesc()->mnemonic);
+    if (isSWMMA(wmma)) return InPlaceRule::Forbidden;
+    if (m.ends_with("_32x16x128_f4")) return InPlaceRule::Allowed;
+    if (m.ends_with("_16x16x128_f8f6f4")) {
+        const auto* fmt = wmma.getModifier<MatrixFmtModifiers>();
+        const SmallFloat a = fmt ? smallFloat(fmt->fmtA) : SmallFloat::F8;
+        const SmallFloat b = fmt ? smallFloat(fmt->fmtB) : SmallFloat::F8;
+        if (a == SmallFloat::F4 && b == SmallFloat::F4) return InPlaceRule::Paired;
+        const bool hasF6 = a == SmallFloat::F6 || b == SmallFloat::F6;
+        const bool hasF4 = a == SmallFloat::F4 || b == SmallFloat::F4;
+        return hasF6 && !hasF4 ? InPlaceRule::Forbidden : InPlaceRule::DifferentAB;
+    }
+    if (m.find("_16x16x128_") != std::string_view::npos)  // fp8/bf8 x fp8/bf8
+        return InPlaceRule::DifferentAB;
+    if (m.ends_with("_f16") || m.ends_with("_bf16") || m.ends_with("_iu8"))
+        return InPlaceRule::Paired;
+    return InPlaceRule::Forbidden;
+}
+
+// `cons` takes `prod`'s D as C and writes the same D. SWMMAC's C is its D.
 bool accumulatesInPlace(const StinkyInstruction& prod, const StinkyInstruction& cons) {
     if (prod.getDestRegs().empty() || cons.getDestRegs().empty()) return false;
     const StinkyRegister& d = prod.getDestRegs()[0];
-    if (!d.isOverlap(cons.getDestRegs()[0])) return false;
-    if (isSWMMA(cons)) return true;  // SWMMAC's C is its D
+    if (!(d == cons.getDestRegs()[0])) return false;
+    if (isSWMMA(cons)) return true;
     const auto& srcs = cons.getSrcRegs();
-    return srcs.size() > 2 && d.isOverlap(srcs[2]);
+    return srcs.size() > 2 && d == srcs[2];
+}
+
+bool abOverlap(const StinkyInstruction& wmma) {
+    const auto& s = wmma.getSrcRegs();
+    return s.size() > 1 && s[0].isOverlap(s[1]);
+}
+
+bool differentAB(const StinkyInstruction& x, const StinkyInstruction& y) {
+    const auto& xs = x.getSrcRegs();
+    const auto& ys = y.getSrcRegs();
+    return xs.size() > 1 && ys.size() > 1 && !xs[0].isOverlap(ys[0]) && !xs[1].isOverlap(ys[1]);
+}
+
+const StinkyInstruction* adjacentWmmaInBlock(const StinkyInstruction& from, bool forward) {
+    for (IRBase* node = forward ? from.getNext() : from.getPrev(); node;
+         node = forward ? node->getNext() : node->getPrev()) {
+        auto* inst = dyn_cast<StinkyInstruction>(node);
+        if (!inst || isPseudoInst(inst)) continue;
+        if (isCall(*inst)) return nullptr;
+        if (isXDLWMMA(*inst)) return inst;
+    }
+    return nullptr;
 }
 
 // The nearest XDL WMMA before `from` on every path; from the block end when null.
@@ -117,19 +180,72 @@ void collectPrevWmmas(BasicBlock& bb, const StinkyInstruction* from,
         if (visited.insert(pred).second) collectPrevWmmas(*pred, nullptr, visited, prev);
 }
 
-// Detection only. Switching the accumulator needs a free register range that this
-// pass cannot pick.
-void warnInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma) {
+std::vector<const StinkyInstruction*> prevWmmas(BasicBlock& bb, const StinkyInstruction& wmma) {
     std::unordered_set<const BasicBlock*> visited;
     std::vector<const StinkyInstruction*> prev;
     collectPrevWmmas(bb, &wmma, visited, prev);
-    for (const StinkyInstruction* p : prev) {
-        if (!accumulatesInPlace(*p, wmma)) continue;
+    return prev;
+}
+
+// The in-place chain ending at `last`, oldest first. Empty when it continues from
+// another block, where its pairing cannot be checked.
+std::vector<const StinkyInstruction*> inBlockChain(BasicBlock& bb, const StinkyInstruction& last) {
+    std::vector<const StinkyInstruction*> chain{&last};
+    for (;;) {
+        const StinkyInstruction& head = *chain.back();
+        const StinkyInstruction* prev = adjacentWmmaInBlock(head, /*forward=*/false);
+        if (!prev) {
+            for (const StinkyInstruction* p : prevWmmas(bb, head))
+                if (accumulatesInPlace(*p, head)) return {};
+            break;
+        }
+        if (!accumulatesInPlace(*prev, head)) break;
+        chain.push_back(prev);
+    }
+    std::reverse(chain.begin(), chain.end());
+    return chain;
+}
+
+// Pairs are chain positions (0,1), (2,3), ... `wmma` needs different A and B from
+// the rest of its pair and from the previous pair, and a pair needs both halves.
+const char* pairedViolation(BasicBlock& bb, const StinkyInstruction& wmma) {
+    const auto chain = inBlockChain(bb, wmma);
+    if (chain.size() < 2) return "the pairs continue from another block and cannot be checked";
+    const size_t pos = chain.size() - 1;
+    const size_t pairStart = pos - pos % 2;
+    for (size_t i = pairStart < 2 ? 0 : pairStart - 2; i < pos; ++i)
+        if (!differentAB(*chain[i], wmma))
+            return "needs different A and B from its pair and the previous pair";
+    if (pos % 2 == 0) {
+        const StinkyInstruction* next = adjacentWmmaInBlock(wmma, /*forward=*/true);
+        if (!next || !accumulatesInPlace(wmma, *next)) return "must be paired with the next WMMA";
+    }
+    return nullptr;
+}
+
+const char* inPlaceViolation(BasicBlock& bb, const StinkyInstruction& prev,
+                             const StinkyInstruction& wmma) {
+    const InPlaceRule rule = inPlaceRule(wmma);
+    if (rule == InPlaceRule::Forbidden || rule != inPlaceRule(prev))
+        return "switch the accumulator";
+    if (rule == InPlaceRule::Allowed) return nullptr;
+    if (abOverlap(prev) || abOverlap(wmma)) return "A and B of one WMMA must not overlap";
+    if (rule == InPlaceRule::DifferentAB)
+        return differentAB(prev, wmma) ? nullptr : "needs different A and B";
+    return pairedViolation(bb, wmma);
+}
+
+void warnInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma) {
+    for (const StinkyInstruction* prev : prevWmmas(bb, wmma)) {
+        if (!accumulatesInPlace(*prev, wmma)) continue;
+        const char* violation = inPlaceViolation(bb, *prev, wmma);
+        if (!violation) continue;
         std::cerr << "[InsertCoexecHazardPass] warning: WMMA in function \"" << func.getName()
                   << "\" block \"" << bb.getLabel()
-                  << "\" accumulates the previous WMMA's D in place; switch the accumulator:\n";
-        p->dump(std::cerr);
+                  << "\" accumulates the previous WMMA's D in place: " << violation << "\n";
+        prev->dump(std::cerr);
         wmma.dump(std::cerr);
+        return;
     }
 }
 
