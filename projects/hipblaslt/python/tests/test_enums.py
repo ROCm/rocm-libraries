@@ -1,11 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Every public enum value is bound, with the header's number (Review A, Decision 6).
+"""Every public enum value is bound, with the header's number.
 
 The headers are read after the real preprocessor has run, so the build configuration decides
 which opt-in values exist: a value inside `#if HIPBLASLT_HAS_...` counts only when the installed
-hipblaslt-opt-in-features.h turns it on. In a source checkout (CI) these are develop's own
-headers, paired with the three generated headers only an install has. Otherwise they're the
+hipblaslt-opt-in-features.h turns it on. In a source checkout (as in CI) these are the checkout's
+own headers, paired with the three generated headers only an install has. Otherwise they're the
 installed headers.
 
 The pre-commit hook (scripts/check_enum_sync.py) is the first line of defense; this is the
