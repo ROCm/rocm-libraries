@@ -325,6 +325,18 @@ CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES: Tuple[
     (256, 256, 64, 4, 4, 16),
 )
 CACHE_WGRAD_EXTRA_WARP_MN: Tuple[int, ...] = (3, 6)
+# Deep-K WMMA wgrad geometries (gfx1250): (tile_m, tile_n, tile_k, warp_m,
+# warp_n), "mem" pipeline, warp tile 16, cshuffle epilogue plus the cover's
+# split-K / async variants. wgrad GEMMs are often small in M x N and long in
+# K; a K tile of 128-512 with 16 waves cuts the barriers per WMMA that the
+# 64-deep ladder pays, as CK's 512-thread, K=128..512 instances do on the
+# same layers. These three are what is left of a wider set after dropping the
+# geometries whose wins the others match.
+CACHE_WGRAD_DEEPK_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
+    (64, 64, 256, 4, 4),
+    (64, 64, 512, 4, 4),
+    (128, 128, 128, 4, 4),
+)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
 # accumulators no longer fit the 256 AGPRs MFMA accumulates into, so the
@@ -663,8 +675,11 @@ def _geometries(
 
     ``direction`` selects the grid: wgrad gets the filter-shaped tile and warp
     extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
-    base grid. It must be threaded through wherever a geometry list is built
-    for a direction, or the chunk bounds stop matching the list the worker
+    base grid; WMMA wgrad then adds the
+    :data:`CACHE_WGRAD_DEEPK_GEOMETRIES` after it; targets whose LDS cannot hold
+    them (a 64x64x512 16-bit tile pair is 128 KB) are filtered by
+    :func:`_spec_is_valid`, not by a per-arch list. It must be threaded through
+    wherever a geometry list is built for a direction, or the chunk bounds stop matching the list the worker
     walks.
     """
     tile_mn, warp_mn = _grid_axes(direction)
@@ -700,6 +715,13 @@ def _geometries(
         if atom is None or tile_k % atom.k:
             continue
         yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom
+    if direction == "wgrad" and mma_family == "wmma":
+        atom = target.mma.select_largest_k(
+            family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=16, n=16
+        )
+        if atom is not None:
+            for tile_m, tile_n, tile_k, warp_m, warp_n in CACHE_WGRAD_DEEPK_GEOMETRIES:
+                yield tile_m, tile_n, tile_k, warp_m, warp_n, 16, "mem", "cshuffle", atom
 
 
 def _aot_pipeline(direction: str, pipeline: str) -> bool:
@@ -749,7 +771,10 @@ def _wgrad_wmma_cover(mma_family: str, geometry: tuple) -> bool:
     :data:`CACHE_WGRAD_WMMA_GEOMETRIES` cover. Outside the cover a WMMA
     geometry builds only the synchronous default-epilogue kernels.
     """
-    return mma_family != "wmma" or tuple(geometry[:5]) in CACHE_WGRAD_WMMA_GEOMETRIES
+    return mma_family != "wmma" or (
+        tuple(geometry[:5]) in CACHE_WGRAD_WMMA_GEOMETRIES
+        or tuple(geometry[:5]) in CACHE_WGRAD_DEEPK_GEOMETRIES
+    )
 
 
 def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[dict]:
