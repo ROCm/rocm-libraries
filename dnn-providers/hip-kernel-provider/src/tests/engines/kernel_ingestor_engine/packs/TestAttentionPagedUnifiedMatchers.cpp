@@ -350,7 +350,7 @@ TEST(TestAttentionPagedUnifiedMatchers, ServesSeparateKAndVPageTables)
     const auto shared = match(decodeGraph());
     ASSERT_TRUE(shared.has_value());
     EXPECT_EQ(tryGetBoundInt(*shared, "attention_paged_unified.page_table_v.uid"), PAGE_TABLE_UID);
-    // A ragged Q with an unset max_seq_len_kv, as #14358's paged bundles build it.
+    // A ragged Q with an unset max_seq_len_kv, as the paged graph bundles build it.
     EXPECT_TRUE(match(raggedGraph(), [](d::GraphT& g) {
                     useSeparateVTable(g);
                     attrs(g).max_seq_len_kv = flatbuffers::nullopt;

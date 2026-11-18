@@ -25,7 +25,11 @@ from rocke.core.ir import F32, I16, I32, PtrType
 # buffer-resource size. ``sink_is_f32`` nonzero: ``sink_ptr`` holds Hq fp32
 # logits, else Hq logits in the Q dtype (ignored without sinks). ``num_kv_blocks`` is
 # the K/V container's block count: a page id at or past it (or negative) reads as a
-# masked page instead of addressing memory outside the cache.
+# masked page instead of addressing memory outside the cache. ``block_table_width`` is
+# the page tables' row width M in entries: a sequence length past ``M * block_size``
+# would walk the table read off its row, so it is capped there. It is not
+# ``block_table_stride`` (the step between rows), which is 0 or arbitrary for a batch
+# of one and may exceed the width.
 RUNTIME_LAYOUT_EXTRA_ARGS = (
     ("block_tables_v_ptr", "ptr<i32>"),
     ("seq_lens_q_ptr", "ptr<i32>"),
@@ -44,6 +48,7 @@ RUNTIME_LAYOUT_EXTRA_ARGS = (
     ("q_block_grid", "i32"),
     ("sink_is_f32", "i32"),
     ("num_kv_blocks", "i32"),
+    ("block_table_width", "i32"),
 )
 
 

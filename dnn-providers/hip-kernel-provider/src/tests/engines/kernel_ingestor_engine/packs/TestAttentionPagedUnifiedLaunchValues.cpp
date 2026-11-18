@@ -76,6 +76,7 @@ AttentionPagedUnifiedLaunchInputs denseInputs()
     s.kvBlockSpanBytes = 131072;
     s.qBlockGrid = 18;
     s.numKvBlocks = 4096;
+    s.blockTableWidth = 24;
     launch.blockThreads = 256;
     return launch;
 }
@@ -167,6 +168,7 @@ void expectSameLaunch(const AttentionPagedUnifiedLaunchInputs& read,
     EXPECT_EQ(r.qBlockGrid, e.qBlockGrid);
     EXPECT_EQ(r.sinkIsF32, e.sinkIsF32);
     EXPECT_EQ(r.numKvBlocks, e.numKvBlocks);
+    EXPECT_EQ(r.blockTableWidth, e.blockTableWidth);
     EXPECT_EQ(read.blockThreads, expected.blockThreads);
 }
 
@@ -221,6 +223,7 @@ TEST(TestAttentionPagedUnifiedLaunchValues, ValuesMatchTheV1Contract)
                                   {"q_block_grid", int64_t{18}},
                                   {"sink_is_f32", int64_t{0}},
                                   {"num_kv_blocks", int64_t{4096}},
+                                  {"block_table_width", int64_t{24}},
                                   {"block_threads", int64_t{256}}};
     EXPECT_EQ(values, expected);
     EXPECT_EQ(ATTENTION_PAGED_UNIFIED_DISPATCH_SYMBOL_V1,
@@ -288,7 +291,12 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnotherContractName)
 TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAMissingOptionalOrFloatValue)
 {
     for(const char* name :
-        {"sink.uid", "ragged_offset.uid", "scale", "sink_is_f32", "num_kv_blocks"})
+        {"sink.uid",
+         "ragged_offset.uid",
+         "scale",
+         "sink_is_f32",
+         "num_kv_blocks",
+         "block_table_width"})
     {
         SCOPED_TRACE(name);
         auto missing = saved(denseInputs());
@@ -337,6 +345,10 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnIntegerOutsideWhatTheKernel
         {&dense, "num_kv_blocks", 0}, // a K/V container holds at least one block
         {&dense, "num_kv_blocks", -1},
         {&dense, "num_kv_blocks", int64_t{2147483648}},
+        // A page-table row is at least one entry wide; a length is capped at its width.
+        {&dense, "block_table_width", 0},
+        {&dense, "block_table_width", -1},
+        {&dense, "block_table_width", int64_t{2147483648}},
         {&dense, "block_table_stride", -1},
         {&dense, "q_tok_stride", -1},
         {&dense, "o_head_stride", int64_t{2147483648}},

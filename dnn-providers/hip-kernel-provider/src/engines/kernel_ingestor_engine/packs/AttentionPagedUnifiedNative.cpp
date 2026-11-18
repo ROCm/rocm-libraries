@@ -901,7 +901,8 @@ std::vector<KernelArgument> kernelSignature()
                             "kv_block_span_bytes",
                             "q_block_grid",
                             "sink_is_f32",
-                            "num_kv_blocks"})
+                            "num_kv_blocks",
+                            "block_table_width"})
     {
         appendKernelArgument(signature, "by_value", I32, name);
     }
@@ -1076,6 +1077,9 @@ public:
         }
         s.kvBlockSpanBytes = narrow(*kvExtent * ELEMENT_BYTES, "K/V block span");
         s.numKvBlocks = narrow(dim(k, BATCH_AXIS), "K/V block count");
+        // The table's row width, not its row stride: a batch of one has a unit batch
+        // extent, whose stride effectiveStrides sets to zero.
+        s.blockTableWidth = narrow(dim(pageTableK, SEQ_AXIS), "page-table width");
 
         // q-block grid: exact for a dense Q; for a ragged Q, enough blocks for every
         // sequence when the batch's tokens fit in Sq (the serving convention) -- the kernel's
@@ -1198,7 +1202,8 @@ public:
                     s.kvBlockSpanBytes,
                     s.qBlockGrid,
                     s.sinkIsF32,
-                    s.numKvBlocks);
+                    s.numKvBlocks,
+                    s.blockTableWidth);
     }
 
 private:
@@ -1250,6 +1255,7 @@ MetadataValues attentionPagedUnifiedLaunchValues(const AttentionPagedUnifiedLaun
             value(ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE, s.qBlockGrid),
             value(ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE, s.sinkIsF32),
             value(ATTENTION_PAGED_UNIFIED_NUM_KV_BLOCKS_VALUE, s.numKvBlocks),
+            value(ATTENTION_PAGED_UNIFIED_BLOCK_TABLE_WIDTH_VALUE, s.blockTableWidth),
             value(ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE, launch.blockThreads)};
 }
 
@@ -1288,6 +1294,7 @@ AttentionPagedUnifiedLaunchInputs
                              ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE,
                              ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE,
                              ATTENTION_PAGED_UNIFIED_NUM_KV_BLOCKS_VALUE,
+                             ATTENTION_PAGED_UNIFIED_BLOCK_TABLE_WIDTH_VALUE,
                              ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE});
 
     const auto refuse = [&inputs](std::string_view name, const std::string& rule) {
@@ -1359,6 +1366,7 @@ AttentionPagedUnifiedLaunchInputs
     // 1: sink_ptr holds FLOAT logits; 0: logits in the Q data type (or no sink).
     s.sinkIsF32 = int32(ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE, 0, 1);
     s.numKvBlocks = int32(ATTENTION_PAGED_UNIFIED_NUM_KV_BLOCKS_VALUE, 1, INT32_LIMIT);
+    s.blockTableWidth = int32(ATTENTION_PAGED_UNIFIED_BLOCK_TABLE_WIDTH_VALUE, 1, INT32_LIMIT);
 
     // The CTA is whole waves, at most the 1024 threads a HIP block holds.
     launch.blockThreads = int32(ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE, WAVE_LANES, 1024);

@@ -165,6 +165,9 @@ SCENARIOS = (
         window=16,
         kv_layout="nhd",
     ),
+    # One sequence: the table's row stride is not passed (0), so the length cap
+    # must come from its width.
+    Scenario("dense_l1_single_sequence", seq_lens=(100,), q_uniform_len=1),
     # One decode row whose origin lies past the first q-blocks: those blocks
     # find no sequence and write nothing (rows before off[0] keep the sentinel).
     Scenario(
@@ -248,6 +251,7 @@ def _launcher(
             "q_block_grid",
             "sink_is_f32",
             "num_kv_blocks",
+            "block_table_width",
         ):
             sb.scalar(name, "i32")
         launcher = KernelLauncher(
@@ -498,7 +502,10 @@ def _run(
         "out_scale": 1.0,
         "softcap": 0.0,
         "num_seqs": B,
-        "block_table_stride": bt_width,
+        # The engine passes the batch stride of hipDNN's page table, which is 0 for a
+        # batch of one (a unit extent's stride is irrelevant); the row width is its own
+        # argument.
+        "block_table_stride": bt_width if B > 1 else 0,
         "qq_bias_stride_0": 0,
         "seq_lens_q_ptr": slq_dev,
         "block_tables_v_ptr": v_bt_dev,
@@ -520,6 +527,7 @@ def _run(
         "q_block_grid": grid_y,
         "sink_is_f32": int(sink_f32),
         "num_kv_blocks": num_blocks,
+        "block_table_width": bt_width,
     }
     launcher(
         values,

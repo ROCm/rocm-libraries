@@ -1744,8 +1744,10 @@ def build_unified_attention_2d_tiled(
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
         seq_len = b.global_load_i32(seq_lens, seq_idx)
         # A length past the table row would walk the page-table read off its end:
-        # bound it by the row's extent (block_table_stride * block_size).
-        rtl_bt_cap = b.mul(bt_stride_p, b.const_i32(BS))
+        # bound it by the row's width (block_table_width * block_size). The width
+        # is its own argument: block_table_stride is the row-to-row step, which a
+        # batch of one has no use for.
+        rtl_bt_cap = b.mul(rtl["block_table_width"], b.const_i32(BS))
         seq_len = b.select(b.cmp_ult(seq_len, rtl_bt_cap), seq_len, rtl_bt_cap)
         context_len = b.sub(seq_len, cur_batch_q_len)
         # Per-sequence Q/O base terms in i64 (ragged offsets times the

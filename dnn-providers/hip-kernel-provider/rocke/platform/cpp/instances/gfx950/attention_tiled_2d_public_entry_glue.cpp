@@ -441,10 +441,13 @@ static void rocke_g950_rtl_seq_lookup(rocke_gfx950_attn2d_build_ctx_t* ctx, int 
     ctx->q_block_local_idx = rocke_b_sub(b, qb, ctx->q_block_start_idx);
     ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, seq_idx, 0);
     /* A length past the table row would walk the page-table read off its end:
-     * bound it by the row's extent (block_table_stride * block_size). */
+     * bound it by the row's width (block_table_width * block_size). The width is
+     * its own argument: block_table_stride is the row-to-row step, which a batch
+     * of one has no use for. */
     {
         rocke_value_t* c_bs_cap = rocke_b_const_i32(b, ctx->BS);
-        rocke_value_t* bt_cap = rocke_b_mul(b, ctx->bt_stride_p, c_bs_cap);
+        rocke_value_t* bt_cap
+            = rocke_b_mul(b, ctx->rtl_p[ROCKE_ATTN2D_RTL_BLOCK_TABLE_WIDTH], c_bs_cap);
         rocke_value_t* in_cap = rocke_b_cmp_ult(b, ctx->seq_len, bt_cap);
         ctx->seq_len = rocke_b_select(b, in_cap, ctx->seq_len, bt_cap);
     }
@@ -866,7 +869,7 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
             o.align_set = true;
             ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
         }
-        /* runtime_layout: the 17 appended arguments (_RTL_PARAMS). */
+        /* runtime_layout: the 18 appended arguments (_RTL_PARAMS). */
         if(spec->runtime_layout)
         {
             ctx->RTL = true;

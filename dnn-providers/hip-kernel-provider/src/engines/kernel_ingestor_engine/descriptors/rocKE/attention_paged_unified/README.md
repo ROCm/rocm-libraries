@@ -44,7 +44,7 @@ A ragged Q needs vLLM's `query_start_loc` layout: non-decreasing origins with
 `ragged_offset[b+1] - ragged_offset[b] >= seq_len_q[b]` and `ragged_offset[B]` the end of
 the last block. The first origin need not be 0. The kernel finds each query block's
 sequence by a binary search over the offsets and sizes its grid from `ragged_offset[B]`.
-RFC 0014 (#15080) also allows origins in any order and an unused `ragged_offset[B]` when
+RFC 0014 also allows origins in any order and an unused `ragged_offset[B]` when
 `seq_len_q` is bound; those are valid graphs whose offset values this engine cannot see at
 match time, so it cannot decline them, and its output for them is wrong. The follow-up is
 a packed query-block numbering driven by `seq_len_q` (a wave prefix sum over the
@@ -107,7 +107,7 @@ values live in SGPRs, and most kernels run out: the compiler spills SGPRs into V
 | Lane moves as a share of the kernel's instructions, median (max) | 1.7% (7.4%) | 1.5% (6.3%) |
 | Fixed-layout twins that spill | 0 of 192 that build | 4 of 288, 1 SGPR each |
 
-The runtime head count, window and batch arguments of #15024 barely move the fixed layout
+The runtime head count, window and batch arguments of the tiled 2D kernel barely move the fixed layout
 (gfx942: no spills before or after; gfx950: 2 kernels spilling 6 SGPRs before, 4 spilling 4
 after), so the spills come from the runtime strides. The lane moves are a small part of
 each kernel, but the lanes they hold count against VGPRs: the VGPR-limited occupancy
@@ -130,15 +130,16 @@ page tables (one tensor, `[B, 1, max_blocks, 1]`), `seq_lens` as `seq_len_kv`, t
 
 The page tables and lengths are read only on the device, so the engine cannot check their
 contents at execute without a device-to-host copy, which would break HIP graph capture.
-The kernels contain them instead, with the container's block count passed as the
-`num_kv_blocks` argument:
+The kernels contain them instead, with the container's block count and the tables' width
+passed as the `num_kv_blocks` and `block_table_width` arguments:
 
 - a K or V page id outside `[0, num_kv_blocks)` (negative included) reads as a masked page:
   block 0 with a zero-size buffer resource, so it touches no memory and the tile contributes
   zeros;
-- `seq_len_kv[b]` is bounded by the table row's extent, `block_table_stride * block_size`,
-  so the page-table read stays inside its row. A longer length is a caller bug and attends
-  to masked pages past the table.
+- `seq_len_kv[b]` is bounded by the table row's width, `block_table_width * block_size`
+  (`block_table_width` is the tables' `M`; it is not `block_table_stride`, the step
+  between rows, which a batch of one does not carry), so the page-table read stays inside
+  its row. A longer length is a caller bug and attends to masked pages past the table.
 
 An invalid page id or length makes that sequence's output wrong (no error is reported); it
 cannot read or write outside the cache, the table or the output. Other device-read values
@@ -159,7 +160,7 @@ absent), the scale (any finite float, stored exactly as a double), every by-valu
 argument (`num_seqs`, `block_table_stride`, the head counts, `sliding_window`,
 `q_uniform_len` (`Sq` for a dense Q, 0 for a ragged one), the Q/O/KV strides,
 `kv_block_span_bytes`, `q_block_grid`, `sink_is_f32` (1 for a FLOAT sink, else 0),
-`num_kv_blocks`) and
+`num_kv_blocks`, `block_table_width`) and
 `block_threads`. The loaded plan
 launches the same grid, `(num_kv_heads, q_block_grid)`, with `block_threads` threads. A load
 refuses a value of another type, an extra or missing value, or one outside what the kernel

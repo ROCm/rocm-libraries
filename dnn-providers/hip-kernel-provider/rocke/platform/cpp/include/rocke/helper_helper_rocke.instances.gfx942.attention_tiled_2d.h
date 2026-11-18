@@ -188,7 +188,7 @@ typedef struct rocke_attention_tiled_2d_spec
      * "lse" token becomes "lsehm". Needs emit_lse. */
     bool lse_head_major; /* False */
     /* Runtime-layout mode (hipDNN paged/ragged SDPA): the Q/O/KV strides and a
-     * dense-or-ragged Q become 17 appended kernel arguments (after the runtime
+     * dense-or-ragged Q become 18 appended kernel arguments (after the runtime
      * head counts and window),
      * the page tables and lengths are read on the device and the q-block grid
      * is walked with a grid-stride loop. Off emits no new IR; on appends the

@@ -252,6 +252,21 @@ def _launcher(spec):
 # token-stride padding), window (None = off), grid_y (None = full grid).
 def _scenarios(bs):
     return [
+        # One sequence: the table's row stride is not passed (0), so the length cap
+        # must come from its width.
+        dict(
+            name="dense_L1_single_sequence",
+            mode="dense",
+            L=1,
+            has_lq=0,
+            seq_lens=[2 * bs + 20],
+            q_lens=None,
+            kv="vllm",
+            fused_q=False,
+            o_pad=0,
+            window=None,
+            grid_y=None,
+        ),
         dict(
             name="dense_L1_empty_seqs",
             mode="dense",
@@ -651,7 +666,9 @@ def _run_case(spec, sc, rng, sink_f32=False, bad_page=None):
         out_scale=1.0,
         softcap=0.0,
         num_seqs=nseq,
-        block_table_stride=table.shape[1],
+        # The engine passes hipDNN's page-table batch stride, which is 0 for a batch of
+        # one (a unit extent's stride is irrelevant); the row width is its own argument.
+        block_table_stride=table.shape[1] if nseq > 1 else 0,
         qq_bias_stride_0=0,
         seq_lens_q_ptr=lq_dev if sc["has_lq"] else seq_lens_dev,
         block_tables_v_ptr=v_table_dev,
@@ -673,6 +690,7 @@ def _run_case(spec, sc, rng, sink_f32=False, bad_page=None):
         q_block_grid=grid_y,
         sink_is_f32=int(sink_f32),
         num_kv_blocks=nb,
+        block_table_width=table.shape[1],
     )
     _launcher(spec)(
         values,

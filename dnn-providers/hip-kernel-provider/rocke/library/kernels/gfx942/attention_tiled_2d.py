@@ -514,9 +514,10 @@ class UnifiedAttention2DTiledSpec:
     # Runtime-layout mode (hipDNN paged/ragged SDPA engine, vLLM KV-cache view).
     # The head counts, the window and the batch's search trip count are already
     # kernargs (``RUNTIME_KERNARG_FIELDS``, ``RUNTIME_SEARCH_ITERS``). When True
-    # the kernel also takes 17 appended kernargs (block_tables_v_ptr,
+    # the kernel also takes 18 appended kernargs (block_tables_v_ptr,
     # seq_lens_q_ptr, has_seq_lens_q, q_uniform_len, the Q/O/KV element strides,
-    # kv_block_span_bytes, q_block_grid, sink_is_f32, num_kv_blocks) and serves a
+    # kv_block_span_bytes, q_block_grid, sink_is_f32, num_kv_blocks,
+    # block_table_width) and serves a
     # dense-or-ragged Q and a real paged-KV layout from one compiled object:
     # Q/O/KV strides are runtime, K pages through ``block_tables_ptr`` and V
     # through ``block_tables_v_ptr``
@@ -2019,8 +2020,10 @@ def build_unified_attention_2d_tiled(
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
         seq_len = b.global_load_i32(seq_lens, seq_idx)
         # A length past the table row would walk the page-table read off its end:
-        # bound it by the row's extent (block_table_stride * block_size).
-        rtl_bt_cap = b.mul(bt_stride_p, b.const_i32(BS))
+        # bound it by the row's width (block_table_width * block_size). The width
+        # is its own argument: block_table_stride is the row-to-row step, which a
+        # batch of one has no use for.
+        rtl_bt_cap = b.mul(rtl_p["block_table_width"], b.const_i32(BS))
         seq_len = b.select(b.cmp_ult(seq_len, rtl_bt_cap), seq_len, rtl_bt_cap)
         context_len = b.sub(seq_len, cur_batch_q_len)
         qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))

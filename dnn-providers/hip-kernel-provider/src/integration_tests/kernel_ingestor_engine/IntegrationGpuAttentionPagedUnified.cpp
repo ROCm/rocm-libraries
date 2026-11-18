@@ -391,7 +391,7 @@ std::vector<float> reference(const Problem& p, const HostState& s, float scale)
 
 constexpr uint16_t SENTINEL = 0x7e00; // a NaN in fp16, a finite value in bf16; checked bitwise
 
-/// hipDNN's own SDPA reference (CpuFpReferenceSdpa, the dense path #14358's paged graphs
+/// hipDNN's own SDPA reference (CpuFpReferenceSdpa, the dense path the paged graph bundles
 /// run through) over the same host state, as float O laid out like the device O
 /// ([tokens, Hq, D]): K and V gathered through their page tables, Q and O dense padded
 /// [B, Hq, Sq, D] with seq_len_q / seq_len_kv padding, and the ragged layout mapped by
@@ -874,6 +874,24 @@ TEST_F(IntegrationGpuAttentionPagedUnified, PagedDecodeWithMaxSeqLenKvUnset)
     Problem p = decodeProblem(DataType::HALF);
     p.setMaxSeqLenKv = false;
     run(p);
+}
+
+/// A batch of one: the page table's batch extent is 1, so hipDNN reads its row stride as
+/// irrelevant. The length cap must come from the table's width, not from that stride, or
+/// the sequence reads as empty and its row comes back zero.
+TEST_F(IntegrationGpuAttentionPagedUnified, DecodeOfASingleSequence)
+{
+    for(const int32_t kv : {1, 17, 100, 384})
+    {
+        SCOPED_TRACE("seq_len_kv = " + std::to_string(kv));
+        Problem p = decodeProblem(DataType::BFLOAT16);
+        p.kvLengths = {kv};
+        run(p);
+        if(::testing::Test::HasFatalFailure())
+        {
+            return;
+        }
+    }
 }
 
 TEST_F(IntegrationGpuAttentionPagedUnified, DecodeHeadSizes64And256)

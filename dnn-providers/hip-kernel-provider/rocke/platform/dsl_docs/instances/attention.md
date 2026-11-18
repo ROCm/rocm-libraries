@@ -434,8 +434,10 @@ dense or ragged Q over a paged K/V cache. The layout is read from kernargs
 appended after the fixed ones (`RUNTIME_LAYOUT_EXTRA_ARGS` in each arch's
 `attention_tiled_2d.py`): the Q/O/KV element strides, a separate V block table,
 `seq_lens_q`, the dense row count `q_uniform_len` (0 for a ragged Q), the
-q-block grid size, and `sink_is_f32`, which says whether `sink_ptr` holds fp32 or
-Q-dtype sink logits. Head counts and the sliding window are runtime kernargs as
+q-block grid size, `sink_is_f32` (whether `sink_ptr` holds fp32 or Q-dtype sink
+logits), and two bounds on device-read values: `num_kv_blocks` (a page id outside
+`[0, num_kv_blocks)` reads as a masked page) and `block_table_width` (a length is
+capped at `block_table_width * block_size`, the table row's width). Head counts and the sliding window are runtime kernargs as
 in the fixed-layout kernel. hip-kernel-provider's `hipkernel:AttentionPagedUnified`
 engine is the consumer.
 
@@ -449,8 +451,11 @@ engine is the consumer.
 - A ragged Q needs non-decreasing offsets with
   `off[b+1] - off[b] >= seq_lens_q[b]`, and `off[B]` the end of the last block.
 - On gfx942, `supports_tiled_2d_spec` and both builders charge
-  `runtime_layout_lds_bytes` against `ArchTarget.lds_capacity_bytes`; on gfx950
-  the shared tiled 2D LDS gate applies.
+  `runtime_layout_lds_bytes` against `ArchTarget.lds_capacity_bytes`. On gfx950
+  no gate models the runtime_layout LDS pool: the catalog geometry (at most four
+  warps) fits, but a hand-built spec past it, such as head size 256 with eight
+  warps and block 32 or 64, needs more than the 160 KiB the arch holds and is
+  refused only when clang compiles it.
 
 Byte identity is checked by the parity emitters
 (`library/tests/parity/gfx94{2,50}_attention_tiled_2d_emit.*`), and
