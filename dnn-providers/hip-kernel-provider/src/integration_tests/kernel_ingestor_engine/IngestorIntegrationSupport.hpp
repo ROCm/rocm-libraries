@@ -23,15 +23,20 @@
 #include <hip/hip_runtime.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -44,6 +49,8 @@
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "ScopedPluginLogCapture.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RankingTraceSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/UnpulledModelsRecord.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -73,6 +80,33 @@ struct ServedEngine
     const char* name;
     const char* arch;
 };
+
+// The one winner shard an engine's cache holds for @p arch, or an empty path if none is
+// there yet: <engine>/<uhd id>/<revision>-<model hash>/<arch>/winners.jsonl. The engine
+// keys its shard by its full identity (revision, UHD id, model hash), which only the
+// loaded descriptor set knows, so each test's fresh cache is searched for its one shard
+// instead of the path being derived directly.
+inline std::filesystem::path winnerShardPath(const std::string& engineName, const std::string& arch)
+{
+    const auto engineDir = hipdnn_data_sdk::utilities::cacheRoot() / "ingestor-winners"
+                           / std::string(hipdnn_plugin_sdk::ingestor::winnerCacheVersion())
+                           / hipdnn_data_sdk::utilities::sanitizeForPath(engineName);
+    const std::string strippedArch(hipdnn_plugin_sdk::stripArchFeatures(arch));
+    std::vector<std::filesystem::path> shards;
+    std::error_code error;
+    for(auto it = std::filesystem::recursive_directory_iterator(engineDir, error);
+        !error && it != std::filesystem::recursive_directory_iterator();
+        it.increment(error))
+    {
+        const auto& path = it->path();
+        if(path.filename() == "winners.jsonl" && path.parent_path().filename() == strippedArch)
+        {
+            shards.push_back(path);
+        }
+    }
+    EXPECT_LE(shards.size(), 1U) << "more than one winner shard under " << engineDir;
+    return shards.empty() ? std::filesystem::path{} : shards.front();
+}
 
 namespace detail
 {
@@ -380,6 +414,50 @@ inline std::optional<std::string>
     return std::nullopt;
 }
 
+// Who ordered that engine's catalog (RankingTraceSupport.hpp), read from @p recorder.
+inline std::optional<std::string>
+    rankingDecidedBy(const ServedEngine& engine,
+                     const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
+{
+    return testing::rankingDecidedBy(engine.name, recorder.getRecordedLogs());
+}
+
+// Whether every trained ranker that engine's UED binds for its arch was left out of the
+// production pack because its model.bin was never pulled, as the pack's skip record says.
+inline bool boundRankerLeftOutAsUnpulled(const ServedEngine& engine)
+{
+    const std::filesystem::path root
+        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+    if(root.empty())
+    {
+        return false;
+    }
+    for(const auto& entry : runtimeCatalog().engines)
+    {
+        const auto& ued = entry.second.descriptor;
+        if(ued.name != engine.name)
+        {
+            continue;
+        }
+        const auto bound = ued.sortKernelCatalog.find(engine.arch);
+        if(bound == ued.sortKernelCatalog.end() || bound->second.empty())
+        {
+            return false;
+        }
+        for(const auto& id : bound->second)
+        {
+            const auto uhd = hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
+            if(!testing::unpulledRecordNames(root / engine.arch, uhd)
+               && !testing::unpulledRecordNames(root, uhd))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 // Prints `KNOB_SELECTED <case> <kernelId>` when the case ends, however it ends, so a run's
 // log carries the selected kernel of every case, including a failing one.
 class SelectedKernelReport
@@ -466,6 +544,20 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(_engine.name);
     }
 
+    // Whether the engine is in graph's ranked engine list, for a case that expects it to be
+    // left out.
+    bool offersToServe(hipdnn_frontend::graph::Graph& graph)
+    {
+        auto result = graph.build_operation_graph(this->_handle);
+        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        return result.code == hipdnn_frontend::ErrorCode::OK
+               && std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId())
+                      != rankedEngineIds.end();
+    }
+
     // On engine.arch the engine's absence from the ranked list is a missing engine or pack,
     // not a skip.
     void buildOperationGraphTheEngineOffersToServe(hipdnn_frontend::graph::Graph& graph)
@@ -536,6 +628,9 @@ struct IngestorSdpaGraphSpec
     // The layouts of K and V. Q and O are BSHD.
     SdpaLayout kLayout = SdpaLayout::BSHD;
     SdpaLayout vLayout = SdpaLayout::BSHD;
+    // K and V are one tensor (one descriptor, one buffer), so the graph has three unique
+    // inputs instead of four. vLayout is ignored.
+    bool sharedKv = false;
 };
 
 struct SdpaGraph
@@ -627,14 +722,15 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
                             shape.seqKv,
                             shape.headSize,
                             shape.kLayout);
-    auto v = makeSdpaTensor(V_UID,
-                            "V",
-                            shape.dataType,
-                            shape.batch,
-                            shape.kvHeads,
-                            shape.seqKv,
-                            shape.headSize,
-                            shape.vLayout);
+    auto v = shape.sharedKv ? k
+                            : makeSdpaTensor(V_UID,
+                                             "V",
+                                             shape.dataType,
+                                             shape.batch,
+                                             shape.kvHeads,
+                                             shape.seqKv,
+                                             shape.headSize,
+                                             shape.vLayout);
 
     hipdnn_frontend::graph::SdpaAttributes attributes;
     attributes.set_name(name);

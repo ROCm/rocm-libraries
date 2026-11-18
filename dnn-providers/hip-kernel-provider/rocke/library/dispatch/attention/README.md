@@ -151,6 +151,20 @@ ragged path, so where the 256×64 tile would be ragged its default starts at
 128×64; it records `block_m` in every id so one id names one tile on every
 problem.
 
+A `layout="paged"` request reaches the non-persistent dense body on both arches
+(`layout_paged`: the gfx950 grid variants and the gfx942 candidate, which then
+starts on the default grid). It takes the same tile as a contiguous request where
+its pages fit that tile (whole pages per KV tile, each wave's rows in one page),
+else the default 256×64 tile. The paged kernel bakes the cache extent, so binding
+retargets `num_kv_blocks` from `k.shape[0]`; `block_tables` and `kv_lens` come
+in with the tensors. The request carries no cache size, so a cache past the 2 GiB
+i32 limit is refused at binding, not at selection. As for the unified path, the
+structural checks always run, and `unsafe_skip_paged_value_validation=True` skips
+only the runner's synchronized value checks. It is only for trusted callers that
+guarantee the dense kernel's contract themselves: `kv_lens[i] == seqlen_kv` and
+every used block id in `[0, num_kv_blocks)`; the kernel does not mask keys past
+`kv_lens`. The cohort is the kernel's own `supports_attention_dense`.
+
 Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
 `attention_gfx950_u2d_narrow_nw1_mw16_t1xb_llvm` (the `spec_id` drops the
 `attention_` prefix). A codepath also fixes base knobs through
@@ -218,10 +232,9 @@ base values. The checks run in this order:
   and the kernel's `supports_tiled_*` run. On gfx950 2D, `UnifiedSpace.validate`
   then checks what that validator does not model: the LDS footprint
   (`_gfx950_2d_lds_bytes`, the pool the LLVM lowering packs) against the
-  arch's LDS capacity, and a padded K LDS that Q aliases, which computes wrong
-  output. Both were confirmed on MI355X: the over-budget specs fail codegen,
-  and padded-K / aliased-Q specs mismatched the reference (most of them, some
-  nondeterministically).
+  arch's LDS capacity. Over-budget specs fail codegen on MI355X. A padded K
+  slot that holds Q is not this check's: the kernel spec's `__post_init__`
+  refuses it (such specs mismatched the reference on MI355X).
 - **Dense:** `DenseSpace` (through `KnobSpace.canonicalize`) applies the
   knobs to the base spec, so the dataclass validators run. It drops any
   setting that would compile to the same IR as another under a new symbol:
@@ -254,13 +267,13 @@ knob dict (`waves_per_eu` included):
   equal to the default spec (or to the codepath's fixed value); on dense,
   restated policies and the inert rules above; on unified, knobs only another
   codepath emits, gated sub-knobs whose gate is off, and on gfx950 2D a KQ LDS
-  pad the kernel lays out as no pad (native-FP8 K, misaligned slabs, or more
-  than one K buffer);
+  pad the kernel lays out as no pad (native-FP8 K, misaligned slabs, zero
+  width, or more than one K buffer);
 - **refused**, with the reason: `KNOWN_WRONG_KNOBS`, fields no axis of that
   variant sets (problem fields, variant geometry, untunable knobs, knobs out
   of scope for the problem), changing a knob the codepath fixes, whatever the
-  kernel spec or validator rejects, and on gfx950 2D a spec over the LDS
-  budget or a padded K that Q aliases.
+  kernel spec or validator rejects (a gfx950 padded K slot that holds Q among
+  them), and on gfx950 2D a spec over the LDS budget.
 
 What remains is the canonical knob dict the spec carries as `knobs`, and the
 input to its `tuning_id`.
@@ -489,7 +502,22 @@ their prefix sums or paged metadata. Rows load as 16-byte vectors (8-byte for
 FP8 K/V), so data pointers and every outer stride must keep that alignment.
 Paged launches pass the caches' page count as `num_blocks`; the kernels treat a
 `block_table` entry outside `[0, num_blocks)` as a page of zeros (no read
-outside the caches, no host-side value check).
+outside the caches, no host-side value check). The binding rejects a `seqlen_k`
+past the table's capacity (its width times the page size), since the kernels
+clamp each `seqused_k` to `seqlen_k`, and a prefill cache with no pages.
+The prefill kernel takes a K
+table (`block_table`) and a V table (`block_table_v`) that share one row
+stride; the binding passes its one `block_table` as both. The prefill kernel
+steps to a K / V head and page in 64 bits, so a paged cache may pass 2 GiB as
+long as one page of one head is I32-addressable in bytes (the decode kernel
+still needs the whole cache I32-addressable). A paged prefill spec with
+`dense_q` takes a batch-strided `[B, Sq, Hq, D]` Q / O and no `cu_seqlens_q`;
+one with `seqused_q` takes an INT32 `[B]` `seqused_q` of live query rows. With
+`dense_q` it writes the rows past it as O = 0, LSE = `-inf`; with `cu_seqlens_q`
+those rows belong to no sequence and are neither read nor written, and
+`cu_seqlens_q[B]` is not read, so origins may come in any order. The request's
+`dense_q` / `seqused_q` fields select these options (the `dense_q` / `seqused_q`
+features; the decode refuses them, so such a request always runs the prefill).
 Runtime kwargs are `softmax_scale`, positive `softcap` when selected, and
 explicit FP32 `k_scale`/`v_scale` for FP8 storage. The decode binding takes
 its split count from the shape, the visible key range and the CU count
@@ -507,12 +535,16 @@ synchronization and graph-destruction boundary.
 The shipped catalog packages the same two kernels per RDNA family (generic
 targets) as two hipDNN engines: `hipkernel:Gfx1151WmmaAttention` is the prefill
 in the causal class (runtime no-mask/causal/window bounds) for Q/V buckets
-64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, and
+64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, plus
+paged prefill objects for the cuDNN paged-K/V graph (buckets 64/96/128/256 x
+page size 16/32/64 x query form), each with and without attention sinks
+(`use_sinks`, catalog field `sinks`), and
 `hipkernel:Gfx1151WmmaAttentionDecode` is the split-KV decode (buckets
 64/128/256 x bias), a two-launch kernel whose `merge` launch is a companion
-kernel of the same code object (RFC 0017 §15.1 `sources`). Both native
-matchers apply `rdna_attention_use_decode`, so exactly one serves a problem,
-and the decode engine uses the split count of `decode_launch_plan`, with one
+kernel of the same code object (RFC 0017 §15.1 `sources`). On dense graphs
+both native matchers apply `rdna_attention_use_decode`, so exactly one serves
+a problem (paged graphs always go to the prefill engine), and the decode
+engine uses the split count of `decode_launch_plan`, with one
 difference: more than one split always merges in the `merge` launch, never in
 the kernel's fused merge (whose arrival counters hipDNN's stateless workspace
 would need zeroed every launch), so the hipDNN workspace holds only the split
@@ -520,10 +552,12 @@ partials. Kernel design, ABI and
 generic-target requirements are in the
 [RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
 dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`
-(`rocke-attention-gfx1151/v7`): v7 retires the single-wave forward kernel from
-dispatch, gives the prefill a `batch` argument and a flat 1-D grid, and routes
+(`rocke-attention-gfx1151/v8`): v7 retired the single-wave forward kernel from
+dispatch, gave the prefill a `batch` argument and a flat 1-D grid, and routed
 decode-shaped requests to the split-KV decode with its workspace and merge
-kernel. Callers built against an earlier header must be rebuilt.
+kernel; v8 adds the paged prefill's separate V page table (`block_table_v`)
+after `block_table`, which moves every later paged argument. Callers built
+against an earlier header must be rebuilt.
 
 ### Tuned RDNA WMMA candidates
 
@@ -571,12 +605,12 @@ between fields or candidate-specific policy:
 
 Per tuning spec, legality is the kernel's own validators plus, on the gfx950
 2D path, `UnifiedSpace.validate`: the tiled 2D validator does not model LDS,
-so a static LDS budget rejects specs codegen would refuse, and a padded K
-LDS is refused when Q aliases K (it computes wrong output). A pad the kernel
-lays out as no pad (double-buffered K, native-FP8 K, misaligned slabs) is
-inert and dropped, so it does not mint a second id. Points they reject are
-omitted before they enter `sweep_space`; kernel builders are not responsible
-for repairing dispatcher tuning points.
+so a static LDS budget rejects specs codegen would refuse. A padded K slot
+that holds Q is refused by the kernel spec itself (it computes wrong output).
+A pad the kernel lays out as no pad (double-buffered K, native-FP8 K,
+misaligned slabs, zero width) is inert and dropped, so it does not mint a
+second id. Points they reject are omitted before they enter `sweep_space`;
+kernel builders are not responsible for repairing dispatcher tuning points.
 
 ## Concrete tuning specs
 

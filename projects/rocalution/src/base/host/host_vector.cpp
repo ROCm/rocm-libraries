@@ -96,9 +96,8 @@ namespace rocalution
         {
             for(int64_t i = 0; i < this->size_; ++i)
             {
-                if((std::abs(this->vec_[i]) == std::numeric_limits<ValueType>::infinity()) || // inf
-                   (this->vec_[i] != this->vec_[i]))
-                { // NaN
+                if(!rocalution_is_finite(this->vec_[i]))
+                {
                     // LCOV_EXCL_START
                     LOG_VERBOSE_INFO(2, "*** error: Vector:Check - problems with vector data");
                     return false;
@@ -391,10 +390,46 @@ namespace rocalution
 
         // Fill this with random data from interval [a,b]
         srand(seed);
-        for(int64_t i = 0; i < this->size_; ++i)
+        if constexpr(std::is_integral_v<ValueType>)
         {
-            this->vec_[i]
-                = a + static_cast<ValueType>(rand()) / static_cast<ValueType>(RAND_MAX) * (b - a);
+            // Uniform over the integers a to b. The width and the offset are unsigned
+            // integers: b - a can overflow ValueType, double cannot hold every int64_t
+            // bound, and a cast of a fraction to bool gives true. One rand() call has only
+            // RAND_MAX + 1 values, at least 2^15, so the offset is drawn 15 bits at a time
+            // up to the bit length of the width, and drawn again while it exceeds the width
+            const uint64_t width = static_cast<uint64_t>(b) - static_cast<uint64_t>(a);
+
+            int bits = 0;
+            while(bits < 64 && (width >> bits) != 0)
+            {
+                ++bits;
+            }
+            const uint64_t mask = (bits == 64) ? ~uint64_t(0) : (uint64_t(1) << bits) - 1;
+
+            for(int64_t i = 0; i < this->size_; ++i)
+            {
+                uint64_t offset;
+                do
+                {
+                    offset = 0;
+                    for(int drawn = 0; drawn < bits; drawn += 15)
+                    {
+                        offset = (offset << 15) | (static_cast<uint64_t>(rand()) & 0x7FFF);
+                    }
+                    offset &= mask;
+                } while(offset > width);
+
+                this->vec_[i] = static_cast<ValueType>(static_cast<uint64_t>(a) + offset);
+            }
+        }
+        else
+        {
+            for(int64_t i = 0; i < this->size_; ++i)
+            {
+                this->vec_[i]
+                    = a
+                      + static_cast<ValueType>(rand()) / static_cast<ValueType>(RAND_MAX) * (b - a);
+            }
         }
     }
 
@@ -969,41 +1004,37 @@ namespace rocalution
     template <>
     std::complex<float> HostVector<std::complex<float>>::Asum(void) const
     {
-        float asum_real = 0.0f;
-        float asum_imag = 0.0f;
+        float asum = 0.0f;
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : asum_real, asum_imag)
+#pragma omp parallel for reduction(+ : asum)
 #endif
         for(int64_t i = 0; i < this->size_; ++i)
         {
-            asum_real += std::abs(this->vec_[i].real());
-            asum_imag += std::abs(this->vec_[i].imag());
+            asum += std::abs(this->vec_[i]);
         }
 
-        return std::complex<float>(asum_real, asum_imag);
+        return std::complex<float>(asum);
     }
 
     template <>
     std::complex<double> HostVector<std::complex<double>>::Asum(void) const
     {
-        double asum_real = 0.0;
-        double asum_imag = 0.0;
+        double asum = 0.0;
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : asum_real, asum_imag)
+#pragma omp parallel for reduction(+ : asum)
 #endif
         for(int64_t i = 0; i < this->size_; ++i)
         {
-            asum_real += std::abs(this->vec_[i].real());
-            asum_imag += std::abs(this->vec_[i].imag());
+            asum += std::abs(this->vec_[i]);
         }
 
-        return std::complex<double>(asum_real, asum_imag);
+        return std::complex<double>(asum);
     }
 
     // LCOV_EXCL_START

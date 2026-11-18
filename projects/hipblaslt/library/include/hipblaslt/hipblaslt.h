@@ -50,9 +50,10 @@
 #include <hipblas/hipblas.h>
 #endif
 
+#ifdef __cplusplus
 #include <memory>
-#include <regex>
 #include <vector>
+#endif
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_complex.h>
@@ -67,11 +68,18 @@
 /* Opaque structures holding information */
 // clang-format off
 
+#ifdef __cplusplus
 #define HIPBLASLT_DATATYPE_INVALID static_cast<hipDataType>(255)
 // TODO: Replace static_cast<hipblasComputeType_t>(0) with the appropriate value since 0 represents f16_r
 #define HIPBLASLT_COMPUTE_TYPE_INVALID static_cast<hipblasComputeType_t>(0)
 #define HIPBLASLT_OPERATION_INVALID static_cast<hipblasOperation_t>(0)
 #define ROCBLASLT_COMPUTE_TYPE_INVALID static_cast<rocblaslt_compute_type>(255)
+#else
+#define HIPBLASLT_DATATYPE_INVALID ((hipDataType)255)
+#define HIPBLASLT_COMPUTE_TYPE_INVALID ((hipblasComputeType_t)0)
+#define HIPBLASLT_OPERATION_INVALID ((hipblasOperation_t)0)
+#define ROCBLASLT_COMPUTE_TYPE_INVALID ((rocblaslt_compute_type)255)
+#endif
 
 #define HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT \
     static_assert(false, "HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT is deprecated and not supported. Please set HIPBLASLT_MATMUL_DESC_A_SCALE_MODE as HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F instead.")
@@ -133,7 +141,7 @@ typedef enum {
  *  Values ``0``-``11`` are reserved for the chainable family's attributes.
  */
 typedef enum {
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. On gfx942 and gfx950 every other queue must be on an even xGMI SDMA engine in 2..14. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS = 13, /**<Required. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT = 14, /**<Required. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. Data type: ``int64_t``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
@@ -692,9 +700,15 @@ typedef struct _hipblasLtMatmulAlgo_t{
  */
 typedef struct _hipblasLtMatmulHeuristicResult_t{
   hipblasLtMatmulAlgo_t algo;                      /**<Algo struct*/
+#ifdef __cplusplus
   size_t workspaceSize = 0;                        /**<Actual size of workspace memory required.*/
   hipblasStatus_t state = HIPBLAS_STATUS_SUCCESS;  /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
   float wavesCount = 1.0;                          /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#else
+  size_t workspaceSize;                            /**<Actual size of workspace memory required.*/
+  hipblasStatus_t state;                           /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
+  float wavesCount;                                /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#endif
   int reserved[4];                                 /**<Reserved.*/
 } hipblasLtMatmulHeuristicResult_t;
 #endif
@@ -808,13 +822,14 @@ hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
  *
  *  \details
  *  Enables or disables uniform summation order for subsequent GEMMs on
- *  this handle. ``0`` off, ``1`` on (default). See
+ *  this handle. ``0`` off, ``1`` on. The default is ``1``, except on gfx11,
+ *  gfx120x, and gfx942, where it is ``0``. See
  *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
  *
  *  @param[in]
  *  handle                     hipBLASLt library context.
  *  @param[in]
- *  uniformSummationOrder      ``0`` (off) or ``1`` (on, default).
+ *  uniformSummationOrder      ``0`` (off) or ``1`` (on).
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
@@ -829,12 +844,12 @@ hipblasStatus_t hipblasLtSetUniformSummationOrder(hipblasLtHandle_t handle,
  *
  *  \details
  *  Returns the value previously programmed via
- *  ``hipblasLtSetUniformSummationOrder``. ``1`` if never set.
+ *  ``hipblasLtSetUniformSummationOrder``, or the device default if never set.
  *
  *  @param[in]
  *  handle                     hipBLASLt library context.
  *  @param[out]
- *  uniformSummationOrder      receives the previously stored value (``1`` if never set).
+ *  uniformSummationOrder      receives the previously stored value (the device default if never set).
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
