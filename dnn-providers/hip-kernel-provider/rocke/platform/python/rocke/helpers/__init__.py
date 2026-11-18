@@ -324,12 +324,15 @@ from .i4_dequant import (
     unpack_i4_byte_to_pair_i32,
     unpack_i4_byte_to_pair_i8,
 )
-from .mx_scale import (
+from .fp8_encoding import (
     BF8_E5M2_FNUZ,
     BF8_E5M2_OCP,
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
-    MxElementFormat,
+    Fp8ElementFormat,
+    fp8_element_format,
+)
+from .mx_scale import (
     add_mx_scaled_dot,
     apply_mx_scale,
     decode_mx_scale_e8m0,
@@ -683,12 +686,14 @@ __all__ = [
     "unpack_i4_byte_to_pair_f32",
     "unpack_i4_byte_to_pair_i32",
     "unpack_i4_byte_to_pair_i8",
-    # MX (microscaling) shared-exponent helpers
+    # fp8 / bf8 element encodings and the one each target uses
     "BF8_E5M2_FNUZ",
     "BF8_E5M2_OCP",
     "FP8_E4M3_FNUZ",
     "FP8_E4M3_OCP",
-    "MxElementFormat",
+    "Fp8ElementFormat",
+    "fp8_element_format",
+    # MX (microscaling) shared-exponent helpers
     "add_mx_scaled_dot",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",

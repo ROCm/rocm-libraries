@@ -58,17 +58,16 @@
 /* ===================================================================== *
  *  mx_gemm_element_format(mantissa_dtype, arch)
  *
- * Python _MFMA_ELEMENT_FORMATS: the fp8 / bf8 encoding the MFMA of each
- * target reads, the FNUZ encodings on gfx942 and the OCP ones on gfx950.
+ * Python mx_gemm_element_format: on the targets the MX GEMM runs on (Python
+ * _MX_GEMM_ARCHS, gfx942 and gfx950), the encoding rocke_fp8_element_format
+ * gives for the mantissa dtype (which refuses any other dtype); the FNUZ
+ * encodings on gfx942, the OCP ones on gfx950.
  * ===================================================================== */
 const rocke_mx_element_format_t* rocke_mx_gemm_element_format(const char* mantissa_dtype,
                                                               const char* arch,
                                                               char* err,
                                                               size_t err_cap)
 {
-    bool fp8;
-    bool bf8;
-
     if(mantissa_dtype == NULL || arch == NULL)
     {
         if(err != NULL && err_cap > 0)
@@ -77,26 +76,20 @@ const rocke_mx_element_format_t* rocke_mx_gemm_element_format(const char* mantis
         }
         return NULL;
     }
-    fp8 = strcmp(mantissa_dtype, "fp8e4m3") == 0;
-    bf8 = strcmp(mantissa_dtype, "bf8e5m2") == 0;
-    if(strcmp(arch, "gfx942") == 0 && (fp8 || bf8))
+    if(strcmp(arch, "gfx942") != 0 && strcmp(arch, "gfx950") != 0)
     {
-        return fp8 ? &ROCKE_FP8_E4M3_FNUZ : &ROCKE_BF8_E5M2_FNUZ;
+        if(err != NULL && err_cap > 0)
+        {
+            snprintf(err,
+                     err_cap,
+                     "mx_gemm: no %s element format known for %s; the MX GEMM reads "
+                     "fp8e4m3 / bf8e5m2 on gfx942 and gfx950",
+                     mantissa_dtype,
+                     arch);
+        }
+        return NULL;
     }
-    if(strcmp(arch, "gfx950") == 0 && (fp8 || bf8))
-    {
-        return fp8 ? &ROCKE_FP8_E4M3_OCP : &ROCKE_BF8_E5M2_OCP;
-    }
-    if(err != NULL && err_cap > 0)
-    {
-        snprintf(err,
-                 err_cap,
-                 "mx_gemm: no %s element format known for %s; the MX GEMM reads "
-                 "fp8e4m3 / bf8e5m2 on gfx942 and gfx950",
-                 mantissa_dtype,
-                 arch);
-    }
-    return NULL;
+    return rocke_fp8_element_format(mantissa_dtype, arch, err, err_cap);
 }
 
 /* ===================================================================== *

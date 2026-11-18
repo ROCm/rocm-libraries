@@ -32,11 +32,13 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.helpers import compile_kernel
-from rocke.helpers.mx_scale import (
+from rocke.helpers.fp8_encoding import (
     BF8_E5M2_FNUZ,
     BF8_E5M2_OCP,
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
+)
+from rocke.helpers.mx_scale import (
     add_mx_scaled_dot,
     decode_mx_scale_e8m0,
     largest_safe_mx_scale_code,

@@ -36,12 +36,6 @@
  * 2^127 stays a full binade below it. */
 #define F32_SAFE_SUM_EXPONENT 127
 
-/* Python FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ. */
-const rocke_mx_element_format_t ROCKE_FP8_E4M3_OCP = {"OCP E4M3", 448.0};
-const rocke_mx_element_format_t ROCKE_BF8_E5M2_OCP = {"OCP E5M2", 57344.0};
-const rocke_mx_element_format_t ROCKE_FP8_E4M3_FNUZ = {"E4M3 FNUZ", 240.0};
-const rocke_mx_element_format_t ROCKE_BF8_E5M2_FNUZ = {"E5M2 FNUZ", 57344.0};
-
 rocke_status_t rocke_largest_safe_mx_scale_code(const rocke_mx_element_format_t* a_format,
                                                 const rocke_mx_element_format_t* b_format,
                                                 int products,

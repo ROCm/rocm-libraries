@@ -465,8 +465,14 @@ apply_mx_scale(b, value_f32, scale_f32)
 add_mx_scaled_dot(b, acc_f32xN, dot_f32xN, a_codes, b_codes)
 # The largest code an A and a B scale may both have before a sum of
 # `products` scaled products (a scaled MFMA) can overflow f32, from the
-# element formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ.
+# element formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ
+# (helpers/fp8_encoding.py).
 largest_safe_mx_scale_code(a_format, b_format, products)
+
+# helpers/fp8_encoding.py: the fp8 / bf8 encoding a target converts to and its
+# matrix cores read (FNUZ on gfx942, OCP on gfx950 and gfx1250), with its
+# largest value.
+fp8_element_format(dtype, arch)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)
 
 # Preshuffled-B tile-major layout helper. The launcher uses
@@ -695,8 +701,8 @@ Higher-level helpers in `helpers/quant.py`:
 
 ```text
 QDType
-QUANT_MAX_ABS # quant range bounds
 quant_ir_type(qdtype)
+QUANT_MAX_ABS # quant range bounds
 quant_max_abs(qdtype)
 quantize_scalar_f32(b, v, scale, qdtype, ...)
 dequantize_scalar_to_f32(b, v, scale, qdtype, ...)

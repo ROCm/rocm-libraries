@@ -69,20 +69,13 @@ from ...core.ir import (
     VectorType,
 )
 from ...helpers.atoms import MfmaAtom
+from ...helpers.fp8_encoding import Fp8ElementFormat, fp8_element_format
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
     validate_arch_and_block_size,
     validate_mfma_atom_in_catalog,
 )
-from ...helpers.mx_scale import (
-    BF8_E5M2_FNUZ,
-    BF8_E5M2_OCP,
-    FP8_E4M3_FNUZ,
-    FP8_E4M3_OCP,
-    MxElementFormat,
-    add_mx_scaled_dot,
-    largest_safe_mx_scale_code,
-)
+from ...helpers.mx_scale import add_mx_scaled_dot, largest_safe_mx_scale_code
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 
@@ -100,25 +93,23 @@ _I32_MAX = 0x7FFFFFFF
 
 MxMantissaDType = Literal["fp8e4m3", "bf8e5m2"]
 
-# The fp8 / bf8 encoding the MFMA of each target reads: the FNUZ encodings on
-# gfx942, the OCP ones on gfx950.
-_MFMA_ELEMENT_FORMATS = {
-    "gfx942": {"fp8e4m3": FP8_E4M3_FNUZ, "bf8e5m2": BF8_E5M2_FNUZ},
-    "gfx950": {"fp8e4m3": FP8_E4M3_OCP, "bf8e5m2": BF8_E5M2_OCP},
-}
+# The targets the MX GEMM runs on.
+_MX_GEMM_ARCHS = ("gfx942", "gfx950")
 
 
-def mx_gemm_element_format(mantissa_dtype: str, arch: str) -> MxElementFormat:
-    """The element format ``arch``'s MFMA reads for ``mantissa_dtype``: the
-    FNUZ encodings on gfx942, the OCP ones on gfx950. Its largest value bounds
-    the products the scaled MFMA sums (:func:`largest_safe_mx_scale_code`)."""
-    formats = _MFMA_ELEMENT_FORMATS.get(arch, {})
-    if mantissa_dtype not in formats:
+def mx_gemm_element_format(mantissa_dtype: str, arch: str) -> Fp8ElementFormat:
+    """The element format ``arch``'s MFMA reads for ``mantissa_dtype``
+    (:func:`~rocke.helpers.fp8_encoding.fp8_element_format`): the FNUZ
+    encodings on gfx942, the OCP ones on gfx950. Its largest value bounds the
+    products the scaled MFMA sums (:func:`largest_safe_mx_scale_code`). Raises
+    ``ValueError`` for a target the MX GEMM does not run on, and as
+    ``fp8_element_format`` does for any other mantissa dtype."""
+    if arch not in _MX_GEMM_ARCHS:
         raise ValueError(
             f"mx_gemm: no {mantissa_dtype} element format known for {arch}; "
             f"the MX GEMM reads fp8e4m3 / bf8e5m2 on gfx942 and gfx950"
         )
-    return formats[mantissa_dtype]
+    return fp8_element_format(mantissa_dtype, arch)
 
 
 @dataclass(frozen=True, kw_only=True)
