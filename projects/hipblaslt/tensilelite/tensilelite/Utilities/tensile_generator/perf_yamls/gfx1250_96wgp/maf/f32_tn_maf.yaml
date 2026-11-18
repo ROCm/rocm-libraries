@@ -27,7 +27,7 @@ GlobalParameters:
   Architecture: gfx1250
   KeepBuildTmp: True
   PrintLevel: 2
-  SkipSlowSolutionRatio: 0
+  SkipSlowSolutionRatio: 0.0
   RotatingBufferSize: 384
 
 BenchmarkProblems:
