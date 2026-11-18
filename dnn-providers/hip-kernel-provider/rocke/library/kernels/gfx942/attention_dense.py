@@ -214,11 +214,12 @@ from kernels.common.attention_dense_spec import (
     check_dense_scale,
     check_dense_spec_preflight,
     partial_tile_reason,
-    RuntimeShapeNamePartsMixin,
+    RuntimeShapeSpecMixin,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
+from kernels.common._attention_dense_shared import emit_o_store
 from kernels.common._attention_tiled_shared import mfma_32x32_c_col, mfma_32x32_c_row
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
@@ -242,7 +243,6 @@ from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
     validate_dense_lse,
-    zero_keyless_row,
 )
 from kernels.common._spec_checks import require_bool
 
@@ -287,7 +287,7 @@ _SCHED_BARRIER_MASK_MAX = 0x7FF
 
 
 @dataclass(frozen=True)
-class Gfx942AttentionDenseSpec(RuntimeShapeNamePartsMixin, AttentionDenseSpec):
+class Gfx942AttentionDenseSpec(RuntimeShapeSpecMixin, AttentionDenseSpec):
     """The gfx942 dense prefill spec: the shared spec plus gfx942-private knobs.
 
     A SUBCLASS of :class:`AttentionDenseSpec`, not a fork and not a sidecar struct.
@@ -618,24 +618,6 @@ class Gfx942AttentionDenseSpec(RuntimeShapeNamePartsMixin, AttentionDenseSpec):
         cache key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
         return not (self.ragged or self.varlen or self.paged)
-
-    @property
-    def runtime_param_fields(self) -> tuple[str, ...]:
-        """The shape fields this body reads *only* from its kernel params, and so
-        the fields ``attention_dense_cache_key`` may drop.
-
-        The tuple also opens the ABI: the body declares one i32 param per field, in
-        this order, after ``scale`` (then the fast-division params of
-        :attr:`runtime_kernarg_fields`), and :func:`attention_dense_signature` /
-        :func:`attention_dense_runtime_args` read the same tuple -- so the kernel and
-        its launchers cannot skew. Kept in sync with :meth:`kernel_name` by hand,
-        which drops ``sq``/``sk`` (via :meth:`_shape_name_parts`), ``hq``/``kv`` (via
-        :meth:`_head_name_parts`) and ``b{batch}`` for exactly this tuple. A field
-        declared here but still baked anywhere would be a cache collision serving one
-        shape's binary to another."""
-        if not self.runtime_shape:
-            return ()
-        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
 
     def kernel_name(self) -> str:
         """The gfx942 kernel symbol: the shared name plus everything THIS body bakes.
@@ -1453,31 +1435,6 @@ def build_attention_dense(
     if not ok:
         raise ValueError(f"unsupported gfx942 attention_dense spec: {why}")
     return _build_attention_dense_single_buffer(_as_gfx942_spec(spec))
-
-
-def _emit_o_store(
-    b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width, row_has_key=None
-):
-    """O = acc / l, ``width`` contiguous head-dim elements per global store.
-
-    ``row_has_key`` zeroes rows that see no key (the LSE path and sliding-window specs
-    without sinks); ``None`` emits the unchanged store sequence.
-    """
-    for dt in range(d_tiles):
-        for g in range(4):
-            for c in range(0, 4, width):
-                d0 = b.add(b.const_i32(dt * 32 + g * 8 + c), d_half)
-                addr = b.add(q_row_byte, d0)
-                vals = [
-                    b.cast_f32_to(
-                        b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
-                    )
-                    for kk in range(c, c + width)
-                ]
-                packed = b.vec_pack(vals, dtype)
-                if row_has_key is not None:
-                    packed = zero_keyless_row(b, packed, row_has_key, dtype, width)
-                b.global_store_vN(o, addr, packed, width, align=2 * width)
 
 
 def _build_attention_dense_single_buffer(
@@ -2733,7 +2690,7 @@ def _build_attention_dense_single_buffer(
             # Both half-waves hold the same query row; one of them writes its LSE.
             with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
                 lse_store(b, lse, lse_index, m_i, l_i, row_has_mass=row_has_mass)
-        _emit_o_store(
+        emit_o_store(
             b,
             o,
             q_row_byte,

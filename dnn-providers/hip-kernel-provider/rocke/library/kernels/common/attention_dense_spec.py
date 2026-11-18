@@ -587,15 +587,43 @@ class AttentionDenseSpec:
 OCP_FP8_KV_DTYPE = "torch.float8_e4m3fn"
 
 
-class RuntimeShapeNamePartsMixin:
-    """Drop the baked shape and head-count tokens from a runtime-shape name.
+class RuntimeShapeSpecMixin:
+    """What a runtime-shape dense body changes in its spec's identity.
 
     One runtime-shape binary serves every batch, sequence length and head
-    count, so its symbol must not claim ``sq``/``sk`` or ``hq``/``kv``. Mix in
-    ahead of :class:`AttentionDenseSpec`; the per-arch dense specs share it.
+    count: it reads them as kernel params, so they leave the cache key
+    (:attr:`runtime_param_fields`) and the symbol must not claim ``sq``/``sk``
+    or ``hq``/``kv``. Mix in ahead of :class:`AttentionDenseSpec`; the per-arch
+    dense specs share it.
     """
 
     runtime_shape: bool
+
+    @property
+    def runtime_param_fields(self) -> tuple[str, ...]:
+        """The shape fields this body reads *only* from its kernel params, and so
+        the fields ``attention_dense_cache_key`` may drop.
+
+        Gated on ``runtime_shape``, not on ``_has_shape_params``: taking a field as
+        a kernarg is necessary but not sufficient: a sub-mode that also bakes the
+        field elsewhere would be a cache collision if it declared it here.
+
+        The tuple also opens the ABI: the body declares one i32 param per field, in
+        this order, after ``scale`` (then the fast-division params of
+        :attr:`runtime_kernarg_fields`), and :func:`attention_dense_signature` /
+        :func:`attention_dense_runtime_args` read the same tuple -- so the kernel and
+        its launchers cannot skew. Kept in sync with ``kernel_name`` by hand, which
+        drops ``sq``/``sk`` (via :meth:`_shape_name_parts`), ``hq``/``kv`` (via
+        :meth:`_head_name_parts`) and ``b{batch}`` for exactly this tuple.
+
+        The head counts ride along: one binary serves every (num_query_heads,
+        num_kv_heads) pair by reading them as kernargs and deriving the token
+        strides and GQA ratio at launch. The grid still takes num_query_heads
+        host-side, which never bakes into the binary.
+        """
+        if not self.runtime_shape:
+            return ()
+        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
@@ -796,7 +824,7 @@ __all__ = [
     "DENSE_MIN_SCALE",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
-    "RuntimeShapeNamePartsMixin",
+    "RuntimeShapeSpecMixin",
     "attention_dense_cache_key",
     "check_dense_scale",
     "check_dense_spec_preflight",
