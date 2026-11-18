@@ -115,8 +115,8 @@ The chain runs in FP32 and y is rounded once:
 - **Extra pass:** otherwise (groups, other activations, a bias of another type): the GEMMs write y in FP32 to the workspace
   and one cast applies the chain
 
-`HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`, numerical notes
-`NONDETERMINISTIC`) runs relu, clamp, swish (beta 1), tanh GELU and fp32 sigmoid in hipBLASLt's epilogue. It serves only fused
+`HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`; deterministic,
+hipBLASLt offered no workspace) runs relu, clamp, swish (beta 1), tanh GELU and fp32 sigmoid in hipBLASLt's epilogue. It serves only fused
 graphs with one of those. Its special values differ from every other engine's: relu maps NaN to 0, clamp maps NaN to its upper
 bound, swish and tanh GELU map -inf to NaN.
 
@@ -131,7 +131,7 @@ below but the opt-in library-activation one is registered by default; a caller e
 | `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
 | `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | `TENSOR_CORE` |
 | `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
-| `HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`) | `NONDETERMINISTIC` |
+| `HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`) | none |
 
 - **TF32** (`*_CONV_TF32_ENGINE`): they serve only convolutions with an FP32 GEMM and permit TF32 for them: hipBLASLt is
   asked for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to FP32 when it has no algorithm; rocBLAS runs under

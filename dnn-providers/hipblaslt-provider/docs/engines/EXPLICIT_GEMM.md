@@ -157,8 +157,7 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   | `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
   | `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | `TENSOR_CORE` |
   | `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
-  | `HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`) | `NONDETERMINISTIC` |
-| `HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`) | `NONDETERMINISTIC` |
+  | `HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`) | none |
 
   - The default engines run the libraries' defaults: rocBLAS with atomics allowed, hipBLASLt offered up to 128 MiB of workspace. Either may split a reduction across workgroups.
   - The deterministic siblings share the default engines' code; one flag picks the plan's library settings. rocBLAS runs with `rocblas_atomics_not_allowed`, the handle's mode saved and restored around the plan (as MIOpen's `DisableRocblasAtomics`). hipBLASLt is offered no workspace (`HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES` 0, as MIOpen's deterministic GEMMs), so it declines a GEMM it has no workspace-free algorithm for. The repack workspace is separate and unaffected.

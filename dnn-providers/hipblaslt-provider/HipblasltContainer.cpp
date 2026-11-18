@@ -157,16 +157,17 @@ HipblasltContainer::HipblasltContainer()
                   HIPBLASLT_NARROW,
                   Notes{RPR, NONDETERMINISTIC},
                   true);
-    // Opt-in: the fused activations hipBLASLt computes with other special values.
+    // Opt-in: the fused activations hipBLASLt computes with other special values. Deterministic
+    // (hipBLASLt offered no workspace, as the *_DETERMINISTIC engines).
     if(convLibraryActivationsEnabled())
     {
         HIPDNN_PLUGIN_LOG_INFO(CONV_LIBRARY_ACTIVATIONS_ENV_NAME
                                << " set: offering HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE");
         addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE_ID,
-                      hipblasltGemm(false),
+                      hipblasltGemm(true),
                       false,
                       HIPBLASLT_NARROW,
-                      Notes{NONDETERMINISTIC},
+                      Notes{},
                       false,
                       GemmEpilogueSupport{true, true});
     }
