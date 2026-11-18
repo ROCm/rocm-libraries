@@ -1785,8 +1785,13 @@ TEST(TestConvWinogradPlan, NativeMultipassPreservesUnpaddedBuffersAndStaging)
                 shape.k = 1;
                 shape.channelsLast = channelsLast;
                 if(m == 3)
+                {
                     shape.stride = {2, 2};
-                const auto problem = parse(specFor(shape, direction));
+                }
+                // A gfx1250 device: its native configs classify the extent-one k axis jointly.
+                const GraphFixture fixture(buildGraph(specFor(shape, direction)),
+                                           gfx950Properties("gfx1250"));
+                const auto problem = parseWinogradProblem(fixture.context(), direction);
                 ASSERT_TRUE(problem.has_value());
                 ConfigFields fields;
                 fields.m = m;

@@ -11,6 +11,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -569,7 +570,16 @@ TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyForFloatWhereItPays)
             ASSERT_TRUE(problem.has_value());
             const bool expected
                 = dataType == DataType::FLOAT && conv_igemm_nchw::threeBf16Pays(*problem, arch);
-            EXPECT_EQ(admitted() > 0, expected);
+            // A build stages the gfx1250 catalogs only when it targets gfx1250.
+            const bool staged
+                = std::string_view(arch) != "gfx1250"
+                  || std::any_of(catalog().begin(), catalog().end(), [](const auto& kernel) {
+                         return kernel.getStringMetadata("atom").rfind("wmma125", 0) == 0;
+                     });
+            if(staged)
+            {
+                EXPECT_EQ(admitted() > 0, expected);
+            }
             EXPECT_EQ(expected,
                       dataType == DataType::FLOAT && std::string(arch).rfind("gfx1", 0) == 0);
         }
