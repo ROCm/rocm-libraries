@@ -16,6 +16,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotSelection.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvFwdAotTestSupport.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -30,23 +31,12 @@ namespace
 
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using namespace hipdnn_plugin_sdk::ingestor;
+using namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot_test;
 namespace conv = hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 constexpr const char* AOT_GRAPH_MATCHER = "hipkernel.gfx950_conv_fwd_aot.graph_match";
 constexpr const char* AOT_KERNEL_MATCHER = "hipkernel.gfx950_conv_fwd_aot.kernel_match";
-
-/// One forward identity of rocKE's AOT sweep (gfx950, fp16, grouped), as
-/// make_conv_aot_config.py packages it. The fields the kernel matcher and the candidate
-/// filter read, in this order: epilogue, vector_size_a/b/c, tile_m/n/k, warp_m/n,
-/// warp_tile_m/n/k, pipeline, unroll_k, async_dma, async_chunk_a/b.
-struct AotSample
-{
-    const char* epilogue;
-    std::array<int64_t, 11> values;
-    const char* pipeline;
-    std::array<int64_t, 4> loop;
-};
 
 /// One instance of each (epilogue, width pair, K loop) the sweep builds, at a 64x64 tile,
 /// then four with the extreme M tiles of their width pairs. test_make_conv_aot_config.py
@@ -134,87 +124,6 @@ const std::vector<SelectionCase>& selectionCases()
 }
 // clang-format on
 
-KernelDefinition sampleKernel(const AotSample& sample)
-{
-    const auto& v = sample.values;
-    KernelDefinition kernel;
-    kernel.name = "aot_instance";
-    kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.metadata = {{"dtype", std::string("fp16")},
-                       {"layout", std::string("NHWC")},
-                       {"vector_size_a", v[0]},
-                       {"vector_size_b", v[1]},
-                       {"vector_size_c", v[2]},
-                       {"tile_m", v[3]},
-                       {"tile_n", v[4]},
-                       {"tile_k", v[5]},
-                       {"warp_m", v[6]},
-                       {"warp_n", v[7]},
-                       {"warp_tile_m", v[8]},
-                       {"warp_tile_n", v[9]},
-                       {"warp_tile_k", v[10]},
-                       {"wave_size", int64_t{64}},
-                       {"pipeline", std::string(sample.pipeline)},
-                       {"epilogue", std::string(sample.epilogue)},
-                       {"unroll_k", sample.loop[0]},
-                       {"async_dma", sample.loop[1]},
-                       {"async_chunk_a", sample.loop[2]},
-                       {"async_chunk_b", sample.loop[3]},
-                       {"grouped", int64_t{1}},
-                       {"instance_id", std::string(40, 'a')},
-                       {"kernel_family", int64_t{0}},
-                       {"direct_variant", std::string("none")},
-                       {"filter_h", int64_t{0}},
-                       {"filter_w", int64_t{0}},
-                       {"stride_h", int64_t{0}},
-                       {"stride_w", int64_t{0}},
-                       {"pad_h", int64_t{0}},
-                       {"pad_w", int64_t{0}},
-                       {"dilation_h", int64_t{0}},
-                       {"dilation_w", int64_t{0}},
-                       {"block_w", int64_t{0}},
-                       {"block_waves", int64_t{0}},
-                       {"block_h", int64_t{0}},
-                       {"unroll_rows", int64_t{0}},
-                       {"block_q", int64_t{0}},
-                       {"block_groups", int64_t{0}},
-                       {"double_buffer", int64_t{0}},
-                       {"cpg", int64_t{0}},
-                       {"kpg", int64_t{0}},
-                       {"tile_h", int64_t{0}},
-                       {"tile_w", int64_t{0}},
-                       {"tile_k_out", int64_t{0}},
-                       {"ck", int64_t{0}},
-                       {"waves_m", int64_t{0}},
-                       {"waves_n", int64_t{0}},
-                       {"atom", std::string("none")},
-                       {"swizzle_wgm", int64_t{0}},
-                       {"iglp", int64_t{-1}},
-                       {"waves_per_eu", int64_t{0}},
-                       {"group_merge", int64_t{1}},
-                       {"split_c", int64_t{1}},
-                       {"prefetch_rows", int64_t{0}},
-                       {"w_fold", int64_t{0}}};
-    return kernel;
-}
-
-/// A direct std depthwise instance compiled for a 3x3, stride 1, "same"-padded filter.
-KernelDefinition directSampleKernel()
-{
-    auto kernel
-        = sampleKernel({"direct", {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, "direct", {0, 0, 0, 0}});
-    kernel.metadata["grouped"] = int64_t{0};
-    kernel.metadata["kernel_family"] = int64_t{1};
-    kernel.metadata["direct_variant"] = std::string("std");
-    kernel.metadata["filter_h"] = kernel.metadata["filter_w"] = int64_t{3};
-    kernel.metadata["stride_h"] = kernel.metadata["stride_w"] = int64_t{1};
-    kernel.metadata["pad_h"] = kernel.metadata["pad_w"] = int64_t{1};
-    kernel.metadata["dilation_h"] = kernel.metadata["dilation_w"] = int64_t{1};
-    kernel.metadata["block_w"] = int64_t{4};
-    kernel.metadata["block_waves"] = int64_t{1};
-    return kernel;
-}
-
 /// A windowed direct_depthwise_win instance (90 of the shipped catalog's 466 instances;
 /// implicit_gemm, at 178, is the largest family), pure depthwise (cpg == kpg == 1),
 /// compiled for the same 3x3 filter.
@@ -238,68 +147,9 @@ KernelDefinition winSampleKernel()
     return kernel;
 }
 
-/// A packed NHWC fp16 forward graph for @p p, in SelectionCase's field order.
-flatbuffers::FlatBufferBuilder convGraph(const std::array<int64_t, 14>& p)
-{
-    const auto [n, c, k, hi, wi, y, x, sH, sW, pH, pW, dH, dW, groups] = p;
-    const auto cpg = c / groups;
-    const auto ho = (hi + 2 * pH - ((y - 1) * dH + 1)) / sH + 1;
-    const auto wo = (wi + 2 * pW - ((x - 1) * dW + 1)) / sW + 1;
-    const std::array<std::vector<int64_t>, 3> dims{
-        std::vector<int64_t>{n, c, hi, wi}, {k, cpg, y, x}, {n, k, ho, wo}};
-    const std::array<std::vector<int64_t>, 3> strides{
-        std::vector<int64_t>{hi * wi * c, 1, wi * c, c},
-        {y * x * cpg, 1, x * cpg, cpg},
-        {ho * wo * k, 1, wo * k, k}};
-
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    for(size_t i = 0; i < dims.size(); ++i)
-    {
-        const auto dimsOffset = builder.CreateVector(dims[i]);
-        const auto stridesOffset = builder.CreateVector(strides[i]);
-        data_objects::TensorAttributesBuilder tensor(builder);
-        tensor.add_uid(static_cast<int64_t>(i + 1));
-        tensor.add_data_type(data_objects::DataType::HALF);
-        tensor.add_dims(dimsOffset);
-        tensor.add_strides(stridesOffset);
-        tensor.add_alignment(16);
-        tensors.push_back(tensor.Finish());
-    }
-    const std::vector<int64_t> stride{sH, sW};
-    const std::vector<int64_t> dilation{dH, dW};
-    const std::vector<int64_t> padding{pH, pW};
-    const auto attributes = data_objects::CreateConvolutionFwdAttributesDirect(
-        builder,
-        1,
-        2,
-        3,
-        &padding,
-        &padding,
-        &stride,
-        &dilation,
-        data_objects::ConvMode::CROSS_CORRELATION);
-    const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
-        data_objects::CreateNodeDirect(builder,
-                                       "gfx950_conv_fwd_aot_selection_test",
-                                       data_objects::DataType::FLOAT,
-                                       data_objects::NodeAttributes::ConvolutionFwdAttributes,
-                                       attributes.Union())};
-    const auto tensorVector = builder.CreateVector(tensors);
-    const auto nodeVector = builder.CreateVector(nodes);
-    data_objects::GraphBuilder graph(builder);
-    graph.add_tensors(tensorVector);
-    graph.add_nodes(nodeVector);
-    builder.Finish(graph.Finish());
-    return builder;
-}
-
 DeviceProperties gfx950()
 {
-    DeviceProperties properties;
-    properties.gcnArchName = "gfx950";
-    properties.warpSize = 64;
-    return properties;
+    return deviceProperties("gfx950");
 }
 
 /// The engine's pipeline for one graph, as KernelIngestorStateManager runs it: the graph

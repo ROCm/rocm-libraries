@@ -946,6 +946,82 @@ def test_gpu_suite_selects_every_seed_instance_for_some_graph(catalogs):
         assert not missing, (dtype, missing)
 
 
+_GFX942_GPU_SUITE = _GPU_SUITE.with_name("IntegrationGpuGfx942ConvFwd.cpp")
+#: One gfx942AotGraphs() row: name, problem, the direct count (both dtypes), then the
+#: implicit-GEMM counts in fp16 and in bf16.
+_GFX942_GRAPH_ROW = re.compile(
+    r'^\s*\{"(\w+)", \{([\d, ]+)\}, (\d+), (\d+), (\d+)\},$', re.MULTILINE
+)
+
+
+def _gfx942_selected(specs, problem, dtype):
+    """What hipkernel:Gfx942ConvFwdAot selects for the problem among ``specs``:
+    gfx942_conv_fwd_aot_runtime_candidates over those that serve it."""
+    from builders.common.convolution_forward import (
+        gfx942_conv_fwd_aot_runtime_candidates,
+    )
+
+    return gfx942_conv_fwd_aot_runtime_candidates(
+        _runtime_problem(problem, dtype), [s for s in specs if s.dtype == dtype]
+    )
+
+
+def _gfx942_gpu_suite_graphs():
+    rows = _GFX942_GRAPH_ROW.findall(_GFX942_GPU_SUITE.read_text())
+    assert len(rows) >= 30, "gfx942AotGraphs() rows not found; keep one row per line"
+    for name, problem, *row in rows:
+        values = tuple(int(v) for v in problem.split(","))
+        assert len(values) == 14, name
+        yield name, values, tuple(int(v) for v in row)
+
+
+def test_gfx942_gpu_suite_selected_counts_are_the_python_runtime_candidates(catalogs):
+    """IntegrationGpuGfx942ConvFwd.cpp states, per graph, how many instances of each family
+    the gfx942 catalog selects; the GPU suites check the engine against those numbers, so
+    they must be what the Python runtime selection counts over the committed gfx942 lists,
+    in both dtypes. Every graph has a selected instance, selection only narrows what serves,
+    and every direct instance that serves is selected."""
+    from builders.common.convolution_forward import gfx942_conv_fwd_aot_serves
+
+    specs = catalogs["gfx942"]
+    for name, problem, (direct, fp16, bf16) in _gfx942_gpu_suite_graphs():
+        for dtype, implicit in (("fp16", fp16), ("bf16", bf16)):
+            selected = _gfx942_selected(specs, problem, dtype)
+            counted = (
+                sum(s.is_direct for s in selected),
+                sum(not s.is_direct for s in selected),
+            )
+            assert counted == (direct, implicit), (name, dtype, counted)
+            assert sum(counted) > 0, (name, dtype)
+            runtime = _runtime_problem(problem, dtype)
+            serving = [
+                s
+                for s in specs
+                if s.dtype == dtype and gfx942_conv_fwd_aot_serves(s, runtime)[0]
+            ]
+            assert counted[1] <= sum(not s.is_direct for s in serving), (name, dtype)
+            assert counted[0] == sum(s.is_direct for s in serving), (name, dtype)
+
+
+def test_gfx942_gpu_suite_selects_every_instance_for_some_graph(catalogs):
+    """IntegrationGpuGfx942ConvFwdAotCatalog runs every shipped instance on a graph it is
+    selected for, so every instance of both gfx942 lists has to be selected for at least
+    one graph of gfx942AotGraphs()."""
+    graphs = [problem for _, problem, _ in _gfx942_gpu_suite_graphs()]
+    for dtype in ("fp16", "bf16"):
+        selected = {
+            spec.instance_id
+            for problem in graphs
+            for spec in _gfx942_selected(catalogs["gfx942"], problem, dtype)
+        }
+        missing = [
+            spec.instance_id
+            for spec in catalogs["gfx942"]
+            if spec.dtype == dtype and spec.instance_id not in selected
+        ]
+        assert not missing, (dtype, len(missing), missing[:5])
+
+
 # ---- The unit suite's selection sample ----
 
 _SELECTION_SUITE = (
@@ -989,6 +1065,60 @@ def test_unit_suite_selection_cases_are_the_python_runtime_candidates():
     for problem, stated in cases:
         values = tuple(int(v) for v in problem.split(","))
         selected = _selected(specs, values, "fp16")
+        assert [int(s.instance_id, 16) for s in selected] == [
+            int(v) for v in stated.split(",")
+        ], values
+
+
+_GFX942_SELECTION_SUITE = _SELECTION_SUITE.with_name(
+    "TestGfx942ConvFwdAotSelection.cpp"
+)
+#: One gfx942Sample() row: the sample's epilogue, values, pipeline and K loop, then the
+#: merge degree.
+_GFX942_SAMPLE_ROW = re.compile(
+    r'^\s*\{\{"(\w+)", \{([\d, ]+)\}, "(\w+)", \{([\d, ]+)\}\}, (\d+)\},$',
+    re.MULTILINE,
+)
+
+
+def test_gfx942_unit_suite_selection_cases_are_the_python_runtime_candidates():
+    """TestGfx942ConvFwdAotSelection.cpp checks the gfx942 engine's selection over a sample
+    of its catalog's implicit-GEMM instances (group-merged ones included) against stated
+    row indices; they must be what gfx942_conv_fwd_aot_runtime_candidates picks from the
+    same sample."""
+    from builders.common.convolution_forward import (
+        Gfx942ConvFwdAotSpec,
+        gfx942_conv_fwd_aot_runtime_candidates,
+    )
+
+    text = _GFX942_SELECTION_SUITE.read_text()
+    specs = []
+    for row, (epilogue, values, pipeline, loop, merge) in enumerate(
+        _GFX942_SAMPLE_ROW.findall(text)
+    ):
+        a, b, c, tm, tn, tk, wm, wn, wtm, wtn, wtk = (int(v) for v in values.split(","))
+        unroll, async_dma, chunk_a, chunk_b = (int(v) for v in loop.split(","))
+        specs.append(
+            Gfx942ConvFwdAotSpec(
+                dtype="fp16", tile_m=tm, tile_n=tn, tile_k=tk, warp_m=wm, warp_n=wn,
+                warp_tile_m=wtm, warp_tile_n=wtn, warp_tile_k=wtk, wave_size=64,
+                pipeline=pipeline, epilogue=epilogue, vector_size_a=a,
+                vector_size_b=b, vector_size_c=c, unroll_k=unroll, async_dma=async_dma,
+                async_chunk_a=chunk_a, async_chunk_b=chunk_b, grouped=1,
+                instance_id=f"{row:040x}", group_merge=int(merge),
+            )  # fmt: skip
+        )
+    cases = _CASE_ROW.findall(text)
+    assert (
+        len(specs) >= 14 and len(cases) >= 15
+    ), "keep one sample row and case per line"
+    # The sample holds every merge degree the gfx942 catalog ships.
+    assert {s.group_merge for s in specs} >= {1, 4, 16, 32}
+    for problem, stated in cases:
+        values = tuple(int(v) for v in problem.split(","))
+        selected = gfx942_conv_fwd_aot_runtime_candidates(
+            _runtime_problem(values, "fp16"), specs
+        )
         assert [int(s.instance_id, 16) for s in selected] == [
             int(v) for v in stated.split(",")
         ], values
@@ -1109,17 +1239,32 @@ _LAUNCH_ROW = re.compile(
 )
 
 
-def test_native_direct_launch_cases_are_the_adapters():
-    """TestGfx950ConvFwdGeometry.cpp holds conv::directInstanceLaunch to a table of
-    (instance, problem) cases; every row must be what the adapter decides, so the native
-    launch is checked against gfx950_conv_fwd_aot_serves, grid() and block()."""
+#: Each engine's launch table: its geometry test, and its sweep's non-grouped MFMA atom of
+#: each tile the table records.
+_LAUNCH_TABLES = {
+    "gfx950": (_GEOMETRY_TEST, {32: "32x32x16", 16: "16x16x32"}),
+    "gfx942": (
+        _GEOMETRY_TEST.with_name("TestGfx942ConvFwdGeometry.cpp"),
+        {32: "32x32x8", 16: "16x16x16"},
+    ),
+}
+
+
+@pytest.mark.parametrize("arch", sorted(_LAUNCH_TABLES))
+def test_native_direct_launch_cases_are_the_adapters(arch):
+    """TestGfx950ConvFwdGeometry.cpp and TestGfx942ConvFwdGeometry.cpp hold
+    conv::directInstanceLaunch to a table of (instance, problem) cases; every row must be
+    what the engine's adapter decides, so the native launch is checked against
+    conv_fwd_aot_serves, grid() and block() of the architecture's spec class."""
     from builders.common.convolution_forward import (
-        Gfx950ConvFwdAotSpec,
+        SPEC_CLASSES,
         Gfx950ConvFwdSpec,
-        gfx950_conv_fwd_aot_serves,
+        conv_fwd_aot_serves,
     )
 
-    rows = _LAUNCH_ROW.findall(_GEOMETRY_TEST.read_text())
+    geometry_test, atoms = _LAUNCH_TABLES[arch]
+    spec_class = SPEC_CLASSES[arch]
+    rows = _LAUNCH_ROW.findall(geometry_test.read_text())
     assert len(rows) >= 30, "directLaunchCases() rows not found; keep one row per line"
     variants = set()
     for compiled, variant, knobs, problem, served, *launch in rows:
@@ -1128,9 +1273,9 @@ def test_native_direct_launch_cases_are_the_adapters():
         values = [int(v) for v in knobs.split(",")]
         values += [0] * (14 - len(values))
         bw, waves, bh, bq, bg, cpg, kpg, th, tw, tk, ck, wm, wn, atom_tile = values
-        # The table records the atom's tile only; the gfx950 sweep's atom of that tile.
-        atom = {32: "32x32x16", 16: "16x16x32"}.get(atom_tile, "none")
-        spec = Gfx950ConvFwdAotSpec(
+        # The table records the atom's tile only; the sweep's atom of that tile.
+        atom = atoms.get(atom_tile, "none")
+        spec = spec_class(
             dtype="fp16", tile_m=0, tile_n=0, tile_k=0, warp_m=0, warp_n=0,
             warp_tile_m=0, warp_tile_n=0, warp_tile_k=0, wave_size=64,
             pipeline="direct", epilogue="direct", vector_size_a=0, vector_size_b=0,
@@ -1150,7 +1295,7 @@ def test_native_direct_launch_cases_are_the_adapters():
             N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=psh, sW=psw, pH=pph, pW=ppw,
             dH=pdh, dW=pdw, groups=groups,
         )  # fmt: skip
-        ok, why = gfx950_conv_fwd_aot_serves(spec, runtime)
+        ok, why = conv_fwd_aot_serves(spec, runtime)
         assert ok == (served == "true"), (variant, problem, why)
         if ok:
             gx, gy, gz, block = (int(v) for v in launch)

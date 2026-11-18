@@ -34,7 +34,7 @@
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/ConvDgradMatcherTestSupport.hpp"
 #ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
-#include "tests/engines/kernel_ingestor_engine/packs/ConvDgradShippedCatalog.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvAotShippedCatalog.hpp"
 #endif
 #include "tests/engines/kernel_ingestor_engine/packs/ConvDgradTestCatalog.hpp"
 
@@ -743,12 +743,13 @@ TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsThePlanAndPrepareReachesCodeLo
 }
 
 #ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
-namespace shipped = hip_kernel_provider::kernel_ingestor_engine::dgrad_shipped_catalog;
+namespace shipped = hip_kernel_provider::kernel_ingestor_engine::conv_aot_shipped_catalog;
 
 /// The shipped bundle's state manager, built once, or null when it is not staged.
 const shipped::StateManager* shippedManager(std::vector<std::string>* knobs = nullptr)
 {
-    const auto& loaded = shipped::shippedCatalog("gfx950", GFX950_CONV_DGRAD_AOT.engineName);
+    const auto& loaded = shipped::shippedCatalog(
+        "gfx950", GFX950_CONV_DGRAD_AOT.engineName, "gfx950_conv_dgrad_aot");
     if(knobs != nullptr)
     {
         *knobs = loaded.knobs;

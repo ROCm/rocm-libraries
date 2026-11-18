@@ -25,13 +25,13 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
-/// @file ConvDgradShippedCatalog.hpp
-/// The production dgrad bundle a build packed, loaded through the real state manager, for
-/// the dgrad engines' shipped-catalog tests: the arch shard of the production tree, the
-/// engine's state manager and knobs, and the check that a shipped kernel passes the pack's
-/// signature check and loads only on its own device. Needs
-/// HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR (the unit test binary's).
-namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_shipped_catalog
+/// @file ConvAotShippedCatalog.hpp
+/// A production conv AOT bundle a build packed (dgrad or forward), loaded through the real
+/// state manager, for the AOT engines' shipped-catalog tests: the arch shard of the
+/// production tree, the engine's state manager, knobs and dispatch symbols, and the check
+/// that a shipped kernel passes the pack's signature check and loads only on its own
+/// device. Needs HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR (the unit test binary's).
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_aot_shipped_catalog
 {
 
 using StateManager = hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>;
@@ -40,27 +40,35 @@ struct ShippedCatalog
 {
     std::unique_ptr<StateManager> manager; ///< null when the bundle is not staged
     std::vector<std::string> knobs;
+    /// The dispatch symbol of every UDD the bundle's packs name.
+    std::vector<std::string> dispatchSymbols;
 };
 
-/// The @p arch shard of the production tree this build packed, when it holds the dgrad
-/// bundle; an empty path otherwise. The whole shard is loaded, not the bundle's folder: a
-/// kernel's archive sits at the shard root and must lie inside the tree it was read from.
-inline std::filesystem::path packedDgradShard(const std::string& arch)
+/// The @p arch shard of the production tree this build packed, when it holds the bundle
+/// folder rocKE/@p bundleFolder; an empty path otherwise. The whole shard is loaded, not
+/// the bundle's folder: a kernel's archive sits at the shard root and must lie inside the
+/// tree it was read from.
+inline std::filesystem::path packedShard(const std::string& arch, const std::string& bundleFolder)
 {
     const auto shard = hip_kernel_provider::testing::descriptorSetRoot(
                            HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR)
                        / arch;
     std::error_code missing;
-    return std::filesystem::is_directory(shard / "rocKE" / (arch + "_conv_dgrad_aot"), missing)
+    return std::filesystem::is_directory(shard / "rocKE" / bundleFolder, missing)
                ? shard
                : std::filesystem::path();
 }
 
-/// @p engineName's shipped bundle in the @p arch shard, loaded once per process.
-inline const ShippedCatalog& shippedCatalog(const std::string& arch, std::string_view engineName)
+/// @p engineName's shipped bundle, folder rocKE/@p bundleFolder of the @p arch shard,
+/// loaded once per process. Keyed by architecture and engine: one shard holds several
+/// engines' bundles (gfx942's dgrad and forward ones), each with its own state manager.
+inline const ShippedCatalog& shippedCatalog(const std::string& arch,
+                                            std::string_view engineName,
+                                            const std::string& bundleFolder)
 {
-    static std::map<std::string, ShippedCatalog> s_loaded;
-    const auto found = s_loaded.find(arch);
+    static std::map<std::pair<std::string, std::string>, ShippedCatalog> s_loaded;
+    const auto key = std::make_pair(arch, std::string(engineName));
+    const auto found = s_loaded.find(key);
     if(found != s_loaded.end())
     {
         return found->second;
@@ -68,7 +76,7 @@ inline const ShippedCatalog& shippedCatalog(const std::string& arch, std::string
     // Filed only once loaded: a load that throws is retried by the next test rather than
     // read back as an unstaged bundle.
     ShippedCatalog loaded;
-    const auto shard = packedDgradShard(arch);
+    const auto shard = packedShard(arch, bundleFolder);
     if(!shard.empty())
     {
         registerNativeIngestorSymbols();
@@ -83,11 +91,15 @@ inline const ShippedCatalog& shippedCatalog(const std::string& arch, std::string
                                      + std::string(engineName));
         }
         loaded.knobs = set->engine.knobs;
+        for(const auto& dispatch : set->dispatches)
+        {
+            loaded.dispatchSymbols.push_back(dispatch.dispatchSymbol);
+        }
         const auto graphMatch = set->engine.graphMatchNativeSymbol;
         loaded.manager
             = hipdnn_plugin_sdk::ingestor::makeStateManager<Handle>(std::move(*set), graphMatch);
     }
-    return s_loaded.emplace(arch, std::move(loaded)).first->second;
+    return s_loaded.emplace(key, std::move(loaded)).first->second;
 }
 
 /// Why a shipped-catalog test skips when the bundle is not staged.
@@ -130,4 +142,4 @@ inline void expectPreparesOnItsDeviceOnly(
     }
 }
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_shipped_catalog
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_aot_shipped_catalog

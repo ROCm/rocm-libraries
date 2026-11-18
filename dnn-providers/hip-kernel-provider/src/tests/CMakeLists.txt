@@ -745,6 +745,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "for gfx950, so its census is not registered.")
     endif()
 
+    # Census for its gfx942 sibling, hipkernel:Gfx942ConvFwdAot. Its UED binds only the
+    # native fallback score until a trained ranker ships, so it has no ModelBinding census
+    # yet.
+    hkp_product_ships_engine_for_arch(_hkp_gfx942_conv_fwd_aot
+                                      "hipkernel:Gfx942ConvFwdAot" gfx942)
+    if(_hkp_gfx942_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942ConvFwdAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx942ConvFwdAot for "
+            "gfx942, so its census is not registered.")
+    endif()
+
     # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
     # every 2D cell that rule hands off must have a 3D kernel.
     if(_hkp_gfx950_attention_unified_2d AND _hkp_gfx950_attention_unified_3d)

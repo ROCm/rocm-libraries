@@ -3,413 +3,31 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <filesystem>
-#include <fstream>
-#include <map>
-#include <memory>
-#include <optional>
-#include <random>
-#include <set>
 #include <string>
-#include <system_error>
-#include <tuple>
-#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
-#include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
-#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_frontend/knob/Knob.hpp>
-#include <hipdnn_frontend/knob/KnobConstraint.hpp>
-#include <hipdnn_plugin_sdk/ArchMatch.hpp>
-#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
-#include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
-#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
-#include <nlohmann/json.hpp>
 
-#include "../IntegrationGraphVerificationHarness.hpp"
-#include "IngestorIntegrationSupport.hpp"
+#include "IntegrationGpuConvFwdAot.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
 
-using namespace hipdnn_frontend;
-using namespace hipdnn_frontend::graph;
-using namespace hipdnn_test_sdk::utilities;
-namespace ingestor = hipdnn_plugin_sdk::ingestor;
+using namespace conv_fwd_aot_test;
 
 namespace
 {
 
 // Each engine's suites compile only where that engine ships: HKP_TEST_GFX950_CONV_FWD_AOT
 // for the AOT-instance engine and HKP_TEST_GFX950_CONV_FWD_AOT_SEED for its test-only seed
-// (src/integration_tests/CMakeLists.txt).
-constexpr const char* KERNEL_FAMILY_KNOB = "kernel_family";
-constexpr int64_t IMPLICIT_GEMM_FAMILY = 0;
-constexpr int64_t DIRECT_DEPTHWISE_FAMILY = 1;
-
-struct ConvProblem
-{
-    int64_t n = 2;
-    int64_t c = 32;
-    int64_t k = 32;
-    int64_t hi = 14;
-    int64_t wi = 14;
-    int64_t y = 3;
-    int64_t x = 3;
-    int64_t strideH = 1;
-    int64_t strideW = 1;
-    int64_t padH = 1;
-    int64_t padW = 1;
-    int64_t dilationH = 1;
-    int64_t dilationW = 1;
-    // hipDNN carries no group attribute: groups = X channels / W dims[1].
-    int64_t groups = 1;
-};
-
-struct Variant
-{
-    std::string name;
-    DataType dtype;
-    int64_t tileK;
-    ConvProblem problem{};
-    // Direct depthwise kernels that serve this graph; 0 when the graph is outside the
-    // direct family's guard.
-    size_t directArms = 0;
-    // Implicit-GEMM kernels that serve this graph, both tile_k arms.
-    size_t implicitArms = 0;
-};
-
-std::shared_ptr<Graph>
-    buildConvGraph(DataType dtype, const ConvProblem& problem = {}, bool channelsLast = true)
-{
-    auto graph = std::make_shared<Graph>();
-    graph->set_name("gfx950_conv_fwd")
-        .set_io_data_type(dtype)
-        .set_intermediate_data_type(dtype)
-        .set_compute_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({problem.n, problem.c, problem.hi, problem.wi})
-        .set_stride(channelsLast ? std::vector<int64_t>{problem.c * problem.hi * problem.wi,
-                                                        1,
-                                                        problem.wi * problem.c,
-                                                        problem.c}
-                                 : std::vector<int64_t>{problem.c * problem.hi * problem.wi,
-                                                        problem.hi * problem.wi,
-                                                        problem.wi,
-                                                        1})
-        .set_data_type(dtype);
-    // Filter [K, C/groups, Y, X] stored channels-last (KYXC over the group's channels).
-    const auto cpg = problem.c / problem.groups;
-    auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(2)
-        .set_name("W")
-        .set_dim({problem.k, cpg, problem.y, problem.x})
-        .set_stride({cpg * problem.y * problem.x, 1, problem.x * cpg, cpg})
-        .set_data_type(dtype);
-
-    ConvFpropAttributes attributes;
-    attributes.set_name("gfx950_conv_fwd")
-        .set_padding({problem.padH, problem.padW})
-        .set_stride({problem.strideH, problem.strideW})
-        .set_dilation({problem.dilationH, problem.dilationW})
-        .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
-    auto y = graph->conv_fprop(x, w, attributes);
-    // The frontend infers output dims/strides from the channels-last input.
-    y->set_uid(3).set_name("Y").set_output(true).set_data_type(dtype);
-    return graph;
-}
-
-KnobSetting enableBenchmarkingKnob()
-{
-    return KnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
-}
-
-KnobSetting disableBenchmarkingKnob()
-{
-    return KnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{0});
-}
-
-KnobSetting kernelFamilyKnob(int64_t family)
-{
-    return {KERNEL_FAMILY_KNOB, family};
-}
-
-// The kernel the last non-benchmarked plan build selected, or empty.
-std::string selectedKernel(const LogRecorderBase& recorder)
-{
-    const std::string marker = detail::SELECTED_KERNEL_LOG;
-    std::string selected;
-    for(const auto& log : recorder.getRecordedLogs())
-    {
-        const auto at = log.message.find(marker);
-        if(at == std::string::npos)
-        {
-            continue;
-        }
-        const auto begin = at + marker.size();
-        selected = log.message.substr(begin, log.message.find(' ', begin) - begin);
-    }
-    return selected;
-}
+// (src/integration_tests/CMakeLists.txt). The suites are IntegrationGpuConvFwdAot.hpp's.
+constexpr FwdAotTarget GFX950_TARGET{"hipkernel:Gfx950ConvFwdAot",
+                                     "gfx950",
+                                     "gfx950_conv_fwd_aot",
+                                     "gfx950-conv",
+                                     "gfx950_conv_fwd"};
 
 } // namespace
-
-class IntegrationGpuGfx950ConvFwd
-    : public test_utilities::IntegrationGraphVerificationHarness<float, Variant>
-{
-protected:
-    using Base = test_utilities::IntegrationGraphVerificationHarness<float, Variant>;
-
-    void SetUp() override
-    {
-        Base::SetUp();
-        if(HasFatalFailure() || IsSkipped())
-        {
-            return;
-        }
-        hipDeviceProp_t properties{};
-        ASSERT_EQ(hipGetDeviceProperties(&properties, _deviceId), hipSuccess);
-        _arch = properties.gcnArchName;
-        if(!hipdnn_plugin_sdk::archMatches(
-               _arch, "gfx950", hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
-        {
-            GTEST_SKIP() << "The packaged convolution family requires gfx950";
-        }
-    }
-
-    /// The engine under test; each concrete suite overrides it.
-    virtual const char* engineName() const = 0;
-
-    int64_t engineId() const
-    {
-        return hipdnn_data_sdk::utilities::engineNameToId(engineName());
-    }
-
-    void buildAndCompile(Graph& graph, const std::vector<KnobSetting>& knobs)
-    {
-        auto result = graph.build_operation_graph(_handle);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        std::vector<int64_t> engineIds;
-        result = graph.get_ranked_engine_ids(engineIds);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_NE(std::find(engineIds.begin(), engineIds.end(), engineId()), engineIds.end())
-            << "The installed plugin did not offer " << engineName();
-
-        // Hard selection: a preferred-engine hint can fall back silently to another
-        // provider. This path must execute this engine even when other engines match.
-        result = graph.create_execution_plan_ext(engineId(), knobs);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        result = graph.check_support();
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        result = graph.build_plans();
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        int64_t selected = 0;
-        result = graph.get_execution_plan_engine_id(selected);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(selected, engineId());
-        int64_t workspaceSize = -1;
-        result = graph.get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        // Only a split-C AOT instance (its fp32 partial sums) needs scratch.
-        ASSERT_GE(workspaceSize, 0);
-        _workspaceSize = workspaceSize;
-    }
-
-    void executeAndVerifyStorage(Graph& graph, DataType dtype, unsigned int seed)
-    {
-        auto [serialized, serializationError] = graph.to_binary();
-        ASSERT_TRUE(serializationError.is_good()) << serializationError.get_message();
-        const auto wrapper
-            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
-                serialized.data(), serialized.size());
-        GraphTensorBundle gpu(wrapper.getTensorMap());
-        GraphTensorBundle cpu(wrapper.getTensorMap());
-        for(const auto uid : {int64_t{1}, int64_t{2}})
-        {
-            const auto tensorSeed = seed + static_cast<unsigned int>(uid);
-            gpu.randomizeTensor(uid, -1.0F, 1.0F, tensorSeed);
-            cpu.randomizeTensor(uid, -1.0F, 1.0F, tensorSeed);
-        }
-        gpu.getTensor(3).fillWithSentinelValue();
-        cpu.getTensor(3).fillWithSentinelValue();
-        auto buffers = gpu.toDeviceVariantPack();
-        void* workspace = nullptr;
-        if(_workspaceSize > 0)
-        {
-            ASSERT_EQ(hipMalloc(&workspace, static_cast<size_t>(_workspaceSize)), hipSuccess);
-        }
-        const auto result = graph.execute(_handle, buffers, workspace);
-        const auto synchronized = hipStreamSynchronize(_stream);
-        if(workspace != nullptr)
-        {
-            EXPECT_EQ(hipFree(workspace), hipSuccess);
-        }
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(synchronized, hipSuccess);
-        CpuReferenceGraphExecutor().execute(
-            serialized.data(), serialized.size(), cpu.toHostVariantPack());
-        gpu.getTensor(3).markDeviceModified();
-
-        // FP32 accumulation followed by a low-precision store. Absolute slack covers
-        // cancellation/order differences in accumulation; relative slack covers
-        // two output ulps. Inputs are bounded to [-1,1] and the reference uses FP32.
-        const float relativeTolerance = dtype == DataType::HALF ? 0.002F : 0.016F;
-        const auto validator
-            = createAllCloseValidator(frontendToSdkDataType(dtype), 0.001F, relativeTolerance);
-        EXPECT_TRUE(validator->allClose(cpu.getTensor(3), gpu.getTensor(3)));
-    }
-
-    std::filesystem::path winnerShardPath() const
-    {
-        return integration::winnerShardPath(engineName(), _arch);
-    }
-
-    std::optional<ingestor::WinnerRecord> persistedRanking() const
-    {
-        const auto path = winnerShardPath();
-        std::ifstream stream(path);
-        std::string line;
-        std::optional<ingestor::WinnerRecord> ranking;
-        while(std::getline(stream, line))
-        {
-            if(const auto entry = ingestor::decodeWinnerRecordLine(line))
-            {
-                // Every parameterized test owns a fresh cache and benchmarks one
-                // graph only. A second record here indicates leaked test state.
-                EXPECT_FALSE(ranking.has_value());
-                ranking = entry->second;
-            }
-        }
-        return ranking;
-    }
-
-    // The last record line in this test's shard, key included. Later lines
-    // supersede earlier ones for the same key.
-    std::optional<std::pair<ingestor::WinnerKey, ingestor::WinnerRecord>>
-        lastPersistedRecord() const
-    {
-        std::ifstream stream(winnerShardPath());
-        std::string line;
-        std::optional<std::pair<ingestor::WinnerKey, ingestor::WinnerRecord>> last;
-        while(std::getline(stream, line))
-        {
-            if(auto entry = ingestor::decodeWinnerRecordLine(line))
-            {
-                last = std::move(entry);
-            }
-        }
-        return last;
-    }
-
-    // Appends @p record for @p key to this test's shard through the shard's own
-    // lock, as the engine's write-back does. The engine's measured record created it.
-    void appendPersistedRecord(const ingestor::WinnerKey& key,
-                               const ingestor::WinnerRecord& record) const
-    {
-        const auto path = winnerShardPath();
-        ASSERT_FALSE(path.empty()) << "The engine has not written its winner shard";
-        auto [shard, opened]
-            = hipdnn_data_sdk::utilities::openLineStore(path, ingestor::winnerCacheVersion());
-        ASSERT_EQ(opened, hipdnn_data_sdk::utilities::LineStoreStatus::OK);
-        ASSERT_TRUE(shard.has_value());
-        ASSERT_EQ(hipdnn_data_sdk::utilities::lockLineStore(*shard),
-                  hipdnn_data_sdk::utilities::LineStoreStatus::OK);
-        const auto appended = hipdnn_data_sdk::utilities::appendLine(
-            *shard, ingestor::encodeWinnerRecordLine(key, record));
-        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
-        ASSERT_EQ(appended, hipdnn_data_sdk::utilities::LineStoreStatus::OK);
-    }
-
-    // Destroying the only handle releases the plugin's engines, so the next
-    // handle's engine reads this test's shard afresh instead of the ranking the
-    // previous engine holds in memory.
-    void recreateHandle()
-    {
-        ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
-        _handle = nullptr;
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
-    }
-
-    // The inherited harness opens the plugin relative to the running binary. No
-    // descriptor override is set: installed tests must load installed kpack archives.
-    ScopedTestCacheDir _cacheDir{"gfx950-conv", ScopedTestCacheDir::Scope::TEST};
-    ScopedEnvironmentVariableSetter _forceBenchmarking{"HIPDNN_FORCE_BENCHMARKING", ""};
-    ScopedEnvironmentVariableSetter _cacheEnabled{"HIPDNN_DISABLE_CACHE", ""};
-    std::string _arch;
-    /// The workspace the last buildAndCompile's plan asked for.
-    int64_t _workspaceSize = 0;
-};
-
-class IntegrationGpuGfx950ConvFwdServing : public IntegrationGpuGfx950ConvFwd
-{
-protected:
-    /// Benchmarks the parameter's graph over every kernel that serves it, then serves each
-    /// measured kernel in turn from a record that ranks it first. Benchmarking executes
-    /// only its winner, so this is what runs every serving kernel against the reference.
-    void verifyEveryServingKernel(unsigned int seed, unsigned int armSeed)
-    {
-        const auto& variant = GetParam();
-        const ScopedPluginLogCapture capture(this);
-        auto& recorder = capture.recorder();
-        const std::vector<KnobSetting> knobs{enableBenchmarkingKnob()};
-        const auto candidates = variant.directArms + variant.implicitArms;
-
-        auto graph = buildConvGraph(variant.dtype, variant.problem);
-        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
-        EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(candidates)))
-            << recorder.getRecordedLogsAsString();
-        ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, seed));
-        graph.reset();
-
-        const auto measured = lastPersistedRecord();
-        ASSERT_TRUE(measured) << "Benchmarking did not persist its measured ranking";
-        const auto& [key, ranking] = *measured;
-        ASSERT_EQ(ranking.size(), candidates);
-
-        for(size_t arm = 0; arm < ranking.size(); ++arm)
-        {
-            auto pinned = ranking;
-            std::rotate(pinned.begin(),
-                        pinned.begin() + static_cast<std::ptrdiff_t>(arm),
-                        pinned.begin() + static_cast<std::ptrdiff_t>(arm) + 1);
-            ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, pinned));
-            ASSERT_NO_FATAL_FAILURE(recreateHandle());
-            recorder.clearLogs();
-
-            auto served = buildConvGraph(variant.dtype, variant.problem);
-            ASSERT_NO_FATAL_FAILURE(buildAndCompile(*served, knobs));
-            const auto kernel = ingestor::toString(pinned.front().kernelId);
-            EXPECT_TRUE(recorder.hasLogContaining("served kernel " + kernel + " at rank 0"))
-                << "kernel " << arm << ": " << recorder.getRecordedLogsAsString();
-            EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
-            ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(
-                *served, variant.dtype, armSeed + static_cast<unsigned int>(arm)));
-        }
-    }
-};
 
 #if defined(HKP_TEST_GFX950_CONV_FWD_AOT) || defined(HKP_TEST_GFX950_CONV_FWD_AOT_SEED)
 
@@ -646,9 +264,14 @@ bool isDepthwise(const ConvProblem& problem)
 
 } // namespace
 
-class IntegrationGpuGfx950ConvFwdAotSeed : public IntegrationGpuGfx950ConvFwdServing
+class IntegrationGpuGfx950ConvFwdAotSeed : public IntegrationGpuConvFwdAotServing
 {
 protected:
+    IntegrationGpuGfx950ConvFwdAotSeed()
+        : IntegrationGpuConvFwdAotServing(GFX950_TARGET)
+    {
+    }
+
     const char* engineName() const override
     {
         return AOT_SEED_ENGINE_NAME;
@@ -666,7 +289,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, UnbenchmarkedPlanServesACapableInstan
     const ScopedPluginLogCapture capture(this);
     auto& recorder = capture.recorder();
 
-    auto graph = buildConvGraph(variant.dtype, variant.problem);
+    auto graph = buildGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
     EXPECT_FALSE(selectedKernel(recorder).empty()) << recorder.getRecordedLogsAsString();
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 41));
@@ -679,7 +302,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
     auto& recorder = capture.recorder();
     const auto catalog = variant.directArms + variant.implicitArms;
 
-    auto implicitGemm = buildConvGraph(variant.dtype, variant.problem);
+    auto implicitGemm = buildGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(
         *implicitGemm, {kernelFamilyKnob(IMPLICIT_GEMM_FAMILY), disableBenchmarkingKnob()}));
     EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(variant.implicitArms)
@@ -695,7 +318,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
     }
 
     recorder.clearLogs();
-    auto direct = buildConvGraph(variant.dtype, variant.problem);
+    auto direct = buildGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(
         *direct, {kernelFamilyKnob(DIRECT_DEPTHWISE_FAMILY), disableBenchmarkingKnob()}));
     EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(variant.directArms)
@@ -710,7 +333,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
     // Unbenchmarked, a depthwise direct instance ranks above every implicit-GEMM one; the
     // grouped and non-grouped direct kernels rank below them (aotScore).
     recorder.clearLogs();
-    auto unforced = buildConvGraph(variant.dtype, variant.problem);
+    auto unforced = buildGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*unforced, {disableBenchmarkingKnob()}));
     EXPECT_EQ(selectedKernel(recorder),
               isDepthwise(variant.problem) || variant.implicitArms == 0 ? directKernel
@@ -724,310 +347,32 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
 
 // ---- hipkernel:Gfx950ConvFwdAot: the shipped catalog ----
 //
-// At full size thousands of instances are selected for each graph, so pinning each one is
-// out of reach; the seed suite above does that. Each graph here runs (a) an unbenchmarked
-// plan, which also checks the selected count of each family, (b) a fixed sample of
-// selected instances, each pinned: the best few by score, then more drawn by a seeded
-// shuffle of the dtype's whole catalog, and (c) a benchmarked plan under
-// HIPDNN_INGESTOR_SHORTLIST_LIMIT.
+// IntegrationGpuConvFwdAotCatalog's suites: an unbenchmarked plan with the selected count of
+// each family, a sample of selected instances each pinned, and a capped benchmark. The seed
+// suite above pins every selected instance.
 
-namespace
-{
-
-constexpr const char* AOT_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAot";
-constexpr size_t TOP_BY_SCORE = 4;
-constexpr size_t SHUFFLED_SAMPLES = 8;
-constexpr size_t BENCHMARK_LIMIT = 64;
-
-/// The kernel the last plan build served from a benchmarked record, or empty.
-std::string servedKernel(const LogRecorderBase& recorder)
-{
-    const std::string marker = "' served kernel ";
-    std::string served;
-    for(const auto& log : recorder.getRecordedLogs())
-    {
-        const auto at = log.message.find(marker);
-        if(at == std::string::npos)
-        {
-            continue;
-        }
-        const auto begin = at + marker.size();
-        served = log.message.substr(begin, log.message.find(' ', begin) - begin);
-    }
-    return served;
-}
-
-/// Every kernel of the shipped gfx950 shards for @p dtype, as winner-record entries, read
-/// from the product tree main() loads (HIPDNN_DESCRIPTOR_RUNTIME_DIR). Empty when they are
-/// not there. Read once per dtype: the shards gfx950_conv_fwd_aot_<dtype>_*.kdp.json
-/// together hold every instance of the dtype, each entry under its own shard's pack.
-const std::vector<ingestor::RankedEntry>& shippedCatalog(DataType dtype)
-{
-    static std::map<DataType, std::vector<ingestor::RankedEntry>> s_catalogs;
-    auto& entries = s_catalogs[dtype];
-    if(!entries.empty())
-    {
-        return entries;
-    }
-    const std::filesystem::path root
-        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
-    const std::string prefix
-        = std::string("gfx950_conv_fwd_aot_") + (dtype == DataType::HALF ? "fp16" : "bf16") + "_";
-    const std::string suffix = ".kdp.json";
-    std::error_code error;
-    if(root.empty() || !std::filesystem::is_directory(root, error))
-    {
-        return entries;
-    }
-    std::set<std::string> read;
-    for(const auto& file : std::filesystem::recursive_directory_iterator(root, error))
-    {
-        const auto name = file.path().filename().string();
-        if(name.size() <= prefix.size() + suffix.size() || name.rfind(prefix, 0) != 0
-           || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0
-           || !read.insert(name).second)
-        {
-            continue;
-        }
-        std::ifstream stream(file.path());
-        const auto document = nlohmann::json::parse(stream);
-        const auto packId
-            = hipdnn_flatbuffers_sdk::utilities::parseUuid(document.at("id").get<std::string>());
-        const auto dispatchId = hipdnn_flatbuffers_sdk::utilities::parseUuid(
-            document.at("dispatch").get<std::string>());
-        for(const auto& kernel : document.at("kernelDescriptors"))
-        {
-            entries.push_back(
-                {hipdnn_flatbuffers_sdk::utilities::parseUuid(kernel.at("id").get<std::string>()),
-                 packId,
-                 dispatchId,
-                 1.0});
-        }
-    }
-    // Directory order is unspecified; the seeded shuffle below needs a fixed start.
-    std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.kernelId < rhs.kernelId;
-    });
-    return entries;
-}
-
-/// FNV-1a, so each graph draws its own fixed sample on every platform.
-uint32_t sampleSeed(const std::string& name)
-{
-    uint32_t hash = 2166136261U;
-    for(const char character : name)
-    {
-        hash = (hash ^ static_cast<uint8_t>(character)) * 16777619U;
-    }
-    return hash;
-}
-
-} // namespace
-
-class IntegrationGpuGfx950ConvFwdAot : public IntegrationGpuGfx950ConvFwd
+class IntegrationGpuGfx950ConvFwdAot : public IntegrationGpuConvFwdAotCatalog
 {
 protected:
-    const char* engineName() const override
+    IntegrationGpuGfx950ConvFwdAot()
+        : IntegrationGpuConvFwdAotCatalog(GFX950_TARGET)
     {
-        return AOT_ENGINE_NAME;
     }
-
-    /// Builds the parameter's graph with @p knobs on a fresh handle, checks that the last
-    /// persisted record of @p recordSize entries served @p kernel (any kernel when empty)
-    /// out of @p candidates, and checks that kernel against the reference. Returns it.
-    std::string serveFromRecord(const std::vector<KnobSetting>& knobs,
-                                const std::string& kernel,
-                                size_t recordSize,
-                                size_t candidates,
-                                unsigned int seed)
-    {
-        const auto& variant = GetParam();
-        recreateHandle();
-        if(HasFatalFailure())
-        {
-            return {};
-        }
-        const ScopedPluginLogCapture capture(this);
-        auto& recorder = capture.recorder();
-        auto graph = buildConvGraph(variant.dtype, variant.problem);
-        buildAndCompile(*graph, knobs);
-        if(HasFatalFailure())
-        {
-            return {};
-        }
-        const auto served = servedKernel(recorder);
-        if(!kernel.empty())
-        {
-            EXPECT_EQ(served, kernel) << recorder.getRecordedLogsAsString();
-        }
-        EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from a benchmarked record of "
-                                              + std::to_string(recordSize) + " entry(s) for "
-                                              + candidateCount(candidates)))
-            << recorder.getRecordedLogsAsString();
-        EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
-        executeAndVerifyStorage(*graph, variant.dtype, seed);
-        return served;
-    }
-
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _candidateLimit{
-        hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME, ""};
 };
 
-// (a), and the selected count of each family at full size.
 TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatalog)
 {
-    const auto& variant = GetParam();
-    const ScopedPluginLogCapture capture(this);
-    auto& recorder = capture.recorder();
-    const auto catalog = variant.directArms + variant.implicitArms;
-
-    auto graph = buildConvGraph(variant.dtype, variant.problem);
-    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
-    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(catalog) + " ("
-                                          + std::to_string(catalog) + " before knob filtering)"))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_FALSE(selectedKernel(recorder).empty()) << recorder.getRecordedLogsAsString();
-    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 53));
-    graph.reset();
-
-    for(const auto& [family, count] : {std::pair{IMPLICIT_GEMM_FAMILY, variant.implicitArms},
-                                       std::pair{DIRECT_DEPTHWISE_FAMILY, variant.directArms}})
-    {
-        if(count == 0)
-        {
-            continue;
-        }
-        recorder.clearLogs();
-        auto forced = buildConvGraph(variant.dtype, variant.problem);
-        ASSERT_NO_FATAL_FAILURE(
-            buildAndCompile(*forced, {kernelFamilyKnob(family), disableBenchmarkingKnob()}));
-        EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(count) + " ("
-                                              + std::to_string(catalog)
-                                              + " before knob filtering)"))
-            << "family " << family << ": " << recorder.getRecordedLogsAsString();
-    }
+    unbenchmarkedPlanServesFromTheWholeCatalog();
 }
 
-// (b): the best TOP_BY_SCORE instances by score, then SHUFFLED_SAMPLES drawn from every
-// selected instance, each served alone from a record and checked against the reference.
 TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference)
 {
-    const auto& variant = GetParam();
-    const auto catalog = variant.directArms + variant.implicitArms;
-    const std::vector<KnobSetting> knobs{enableBenchmarkingKnob()};
-    std::vector<std::string> pinned;
-    // A graph with fewer selected instances than TOP_BY_SCORE measures all of them.
-    const auto topCount = std::min(TOP_BY_SCORE, catalog);
-
-    // Benchmarking under a limit of TOP_BY_SCORE measures exactly the best-ranked ones.
-    _candidateLimit.setValue(std::to_string(TOP_BY_SCORE));
-    {
-        const ScopedPluginLogCapture capture(this);
-        auto& recorder = capture.recorder();
-        auto graph = buildConvGraph(variant.dtype, variant.problem);
-        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
-        EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(topCount) + " ("
-                                              + std::to_string(catalog)
-                                              + " before knob filtering)"))
-            << recorder.getRecordedLogsAsString();
-        ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 59));
-    }
-    const auto measured = lastPersistedRecord();
-    ASSERT_TRUE(measured) << "Benchmarking did not persist its measured ranking";
-    const auto& [key, top] = *measured;
-    ASSERT_EQ(top.size(), topCount);
-    for(size_t arm = 0; arm < top.size(); ++arm)
-    {
-        auto record = top;
-        std::rotate(record.begin(),
-                    record.begin() + static_cast<std::ptrdiff_t>(arm),
-                    record.begin() + static_cast<std::ptrdiff_t>(arm) + 1);
-        ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, record));
-        const auto kernel = ingestor::toString(record.front().kernelId);
-        ASSERT_NO_FATAL_FAILURE(serveFromRecord(
-            knobs, kernel, topCount, topCount, 61 + static_cast<unsigned int>(arm)));
-        pinned.push_back(kernel);
-    }
-
-    // A record ordering every kernel of the dtype's shards covers every candidate, so it
-    // serves the first instance in its order that is selected for the graph: in a seeded
-    // shuffle, a random selected instance. Instances already served move to the back.
-    _candidateLimit.setValue("");
-    auto shard = shippedCatalog(variant.dtype);
-    ASSERT_GE(shard.size(), catalog) << "the shipped gfx950 shards for this dtype were not found";
-    for(const auto& entry : top)
-    {
-        // The measured record and the shards agree on each kernel's pack and dispatch.
-        ASSERT_NE(std::find_if(shard.begin(),
-                               shard.end(),
-                               [&](const auto& listed) {
-                                   return listed.kernelId == entry.kernelId
-                                          && listed.packId == entry.packId
-                                          && listed.dispatchId == entry.dispatchId;
-                               }),
-                  shard.end())
-            << ingestor::toString(entry.kernelId);
-    }
-    std::mt19937 rng(sampleSeed(variant.name));
-    for(size_t i = shard.size() - 1; i > 0; --i)
-    {
-        std::swap(shard[i], shard[rng() % (i + 1)]);
-    }
-    const auto samples = std::min(SHUFFLED_SAMPLES, catalog - std::min(catalog, TOP_BY_SCORE));
-    for(size_t sample = 0; sample < samples; ++sample)
-    {
-        std::stable_partition(shard.begin(), shard.end(), [&](const auto& entry) {
-            return std::find(pinned.begin(), pinned.end(), ingestor::toString(entry.kernelId))
-                   == pinned.end();
-        });
-        ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, shard));
-        std::string served;
-        ASSERT_NO_FATAL_FAILURE(
-            served = serveFromRecord(
-                knobs, "", shard.size(), catalog, 67 + static_cast<unsigned int>(sample)));
-        ASSERT_FALSE(served.empty());
-        EXPECT_EQ(std::find(pinned.begin(), pinned.end(), served), pinned.end()) << served;
-        pinned.push_back(served);
-    }
+    sampledSelectedInstancesMatchCpuReference();
 }
 
-// (c): benchmarking under HIPDNN_INGESTOR_SHORTLIST_LIMIT measures only the best-ranked
-// candidates, and its record serves the next build of the graph.
 TEST_P(IntegrationGpuGfx950ConvFwdAot, CappedBenchmarkMatchesCpuReference)
 {
-    const auto& variant = GetParam();
-    const ScopedPluginLogCapture capture(this);
-    auto& recorder = capture.recorder();
-    const auto catalog = variant.directArms + variant.implicitArms;
-    const auto capped = std::min(BENCHMARK_LIMIT, catalog);
-    _candidateLimit.setValue(std::to_string(BENCHMARK_LIMIT));
-
-    auto graph = buildConvGraph(variant.dtype, variant.problem);
-    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {enableBenchmarkingKnob()}));
-    EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(capped) + " ("
-                                          + std::to_string(catalog) + " before knob filtering)"))
-        << recorder.getRecordedLogsAsString();
-    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 71));
-    graph.reset();
-
-    const auto ranking = persistedRanking();
-    ASSERT_TRUE(ranking) << "Benchmarking did not persist its measured candidate ranking";
-    ASSERT_EQ(ranking->size(), capped);
-    const std::string winner = ingestor::toString(ranking->front().kernelId);
-    EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel " + winner))
-        << recorder.getRecordedLogsAsString();
-
-    recorder.clearLogs();
-    auto recreated = buildConvGraph(variant.dtype, variant.problem);
-    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*recreated, {enableBenchmarkingKnob()}));
-    const auto count = std::to_string(capped);
-    EXPECT_TRUE(recorder.hasLogContaining("served kernel " + winner + " at rank 0"))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_TRUE(recorder.hasLogContaining("from a benchmarked record of " + count + " entry(s) for "
-                                          + count + " candidate(s)"))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
-    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*recreated, variant.dtype, 73));
+    cappedBenchmarkMatchesCpuReference();
 }
 
 #endif // HKP_TEST_GFX950_CONV_FWD_AOT
