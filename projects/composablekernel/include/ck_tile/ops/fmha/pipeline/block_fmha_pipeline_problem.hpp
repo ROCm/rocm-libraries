@@ -124,6 +124,7 @@ struct BlockFmhaPipelineProblem
     static constexpr auto QScaleEnum        = Traits::QScaleEnum;
     static constexpr index_t kBlockPerCu    = Traits::kBlockPerCu;
     static constexpr bool kHasSink          = Traits::kHasSink;
+    static constexpr bool kStoreMaxLogits   = Traits::kStoreMaxLogits;
 
     // Only TileFmhaMergeHeadsTraits sets it; other traits leave it false.
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = kTraitsMergeNumHeadGroupsSeqLenQ<Traits>;

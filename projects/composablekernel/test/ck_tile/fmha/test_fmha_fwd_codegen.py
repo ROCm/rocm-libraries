@@ -143,7 +143,7 @@ struct FmhaMasks {
 inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
 template <int, typename, bool, int, int, int, int, int, int, bool, auto, bool,
           typename, auto, bool, bool, auto, bool, bool, bool, bool, bool, bool, bool, int = -1,
-          bool = false>
+          bool = false, bool = false>
 struct fmha_fwd_traits_ {};
 struct fmha_fwd_traits {
     int hdim_q = 192, hdim_v = 128;
@@ -166,6 +166,7 @@ struct fmha_fwd_args {
     const void* o_ptr = nullptr;
     int stride_o = 1024, nhead_stride_o = 128, batch_stride_o = 262144;
     int block_scale_size_q = 0, block_scale_size_kv = 0;
+    void* max_logits_ptr = nullptr;
 };
 inline bool fmha_fwd_can_merge_head_groups(const fmha_fwd_args&, int, bool, bool, bool = false) {
     return false;
