@@ -532,6 +532,12 @@ def _canonical_uhd_validator():
         "linear_data_max_objective",
         "linear_data_metric",
         "linear_data_transform",
+        "mlp_data",
+        "mlp_data_time",
+        "mlp_data_without_metric",
+        "mlp_data_transform",
+        "mlp_data_without_transform",
+        "mlp_data_without_signature",
     ],
 )
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
@@ -545,12 +551,19 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         "feature_semantics",
         "uppercase_ids",
         "linear_data",
+        "mlp_data",
+        "mlp_data_time",
     )
     if mutation.startswith("linear_data"):
         # RFC 0019 §7.5: a log slowdown, lower is better, in no registered unit.
         doc["adapter"] = "linear_data"
         doc["linear_data"] = doc.pop("tree_data")
         doc["objective"] = "min"
+    if mutation.startswith("mlp_data"):
+        # RFC 0019 §7.6: the log of the registered metric the artifact names.
+        doc["adapter"] = "mlp_data"
+        doc["mlp_data"] = doc.pop("tree_data")
+        doc["score"] = {"metric": "tflops", "transform": "log"}
     if mutation == "missing_objective":
         del doc["objective"]
     elif mutation == "missing_provenance":
@@ -603,6 +616,17 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["score"] = {"metric": "time"}
     elif mutation == "linear_data_transform":
         doc["score"] = {"transform": "log1p"}
+    elif mutation == "mlp_data_time":
+        doc["objective"] = "min"
+        doc["score"] = {"metric": "time", "calibrated": True, "transform": "log"}
+    elif mutation == "mlp_data_without_metric":
+        del doc["score"]["metric"]
+    elif mutation == "mlp_data_transform":
+        doc["score"]["transform"] = "log1p"
+    elif mutation == "mlp_data_without_transform":
+        del doc["score"]["transform"]
+    elif mutation == "mlp_data_without_signature":
+        del doc["features_signature"]
     elif mutation == "uppercase_ids":
         doc["id"] = doc["id"].upper()
         doc["trained_against"]["ued"]["id"] = doc["trained_against"]["ued"][
@@ -1136,6 +1160,50 @@ def test_packaging_rejects_ambiguous_per_metric_models(
     root = _root_with_roles(tmp_path, main_fixture, **roles)
     with pytest.raises(HkpPackError, match=message):
         load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+
+_TRAINED_ID = "833a8b19-8e34-4f74-86d6-b6495a6483f3"
+
+
+def _trained_uhd(adapter: str) -> dict:
+    """A trained model UHD of @p adapter, declared as UhdParser requires for it."""
+    doc = _model_uhd("trained.bin")
+    doc["id"] = _TRAINED_ID
+    doc["adapter"] = adapter
+    doc[adapter] = doc.pop("tree_data")
+    if adapter == "linear_data":
+        doc["objective"] = "min"
+    elif adapter == "mlp_data":
+        doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log"}
+    return doc
+
+
+@pytest.mark.parametrize(
+    "adapter, role",
+    [
+        ("tree_data", "sort_kernel_catalog"),
+        ("linear_data", "sort_kernel_catalog"),
+        ("mlp_data", "sort_kernel_catalog"),
+        ("mlp_data", "predict_engine"),
+    ],
+)
+def test_an_engine_ships_each_trained_adapter(tmp_path, main_fixture, adapter, role):
+    """An engine whose UED binds a trained model packs it with its artifact, whatever
+    adapter trained it: the packer must know every adapter the runtime loads."""
+    root = _root_with_roles(tmp_path, main_fixture)
+    _write_json(root / "trained.uhd.json", _trained_uhd(adapter))
+    (root / "trained.bin").write_bytes(b"model bytes")
+    ued_path = root / "pointwise.ued.json"
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    ued[role] = {"gfx942": _TRAINED_ID}
+    _write_json(ued_path, ued)
+
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+    (uhd,) = [d for d in flat.by_type("uhd") if d.id == _TRAINED_ID]
+    assert uhd.doc["adapter"] == adapter
+    (sidecar,) = uhd.sidecars
+    assert sidecar.source.read_bytes() == b"model bytes"
 
 
 def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture):

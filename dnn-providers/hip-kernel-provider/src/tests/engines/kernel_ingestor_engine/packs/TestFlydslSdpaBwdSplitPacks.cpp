@@ -1769,8 +1769,8 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, TheCoverageConstantsAreTheHeadDimsTheShipped
 TEST_F(TestFlydslSdpaBwdSplitPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor)
 {
     const auto& set = loadedSet(ENGINE_NAME);
-    const auto& floor
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, false, false, false, true);
+    const auto& floor = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        false, false, false, false, true, false);
     EXPECT_FALSE(set.engine.sdkVersion < floor) << set.engine.sdkVersion.str();
 }
 
