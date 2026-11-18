@@ -541,18 +541,20 @@ Rules that keep a tier small:
   10 s of overhead. gfx942 is the budget basis.
 - **Over budget.** The case generator only reports; it does not move cases.
 
-Result for the case list (section 8; times are the summed `est_seconds`
-columns plus the overhead):
+Result for the case list (section 8). Budget use is the summed `est_seconds`
+columns of the cumulative cases plus the overhead, as a percentage of the tier's
+budget in the tier table above:
 
-| Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
-|---|---|---|---|---|---|
-| quick | 1,506 | 1,506 | 63.3 | 51.1 | 21.1 % |
-| standard | 9,555 | 11,061 | 580.7 | 436.6 | 32.3 % |
-| comprehensive | 4,643 | 15,704 | 2,333.2 | 1,685.0 | 32.4 % |
-| full | 11,545 | 27,249 | 7,043.4 | 5,052.0 | — |
+| Tier | Cases in this tier | Cumulative cases | Budget use, gfx942 | Budget use, gfx950 |
+|---|---|---|---|---|
+| quick | 1,506 | 1,506 | 21.1 % | 17.0 % |
+| standard | 9,555 | 11,061 | 32.3 % | 24.3 % |
+| comprehensive | 4,643 | 15,704 | 32.4 % | 23.4 % |
+| full | 11,545 | 27,249 | — | — |
 
-These times are the model's estimates of the case runner's time for one engine
-run plus one reference run. The suite does more work per case, so its times are larger.
+These percentages come from the model's estimates of the case runner's time for
+one engine run plus one reference run. The suite does more work per case, so its
+budget use is larger.
 
 **Seeds.** The case generator completes each of the 15 seeds with the fewest
 changes under the rules and the answer-key rules. A seed whose row the
@@ -646,12 +648,12 @@ The bundle tools never change the model or the rows of the case list. They only
 filter. To bring a row back, the filter of the bundle tools must change and the
 bundles must be made again.
 
-| Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
+| Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows as % of the tier's budget, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,506 | 1,500 | 87 | 492 | 53.1 / 41.0 |
-| standard | 9,555 | 9,519 | 231 | 2,584 | 515.8 / 384.2 |
-| comprehensive | 4,643 | 4,622 | 203 | 1,237 | 1,745.8 / 1,243.7 |
-| full | 11,545 | 11,491 | 294 | 2,452 | 4,693.0 / 3,354.7 |
+| quick | 1,506 | 1,500 | 87 | 492 | 17.7 % / 13.7 % |
+| standard | 9,555 | 9,519 | 231 | 2,584 | 28.7 % / 21.3 % |
+| comprehensive | 4,643 | 4,622 | 203 | 1,237 | 24.2 % / 17.3 % |
+| full | 11,545 | 11,491 | 294 | 2,452 | — |
 | total | 27,249 | 27,132 | 815 | | |
 
 ### 9.2 How a graph is made from a row
