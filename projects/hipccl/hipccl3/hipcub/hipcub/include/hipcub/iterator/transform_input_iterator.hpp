@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2020-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2020-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -36,7 +36,10 @@
     #include "../backend/rocprim/iterator/transform_input_iterator.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
-    #include <cub/iterator/transform_input_iterator.cuh> // IWYU pragma: export
+    #if HIPCUB_USE_LEGACY_API
+        #error "hipcub::TransformInputIterator is not provided by the CUB backend: CUB removed it in CCCL 3.0 and hipCUB provides it only for the rocPRIM backend. Use cub or thrust iterators instead."
+    #endif
+    // CUB removed this iterator in CCCL 3.0. The CUB backend does not provide it.
 #endif
 
 #endif // HIPCUB_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_

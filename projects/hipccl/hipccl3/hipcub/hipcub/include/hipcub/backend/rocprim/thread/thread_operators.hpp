@@ -40,6 +40,9 @@
 #include <rocprim/type_traits_functions.hpp>
 
 #include _HIPCUB_STD_INCLUDE(functional)
+#if HIPCUB_USE_LEGACY_API
+#    include _HIPCUB_LIBCXX_INCLUDE(functional) // hip::maximum, hip::minimum
+#endif
 
 #include <hip/hip_bf16.h>
 
@@ -48,49 +51,46 @@
 BEGIN_HIPCUB_NAMESPACE
 
 #if HIPCUB_USE_LEGACY_API
-// Restored for backward compatibility with code written against older hipCUB (e.g. hipcomp-core).
-// Deprecated: new code should use hip::maximum<> instead.
-struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum instead") Max
-{
-    template<class T, class U>
-    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
-        operator()(T&& t, U&& u) const
-    {
-        return (((u) > (t)) ? (u) : (t));
-    }
-};
+// Old code (for example hipcomp-core and PyTorch) still uses these operators.
+// hipCUB removed them before they were deprecated long enough.
+// Each one now calls the matching libhipcxx functor.
+// They will be removed again after users switch to libhipcxx.
 
-// Restored for backward compatibility with code written against older hipCUB (e.g. hipcomp-core).
-// Deprecated: new code should use hip::minimum<> instead.
-struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum instead") Min
-{
-    template<class T, class U>
-    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
-        operator()(T&& t, U&& u) const
-    {
-        return (((u) < (t)) ? (u) : (t));
-    }
-};
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum instead") Max : _HIPCUB_LIBCXX::maximum<void>
+{};
 
-// Restored for backward compatibility with code written against older hipCUB (e.g. hipcomp-core).
-// Deprecated: new code should use hip::sum<> instead.
-struct HIPCUB_DEPRECATED_BECAUSE("Use hip::sum instead") Sum
-{
-    template<class T, class U>
-    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
-    {
-        return std::forward<T>(t) + std::forward<U>(u);
-    }
-};
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum instead") Min : _HIPCUB_LIBCXX::minimum<void>
+{};
 
-// Restored for backward compatibility with code written against older hipCUB (e.g. PyTorch).
-// Deprecated: new code should use _HIPCUB_STD::equal_to<> instead.
-struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to instead") Equality
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::plus instead") Sum : _HIPCUB_STD::plus<>
+{};
+
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::minus instead") Difference : _HIPCUB_STD::minus<>
+{};
+
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::divides instead") Division : _HIPCUB_STD::divides<>
+{};
+
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to instead") Equality : _HIPCUB_STD::equal_to<>
+{};
+
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to instead") Inequality
+    : _HIPCUB_STD::not_equal_to<>
+{};
+
+// Not delegated. It stores a functor from the caller.
+template<class EqualityOp>
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to instead") InequalityWrapper
 {
+    EqualityOp op;
+
+    HIPCUB_HOST_DEVICE inline
+    InequalityWrapper(EqualityOp op) : op(op) {}
+
     template<class T, class U>
-    HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
+    HIPCUB_HOST_DEVICE inline bool operator()(T&& t, U&& u)
     {
-        return std::forward<T>(t) == std::forward<U>(u);
+        return !op(std::forward<T>(t), std::forward<U>(u));
     }
 };
 #endif // HIPCUB_USE_LEGACY_API

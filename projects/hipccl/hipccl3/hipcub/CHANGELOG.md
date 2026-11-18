@@ -29,15 +29,17 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added support for large sizes to `hipcub::DeviceRunLengthEncode::NonTrivialRuns`.
 * Added env-based API for `hipcub::DeviceReduce::Reduce`.
 * Added env-based API for `hipcub::DeviceReduce::Sum`.
+* Added the `HIPCUB_USE_LEGACY_API` macro, enabled by default. Define it as `0` to remove the deprecated legacy thread operators and iterators.
 * Feature parity with CCCL/CUB 3.1.4.
 
 ### Changed
 
 * Changed `CCCL_MINIMUM_VERSION` to `3.1.4` to align with CUB.
 
-### Removed
+### Deprecated
 
-* Removed the deprecated thread operators `Equality`, `Inequality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+* Deprecated the thread operators `Equality`, `Inequality`, `InequalityWrapper`, `Sum`, `Difference`, `Division`, `Max` and `Min` on the rocPRIM backend. They now wrap the matching libhipcxx functors (`hip::std::equal_to<>`, `hip::std::not_equal_to<>`, `hip::std::plus<>`, `hip::std::minus<>`, `hip::std::divides<>`, `hip::maximum<>`, `hip::minimum<>`), which should be used instead. They will be removed in a future release. The CUB backend does not provide them, as CUB removed them in CCCL 3.0.
+* Deprecated the iterators `hipcub::ConstantInputIterator`, `hipcub::CountingInputIterator`, `hipcub::TransformInputIterator` and `hipcub::DiscardOutputIterator` on the rocPRIM backend. Use `hip::constant_iterator`, `hip::counting_iterator`, `hip::transform_iterator` and `hip::discard_iterator` from libhipcxx instead. They will be removed in a future release. The CUB backend does not provide them, as CUB removed the corresponding classes in CCCL 3.0.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  
