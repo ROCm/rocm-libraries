@@ -71,26 +71,28 @@ namespace
     }
 
     // Grid-stride over every element of every batch in memory order. Element (r, c) of a batch
-    // is compared with (0, c).
-    template <typename T>
-    __global__ void check_rows_kernel(const T*                  d,
-                                      uint64_t                  rows,
-                                      uint64_t                  cols,
-                                      uint64_t                  ld,
-                                      uint64_t                  stride,
-                                      uint64_t                  total,
-                                      unsigned*                 flags,
-                                      UniformCheckDeviceResult* result)
+    // is compared with (0, c), flagging column c, or when COL with (r, 0), flagging row r.
+    template <typename T, bool COL>
+    __global__ void check_kernel(const T*                  d,
+                                 uint64_t                  rows,
+                                 uint64_t                  cols,
+                                 uint64_t                  ld,
+                                 uint64_t                  stride,
+                                 uint64_t                  total,
+                                 unsigned*                 flags,
+                                 UniformCheckDeviceResult* result)
     {
         const uint64_t step = uint64_t(gridDim.x) * blockDim.x;
         for(uint64_t i = blockIdx.x * uint64_t(blockDim.x) + threadIdx.x; i < total; i += step)
         {
-            const uint64_t r    = i % rows;
-            const uint64_t line = i / rows; // batch * cols + column
-            const uint64_t c    = line % cols;
-            const T*       col  = d + (line / cols) * stride + c * ld;
-            if(r != 0 && col[r] != col[0])
-                record(flags, line, (unsigned long long)r << 32 | c, result);
+            const uint64_t r = i % rows;
+            const uint64_t c = (i / rows) % cols;
+            const uint64_t b = i / rows / cols;
+            const T*       m = d + b * stride;
+            if(!COL && r != 0 && m[c * ld + r] != m[c * ld])
+                record(flags, b * cols + c, (unsigned long long)r << 32 | c, result);
+            if(COL && c != 0 && m[c * ld + r] != m[r])
+                record(flags, b * rows + r, (unsigned long long)c << 32 | r, result);
         }
     }
 
@@ -150,20 +152,21 @@ namespace
     }
 
     template <typename T>
-    hipError_t launch_check_rows(const void*               d,
-                                 int64_t                   rows,
-                                 int64_t                   cols,
-                                 int64_t                   ld,
-                                 int64_t                   stride,
-                                 int64_t                   batches,
-                                 void*                     flags,
-                                 UniformCheckDeviceResult* result,
-                                 hipStream_t               stream)
+    hipError_t launch_check(const void*               d,
+                            int64_t                   rows,
+                            int64_t                   cols,
+                            int64_t                   ld,
+                            int64_t                   stride,
+                            int64_t                   batches,
+                            bool                      col,
+                            void*                     flags,
+                            UniformCheckDeviceResult* result,
+                            hipStream_t               stream)
     {
         const uint64_t total   = uint64_t(rows) * uint64_t(cols) * uint64_t(batches);
         constexpr int  threads = 256;
         const auto blocks = unsigned(std::min<uint64_t>((total + threads - 1) / threads, 65536));
-        hipLaunchKernelGGL((check_rows_kernel<T>),
+        hipLaunchKernelGGL((col ? check_kernel<T, true> : check_kernel<T, false>),
                            dim3(blocks),
                            dim3(threads),
                            0,
@@ -215,38 +218,41 @@ size_t uniform_check_flags_bytes(int64_t lines, int64_t batches)
     return (size_t(lines) * size_t(batches) + 31) / 32 * sizeof(unsigned);
 }
 
-hipError_t uniform_check_rows_device(const void*               d,
-                                     size_t                    element_size,
-                                     int64_t                   rows,
-                                     int64_t                   cols,
-                                     int64_t                   ld,
-                                     int64_t                   stride,
-                                     int64_t                   batches,
-                                     void*                     flags,
-                                     UniformCheckDeviceResult* result,
-                                     hipStream_t               stream)
+hipError_t uniform_check_device(const void*               d,
+                                size_t                    element_size,
+                                int64_t                   rows,
+                                int64_t                   cols,
+                                int64_t                   ld,
+                                int64_t                   stride,
+                                int64_t                   batches,
+                                bool                      col,
+                                void*                     flags,
+                                UniformCheckDeviceResult* result,
+                                hipStream_t               stream)
 {
-    if(rows <= 1 || cols <= 0 || batches <= 0)
+    // A line of one element has nothing to compare.
+    if((col ? cols : rows) <= 1 || (col ? rows : cols) <= 0 || batches <= 0)
         return hipSuccess;
-    if(hipError_t err = hipMemsetAsync(flags, 0, uniform_check_flags_bytes(cols, batches), stream);
+    if(hipError_t err
+       = hipMemsetAsync(flags, 0, uniform_check_flags_bytes(col ? rows : cols, batches), stream);
        err != hipSuccess)
         return err;
     switch(element_size)
     {
     case 1:
-        return launch_check_rows<uint8_t>(
-            d, rows, cols, ld, stride, batches, flags, result, stream);
+        return launch_check<uint8_t>(
+            d, rows, cols, ld, stride, batches, col, flags, result, stream);
     case 2:
-        return launch_check_rows<uint16_t>(
-            d, rows, cols, ld, stride, batches, flags, result, stream);
+        return launch_check<uint16_t>(
+            d, rows, cols, ld, stride, batches, col, flags, result, stream);
     case 4:
-        return launch_check_rows<uint32_t>(
-            d, rows, cols, ld, stride, batches, flags, result, stream);
+        return launch_check<uint32_t>(
+            d, rows, cols, ld, stride, batches, col, flags, result, stream);
     case 8:
-        return launch_check_rows<uint64_t>(
-            d, rows, cols, ld, stride, batches, flags, result, stream);
+        return launch_check<uint64_t>(
+            d, rows, cols, ld, stride, batches, col, flags, result, stream);
     case 16:
-        return launch_check_rows<Word16>(d, rows, cols, ld, stride, batches, flags, result, stream);
+        return launch_check<Word16>(d, rows, cols, ld, stride, batches, col, flags, result, stream);
     default:
         return hipErrorInvalidValue;
     }
