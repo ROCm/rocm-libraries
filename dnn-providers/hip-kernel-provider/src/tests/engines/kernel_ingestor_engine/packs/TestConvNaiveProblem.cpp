@@ -526,7 +526,7 @@ TEST(TestConvNaiveWorkload, CountsTwoComputeUnitsPerReportedRdnaWorkgroupProcess
 // Device units (DeviceUnits.hpp): what HIP's multiProcessorCount counts
 // ---------------------------------------------------------------------------
 
-TEST(TestConvDeviceUnits, Gfx10AndLaterReportWorkgroupProcessors)
+TEST(TestConvDeviceUnits, MeasuredWgpTargetsAndCuReportingTargets)
 {
     for(const char* arch : {"gfx1030",
                             "gfx1100",
@@ -534,8 +534,7 @@ TEST(TestConvDeviceUnits, Gfx10AndLaterReportWorkgroupProcessors)
                             "gfx1201",
                             "gfx1201:xnack-",
                             "gfx11-generic",
-                            "gfx10-3-generic",
-                            "gfx1250"})
+                            "gfx10-3-generic"})
     {
         EXPECT_TRUE(device_units::reportsWorkgroupProcessors(arch)) << arch;
     }
@@ -544,6 +543,8 @@ TEST(TestConvDeviceUnits, Gfx10AndLaterReportWorkgroupProcessors)
                             "gfx90a",
                             "gfx942:sramecc+:xnack-",
                             "gfx950",
+                            "gfx1250",
+                            "gfx1250:xnack-",
                             "gfx9-4-generic",
                             "",
                             "gfx000",
@@ -560,6 +561,9 @@ TEST(TestConvDeviceUnits, ComputeUnitsArePhysicalAndUnknownCountsAreZero)
     EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1151", 20)), 40);
     EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx942", 304)), 304);
     EXPECT_EQ(device_units::computeUnits(deviceOf("gfx942", 304)), 304);
+    // Observed HIP reported and physical counts are both 256 on gfx1250.
+    EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx1250", 256)), 256);
+    EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1250:xnack-", 256)), 256);
     EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx1100", 0)), 0);
     EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1100", 0)), 0);
     EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx942", -1)), 0);

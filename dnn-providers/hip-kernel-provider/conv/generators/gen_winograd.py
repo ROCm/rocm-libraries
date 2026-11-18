@@ -38,6 +38,9 @@ FIELDS = [
     "f16math",
     "pf",
     "sb",
+    "variant_id",
+    "layout_id",
+    "atom",
 ]
 STRINGS = {"direction", "dtype", "variant", "layout", "arch"}
 # The integer fields identify a config among those one graph admits (the enrolled knob tuple):
@@ -58,6 +61,9 @@ KNOBS = [
     "f16math",
     "pf",
     "sb",
+    "variant_id",
+    "layout_id",
+    "atom",
 ]
 ENTRY = {
     "multipass": "ConvWinogradGemm",
@@ -68,6 +74,9 @@ ENTRY = {
     "coop": "ConvWinogradCoop",
     "wrw": "ConvWinogradWrwGemm",
 }
+VARIANT_ID = {"multipass": 0, "fused": 1, "wmma": 2, "wreg": 3, "sreg": 4, "coop": 5, "wrw": 6}
+ATOM_ID = {"gfx11": 1, "gfx12": 2, "gfx9": 3, "gfx942": 3, "gfx950": 3, "gfx1250": 4}
+WRW_ATOM_ID = {"any": 0, "gfx11": 1, "gfx12": 2, "gfx9": 3, "gfx950": 6}
 
 
 def C(
@@ -87,6 +96,7 @@ def C(
     f16math=0,
     pf=0,
     sb=0,
+    atom=None,
 ):
     return dict(
         variant=variant,
@@ -107,32 +117,37 @@ def C(
         f16math=f16math,
         pf=pf,
         sb=sb,
+        variant_id=VARIANT_ID[variant],
+        layout_id=0 if layout == "NCHW" else 1,
+        atom=(WRW_ATOM_ID[arch] if variant == "wrw"
+              else ATOM_ID[arch] if variant in ("wmma", "wreg", "coop") else 0)
+        if atom is None else atom,
     )
 
 
 GEMMS = [(128, 64, 8), (64, 64, 16)]
 
 
-def multipass(ms, plan):
+def multipass(ms, plan, arch="any", atom=0):
     return [
-        C("multipass", m, lay, plan=plan, gemm=g)
+        C("multipass", m, lay, arch=arch, plan=plan, gemm=g, atom=atom)
         for m in ms
         for lay in ("NCHW", "NHWC")
         for g in GEMMS
     ]
 
 
-def wmma():
+def wmma(archs=("gfx11", "gfx12"), atom=None):
     return [
-        C("wmma", arch=a, bk=bk, waves=wv)
+        C("wmma", arch=a, bk=bk, waves=wv, atom=atom)
         for bk, wv in ((64, 8), (32, 4))
-        for a in ("gfx11", "gfx12")
+        for a in archs
     ]
 
 
 # Register-built WMMA operands (gfx11 / gfx12): K block, 16-tile groups, bins per wave (4: a whole
 # transform row; 2: half), fp16 packed input-transform math.
-def wreg(blocks):
+def wreg(blocks, archs=("gfx11", "gfx12")):
     return [
         C(
             "wreg",
@@ -144,7 +159,7 @@ def wreg(blocks):
             f16math=h,
         )
         for bk, tg, bins, h in blocks
-        for a in ("gfx11", "gfx12")
+        for a in archs
     ]
 
 
@@ -245,6 +260,16 @@ COOPPF_GFX950_F16 = [(4, 2, 1, 1)]
 COOP3_CDNA_F16 = [(1, 4, 4, 1), (2, 2, 1, 1), (1, 2, 1, 1), (2, 2, 2, 1)]
 COOP3_CDNA_BF16 = [(1, 4, 4, 0), (2, 2, 1, 0), (1, 2, 1, 0)]
 
+# Native gfx1250 consumes K32, not gfx12's K16. Its two V buffers use 2 KiB per tile:
+# cap NT at 2 within 64 KiB; tune MT/KW independently rather than aliasing old tile contracts.
+COOP_1250_F16 = [
+    (1, 2, 4, 1), (2, 2, 4, 1), (1, 2, 8, 1), (2, 2, 2, 1),
+    (1, 2, 1, 1), (1, 2, 2, 1), (4, 1, 1, 1), (2, 2, 2, 0),
+]
+COOP_1250_BF16 = [
+    (1, 2, 4, 0), (2, 2, 2, 0), (1, 2, 1, 0), (1, 2, 2, 0), (4, 1, 1, 0),
+]
+
 
 # Register-operand VALU on wave64 gfx9: lane = tile, the transformed filter through the scalar cache.
 def sreg(variants):
@@ -284,14 +309,20 @@ F32_RDNA_BLOCKS = [(64, 64, 2, 8, 16)]
 F16_BLOCKS = [(64, 32, 2, 8, 8), (32, 32, 8, 8, 4), (16, 32, 2, 8, 4)]
 BF16_BLOCKS = [(64, 32, 4, 8, 8), (32, 32, 8, 8, 4), (16, 32, 4, 8, 4)]
 CATALOG = {
-    "FLOAT": sreg([0])
+    "FLOAT": wmma(("gfx1250",), atom=5)
+    + sreg([0])
     + fused(F32_BLOCKS)
     + fused(F32_PF_BLOCKS, pf=1)
     + fused(F32_RDNA_BLOCKS, (2,), archs=("gfx12",))
     + fused(F32_RDNA_BLOCKS, (2,), pf=1, archs=("gfx11",))
     + multipass((4, 2, 3), "none")
-    + multipass((4, 2, 3), "llc"),
-    "HALF": coop(COOP_F16)
+    + multipass((4, 2, 3), "llc")
+    + multipass((4, 2, 3), "none", "gfx1250", 5)
+    + multipass((4, 2, 3), "llc", "gfx1250", 5),
+    "HALF": coop(COOP_1250_F16, ("gfx1250",))
+    + wreg(WREG_F16, ("gfx1250",))
+    + wmma(("gfx1250",))
+    + coop(COOP_F16)
     + coop16(COOP16_F16)
     + coop16(COOP16_F16_GFX11, ("gfx11",))
     + coop(COOP3_F16, m=3)
@@ -307,7 +338,10 @@ CATALOG = {
     + fused(F16_BLOCKS)
     + multipass((2, 3), "none")
     + multipass((2, 3), "llc"),
-    "BFLOAT16": coop(COOP_BF16)
+    "BFLOAT16": coop(COOP_1250_BF16, ("gfx1250",))
+    + wreg(WREG_BF16, ("gfx1250",))
+    + wmma(("gfx1250",))
+    + coop(COOP_BF16)
     + coop(COOP3_BF16, m=3)
     + coop(COOP_CDNA_BF16, ("gfx9",))
     + coop(COOP3_CDNA_BF16, ("gfx9",), m=3)
@@ -379,7 +413,8 @@ def label(c):
     if c["variant"] == "wrw":
         return f"wrw.f3x{c['m']}.{c['layout'].lower()}.{c['arch']}.{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}t{c['tm']}{c['tn']}{'.h' if c['f16math'] else ''}"
     if c["variant"] == "multipass":
-        return f"multipass.f{c['m']}.{c['layout'].lower()}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}.{'llc' if c['llc'] else 'none'}"
+        native = f".{c['arch']}.atom{c['atom']}" if c["atom"] else ""
+        return f"multipass.f{c['m']}.{c['layout'].lower()}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}.{'llc' if c['llc'] else 'none'}{native}"
     if c["variant"] == "fused":
         arch = "" if c["arch"] == "any" else f".{c['arch']}"
         return f"fused.f{c['m']}.nchw{arch}.{c['bk']}x{c['bt']}c{c['ccv']}t{c['tm']}{c['tn']}{'.pf1' if c['pf'] else ''}"
@@ -464,7 +499,14 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
     groups = {}
     for dtype, cfgs in (WRW_CATALOG if direction == "WRW" else CATALOG).items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
-        for i, c in enumerate(cfgs):
+        legacy_index = native_index = 0
+        for c in cfgs:
+            if c["arch"] == "gfx1250":
+                priority = 1100 - native_index
+                native_index += 1
+            else:
+                priority = 1000 - legacy_index
+                legacy_index += 1
             name = f"conv_winograd.{tag}.{dt}.{label(c)}"
             groups.setdefault(sibling(direction, c, dtype), []).append(
                 {
@@ -477,7 +519,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
                         "entry_point": ENTRY[c["variant"]],
                     },
                     "metadata": {"direction": direction, "dtype": dtype, **c},
-                    "priority": 1000 - i,
+                    "priority": priority,
                 }
             )
     for suffix, kernels in sorted(groups.items()):

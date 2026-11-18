@@ -9,3 +9,4 @@
 /conv_stem_bwd_f16_rdna.kdp.json
 /conv_stem_bwd_f32_cdna.kdp.json
 /conv_stem_bwd_f32_fma.kdp.json
+/conv_stem_bwd_f32_rdna.kdp.json

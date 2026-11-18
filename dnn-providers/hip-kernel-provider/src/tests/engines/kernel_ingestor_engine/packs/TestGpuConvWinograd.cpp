@@ -9,6 +9,9 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -18,6 +21,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -40,8 +44,8 @@
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16: the multipass engine in both
- * layouts, the fused VALU kernel and (gfx11 / gfx12) the fused WMMA kernel. The cases cover
- * NCHW, NHWC and mixed layouts (staged), groups, padding 0, 1 and 2, asymmetric padding, odd
+ * layouts, the fused VALU kernel and the fused matrix kernels (gfx11 / gfx1200-1201 / gfx1250).
+ * Cases cover NCHW, NHWC and mixed layouts (staged), groups, padding 0, 1 and 2, asymmetric padding, odd
  * extents (partial tiles), deep channels and true convolution. The LLC-fit plan's last-level
  * cache is overridden to a few KiB so its configs slice the batch on every device.
  *
@@ -311,10 +315,31 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"Nhwc3x3", dense(24, 40, {13, 11}, 1, true)});
     cases.push_back({"NhwcPad0OddChannels", dense(7, 5, {9, 10}, 0, true)});
     cases.push_back({"NchwPad2", dense(8, 6, {6, 7}, 2, false)});
+    // The last image's aligned 12-byte patch rows exceed NUM_RECORDS although their
+    // first one or two dwords hold real inputs. Exercises both alignment phases and
+    // boundary words for every native cooperative config, with no tolerance relaxation.
+    cases.push_back({"NchwAllocationBoundaryRows", dense(1, 1, {2, 2}, 1, false)});
+    // A full native K32 chunk whose final image reaches a later tile block: no negative
+    // chunk-0 address forces the per-element reload, so native vector-boundary checks matter.
+    cases.push_back({"NchwNativeFullReductionBoundaryRows", dense(32, 1, {7, 9}, 1, false)});
+
+    // One scalar input: short K4 reduction, row/column tails and windows entirely in padding.
+    // Opposite asymmetric edges also exercise the negative effective padding in dgrad.
+    auto tinyAsymmetric = dense(1, 1, {1, 1}, 0, true);
+    tinyAsymmetric.n = 1;
+    tinyAsymmetric.prePadding = {3, 0};
+    tinyAsymmetric.postPadding = {0, 3};
+    cases.push_back({"NhwcTinyAsymmetricPadding", tinyAsymmetric});
 
     auto grouped = dense(32, 48, {12, 13}, 1, false);
     grouped.groups = 4;
     cases.push_back({"NchwGrouped", grouped});
+
+    // Native K32 reduction: a second chunk with one channel, odd row alignment, K16 output tails.
+    cases.push_back({"NchwNativeReductionTail", dense(33, 35, {7, 9}, 1, false)});
+    auto nativeGrouped = dense(34, 66, {9, 7}, 1, true);
+    nativeGrouped.groups = 2; // C/g = 17, K/g = 33; dgrad swaps both tail contracts
+    cases.push_back({"NhwcNativeGroupedReductionTail", nativeGrouped});
 
     auto asymmetric = dense(6, 10, {9, 5}, 1, true);
     asymmetric.prePadding = {2, 0};
@@ -324,6 +349,9 @@ std::vector<DeviceCase> deviceCases()
     auto convolution = dense(12, 20, {11, 9}, 1, false);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"NchwConvolutionMode", convolution});
+    auto nhwcConvolution = dense(3, 5, {7, 9}, 1, true);
+    nhwcConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"NhwcConvolutionModeOddChannels", nhwcConvolution});
 
     cases.push_back({"NchwDeepChannels", dense(136, 72, {7, 9}, 1, false)});
     cases.push_back({"MixedLayouts", dense(16, 24, {10, 9}, 1, true), true});
@@ -343,6 +371,7 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"NchwStride2Grouped", strided(grouped)});
     cases.push_back({"NhwcStride2AsymmetricPadding", strided(asymmetric)});
     cases.push_back({"NchwStride2ConvolutionMode", strided(convolution)});
+    cases.push_back({"NhwcStride2ConvolutionModeOddChannels", strided(nhwcConvolution)});
     cases.push_back({"NchwStride2Stem", strided(dense(3, 32, {17, 20}, 0, false))});
     cases.push_back({"NchwStride2DeepChannels", strided(dense(136, 72, {12, 9}, 1, false))});
     cases.push_back({"Stride2MixedLayouts", strided(dense(16, 24, {10, 9}, 1, true)), true});
@@ -414,7 +443,10 @@ float winogradBound(int64_t m)
 }
 
 template <typename T>
-void runCase(const DeviceCase& deviceCase, ConvDirection direction)
+void runCase(const DeviceCase& deviceCase,
+             ConvDirection direction,
+             bool nativeCoopOnly = false,
+             std::optional<float> unrelatedInputNonfinite = std::nullopt)
 {
     // A few KiB of "last-level cache": the LLC-fit configs slice the batch on every device.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter llc(
@@ -427,6 +459,12 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
         spec.y.strides = packedStrides(spec.y.dims, !shape.channelsLast);
     }
     const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const bool native1250 = hipdnn_plugin_sdk::stripArchFeatures(
+                                fixture.context().deviceProperties.gcnArchName) == "gfx1250";
+    if(nativeCoopOnly && !native1250)
+    {
+        GTEST_SKIP() << "Native K32 cooperative convolution requires gfx1250";
+    }
     const auto pack = packFor(direction);
     const auto bound = matchesGraph(pack, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
@@ -492,14 +530,39 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
     // dx.
     const bool phasedBackward = !forward && shape.stride[0] == 2;
     const auto scale = tileMagnitudes(magnitude, phasedBackward ? 5 : 3);
+    if(unrelatedInputNonfinite)
+    {
+        ASSERT_TRUE(forward);
+        // The independent reference and its error scale use the original finite inputs.
+        // Only later images/groups change; the first image's first group must stay finite.
+        auto* input = static_cast<T*>(x.rawHostData());
+        forEachIndex(x.dims(), [&](const std::vector<int64_t>& index) {
+            if(index[0] != 0 || index[1] >= shape.c / shape.groups)
+            {
+                input[offsetOf(index, x.strides())] = static_cast<T>(*unrelatedInputNonfinite);
+            }
+        });
+        x.markHostModified();
+    }
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
+    unsigned nativeModesRan = 0;
+    bool nativeMultipassRan = false;
     for(const auto& kernel : catalog(direction))
     {
         if(!matchesKernel(pack, fixture.context(), kernel, *bound))
         {
             continue;
+        }
+        if(nativeCoopOnly)
+        {
+            const auto config = conv_winograd::configOf(kernel);
+            ASSERT_TRUE(config.has_value());
+            if(config->variant != conv_winograd::Variant::COOP || config->atom != 4)
+            {
+                continue;
+            }
         }
         SCOPED_TRACE(kernel.name);
         ++ran;
@@ -546,9 +609,15 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
         int64_t mismatches = 0;
         size_t visited = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
+            const float tileScale = scale[visited++];
+            if(unrelatedInputNonfinite
+               && (index[0] != 0 || index[1] >= shape.k / shape.groups))
+            {
+                return;
+            }
             const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
             const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
-            const float tolerance = relative * scale[visited++]
+            const float tolerance = relative * tileScale
                                     + 2.0f * storageEpsilon<T>() * std::fabs(want) + 1e-6f;
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
             {
@@ -558,8 +627,37 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
             }
         });
         EXPECT_EQ(mismatches, 0);
+        if(native1250)
+        {
+            const auto& variant = kernel.getStringMetadata("variant");
+            const auto config = conv_winograd::configOf(kernel);
+            ASSERT_TRUE(config.has_value());
+            if(config->variant == conv_winograd::Variant::MULTIPASS)
+            {
+                nativeMultipassRan |= config->atom == 5;
+            }
+            else if(config->atom >= 4)
+            {
+                nativeModesRan |= variant == "wmma" ? 1u : variant == "wreg" ? 2u : 4u;
+            }
+            if(variant == "fused")
+                nativeModesRan |= 8u;
+        }
     }
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    // Numeric proof must exercise each intended family, not silently pass on VALU alone.
+    if(native1250)
+    {
+        const unsigned expected = nativeCoopOnly ? 4u
+                                  : shape.stride[0] == 2 ? 8u
+                                  : std::is_same_v<T, float> ? 9u : 15u;
+        EXPECT_EQ(nativeModesRan, expected);
+        if constexpr(std::is_same_v<T, float>)
+        {
+            EXPECT_TRUE(nativeMultipassRan)
+                << "no exact-f32 native multipass catalog config executed";
+        }
+    }
 }
 
 class TestGpuConvWinograd : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
@@ -595,7 +693,48 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
-// ---- Host-only: the shipped catalog ----
+TEST(TestGpuConvWinogradNative, HalfAllocationBoundary)
+{
+    SKIP_IF_NO_DEVICES();
+    auto shape = dense(32, 1, {4, 4}, 0, false);
+    shape.n = 1;
+    runCase<Half>({"NchwNativeAllocationBoundary", shape}, ConvDirection::FORWARD, true);
+}
+
+TEST(TestGpuConvWinogradNative, HalfPartialReductionIsolatesImages)
+{
+    SKIP_IF_NO_DEVICES();
+    // The second K32 chunk contains one live channel. A K16-based full-chunk guard
+    // incorrectly reads the following image into its other 31 channels, where 0 * Inf/NaN
+    // must not contaminate the first image's output.
+    const auto shape = dense(33, 1, {4, 4}, 0, false);
+    for(float nonfinite :
+        {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+    {
+        SCOPED_TRACE(std::isnan(nonfinite) ? "NaN in the other image" : "Inf in the other image");
+        runCase<Half>({"NchwNativePartialReductionImages", shape},
+                      ConvDirection::FORWARD,
+                      true,
+                      nonfinite);
+    }
+}
+
+TEST(TestGpuConvWinogradNative, HalfPartialReductionIsolatesGroups)
+{
+    SKIP_IF_NO_DEVICES();
+    auto shape = dense(66, 2, {4, 4}, 0, false);
+    shape.n = 1;
+    shape.groups = 2; // C/g = 33: a full K32 chunk followed by one live channel.
+    for(float nonfinite :
+        {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+    {
+        SCOPED_TRACE(std::isnan(nonfinite) ? "NaN in the other group" : "Inf in the other group");
+        runCase<Half>({"NchwNativePartialReductionGroups", shape},
+                      ConvDirection::FORWARD,
+                      true,
+                      nonfinite);
+    }
+}
 
 // ---- Backward weights ----
 
@@ -822,16 +961,54 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvWinogradWrw,
                          ::testing::ValuesIn(wrwCases()),
                          [](const auto& info) { return info.param.name; });
+// ---- Host-only: the shipped catalog ----
 
-TEST(TestConvWinogradCatalog, EveryConfigParses)
+TEST(TestConvWinogradCatalog, ApplicableCompiledContractsHaveDistinctIntegerKnobs)
 {
+    constexpr const char* KNOBS[] = {"m", "llc", "gemm_bm", "gemm_bn", "gemm_bk", "bk", "bt",
+                                    "ccv", "tm", "tn", "waves", "bins", "f16math", "pf", "sb",
+                                    "variant_id", "layout_id", "atom"};
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter smallCache(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES", "4096");
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
     {
-        for(const auto& kernel : catalog(direction))
+        for(const auto* arch : {"gfx1100", "gfx1201", "gfx1250", "gfx942"})
         {
-            SCOPED_TRACE(kernel.name);
-            EXPECT_TRUE(conv_winograd::configOf(kernel).has_value());
+            for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+            {
+                auto shape = dense(34, 66, {9, 7}, 1, false);
+                shape.groups = 2;
+                shape.dataType = dtype;
+                auto properties = testDeviceProperties();
+                properties.gcnArchName = arch;
+                properties.multiProcessorCount = 64;
+                const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+                const auto pack = packFor(direction);
+                const auto bound = matchesGraph(pack, fixture.context());
+                ASSERT_TRUE(bound.has_value());
+                std::set<std::vector<int64_t>> seen;
+                for(const auto& kernel : catalog(direction))
+                {
+                    SCOPED_TRACE(kernel.name);
+                    const auto config = conv_winograd::configOf(kernel);
+                    ASSERT_TRUE(config.has_value());
+                    if(matchesKernel(pack, fixture.context(), kernel, *bound))
+                    {
+                        std::vector<int64_t> key;
+                        for(const auto* knob : KNOBS)
+                            key.push_back(kernel.getIntMetadata(knob));
+                        EXPECT_TRUE(seen.insert(std::move(key)).second)
+                            << "two applicable kernels would enroll the same config";
+                    }
+                    if(config->arch == "gfx12"
+                       && (config->variant == conv_winograd::Variant::WMMA
+                           || config->variant == conv_winograd::Variant::WREG
+                           || config->variant == conv_winograd::Variant::COOP
+                           || config->variant == conv_winograd::Variant::WRW))
+                        EXPECT_FALSE(conv_winograd::configRunsOn(*config, "gfx1250"));
+                }
+            }
         }
     }
 }

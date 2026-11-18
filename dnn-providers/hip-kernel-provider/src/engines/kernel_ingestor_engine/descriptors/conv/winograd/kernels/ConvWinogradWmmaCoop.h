@@ -2,11 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 // Fused Winograd F(2,3) on matrix cores, fp16 and bf16, fp32 accumulate, NCHW, forward form
-// (backward data runs it on the rotated filter): RDNA WMMA (gfx11 / gfx12, wave32) and CDNA MFMA
+// (backward data runs it on the rotated filter): WMMA (gfx11 / gfx1200-1201 / gfx1250, wave32) and CDNA MFMA
 // (gfx908+, wave64), one body over the atom traits below. F(3,2) (M = 3) runs stride 2 by phases
 // on the same 16 bins: B^T is F(2,3)'s, only the filter and output transforms and the phase
 // gather (forward) / scatter (backward data) differ. The cooperative variant: the whole
-// block transforms each 16-channel chunk of input once into LDS, and every wave reads its B
+// block transforms each CC-channel chunk (16 legacy, 32 native gfx1250) once into LDS; waves read B
 // fragments from there, so one transformed value feeds all of the block's out channels.
 //
 // On RDNA, VALU and WMMA share the SIMD: every VALU cycle is a cycle without WMMA. The input
@@ -18,13 +18,13 @@
 // channels, BT tiles).
 //   - A fragments (transformed filter U) come straight from the pre-pass buffer, prefetched one
 //     chunk ahead bin by bin into the registers just consumed.
-//   - Input: a lane owns one tile and one channel pair: 4 rows x 2 channels as 12-byte loads,
+//   - Input: a lane owns one or more (tile, channel pair) jobs: 4 rows x 2 channels as 12-byte loads,
 //     realigned, column pass, channel pairing, row pass (fp16 packed math, or fp32 for bf16), 16
 //     dword LDS stores V[bin][tile][channel]. Double-buffered: chunk ch + 1 is transformed after
 //     chunk ch's WMMAs; one barrier per chunk.
 //   - Epilogue: per 16-channel slab, the wave folds its row's 4 bins to 2 values in registers
 //     (Z = M A), Z goes to LDS, then A^T over the 4 rows gives the 2x2 outputs.
-// Filter pre-pass: k5WmmaFilterTransform (U[G][16][cgo][cgiPad] T).
+// Filter pre-pass: k5CoopFilterTransform, U fragment-major in 16 x CC units.
 #pragma once
 
 #include "ConvWinogradWmmaReg.h"
@@ -33,16 +33,16 @@
 #define K5C_OOB 0x7fffffff
 
 // The cooperative kernel's filter pre-pass: U fragment-major, so a wave's A fragment is one
-// contiguous run (512 bytes) instead of 16 rows a channel stride apart. Unit (g, bin, kb = k / 16,
-// ch = c / 16) holds 256 elements in the atom's A lane order: (row r = k % 16, channel j = c % 16)
-// at ((j / KPL) * 16 + r) * KPL + j % KPL. Units run [g][bin][ceil(cgo / 16)][cgiPad / 16]; the
+// contiguous run instead of 16 rows a channel stride apart. Unit (g, bin, kb = k / 16,
+// ch = c / CC) holds 16 * CC elements in A lane order: (row r = k % 16, channel j = c % CC)
+// at ((j / KPL) * 16 + r) * KPL + j % KPL. Units run [g][bin][ceil(cgo / 16)][cgiPad / CC]; the
 // rows of a partial last k block are never written (their outputs are discarded).
 // M 2: F(2,3) on the 3x3 filter; M 3: F(3,2) on the stride-2 phase sub-filters (virtual channels).
-template <class T, int LAYOUT, int DIR, int KPL, int M = 2>
+template <class T, int LAYOUT, int DIR, int KPL, int M = 2, int CC = 16>
 __device__ void k5CoopFilterTransform(const K5Args& a)
 {
     constexpr int P = 16;
-    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + 15) / 16 * 16;
+    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + CC - 1) / CC * CC;
     const long long idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(idx >= static_cast<long long>(a.groups) * cgo * cgiPad)
         return;
@@ -83,14 +83,14 @@ __device__ void k5CoopFilterTransform(const K5Args& a)
         k5FilterTile<2>(f, u);
     }
     T* U = static_cast<T*>(a.u);
-    const int kbs = (cgo + 15) / 16, chs = cgiPad / 16;
-    const int j = i % 16;
+    const int kbs = (cgo + 15) / 16, chs = cgiPad / CC;
+    const int j = i % CC;
     const long long inUnit = ((j / KPL) * 16 + o % 16) * KPL + j % KPL;
 #pragma unroll
     for(int p = 0; p < P; ++p)
     {
-        const long long unit = ((static_cast<long long>(g) * P + p) * kbs + o / 16) * chs + i / 16;
-        U[unit * 256 + inUnit] = K5Elem<T>::store(u[p]);
+        const long long unit = ((static_cast<long long>(g) * P + p) * kbs + o / 16) * chs + i / CC;
+        U[unit * (16 * CC) + inUnit] = K5Elem<T>::store(u[p]);
     }
 }
 
@@ -123,9 +123,9 @@ __device__ inline void k5cLdsBarrier()
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 }
 
-// The 16 x 16 x 16 matrix atom the cooperative kernel runs on, with how its A (transformed
-// filter, from global) and B (transformed input, from LDS) fragments load.
-//   RDNA WMMA (wave32): a lane holds 16 (gfx11) or 8 (gfx12) k of its row / column; 8 accumulators.
+// The 16 x 16 x CC matrix atom, including global A and LDS B fragment loads.
+// WMMA wave32: gfx11 duplicates K16; gfx1200/1201 splits K8; gfx1250 splits native K16.
+// All WMMA variants hold 8 fp32 accumulators per lane.
 //   CDNA MFMA (wave64, v_mfma_f32_16x16x16 f16 / bf16_1k): a lane holds k 4 (lane / 16) .. + 3 of
 //   row / column lane % 16; 4 accumulators, rows 4 (lane / 16) + i.
 template <class T, bool GFX12>
@@ -134,7 +134,7 @@ struct K5CoopWmma
     typedef K5Wmma<T, GFX12> W;
     typedef typename W::frag frag;
     typedef k5f8 acc;
-    static constexpr int WAVE = 32, ACCN = 8, KPL = W::KPL;
+    static constexpr int WAVE = 32, ACCN = 8, KPL = W::KPL, CC = W::CC;
     __device__ static int kBase(int lane)
     {
         return W::kBase(lane);
@@ -149,17 +149,7 @@ struct K5CoopWmma
     }
     __device__ static frag loadA(__amdgpu_buffer_rsrc_t r, unsigned laneOff, unsigned so)
     {
-        if constexpr(GFX12)
-            return __builtin_bit_cast(frag,
-                                      __builtin_amdgcn_raw_buffer_load_b128(r, laneOff, so, 0));
-        else
-        {
-            const k5u4 lo = __builtin_bit_cast(
-                k5u4, __builtin_amdgcn_raw_buffer_load_b128(r, laneOff, so, 0));
-            const k5u4 hi = __builtin_bit_cast(
-                k5u4, __builtin_amdgcn_raw_buffer_load_b128(r, laneOff + 16, so, 0));
-            return __builtin_bit_cast(frag, k5u8{lo.x, lo.y, lo.z, lo.w, hi.x, hi.y, hi.z, hi.w});
-        }
+        return W::loadA(r, laneOff, so);
     }
     __device__ static frag loadB(const unsigned* p)
     {
@@ -180,7 +170,7 @@ struct K5CoopMfma
     typedef typename K5WmmaElem<T>::e e;
     typedef e frag __attribute__((ext_vector_type(4)));
     typedef float acc __attribute__((ext_vector_type(4)));
-    static constexpr int WAVE = 64, ACCN = 4, KPL = 4;
+    static constexpr int WAVE = 64, ACCN = 4, KPL = 4, CC = 16;
     __device__ static int kBase(int lane)
     {
         return (lane >> 4) * 4;
@@ -238,12 +228,12 @@ struct K5CoopCfg
     static constexpr int NBU = B16 && A::KPL == 16 ? 4 : NB;
     static constexpr int BK = 16 * MT * KW, BT = 16 * NT * (B16 ? TW : 1),
                          WAVES = B16 ? KW * TW : 4 * KW, THREADS = A::WAVE * WAVES;
-    static constexpr int VB = 16 * BT * 16; // halves per V buffer: [bin][tile][16 channels]
+    static constexpr int VB = 16 * BT * A::CC; // halves per V buffer
     // V buffers: 2 (the next chunk is transformed while the current one is read), or 1 (SB: half
     // the LDS for more resident blocks, one more barrier per chunk).
     static constexpr int NVB = SB ? 1 : 2;
-    // (tile, channel pair) jobs per chunk: BT x 8; a lane takes one, 16 lanes per channel pair.
-    static constexpr int JW = BT * 8 / A::WAVE; // waves of jobs per chunk
+    // (tile, channel pair) jobs per chunk, 16 lanes per channel pair.
+    static constexpr int JW = BT * (A::CC / 2) / A::WAVE;
     static constexpr int JT = JW > WAVES ? JW / WAVES : 1; // jobs per thread
     // K wave groups per epilogue pass: 2 where Z fits the V buffers' LDS (F(3,2)'s 3 values per
     // bin row do not: 1).
@@ -255,7 +245,7 @@ struct K5CoopCfg
         = A::WAVE == 64 && 4 * M * 16 * KWP * (BT + 4) * 4 <= NVB * VB * 2 ? BT + 4 : BT;
     static constexpr int ZB = 4 * M * 16 * KWP * ZS; // floats per epilogue pass
     static constexpr int LDSB = B16 || NVB * VB * 2 > ZB * 4 ? NVB* VB * 2 : ZB * 4; // bytes
-    static_assert(B16 || LDSB == k5CoopLdsBytes(NT, KW, M, A::WAVE == 64, SB != 0),
+    static_assert(B16 || A::CC != 16 || LDSB == k5CoopLdsBytes(NT, KW, M, A::WAVE == 64, SB != 0),
                   "host LDS model");
     static_assert(SB == 0 || (A::WAVE == 64 && !B16), "single V buffer: CDNA transform rows");
     // RDNA: waves per SIMD the kernel is built for (VGPR budget 1536 / WPE): the loop is
@@ -278,8 +268,10 @@ struct K5CoopCfg
 #else
     static constexpr int WPE_B16 = 4;
 #endif
-    static constexpr int WPE = A::WAVE == 64 ? WPE_CDNA : B16 ? WPE_B16 : MT * NT <= 2 ? 8 : 4;
+    static constexpr int WPE = A::WAVE == 64 ? WPE_CDNA : B16 ? WPE_B16
+        : A::CC == 32 ? 4 : MT * NT <= 2 ? 8 : 4;
     static_assert(JW % WAVES == 0 || WAVES % JW == 0, "job split");
+    static_assert(LDSB <= 65536, "cooperative LDS budget");
 };
 
 // M 2: F(2,3), stride 1 (mode 0). M 3: F(3,2) on the stride-2 phase sub-filters (K5Args::mode):
@@ -304,7 +296,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
     constexpr int NB = C::NB, NBU = C::NBU;
     static_assert(!B16 || M == 2, "16-bin layout: F(2,3)");
     typedef typename W::frag frag;
-    constexpr int WAVE = W::WAVE, ACCN = W::ACCN;
+    constexpr int WAVE = W::WAVE, ACCN = W::ACCN, CC = W::CC;
+    static_assert(sizeof(T) == 2, "cooperative transform packs channel pairs");
     constexpr int BK = C::BK, BT = C::BT, THREADS = C::THREADS, VB = C::VB, JT = C::JT, JW = C::JW;
     constexpr bool PACKED = F16MATH && __is_same(T, k5_half);
     constexpr int MODE = M == 3 ? (DIR == K5_FORWARD ? 1 : 2) : 0;
@@ -313,18 +306,19 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
     unsigned* Vd = reinterpret_cast<unsigned*>(ldsRaw); // two buffers of VB halves
     float* Zs = reinterpret_cast<float*>(ldsRaw);
 
-    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + 15) / 16 * 16;
+    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + CC - 1) / CC * CC;
     const int nKB = (cgo + BK - 1) / BK, nTB = (a.tiles + BT - 1) / BT;
     // 32-bit item index: the plan admits at most 2^30 items (64-bit division per item, and the
     // registers it took, spilled scalar registers on CDNA).
     const int items = a.groups * nKB * nTB;
-    const int nCh = cgiPad / 16;
+    const int nCh = cgiPad / CC;
     // Mode 1 reads x itself: 4 virtual channels (phases) per plane of x.
     const int chanStride = MODE == 1 ? a.xh * a.xw : a.hi * a.wi;
     const long long inElems
         = static_cast<long long>(a.n) * (MODE == 1 ? a.ci / 4 : a.ci) * chanStride;
-    const __amdgpu_buffer_rsrc_t rIn
-        = k5Rsrc(a.in, (inElems * static_cast<long long>(sizeof(T)) + 3) / 4 * 4);
+    const unsigned inRecords
+        = static_cast<unsigned>((inElems * static_cast<long long>(sizeof(T)) + 3) / 4 * 4);
+    const __amdgpu_buffer_rsrc_t rIn = k5Rsrc(a.in, inRecords);
     const int kbs = (cgo + 15) / 16;
     const __amdgpu_buffer_rsrc_t rU = k5Rsrc(a.u,
                                              static_cast<long long>(a.groups) * 16 * kbs * 16
@@ -339,7 +333,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
     // Tile t's column, row and image. gfx11 divides by reciprocals set once (a runtime division
     // costs about 20 VALU, and every item takes two per lane in its job setup and two in its
     // epilogue: gfx1101 small-C graphs 2-4% faster); the others divide.
-    constexpr bool FDIV = W::KPL == 16;
+    constexpr bool FDIV = CC == 16 && W::KPL == 16;
     [[maybe_unused]] K5FastDiv divTw, divTh;
     if constexpr(FDIV)
     {
@@ -367,7 +361,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
     };
     T* out = static_cast<T*>(a.out);
     const unsigned chunkBytes
-        = static_cast<unsigned>((MODE == 1 ? 4 : 16) * chanStride) * sizeof(T);
+        = static_cast<unsigned>((MODE == 1 ? CC / 4 : CC) * chanStride) * sizeof(T);
     // V swizzle: tiles 8 apart share 64-bank rows, so tiles with bit 3 set take the other half
     // of their 8 channel-pair dwords: the transform's dword stores and the B reads then spread
     // over the banks (CDNA: 16 tiles x 4 pairs a wave, conflict cycles 3.2e8 -> 1.2e8 on gfx950
@@ -377,7 +371,9 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
     // data, 16-bin layout: conflict cycles 2.8e7 -> 3.1e6 against bit 3 alone; 5-20% faster).
     auto vSwz = [](int tile) __attribute__((always_inline))
     {
-        if constexpr(W::KPL == 16)
+        if constexpr(CC == 32)
+            return 0; // Native fragments are contiguous K16 halves, without the legacy swizzle.
+        else if constexpr(W::KPL == 16)
             return (((tile >> 3) ^ (tile >> 2)) & 1) << 2;
         else
             return ((tile >> 3) & 1) << 2;
@@ -386,8 +382,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
     // A fragment lane offset (bytes) within a U unit (k5CoopFilterTransform): the lane's KPL
     // elements (gfx11's wave32 lanes 16-31 repeat rows 0-15).
     const unsigned uLane
-        = static_cast<unsigned>((W::KPL == 16 ? lane % 16 : lane) * W::KPL) * sizeof(T);
-    constexpr unsigned UNIT = 256 * sizeof(T);
+        = static_cast<unsigned>((W::KPL == W::CC ? lane % 16 : lane) * W::KPL) * sizeof(T);
+    constexpr unsigned UNIT = 16 * CC * sizeof(T);
 
     // The transform jobs' tables (set per item, setupJobs below), the input chunk in flight, and
     // this wave's U offset. PF (prefetch) 1 sets them up one item ahead: the last chunk step of an
@@ -541,9 +537,10 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
             // tensor start: the chunk-0 offsets as they are, the chunk offset as the scalar
             // offset -- no VALU per load. A padding row's out-of-range offset stays out of
             // range with the scalar offset added (both below 2 GiB) or not.
-            // Not for the stride-2 forward phase gather, whose two loads a row the fast path
-            // keeps live longer (bf16 F(3,2) forward: 168 -> 180 registers, one wave a SIMD less).
-            if(MODE != 1 && (ch + 1) * 16 <= cgi && !negWave)
+            // Native K32 rows need the checked path below: a vector crossing NUM_RECORDS loses
+            // even its in-range words. Not for the stride-2 forward phase gather either, whose
+            // two loads a row the fast path keeps live longer (bf16 F(3,2): fewer resident waves).
+            if(CC == 16 && MODE != 1 && (ch + 1) * CC <= cgi && !negWave)
             {
 #pragma unroll
                 for(int q = 0; q < JT; ++q)
@@ -562,7 +559,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
 #pragma unroll
                 for(int v = 0; v < 2; ++v)
                 {
-                    const bool cok = ch * 16 + 2 * cp[q] + v < cgi;
+                    const bool cok = ch * CC + 2 * cp[q] + v < cgi;
 #pragma unroll
                     for(int r = 0; r < 4; ++r)
                     {
@@ -572,8 +569,32 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
                         // Opaque: keeps one load after a select (else the compiler branches per
                         // load and waits for every outstanding load in each branch).
                         asm volatile("" : "+v"(vo));
-                        raw[q][r][v] = __builtin_bit_cast(
-                            k5u3, __builtin_amdgcn_raw_buffer_load_b96(rIn, vo, 0, 0));
+                        if constexpr(CC == 32)
+                        {
+                            // Native buffer loads check the whole vector against NUM_RECORDS.
+                            // A b96 straddling the final allocation boundary loses valid row
+                            // words too; load its in-range dwords separately, keeping the same
+                            // aligned raw/shift contract. Fully OOB rows still use one b96.
+                            if(vo < inRecords && inRecords - vo < 12)
+                            {
+                                const unsigned remaining = inRecords - vo;
+                                unsigned words[3];
+#pragma unroll
+                                for(int d = 0; d < 3; ++d)
+                                    words[d] = __builtin_amdgcn_raw_buffer_load_b32(
+                                        rIn, remaining >= static_cast<unsigned>(4 * (d + 1))
+                                            ? vo + static_cast<unsigned>(4 * d)
+                                            : static_cast<unsigned>(K5C_OOB),
+                                        0, 0);
+                                raw[q][r][v] = k5u3{words[0], words[1], words[2]};
+                            }
+                            else
+                                raw[q][r][v] = __builtin_bit_cast(
+                                    k5u3, __builtin_amdgcn_raw_buffer_load_b96(rIn, vo, 0, 0));
+                        }
+                        else
+                            raw[q][r][v] = __builtin_bit_cast(
+                                k5u3, __builtin_amdgcn_raw_buffer_load_b96(rIn, vo, 0, 0));
                     }
                 }
         };
@@ -773,7 +794,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
                 // V[bin][tile][channel]: dword (bin * BT + tile) * 8 + channel pair (swizzled).
 #pragma unroll
                 for(int b = 0; b < 16; ++b)
-                    Vw[(b * BT + tl[q]) * 8 + (cp[q] ^ vSwz(tl[q]))] = vout[b];
+                    Vw[(b * BT + tl[q]) * (CC / 2) + (cp[q] ^ vSwz(tl[q]))] = vout[b];
             }
         };
 
@@ -798,7 +819,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
         // A fragments for this wave: bins 4 * row + b, out channels kRow0 + m * 16 + col.
         const int kRow0 = k0 + kw * 16 * MT;
         // Unit (g, bin 4 row + b, k block kRow0 / 16 + m, chunk ch).
-        const int nChU = cgiPad / 16;
+        const int nChU = cgiPad / CC;
         const auto uOf = [&](int g, int kRow0) __attribute__((always_inline))
         {
             return static_cast<unsigned>(((g * 16 + 4 * row) * kbs + kRow0 / 16) * nChU) * UNIT;
@@ -822,8 +843,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
         // B fragment: tile n * 16 + col of bin, channels kBase.
         auto loadB = [&](const unsigned* Vs, int bin, int n) __attribute__((always_inline))
         {
-            const unsigned* p = Vs + (bin * BT + twv * 16 * NT + n * 16 + col) * 8;
-            if constexpr(W::KPL == 16)
+            const unsigned* p = Vs + (bin * BT + twv * 16 * NT + n * 16 + col) * (CC / 2);
+            if constexpr(CC == 16 && W::KPL == 16)
             {
                 // gfx11: channel pairs 0-3 and 4-7 of the tile, at swapped halves where the
                 // tile's swizzle bit (vSwz) is set.

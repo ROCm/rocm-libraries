@@ -615,8 +615,8 @@ TEST(TestConvStemBwdCatalog, KnobsTellApartEveryConfigOfAGraph)
 
 TEST(TestConvStemBwdCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures)
 {
-    static constexpr std::array<const char*, 7> ARCHS{
-        "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201"};
+    static constexpr std::array<const char*, 8> ARCHS{
+        "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201", "gfx1250"};
     std::set<std::string> dtypes;
     for(const auto& kernel : catalog())
     {

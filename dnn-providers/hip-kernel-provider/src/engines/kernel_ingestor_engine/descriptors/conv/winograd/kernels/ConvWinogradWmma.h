@@ -1,21 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Fused Winograd F(2,3) on RDNA WMMA (gfx11 / gfx12, wave32), fp16 and bf16, fp32
-// accumulate, NCHW, forward and backward data (forward form, see K5Winograd.h).
+// Fused Winograd F(2,3), wave32: gfx11/gfx1200-1201 WMMA K16 for fp16/bf16,
+// gfx1250 native WMMA K32 for fp16/bf16 or exact K4 for fp32. NCHW, both directions.
 // HIPRTC-compatible: no standard headers.
 //
 // Persistent kernel. Work item = (group, BK out channels, 32 tiles). WAVES waves per workgroup, each
 // owning 16/WAVES of the 16 Winograd bins; per bin a BK x 32 block of accumulators = (BK/16) x 2
 // WMMA 16x16 tiles (fp32, 8 VGPRs each). Default BK = 64, 8 waves: 128 accumulator VGPRs per lane.
-// Per C chunk of 16 channels (one WMMA K step):
-//   U [bin][k][c 16] (T)   - copied from the pre-transformed filter (16-byte loads, prefetched);
-//   V [bin][t 32][c 16] (T) - input transform, 4 lanes per 4x4 patch (column pass per lane, row
-//                             pass via DPP quad_perm), channel pairs packed, rounded once to T.
-//   M[bin] += U[bin] (BK x 16) * V[bin] (16 x 32).
+// Per CC channels (one WMMA K step: 16 legacy, 32 native half/bfloat, 4 native float):
+//   U [bin][k][c CC] (T)   - legacy: prefetched into LDS; native: direct A-fragment buffer loads.
+//   V [bin][t 32][c CC] (T) - double-buffered input transform, 4 lanes per 4x4 patch,
+//                            column pass per lane, row pass via DPP; rounded once to T.
+//   M[bin] += U[bin] (BK x CC) * V[bin] (CC x 32).
 // Epilogue: accumulators -> LDS M fp32 (32 out channels per pass), A^T M A -> y with the parity mask.
 //
-// Filter pre-pass (k5WmmaFilterTransform): U[G][16][cgo][cgiPad] (T), cgiPad = ceil(cgi/16)*16,
+// Filter pre-pass (k5WmmaFilterTransform): U[G][16][cgo][cgiPad] (T), cgiPad = ceil(cgi/CC)*CC,
 // zero-padded channels. Workspace = G * 16 * cgo * cgiPad * sizeof(T).
 #pragma once
 
@@ -33,6 +33,10 @@
 #define K5_WAVE32 1
 #endif
 
+#ifndef CONV_WINO_GFX1250
+#define CONV_WINO_GFX1250 0
+#endif
+
 template <class T>
 struct K5WmmaElem; // fragment element type of the builtin
 template <>
@@ -45,31 +49,56 @@ struct K5WmmaElem<k5_bf16>
 {
     typedef short e;
 };
+template <>
+struct K5WmmaElem<float>
+{
+    typedef float e;
+};
 
 template <class T, int N>
 using k5wv = typename K5WmmaElem<T>::e __attribute__((ext_vector_type(N)));
 typedef float k5f8 __attribute__((ext_vector_type(8)));
 
-// D = A(16x16) * B(16x16) + C. gfx11: a lane holds all 16 k of row/col lane%16; D element i is
-// row 2i + lane/16. gfx12: a lane holds k (lane/16)*8 .. +7; D element i is row (lane/16)*8 + i.
+// gfx11: 16x16x16, duplicated K16 fragments, interleaved accumulator rows.
+// gfx1200/1201: 16x16x16, split K8 fragments, contiguous accumulator rows.
+// gfx1250: native 16x16x32 f16/bf16 (K16 per lane), or exact 16x16x4 f32 (K2 per lane).
+// The gfx1250 contract is not the gfx12 WMMA128 contract.
 template <class T, bool GFX12>
 struct K5Wmma
 {
-    static constexpr int KPL = GFX12 ? 8 : 16;
+    static constexpr bool NATIVE = CONV_WINO_GFX1250 != 0;
+    static constexpr int CC = NATIVE ? (__is_same(T, float) ? 4 : 32) : 16;
+    static constexpr int KPL = NATIVE ? CC / 2 : GFX12 ? 8 : 16;
     typedef k5wv<T, KPL> frag;
     __device__ static int dRow(int lane, int i)
     {
-        return GFX12 ? (lane >> 4) * 8 + i : 2 * i + (lane >> 4);
+        return (GFX12 || NATIVE) ? (lane >> 4) * 8 + i : 2 * i + (lane >> 4);
     }
     __device__ static int kBase(int lane)
     {
-        return GFX12 ? (lane >> 4) * 8 : 0;
+        return (GFX12 || NATIVE) ? (lane >> 4) * KPL : 0;
     }
     __device__ static k5f8 mma(frag a, frag b, k5f8 c)
     {
-        // The WMMA families, not __GFX12__ / __GFX11__: those also cover gfx1250 and gfx1170,
-        // which lack these builtins.
-#if HKP_ARCH_GFX12 && K5_WAVE32
+        // Legacy families exclude gfx1250/gfx1170, which have different matrix instructions.
+#if HKP_ARCH_GFX1250 && K5_WAVE32
+        if constexpr(NATIVE)
+        {
+            if constexpr(__is_same(T, k5_half))
+                return __builtin_amdgcn_wmma_f32_16x16x32_f16(
+                    false, a, false, b, 0, c, false, false);
+            else if constexpr(__is_same(T, k5_bf16))
+            {
+                typedef __bf16 bf16x16 __attribute__((ext_vector_type(16)));
+                return __builtin_amdgcn_wmma_f32_16x16x32_bf16(
+                    false, __builtin_bit_cast(bf16x16, a),
+                    false, __builtin_bit_cast(bf16x16, b), 0, c, false, false);
+            }
+            else
+                return __builtin_amdgcn_wmma_f32_16x16x4_f32(
+                    false, a, false, b, 0, c, false, false);
+        }
+#elif HKP_ARCH_GFX12 && K5_WAVE32
         if constexpr(GFX12)
         {
             if constexpr(__is_same(T, k5_half))
@@ -89,14 +118,136 @@ struct K5Wmma
         __builtin_trap();
         return c;
     }
+    __device__ static frag loadA(__amdgpu_buffer_rsrc_t r, unsigned vo, unsigned so)
+    {
+        if constexpr(sizeof(frag) == 8)
+            return __builtin_bit_cast(frag, __builtin_amdgcn_raw_buffer_load_b64(r, vo, so, 0));
+        else if constexpr(sizeof(frag) == 16)
+            return __builtin_bit_cast(frag, __builtin_amdgcn_raw_buffer_load_b128(r, vo, so, 0));
+        else
+        {
+            typedef unsigned u4 __attribute__((ext_vector_type(4)));
+            typedef unsigned u8 __attribute__((ext_vector_type(8)));
+            const u4 lo = __builtin_bit_cast(u4, __builtin_amdgcn_raw_buffer_load_b128(r, vo, so, 0));
+            const u4 hi = __builtin_bit_cast(u4, __builtin_amdgcn_raw_buffer_load_b128(r, vo + 16, so, 0));
+            return __builtin_bit_cast(frag, u8{lo.x, lo.y, lo.z, lo.w, hi.x, hi.y, hi.z, hi.w});
+        }
+    }
 };
 
+/// The multipass U/V product, using exact native fp32 WMMA rather than scalar micro-tiles.
+/// The transform buffers and batched-GEMM strides remain unchanged.
+template <int BM, int BN, int BK>
+__device__ void k5GemmWmma(const K5GemmArgs& g)
+{
+    using W = K5Wmma<float, false>;
+    using Frag = typename W::frag;
+    constexpr int THREADS = 256, FM = BM / 64, FN = BN / 32;
+    constexpr int LDA = BK + 4, LDB = BN + 4;
+    constexpr int LA = BM * BK / THREADS, LB = BK * BN / THREADS;
+    static_assert(BM > 0 && BM % 64 == 0 && BN > 0 && BN % 32 == 0, "WMMA block tiles");
+    static_assert(BK > 0 && BK % 4 == 0, "exact fp32 reduction atom");
+    static_assert(BM * BK % THREADS == 0 && BK * BN % THREADS == 0, "cooperative loads");
+    static_assert(BM == 0 || W::NATIVE, "native fp32 WMMA only");
+    static_assert((BM * LDA + BK * LDB) * sizeof(float) <= 65536, "multipass WMMA LDS budget");
+    __shared__ __attribute__((aligned(16))) float As[BM * LDA];
+    __shared__ __attribute__((aligned(16))) float Bs[BK * LDB];
+
+    const float* A = static_cast<const float*>(g.a) + blockIdx.z * g.sa;
+    const float* B = static_cast<const float*>(g.b) + blockIdx.z * g.sb;
+    float* C = g.c + blockIdx.z * g.sc;
+    const int m0 = blockIdx.y * BM, n0 = blockIdx.x * BN;
+    const int tid = threadIdx.x, lane = tid % 32, wave = tid / 32;
+    const int wm = wave / 2, wn = wave % 2;
+    k5f8 acc[FM][FN];
+#pragma unroll
+    for(int i = 0; i < FM; ++i)
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            acc[i][j] = k5f8{};
+
+    float ra[LA], rb[LB];
+    auto load = [&](int k0) {
+#pragma unroll
+        for(int q = 0; q < LA; ++q)
+        {
+            const int e = tid + q * THREADS, row = e / BK, col = e % BK;
+            ra[q] = m0 + row < g.m && k0 + col < g.k
+                        ? A[static_cast<long long>(m0 + row) * g.lda + k0 + col] : 0.0f;
+        }
+#pragma unroll
+        for(int q = 0; q < LB; ++q)
+        {
+            const int e = tid + q * THREADS, row = e / BN, col = e % BN;
+            rb[q] = k0 + row < g.k && n0 + col < g.n
+                        ? B[static_cast<long long>(k0 + row) * g.ldb + n0 + col] : 0.0f;
+        }
+    };
+    load(0);
+    for(int k0 = 0; k0 < g.k; k0 += BK)
+    {
+        __syncthreads();
+#pragma unroll
+        for(int q = 0; q < LA; ++q)
+        {
+            const int e = tid + q * THREADS;
+            As[(e / BK) * LDA + e % BK] = ra[q];
+        }
+#pragma unroll
+        for(int q = 0; q < LB; ++q)
+        {
+            const int e = tid + q * THREADS;
+            Bs[(e / BN) * LDB + e % BN] = rb[q];
+        }
+        __syncthreads();
+        if(k0 + BK < g.k)
+            load(k0 + BK);
+#pragma unroll
+        for(int kk = 0; kk < BK; kk += 4)
+        {
+            Frag av[FM], bv[FN];
+            const int rk = kk + W::kBase(lane);
+#pragma unroll
+            for(int i = 0; i < FM; ++i)
+            {
+                const int row = wm * FM * 16 + i * 16 + lane % 16;
+                av[i] = *reinterpret_cast<const Frag*>(As + row * LDA + rk);
+            }
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+            {
+                const int col = wn * FN * 16 + j * 16 + lane % 16;
+                bv[j] = Frag{Bs[rk * LDB + col], Bs[(rk + 1) * LDB + col]};
+            }
+#pragma unroll
+            for(int i = 0; i < FM; ++i)
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    acc[i][j] = W::mma(av[i], bv[j], acc[i][j]);
+        }
+    }
+#pragma unroll
+    for(int i = 0; i < FM; ++i)
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+        {
+            const int col = n0 + wn * FN * 16 + j * 16 + lane % 16;
+#pragma unroll
+            for(int e = 0; e < 8; ++e)
+            {
+                const int row = m0 + wm * FM * 16 + i * 16 + W::dRow(lane, e);
+                if(row < g.m && col < g.n)
+                    C[static_cast<long long>(row) * g.ldc + col] = acc[i][j][e];
+            }
+        }
+}
+
 // Filter pre-pass. One thread per (g, o, i < cgiPad), i fastest.
-template <class T, int LAYOUT, int DIR>
+template <class T, int LAYOUT, int DIR, int CC = 16>
 __device__ void k5WmmaFilterTransform(const K5Args& a)
 {
     constexpr int P = 16;
-    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + 15) / 16 * 16;
+    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + CC - 1) / CC * CC;
     const long long idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(idx >= static_cast<long long>(a.groups) * cgo * cgiPad)
         return;
@@ -135,20 +286,22 @@ __device__ void k5WmmaFilterTransform(const K5Args& a)
 }
 
 // Main kernel. BK = out channels per item (32 or 64), WAVES = waves per workgroup (4 or 8; each
-// wave owns 16/WAVES bins). BT = 32 tiles, C chunk = 16 channels (one WMMA K step).
-// LDS (halves): U [bin][k BK][c 16] single-buffered (refilled from registers between two barriers),
-// V [bin][t 32][c 16] double-buffered (the next chunk's transform overlaps the WMMAs).
+// wave owns 16/WAVES bins). BT = 32 tiles, CC = the atom's reduction length.
+// Legacy LDS holds single-buffered U and double-buffered V; native U loads directly from global,
+// keeping native K32 double-buffered V and the epilogue within the same 64 KiB budget.
 template <class T, bool GFX12, int BK = 64, int WAVES = 8>
 struct K5WmmaCfg
 {
-    static constexpr int P = 16, BT = 32, CC = 16, THREADS = 32 * WAVES, BPW = P / WAVES;
+    typedef K5Wmma<T, GFX12> W;
+    static constexpr int P = 16, BT = 32, CC = W::CC, THREADS = 32 * WAVES, BPW = P / WAVES;
     static constexpr int MT = BK / 16, NT = BT / 16;
-    static constexpr int UB = P * BK * CC, VB = P * BT * CC; // halves
-    static constexpr int LDS
-        = ((UB + 2 * VB) / 2 > P * 32 * BT ? (UB + 2 * VB) / 2 : P * 32 * BT); // dwords
-    static constexpr int NUQ = UB / 8 / THREADS; // 16-byte U slots per lane
-    static constexpr int EPASS = BK / 32; // epilogue passes (32 out channels each)
-    static_assert(P % WAVES == 0 && (THREADS / 2) % BK == 0 && UB % (8 * THREADS) == 0, "config");
+    // Native A fragments load directly from U: two K32 V buffers already occupy 64 KiB.
+    static constexpr int UB = W::NATIVE ? 0 : P * BK * CC, VB = P * BT * CC;
+    static constexpr int LDS = ((UB + 2 * VB) * sizeof(T) / 4 > P * 32 * BT
+                                   ? (UB + 2 * VB) * sizeof(T) / 4 : P * 32 * BT);
+    static constexpr int NUQ = UB * sizeof(T) / 16 / THREADS;
+    static constexpr int EPASS = BK / 32;
+    static_assert(P % WAVES == 0 && LDS * 4 <= 65536, "config");
 };
 
 template <class T, bool GFX12, int BK = 64, int WAVES = 8>
@@ -160,10 +313,10 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
                   NT = C::NT;
     constexpr int UB = C::UB, VB = C::VB, NUQ = C::NUQ;
     __shared__ __attribute__((aligned(16))) unsigned lds[C::LDS];
-    unsigned short* Us = reinterpret_cast<unsigned short*>(lds);
-    unsigned short* Vbase = Us + UB;
+    T* Us = reinterpret_cast<T*>(lds);
+    T* Vbase = Us + UB;
 
-    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + 15) / 16 * 16;
+    const int cgi = a.ci / a.groups, cgo = a.co / a.groups, cgiPad = (cgi + CC - 1) / CC * CC;
     const int nKB = (cgo + BK - 1) / BK, nTB = (a.tiles + BT - 1) / BT;
     const long long items = static_cast<long long>(a.groups) * nKB * nTB;
     const int nCh = cgiPad / CC;
@@ -189,7 +342,7 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
         const int uK = (tid / 2) % BK, uHf = tid % 2, uP0 = (tid / 2) / BK;
         constexpr int UPQ = (THREADS / 2) / BK; // bins per slot step
         const bool uOk = k0 + uK < cgo;
-        uint4 ureg[NUQ];
+        uint4 ureg[NUQ > 0 ? NUQ : 1]; // unused and eliminated in native builds
         auto loadU = [&](int ch) {
             const unsigned off
                 = uOk ? static_cast<unsigned>(
@@ -268,11 +421,18 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
 #pragma unroll
                 for(int i = 0; i < 4; ++i)
                 {
-                    const unsigned lo
-                        = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[0][i]));
-                    const unsigned hi
-                        = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[1][i]));
-                    Vw[(((i * 4 + j) * BT + tl) * CC) / 2 + cp] = lo | (hi << 16);
+                    if constexpr(sizeof(T) == 4)
+                    {
+                        T* Vs = reinterpret_cast<T*>(Vw);
+                        Vs[((i * 4 + j) * BT + tl) * CC + cp * 2] = K5Elem<T>::store(o[0][i]);
+                        Vs[((i * 4 + j) * BT + tl) * CC + cp * 2 + 1] = K5Elem<T>::store(o[1][i]);
+                    }
+                    else
+                    {
+                        const unsigned lo = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[0][i]));
+                        const unsigned hi = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[1][i]));
+                        Vw[(((i * 4 + j) * BT + tl) * CC) / 2 + cp] = lo | (hi << 16);
+                    }
                 }
             }
         };
@@ -286,16 +446,20 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
                 for(int n = 0; n < NT; ++n)
                     acc[b][m][n] = k5f8{0, 0, 0, 0, 0, 0, 0, 0};
 
-        loadU(0);
-        storeU();
+        if constexpr(!W::NATIVE)
+        {
+            loadU(0);
+            storeU();
+        }
         stageV(0, 0);
         __syncthreads();
         for(int ch = 0; ch < nCh; ++ch)
         {
             const bool more = ch + 1 < nCh;
-            if(more)
-                loadU(ch + 1);
-            const unsigned short* Vs = Vbase + (ch & 1) * VB;
+            if constexpr(!W::NATIVE)
+                if(more)
+                    loadU(ch + 1);
+            const T* Vs = Vbase + (ch & 1) * VB;
 #pragma unroll
             for(int b = 0; b < BPW; ++b)
             {
@@ -303,8 +467,20 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
                 typename W::frag af[MT], bf[NT];
 #pragma unroll
                 for(int m = 0; m < MT; ++m)
-                    af[m] = *reinterpret_cast<const typename W::frag*>(
-                        Us + (bin * BK + m * 16 + lane % 16) * CC + W::kBase(lane));
+                {
+                    if constexpr(W::NATIVE)
+                    {
+                        const int k = k0 + m * 16 + lane % 16;
+                        const unsigned vo = k < cgo
+                            ? static_cast<unsigned>(((g * P + bin) * cgo + k) * cgiPad
+                                                    + ch * CC + W::kBase(lane)) * sizeof(T)
+                            : static_cast<unsigned>(K5_OOB);
+                        af[m] = W::loadA(rU, vo, 0);
+                    }
+                    else
+                        af[m] = *reinterpret_cast<const typename W::frag*>(
+                            Us + (bin * BK + m * 16 + lane % 16) * CC + W::kBase(lane));
+                }
 #pragma unroll
                 for(int n = 0; n < NT; ++n)
                     bf[n] = *reinterpret_cast<const typename W::frag*>(
@@ -320,10 +496,13 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
             if(more)
                 stageV(ch + 1, (ch + 1) & 1);
             __syncthreads(); // all WMMAs on U done; V(ch+1) complete
-            if(more)
+            if constexpr(!W::NATIVE)
             {
-                storeU();
-                __syncthreads();
+                if(more)
+                {
+                    storeU();
+                    __syncthreads();
+                }
             }
         }
 

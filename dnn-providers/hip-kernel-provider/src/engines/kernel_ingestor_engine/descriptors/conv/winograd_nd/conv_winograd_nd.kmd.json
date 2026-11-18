@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "id": "402e34a4-77ea-55d3-bba0-c813e6333a9a",
+  "name": "winograd_nd configuration",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "arch",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "int"
+    },
+    {
+      "name": "precision",
+      "type": "int"
+    },
+    {
+      "name": "gemm_bm",
+      "type": "int"
+    },
+    {
+      "name": "gemm_bn",
+      "type": "int"
+    },
+    {
+      "name": "gemm_bk",
+      "type": "int"
+    },
+    {
+      "name": "chunk_tiles",
+      "type": "int"
+    }
+  ]
+}

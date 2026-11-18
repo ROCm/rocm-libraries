@@ -7,8 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <numeric>
-#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -39,9 +37,9 @@ constexpr size_t MAX_RANK = 5;
 /// A validated operand: rank 3 to 5, every extent positive, every stride non-negative.
 struct Operand
 {
-    std::vector<int64_t> dims;
-    std::vector<int64_t> strides;
-    data_objects::DataType dataType = data_objects::DataType::UNSET;
+    const flatbuffers::Vector<int64_t>& dims;
+    const flatbuffers::Vector<int64_t>& strides;
+    data_objects::DataType dataType;
 };
 
 /// The node fields the three convolution attribute tables share, read once.
@@ -180,11 +178,8 @@ std::optional<Operand> deviceOperand(const MatchContext& context, int64_t uid)
         return std::nullopt;
     }
 
-    Operand operand;
-    operand.dataType = dataType;
-    operand.dims.assign(dims->begin(), dims->end());
-    operand.strides.assign(strides->begin(), strides->end());
-    for(size_t axis = 0; axis < operand.dims.size(); ++axis)
+    const Operand operand{*dims, *strides, dataType};
+    for(flatbuffers::uoffset_t axis = 0; axis < operand.dims.size(); ++axis)
     {
         if(operand.dims[axis] < 1 || operand.strides[axis] < 0)
         {
@@ -198,21 +193,25 @@ std::optional<Operand> deviceOperand(const MatchContext& context, int64_t uid)
 /// operand: one thread per element writes it, so an overlap is a race.
 bool hasDistinctElements(const Operand& operand)
 {
-    std::vector<size_t> axes;
-    for(size_t axis = 0; axis < operand.dims.size(); ++axis)
+    std::array<flatbuffers::uoffset_t, MAX_RANK> axes{};
+    size_t count = 0;
+    for(flatbuffers::uoffset_t axis = 0; axis < operand.dims.size(); ++axis)
     {
         if(operand.dims[axis] > 1)
         {
-            axes.push_back(axis);
+            axes[count++] = axis;
         }
     }
-    std::sort(axes.begin(), axes.end(), [&operand](size_t lhs, size_t rhs) {
-        return operand.strides[lhs] < operand.strides[rhs];
-    });
+    std::sort(axes.begin(),
+              axes.begin() + count,
+              [&operand](flatbuffers::uoffset_t lhs, flatbuffers::uoffset_t rhs) {
+                  return operand.strides[lhs] < operand.strides[rhs];
+              });
 
     int64_t span = 1;
-    for(const auto axis : axes)
+    for(size_t i = 0; i < count; ++i)
     {
+        const auto axis = axes[i];
         if(operand.strides[axis] < span)
         {
             return false;
@@ -227,23 +226,22 @@ bool hasDistinctElements(const Operand& operand)
     return true;
 }
 
-/// @p values as a vector of exactly @p size elements each at least @p minimum, or nullopt.
-std::optional<std::vector<int64_t>>
+/// Validates @p values without copying; the view is used only while parsing the graph.
+const flatbuffers::Vector<int64_t>*
     convParameter(const flatbuffers::Vector<int64_t>* values, size_t size, int64_t minimum)
 {
     if(values == nullptr || values->size() != size)
     {
-        return std::nullopt;
+        return nullptr;
     }
-    std::vector<int64_t> result(values->begin(), values->end());
-    for(const auto value : result)
+    for(const auto value : *values)
     {
         if(value < minimum)
         {
-            return std::nullopt;
+            return nullptr;
         }
     }
-    return result;
+    return values;
 }
 
 /// Spatial extent of the output for one axis, or nullopt when the dilated filter does not
@@ -291,7 +289,9 @@ void fillStrides(
     for(int64_t axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
     {
         strides[2 + axis]
-            = axis < missing ? 0 : operand.strides[static_cast<size_t>(2 + axis - missing)];
+            = axis < missing
+                  ? 0
+                  : operand.strides[static_cast<flatbuffers::uoffset_t>(2 + axis - missing)];
     }
 }
 
@@ -428,8 +428,7 @@ std::optional<ConvNaiveProblem>
     const auto postPadding = convParameter(fields->postPadding, rank - 2, 0);
     const auto stride = convParameter(fields->stride, rank - 2, 1);
     const auto dilation = convParameter(fields->dilation, rank - 2, 1);
-    if(!prePadding.has_value() || !postPadding.has_value() || !stride.has_value()
-       || !dilation.has_value())
+    if(prePadding == nullptr || postPadding == nullptr || stride == nullptr || dilation == nullptr)
     {
         return std::nullopt;
     }
@@ -477,8 +476,8 @@ std::optional<ConvNaiveProblem>
             continue;
         }
 
-        const auto tensorAxis = static_cast<size_t>(2 + axis - missing);
-        const auto parameterAxis = static_cast<size_t>(axis - missing);
+        const auto tensorAxis = static_cast<flatbuffers::uoffset_t>(2 + axis - missing);
+        const auto parameterAxis = static_cast<flatbuffers::uoffset_t>(axis - missing);
         const auto extent = outputExtent(x->dims[tensorAxis],
                                          w->dims[tensorAxis],
                                          (*prePadding)[parameterAxis],

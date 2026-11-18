@@ -7,7 +7,6 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <set>
 #include <stdexcept>
@@ -23,7 +22,6 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <nlohmann/json.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -94,61 +92,33 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        // The native configs and the three-bf16 ones (CONV_IGEMM_NCHW_BWD_TF32's), one pack each.
-        std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
-        for(const std::string file :
-            {"conv_igemm_nchw_bwd.kdp.json", "conv_igemm_nchw_bwd_f32x3.kdp.json"})
+        const std::string prefix = "conv_igemm_nchw_bwd", suffix = ".kdp.json";
+        std::vector<std::filesystem::path> found;
+        for(const auto& root : roots)
         {
-            std::filesystem::path found;
-            for(const auto& root : roots)
+            std::error_code error;
+            for(auto it = std::filesystem::recursive_directory_iterator(root, error);
+                !error && it != std::filesystem::recursive_directory_iterator();
+                it.increment(error))
             {
-                std::error_code error;
-                for(auto it = std::filesystem::recursive_directory_iterator(root, error);
-                    !error && found.empty()
-                    && it != std::filesystem::recursive_directory_iterator();
-                    it.increment(error))
+                const auto file = it->path().filename().string();
+                if(file.rfind(prefix, 0) == 0 && file.size() >= suffix.size()
+                   && file.compare(file.size() - suffix.size(), suffix.size(), suffix) == 0)
                 {
-                    if(it->path().filename() == file)
-                    {
-                        found = it->path();
-                    }
-                }
-                if(!found.empty())
-                {
-                    break;
+                    found.push_back(it->path());
                 }
             }
-            if(found.empty())
+            if(!found.empty())
             {
-                throw std::runtime_error("no " + file + " beside the provider or this test binary");
-            }
-            std::ifstream stream(found);
-            const auto pack = nlohmann::json::parse(stream);
-            for(const auto& descriptor : pack.at("kernelDescriptors"))
-            {
-                hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-                kernel.name = descriptor.at("name").get<std::string>();
-                kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
-                kernel.source.sourceFile
-                    = descriptor.at("kernel_source").at("source_file").get<std::string>();
-                kernel.source.entryPoint
-                    = descriptor.at("kernel_source").at("entry_point").get<std::string>();
-                for(const auto& [key, value] : descriptor.at("metadata").items())
-                {
-                    if(value.is_string())
-                    {
-                        kernel.metadata[key] = value.get<std::string>();
-                    }
-                    else
-                    {
-                        kernel.metadata[key] = value.get<int64_t>();
-                    }
-                }
-                kernel.priority = descriptor.at("priority").get<int64_t>();
-                kernels.push_back(std::move(kernel));
+                break;
             }
         }
-        return kernels;
+        if(found.empty())
+        {
+            throw std::runtime_error("no " + prefix + "*.kdp.json beside the provider or this test binary");
+        }
+        std::sort(found.begin(), found.end());
+        return readDistinctEmbeddedKernelCatalog(found);
     }();
     return s_catalog;
 }
@@ -361,10 +331,10 @@ bool everyCaseServed(DataType dataType)
         return true;
     }
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
-    const std::array<const char*, 3> atoms
+    const std::array<const char*, 4> atoms
         = dataType == DataType::HALF
-              ? std::array<const char*, 3>{"mfma16_f16", "wmma11_f16", "wmma12_f16"}
-              : std::array<const char*, 3>{"mfma16_bf16", "wmma11_bf16", "wmma12_bf16"};
+              ? std::array<const char*, 4>{"mfma16_f16", "wmma11_f16", "wmma12_f16", "wmma125_f16"}
+              : std::array<const char*, 4>{"mfma16_bf16", "wmma11_bf16", "wmma12_bf16", "wmma125_bf16"};
     return std::any_of(atoms.begin(), atoms.end(), [&](const char* atom) {
         return conv_igemm::atomRunsOn(atom, arch);
     });
@@ -569,7 +539,7 @@ TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyForFloatWhereItPays)
         }
     }
     ASSERT_EQ(shape.filter.size(), 3u);
-    for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
+    for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx1250", "gfx908"})
     {
         for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
         {
@@ -611,7 +581,7 @@ TEST(TestConvIgemmNchwCatalog, AnUncountedDeviceIsServedAsACountedOne)
 {
     auto shape = upsample(24, 40, {1}, 61, 4, 2, 1, 1);
     shape.dataType = DataType::HALF;
-    for(const char* arch : {"gfx942:sramecc+:xnack-", "gfx1100", "gfx1201"})
+    for(const char* arch : {"gfx942:sramecc+:xnack-", "gfx1100", "gfx1201", "gfx1250"})
     {
         auto counted = testDeviceProperties();
         counted.gcnArchName = arch;

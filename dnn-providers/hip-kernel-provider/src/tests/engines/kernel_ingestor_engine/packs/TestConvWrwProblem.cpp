@@ -986,7 +986,7 @@ std::vector<ConfigRefusal> configRefusals()
              f.atom = "wmma11_f16";
              f.atomId = 12;
          }},
-        {"LoopUnknown", [](ConfigFields& f) { f.loop = 9; }},
+        {"LoopUnknown", [](ConfigFields& f) { f.loop = 13; }},
         // The generic loop: runtime geometry, fr taps a block, a position per thread, whole
         // channel rows a pass, its layout the problem's channel-vector form, at most 64 loads,
         // and no specialized class serving the problem.
@@ -1663,6 +1663,54 @@ TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)
     EXPECT_EQ(launch->gridY, 1u); // 3 filter rows, fr 3
 }
 
+TEST(TestConvWrwKernelMatch, NativeSmallCRowsBoundChannelsPerGroupAndVectorStridePhases)
+{
+    for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+    {
+        SCOPED_TRACE(dtypeName(dtype));
+        auto shape = baseShape();
+        shape.dataType = dtype;
+        shape.groups = 3;
+        shape.c = 48; // Cg16 is supported even though the tensor has more than 16 channels.
+        shape.k = 72;
+        shape.input = {11, 65};
+        auto fields = smallcFields();
+        fields.atom = dtype == DataType::HALF ? "wmma125_f16" : "wmma125_bf16";
+        fields.atomId = conv_wrw::atomIdOf(fields.atom);
+        fields.bk = 16;
+        fields.bc = 8;
+        fields.wk = 1;
+        for(const int64_t stride : {1, 2})
+        {
+            SCOPED_TRACE(stride);
+            shape.stride = {stride, stride};
+            fields.sw = stride;
+            EXPECT_TRUE(admits(fields, "gfx1250", shape));
+            auto pastLimit = shape;
+            pastLimit.c = 51; // Cg17, not the global channel count, is past the limit.
+            EXPECT_FALSE(admits(fields, "gfx1250", pastLimit));
+            auto channelsLast = shape;
+            channelsLast.channelsLast = true;
+            auto channelsLastFields = fields;
+            channelsLastFields.layout = 1;
+            // CL BQ64 exceeds the one-wave scalar-load pass mask. BQ32 fits at
+            // stride 1; stride 2 needs two output-channel waves to keep passes <=32.
+            EXPECT_FALSE(admits(channelsLastFields, "gfx1250", channelsLast));
+            channelsLastFields.bq = 32;
+            if(stride == 2)
+            {
+                EXPECT_FALSE(admits(channelsLastFields, "gfx1250", channelsLast));
+                channelsLastFields.bk = 32;
+                channelsLastFields.wk = 2;
+            }
+            EXPECT_TRUE(admits(channelsLastFields, "gfx1250", channelsLast));
+        }
+        shape.stride = {1, 3};
+        fields.sw = 3; // VEC8 cannot hold three whole channels-first stride phases.
+        EXPECT_FALSE(admits(fields, "gfx1250", shape));
+    }
+}
+
 TEST(TestConvWrwKernelMatch, TheRingRunsHeightStridesAsPhases)
 {
     // 3x3 at height stride 2: the matrix ring with ceil(3 / 2) = 2 filter rows per phase.
@@ -2056,6 +2104,11 @@ TEST(TestConvWrwKernelMatch, TheLdsLimitIsTheDevices)
     EXPECT_GT(conv_wrw::ldsBytesOf(configOf(f), 2), 64 * 1024);
     EXPECT_FALSE(admits(f, "gfx942"));
     EXPECT_TRUE(admits(f, "gfx950"));
+    const auto problem = parse(specOf(baseShape()));
+    ASSERT_TRUE(problem.has_value());
+    auto legacy = deviceOf("gfx950:sramecc+:xnack-");
+    legacy.sharedMemPerBlock = 64 * 1024;
+    EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, configOf(f), legacy).has_value());
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx942"), 64 * 1024);
     EXPECT_EQ(conv_wrw::ldsLimitOf("gfx1100"), 64 * 1024);
@@ -3190,7 +3243,9 @@ TEST(TestConvWrwSpec, MalformedKeysAreNotClasses)
     for(const char* key : {"",
                            "R0.3.1.1.0",
                            "16R0.3.1.1.0", // fma
-                           "17R0.3.1.1.0",
+                           "17R0.3.1.1.0", // native atoms are outside the legacy spec namespace
+                           "18R0.3.1.1.0",
+                           "19R0.3.1.1.0",
                            "-1R0.3.1.1.0",
                            "4X0.3.1.1.0",
                            "4R3.3.1.1.0",
@@ -3318,41 +3373,468 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
               3 * (2 * (40 * 64 + 32 * 64) + 512) * 2 + 1 * 4 * 3 * 2 * 2 * 64 * 16);
 }
 
-TEST(TestConvWrwDefines, EveryFieldIsADefine)
+WrwConfig genericConfig(DataType dtype, bool channelsLast = false)
 {
-    auto f = dmaFields();
-    const auto defines
-        = conv_wrw::compileDefinesFor(DataType::BFLOAT16, configOf(f), "K1AtomMfma32Bf16X16");
-    ASSERT_EQ(defines.size(), 21u);
-    EXPECT_EQ(defines[0], (std::pair<std::string, std::string>{"CONV_K3_T", "unsigned short"}));
-    EXPECT_EQ(defines[1],
-              (std::pair<std::string, std::string>{"CONV_K3_ATOM", "K1AtomMfma32Bf16X16"}));
-    EXPECT_EQ(defines[2], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "2"}));
-    EXPECT_EQ(defines[13], (std::pair<std::string, std::string>{"CONV_K3_TK", "0"}));
-    EXPECT_EQ(defines[18], (std::pair<std::string, std::string>{"CONV_K3_NS", "2"}));
-    EXPECT_EQ(defines[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "0"}));
-    EXPECT_EQ(defines[20], (std::pair<std::string, std::string>{"CONV_K3_DWS", "1"}));
-    const auto direct
-        = conv_wrw::compileDefinesFor(DataType::HALF, configOf(directFields()), "K1AtomMfmaF16X32");
-    ASSERT_EQ(direct.size(), 21u);
-    EXPECT_EQ(direct[2], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "5"}));
-    EXPECT_EQ(direct[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "2"}));
-    EXPECT_EQ(direct[20], (std::pair<std::string, std::string>{"CONV_K3_DWS", "0"}));
-    // The FMA ring names no atom.
-    const auto fma = conv_wrw::compileDefinesFor(DataType::FLOAT, configOf(fmaFields()), "");
-    ASSERT_EQ(fma.size(), 20u);
-    EXPECT_EQ(fma[0], (std::pair<std::string, std::string>{"CONV_K3_T", "float"}));
-    EXPECT_EQ(fma[1], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "3"}));
-    EXPECT_EQ(fma[12], (std::pair<std::string, std::string>{"CONV_K3_TK", "4"}));
-    // Block-based buffers: CONV_K3_PB is defined only when set.
-    auto pb = rowsFields();
-    pb.pb = 1;
-    const auto blocks
-        = conv_wrw::compileDefinesFor(DataType::HALF, configOf(pb), "K1AtomMfma32F16");
-    ASSERT_EQ(blocks.size(), 22u);
-    EXPECT_EQ(blocks[21], (std::pair<std::string, std::string>{"CONV_K3_PB", "1"}));
-    EXPECT_THROW(static_cast<void>(conv_wrw::compileDefinesFor(DataType::DOUBLE, configOf(f), "")),
-                 std::invalid_argument);
+    WrwConfig c;
+    c.atom = dtype == DataType::FLOAT  ? "wmma125_f32"
+             : dtype == DataType::HALF ? "wmma125_f16"
+                                       : "wmma125_bf16";
+    c.atomId = conv_wrw::atomIdOf(c.atom);
+    c.loop = conv_wrw::LOOP_NATIVE_GENERIC;
+    c.layout = channelsLast ? 1 : 0;
+    c.bk = c.bc = 32;
+    c.bq = 64;
+    c.fr = c.s = c.sw = c.dw = 0;
+    c.wk = c.wc = 2;
+    c.vec = c.dws = 1;
+    c.xcd = c.align = c.ns = c.wq = c.tk = c.tc = 0;
+    c.bpu = 2;
+    return c;
+}
+
+TEST(TestConvWrwGeneric, RuntimeGeometryAndGroupedChannelTails)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+        for(const bool channelsLast : {false, true})
+            for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
+            {
+                auto shape = baseShape();
+                shape.dataType = dtype;
+                shape.mode = mode;
+                shape.channelsLast = channelsLast;
+                shape.c = 10;
+                shape.k = 14;
+                shape.groups = 2;
+                shape.input = {5, 9, 17};
+                shape.filter = {2, 4, 5};
+                shape.prePadding = {1, 4, 6};
+                shape.postPadding = {0, 1, 2};
+                shape.stride = {2, 3, 2};
+                shape.dilation = {2, 2, 3};
+                auto spec = specOf(shape);
+                // Exercise the filter layout independently of the activation layout.
+                spec.w.strides = packedStrides(spec.w.dims, !channelsLast);
+                const auto problem = parse(spec);
+                ASSERT_TRUE(problem.has_value());
+                auto config = genericConfig(dtype, channelsLast);
+                const auto launch
+                    = conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250", 8));
+                ASSERT_TRUE(launch.has_value());
+                const auto& a = problem->base.args;
+                const int64_t positions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+                EXPECT_EQ(launch->args.steps, (positions + config.bq - 1) / config.bq);
+                EXPECT_EQ(launch->gridX, 2 * problem->taps);
+                EXPECT_EQ(launch->gridY, 1u);
+                EXPECT_EQ(launch->reduce.flip, mode == ConvMode::CONVOLUTION);
+                EXPECT_LE(launch->workspaceBytes, conv_wrw::MAX_WORKSPACE_BYTES);
+                EXPECT_FALSE(
+                    conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1201")).has_value());
+                config.s = 5; // Runtime loop metadata cannot falsely claim a specialized geometry.
+                EXPECT_FALSE(
+                    conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+            }
+}
+
+TEST(TestConvWrwGeneric, NativeScalarGathersAdmitStridedOperandsInMatchingLoadOrder)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        for(const int64_t pitch : {0, 26, 32})
+        {
+            SCOPED_TRACE(dtypeName(dtype));
+            SCOPED_TRACE(pitch);
+            auto shape = baseShape();
+            shape.dataType = dtype;
+            shape.channelsLast = pitch != 0;
+            auto spec = specOf(shape);
+            spec.x.strides = pitch == 0
+                                 ? std::vector<int64_t>{24 * 10 * 16, 10 * 16, 16, 1}
+                                 : std::vector<int64_t>{10 * 12 * pitch, 1, 12 * pitch, pitch};
+            const auto problem = parse(spec);
+            ASSERT_TRUE(problem.has_value());
+            ASSERT_FALSE(problem->channelsFirst || problem->channelsLast);
+            auto config = genericConfig(dtype, pitch == 32);
+            EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+            config.layout = 1 - config.layout;
+            EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+            // Vectorized specialized rows must not claim the scalar gather's strided inputs.
+            config.loop = conv_wrw::LOOP_ROWS;
+            config.fr = 1;
+            config.s = 3;
+            config.sw = config.dw = 1;
+            config.vec = 16 / problem->elementBytes;
+            EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+        }
+    }
+}
+
+TEST(TestConvWrwLaunch, ChannelsFirstStoreKeepsSplitAndFilterLayoutContracts)
+{
+    auto config = genericConfig(DataType::HALF);
+    config.loop = conv_wrw::LOOP_TAP_TILED;
+    config.bk = config.bc = 64;
+    config.bq = 32;
+    config.dws = 2;
+    config.bpu = 1;
+    auto shape = baseShape();
+    shape.n = 1;
+    shape.input = {4, 4};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto device = deviceOf("gfx1250", 256);
+    const auto direct = conv_wrw::wrwLaunchFor(*problem, config, device);
+    ASSERT_TRUE(direct.has_value());
+    EXPECT_EQ(direct->args.splits, 1);
+    EXPECT_TRUE(direct->dwStore);
+    EXPECT_EQ(direct->workspaceBytes, 0u);
+    auto legacyConfig = config;
+    legacyConfig.dws = 1;
+    const auto legacy = conv_wrw::wrwLaunchFor(*problem, legacyConfig, device);
+    ASSERT_TRUE(legacy.has_value());
+    EXPECT_FALSE(legacy->dwStore);
+    EXPECT_GT(legacy->workspaceBytes, 0u);
+
+    shape.n = 16;
+    shape.input = {16, 16};
+    const auto large = parse(specOf(shape));
+    ASSERT_TRUE(large.has_value());
+    const auto split = conv_wrw::wrwLaunchFor(*large, config, device);
+    ASSERT_TRUE(split.has_value());
+    EXPECT_GT(split->args.splits, 1);
+    EXPECT_FALSE(split->dwStore);
+    EXPECT_GT(split->workspaceBytes, 0u);
+
+    auto mixedSpec = specOf(shape);
+    mixedSpec.w.strides = filterChannelsLast(mixedSpec.w.dims);
+    const auto mixed = parse(mixedSpec);
+    ASSERT_TRUE(mixed.has_value());
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*mixed, config, device).has_value());
+    config.loop = conv_wrw::LOOP_NATIVE_GENERIC;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+}
+
+TEST(TestConvWrwGeneric, GlobalAddressesBeyondBufferImageLimit)
+{
+    auto shape = baseShape();
+    shape.n = shape.k = 1;
+    shape.c = int64_t{1} << 27;
+    shape.input = {1, 8};
+    shape.filter = {1, 1};
+    shape.prePadding = shape.postPadding = {0, 0};
+    shape.stride = {1, 1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto generic
+        = conv_wrw::wrwLaunchFor(*problem, genericConfig(DataType::HALF), deviceOf("gfx1250"));
+    ASSERT_TRUE(generic.has_value());
+    EXPECT_EQ(generic->args.xImage * 2, TWO_POW_31);
+    EXPECT_EQ(generic->args.xs[0], int64_t{1} << 30);
+    auto specialized = genericConfig(DataType::HALF);
+    specialized.loop = conv_wrw::LOOP_ROWS;
+    specialized.fr = specialized.s = specialized.dw = 1;
+    specialized.sw = 1;
+    specialized.vec = 8;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, specialized, deviceOf("gfx1250")).has_value());
+}
+
+TEST(TestConvWrwGeneric, RefusesUnallocatableSplitPartials)
+{
+    auto shape = baseShape();
+    shape.n = 1;
+    shape.c = shape.k = 16384;
+    shape.input = {2, 2};
+    shape.filter = {3, 3};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*problem, genericConfig(DataType::HALF), deviceOf("gfx1250"))
+            .has_value());
+}
+
+TEST(TestConvWrwWorkspace, NativeCapPreservesLegacyLargeRingAdmission)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 1;
+    shape.groups = 1;
+    shape.c = shape.k = 8192;
+    shape.input = {2, 2};
+    shape.filter = {3, 3};
+    shape.prePadding = shape.postPadding = {1, 1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    ConfigFields fields;
+    const auto legacy = conv_wrw::wrwLaunchFor(*problem, configOf(fields), deviceOf("gfx942"));
+    ASSERT_TRUE(legacy.has_value());
+    EXPECT_EQ(legacy->args.splits, 1);
+    EXPECT_EQ(legacy->workspaceBytes, size_t{9} * 8192 * 8192 * sizeof(float));
+    fields.atom = "wmma125_f16";
+    fields.atomId = conv_wrw::atomIdOf(fields.atom);
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*problem, configOf(fields), deviceOf("gfx1250")).has_value());
+    shape.c = shape.k = 4096;
+    const auto smaller = parse(specOf(shape));
+    ASSERT_TRUE(smaller.has_value());
+    EXPECT_TRUE(
+        conv_wrw::wrwLaunchFor(*smaller, configOf(fields), deviceOf("gfx1250")).has_value());
+}
+
+TEST(TestConvWrwTapTiled, UsesAvailableLdsRatherThanLegacyLimit)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        auto shape = baseShape();
+        shape.dataType = dtype;
+        const auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        auto config = genericConfig(dtype);
+        config.loop = conv_wrw::LOOP_TAP_TILED;
+        config.bc = 128;
+        config.bq = 256;
+        config.wc = 4;
+        auto device = deviceOf("gfx1250");
+        device.sharedMemPerBlock = 64 * 1024;
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+        device.sharedMemPerBlock = 320 * 1024;
+        EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+    }
+}
+
+TEST(TestConvWrwDilationRows, ChunkAndLoadBoundsAtWidth65And128)
+{
+    auto shape = baseShape();
+    shape.c = 2048;
+    shape.k = 256;
+    shape.n = 16;
+    shape.dilation = {24, 24};
+    shape.prePadding = shape.postPadding = {24, 24};
+    auto config = genericConfig(DataType::HALF);
+    config.loop = conv_wrw::LOOP_ROWS;
+    config.bk = config.bc = 64;
+    config.fr = config.sw = 1;
+    config.s = 3;
+    config.dw = 24;
+    config.vec = 8;
+    for(const int64_t width : {65, 128})
+    {
+        shape.input = {width, width};
+        const auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        for(const int64_t bq : {32, 64, 128})
+        {
+            config.bq = bq;
+            auto device = deviceOf("gfx1250");
+            const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
+            ASSERT_TRUE(launch.has_value());
+            const int64_t chunks = (width + bq - 1) / bq;
+            EXPECT_EQ(launch->args.chunks, chunks);
+            EXPECT_EQ(launch->args.steps, 16 * width * chunks);
+            device.sharedMemPerBlock = static_cast<size_t>(conv_wrw::ldsBytesOf(config, 2) - 1);
+            EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+        }
+    }
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    config.bq = 32;
+    config.wk = config.wc = 1;
+    const auto device = deviceOf("gfx1250");
+    ASSERT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+    config.bc = 128; // 40 x-window vector loads per lane exceed the real 32-bit pass mask.
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, device).has_value());
+}
+
+TEST(TestConvWrwSmallK, RefusesUnsupportedChannelCountLayoutAndArchitecture)
+{
+    for(const auto dtype : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        auto shape = baseShape();
+        shape.dataType = dtype;
+        shape.channelsLast = true;
+        shape.c = 10;
+        shape.k = 6;
+        shape.groups = 2;
+        auto config = genericConfig(dtype, true);
+        config.loop = conv_wrw::LOOP_SMALL_K;
+        config.atom = "fma";
+        config.atomId = 16;
+        config.bk = config.tk = 4;
+        config.bc = 64;
+        config.tc = 1;
+        config.wk = config.wc = 0;
+        auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1201")).has_value());
+        shape.k = 10; // Five output channels per group cannot fit the four accumulators.
+        problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+        shape.k = 6;
+        shape.channelsLast = false;
+        problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+    }
+}
+
+WrwConfig accurateConfig(bool channelsLast = false)
+{
+    WrwConfig c;
+    c.atom = "fma";
+    c.atomId = conv_wrw::atomIdOf(c.atom);
+    c.loop = conv_wrw::LOOP_ACCURATE;
+    c.layout = channelsLast ? 1 : 0;
+    c.bk = c.bc = 8;
+    c.bq = 32;
+    c.tk = c.tc = c.vec = 1;
+    c.bpu = 2;
+    return c;
+}
+
+TEST(TestConvWrwAccurate, CoversRuntimeGeometryWithoutDirectStoreOrFloatWorkspace)
+{
+    for(const bool channelsLast : {false, true})
+        for(const bool filterLast : {false, true})
+            for(const auto mode : {ConvMode::CROSS_CORRELATION, ConvMode::CONVOLUTION})
+            {
+                auto shape = baseShape();
+                shape.dataType = DataType::FLOAT;
+                shape.channelsLast = channelsLast;
+                shape.mode = mode;
+                shape.c = 10;
+                shape.k = 14;
+                shape.groups = 2;
+                shape.input = {5, 9, 17};
+                shape.filter = {2, 4, 5};
+                shape.prePadding = {1, 4, 6};
+                shape.postPadding = {0, 1, 2};
+                shape.stride = {2, 3, 2};
+                shape.dilation = {2, 2, 3};
+                auto spec = specOf(shape);
+                spec.w.strides = packedStrides(spec.w.dims, filterLast);
+                const auto problem = parse(spec);
+                ASSERT_TRUE(problem.has_value());
+                const auto launch = conv_wrw::wrwLaunchFor(
+                    *problem, accurateConfig(channelsLast), deviceOf("gfx1250"));
+                ASSERT_TRUE(launch.has_value());
+                EXPECT_FALSE(launch->dwStore);
+                EXPECT_EQ(launch->workspaceBytes,
+                          size_t(launch->args.splits) * size_t(launch->args.partialElems)
+                              * sizeof(double));
+                EXPECT_LE(launch->workspaceBytes, conv_wrw::MAX_WORKSPACE_BYTES);
+                EXPECT_GE(launch->args.splits * launch->args.stepsPerSplit, launch->args.steps);
+                EXPECT_LT((launch->args.splits - 1) * launch->args.stepsPerSplit,
+                          launch->args.steps);
+            }
+}
+
+TEST(TestConvWrwAccurate, RefusesEveryUnsupportedConfigFieldAndDeviceResource)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::FLOAT;
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto good = accurateConfig();
+    using Mutation = std::pair<const char*, std::function<void(WrwConfig&)>>;
+    const std::vector<Mutation> mutations{
+        {"Atom",
+         [](auto& c) {
+             c.atom = "mfma16_f32";
+             c.atomId = 3;
+         }},
+        {"AtomId", [](auto& c) { ++c.atomId; }},
+        {"Loop", [](auto& c) { c.loop = 13; }},
+        {"Layout", [](auto& c) { c.layout = 1; }},
+        {"Transpose", [](auto& c) { c.layout = 2; }},
+        {"Bk", [](auto& c) { c.bk = 32; }},
+        {"Bc", [](auto& c) { c.bc = 32; }},
+        {"Bq", [](auto& c) { c.bq = 128; }},
+        {"Tk", [](auto& c) { c.tk = 2; }},
+        {"Tc", [](auto& c) { c.tc = 2; }},
+        {"Vec", [](auto& c) { c.vec = 4; }},
+        {"Wk", [](auto& c) { c.wk = 1; }},
+        {"Wc", [](auto& c) { c.wc = 1; }},
+        {"Fr", [](auto& c) { c.fr = 1; }},
+        {"S", [](auto& c) { c.s = 3; }},
+        {"Sw", [](auto& c) { c.sw = 1; }},
+        {"Dw", [](auto& c) { c.dw = 1; }},
+        {"Xcd", [](auto& c) { c.xcd = 1; }},
+        {"Align", [](auto& c) { c.align = 1; }},
+        {"Ns", [](auto& c) { c.ns = 2; }},
+        {"Wq", [](auto& c) { c.wq = 1; }},
+        {"Dws", [](auto& c) { c.dws = 1; }},
+        {"Bpu", [](auto& c) { c.bpu = 3; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        SCOPED_TRACE(name);
+        auto config = good;
+        mutate(config);
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, config, deviceOf("gfx1250")).has_value());
+    }
+    for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+    {
+        shape.dataType = dtype;
+        const auto lowPrecision = parse(specOf(shape));
+        ASSERT_TRUE(lowPrecision.has_value());
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*lowPrecision, good, deviceOf("gfx1250")).has_value());
+    }
+    auto device = deviceOf("gfx1250");
+    device.sharedMemPerBlock = size_t(conv_wrw::ldsBytesOf(good, 4)) - 1;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, device).has_value());
+    device = deviceOf("gfx1250");
+    device.multiProcessorCount = 0;
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, device).has_value());
+    for(const char* arch : {"gfx000", "gfx950", "gfx1201", ""})
+        EXPECT_FALSE(conv_wrw::wrwLaunchFor(*problem, good, deviceOf(arch)).has_value()) << arch;
+    EXPECT_TRUE(conv_wrw::wrwLaunchFor(*problem, good, deviceOf("gfx1250:xnack-")).has_value());
+}
+
+TEST(TestConvWrwAccurate, EnforcesDoubleWorkspaceBoundaryAndAddressesLargeImages)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::FLOAT;
+    shape.n = shape.k = 1;
+    shape.c = int64_t{1} << 27;
+    shape.input = {8};
+    shape.filter = {1};
+    shape.prePadding = shape.postPadding = {0};
+    shape.stride = shape.dilation = {1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    const auto launch = conv_wrw::wrwLaunchFor(*problem, accurateConfig(), deviceOf("gfx1250"));
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->workspaceBytes, size_t(conv_wrw::MAX_WORKSPACE_BYTES));
+    EXPECT_GT(launch->args.xImage * static_cast<int64_t>(sizeof(float)), TWO_POW_31);
+    const auto suffixed
+        = conv_wrw::wrwLaunchFor(*problem, accurateConfig(), deviceOf("gfx1250:xnack-"));
+    ASSERT_TRUE(suffixed.has_value());
+    EXPECT_EQ(suffixed->workspaceBytes, size_t(conv_wrw::MAX_WORKSPACE_BYTES));
+    ++shape.c;
+    const auto tooLarge = parse(specOf(shape));
+    ASSERT_TRUE(tooLarge.has_value());
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*tooLarge, accurateConfig(), deviceOf("gfx1250")).has_value());
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(
+                     *tooLarge, accurateConfig(), deviceOf("gfx1250:xnack-"))
+                     .has_value());
+    EXPECT_EQ(conv_wrw::splitsWanted(1, 2, 1 << 20, int64_t{1} << 26, 304, sizeof(double)), 2);
+}
+
+TEST(TestConvWrwAccurate, RefusesOversizedRuntimeGrid)
+{
+    auto shape = baseShape();
+    shape.dataType = DataType::FLOAT;
+    shape.n = 1;
+    shape.c = shape.k = shape.groups = int64_t{1} << 30;
+    shape.input = {3};
+    shape.filter = {3};
+    shape.prePadding = shape.postPadding = {0};
+    shape.stride = shape.dilation = {1};
+    const auto problem = parse(specOf(shape));
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_FALSE(
+        conv_wrw::wrwLaunchFor(*problem, accurateConfig(), deviceOf("gfx1250")).has_value());
 }
 
 TEST(TestConvWrwComputeType, ServesCudnnsComputeTypesPerElementType)

@@ -28,3 +28,17 @@
 /conv_wrw_f16_rdna12.kdp.json
 /conv_wrw_f32_x3rdna11.kdp.json
 /conv_wrw_f32_x3rdna12.kdp.json
+/conv_wrw_bf16_generic1250.kdp.json
+/conv_wrw_bf16_gfx1250.kdp.json
+/conv_wrw_bf16_smallk1250.kdp.json
+/conv_wrw_bf16_taptiled1250.kdp.json
+/conv_wrw_f16_generic1250.kdp.json
+/conv_wrw_f16_gfx1250.kdp.json
+/conv_wrw_f16_smallk1250.kdp.json
+/conv_wrw_f16_taptiled1250.kdp.json
+/conv_wrw_f32_accurate.kdp.json
+/conv_wrw_f32_generic1250.kdp.json
+/conv_wrw_f32_gfx1250.kdp.json
+/conv_wrw_f32_smallk1250.kdp.json
+/conv_wrw_f32_taptiled1250.kdp.json
+/conv_wrw_f32_x3gfx1250.kdp.json

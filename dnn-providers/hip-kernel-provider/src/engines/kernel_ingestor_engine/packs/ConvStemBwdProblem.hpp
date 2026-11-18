@@ -40,7 +40,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::conv_stem_bwd
 
 /// The atoms a config may name, in atom_id order: K1's matrix-core atoms (no TF32 form), then
 /// "fma" (exact fp32 on the vector ALUs, for devices without an fp32 matrix core).
-inline constexpr std::array<std::string_view, 17> ATOMS{"mfma16_f16",
+inline constexpr std::array<std::string_view, 20> ATOMS{"mfma16_f16",
                                                         "mfma16_bf16",
                                                         "mfma16_bf16_908",
                                                         "mfma16_f32",
@@ -56,7 +56,10 @@ inline constexpr std::array<std::string_view, 17> ATOMS{"mfma16_f16",
                                                         "wmma11_bf16",
                                                         "wmma12_f16",
                                                         "wmma12_bf16",
-                                                        "fma"};
+                                                        "fma",
+                                                        "wmma125_f16",
+                                                        "wmma125_bf16",
+                                                        "wmma125_f32"};
 
 /// The atom_id of @p atom, or -1 for an unknown one.
 int64_t atomIdOf(std::string_view atom);

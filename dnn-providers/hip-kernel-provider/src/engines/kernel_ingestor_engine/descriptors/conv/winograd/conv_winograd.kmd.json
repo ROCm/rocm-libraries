@@ -82,6 +82,18 @@
     {
       "name": "sb",
       "type": "int"
+    },
+    {
+      "name": "variant_id",
+      "type": "int"
+    },
+    {
+      "name": "layout_id",
+      "type": "int"
+    },
+    {
+      "name": "atom",
+      "type": "int"
     }
   ]
 }

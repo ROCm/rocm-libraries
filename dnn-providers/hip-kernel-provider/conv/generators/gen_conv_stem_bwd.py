@@ -48,6 +48,9 @@ ATOMS = [
     "wmma12_f16",
     "wmma12_bf16",
     "fma",
+    "wmma125_f16",
+    "wmma125_bf16",
+    "wmma125_f32",
 ]
 SHAPE = {
     "mfma16_f16": (16, 16, 64),
@@ -61,11 +64,14 @@ SHAPE = {
     "wmma12_f16": (16, 16, 32),
     "wmma12_bf16": (16, 16, 32),
     "fma": (16, 4, 16),
+    "wmma125_f16": (16, 32, 32),
+    "wmma125_bf16": (16, 32, 32),
+    "wmma125_f32": (16, 4, 32),
 }
 # Per dtype, the atoms the catalog carries (gfx950 runs mfma16_* too; its 16 x 32 atoms halve
 # the steps).
 FAMILIES = {
-    "HALF": ["mfma16_f16", "mfma16x32_f16", "wmma11_f16", "wmma12_f16", "fma"],
+    "HALF": ["mfma16_f16", "mfma16x32_f16", "wmma11_f16", "wmma12_f16", "fma", "wmma125_f16"],
     "BFLOAT16": [
         "mfma16_bf16",
         "mfma16_bf16_908",
@@ -73,8 +79,9 @@ FAMILIES = {
         "wmma11_bf16",
         "wmma12_bf16",
         "fma",
+        "wmma125_bf16",
     ],
-    "FLOAT": ["mfma16_f32", "fma"],
+    "FLOAT": ["mfma16_f32", "fma", "wmma125_f32"],
 }
 # 16-bit FMA configs serve only devices without a matrix core for the type: they ship in
 # conv_stem_bwd_<dtype>_fma906 packs that list these architectures.
@@ -156,6 +163,8 @@ def prefetch_vgprs(e, layout, vec, w, nb, kc, th, tw, wave):
 
 
 def lds_limit(atom):
+    if atom.startswith("wmma125"):
+        return 320 * 1024
     return 160 * 1024 if atom.startswith("mfma16x32") else 64 * 1024
 
 
@@ -204,6 +213,9 @@ def build():
                 if atom == "fma"
                 else [(2, 4), (4, 2), (4, 4), (8, 2)]
             )
+            if atom.startswith("wmma125"):
+                # K32 needs a wider prefetch. Narrow spatial tiles bound registers.
+                tiles += [(8, 1), (16, 1)]
             layouts = [(1, ev), (0, ev), (0, 1)]
             for nb in nbs(atom, sd or s):
                 for layout, vec in layouts:
@@ -317,7 +329,14 @@ def emit(catalog):
         packs = {}
         if kept is not None:
             cfgs = [c for c in cfgs if config_name(dtype, c) in kept]
-        for i, c in enumerate(cfgs):
+        legacy_index = native_index = 0
+        for c in cfgs:
+            if c["atom"].startswith("wmma125"):
+                priority = 1100 - native_index
+                native_index += 1
+            else:
+                priority = 1000 - legacy_index
+                legacy_index += 1
             fam = family_of(c["atom"])
             fam = "fma906" if fam == "fma" and dtype != "FLOAT" else fam
             pack = packs.setdefault(fam, [])
@@ -336,10 +355,10 @@ def emit(catalog):
                         "entry_point": "ConvStemBwd",
                     },
                     "metadata": {"direction": "BWD", "dtype": dtype, **c},
-                    "priority": 1000 - i,
+                    "priority": priority,
                 }
             )
-        # One pack per dtype and atom family (the repository caps a file at 500 KB).
+        # One pack per dtype and atom family, with an explicit generator size bound.
         for fam, pack in sorted(packs.items()):
             fname = f"conv_stem_bwd_{dt}_{fam}.kdp.json"
             write(

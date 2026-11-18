@@ -88,6 +88,9 @@ constexpr std::array<AtomShape, ATOMS.size()> SHAPES{{
     {16, 16}, // wmma12_f16
     {16, 16}, // wmma12_bf16
     {16, 4}, // fma: SbFma
+    {16, 32}, // wmma125_f16
+    {16, 32}, // wmma125_bf16
+    {16, 4}, // wmma125_f32
 }};
 
 } // namespace
@@ -279,7 +282,8 @@ int64_t ldsBytesOf(const StemBwdConfig& config, int elementBytes)
 
 int64_t ldsLimitOf(std::string_view gcnArchName)
 {
-    return hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950" ? 160 * 1024 : 64 * 1024;
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    return arch == "gfx1250" ? 320 * 1024 : arch == "gfx950" ? 160 * 1024 : 64 * 1024;
 }
 
 std::optional<StemBwdLaunch>
@@ -369,7 +373,12 @@ std::optional<StemBwdLaunch>
         return std::nullopt;
     }
     const int64_t threads = config.th * (fma ? FMA_ROW_THREADS : info->wave);
-    if(threads > MAX_BLOCK || ldsBytesOf(config, eb) > ldsLimitOf(arch))
+    const auto architecturalLds = static_cast<size_t>(ldsLimitOf(arch));
+    const auto availableLds
+        = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx1250" && device.sharedMemPerBlock > 0
+              ? std::min(architecturalLds, device.sharedMemPerBlock)
+              : architecturalLds;
+    if(threads > MAX_BLOCK || ldsBytesOf(config, eb) > static_cast<int64_t>(availableLds))
     {
         return std::nullopt;
     }
