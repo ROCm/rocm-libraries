@@ -17,8 +17,11 @@
 #include <type_traits>
 
 #ifndef _WIN32
+#include <dirent.h>
 #include <fstream>
+#include <memory>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #endif
 
@@ -216,6 +219,32 @@ const CkImplLibLoader& CkImplLibLoader::Get(const std::string& device_name)
 }
 
 #ifndef _WIN32
+namespace {
+
+/// Calls fn(entry_name) for each entry of the directory, skipping "." and "..". A directory
+/// that cannot be opened has no entries.
+///
+/// This uses opendir and readdir, not std::filesystem::directory_iterator. The library
+/// constructor below can run before the constructors of libraries preloaded into the process,
+/// and libstdc++ opens the directory with openat. A preloaded library that intercepts openat
+/// can crash when it is called before its own constructor has run, while it handles opendir
+/// during that window.
+template <class Fn>
+void ForEachDirectoryEntry(const char* dir, Fn&& fn)
+{
+    const std::unique_ptr<DIR, int (*)(DIR*)> handle{opendir(dir), closedir};
+    if(!handle)
+        return;
+    while(const dirent* entry = readdir(handle.get()))
+    {
+        const std::string_view name{entry->d_name};
+        if(name != "." && name != "..")
+            fn(name);
+    }
+}
+
+} // namespace
+
 std::string GfxNameFromTargetVersion(unsigned long long target_version)
 {
     if(target_version == 0)
@@ -229,10 +258,9 @@ std::string GfxNameFromTargetVersion(unsigned long long target_version)
 std::vector<std::string> GetKfdDeviceNames()
 {
     std::vector<std::string> names;
-    std::error_code ec;
-    for(const auto& node : miopen::fs::directory_iterator{"/sys/class/kfd/kfd/topology/nodes", ec})
-    {
-        std::ifstream properties{node.path() / "properties"};
+    constexpr std::string_view nodes_dir = "/sys/class/kfd/kfd/topology/nodes";
+    ForEachDirectoryEntry(nodes_dir.data(), [&](std::string_view node) {
+        std::ifstream properties{std::string{nodes_dir} + '/' + std::string{node} + "/properties"};
         std::string key;
         unsigned long long value = 0;
         while(properties >> key >> value)
@@ -244,7 +272,7 @@ std::vector<std::string> GetKfdDeviceNames()
                 names.push_back(std::move(name));
             break;
         }
-    }
+    });
     return names;
 }
 
@@ -254,14 +282,14 @@ namespace {
 /// has started.
 bool IsKfdOpen()
 {
-    std::error_code ec;
-    for(const auto& entry : miopen::fs::directory_iterator{"/proc/self/fd", ec})
-    {
-        std::error_code link_ec;
-        if(miopen::fs::read_symlink(entry.path(), link_ec) == "/dev/kfd")
-            return true;
-    }
-    return false;
+    bool found = false;
+    ForEachDirectoryEntry("/proc/self/fd", [&](std::string_view fd) {
+        std::error_code ec;
+        const miopen::fs::path link{"/proc/self/fd/" + std::string{fd}};
+        if(miopen::fs::read_symlink(link, ec) == "/dev/kfd")
+            found = true;
+    });
+    return found;
 }
 
 /// Loads the CK library of each GPU in the system while MIOpen itself is being loaded, which in
