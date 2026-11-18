@@ -353,8 +353,8 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
 {
     // Scalar gathers have no register load-pass bitmask or outstanding inline-asm loads.
-    if(config.loop == LOOP_NATIVE_GENERIC || config.loop == LOOP_TAP_TILED || config.loop == LOOP_SMALL_K
-       || config.loop == LOOP_ACCURATE)
+    if(config.loop == LOOP_NATIVE_GENERIC || config.loop == LOOP_TAP_TILED
+       || config.loop == LOOP_SMALL_K || config.loop == LOOP_ACCURATE)
         return 0;
     const int64_t vec = config.vec;
     if(config.loop == LOOP_GENERIC)
@@ -867,7 +867,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool generic = config.loop == LOOP_GENERIC;
     // The generic loop's FMA form: the "fma" atom (thread tiles tk x tc).
     const bool genericFma = generic && info->wave == 0;
-    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA || genericFma || smallk || accurate;
+    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA || genericFma
+                     || smallk || accurate;
     const bool direct = config.loop == LOOP_DIRECT;
     const bool smallc = config.loop == LOOP_ROWS_SMALLC;
     const bool packed = config.loop == LOOP_ROWS_PACKED;
@@ -1116,8 +1117,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         }
     }
     // Every other loop: the filter width, its stride and dilation are compile-time.
-    else if(!runtime && (config.s != a.filter[2] || config.sw != a.stride[2]
-                         || config.dw != a.dilation[2] || config.fr < 1))
+    else if(!runtime
+            && (config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
+                || config.fr < 1))
     {
         return std::nullopt;
     }
@@ -1429,26 +1431,26 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // K C T R S filters of several taps at few splits: tile blocks, which write each output
     // channel's run of channels by every tap contiguously (reduceTileFor). With more splits, K T
     // R S C or one tap (channels already contiguous), the quad blocks.
-    const ReduceTile reduceTile
-        = accurate || dwStore || problem.filterChannelsLast || problem.taps < 2 || splits > K3_REDUCE_TILE_MAX_SPLITS
-              ? ReduceTile{}
-              : reduceTileFor(a.groups, kg, cg, problem.taps, units);
+    const ReduceTile reduceTile = accurate || dwStore || problem.filterChannelsLast
+                                          || problem.taps < 2 || splits > K3_REDUCE_TILE_MAX_SPLITS
+                                      ? ReduceTile{}
+                                      : reduceTileFor(a.groups, kg, cg, problem.taps, units);
     // gfx950 at one split: the row reduce (one output channel's run of 64 channels a block)
     // measured 3-4 us ahead of the tile reduce in the call (StyleGAN2 c512 8^2 n2, R(2+1)D c512).
     const bool reduceRows = reduceTile.blocks > 0 && splits == 1
                             && problem.taps <= K3_REDUCE_ROW_MAX_TAPS
                             && hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx950";
-    int64_t reduceGrid
-        = accurate ? divUp(*partialElems, 256)
-                   : reduceTile.blocks > 0 ? reduceTile.blocks : divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    int64_t reduceGrid = accurate                ? divUp(*partialElems, 256)
+                         : reduceTile.blocks > 0 ? reduceTile.blocks
+                                                 : divUp(quads, REDUCE_QUADS_PER_BLOCK);
     if(reduceRows)
     {
         reduceGrid = a.groups * kg * divUp(cg, int64_t{K3_REDUCE_ROW_CHANNELS});
     }
     if(splits > MAX_GRID_YZ
-       || (!dwStore && (!workspace.has_value()
-                       || ((direct || gfx1250) && *workspace > MAX_WORKSPACE_BYTES)
-                       || reduceGrid > INT_LIMIT))
+       || (!dwStore
+           && (!workspace.has_value() || ((direct || gfx1250) && *workspace > MAX_WORKSPACE_BYTES)
+               || reduceGrid > INT_LIMIT))
        || (config.xcd != 0 && gridX * gridY * gridZ > UINT_LIMIT))
     {
         return std::nullopt;

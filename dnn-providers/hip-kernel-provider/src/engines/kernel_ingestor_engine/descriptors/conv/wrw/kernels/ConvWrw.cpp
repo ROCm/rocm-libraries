@@ -130,15 +130,6 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
     k3WrwSmallK<CONV_K3_T, CONV_K3_BC, CONV_K3_BQ>(a);
 #elif CONV_K3_LOOP == 12
     k3WrwTapTiled<CONV_K3_T,
-                   CONV_K3_ATOM,
-                   CONV_K3_LAYOUT,
-                   CONV_K3_BK,
-                   CONV_K3_BC,
-                   CONV_K3_BQ,
-                   CONV_K3_WK,
-                   CONV_K3_WC>(a);
-#elif CONV_K3_LOOP == 11
-    k3WrwNativeGeneric<CONV_K3_T,
                   CONV_K3_ATOM,
                   CONV_K3_LAYOUT,
                   CONV_K3_BK,
@@ -146,6 +137,15 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
                   CONV_K3_BQ,
                   CONV_K3_WK,
                   CONV_K3_WC>(a);
+#elif CONV_K3_LOOP == 11
+    k3WrwNativeGeneric<CONV_K3_T,
+                       CONV_K3_ATOM,
+                       CONV_K3_LAYOUT,
+                       CONV_K3_BK,
+                       CONV_K3_BC,
+                       CONV_K3_BQ,
+                       CONV_K3_WK,
+                       CONV_K3_WC>(a);
 #else
 #if CONV_K3_LOOP == 5
     k3WrwDirect<CONV_K3_T,

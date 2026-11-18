@@ -3815,8 +3815,7 @@ TEST(TestConvWrwAccurate, EnforcesDoubleWorkspaceBoundaryAndAddressesLargeImages
     ASSERT_TRUE(tooLarge.has_value());
     EXPECT_FALSE(
         conv_wrw::wrwLaunchFor(*tooLarge, accurateConfig(), deviceOf("gfx1250")).has_value());
-    EXPECT_FALSE(conv_wrw::wrwLaunchFor(
-                     *tooLarge, accurateConfig(), deviceOf("gfx1250:xnack-"))
+    EXPECT_FALSE(conv_wrw::wrwLaunchFor(*tooLarge, accurateConfig(), deviceOf("gfx1250:xnack-"))
                      .has_value());
     EXPECT_EQ(conv_wrw::splitsWanted(1, 2, 1 << 20, int64_t{1} << 26, 304, sizeof(double)), 2);
 }

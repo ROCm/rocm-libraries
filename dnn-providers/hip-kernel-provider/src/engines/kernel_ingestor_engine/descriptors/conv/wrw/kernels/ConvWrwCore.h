@@ -1339,10 +1339,10 @@ __device__ inline K3_LOOP_INLINE void k3WrwNativeGeneric(const K3Args& a)
     static_assert(BK % (WK * DIM) == 0 && BC % (WC * DIM) == 0 && BQ % KA == 0,
                   "K3 generic: whole matrix fragments");
     static_assert(LAYOUT == K3_NCHW || LAYOUT == K3_NHWC, "K3 native generic: operand load order");
-    static_assert((BK + BC) * LD * sizeof(T)
-                      == k3LdsBytes(11, LAYOUT, sizeof(T), BK, BC, BQ, 0, 0, 0, 0,
-                                    WK, WC, 0, 0, 1, 0, 0),
-                  "K3 generic: host and kernel LDS agree");
+    static_assert(
+        (BK + BC) * LD * sizeof(T)
+            == k3LdsBytes(11, LAYOUT, sizeof(T), BK, BC, BQ, 0, 0, 0, 0, WK, WC, 0, 0, 1, 0, 0),
+        "K3 generic: host and kernel LDS agree");
     __shared__ __attribute__((aligned(16))) T tile[(BK + BC) * LD];
     T* as = tile;
     T* bs = tile + BK * LD;
@@ -1389,9 +1389,9 @@ __device__ inline K3_LOOP_INLINE void k3WrwNativeGeneric(const K3Args& a)
                 {
                     const long long k = static_cast<long long>(k0) + ch;
                     if(k < kg)
-                        value = static_cast<const T*>(a.dy)[n * a.ys[0]
-                            + (static_cast<long long>(g) * kg + k) * a.ys[1]
-                            + od * a.ys[2] + oh * a.ys[3] + ow * a.ys[4]];
+                        value = static_cast<const T*>(
+                            a.dy)[n * a.ys[0] + (static_cast<long long>(g) * kg + k) * a.ys[1]
+                                  + od * a.ys[2] + oh * a.ys[3] + ow * a.ys[4]];
                 }
                 else
                 {
@@ -1399,11 +1399,11 @@ __device__ inline K3_LOOP_INLINE void k3WrwNativeGeneric(const K3Args& a)
                     const long long id = static_cast<long long>(od) * a.sd + ft * a.dd - a.pd;
                     const long long ih = static_cast<long long>(oh) * a.sh + fr * a.dh - a.ph;
                     const long long iw = static_cast<long long>(ow) * a.sw + fs * a.dw - a.pw;
-                    if(c < cg && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
-                       && iw >= 0 && iw < a.wi)
-                        value = static_cast<const T*>(a.x)[n * a.xs[0]
-                            + (static_cast<long long>(g) * cg + c) * a.xs[1]
-                            + id * a.xs[2] + ih * a.xs[3] + iw * a.xs[4]];
+                    if(c < cg && id >= 0 && id < a.di && ih >= 0 && ih < a.hi && iw >= 0
+                       && iw < a.wi)
+                        value = static_cast<const T*>(
+                            a.x)[n * a.xs[0] + (static_cast<long long>(g) * cg + c) * a.xs[1]
+                                 + id * a.xs[2] + ih * a.xs[3] + iw * a.xs[4]];
                 }
             }
             (dy ? as : bs)[ch * LD + q] = value;
@@ -1416,12 +1416,10 @@ __device__ inline K3_LOOP_INLINE void k3WrwNativeGeneric(const K3Args& a)
             const int qp = q + Atom::template kBase<KPL>(lane);
 #pragma unroll
             for(int f = 0; f < FK; ++f)
-                af[f] = k3FragAt<Atom, T, 0>(
-                    as + (wk * WTK + f * DIM + lane % DIM) * LD + qp);
+                af[f] = k3FragAt<Atom, T, 0>(as + (wk * WTK + f * DIM + lane % DIM) * LD + qp);
 #pragma unroll
             for(int f = 0; f < FC; ++f)
-                bf[f] = k3FragAt<Atom, T, 0>(
-                    bs + (wc * WTC + f * DIM + lane % DIM) * LD + qp);
+                bf[f] = k3FragAt<Atom, T, 0>(bs + (wc * WTC + f * DIM + lane % DIM) * LD + qp);
 #pragma unroll
             for(int x = 0; x < FK; ++x)
 #pragma unroll
@@ -1442,8 +1440,8 @@ __device__ inline K3_LOOP_INLINE void k3WrwNativeGeneric(const K3Args& a)
 #pragma unroll
                 for(int e = 0; e < Atom::ACC; ++e)
                 {
-                    const long long k = static_cast<long long>(k0) + wk * WTK + x * DIM
-                                        + Atom::dRow(lane, e);
+                    const long long k
+                        = static_cast<long long>(k0) + wk * WTK + x * DIM + Atom::dRow(lane, e);
                     if(k < kg && c < cg)
                         base[tap * out.ts + k * out.ks + c] = K1Elem<E>::store(acc[x][y][e]);
                 }
@@ -1473,8 +1471,7 @@ __device__ inline K3_LOOP_INLINE void k3WrwTapTiled(const K3Args& a)
     constexpr int FK = WTK / DIM, FC = WTC / DIM;
     constexpr int LD = BQ + 16 / sizeof(T);
     constexpr int QLANES = BQ < THREADS ? BQ : THREADS;
-    static_assert(Atom::WAVE == 32 && ((sizeof(T) == 2 && KA == 32)
-                                     || (sizeof(T) == 4 && KA == 4)),
+    static_assert(Atom::WAVE == 32 && ((sizeof(T) == 2 && KA == 32) || (sizeof(T) == 4 && KA == 4)),
                   "K3 tap-tiled: native gfx1250 matrix atoms");
     static_assert(BK % (WK * DIM) == 0 && BC % (WC * DIM) == 0 && BQ % KA == 0,
                   "K3 tap-tiled: whole matrix fragments");
@@ -1482,10 +1479,10 @@ __device__ inline K3_LOOP_INLINE void k3WrwTapTiled(const K3Args& a)
                       && BQ % QLANES == 0,
                   "K3 tap-tiled: whole cooperative load groups");
     static_assert(LAYOUT == K3_NCHW || LAYOUT == K3_NHWC, "K3 tap-tiled: packed layouts");
-    static_assert((BK + BC) * LD * sizeof(T) + BQ * sizeof(K3TapPosition)
-                      == k3LdsBytes(12, LAYOUT, sizeof(T), BK, BC, BQ, 0, 0, 0, 0,
-                                    WK, WC, 0, 0, 1, 0, 0),
-                  "K3 tap-tiled: host and kernel LDS agree");
+    static_assert(
+        (BK + BC) * LD * sizeof(T) + BQ * sizeof(K3TapPosition)
+            == k3LdsBytes(12, LAYOUT, sizeof(T), BK, BC, BQ, 0, 0, 0, 0, WK, WC, 0, 0, 1, 0, 0),
+        "K3 tap-tiled: host and kernel LDS agree");
     __shared__ __attribute__((aligned(16))) T tile[(BK + BC) * LD];
     __shared__ K3TapPosition position[BQ];
     T* as = tile;
@@ -1551,17 +1548,18 @@ __device__ inline K3_LOOP_INLINE void k3WrwTapTiled(const K3Args& a)
             {
                 const long long yp = position[q].yPosition;
                 as[ach * LD + q] = yp >= 0 && static_cast<long long>(k0) + ach < kg
-                    ? static_cast<const T*>(a.dy)[yp + ach * a.ys[1]] : T(0);
+                                       ? static_cast<const T*>(a.dy)[yp + ach * a.ys[1]]
+                                       : T(0);
             }
             for(int q = tid / BC; q < BQ; q += THREADS / BC)
             {
                 const K3TapPosition p = position[q];
                 const long long id = p.id + bd, ih = p.ih + bh, iw = p.iw + bw;
                 T value = T(0);
-                if(bLive && p.yPosition >= 0 && id >= 0 && id < a.di
-                   && ih >= 0 && ih < a.hi && iw >= 0 && iw < a.wi)
-                    value = static_cast<const T*>(a.x)[p.xImage + bcOffset
-                            + id * a.xs[2] + ih * a.xs[3] + iw * a.xs[4]];
+                if(bLive && p.yPosition >= 0 && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
+                   && iw >= 0 && iw < a.wi)
+                    value = static_cast<const T*>(
+                        a.x)[p.xImage + bcOffset + id * a.xs[2] + ih * a.xs[3] + iw * a.xs[4]];
                 bs[bcol * LD + q] = value;
             }
         }
@@ -1574,7 +1572,8 @@ __device__ inline K3_LOOP_INLINE void k3WrwTapTiled(const K3Args& a)
                 {
                     const long long yp = position[q].yPosition;
                     as[ch * LD + q] = yp >= 0 && static_cast<long long>(k0) + ch < kg
-                        ? static_cast<const T*>(a.dy)[yp + ch * a.ys[1]] : T(0);
+                                          ? static_cast<const T*>(a.dy)[yp + ch * a.ys[1]]
+                                          : T(0);
                 }
             for(int ch = tid / QLANES; ch < BC; ch += THREADS / QLANES)
             {
@@ -1590,10 +1589,10 @@ __device__ inline K3_LOOP_INLINE void k3WrwTapTiled(const K3Args& a)
                     const K3TapPosition p = position[q];
                     const long long id = p.id + td, ih = p.ih + th, iw = p.iw + tw;
                     T value = T(0);
-                    if(live && p.yPosition >= 0 && id >= 0 && id < a.di
-                       && ih >= 0 && ih < a.hi && iw >= 0 && iw < a.wi)
-                        value = static_cast<const T*>(a.x)[p.xImage + co
-                                + id * a.xs[2] + ih * a.xs[3] + iw * a.xs[4]];
+                    if(live && p.yPosition >= 0 && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
+                       && iw >= 0 && iw < a.wi)
+                        value = static_cast<const T*>(
+                            a.x)[p.xImage + co + id * a.xs[2] + ih * a.xs[3] + iw * a.xs[4]];
                     bs[ch * LD + q] = value;
                 }
             }
@@ -1608,12 +1607,10 @@ __device__ inline K3_LOOP_INLINE void k3WrwTapTiled(const K3Args& a)
             const int qp = q + Atom::template kBase<KPL>(lane);
 #pragma unroll
             for(int f = 0; f < FK; ++f)
-                af[f] = k3FragAt<Atom, T, 0>(
-                    as + (wk * WTK + f * DIM + lane % DIM) * LD + qp);
+                af[f] = k3FragAt<Atom, T, 0>(as + (wk * WTK + f * DIM + lane % DIM) * LD + qp);
 #pragma unroll
             for(int f = 0; f < FC; ++f)
-                bf[f] = k3FragAt<Atom, T, 0>(
-                    bs + (wc * WTC + f * DIM + lane % DIM) * LD + qp);
+                bf[f] = k3FragAt<Atom, T, 0>(bs + (wc * WTC + f * DIM + lane % DIM) * LD + qp);
 #pragma unroll
             for(int x = 0; x < FK; ++x)
 #pragma unroll
@@ -1637,8 +1634,8 @@ __device__ inline K3_LOOP_INLINE void k3WrwTapTiled(const K3Args& a)
 #pragma unroll
                 for(int e = 0; e < Atom::ACC; ++e)
                 {
-                    const long long k = static_cast<long long>(k0) + wk * WTK + x * DIM
-                                        + Atom::dRow(lane, e);
+                    const long long k
+                        = static_cast<long long>(k0) + wk * WTK + x * DIM + Atom::dRow(lane, e);
                     if(k < kg)
                         base[tap * out.ts + k * out.ks + c * out.cs]
                             = K1Elem<E>::store(acc[x][y][e]);

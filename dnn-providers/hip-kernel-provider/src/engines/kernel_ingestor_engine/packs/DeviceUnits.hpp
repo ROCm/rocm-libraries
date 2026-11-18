@@ -31,8 +31,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine::device_units
 inline bool reportsWorkgroupProcessors(std::string_view gcnArchName)
 {
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
-    return arch != "gfx1250" && arch.size() >= 6 && arch.substr(0, 4) == "gfx1"
-           && arch[4] >= '0' && arch[4] <= '9';
+    return arch != "gfx1250" && arch.size() >= 6 && arch.substr(0, 4) == "gfx1" && arch[4] >= '0'
+           && arch[4] <= '9';
 }
 
 /// HIP's reported launch units (including CUs on gfx1250); 0 when unknown.

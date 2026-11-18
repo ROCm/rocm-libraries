@@ -614,7 +614,8 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                         {
                             if constexpr(DOT2)
                                 acc[i][j] = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
-                                                  __builtin_bit_cast(k5h2, bv[j]), acc[i][j]);
+                                                   __builtin_bit_cast(k5h2, bv[j]),
+                                                   acc[i][j]);
                             else
                                 acc[i][j] = __builtin_fmaf(
                                     __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
@@ -672,7 +673,8 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                         {
                             if constexpr(DOT2)
                                 acc[i][j] = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
-                                                  __builtin_bit_cast(k5h2, bv[j]), acc[i][j]);
+                                                   __builtin_bit_cast(k5h2, bv[j]),
+                                                   acc[i][j]);
                             else
                                 acc[i][j] = __builtin_fmaf(
                                     __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
@@ -723,10 +725,9 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                             for(int j = j0; j < j0 + 4; ++j)
                             {
                                 if constexpr(DOT2)
-                                    acc[i][j]
-                                        = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
-                                                 __builtin_bit_cast(k5h2, bv[j]),
-                                                 acc[i][j]);
+                                    acc[i][j] = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
+                                                       __builtin_bit_cast(k5h2, bv[j]),
+                                                       acc[i][j]);
                                 else
                                     acc[i][j] = __builtin_fmaf(
                                         __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
@@ -783,10 +784,9 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                             for(int j = 0; j < TN; ++j)
                             {
                                 if constexpr(DOT2)
-                                    acc[i][j]
-                                        = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
-                                                 __builtin_bit_cast(k5h2, bv[j]),
-                                                 acc[i][j]);
+                                    acc[i][j] = k1Dot2(__builtin_bit_cast(k5h2, av[i]),
+                                                       __builtin_bit_cast(k5h2, bv[j]),
+                                                       acc[i][j]);
                                 else
                                     acc[i][j] = __builtin_fmaf(
                                         __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);

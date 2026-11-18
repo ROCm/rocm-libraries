@@ -127,7 +127,9 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) CONV_WINO
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
-    k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR,
+    k5WmmaFilterTransform<CONV_WINO_T,
+                          K5_NCHW,
+                          CONV_WINO_DIR,
                           K5Wmma<CONV_WINO_T, CONV_WINO_GFX12 != 0>::CC>(a);
 }
 
@@ -144,7 +146,9 @@ extern "C" __global__ void __launch_bounds__(32 * CONV_WINO_WAVES)
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
-    k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR,
+    k5WmmaFilterTransform<CONV_WINO_T,
+                          K5_NCHW,
+                          CONV_WINO_DIR,
                           K5Wmma<CONV_WINO_T, CONV_WINO_GFX12 != 0>::CC>(a);
 }
 

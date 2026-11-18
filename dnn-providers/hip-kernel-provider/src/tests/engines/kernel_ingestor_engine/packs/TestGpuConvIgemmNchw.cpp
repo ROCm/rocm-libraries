@@ -115,7 +115,8 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
         }
         if(found.empty())
         {
-            throw std::runtime_error("no " + prefix + "*.kdp.json beside the provider or this test binary");
+            throw std::runtime_error("no " + prefix
+                                     + "*.kdp.json beside the provider or this test binary");
         }
         std::sort(found.begin(), found.end());
         return readDistinctEmbeddedKernelCatalog(found);
@@ -334,7 +335,8 @@ bool everyCaseServed(DataType dataType)
     const std::array<const char*, 4> atoms
         = dataType == DataType::HALF
               ? std::array<const char*, 4>{"mfma16_f16", "wmma11_f16", "wmma12_f16", "wmma125_f16"}
-              : std::array<const char*, 4>{"mfma16_bf16", "wmma11_bf16", "wmma12_bf16", "wmma125_bf16"};
+              : std::array<const char*, 4>{
+                    "mfma16_bf16", "wmma11_bf16", "wmma12_bf16", "wmma125_bf16"};
     return std::any_of(atoms.begin(), atoms.end(), [&](const char* atom) {
         return conv_igemm::atomRunsOn(atom, arch);
     });
@@ -539,7 +541,8 @@ TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyForFloatWhereItPays)
         }
     }
     ASSERT_EQ(shape.filter.size(), 3u);
-    for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx1250", "gfx908"})
+    for(const char* arch :
+        {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx1250", "gfx908"})
     {
         for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
         {

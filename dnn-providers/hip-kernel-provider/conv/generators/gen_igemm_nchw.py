@@ -505,7 +505,9 @@ def build_x3():
 def kernels_for(catalog, priority=1000):
     kernels = []
     for dtype, cfgs in catalog.items():
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[dtype]
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[
+            dtype
+        ]
         dtype = "FLOAT" if dtype == "FLOATX3" else dtype
         for i, c in enumerate(cfgs):
             kind = (
@@ -602,13 +604,16 @@ def emit():
             "numerical_notes": ["tensor_core"],
         },
     )
-    kernels = kernels_for({
-        dtype: [c for c in cfgs if not c["atom"].startswith("wmma125")]
-        for dtype, cfgs in CATALOG.items()
-    })
+    kernels = kernels_for(
+        {
+            dtype: [c for c in cfgs if not c["atom"].startswith("wmma125")]
+            for dtype, cfgs in CATALOG.items()
+        }
+    )
     x3 = kernels_for(
         {"FLOATX3": [c for c in CATALOGX3 if not c["atom"].startswith("wmma125")]},
-        priority=1000 - len([c for c in CATALOG["FLOAT"] if not c["atom"].startswith("wmma125")]),
+        priority=1000
+        - len([c for c in CATALOG["FLOAT"] if not c["atom"].startswith("wmma125")]),
     )
     write(
         "conv_igemm_nchw_bwd.kdp.json",
@@ -638,10 +643,12 @@ def emit():
     )
     kernels += x3
     for dtype, cfgs in list(CATALOG.items()) + [("FLOATX3", CATALOGX3)]:
-        native_kernels = kernels_for({
-            dtype: [c for c in cfgs if c["atom"].startswith("wmma125")]
-        }, priority=1100)
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[dtype]
+        native_kernels = kernels_for(
+            {dtype: [c for c in cfgs if c["atom"].startswith("wmma125")]}, priority=1100
+        )
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[
+            dtype
+        ]
         native_pack = {
             "version": "1.0",
             "id": U("kdp.bwd.gfx1250." + dt),

@@ -9,12 +9,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <initializer_list>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <initializer_list>
 #include <vector>
 namespace
 {
@@ -119,10 +119,9 @@ void runNd(bool last,
     shape.prePadding = {dilationH + 1, dilationW - 1};
     shape.postPadding = {dilationH - 1, dilationW + 1};
     shape.mode = reflect ? ConvMode::CONVOLUTION : ConvMode::CROSS_CORRELATION;
-    SCOPED_TRACE(::testing::Message() << "C/g " << channelsPerGroup << " K/g "
-                                     << outputsPerGroup << " channelsLast " << last
-                                     << " reflected filter " << reflect << " dilation "
-                                     << dilationH << "x" << dilationW);
+    SCOPED_TRACE(::testing::Message() << "C/g " << channelsPerGroup << " K/g " << outputsPerGroup
+                                      << " channelsLast " << last << " reflected filter " << reflect
+                                      << " dilation " << dilationH << "x" << dilationW);
     auto spec = specFor(shape, ConvDirection::FORWARD);
     // Deliberately mix packed output layout and filter layout with input layout.
     spec.y.strides = packedStrides(spec.y.dims, !last);
@@ -157,8 +156,7 @@ void runNd(bool last,
             ASSERT_TRUE(matchesKernel(pack, fixture.context(), kernel, *bound));
             const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
             ASSERT_NE(prepared, nullptr);
-            const size_t workspaceBytes
-                = handler.workspaceBytes(fixture.context(), *bound, kernel);
+            const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
             const hipdnn_data_sdk::utilities::Workspace<> workspace(workspaceBytes);
             const Handle handle;
             // Repeat at the same filter address with different contents, and change the input binding.

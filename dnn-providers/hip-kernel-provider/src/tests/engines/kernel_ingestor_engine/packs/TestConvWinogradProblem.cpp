@@ -535,43 +535,58 @@ struct ConfigFields
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                                                        const std::string& dtype,
-                                                       ConvDirection direction = ConvDirection::FORWARD)
+                                                       ConvDirection direction
+                                                       = ConvDirection::FORWARD)
 {
     auto kernel = makeKernel(0, dtype, "ConvWinogradGemm");
     kernel.source.sourceFile = "kernels/ConvWinograd.cpp";
     const bool matrix = f.variant == "wmma" || f.variant == "wreg" || f.variant == "coop";
-    const int64_t atom = f.atom >= 0 ? f.atom
-        : f.variant == "wrw" ? (f.arch == "any" ? 0 : f.arch == "gfx11" ? 1 : f.arch == "gfx12" ? 2
-                               : f.arch == "gfx9" ? 3 : f.arch == "gfx950" ? 6 : -1)
-        : f.variant == "multipass" && f.arch == "gfx1250" ? 5 : !matrix ? 0 : f.arch == "gfx11" ? 1
-        : f.arch == "gfx12" ? 2 : (f.arch == "gfx9" || f.arch == "gfx942" || f.arch == "gfx950") ? 3
-        : f.arch == "gfx1250" ? 4 : -1;
-    const int64_t variantId = f.variant == "multipass" ? 0 : f.variant == "fused" ? 1
-        : f.variant == "wmma" ? 2 : f.variant == "wreg" ? 3 : f.variant == "sreg" ? 4
-        : f.variant == "coop" ? 5 : f.variant == "wrw" ? 6 : -1;
-    kernel.metadata = {{"direction", std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD")},
-                       {"dtype", dtype},
-                       {"variant", f.variant},
-                       {"m", f.m},
-                       {"layout", f.layout},
-                       {"arch", f.arch},
-                       {"atom", atom},
-                       {"variant_id", variantId},
-                       {"layout_id", int64_t{f.layout == "NCHW" ? 0 : 1}},
-                       {"llc", f.llc},
-                       {"gemm_bm", f.gemmBm},
-                       {"gemm_bn", f.gemmBn},
-                       {"gemm_bk", f.gemmBk},
-                       {"bk", f.bk},
-                       {"bt", f.bt},
-                       {"ccv", f.ccv},
-                       {"tm", f.tm},
-                       {"tn", f.tn},
-                       {"waves", f.waves},
-                       {"bins", f.bins},
-                       {"f16math", f.f16math},
-                       {"pf", f.pf},
-                       {"sb", f.sb}};
+    const int64_t atom = f.atom >= 0                                       ? f.atom
+                         : f.variant == "wrw"                              ? (f.arch == "any"      ? 0
+                                                                              : f.arch == "gfx11"  ? 1
+                                                                              : f.arch == "gfx12"  ? 2
+                                                                              : f.arch == "gfx9"   ? 3
+                                                                              : f.arch == "gfx950" ? 6
+                                                                                                   : -1)
+                         : f.variant == "multipass" && f.arch == "gfx1250" ? 5
+                         : !matrix                                         ? 0
+                         : f.arch == "gfx11"                               ? 1
+                         : f.arch == "gfx12"                               ? 2
+                         : (f.arch == "gfx9" || f.arch == "gfx942" || f.arch == "gfx950") ? 3
+                         : f.arch == "gfx1250"                                            ? 4
+                                                                                          : -1;
+    const int64_t variantId = f.variant == "multipass" ? 0
+                              : f.variant == "fused"   ? 1
+                              : f.variant == "wmma"    ? 2
+                              : f.variant == "wreg"    ? 3
+                              : f.variant == "sreg"    ? 4
+                              : f.variant == "coop"    ? 5
+                              : f.variant == "wrw"     ? 6
+                                                       : -1;
+    kernel.metadata
+        = {{"direction", std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD")},
+           {"dtype", dtype},
+           {"variant", f.variant},
+           {"m", f.m},
+           {"layout", f.layout},
+           {"arch", f.arch},
+           {"atom", atom},
+           {"variant_id", variantId},
+           {"layout_id", int64_t{f.layout == "NCHW" ? 0 : 1}},
+           {"llc", f.llc},
+           {"gemm_bm", f.gemmBm},
+           {"gemm_bn", f.gemmBn},
+           {"gemm_bk", f.gemmBk},
+           {"bk", f.bk},
+           {"bt", f.bt},
+           {"ccv", f.ccv},
+           {"tm", f.tm},
+           {"tn", f.tn},
+           {"waves", f.waves},
+           {"bins", f.bins},
+           {"f16math", f.f16math},
+           {"pf", f.pf},
+           {"sb", f.sb}};
     return kernel;
 }
 
@@ -1778,17 +1793,21 @@ TEST(TestConvWinogradPlan, NativeMultipassPreservesUnpaddedBuffersAndStaging)
                 fields.layout = channelsLast ? "NHWC" : "NCHW";
                 fields.arch = "gfx1250";
                 fields.atom = 5;
-                const auto nativeConfig = conv_winograd::configOf(kernelOf(fields, "FLOAT", direction));
+                const auto nativeConfig
+                    = conv_winograd::configOf(kernelOf(fields, "FLOAT", direction));
                 ASSERT_TRUE(nativeConfig.has_value());
-                const auto native = conv_winograd::planFor(*problem, *nativeConfig, countedDevice());
+                const auto native
+                    = conv_winograd::planFor(*problem, *nativeConfig, countedDevice());
                 ASSERT_TRUE(native.has_value());
                 const int64_t positions = m == 4 ? 36 : 16;
                 EXPECT_EQ(native->uBytes,
                           static_cast<size_t>(positions * problem->args.ci * problem->args.co * 4));
-                EXPECT_EQ(native->vBytes,
-                          static_cast<size_t>(positions * problem->args.ci * native->args.tiles * 4));
-                EXPECT_EQ(native->mBytes,
-                          static_cast<size_t>(positions * problem->args.co * native->args.tiles * 4));
+                EXPECT_EQ(
+                    native->vBytes,
+                    static_cast<size_t>(positions * problem->args.ci * native->args.tiles * 4));
+                EXPECT_EQ(
+                    native->mBytes,
+                    static_cast<size_t>(positions * problem->args.co * native->args.tiles * 4));
                 EXPECT_FALSE(native->in.needed);
                 EXPECT_FALSE(native->out.needed);
             }

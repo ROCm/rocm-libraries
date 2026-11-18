@@ -459,8 +459,9 @@ void runCase(const DeviceCase& deviceCase,
         spec.y.strides = packedStrides(spec.y.dims, !shape.channelsLast);
     }
     const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
-    const bool native1250 = hipdnn_plugin_sdk::stripArchFeatures(
-                                fixture.context().deviceProperties.gcnArchName) == "gfx1250";
+    const bool native1250
+        = hipdnn_plugin_sdk::stripArchFeatures(fixture.context().deviceProperties.gcnArchName)
+          == "gfx1250";
     if(nativeCoopOnly && !native1250)
     {
         GTEST_SKIP() << "Native K32 cooperative convolution requires gfx1250";
@@ -610,15 +611,14 @@ void runCase(const DeviceCase& deviceCase,
         size_t visited = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
             const float tileScale = scale[visited++];
-            if(unrelatedInputNonfinite
-               && (index[0] != 0 || index[1] >= shape.k / shape.groups))
+            if(unrelatedInputNonfinite && (index[0] != 0 || index[1] >= shape.k / shape.groups))
             {
                 return;
             }
             const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
             const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
-            const float tolerance = relative * tileScale
-                                    + 2.0f * storageEpsilon<T>() * std::fabs(want) + 1e-6f;
+            const float tolerance
+                = relative * tileScale + 2.0f * storageEpsilon<T>() * std::fabs(want) + 1e-6f;
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, written.strides())
@@ -648,9 +648,10 @@ void runCase(const DeviceCase& deviceCase,
     // Numeric proof must exercise each intended family, not silently pass on VALU alone.
     if(native1250)
     {
-        const unsigned expected = nativeCoopOnly ? 4u
-                                  : shape.stride[0] == 2 ? 8u
-                                  : std::is_same_v<T, float> ? 9u : 15u;
+        const unsigned expected = nativeCoopOnly             ? 4u
+                                  : shape.stride[0] == 2     ? 8u
+                                  : std::is_same_v<T, float> ? 9u
+                                                             : 15u;
         EXPECT_EQ(nativeModesRan, expected);
         if constexpr(std::is_same_v<T, float>)
         {
@@ -712,10 +713,8 @@ TEST(TestGpuConvWinogradNative, HalfPartialReductionIsolatesImages)
         {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
     {
         SCOPED_TRACE(std::isnan(nonfinite) ? "NaN in the other image" : "Inf in the other image");
-        runCase<Half>({"NchwNativePartialReductionImages", shape},
-                      ConvDirection::FORWARD,
-                      true,
-                      nonfinite);
+        runCase<Half>(
+            {"NchwNativePartialReductionImages", shape}, ConvDirection::FORWARD, true, nonfinite);
     }
 }
 
@@ -729,10 +728,8 @@ TEST(TestGpuConvWinogradNative, HalfPartialReductionIsolatesGroups)
         {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
     {
         SCOPED_TRACE(std::isnan(nonfinite) ? "NaN in the other group" : "Inf in the other group");
-        runCase<Half>({"NchwNativePartialReductionGroups", shape},
-                      ConvDirection::FORWARD,
-                      true,
-                      nonfinite);
+        runCase<Half>(
+            {"NchwNativePartialReductionGroups", shape}, ConvDirection::FORWARD, true, nonfinite);
     }
 }
 
@@ -965,9 +962,24 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST(TestConvWinogradCatalog, ApplicableCompiledContractsHaveDistinctIntegerKnobs)
 {
-    constexpr const char* KNOBS[] = {"m", "llc", "gemm_bm", "gemm_bn", "gemm_bk", "bk", "bt",
-                                    "ccv", "tm", "tn", "waves", "bins", "f16math", "pf", "sb",
-                                    "variant_id", "layout_id", "atom"};
+    constexpr const char* KNOBS[] = {"m",
+                                     "llc",
+                                     "gemm_bm",
+                                     "gemm_bn",
+                                     "gemm_bk",
+                                     "bk",
+                                     "bt",
+                                     "ccv",
+                                     "tm",
+                                     "tn",
+                                     "waves",
+                                     "bins",
+                                     "f16math",
+                                     "pf",
+                                     "sb",
+                                     "variant_id",
+                                     "layout_id",
+                                     "atom"};
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter smallCache(
         "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES", "4096");
     for(const auto direction :

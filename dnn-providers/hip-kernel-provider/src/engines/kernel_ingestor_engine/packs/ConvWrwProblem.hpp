@@ -83,8 +83,10 @@ inline constexpr int64_t LOOP_ROWS_PACKED = 7; ///< output rows, several narrow 
 inline constexpr int64_t LOOP_GENERIC = 8; ///< generic taps: runtime filter, strides (coverage)
 inline constexpr int64_t LOOP_SMALL_K = 9; ///< gfx1250 channels-last, at most four K per group, FMA
 inline constexpr int64_t LOOP_ACCURATE = 10; ///< runtime tiled FP64 products, partials and fold
-inline constexpr int64_t LOOP_NATIVE_GENERIC = 11; ///< gfx1250 masked 64-bit gathers, flattened positions
-inline constexpr int64_t LOOP_TAP_TILED = 12; ///< gfx1250 GEMM with flattened (tap, channel) columns
+inline constexpr int64_t LOOP_NATIVE_GENERIC
+    = 11; ///< gfx1250 masked 64-bit gathers, flattened positions
+inline constexpr int64_t LOOP_TAP_TILED
+    = 12; ///< gfx1250 GEMM with flattened (tap, channel) columns
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).

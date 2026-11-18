@@ -74,7 +74,15 @@ ENTRY = {
     "coop": "ConvWinogradCoop",
     "wrw": "ConvWinogradWrwGemm",
 }
-VARIANT_ID = {"multipass": 0, "fused": 1, "wmma": 2, "wreg": 3, "sreg": 4, "coop": 5, "wrw": 6}
+VARIANT_ID = {
+    "multipass": 0,
+    "fused": 1,
+    "wmma": 2,
+    "wreg": 3,
+    "sreg": 4,
+    "coop": 5,
+    "wrw": 6,
+}
 ATOM_ID = {"gfx11": 1, "gfx12": 2, "gfx9": 3, "gfx942": 3, "gfx950": 3, "gfx1250": 4}
 WRW_ATOM_ID = {"any": 0, "gfx11": 1, "gfx12": 2, "gfx9": 3, "gfx950": 6}
 
@@ -119,9 +127,15 @@ def C(
         sb=sb,
         variant_id=VARIANT_ID[variant],
         layout_id=0 if layout == "NCHW" else 1,
-        atom=(WRW_ATOM_ID[arch] if variant == "wrw"
-              else ATOM_ID[arch] if variant in ("wmma", "wreg", "coop") else 0)
-        if atom is None else atom,
+        atom=(
+            (
+                WRW_ATOM_ID[arch]
+                if variant == "wrw"
+                else ATOM_ID[arch] if variant in ("wmma", "wreg", "coop") else 0
+            )
+            if atom is None
+            else atom
+        ),
     )
 
 
@@ -263,11 +277,21 @@ COOP3_CDNA_BF16 = [(1, 4, 4, 0), (2, 2, 1, 0), (1, 2, 1, 0)]
 # Native gfx1250 consumes K32, not gfx12's K16. Its two V buffers use 2 KiB per tile:
 # cap NT at 2 within 64 KiB; tune MT/KW independently rather than aliasing old tile contracts.
 COOP_1250_F16 = [
-    (1, 2, 4, 1), (2, 2, 4, 1), (1, 2, 8, 1), (2, 2, 2, 1),
-    (1, 2, 1, 1), (1, 2, 2, 1), (4, 1, 1, 1), (2, 2, 2, 0),
+    (1, 2, 4, 1),
+    (2, 2, 4, 1),
+    (1, 2, 8, 1),
+    (2, 2, 2, 1),
+    (1, 2, 1, 1),
+    (1, 2, 2, 1),
+    (4, 1, 1, 1),
+    (2, 2, 2, 0),
 ]
 COOP_1250_BF16 = [
-    (1, 2, 4, 0), (2, 2, 2, 0), (1, 2, 1, 0), (1, 2, 2, 0), (4, 1, 1, 0),
+    (1, 2, 4, 0),
+    (2, 2, 2, 0),
+    (1, 2, 1, 0),
+    (1, 2, 2, 0),
+    (4, 1, 1, 0),
 ]
 
 

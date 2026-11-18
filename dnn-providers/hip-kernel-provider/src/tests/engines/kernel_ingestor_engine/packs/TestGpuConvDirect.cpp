@@ -642,8 +642,15 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST(TestConvDirectCatalog, EveryConfigParsesAndRunsSomewhere)
 {
-    static constexpr std::array<const char*, 9> ARCHS{
-        "gfx906", "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201", "gfx1250"};
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1100",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         ASSERT_FALSE(catalog(direction).empty());
@@ -662,8 +669,15 @@ TEST(TestConvDirectCatalog, EveryConfigParsesAndRunsSomewhere)
 
 TEST(TestConvDirectCatalog, EveryFilterAndDtypeHasAConfigOnEveryArchitecture)
 {
-    static constexpr std::array<const char*, 9> ARCHS{
-        "gfx906", "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1151", "gfx1201", "gfx1250"};
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1030",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
     for(const auto& filter : conv_direct::FILTERS)
     {
         for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})

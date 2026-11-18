@@ -388,7 +388,8 @@ public:
         {
             KernelDefinition reduceKernel = kernel;
             // The reduce is the same source under another entry point.
-            std::string_view entry = launch->accurate ? ACCURATE_REDUCE_ENTRY_POINT : REDUCE_ENTRY_POINT;
+            std::string_view entry
+                = launch->accurate ? ACCURATE_REDUCE_ENTRY_POINT : REDUCE_ENTRY_POINT;
             if(launch->reduce.tile == 1)
             {
                 entry = REDUCE_TILE_ENTRY_POINT;
@@ -398,8 +399,13 @@ public:
                 entry = REDUCE_ROWS_ENTRY_POINT;
             }
             reduceKernel.source.entryPoint = std::string(entry);
-            reduce = buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, reduceKernel, options, launch->accurate ? accurateReduceSignature() : reduceSignature());
+            reduce = buildIngestorKernelCode(_kernelCompiler,
+                                             _kpackLoader,
+                                             context,
+                                             reduceKernel,
+                                             options,
+                                             launch->accurate ? accurateReduceSignature()
+                                                              : reduceSignature());
             reduce->setBlockSize(launch->reduceBlock, 1, 1);
             reduce->setGridSize(launch->reduceGrid, 1, 1);
         }

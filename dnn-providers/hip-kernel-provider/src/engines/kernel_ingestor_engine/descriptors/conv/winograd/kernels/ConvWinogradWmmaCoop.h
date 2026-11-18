@@ -268,8 +268,11 @@ struct K5CoopCfg
 #else
     static constexpr int WPE_B16 = 4;
 #endif
-    static constexpr int WPE = A::WAVE == 64 ? WPE_CDNA : B16 ? WPE_B16
-        : A::CC == 32 ? 4 : MT * NT <= 2 ? 8 : 4;
+    static constexpr int WPE = A::WAVE == 64  ? WPE_CDNA
+                               : B16          ? WPE_B16
+                               : A::CC == 32  ? 4
+                               : MT * NT <= 2 ? 8
+                                              : 4;
     static_assert(JW % WAVES == 0 || WAVES % JW == 0, "job split");
     static_assert(LDSB <= 65536, "cooperative LDS budget");
 };
@@ -582,10 +585,12 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
 #pragma unroll
                                 for(int d = 0; d < 3; ++d)
                                     words[d] = __builtin_amdgcn_raw_buffer_load_b32(
-                                        rIn, remaining >= static_cast<unsigned>(4 * (d + 1))
+                                        rIn,
+                                        remaining >= static_cast<unsigned>(4 * (d + 1))
                                             ? vo + static_cast<unsigned>(4 * d)
                                             : static_cast<unsigned>(K5C_OOB),
-                                        0, 0);
+                                        0,
+                                        0);
                                 raw[q][r][v] = k5u3{words[0], words[1], words[2]};
                             }
                             else

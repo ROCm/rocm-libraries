@@ -251,8 +251,8 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes)
     // The output tile: dx's element type (fp32 for three-bf16), over the operand tiles.
     const int outBytes = config.math == 1 ? 4 : elementBytes;
     const int64_t out = config.bn * (config.bmq * config.stride + 16 / outBytes) * outBytes;
-    if(config.atom.substr(0, 4) == "mfma"
-       && config.atom.size() >= 3 && config.atom.substr(config.atom.size() - 3) == "f32")
+    if(config.atom.substr(0, 4) == "mfma" && config.atom.size() >= 3
+       && config.atom.substr(config.atom.size() - 3) == "f32")
     {
         // MFMA fp32 has one k per lane; native gfx1250 float2 fragments are transposed.
         const int64_t chunks = divUp(smax, pad);

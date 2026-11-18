@@ -71,7 +71,14 @@ SHAPE = {
 # Per dtype, the atoms the catalog carries (gfx950 runs mfma16_* too; its 16 x 32 atoms halve
 # the steps).
 FAMILIES = {
-    "HALF": ["mfma16_f16", "mfma16x32_f16", "wmma11_f16", "wmma12_f16", "fma", "wmma125_f16"],
+    "HALF": [
+        "mfma16_f16",
+        "mfma16x32_f16",
+        "wmma11_f16",
+        "wmma12_f16",
+        "fma",
+        "wmma125_f16",
+    ],
     "BFLOAT16": [
         "mfma16_bf16",
         "mfma16_bf16_908",

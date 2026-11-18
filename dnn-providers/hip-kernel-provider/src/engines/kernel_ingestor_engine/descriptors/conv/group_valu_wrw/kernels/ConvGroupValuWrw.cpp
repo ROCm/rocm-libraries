@@ -51,8 +51,8 @@
 //               odd element come from one half-dword shifted copy of the window
 
 #include "ConvArchFamily.h"
-#include "ConvPackedMath.h"
 #include "ConvGroupValuWrwArgs.h"
+#include "ConvPackedMath.h"
 
 #ifndef GVW_DT
 #error "GVW_DT must name the element type"
@@ -185,7 +185,6 @@ constexpr unsigned OOB = 0x80000000u;
 
 typedef unsigned GvwU2 __attribute__((ext_vector_type(2)));
 typedef unsigned GvwU4 __attribute__((ext_vector_type(4)));
-
 
 __device__ inline float toFloat(Raw bits)
 {
@@ -491,10 +490,9 @@ __device__ inline void passDot2(float (&acc)[CB][KB][FR][FS],
 #pragma unroll
                             for(int k = 0; k < KB; ++k)
                             {
-                                acc[c][k][r][s]
-                                    = k1Dot2(__builtin_bit_cast(HkpHalf2, pair),
-                                             __builtin_bit_cast(HkpHalf2, dyd[k][jp]),
-                                             acc[c][k][r][s]);
+                                acc[c][k][r][s] = k1Dot2(__builtin_bit_cast(HkpHalf2, pair),
+                                                         __builtin_bit_cast(HkpHalf2, dyd[k][jp]),
+                                                         acc[c][k][r][s]);
                             }
                         }
                     }
@@ -641,8 +639,8 @@ __device__ inline void ringRow(
                     for(int k = 0; k < KB; ++k)
                     {
                         acc[c][k][r][s] = k1Dot2(__builtin_bit_cast(HkpHalf2, pair),
-                                               __builtin_bit_cast(HkpHalf2, dy[k][jp]),
-                                               acc[c][k][r][s]);
+                                                 __builtin_bit_cast(HkpHalf2, dy[k][jp]),
+                                                 acc[c][k][r][s]);
                     }
                 }
             }

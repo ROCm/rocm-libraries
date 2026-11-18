@@ -90,9 +90,14 @@ struct K5Wmma
             else if constexpr(__is_same(T, k5_bf16))
             {
                 typedef __bf16 bf16x16 __attribute__((ext_vector_type(16)));
-                return __builtin_amdgcn_wmma_f32_16x16x32_bf16(
-                    false, __builtin_bit_cast(bf16x16, a),
-                    false, __builtin_bit_cast(bf16x16, b), 0, c, false, false);
+                return __builtin_amdgcn_wmma_f32_16x16x32_bf16(false,
+                                                               __builtin_bit_cast(bf16x16, a),
+                                                               false,
+                                                               __builtin_bit_cast(bf16x16, b),
+                                                               0,
+                                                               c,
+                                                               false,
+                                                               false);
             }
             else
                 return __builtin_amdgcn_wmma_f32_16x16x4_f32(
@@ -128,8 +133,10 @@ struct K5Wmma
         {
             typedef unsigned u4 __attribute__((ext_vector_type(4)));
             typedef unsigned u8 __attribute__((ext_vector_type(8)));
-            const u4 lo = __builtin_bit_cast(u4, __builtin_amdgcn_raw_buffer_load_b128(r, vo, so, 0));
-            const u4 hi = __builtin_bit_cast(u4, __builtin_amdgcn_raw_buffer_load_b128(r, vo + 16, so, 0));
+            const u4 lo
+                = __builtin_bit_cast(u4, __builtin_amdgcn_raw_buffer_load_b128(r, vo, so, 0));
+            const u4 hi
+                = __builtin_bit_cast(u4, __builtin_amdgcn_raw_buffer_load_b128(r, vo + 16, so, 0));
             return __builtin_bit_cast(frag, u8{lo.x, lo.y, lo.z, lo.w, hi.x, hi.y, hi.z, hi.w});
         }
     }
@@ -173,14 +180,16 @@ __device__ void k5GemmWmma(const K5GemmArgs& g)
         {
             const int e = tid + q * THREADS, row = e / BK, col = e % BK;
             ra[q] = m0 + row < g.m && k0 + col < g.k
-                        ? A[static_cast<long long>(m0 + row) * g.lda + k0 + col] : 0.0f;
+                        ? A[static_cast<long long>(m0 + row) * g.lda + k0 + col]
+                        : 0.0f;
         }
 #pragma unroll
         for(int q = 0; q < LB; ++q)
         {
             const int e = tid + q * THREADS, row = e / BN, col = e % BN;
             rb[q] = k0 + row < g.k && n0 + col < g.n
-                        ? B[static_cast<long long>(k0 + row) * g.ldb + n0 + col] : 0.0f;
+                        ? B[static_cast<long long>(k0 + row) * g.ldb + n0 + col]
+                        : 0.0f;
         }
     };
     load(0);
@@ -297,8 +306,9 @@ struct K5WmmaCfg
     static constexpr int MT = BK / 16, NT = BT / 16;
     // Native A fragments load directly from U: two K32 V buffers already occupy 64 KiB.
     static constexpr int UB = W::NATIVE ? 0 : P * BK * CC, VB = P * BT * CC;
-    static constexpr int LDS = ((UB + 2 * VB) * sizeof(T) / 4 > P * 32 * BT
-                                   ? (UB + 2 * VB) * sizeof(T) / 4 : P * 32 * BT);
+    static constexpr int LDS
+        = ((UB + 2 * VB) * sizeof(T) / 4 > P * 32 * BT ? (UB + 2 * VB) * sizeof(T) / 4
+                                                       : P * 32 * BT);
     static constexpr int NUQ = UB * sizeof(T) / 16 / THREADS;
     static constexpr int EPASS = BK / 32;
     static_assert(P % WAVES == 0 && LDS * 4 <= 65536, "config");
@@ -429,8 +439,10 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
                     }
                     else
                     {
-                        const unsigned lo = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[0][i]));
-                        const unsigned hi = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[1][i]));
+                        const unsigned lo
+                            = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[0][i]));
+                        const unsigned hi
+                            = __builtin_bit_cast(unsigned short, K5Elem<T>::store(o[1][i]));
                         Vw[(((i * 4 + j) * BT + tl) * CC) / 2 + cp] = lo | (hi << 16);
                     }
                 }
@@ -471,10 +483,11 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
                     if constexpr(W::NATIVE)
                     {
                         const int k = k0 + m * 16 + lane % 16;
-                        const unsigned vo = k < cgo
-                            ? static_cast<unsigned>(((g * P + bin) * cgo + k) * cgiPad
-                                                    + ch * CC + W::kBase(lane)) * sizeof(T)
-                            : static_cast<unsigned>(K5_OOB);
+                        const unsigned vo
+                            = k < cgo ? static_cast<unsigned>(((g * P + bin) * cgo + k) * cgiPad
+                                                              + ch * CC + W::kBase(lane))
+                                            * sizeof(T)
+                                      : static_cast<unsigned>(K5_OOB);
                         af[m] = W::loadA(rU, vo, 0);
                     }
                     else

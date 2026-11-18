@@ -60,8 +60,8 @@ __device__ inline K3_LOOP_INLINE void k3WrwSmallK(const K3Args& a)
         // spatial/channel masks pass, the residue is the actual in-range offset.
         // This path is admitted only for packed channels-last tensors: channel stride is
         // one and adjacent dy positions are exactly total-K elements apart.
-        const unsigned long long xs0 = a.xs[0], xs1 = 1, xs2 = a.xs[2],
-                                 xs3 = a.xs[3], xs4 = static_cast<unsigned>(a.c);
+        const unsigned long long xs0 = a.xs[0], xs1 = 1, xs2 = a.xs[2], xs3 = a.xs[3],
+                                 xs4 = static_cast<unsigned>(a.c);
         const unsigned long long ys1 = 1, ys4 = static_cast<unsigned>(a.k);
         unsigned long long xo = static_cast<unsigned long long>(n) * xs0
                                 + (static_cast<unsigned long long>(g) * cg + c) * xs1
@@ -83,8 +83,7 @@ __device__ inline K3_LOOP_INLINE void k3WrwSmallK(const K3Args& a)
             int consumed = 1;
             // Subtraction-form bounds avoid overflowing q/ow near their limits.
             // The four-position path never crosses a row or touches padded x.
-            if(qEnd - q >= 4 && a.wo - ow >= 4
-               && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
+            if(qEnd - q >= 4 && a.wo - ow >= 4 && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
                && iw >= 0 && static_cast<long long>(a.wi) - iw > 3LL * a.sw)
             {
                 float xv[4], yv[4][4];

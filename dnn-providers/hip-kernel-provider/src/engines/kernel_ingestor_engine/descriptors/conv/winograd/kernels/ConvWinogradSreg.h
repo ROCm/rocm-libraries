@@ -263,7 +263,8 @@ __device__ __attribute__((always_inline)) void k5SregBody(const K5Args& a,
                     const unsigned u = Ub[k];
                     if constexpr(HALF)
                         acc[b][k] = k1Dot2(__builtin_bit_cast(k5h2, u),
-                                          __builtin_bit_cast(k5h2, vb[b]), acc[b][k]);
+                                           __builtin_bit_cast(k5h2, vb[b]),
+                                           acc[b][k]);
                     else
                         acc[b][k]
                             = __builtin_fmaf(__uint_as_float(u), __uint_as_float(vb[b]), acc[b][k]);

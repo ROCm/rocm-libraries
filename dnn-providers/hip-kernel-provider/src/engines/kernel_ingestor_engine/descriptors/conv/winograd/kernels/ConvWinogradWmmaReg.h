@@ -424,8 +424,9 @@ __device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
         const unsigned uLane
             = static_cast<unsigned>(((g * 16 + 4 * I + B0) * cgo + uRow) * cgiPad + HC * h)
               * sizeof(T);
-        const unsigned uLane2 = W::NATIVE ? uLane + 16
-            : uLane + static_cast<unsigned>((8 - 16 * h) * static_cast<int>(sizeof(T)));
+        const unsigned uLane2
+            = W::NATIVE ? uLane + 16
+                        : uLane + static_cast<unsigned>((8 - 16 * h) * static_cast<int>(sizeof(T)));
         const unsigned binBytes = static_cast<unsigned>(cgo) * cgiPad * sizeof(T);
         frag ufr[BINS][MT];
         auto loadU = [&](int ch, int b) {
