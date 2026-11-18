@@ -1503,8 +1503,11 @@ TEST(TestConvDirectPlan, LineTilesAreSegmentsOfTheRowEndToEnd)
     EXPECT_EQ(plan->args.tw, 512);
     EXPECT_EQ(plan->args.tilesW, 3);
     EXPECT_EQ(plan->args.tilesH, 1);
-    // A line tile is the reference tile's 512 pixels: many rounds do not decline it.
-    EXPECT_TRUE(planOf(wide, line, "HALF", 1).has_value());
+    // A line tile is the reference tile's 512 pixels: 128 tiles on one unit (past 8 rounds) do
+    // not decline it.
+    auto longRow = wide;
+    longRow.input = {1, 65536};
+    EXPECT_TRUE(planOf(longRow, line, "HALF", 1).has_value());
 }
 
 TEST(TestConvDirectPlan, SmallGfx950RowsTilesCompareTheChannelsTheyCompute)
