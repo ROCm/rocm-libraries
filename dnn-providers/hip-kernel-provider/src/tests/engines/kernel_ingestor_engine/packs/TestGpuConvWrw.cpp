@@ -1104,7 +1104,7 @@ void runWideTilesPartialChannels()
 template <typename T>
 void runDeepReduce()
 {
-    DeviceCase deviceCase{
+    const DeviceCase deviceCase{
         "DeepReduce", conv(8, 8, {16, 16}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 1, 64)};
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
