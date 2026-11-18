@@ -423,15 +423,10 @@ bool data_set_t::is_contiguous() const
     return compute_ptrdiff(lengths_and_batches(), strides_and_distances()) == logical_count();
 }
 
-bool data_set_t::has_same_axes_as(const data_set_t& other) const
-{
-    return len_axes == other.len_axes && batch_axes == other.batch_axes;
-}
-
 bool data_set_t::operator==(const data_set_t& other) const
 {
-    return has_same_axes_as(other) && array_type == other.array_type
-           && precision == other.precision;
+    return len_axes == other.len_axes && batch_axes == other.batch_axes
+           && array_type == other.array_type && precision == other.precision;
 }
 
 bool data_set_t::has_same_logical_range_as(const data_set_t& other) const
