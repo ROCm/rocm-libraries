@@ -1021,6 +1021,9 @@ TEST(TestConvStemBwdKernelMatch, ChannelsLastSingleElementsServeOnlyPartialVecto
     auto vector = single;
     vector.vec = 8;
     EXPECT_FALSE(admits(vector, "gfx942", shape));
+    // Even counts that are not whole 8-element vectors too.
+    shape.k = 46;
+    EXPECT_TRUE(admits(single, "gfx942", shape));
     // Whole vectors of output channels take the vector configs only.
     shape.k = 48;
     EXPECT_FALSE(admits(single, "gfx942", shape));
