@@ -215,23 +215,10 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
         rocke_spec_set_reason(reason, cap, "degenerate geometry");
         return true;
     }
-    {
-        /* byte offsets are i32 and masked lanes use INT32_MAX, which is past
-         * the buffer only while it is smaller than that. */
-        const long long hw = (long long)p->H * p->W;
-        const long long ow
-            = (long long)rocke_direct_conv_problem_Ho(p) * rocke_direct_conv_problem_Wo(p);
-        const long long big = 2LL * p->N * (hw > ow ? hw : ow) * p->groups;
-        if(big > INT32_MAX)
-        {
-            rocke_spec_set_reasonf(
-                reason,
-                cap,
-                "activation tensor of %lld bytes exceeds i32 byte offsets (split the batch)",
-                big);
-            return true;
-        }
-    }
+    /* byte offsets are i32 and masked lanes use INT32_MAX, which is past the
+     * buffer only while the buffer is smaller than that. */
+    if(!rocke_wmma_fwd_tensor_bytes_ok(p, reason, cap))
+        return true;
     if(spec->wave_size != 32)
     {
         rocke_spec_set_reason(reason, cap, "the WMMA 16x16x32 lane maps are wave32");

@@ -66,7 +66,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     pad_w_reason,
 )
-from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op, wmma_fwd_tensor_bytes_reason
 
 DW_WGRAD_WMMA_CH = 8  # channels per wave (the 8-wide K group of a lane half)
 
@@ -191,11 +191,11 @@ def dw_wgrad_wmma_reason(spec: DwWgradWmmaSpec) -> str:
         return why
     if spec.pad_h < 0 or spec.pad_w < 0 or p.Ho < 1 or p.Wo < 1:
         return "degenerate geometry"
-    big = 2 * p.N * max(p.H * p.W, p.Ho * p.Wo) * p.groups
-    if big > I32_MAX:
-        # The kernel keeps byte offsets in i32 and masks lanes with an
-        # offset of I32_MAX, which is past the buffer only when it is smaller.
-        return f"activation tensor of {big} bytes exceeds i32 byte offsets (split the batch)"
+    # The kernel keeps byte offsets in i32 and masks lanes with an offset of
+    # I32_MAX, which is past the buffer only while the buffer is smaller.
+    why = wmma_fwd_tensor_bytes_reason(p)
+    if why is not None:
+        return why
     if spec.wave_size != 32:
         return "the WMMA 16x16x32 lane maps are wave32"
     if spec.waves < 1 or spec.waves > 16:
