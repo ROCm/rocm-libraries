@@ -25,6 +25,9 @@
  *******************************************************************************/
 
 #pragma once
+#include <cstddef>
+#include <limits>
+#include <algorithm>
 #include <stdexcept>
 #include <origami/origami.hpp>
 #include <rocisa/include/enum.hpp>
@@ -83,10 +86,82 @@ namespace TensileLite
             return origami::data_type_t::BFloat6;   
         case rocisa::DataType::Float4:
             return origami::data_type_t::Float4;
+        case rocisa::DataType::Int4:
+            return origami::data_type_t::Int4;
 
         default:
             throw std::runtime_error("Unsupported data type: " + std::to_string(static_cast<int>(type)));
         }
+    }
+    /**
+     * The Origami config of a solution: what Origami ranks the solution with. Whoever asks
+     * Origami about a solution builds its config here, so that a launch decision (the Stream-K
+     * grid) is taken with the config that was ranked. The workspace is unlimited, as for
+     * ranking; a caller that knows the launch's workspace overrides workspace_size and
+     * workspace_size_per_elem_c.
+     *
+     * @param solution The solution (its sizeMapping is read)
+     * @param index    Position of the config in its library's list
+     */
+    template <typename Solution>
+    origami::config_t makeOrigamiConfig(const Solution& solution, std::size_t index = 0)
+    {
+        const auto& sm = solution.sizeMapping;
+        // A dot2 kernel has no matrix instruction: Origami gets its vector lane widths.
+        origami::dim3_t mi = {1, 1, 64};
+        if(sm.matrixInstruction[0] != 0 || sm.matrixInstruction[1] != 0
+           || sm.matrixInstruction[2] != 0)
+            mi = {static_cast<size_t>(sm.matrixInstruction[0]),
+                  static_cast<size_t>(sm.matrixInstruction[1]),
+                  static_cast<size_t>(sm.matrixInstruction[2])};
+        return origami::config_t{
+            .mt                        = {sm.macroTile.x, sm.macroTile.y, sm.depthU},
+            .mi                        = mi,
+            .hand_optimized_main_loop  = (sm.customMainLoopScheduling > 0) ? true : false,
+            .subtile                   = sm.useSubtileImpl,
+            .occupancy                 = std::max(sm.CUOccupancy, static_cast<int>(1)),
+            .workgroup_mapping         = sm.workGroupMapping,
+            .cache_hints_a             = sm.cacheHintA(),
+            .cache_hints_b             = sm.cacheHintB(),
+            .cache_hints_d             = sm.cacheHintD(),
+            .workspace_size            = std::numeric_limits<size_t>::max(),
+            .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+            .stream_k                  = (sm.isStreamK() ? (sm.hasDynamicAssignment() ? 4 : sm.hasHybridAssignment() ? 5 : 3) : 0),
+            .index                     = index,
+            .grvw_a                    = static_cast<std::size_t>(sm.grvwA),
+            .grvw_b                    = static_cast<std::size_t>(sm.grvwB),
+            .gwvw_d                    = static_cast<std::size_t>(sm.gwvwD),
+            .vector_width_a            = sm.VectorWidthA,
+            .vector_width_b            = sm.VectorWidthB,
+            .cluster_dim               = {sm.clusterDim.x, sm.clusterDim.y, sm.clusterDim.z},
+            .backend                   = origami::tensile_params_t{
+                .local_split_u               = sm.LocalSplitU,
+                .direct_to_vgpr_a            = sm.DirectToVgprA,
+                .direct_to_vgpr_b            = sm.DirectToVgprB,
+                .direct_to_lds_a             = sm.DirectToLdsA,
+                .direct_to_lds_b             = sm.DirectToLdsB,
+                .wavefront_size              = sm.WavefrontSize,
+                .wave_group_m                = sm.waveGroup[0],
+                .wave_group_n                = sm.waveGroup[1],
+                .prefetch_global_read        = sm.PrefetchGlobalRead,
+                .buffer_load                 = sm.BufferLoad,
+                .buffer_store                = sm.BufferStore,
+                .workgroup_mapping_xcc       = sm.workGroupMappingXCC,
+                .workgroup_mapping_xcc_group = sm.workGroupMappingXCCGroup,
+                .one_lds_buffer              = sm.OneLDSBuffer,
+                .source_swap                 = sm.SourceSwap,
+                .unroll_major_lds_a          = sm.UnrollMajorLDSA,
+                .unroll_major_lds_b          = sm.UnrollMajorLDSB,
+                .lds_transpose_read_a        = sm.enableLDSTrA,
+                .lds_transpose_read_b        = sm.enableLDSTrB,
+                .tdm_inst                    = sm.TDMInst,
+                .prefetch_gl2                = sm.PrefetchGL2,
+                .prefetch_local_read         = sm.PrefetchLocalRead,
+                .half_plr                    = sm.HalfPLR,
+                .multicast                   = sm.Multicast != 0,
+                .adaptive_gemm               = sm.adaptiveGemm,
+            },
+        };
     }
 } // namespace TensileLite
 
