@@ -22,7 +22,7 @@ This module records the policy; which (tile, feature) combinations the kernel co
 
 from dataclasses import dataclass, fields, replace
 
-from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import Family
+from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import ARCHES, Family
 
 __all__ = [
     "BwdDqKnobs",
@@ -38,6 +38,9 @@ __all__ = [
 
 # The fp32 ladder: the 16-bit ladder without 384 (hd 257..512 rides t512).
 FP32_LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 512)
+
+# gfx90a has no 64-bit-pointer `global_load_lds`, and the buffer-resource staging of a padded object is bounded by `slab_span`, which an exact object does not have.
+EXACT_REFUSED_GFX90A = "gfx90a stages fp32 tiles through buffer resources only: an exact-head (unpadded) fp32 object is refused, build the padded one"
 
 # Geometry of an unpinned Spec.
 DEFAULT_BLOCK_M = 32
@@ -127,6 +130,9 @@ class BwdDqKnobs:
     store of a bias build. `paged`, `num_kv_splits` and `bias_stage` are the 16-bit build axes the Spec layer passes through: only their no-feature
     values exist here."""
 
+    arch: str | None = (
+        None  # `fmha_f32_common_gfx950.ARCHES`: the DMA width, LDS cap and half-head tiles of the family; set by `bwd_dq_knobs`
+    )
     block_dmodel: int | None = None
     padded_head: bool | None = None
     hdim_qk_floor: int | None = None
@@ -140,6 +146,13 @@ class BwdDqKnobs:
     block_n: int | None = None
     head_dim_granule: int | None = None
     waves_per_eu: int | None = None
+
+    def _arch(self):
+        if self.arch is None:
+            raise ValueError(
+                "knobs carry no arch: build them with `bwd_dq_knobs(arch, ...)`"
+            )
+        return self.arch
 
     def merge(self, other):
         """`other`'s set fields win; its `None`s leave this one's alone."""
@@ -209,6 +222,8 @@ class BwdDqKnobs:
         padded_head = self.padded_head
         if padded_head is None:
             padded_head = meta.head_dim != block_dmodel
+        if self._arch() == "gfx90a" and not padded_head:
+            raise ValueError(EXACT_REFUSED_GFX90A)
         # the floor of a pinned tile is 0 unless the Spec names one; a build promises head dims above it
         hdim_qk_floor = 0 if self.hdim_qk_floor is None else self.hdim_qk_floor
         if not 0 <= hdim_qk_floor < block_dmodel:
@@ -246,9 +261,8 @@ class BwdDqKnobs:
                 )
         return replace(self, **derived)
 
-    @staticmethod
-    def family_of(entry):
-        return Family("dq", entry.tile, entry.block_m, "ds", entry.waves)
+    def family_of(self, entry):
+        return Family("dq", entry.tile, entry.block_m, "ds", entry.waves, self._arch())
 
     def family(self):
         """The layout parameters of the resolved variant (`fmha_f32_common_gfx950.Family`)."""
@@ -256,11 +270,13 @@ class BwdDqKnobs:
             raise ValueError(
                 "knobs must be resolved: call `bwd_dq_knobs(...).resolve(meta)` first"
             )
-        return Family("dq", self.block_dmodel, self.block_m, "ds", self.num_waves)
+        return Family(
+            "dq", self.block_dmodel, self.block_m, "ds", self.num_waves, self._arch()
+        )
 
 
 def bwd_dq_knobs(arch="gfx950", **overrides):
     """Knobs for `arch`, with `overrides` pinned. Mirrors `fmha_tuning_bwd_dq_gfx950.bwd_dq_knobs`."""
-    if arch != "gfx950":
-        raise ValueError(f"this tuning module is gfx950-only, got {arch!r}")
-    return BwdDqKnobs(**overrides)
+    if arch not in ARCHES:
+        raise ValueError(f"arch {arch!r} is not one of {ARCHES}")
+    return BwdDqKnobs(arch=arch, **overrides)

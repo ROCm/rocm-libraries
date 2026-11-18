@@ -203,6 +203,95 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
     }
 }
 
+// Copy of a backward graph with @p mutate applied to its SDPA backward attributes.
+template <typename Mutate>
+flatbuffers::FlatBufferBuilder withBwdAttributes(const flatbuffers::FlatBufferBuilder& base,
+                                                 Mutate&& mutate)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    GraphT graph;
+    GetGraph(base.GetBufferPointer())->UnPackTo(&graph);
+    auto* attrs = graph.nodes.front()->attributes.AsSdpaBackwardAttributes();
+    if(attrs == nullptr)
+    {
+        throw std::logic_error("withBwdAttributes: first node is not an SDPA backward node");
+    }
+    mutate(*attrs, graph);
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, &graph));
+    return builder;
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsEveryDropoutField)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+    using hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributesT;
+    using sdpa::detail::appendIndexTensor;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // The base graph and its probability-0 copy are served, so each decline below is the
+    // dropout field's alone.
+    const auto base = createSdpaBwdGraph();
+    const GraphTest noDrop{
+        withBwdAttributes(base,
+                          [](SdpaBackwardAttributesT& a, GraphT&) { a.dropout_probability = 0.f; }),
+        "dropout_probability 0"};
+    ASSERT_TRUE(
+        _planBuilder.isApplicable(_handle,
+                                  hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+                                      base.GetBufferPointer(), base.GetSize())));
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, noDrop.graphWrapper())) << noDrop.message;
+
+    const std::vector<GraphTest> declines = [&base] {
+        std::vector<GraphTest> cases;
+        cases.emplace_back(
+            withBwdAttributes(
+                base, [](SdpaBackwardAttributesT& a, GraphT&) { a.dropout_probability = 0.1f; }),
+            "dropout_probability 0.1");
+        cases.emplace_back(withBwdAttributes(base,
+                                             [](SdpaBackwardAttributesT& a, GraphT& g) {
+                                                 a.seed_tensor_uid = appendIndexTensor(g, "seed");
+                                             }),
+                           "seed tensor");
+        cases.emplace_back(withBwdAttributes(base,
+                                             [](SdpaBackwardAttributesT& a, GraphT& g) {
+                                                 a.offset_tensor_uid
+                                                     = appendIndexTensor(g, "offset");
+                                             }),
+                           "offset tensor");
+        cases.emplace_back(withBwdAttributes(base,
+                                             [](SdpaBackwardAttributesT& a, GraphT& g) {
+                                                 a.dropout_mask_tensor_uid
+                                                     = appendIndexTensor(g, "dropout_mask");
+                                             }),
+                           "dropout_mask tensor");
+        cases.emplace_back(withBwdAttributes(base,
+                                             [](SdpaBackwardAttributesT& a, GraphT& g) {
+                                                 a.dropout_scale_tensor_uid
+                                                     = appendIndexTensor(g, "dropout_scale");
+                                             }),
+                           "dropout_scale tensor");
+        cases.emplace_back(withBwdAttributes(base,
+                                             [](SdpaBackwardAttributesT& a, GraphT& g) {
+                                                 a.dropout_scale_inv_tensor_uid
+                                                     = appendIndexTensor(g, "dropout_scale_inv");
+                                             }),
+                           "dropout_scale_inv tensor");
+        return cases;
+    }();
+    for(const auto& test : declines)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
 // =============================================================================
 // Runtime pass-by-value scale tensor (RFC 0016)
 // =============================================================================
@@ -2510,6 +2599,73 @@ TEST_F(TestSdpaBwdPlanBuilder, WorkspaceSizeDefaultSettingsIsA32)
 
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, defaultSettings),
               _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a32Settings));
+}
+
+// =============================================================================
+// Operand dtype and tensor metadata the backward kernels do not serve
+// =============================================================================
+
+TEST_F(TestSdpaBwdPlanBuilder, DeclinesAnOutputWhoseDtypeDiffersFromTheInputs)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    {
+        auto builder = createSdpaBwdGraph();
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        ASSERT_TRUE(_planBuilder.isApplicable(_handle, graph));
+    }
+
+    // O keeps its shape, strides and the Q/K/V/dO/dQ/dK/dV dtype checks still pass; only its
+    // element type, hence its byte size, changes.
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [](GraphT& graph) {
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->name == "o")
+            {
+                tensor->data_type = DataType::HALF;
+            }
+        }
+    });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, DeclinesARaggedOffsetMultiplierOnATensorWithoutRaggedOffset)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    for(const char* name : {"q", "k", "v", "o"})
+    {
+        SCOPED_TRACE(name);
+        auto builder
+            = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [name](GraphT& graph) {
+                  for(auto& tensor : graph.tensors)
+                  {
+                      if(tensor->name == name)
+                      {
+                          tensor->ragged_offset_multiplier = 2;
+                      }
+                  }
+              });
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+    }
 }
 
 } // namespace
