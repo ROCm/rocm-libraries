@@ -24,6 +24,9 @@
  *
  *******************************************************************************/
 
+// testing_matmul.hpp runs --partitions through the experimental PartitionedGemm.
+#define ROCM_ENABLE_EXPERIMENTAL_APIS 1
+
 #include "program_options.hpp"
 
 #include "hipblaslt_bench_options.hpp"
@@ -715,7 +718,7 @@ try
         ("partitions",
          value<int>(&partitions_opt)->default_value(1),
          "Run each GEMM as slices on this many partitions, one stream each, with "
-         "hipblaslt_ext::experimental::PartitionedGemm. The devices are the DPX group of the current "
+         "hipblaslt_experimental::PartitionedGemm. The devices are the DPX group of the current "
          "device when it is in one (the current device is partition 0), otherwise the current device "
          "once per partition (SPX: correct results, only for checking them, not for speed). The time "
          "is the full span, first launch to last partition done. Data placement follows "

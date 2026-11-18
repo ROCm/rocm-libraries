@@ -22,3 +22,13 @@ hipblaslt_experimental_feature(DEMO
     INTRODUCED   10.3
     LAST_RELEASE 11.0
 )
+
+# hipblaslt_experimental::PartitionedGemm: one GEMM run as slices on the partitions of a
+# partitioned GPU (DPX), one stream per partition.
+hipblaslt_experimental_feature(PARTITIONED_GEMM
+    HEADER       hipblaslt-experimental-partitioned-gemm.h
+    OWNER        "@KKyang"
+    TRACKING     "https://github.com/ROCm/rocm-libraries/pull/15976"
+    INTRODUCED   10.3
+    LAST_RELEASE 11.0
+)

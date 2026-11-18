@@ -28,6 +28,8 @@ _DEMO_HEADER = f"{cea.HEADER_DIR}/hipblaslt-experimental-demo.h"
 _DEMO_CONTRACT = f"{cea.CONTRACT_DIR}/contract_demo_gtest.cpp"
 _DEMO_FUNC = "HIPBLASLT_EXPORT\nhipblasStatus_t hipblasLtExperimentalDemoAlignSize"
 _DEMO_ENUM_END = "} hipblasLtExperimentalDemoRounding_t;"
+# The first value a new experimental enumerator may take in the real headers.
+_NEXT_ENUM = cea.load_surface(cea.DirTree(_REAL_ROOT)).high_water + 1
 
 
 def _copy_tree(dst: Path) -> Path:
@@ -95,7 +97,7 @@ def test_identical_trees_pass(trees):
 def test_real_headers_parse_cleanly():
     surface = cea.load_surface(cea.DirTree(_REAL_ROOT))
     assert surface.errors == []
-    assert surface.revisions == {"DEMO": 1}
+    assert surface.revisions == {"DEMO": 1, "PARTITIONED_GEMM": 1}
     assert surface.high_water is not None
     assert surface.decls["function hipblasLtExperimentalGetFeatureRevision"][0] == cea.CORE
     assert surface.decls["function hipblasLtExperimentalDemoAlignSize"][0] == "DEMO"
@@ -140,7 +142,7 @@ def test_adding_a_function_passes_without_bump(trees):
 def test_adding_an_enumerator_above_high_water_passes_without_bump(trees):
     base, head = trees
     _edit(head, _DEMO_HEADER, _DEMO_ENUM_END,
-          f"    HIPBLASLT_EXPERIMENTAL_DEMO_ROUND_NEAREST = 2,\n{_DEMO_ENUM_END}")
+          f"    HIPBLASLT_EXPERIMENTAL_DEMO_ROUND_NEAREST = {_NEXT_ENUM},\n{_DEMO_ENUM_END}")
     _raise_high_water(head)
     report = _check(base, head)
     assert report.ok and not report.breaking, report.errors
@@ -309,7 +311,7 @@ def test_reusing_a_retired_enum_value_fails(trees):
 def test_new_enumerator_must_raise_high_water(trees):
     base, head = trees
     _edit(head, _DEMO_HEADER, _DEMO_ENUM_END,
-          f"    HIPBLASLT_EXPERIMENTAL_DEMO_ROUND_NEAREST = 2,\n{_DEMO_ENUM_END}")
+          f"    HIPBLASLT_EXPERIMENTAL_DEMO_ROUND_NEAREST = {_NEXT_ENUM},\n{_DEMO_ENUM_END}")
     report = _check(base, head)
     assert any("raise it" in e for e in report.errors)
 

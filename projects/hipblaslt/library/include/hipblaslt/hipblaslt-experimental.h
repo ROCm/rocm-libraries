@@ -68,7 +68,7 @@
  *  the mark is raised to match. It never goes down.
  *  tools/scripts/check_experimental_api.py enforces this.
  */
-#define HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER 1
+#define HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER 4
 
 #ifdef __cplusplus
 extern "C" {
