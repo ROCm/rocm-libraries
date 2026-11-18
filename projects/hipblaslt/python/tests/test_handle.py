@@ -67,6 +67,26 @@ def test_rocm_33629_create_without_a_device_returns_an_error():
 
 
 @pytest.mark.gpu
+def test_first_handle_runs_the_version_check():
+    # In a fresh process: import leaves the check alone, and the first Handle() runs it once.
+    code = """
+        import warnings; warnings.simplefilter("ignore")
+        import hipblaslt
+        before = hipblaslt._loader._version_checked
+        hipblaslt._core.Handle().close()
+        print("checked:", before, hipblaslt._loader._version_checked)
+        """
+    r = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert "checked: False True" in r.stdout, r.stdout
+
+
+@pytest.mark.gpu
 def test_handle_closes_once_and_raises_after():
     h = c.Handle()
     assert not h.closed and h.ptr
