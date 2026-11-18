@@ -55,6 +55,7 @@ inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_DIM_AXIS = 3;
 
 using sdpa_graph::INT32_LIMIT;
+using sdpa_graph::launchAxisFits;
 inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 
 /// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).

@@ -322,13 +322,18 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
         return false;
     }
     const auto queryTiles = (problem.seqLenQ + *blockM - 1) / *blockM;
-    if(queryTiles > GRID_YZ_LIMIT || problem.batch > GRID_YZ_LIMIT
-       || problem.numHeads > INT32_LIMIT)
+    if(queryTiles > GRID_YZ_LIMIT || problem.batch > GRID_YZ_LIMIT || problem.numHeads > INT32_LIMIT
+       || !launchAxisFits(problem.numHeads, *threads))
     {
         return false;
     }
 
     const auto binding = flydslSdpaRdnaBinding(bound);
+    // The padded-row fill launch spans the same heads with its own workgroup size.
+    if(fillsPaddedRows(binding) && !launchAxisFits(problem.numHeads, FILL_THREADS))
+    {
+        return false;
+    }
     if(integerMetadata(kernel, CAUSAL_FIELD) != (needsMask(binding) ? 1 : 0))
     {
         return false;
@@ -648,7 +653,8 @@ public:
         {
             const auto fillSymbol = stringMetadata(kernel, FILL_SYMBOL_FIELD);
             const auto fillTiles = (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS;
-            if(!fillSymbol.has_value() || fillSymbol->empty() || fillTiles > GRID_YZ_LIMIT)
+            if(!fillSymbol.has_value() || fillSymbol->empty() || fillTiles > GRID_YZ_LIMIT
+               || !launchAxisFits(problem.numHeads, FILL_THREADS))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,

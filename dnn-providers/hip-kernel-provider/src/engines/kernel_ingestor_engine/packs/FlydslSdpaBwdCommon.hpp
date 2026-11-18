@@ -256,6 +256,7 @@ inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t DIM_AXIS = 3;
 
 using sdpa_graph::INT32_LIMIT;
+using sdpa_graph::launchAxisFits;
 inline constexpr int64_t STATS_BYTES_PER_ELEMENT = 4; // stats is FLOAT
 inline constexpr int64_t INT32_BYTES = 4;
 inline constexpr int64_t INT64_BYTES = 8;

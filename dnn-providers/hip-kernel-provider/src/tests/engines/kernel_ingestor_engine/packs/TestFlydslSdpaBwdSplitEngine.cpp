@@ -1199,6 +1199,19 @@ TEST(TestFlydslSdpaBwdSplitKernel, DeclinesALaunchGridPastTheLimitsOfAnAxis)
     EXPECT_TRUE(serves(Slot::DKDV, longSequence, plainRow()));
 }
 
+TEST(TestFlydslSdpaBwdSplitKernel, DeclinesALaunchPastThirtyTwoBitWorkItemsOnX)
+{
+    // x holds the key heads (dkdv, heads first) or the query heads (dq); at 1024 threads a
+    // block row holds 2^22 - 1 workgroups before x passes 2^32 work-items.
+    RowSpec wide = plainRow();
+    wide.blockThreads = 1024;
+    for(const Slot slot : {Slot::DKDV, Slot::DQ})
+    {
+        EXPECT_TRUE(serves(slot, dimsSpec(1, (int64_t{1} << 22) - 1, 1, 1, 64), wide));
+        EXPECT_FALSE(serves(slot, dimsSpec(1, int64_t{1} << 22, 1, 1, 64), wide));
+    }
+}
+
 TEST(TestFlydslSdpaBwdSplitLaunch, TheDkdvGridFollowsTheRowsGridOrder)
 {
     auto spec = dimsSpec(3, 6, 100, 91, 64);

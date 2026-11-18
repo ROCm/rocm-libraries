@@ -52,6 +52,16 @@ inline constexpr uint32_t SDPA_RANK = 4;
 /// The largest value a 32-bit offset or extent holds.
 inline constexpr int64_t INT32_LIMIT = 2147483647LL;
 
+/// The most work-items one launch axis holds: HIP rejects a launch whose workgroups times
+/// workgroup size on any axis passes the dispatch packet's 32-bit grid size.
+inline constexpr int64_t LAUNCH_AXIS_ITEM_LIMIT = 4294967295LL;
+
+/// Whether @p workgroups workgroups of @p threads work-items each fit one launch axis.
+inline bool launchAxisFits(int64_t workgroups, int64_t threads)
+{
+    return workgroups >= 0 && threads > 0 && workgroups <= LAUNCH_AXIS_ITEM_LIMIT / threads;
+}
+
 /// The largest softmax scale magnitude every FlyDSL SDPA kernel serves. Real graphs use
 /// 1/sqrt(d) or a temperature near 1; far above this each family overflows f32 at a different
 /// point (the CDNA causal objects' running-max floor times scale * log2(e) passes FLT_MAX near
