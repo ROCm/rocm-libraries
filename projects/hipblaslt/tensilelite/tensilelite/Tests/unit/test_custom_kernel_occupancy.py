@@ -27,6 +27,8 @@ from tensilelite.OccupancyMeasure import (
     _arch_caps_for_kernel,
 )
 
+from logic_corpus import needs_logic_corpus, require_asm_full_root
+
 try:
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly as _KWA
     _KWA_AVAILABLE = True
@@ -435,6 +437,58 @@ class TestSolutionKeepsTheDeclaredCustomKernelOccupancy:
 
     def test_handwritten_custom_kernel_block_keeps_a_positive_value(self):
         assert self._declared({"CustomKernel": {"name": "k"}, "CUOccupancy": 4}) == 4
+
+
+@needs_logic_corpus
+class TestGfx1151W4A16LogicDeclaresOccupancy:
+    """The gfx1151 W4A16 custom kernels get no computed occupancy (not gfx9), so every
+    logic entry that uses one must declare it, and every entry of a kernel the same
+    value; otherwise Origami would see one workgroup per WGP for all of them."""
+
+    def test_every_entry_declares_one_consistent_value(self):
+        import yaml
+
+        values, missing = {}, []
+        for f in sorted(require_asm_full_root().glob("gfx1151/*/gfx1151_*I4*.yaml")):
+            text = f.read_text()
+            # The libyaml loader when PyYAML has it: the Origami logic files are large.
+            data = yaml.load(text, Loader=yaml.CSafeLoader) if hasattr(yaml, "CSafeLoader") else yaml.safe_load(text)
+            for sol in data["Solutions"]:
+                name = sol.get("CustomKernelName")
+                if not name:
+                    continue
+                occ = sol.get("CUOccupancy")
+                if not isinstance(occ, int) or isinstance(occ, bool) or occ < 1:
+                    missing.append(f"{f.name}: {name} ({occ})")
+                else:
+                    values.setdefault(name, set()).add(occ)
+        assert values, "no gfx1151 W4A16 custom kernels found"
+        assert not missing, f"{len(missing)} entries without CUOccupancy, e.g. {missing[:3]}"
+        inconsistent = {n: v for n, v in values.items() if len(v) > 1}
+        assert not inconsistent, f"kernels declared with different values: {inconsistent}"
+
+    @pytest.mark.parametrize("arch", ["gfx1151"])
+    def test_declared_value_is_the_occupancy_rule(self, arch):
+        """The declared CUOccupancy is what the gfx11 occupancy rule gives for the kernel's .s on
+        its own architecture, so a value computed with another rule is wrong."""
+        import yaml
+        from tensilelite.OccupancyMeasure import compute_gfx11_occupancy_from_asm_source
+
+        wrong = []
+        isa = {"gfx1151": (11, 5, 1), "gfx1150": (11, 5, 0)}[arch]
+        for f in sorted(require_asm_full_root().glob(f"{arch}/*/{arch}_*I4*.yaml")):
+            text = f.read_text()
+            data = yaml.load(text, Loader=yaml.CSafeLoader) if hasattr(yaml, "CSafeLoader") else yaml.safe_load(text)
+            for sol in data["Solutions"]:
+                name = sol.get("CustomKernelName")
+                if not name:
+                    continue
+                asm = _find_custom_kernel(name)
+                assert asm is not None, f"{name}.s not found"
+                expected = compute_gfx11_occupancy_from_asm_source(asm.read_text(), isa)
+                if sol.get("CUOccupancy") != expected:
+                    wrong.append(f"{f.name}: {name} declares {sol.get('CUOccupancy')}, rule {expected}")
+        assert not wrong, f"{len(wrong)} entries, e.g. {wrong[:3]}"
 
 
 class TestPythonDebugWarning:
