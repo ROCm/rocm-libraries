@@ -768,7 +768,7 @@ TheRock jobs run the installed entries. The scheduled TheRock job does not
 build rocKE: TheRock's flag `THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off
 by default, and only `therock-multi-arch-ci.yml` turns it on, through
 `extra_cmake_options`. Thus an installed entry that starts at comprehensive or
-full runs in no CI job until the scheduled TheRock job builds rocKE. The hipDNN
+full runs in no CI job (⚠ [G11](#72-platform-quality-gaps-question-b)). The hipDNN
 superbuild runs every build-tree entry (the test binaries and Python checks
 that `platform/tests/cmake/` and `library/cpp/tests/` register) and no
 installed entry.
@@ -838,10 +838,11 @@ what the level below cannot see.
 | 5. GPU numeric | A kernel computes the right result | quick for a published operation's pinned reference lane; otherwise standard |
 | 6. Explicit resource gate | An exhaustive matrix, a compiler or resource qualification | comprehensive or full (see below) |
 
-The quick golden entries lower with the Python engine only. No CTest entry runs
-the byte-identity gate over the kernel families; `tests/run_all.py` does,
-through `tools/check_byte_identity.py`
-([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)).
+The quick golden entries lower with the Python engine only. The byte-identity
+gate over the kernel families runs in `tests/run_all.py`, through
+`tools/check_byte_identity.py`
+([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)), and in no CTest
+entry (⚠ [G10](#72-platform-quality-gaps-question-b)).
 
 **quick is a smoke tier.** It runs unsplit on one CI shard, and a failure there
 must mean that rocKE cannot be used or that a shipped kernel is wrong. It admits
@@ -879,9 +880,9 @@ with no edit if it is installed and its entry's filters select it, so it runs in
 quick. The `rocke_pytest_<part>` entries deselect `integration`-marked tests,
 which run only in `tests/run_all.py`; tiling `visualization/` tests that use no
 GPU fixture run in the comprehensive `rocke_tiling_visualization_pytest`, which
-no CI job runs today; and only the golden check of
-`platform/tests/instances/differential/` is installed, so a new test file there
-runs only in `tests/run_all.py`.
+no CI job runs (⚠ [G12](#72-platform-quality-gaps-question-b)); and only the
+golden check of `platform/tests/instances/differential/` is installed, so a new
+test file there runs only in `tests/run_all.py`.
 `rocke_library_attention_pytest` and `rocke_library_sdpa_pytest` collect the two
 library directories whole. Another library file runs once it is added to an
 entry's file list.
@@ -1091,18 +1092,17 @@ and run in three entries of their own:
 |---|---|---|---|
 | `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | every TheRock job that builds rocKE |
 | `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | every TheRock job that builds rocKE |
-| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | none today |
+| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | none (⚠ [G12](#72-platform-quality-gaps-question-b)) |
 
 The tree's `conftest.py` says which tests carry the `gpu` marker.
-[§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI job runs which
-tier. A quick entry carries every tier's label, so every TheRock job that
-builds rocKE runs it. A comprehensive entry carries only the comprehensive and
-full labels, so it runs only in the jobs
-[§5.0.2](#502-ci-shards-and-rocke-item-sharding) lists for those tiers, and none
-of them runs this installed entry today: **no CI job runs the visualization
-tests**. `tests/run_all.py` does not run them
-either (it collects `platform/tests`). Run them before merging a change to the visualization
-package, from `platform/`:
+`ROCKE_ENGINE_test_categories_external.yaml` lists both quick tiling entries
+under quick and the visualization entry under comprehensive;
+[§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which labels that gives
+each entry and which CI jobs run each tier. A quick entry that the YAML matches,
+as both quick tiling entries are, carries every tier's label, so every TheRock
+job that builds rocKE runs it. **Neither CI nor the developer gate runs the
+visualization tests** (G12). Run them before merging a change to the
+visualization package, from `platform/`:
 
 ```bash
 PYTHONPATH=$(pwd)/python python -m pytest python/rocke/tests/helpers/tiling/visualization -q
@@ -1297,6 +1297,9 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 | G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in the `rocke_pytest_*` parts. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
 | G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
+| G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. The installed tree has no `rocke_engine` binding, so the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
+| G11 | **No CI job runs the installed comprehensive and full entries** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | The scheduled TheRock job selects comprehensive but does not build rocKE; the hipDNN superbuild selects full but tests the build tree only. The installed entries that start at comprehensive (the library gates and contracts that [`platform/tests/README.md`](platform/tests/README.md) lists as comprehensive and full, and G12's entry) run nowhere in CI | Build rocKE in the scheduled TheRock job (tracked in AICK-2925) |
+| G12 | **Nothing runs the tiling visualization tests** ([§5.1.2](#512-installed-artifact-replay)) | Their only entry, `rocke_tiling_visualization_pytest`, is comprehensive (G11), and `tests/run_all.py` collects only `platform/tests`; a change to the visualization package is checked only if its author runs them by hand | Close G11, so that scheduled CI runs the entry, and run the tests from the developer gate (no ticket yet) |
 
 ### 7.3 What "green" does and does not mean today
 
@@ -1308,7 +1311,8 @@ accepted named skip, and the copyability contract holds. If `rocke_engine` was
 not importable, GREEN also does not prove that the differential pytest pass ran;
 its explicit skip must be reviewed. A green developer gate does not prove that
 kernels are numerically correct on hardware, that they are fast (G8), that every
-`library/tests/` file is enrolled (G6), or that an architecture absent from the
+`library/tests/` file is enrolled (G6), that the tiling visualization tests pass
+(G12), or that an architecture absent from the
 enumerated configs works.
 
 A green **matching installed pinned-reference lane** additionally proves the
@@ -1316,6 +1320,11 @@ enrolled operation/architecture cases matched their independent qualified
 reference under that lane's numerical contract. A green installed host lane or a
 GPU lane that selected no matching test, skipped, or performed zero comparisons
 does not make that claim. The remaining numerical holes are G1–G5.
+
+A green **CI run** does not prove that the two engines emit the same IR: no CI
+job runs the byte-identity gate (G10). No CI run, pull-request or scheduled,
+covers the installed comprehensive and full entries (G11) or the tiling
+visualization tests (G12).
 
 ---
 
