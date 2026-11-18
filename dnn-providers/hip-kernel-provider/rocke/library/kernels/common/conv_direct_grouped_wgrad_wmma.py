@@ -47,6 +47,7 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     channel_totals_reason,
     dilation_reason,
+    problem_dims_reason,
     emit_direct_params,
     one_padding_reason,
 )
@@ -153,12 +154,17 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
     why = dilation_reason(p)
     if why is not None:
         return False, why
+    why = problem_dims_reason(p)
+    if why is not None:
+        return False, why
     if p.cpg != p.kpg or p.cpg not in (4, 8):
         return False, "cpg = kpg in (4, 8)"
     if p.dtype not in ("fp16", "bf16"):
         return False, "fp16/bf16 only"
     if p.stride != 1:
         return False, "stride 1 only"
+    if p.Ho < 1 or p.Wo < 1:
+        return False, f"empty output {p.Ho}x{p.Wo}"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
     why = one_padding_reason(p)  # the kernel offsets columns by PAD

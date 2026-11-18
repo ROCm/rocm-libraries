@@ -188,6 +188,8 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
+    if(rocke_direct_problem_dims_reason(p, reason, reason_cap))
+        return false;
     const char* why = NULL;
     if(p->cpg != p->kpg || (p->cpg != 4 && p->cpg != 8))
     {
@@ -200,6 +202,15 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
     else if(p->stride != 1)
     {
         why = "stride 1 only";
+    }
+    else if(rocke_direct_conv_problem_Ho(p) < 1 || rocke_direct_conv_problem_Wo(p) < 1)
+    {
+        snprintf(msg,
+                 sizeof msg,
+                 "empty output %lldx%lld",
+                 (long long)rocke_direct_conv_problem_Ho(p),
+                 (long long)rocke_direct_conv_problem_Wo(p));
+        why = msg;
     }
     else if(p->PAD > p->KH - 1 || p->PAD > p->KW - 1)
     {

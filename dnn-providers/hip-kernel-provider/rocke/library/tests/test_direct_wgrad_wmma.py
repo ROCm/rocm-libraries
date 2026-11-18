@@ -344,3 +344,17 @@ class TestWgradWmmaEngines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize(
+    "kw, why",
+    [
+        (dict(C=0, K=0), "cpg must be >= 1"),
+        (dict(N=0), "N must be >= 1"),
+        (dict(W=2, PAD=0), "empty output"),
+    ],
+)
+def test_refuses_empty_problems(kw, why):
+    spec = DirectWgradWmmaSpec(problem=_problem(**kw))
+    ok, got = is_valid_direct_wgrad_wmma_spec(spec, "gfx1250")
+    assert not ok and why in got

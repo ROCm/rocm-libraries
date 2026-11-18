@@ -385,3 +385,24 @@ def test_fold_accepts_1024_threads():
             True,
             "ok",
         )
+
+
+@pytest.mark.parametrize(
+    "kw, why",
+    [
+        (dict(cpg=0, C=0), "must be >= 1"),
+        (dict(N=0), "N must be >= 1"),
+        (dict(W=2, PAD=0), "empty output"),
+    ],
+)
+def test_refuses_empty_problems(kw, why):
+    try:
+        prob = _problem(**kw)
+    except ZeroDivisionError:  # C // cpg with cpg=0
+        prob = DirectConvProblem(
+            N=2, H=19, W=45, groups=16, cpg=0, kpg=0, KH=3, KW=3, PAD=1, dtype="bf16"
+        )
+    ok, got = is_valid_grouped_wgrad_wmma_spec(
+        GroupedWgradWmmaSpec(problem=prob), "gfx1250"
+    )
+    assert not ok and why in got

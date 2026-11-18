@@ -52,6 +52,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
     dilation_reason,
+    problem_dims_reason,
     emit_direct_params,
     one_padding_reason,
 )
@@ -212,6 +213,9 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
     why = dilation_reason(p)
     if why is not None:
         return False, why
+    why = problem_dims_reason(p)
+    if why is not None:
+        return False, why
     why, target = wgrad_wmma_arch_reason(arch, p.dtype)
     if why is not None:
         return False, why
@@ -221,6 +225,8 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, "fp16/bf16 only"
     if p.stride != 1:
         return False, "stride 1 only"
+    if p.Ho < 1 or p.Wo < 1:
+        return False, f"empty output {p.Ho}x{p.Wo}"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
     why = one_padding_reason(p)  # the kernel offsets columns by PAD

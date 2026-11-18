@@ -250,7 +250,8 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
     if(arch == NULL)
         arch = "gfx1250";
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    if(rocke_direct_dilation_reason(p, reason, reason_cap))
+    if(rocke_direct_dilation_reason(p, reason, reason_cap)
+       || rocke_direct_problem_dims_reason(p, reason, reason_cap))
         return false;
     const rocke_archtarget_t* target = rocke_dwg::wgrad_wmma_arch_target(
         arch, rocke_dwg::problem_is_bf16(p), reason, reason_cap);
@@ -269,6 +270,15 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
     if(p->stride != 1)
     {
         rocke_spec_set_reason(reason, reason_cap, "stride 1 only");
+        return false;
+    }
+    if(rocke_direct_conv_problem_Ho(p) < 1 || rocke_direct_conv_problem_Wo(p) < 1)
+    {
+        rocke_spec_set_reasonf(reason,
+                               reason_cap,
+                               "empty output %lldx%lld",
+                               (long long)rocke_direct_conv_problem_Ho(p),
+                               (long long)rocke_direct_conv_problem_Wo(p));
         return false;
     }
     if(p->PAD > p->KH - 1 || p->PAD > p->KW - 1)
