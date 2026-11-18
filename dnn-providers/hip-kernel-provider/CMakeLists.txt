@@ -679,10 +679,18 @@ if(ENABLE_HIP_MLOPS_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_hip_mlops_DESCRIPTOR_SOURCE_DIR
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_mlops_engine/descriptors")
     set(HIPKERNELPROVIDER_hip_mlops_DESCRIPTOR_FILES
+        predict_engine/gfx90a/hip_mlops_engine_tflops.uhd.json
+        predict_engine/gfx90a/hip_mlops_engine_tflops.bin
         predict_engine/gfx942/hip_mlops_engine_tflops.uhd.json
         predict_engine/gfx942/hip_mlops_engine_tflops.bin
         predict_engine/gfx950/hip_mlops_engine_tflops.uhd.json
         predict_engine/gfx950/hip_mlops_engine_tflops.bin
+        predict_engine/gfx1100/hip_mlops_engine_tflops.uhd.json
+        predict_engine/gfx1100/hip_mlops_engine_tflops.bin
+        predict_engine/gfx1101/hip_mlops_engine_tflops.uhd.json
+        predict_engine/gfx1101/hip_mlops_engine_tflops.bin
+        predict_engine/gfx1201/hip_mlops_engine_tflops.uhd.json
+        predict_engine/gfx1201/hip_mlops_engine_tflops.bin
     )
 endif()
 set(HIPKERNELPROVIDER_PRODUCT_STAGE_FILES)

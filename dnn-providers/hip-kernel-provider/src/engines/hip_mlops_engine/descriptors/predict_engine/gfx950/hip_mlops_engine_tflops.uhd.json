@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "id": "163d8e83-807f-43cc-979e-8a1333b1beb4",
-  "name": "HIP_MLOPS_ENGINE (gfx950, 480 contribution(s))",
+  "name": "HIP_MLOPS_ENGINE (gfx950, 213 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
     "$device.memory_clock_rate",
@@ -1630,19 +1630,8 @@
   ],
   "features_hash": "sha256:44cfe25711d7b0ce",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/hip-mlops/e6f0886a9f880f9e",
-    "feature_semantics_revision": 1,
-    "x-restamps": [
-      {
-        "from": "hip-kernel-provider/hip-mlops/dce4926a806e57e0",
-        "to": "hip-kernel-provider/hip-mlops/e6f0886a9f880f9e",
-        "proof": "recipe-narrowed",
-        "changes": [
-          "compilation/Program.cpp",
-          "compilation/Program.hpp"
-        ]
-      }
-    ]
+    "selector_revision": "hip-kernel-provider/hip-mlops/c57439d67438e94a",
+    "feature_semantics_revision": 1
   },
   "objective": "max",
   "score": {
@@ -1652,6 +1641,6 @@
   },
   "tree_data": {
     "artifact": "hip_mlops_engine_tflops.bin",
-    "hash": "45eb52bcb914ca32dfd1facbb0a6be911c4bcc8caf1a7c581e1ed7a879f6528a"
+    "hash": "6c5c2d740ca8ec76d12a2223209945e03151bf61f4420a1afcc5af55849429ee"
   }
 }
