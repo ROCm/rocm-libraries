@@ -210,6 +210,15 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
         }
     }
 
+    for (const auto& form : hw.waitHide.forms) {
+        // No mixed rule without a lead: the pass counts a mixed rule's VALUs from the lead on.
+        for (const auto* rs : {&form.xdl, &form.csmacc})
+            for (const auto* rh : {&rs->dst, &rs->src})
+                if (rh->mix.on()) {
+                    EXPECT_GT(rh->mix.lead, 0) << "lead-less mixed rule";
+                }
+    }
+
     // A deliberate alias, not an accidental fallthrough.
     const HWModel& v0 = hwModelForArch(kGfx1250v0);
     ASSERT_EQ(v0.waitHide.forms.size(), hw.waitHide.forms.size());
