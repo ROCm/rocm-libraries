@@ -22,6 +22,7 @@ import pytest
 from kernels.common import _attention_bwd_band as BAND
 from kernels.common._attention_bwd_addr import decode_batched, decode_thd
 from rocke.core.ir import I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.helpers.attention_band import AttnRuntimeBounds, BandEmitter
 from rocke.numeric.sdpa_reference import keep as ref_keep
 
@@ -29,7 +30,7 @@ from ._attention_bwd_test_utils import device_arch
 from ._attention_bwd_int_eval import IntEvalBuilder
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 BOUNDS = (-1, 0, 1, 3, 7)
 
 
@@ -482,7 +483,7 @@ def test_no_exported_helper_looks_like_a_builder():
 
 
 # ---------------------------------------------------------------------------
-# IR probe kernel: lowering at three flavors, and on the local device
+# IR probe kernel: lowering at every LLVM flavor, and on the local device
 # ---------------------------------------------------------------------------
 
 # Outputs per kv tile (one CTA per kv tile, lane 0 stores): qt_start, n_qt,

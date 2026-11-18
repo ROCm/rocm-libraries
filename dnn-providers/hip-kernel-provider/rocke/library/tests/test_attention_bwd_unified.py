@@ -40,6 +40,7 @@ from collections import Counter
 from functools import cache
 
 import pytest
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
 from kernels.common._attention_bwd_body import BwdTileGeometry
@@ -68,7 +69,7 @@ from .test_attention_bwd_ir import _walk, q_loops, step_bodies
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 CDNA = ("gfx942", "gfx950")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 HEADS = (32, 64, 128)
 DTYPES = ("fp16", "bf16")
 MODES = ("direct", "atomic")

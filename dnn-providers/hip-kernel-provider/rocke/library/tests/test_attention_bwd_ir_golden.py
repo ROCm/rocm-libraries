@@ -6,7 +6,7 @@ lowering, no device, no comgr).
 
 The fixture ``tests/golden/attention_bwd_ir_sha256.json`` pins the emitted
 LLVM IR of four kernel kinds on gfx942, gfx950, gfx1151 and gfx1201, at
-every LLVM flavor (llvm20, llvm22, llvm23):
+every LLVM flavor (``rocke.core.ir_golden.GOLDEN_FLAVORS``):
 
 * ``main``: the layout-general main kernel (``build_attn_bwd_main``);
 * ``dq``: the split dQ kernel (``build_attn_bwd_dq``);
@@ -53,9 +53,11 @@ _LIB_ROOT = str(_TESTS.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
+from rocke.core.ir_golden import GOLDEN_FLAVORS  # noqa: E402
+
 GOLDEN = _TESTS / "golden" / "attention_bwd_ir_sha256.json"
 SCHEMA = "attention_bwd.ir_golden_sha256/v1"
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = GOLDEN_FLAVORS
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 KINDS = ("main", "dq", "aux", "unified")
 # The split dQ kernel is built on the MFMA targets only.

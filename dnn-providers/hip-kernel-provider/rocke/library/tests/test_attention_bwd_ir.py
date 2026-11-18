@@ -83,6 +83,7 @@ import re
 from functools import cache
 
 import pytest
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
 from kernels.common._attention_bwd_body import (
@@ -106,7 +107,7 @@ from ._attention_bwd_test_utils import distinct_configs, kernel_signature
 from .sdpa.bwd_kernel_cases import config_knobs
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 DTYPES = ("fp16", "bf16")
 HEADS = (32, 64, 128)
 INPUTS = {"Q", "K", "V", "dO", "WS_LSE2", "WS_DSUM", "SEQ_Q", "SEQ_KV", "OFF_Q",
