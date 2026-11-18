@@ -40,6 +40,7 @@
 #  include <cstddef>
 #endif
 
+#include <new>
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
@@ -133,7 +134,7 @@ public:
   {
     if (cnt > this->max_size())
     {
-      std::__throw_bad_alloc();
+      throw std::bad_alloc();
     } // end if
 
     // use "::operator new" rather than keyword new

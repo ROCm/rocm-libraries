@@ -160,7 +160,7 @@ void run_trig_tests(
 TYPED_TEST(VariousComplexTest, isinf)
 {
   using T = typename TestFixture::T;
-  T inf   = thrust::detail::complex::infinity<T>();
+  T inf   = std::numeric_limits<T>::infinity();
   ASSERT_EQ(std::isinf(inf), thrust::detail::complex::isinf(inf));
 
   run_rng_test<T, true>(
@@ -229,7 +229,7 @@ TEST(VariousComplexTest, copysignf)
       return std::copysignf(x, y);
     },
     [](const float x, const float y) {
-      return thrust::detail::complex::copysignf(x, y);
+      return thrust::detail::complex::copysign(x, y);
     });
 }
 
@@ -255,7 +255,7 @@ TYPED_TEST(VariousComplexTest, log1pf)
       return std::log1pf(x);
     },
     [](const T& x) {
-      return thrust::detail::complex::log1pf(x);
+      return thrust::detail::complex::log1p(x);
     });
 }
 #  endif

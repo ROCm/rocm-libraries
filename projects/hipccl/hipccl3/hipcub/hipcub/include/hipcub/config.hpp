@@ -304,7 +304,7 @@ END_HIPCUB_NAMESPACE
             const ::hipError_t __status                  \
                 = _NAME(__VA_ARGS__);                    \
             (void)::hipGetLastError();                   \
-            _CCCL_ASSERT(__status == cudaSuccess, _MSG); \
+            _CCCL_ASSERT(__status == ::hipSuccess, _MSG); \
         }                                                \
         while(0)
 #endif // HIPCUB_ASSERT_CUDA_API
