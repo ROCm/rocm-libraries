@@ -15,6 +15,7 @@ using half = half_float::half;
 #include <miopen/logger.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/tensor.hpp>
+#include <nlohmann/json.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -268,7 +269,14 @@ void ExpectLogValue(const std::string& log,
         EXPECT_NEAR(actual, expected, tolerance) << key;
 }
 
-class CheckNumericsInput : public ::testing::TestWithParam<bool>
+enum class NumericsInputKind
+{
+    FiniteGridStride,
+    Nonfinite,
+    Empty
+};
+
+class CheckNumericsInput : public ::testing::TestWithParam<NumericsInputKind>
 {
 protected:
     // Explicit severity works for both debug and release logging defaults. Override
@@ -297,8 +305,18 @@ TEST_P(GPU_CheckNumerics_BFP8, ExtremaAndFlags) { this->RunTest(); }
 
 TEST_P(GPU_CheckNumericsInput_FP32, StatsAndFlags)
 {
-    auto& handle        = get_handle();
-    const bool abnormal = GetParam();
+    auto& handle = get_handle();
+    if(GetParam() == NumericsInputKind::Empty)
+    {
+        // Internal JSON imports can represent empty tensors even though constructors reject them.
+        const nlohmann::json metadata = {
+            {"lengths", {0}}, {"strides", {1}}, {"packed", true}, {"type", miopenFloat}};
+        const auto desc = metadata.get<miopen::TensorDescriptor>();
+        ASSERT_EQ(desc.GetElementSize(), 0);
+        EXPECT_FALSE(miopen::checkNumericsInput(handle, desc, nullptr));
+        return;
+    }
+    const bool abnormal = GetParam() == NumericsInputKind::Nonfinite;
     constexpr float inf = std::numeric_limits<float>::infinity();
     constexpr float nan = std::numeric_limits<float>::quiet_NaN();
     std::vector<float> input;
@@ -341,9 +359,14 @@ TEST_P(GPU_CheckNumericsInput_FP32, StatsAndFlags)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_CheckNumericsInput_FP32,
-                         ::testing::Values(false, true),
-                         [](const ::testing::TestParamInfo<bool>& info) {
-                             return info.param ? "Nonfinite" : "FiniteGridStride";
+                         ::testing::Values(NumericsInputKind::FiniteGridStride,
+                                           NumericsInputKind::Nonfinite,
+                                           NumericsInputKind::Empty),
+                         [](const ::testing::TestParamInfo<NumericsInputKind>& info) {
+                             if(info.param == NumericsInputKind::Empty)
+                                 return "Empty";
+                             return info.param == NumericsInputKind::Nonfinite ? "Nonfinite"
+                                                                               : "FiniteGridStride";
                          });
 
 INSTANTIATE_TEST_SUITE_P(Smoke,

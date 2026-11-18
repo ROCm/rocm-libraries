@@ -10,6 +10,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   minimum/maximum reductions for positive-only, negative-only, zero, infinity, and BF16
   subnormal inputs. Bound the grid-stride reduction to eight blocks per hardware compute unit
   to limit contention on the statistics atomics.
+  Empty tensors return without allocating or launching GPU work, and element counts are
+  no longer narrowed to `int`.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
   with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
