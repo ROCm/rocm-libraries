@@ -174,6 +174,8 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
                                                   size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(rocke_direct_problem_dims_reason(p, reason, cap))
+        return true;
     if(!problem_dtype_ok(p))
     {
         char rep[64];
@@ -212,6 +214,23 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
     {
         rocke_spec_set_reason(reason, cap, "degenerate geometry");
         return true;
+    }
+    {
+        /* byte offsets are i32 and masked lanes use INT32_MAX, which is past
+         * the buffer only while it is smaller than that. */
+        const long long hw = (long long)p->H * p->W;
+        const long long ow = (long long)rocke_direct_conv_problem_Ho(p)
+                             * rocke_direct_conv_problem_Wo(p);
+        const long long big = 2LL * p->N * (hw > ow ? hw : ow) * p->groups;
+        if(big > INT32_MAX)
+        {
+            rocke_spec_set_reasonf(
+                reason,
+                cap,
+                "activation tensor of %lld bytes exceeds i32 byte offsets (split the batch)",
+                big);
+            return true;
+        }
     }
     if(spec->wave_size != 32)
     {
@@ -394,7 +413,7 @@ extern "C" rocke_kernel_def_t* rocke_build_direct_dw_wgrad_wmma(
     V c2 = e.ci(2);
     V c8 = e.ci(8);
     V c16 = e.ci(16);
-    V oob = e.ci((1 << 30) - 1); /* past every in-range byte offset */
+    V oob = e.ci(INT32_MAX); /* >= num_records: every masked lane reads 0 */
 
     V tid = rocke_b_thread_id_x(b);
     V c32 = e.ci(32);

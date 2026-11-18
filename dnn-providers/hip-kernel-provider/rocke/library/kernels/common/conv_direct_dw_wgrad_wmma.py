@@ -60,7 +60,9 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _buf_load_vN,
     _io_type,
+    I32_MAX,
     dilation_reason,
+    problem_dims_reason,
     emit_direct_params,
     pad_w_reason,
 )
@@ -171,6 +173,9 @@ class DwWgradWmmaSpec:
 def dw_wgrad_wmma_reason(spec: DwWgradWmmaSpec) -> str:
     """Why a spec cannot be built ("" when it can); arch-independent rules."""
     p = spec.problem
+    why = problem_dims_reason(p)
+    if why is not None:
+        return why
     if p.dtype not in ("fp16", "bf16"):
         return f"unsupported dtype {p.dtype!r}; expected fp16 or bf16"
     if p.cpg != 1 or p.kpg != 1:
@@ -186,6 +191,11 @@ def dw_wgrad_wmma_reason(spec: DwWgradWmmaSpec) -> str:
         return why
     if spec.pad_h < 0 or spec.pad_w < 0 or p.Ho < 1 or p.Wo < 1:
         return "degenerate geometry"
+    big = 2 * p.N * max(p.H * p.W, p.Ho * p.Wo) * p.groups
+    if big > I32_MAX:
+        # The kernel keeps byte offsets in i32 and masks lanes with an
+        # offset of I32_MAX, which is past the buffer only when it is smaller.
+        return f"activation tensor of {big} bytes exceeds i32 byte offsets (split the batch)"
     if spec.wave_size != 32:
         return "the WMMA 16x16x32 lane maps are wave32"
     if spec.waves < 1 or spec.waves > 16:
@@ -265,7 +275,7 @@ def build_dw_wgrad_wmma(spec: DwWgradWmmaSpec, arch: str = "gfx1250") -> KernelD
     c2 = b.const_i32(2)
     c8 = b.const_i32(8)
     c16 = b.const_i32(16)
-    oob = b.const_i32((1 << 30) - 1)  # past every in-range byte offset
+    oob = b.const_i32((1 << 31) - 1)  # >= num_records: every masked lane reads 0
 
     tid = b.thread_id_x()
     c32 = b.const_i32(32)

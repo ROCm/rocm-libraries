@@ -62,7 +62,7 @@ _REJECTED = (
         {},
         "channels 12 must be a multiple of 8 (16-byte NHWC reads)",
     ),
-    (dict(KH=0, KW=3, PAD=0), {}, "filter 0x3 is not positive"),
+    (dict(KH=0, KW=3, PAD=0), {}, "KH must be >= 1 (got 0)"),
     (
         dict(pad_w=-2),
         {},
@@ -243,3 +243,29 @@ class TestDwWgradWmmaEngines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize(
+    "kw, why",
+    [
+        (dict(C=0), "groups must be >= 1"),
+        (dict(N=0), "N must be >= 1"),
+        (dict(H=0, PAD=0), "H must be >= 1"),
+    ],
+)
+def test_refuses_zero_extents_without_dividing(kw, why):
+    spec = DwWgradWmmaSpec(problem=_problem(**kw))
+    ok, got = is_valid_dw_wgrad_wmma_spec(spec, "gfx1250")
+    assert not ok and why in got
+    assert why in dw_wgrad_wmma_reason(spec)
+
+
+def test_masked_lane_sentinel_is_past_every_admitted_buffer():
+    """Masked lanes load at byte offset 2^31 - 1, so a tensor the validator
+    admits must be smaller than that: 1.5 GiB passes, 2 GiB is refused."""
+    big = _problem(N=3, H=512, W=512, C=1024, KH=3, PAD=1)
+    assert is_valid_dw_wgrad_wmma_spec(DwWgradWmmaSpec(problem=big), "gfx1250")[0]
+    assert str((1 << 31) - 1) in str(build_dw_wgrad_wmma(DwWgradWmmaSpec(problem=big)))
+    too_big = _problem(N=4, H=512, W=512, C=1024, KH=3, PAD=1)
+    ok, why = is_valid_dw_wgrad_wmma_spec(DwWgradWmmaSpec(problem=too_big), "gfx1250")
+    assert not ok and "exceeds i32 byte offsets" in why
