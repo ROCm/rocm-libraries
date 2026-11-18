@@ -110,14 +110,41 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
     }
 
     //
+    // Every target array that will be written, then VAL_DATA: an invalid pointer or an
+    // unsupported data type pair is rejected before anything is written.
+    //
+    ROCSPARSE_CHECKARG(1,
+                       target,
+                       ((source->const_val_data != nullptr) && (target->val_data == nullptr)),
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(1,
+                       target,
+                       ((source->const_row_data != nullptr) && (target->row_data == nullptr)),
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(1,
+                       target,
+                       ((source->const_col_data != nullptr) && (target->col_data == nullptr)),
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(1,
+                       target,
+                       ((source->const_ind_data != nullptr) && (target->ind_data == nullptr)),
+                       rocsparse_status_invalid_pointer);
+
+    if(source->const_val_data != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
+                                                           size_val_data,
+                                                           target->data_type,
+                                                           target->val_data,
+                                                           source->data_type,
+                                                           source->const_val_data));
+    }
+
+    //
     // ROW_DATA.
     //
     if(source->const_row_data != nullptr)
     {
-        ROCSPARSE_CHECKARG(1,
-                           target,
-                           ((source->const_row_data != nullptr) && (target->row_data == nullptr)),
-                           rocsparse_status_invalid_pointer);
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
                                                            size_row_data,
                                                            target->row_type,
@@ -131,10 +158,6 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
     //
     if(source->const_col_data != nullptr)
     {
-        ROCSPARSE_CHECKARG(1,
-                           target,
-                           ((source->const_col_data != nullptr) && (target->col_data == nullptr)),
-                           rocsparse_status_invalid_pointer);
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
                                                            size_col_data,
                                                            target->col_type,
@@ -148,33 +171,12 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
     //
     if(source->const_ind_data != nullptr)
     {
-        ROCSPARSE_CHECKARG(1,
-                           target,
-                           ((source->const_ind_data != nullptr) && (target->ind_data == nullptr)),
-                           rocsparse_status_invalid_pointer);
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
                                                            size_ind_data,
                                                            target->row_type,
                                                            target->ind_data,
                                                            source->row_type,
                                                            source->const_ind_data));
-    }
-
-    //
-    // VAL_DATA.
-    //
-    if(source->const_val_data != nullptr)
-    {
-        ROCSPARSE_CHECKARG(1,
-                           target,
-                           ((source->const_val_data != nullptr) && (target->val_data == nullptr)),
-                           rocsparse_status_invalid_pointer);
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
-                                                           size_val_data,
-                                                           target->data_type,
-                                                           target->val_data,
-                                                           source->data_type,
-                                                           source->const_val_data));
     }
 
     return rocsparse_status_success;

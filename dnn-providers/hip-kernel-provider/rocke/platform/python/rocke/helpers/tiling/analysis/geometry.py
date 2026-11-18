@@ -110,9 +110,3 @@ def _arch_wave(pipeline: Any) -> tuple[str, int]:
             "declared_wave_size=N)."
         )
     return pipeline.arch, pipeline.wave_size
-
-
-def _elem_bytes(dtype_name: str) -> int:
-    from ..emit import _BYTE_WIDTH
-
-    return _BYTE_WIDTH[dtype_name]

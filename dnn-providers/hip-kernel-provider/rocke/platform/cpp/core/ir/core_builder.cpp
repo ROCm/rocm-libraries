@@ -648,33 +648,6 @@ int rocke_i_count_of(const rocke_type_t* t)
     return 1;
 }
 
-/* Mirrors lower_llvm._smem_vec_align / ir.py smem_store_vN: gcd(vec, innermost
- * LDS dimension). Outer strides are products that include the innermost
- * dimension, so they never bind tighter and are not considered. */
-int rocke_i_smem_vec_align_elems(const rocke_type_t* smem_type, int vec)
-{
-    int a;
-    int b;
-
-    if(smem_type == NULL || smem_type->shape == NULL || smem_type->rank <= 0 || vec <= 0)
-    {
-        return vec > 0 ? vec : 1;
-    }
-    a = vec;
-    b = smem_type->shape[smem_type->rank - 1];
-    if(b <= 0)
-    {
-        return vec;
-    }
-    while(b != 0) /* Euclid; Python math.gcd */
-    {
-        int t = a % b;
-        a = b;
-        b = t;
-    }
-    return a > 0 ? a : vec;
-}
-
 static const rocke_type_t* packed_only_candidate(const rocke_type_t* t)
 {
     return (t != NULL && t->kind == ROCKE_TYPE_SMEM) ? t->elem : rocke_i_elem_of(t);
@@ -687,16 +660,30 @@ bool rocke_i_is_packed_only(const rocke_type_t* t)
            && (elem->scalar == ROCKE_SCALAR_I4 || elem->scalar == ROCKE_SCALAR_U4);
 }
 
+const char* rocke_i_packed_only_value_error(const char* op_name,
+                                            const rocke_type_t* t,
+                                            char* buf,
+                                            size_t cap)
+{
+    if(!rocke_i_is_packed_only(t))
+    {
+        return NULL;
+    }
+    snprintf(buf,
+             cap,
+             "%s: %s values travel packed in 32-bit words and have no scalar or vector form -- "
+             "keep them in i32 storage and unpack explicitly",
+             op_name,
+             packed_only_candidate(t)->name);
+    return buf;
+}
+
 void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t)
 {
-    if(rocke_i_is_packed_only(t))
+    char err[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_packed_only_value_error(op_name, t, err, sizeof err) != NULL)
     {
-        const rocke_type_t* elem = packed_only_candidate(t);
-        throw ckc::TypeError(
-            ckc::format_error("%s: %s values travel packed in 32-bit words and have no scalar or "
-                              "vector form -- keep them in i32 storage and unpack explicitly",
-                              op_name,
-                              elem->name));
+        throw ckc::TypeError(err);
     }
 }
 
