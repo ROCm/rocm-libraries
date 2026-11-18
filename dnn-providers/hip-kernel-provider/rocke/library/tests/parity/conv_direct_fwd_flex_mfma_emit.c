@@ -69,65 +69,65 @@ static int make_cfg(int idx, rocke_fwd_flex_mfma_spec_t* s, const char** arch)
     *arch = "gfx950";
     switch(idx)
     {
-    case 0: /* bf16, 3x3 s2 pad 1, bk 256, split_c 1 */
+    case 0: /* bf16, 3x3 s2 pad 1, block_k 256, split_c 1 */
         s->problem = make_problem("bf16");
         s->problem.stride = 2;
         return 0;
-    case 1: /* fp16, 3x3 s2 pad 1, bk 128, split_c 1 */
+    case 1: /* fp16, 3x3 s2 pad 1, block_k 128, split_c 1 */
         s->problem = make_problem("fp16");
         s->problem.stride = 2;
-        s->bk = 128;
+        s->block_k = 128;
         return 0;
-    case 2: /* bf16, 1x1 s2, bk 256, split_c 2 */
+    case 2: /* bf16, 1x1 s2, block_k 256, split_c 2 */
         s->problem = make_problem("bf16");
         set_geom(&s->problem, 1, 1, 0, -1, 2, 1, 1);
         s->split_c = 2;
         return 0;
-    case 3: /* fp16, 2x2 s2, bk 128, split_c 4 */
+    case 3: /* fp16, 2x2 s2, block_k 128, split_c 4 */
         s->problem = make_problem("fp16");
         set_geom(&s->problem, 2, 2, 0, -1, 2, 1, 1);
-        s->bk = 128;
+        s->block_k = 128;
         s->split_c = 4;
         return 0;
-    case 4: /* bf16, 3x3 dil 2 pad 2, bk 128, split_c 8 */
+    case 4: /* bf16, 3x3 dil 2 pad 2, block_k 128, split_c 8 */
         s->problem = make_problem("bf16");
         set_geom(&s->problem, 3, 3, 2, -1, 1, 2, 2);
-        s->bk = 128;
+        s->block_k = 128;
         s->split_c = 8;
         return 0;
-    case 5: /* fp16, 3x3 dil 12 pad 12, bk 256, split_c 1 */
+    case 5: /* fp16, 3x3 dil 12 pad 12, block_k 256, split_c 1 */
         s->problem = make_problem("fp16");
         set_geom(&s->problem, 3, 3, 12, -1, 1, 12, 12);
         return 0;
-    case 6: /* bf16, 1x3 dil 1x3 pad 0x3, bk 256, split_c 2 */
+    case 6: /* bf16, 1x3 dil 1x3 pad 0x3, block_k 256, split_c 2 */
         s->problem = make_problem("bf16");
         set_geom(&s->problem, 1, 3, 0, 3, 1, 1, 3);
         s->split_c = 2;
         return 0;
-    case 7: /* fp16, 7x1 pad 3x0, bk 128, split_c 1 */
+    case 7: /* fp16, 7x1 pad 3x0, block_k 128, split_c 1 */
         s->problem = make_problem("fp16");
         set_geom(&s->problem, 7, 1, 3, 0, 1, 1, 1);
-        s->bk = 128;
+        s->block_k = 128;
         return 0;
-    case 8: /* bf16, 1x11 dil 1x3 pad 0x15, bk 128, split_c 2 */
+    case 8: /* bf16, 1x11 dil 1x3 pad 0x15, block_k 128, split_c 2 */
         s->problem = make_problem("bf16");
         set_geom(&s->problem, 1, 11, 0, 15, 1, 1, 3);
-        s->bk = 128;
+        s->block_k = 128;
         s->split_c = 2;
         return 0;
-    case 9: /* fp16, 1x7 dil 1x3 pad 0x9, bk 256, split_c 4 */
+    case 9: /* fp16, 1x7 dil 1x3 pad 0x9, block_k 256, split_c 4 */
         s->problem = make_problem("fp16");
         set_geom(&s->problem, 1, 7, 0, 9, 1, 1, 3);
         s->split_c = 4;
         return 0;
-    case 10: /* bf16, 3x3 dil 24 pad 24, bk 256, split_c 8 */
+    case 10: /* bf16, 3x3 dil 24 pad 24, block_k 256, split_c 8 */
         s->problem = make_problem("bf16");
         set_geom(&s->problem, 3, 3, 24, -1, 1, 24, 24);
         s->split_c = 8;
         return 0;
-    case 11: /* rejected by both engines: bk 192 */
+    case 11: /* rejected by both engines: block_k 192 */
         s->problem = make_problem("bf16");
-        s->bk = 192;
+        s->block_k = 192;
         return 0;
     case 12: /* rejected by both engines: gfx942 */
         s->problem = make_problem("bf16");

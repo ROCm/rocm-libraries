@@ -11,18 +11,18 @@
 #
 # The problem is N=2, 20x24, C=512, K=96 with the filter / padding / stride /
 # dilation of the row. Config index map (gfx950 unless noted):
-#   0  bf16, 3x3 s2 pad 1, bk 256, split_c 1
-#   1  fp16, 3x3 s2 pad 1, bk 128, split_c 1
-#   2  bf16, 1x1 s2, bk 256, split_c 2
-#   3  fp16, 2x2 s2, bk 128, split_c 4
-#   4  bf16, 3x3 dil 2 pad 2, bk 128, split_c 8
-#   5  fp16, 3x3 dil 12 pad 12, bk 256, split_c 1
-#   6  bf16, 1x3 dil 1x3 pad 0x3, bk 256, split_c 2
-#   7  fp16, 7x1 pad 3x0, bk 128, split_c 1
-#   8  bf16, 1x11 dil 1x3 pad 0x15, bk 128, split_c 2
-#   9  fp16, 1x7 dil 1x3 pad 0x9, bk 256, split_c 4
-#  10  bf16, 3x3 dil 24 pad 24, bk 256, split_c 8
-#  11  rejected by both engines: bk 192
+#   0  bf16, 3x3 s2 pad 1, block_k 256, split_c 1
+#   1  fp16, 3x3 s2 pad 1, block_k 128, split_c 1
+#   2  bf16, 1x1 s2, block_k 256, split_c 2
+#   3  fp16, 2x2 s2, block_k 128, split_c 4
+#   4  bf16, 3x3 dil 2 pad 2, block_k 128, split_c 8
+#   5  fp16, 3x3 dil 12 pad 12, block_k 256, split_c 1
+#   6  bf16, 1x3 dil 1x3 pad 0x3, block_k 256, split_c 2
+#   7  fp16, 7x1 pad 3x0, block_k 128, split_c 1
+#   8  bf16, 1x11 dil 1x3 pad 0x15, block_k 128, split_c 2
+#   9  fp16, 1x7 dil 1x3 pad 0x9, block_k 256, split_c 4
+#  10  bf16, 3x3 dil 24 pad 24, block_k 256, split_c 8
+#  11  rejected by both engines: block_k 192
 #  12  rejected by both engines: gfx942 (no 16-byte LDS DMA)
 #  13  rejected by both engines: C = 96 (not a multiple of 64)
 #  14  rejected by both engines: K = 100 (not a multiple of 8)
@@ -60,18 +60,22 @@ def _spec(idx: int):
     h = "fp16"
     cfgs = {
         0: (S(problem=_p(stride=2)), "gfx950"),
-        1: (S(problem=_p(stride=2, dtype=h), bk=128), "gfx950"),
+        1: (S(problem=_p(stride=2, dtype=h), block_k=128), "gfx950"),
         2: (S(problem=_p(KH=1, KW=1, PAD=0, stride=2), split_c=2), "gfx950"),
         3: (
-            S(problem=_p(KH=2, KW=2, PAD=0, stride=2, dtype=h), bk=128, split_c=4),
+            S(problem=_p(KH=2, KW=2, PAD=0, stride=2, dtype=h), block_k=128, split_c=4),
             "gfx950",
         ),
-        4: (S(problem=_p(PAD=2, dil=(2, 2)), bk=128, split_c=8), "gfx950"),
+        4: (S(problem=_p(PAD=2, dil=(2, 2)), block_k=128, split_c=8), "gfx950"),
         5: (S(problem=_p(PAD=12, dil=(12, 12), dtype=h)), "gfx950"),
         6: (S(problem=_p(KH=1, PAD=0, pad_w=3, dil=(1, 3)), split_c=2), "gfx950"),
-        7: (S(problem=_p(KH=7, KW=1, PAD=3, pad_w=0, dtype=h), bk=128), "gfx950"),
+        7: (S(problem=_p(KH=7, KW=1, PAD=3, pad_w=0, dtype=h), block_k=128), "gfx950"),
         8: (
-            S(problem=_p(KH=1, KW=11, PAD=0, pad_w=15, dil=(1, 3)), bk=128, split_c=2),
+            S(
+                problem=_p(KH=1, KW=11, PAD=0, pad_w=15, dil=(1, 3)),
+                block_k=128,
+                split_c=2,
+            ),
             "gfx950",
         ),
         9: (
@@ -79,7 +83,7 @@ def _spec(idx: int):
             "gfx950",
         ),
         10: (S(problem=_p(PAD=24, dil=(24, 24)), split_c=8), "gfx950"),
-        11: (S(problem=_p(), bk=192), "gfx950"),
+        11: (S(problem=_p(), block_k=192), "gfx950"),
         12: (S(problem=_p()), "gfx942"),
         13: (S(problem=_p(C=96)), "gfx950"),
         14: (S(problem=_p(K=100)), "gfx950"),

@@ -25,7 +25,7 @@
  *
  * AOT: the kernel declares the forward direct-conv kernarg block of
  * rocke_conv_direct_arg_names("fwd"). Batch, extents and both channel counts
- * are runtime; the filter, padding, stride, dilation, dtype, bk and split_c
+ * are runtime; the filter, padding, stride, dilation, dtype, block_k and split_c
  * are baked.
  */
 #ifndef ROCKE_INSTANCE_CONV_DIRECT_FWD_FLEX_MFMA_H
@@ -48,7 +48,7 @@ extern "C" {
  *  @dataclass(frozen=True)
  *  class FwdFlexMfmaSpec:
  *      problem: DirectConvProblem
- *      bk: int = 256                # output channels per block tile (256 or 128)
+ *      block_k: int = 256         # output channels per block tile (256 or 128)
  *      split_c: int = 1             # pieces of the channel chunks
  *      name: str = "fwd_flex_mfma"
  *      wave_size: int = 64
@@ -56,7 +56,7 @@ extern "C" {
 typedef struct rocke_fwd_flex_mfma_spec
 {
     rocke_direct_conv_problem_t problem;
-    int bk; /* default 256 */
+    int block_k; /* default 256 */
     int split_c; /* default 1 */
     const char* name; /* default "fwd_flex_mfma" */
     int wave_size; /* default 64 */
@@ -68,7 +68,7 @@ rocke_fwd_flex_mfma_spec_t rocke_fwd_flex_mfma_spec_default(void);
 /* Derived geometry (Python @property / methods). */
 int rocke_fwd_flex_mfma_kt(const rocke_fwd_flex_mfma_spec_t* spec);
 int rocke_fwd_flex_mfma_threads_per_block(const rocke_fwd_flex_mfma_spec_t* spec);
-/* spec.items() -> ceil(N * Ho * Wo / 256) * ceil(total_k / bk) * split_c. */
+/* spec.items() -> ceil(N * Ho * Wo / 256) * ceil(total_k / block_k) * split_c. */
 long long rocke_fwd_flex_mfma_items(const rocke_fwd_flex_mfma_spec_t* spec);
 /* spec.grid() -> (min(items, 256), 1, 1): the persistent grid. */
 void rocke_fwd_flex_mfma_grid(const rocke_fwd_flex_mfma_spec_t* spec, int grid[3]);
@@ -76,7 +76,7 @@ void rocke_fwd_flex_mfma_grid(const rocke_fwd_flex_mfma_spec_t* spec, int grid[3
 long long rocke_fwd_flex_mfma_workspace_bytes(const rocke_fwd_flex_mfma_spec_t* spec);
 
 /* kernel_name(): kernel_name_join(name, f{KH}x{KW}, p{PAD}x{PAD_W}, s{stride},
- * d{dil_h}x{dil_w}, k{bk}, sc{split_c}, [bf16]). */
+ * d{dil_h}x{dil_w}, bk{block_k}, sc{split_c}, [bf16]). */
 rocke_status_t rocke_fwd_flex_mfma_kernel_name(const rocke_fwd_flex_mfma_spec_t* spec,
                                                char* out,
                                                size_t out_cap);

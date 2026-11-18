@@ -340,7 +340,7 @@ def conv_direct_fwd_flex_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`FwdFlexMfmaSpec` -> flat dict (problem nested, dtype included)."""
     return dict(
         problem=_fwd_small_problem_dict(spec.problem),
-        bk=spec.bk,
+        block_k=spec.block_k,
         split_c=spec.split_c,
         name=spec.name,
         wave_size=spec.wave_size,
