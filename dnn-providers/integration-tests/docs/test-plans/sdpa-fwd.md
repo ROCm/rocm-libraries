@@ -927,12 +927,31 @@ that the engine is correct for it. Examples:
   result depends on the input data and on the memory contents.
 
 ALMIOPEN-3123 and ALMIOPEN-3124 are an exception to this rule: their entries
-cover the cases observed to fail, not every case with the trigger. Most
-trigger cases pass or the engine declines them, and the uncovered cases keep
-running so they still exercise the engine. ALMIOPEN-3123 has 2,360 trigger
-cases with no entry; 156 of them ran, 153 passing on gfx942 and gfx950 and 3
-passing on gfx942 but declined on gfx950, the rest declined on both.
+cover the cases observed to fail, not every case with the trigger. The
+uncovered cases keep running, and the engine declines them or they pass.
+ALMIOPEN-3123 has 2,360 trigger cases with no entry. Before the ALMIOPEN-3123
+fix (rocm-libraries #15768), 156 of them ran: 153 passed on gfx942 and gfx950,
+and 3 passed on gfx942 but were declined on gfx950. The rest were declined on
+both. With the fix, `ASM_SDPA_ENGINE` declines a graph that has a block mask,
+or a dropout mask and a dropout scale. On the `quick`, `standard` and
+`comprehensive` tiers, the fix moved 123 cases on gfx942 and 120 on gfx950
+from passed to declined, and no case failed. The `full` tier was not run after
+the fix. The ALMIOPEN-3123 entries stay until a run without them shows that
+the engine declines every case that they match (section 10.4).
 ALMIOPEN-3124 has 313 trigger cases with no entry, all declined on both.
+
+The `ASM_SDPA_ENGINE` results on the `SdpaFwdPlan` cases with the fix, per
+tier (each tier's own cases), with the GPU reference and the default fill:
+
+| Tier | Cases | gfx942 passed / declined / skipped | gfx950 passed / declined / skipped |
+|---|---|---|---|
+| quick | 1,500 | 170 / 1,204 / 126 | 150 / 1,342 / 8 |
+| standard | 9,519 | 320 / 7,625 / 1,574 | 302 / 8,080 / 1,137 |
+| comprehensive | 4,622 | 151 / 3,843 / 628 | 137 / 4,042 / 443 |
+
+No case failed. A skipped case matches a `[[test_skips]]` entry of
+`ASM_SDPA_ENGINE.toml`. The skips differ by GPU because the `FP8_E4M3_FNUZ`
+entry applies on gfx942 only.
 
 Use a list of exact names from measured failures only for a defect that has no
 known trigger. For example, the ALMIOPEN-3212 entry names the one case that
