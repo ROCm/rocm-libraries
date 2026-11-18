@@ -139,9 +139,9 @@ bool isSupportedTypedInstruction(const std::string& mnemonic) {
         "v_lshrrev_b32", "v_max3_num_f32", "v_max_num_f32", "v_mov_b32", "v_mov_b64",
         "v_mul_f32", "v_mul_hi_u32", "v_mul_i32_i24", "v_mul_lo_u32",
         "v_mul_u32_u24", "v_nop", "v_permlane16_swap_b32", "v_permlanex16_b32",
-        "v_pk_add_f32", "v_pk_mul_f32", "v_rcp_f32", "v_rcp_iflag_f32", "v_readfirstlane_b32",
+        "v_perm_b32", "v_pk_add_f32", "v_pk_mul_f32", "v_rcp_f32", "v_rcp_iflag_f32", "v_readfirstlane_b32",
         "v_readlane_b32", "v_sub_f32", "v_sub_nc_i32", "v_sub_u32", "v_subrev_nc_u32",
-        "v_swap_b32", "v_wmma_f32_16x16x32_bf16", "v_writelane_b32",
+        "v_swap_b32", "v_tanh_f32", "v_wmma_f32_16x16x32_bf16", "v_writelane_b32", "v_xor_b32",
         // Structural records selected by the target lowering.
         "s_branch", "s_cbranch_execnz", "s_cbranch_execz", "s_cbranch_scc0",
         "s_cbranch_scc1", "s_cbranch_vccnz", "s_cbranch_vccz", "s_set_vgpr_msb",
@@ -659,7 +659,7 @@ std::string validateCustomEncoding(std::string text, size_t itemIndex) {
     return text;
 }
 
-std::string validateStandaloneComment(std::string text, size_t itemIndex) {
+std::string validateStandaloneComment(const std::string& text, size_t itemIndex) {
     if (text.find_first_of("\r\n") != std::string::npos)
         fail(itemIndex, "field 'text' must be a single line");
     if (text.find('\0') != std::string::npos)
@@ -704,8 +704,12 @@ std::string emitAsm(const std::string& archName, uint32_t waveSize, const nb::li
             const std::string mnemonic = requireString(record, "mnemonic", itemIndex);
             const auto& mnemonicMap = archInfo->getMnemonicToIsaOpcodeMap();
             auto opcodeIt = mnemonicMap.find(mnemonic);
-            if (opcodeIt == mnemonicMap.end())
-                fail(itemIndex, "unknown instruction '" + mnemonic + "' for " + archName);
+            if (opcodeIt == mnemonicMap.end()) {
+                std::string message = "unknown instruction '" + mnemonic;
+                message += "' for ";
+                message += archName;
+                fail(itemIndex, message);
+            }
             if (!isSupportedTypedInstruction(mnemonic))
                 fail(itemIndex, "instruction '" + mnemonic +
                                     "' is unsupported by the T01 typed bridge allowlist");
@@ -845,6 +849,8 @@ std::string emitAsm(const std::string& archName, uint32_t waveSize, const nb::li
 
 }  // namespace
 
+// Called from python_bindings.cpp, which declares it, so it cannot have internal linkage.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void init_asm_bridge(nb::module_& m) {
     m.def("emit_asm", &emitAsm, nb::arg("arch"), nb::arg("wave_size"), nb::arg("items"),
           R"doc(Emit ordered, already-selected assembly records through temporary Asm IR.

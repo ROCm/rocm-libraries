@@ -1444,6 +1444,7 @@ DEF_BATCH(.format = VOP1_TRANSCENDENTAL,
     VSqrtF16Inst, "v_sqrt_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
     VSqrtF32Inst, "v_sqrt_f32",
+    VTanhF32Inst, "v_tanh_f32",
 )
 // Vector Transcendental — 64-bit
 DEF_BATCH(.format = VOP1_TRANSCENDENTAL, .flags = {Trans64},
