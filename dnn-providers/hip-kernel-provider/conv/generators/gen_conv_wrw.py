@@ -617,7 +617,7 @@ FILTERS = [
     ("1x1", 1, 1, 1, 1, 1, [0, 1], [0, 1], None),
     ("1x3", 3, 1, 1, 1, 1, [0, -1], [0, 1], None),
     # HiFi-GAN's dilated 1-D rows, in both layouts (channels-last otherwise falls to the
-    # generic tier, or to BLAS on gfx11).
+    # generic tier).
     ("1x3d5", 3, 1, 5, 1, 1, [0, -1], [0, 1], None),
     # HiFi-GAN's dilation-3 1x3 (the d5 row's tiles).
     ("1x3d3", 3, 1, 3, 1, 1, [0, -1], [0, 1], None),
@@ -629,8 +629,8 @@ FILTERS = [
     ("1x11d3", 11, 1, 3, 1, 1, [-1], [0], None),
     ("1x11d5", 11, 1, 5, 1, 1, [-1], [0], None),
     # Dilated 3x3 rows in both layouts: without channels-last configs a channels-last deeplab
-    # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+)
-    # or has no gfx11 config, and it falls to the BLAS path (30x on gfx1100).
+    # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+,
+    # except on gfx11) and it falls to the BLAS path (30x on gfx1100).
     ("3x3d4", 3, 1, 4, 3, 1, [0, -1], [0], None),
     # SSD300's dilation-6 3x3 (the d4 row's tiles).
     ("3x3d6", 3, 1, 6, 3, 1, [0, -1], [0], None),
@@ -1174,7 +1174,8 @@ def build_pb():
 
 # The generic tier (loop 8): few configs of runtime filter, strides and dilation, each declined
 # wherever a specialized config's class serves (its "spec", written by emit). (atoms per dtype,
-# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block[, shared-window dw])]), the measured best per arch: gfx950 on
+# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block[, shared-window dw])][, the tiles with a
+# block-based buffer twin, default all]), the measured best per arch: gfx950 on
 # 2-D 5x5 / 7x7 and 3-D 1x5x5 channels-last fp16 (1.5-1.9x over the BLAS path), gfx1201 on the
 # same and 1-D k3 (1.7-3.2x).
 GENERIC = [
@@ -1229,20 +1230,44 @@ GENERIC = [
             (CL, (64, 64, 4, 4, 32), 5, 8),
         ],
     ),
+    # gfx11 (wave32, 16 x 16 x 16 WMMA), chosen by a greedy cover of 19 candidate tiles timed on
+    # gfx1101 over the corpus wrw layers BLAS serves there and the specialized classes' layers.
+    # Channels-first elements: 128 x 64 at 2 taps for wide channel counts, 64 x 64 at 3, 64 x 64
+    # on 4 waves at 1 tap for short maps, 32 x 32 for few output channels (HiFi-GAN's 1-channel
+    # outputs, 1.34x the BLAS path where 64 x 64 gives 1.15x). Channel vectors: 64 x 32 at 9 taps
+    # and the shared windows for unit width stride. Within 1.2% of all 19 (geomean) on
+    # channels-first layers and 7% on channels-last. Block-based buffer twins on one tile a
+    # layout only (images past 2 GiB; listed last, the "pb" set).
+    (
+        {"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"},
+        0,
+        [
+            (CF, (128, 64, 4, 2, 32), 2),
+            (CF, (64, 64, 4, 2, 32), 3),
+            (CF, (64, 64, 2, 2, 32), 1),
+            (CF, (32, 32, 2, 2, 32), 3),
+            (CL, (64, 32, 4, 2, 32), 9),
+            (CL, (128, 64, 4, 2, 32), 5, 16),
+            (CL, (64, 64, 4, 2, 32), 9, 8),
+        ],
+        {0, 4},
+    ),
 ]
 
 
 def build_generic():
     dropped = 0
-    for atoms, xcd, tiles in GENERIC:
+    for atoms, xcd, tiles, *pb_tiles in GENERIC:
         for dtype, atom in atoms.items():
-            for lay, tile, taps, *window in tiles:
+            for t, (lay, tile, taps, *window) in enumerate(tiles):
                 wx = window[0] if window else 0  # dw: shared-window positions
                 c = C(atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0)
                 if valid(c, dtype):
                     CATALOG[dtype].extend(with_bpu(c))
-                    # Its block-based buffer twin: images past the 32-bit buffer range.
-                    CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
+                    # Its block-based buffer twin: images past the 32-bit buffer range (every
+                    # tile, or the entry's "pb" set).
+                    if not pb_tiles or t in pb_tiles[0]:
+                        CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
                 else:
                     dropped += 1
     return dropped

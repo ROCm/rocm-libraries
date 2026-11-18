@@ -2862,6 +2862,21 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({1, 10}, {1, 6})));
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({2, 5}, {6, 1})));
     EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
+    // gfx11 keeps them (BLAS is slow there): its WMMA config admits dilation 6 and 12, the
+    // same tile on gfx12's atom declines.
+    const auto wmma = [](const char* atom) {
+        auto f = genericFields();
+        f.atom = atom;
+        f.atomId = conv_wrw::atomIdOf(atom);
+        f.wk = 4;
+        f.wc = 2;
+        return f;
+    };
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1101", dilated({3, 3}, {6, 6})));
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1100", dilated({3, 3}, {12, 12})));
+    EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1151", dilated({3, 3}, {6, 1})));
+    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1201", dilated({3, 3}, {5, 5})));
+    EXPECT_FALSE(admits(wmma("wmma12_f16"), "gfx1201", dilated({3, 3}, {6, 6})));
 }
 
 TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesNarrowGroupsToTheVectorEngines)
