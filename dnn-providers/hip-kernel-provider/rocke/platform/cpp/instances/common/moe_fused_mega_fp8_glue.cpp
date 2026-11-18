@@ -32,6 +32,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h"
+#include "rocke/helper_rocke.helpers.quant.h"
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
 #include "rocke/instance_moe_fused_mega_fp8.h"
@@ -596,7 +597,7 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
                     b, rocke_b_smem_load_vN(b, ctx->WarpAmax_smem, pwidx, 1, rocke_f32(), 1), 0);
                 amax = rocke_b_fmax(b, amax, pw);
             }
-            scale = rocke_b_fmul(b, amax, rocke_b_rcp(b, ctx->c_fp8_max)); /* amax / 448 */
+            scale = rocke_b_fmul(b, amax, rocke_b_rcp(b, ctx->c_fp8_max)); /* amax / fp8 max */
 
             row_bc = rocke_b_scf_for_iter(
                 b, ctx->c0, ctx->c_block_m, rocke_b_const_i32(b, 1), NULL, 0, "rb", false, true);
@@ -1131,7 +1132,20 @@ rocke_kernel_def_t*
     /* ---- f32/const SSA constants ---- */
     ctx.c_neg_log2e = rocke_b_const_f32(b, -1.4426950408889634);
     ctx.one_f32 = rocke_b_const_f32(b, 1.0);
-    ctx.c_fp8_max = rocke_b_const_f32(b, ROCKE_MOE_FP8_FP8_MAX);
+    /* The hidden activation is requantized to the largest value of the fp8
+     * encoding the target converts to (240 for gfx942's FNUZ, 448 for OCP): the
+     * conversion does not saturate, so a block's largest values must land on it. */
+    {
+        char fp8_err[ROCKE_ERR_MSG_CAP];
+        double hidden_fp8_max;
+        if(rocke_quant_max_abs("fp8e4m3", arch, &hidden_fp8_max, fp8_err, sizeof(fp8_err))
+           != ROCKE_OK)
+        {
+            (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", fp8_err);
+            return NULL;
+        }
+        ctx.c_fp8_max = rocke_b_const_f32(b, hidden_fp8_max);
+    }
     ctx.c_floor = rocke_b_const_f32(b, ROCKE_MOE_FP8_AMAX_FLOOR);
 
     ctx.c_group_k = rocke_b_const_i32(b, ROCKE_MOE_FP8_GROUP_K);

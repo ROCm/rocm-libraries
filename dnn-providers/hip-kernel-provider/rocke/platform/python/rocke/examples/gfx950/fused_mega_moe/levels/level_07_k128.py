@@ -89,8 +89,8 @@ __all__ = [
 
 # Group block along the contraction axis (= 4 fp8_16x16x32 atoms).
 GROUP_K = 128
-# fp8e4m3 saturating clamp magnitude.
-FP8_MAX = quant_max_abs("fp8e4m3")  # 448.0
+# The largest value of gfx950's OCP e4m3: the requantization bound.
+FP8_MAX = quant_max_abs("fp8e4m3", arch="gfx950")  # 448.0
 # hand-tuned asm dynamic-quant amax floor.
 AMAX_FLOOR = 1e-6
 # L5: MI355X has 8 XCDs; the persistent-grid XCD remap groups consecutive

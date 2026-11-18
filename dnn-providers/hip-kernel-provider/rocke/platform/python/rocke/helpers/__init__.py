@@ -347,7 +347,6 @@ from .preshuffle import (
 from .quant import (
     LogicalQDType,
     QDType,
-    QUANT_MAX_ABS,
     dequantize_scalar_to_f32,
     ir_to_qdtype,
     quant_ir_type,
@@ -672,7 +671,6 @@ __all__ = [
     # Quantisation (f32 <-> {i8, fp8e4m3, bf8e5m2})
     "LogicalQDType",
     "QDType",
-    "QUANT_MAX_ABS",
     "dequantize_scalar_to_f32",
     "ir_to_qdtype",
     "quant_ir_type",

@@ -450,8 +450,8 @@ scaled and MX GEMM kernels need:
 unpack_i4_byte_to_pair_i32(b, packed_byte)
 unpack_i4_byte_to_pair_i8(b, packed_byte) # alias of _i32 today
 unpack_i4_byte_to_pair_f32(b, packed_byte)
-dequant_i4_byte_to_fp8_pair(b, packed_byte, *, inv_scale)
-dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
+dequant_i4_byte_to_fp8_pair(b, packed_byte, *, inv_scale, arch)
+dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale, arch)
 
 # OCP MX E8M0 shared-exponent decode + apply.
 # decode_mx_scale_e8m0(e8m0) -> f32 multiplier, per the OCP MX spec:
@@ -702,9 +702,8 @@ Higher-level helpers in `helpers/quant.py`:
 ```text
 QDType
 quant_ir_type(qdtype)
-QUANT_MAX_ABS # quant range bounds
-quant_max_abs(qdtype)
-quantize_scalar_f32(b, v, scale, qdtype, ...)
+quant_max_abs(qdtype, *, arch) # quant range bound on arch
+quantize_scalar_f32(b, v, *, inv_scale, qdtype, arch)
 dequantize_scalar_to_f32(b, v, scale, qdtype, ...)
 ir_to_qdtype(ir_type)
 ```

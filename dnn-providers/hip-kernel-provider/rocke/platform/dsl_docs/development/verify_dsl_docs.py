@@ -265,7 +265,6 @@ _imp(
         "LdsLayout",
         "TransposeLdsReader",
         "QDType",
-        "QUANT_MAX_ABS",
         "dequantize_scalar_to_f32",
         "ir_to_qdtype",
         "quant_ir_type",
@@ -720,7 +719,6 @@ check("BatchedGemmSpec + GroupedGemmSpec: build + LLVM", t_batched_grouped)
 section("quantization")
 
 from rocke.helpers import (
-    QUANT_MAX_ABS,
     quant_ir_type,
     quant_max_abs,
     ir_to_qdtype,
@@ -731,17 +729,18 @@ from rocke.helpers import (
 
 def t_quant() -> None:
     # The QDType "values" are plain strings.
-    assert quant_max_abs("fp8e4m3") == 448.0
-    assert quant_max_abs("bf8e5m2") == 57344.0
-    assert quant_max_abs("i8") == 127.0
-    assert QUANT_MAX_ABS["fp8e4m3"] == 448.0
+    assert quant_max_abs("fp8e4m3", arch="gfx950") == 448.0
+    assert quant_max_abs("fp8e4m3", arch="gfx942") == 240.0
+    assert quant_max_abs("bf8e5m2", arch="gfx950") == 57344.0
+    assert quant_max_abs("i8", arch="gfx950") == 127.0
     assert quant_ir_type("fp8e4m3").name == "fp8e4m3"
-    # round-trip via IR. quantize_scalar_f32 expects keyword inv_scale + qdtype.
+    # round-trip via IR. quantize_scalar_f32 expects keyword inv_scale, qdtype
+    # and arch.
     b = builder("t_quant")
     f = b.const_f32(0.5)
     inv_scale = b.const_f32(1.0)
     scale = b.const_f32(1.0)
-    q = quantize_scalar_f32(b, f, inv_scale=inv_scale, qdtype="fp8e4m3")
+    q = quantize_scalar_f32(b, f, inv_scale=inv_scale, qdtype="fp8e4m3", arch="gfx950")
     dequantize_scalar_to_f32(b, q, scale=scale)
     lower_kernel_to_llvm(b.kernel, arch="gfx950")
     assert ir_to_qdtype(quant_ir_type("fp8e4m3")) == "fp8e4m3"

@@ -42,7 +42,9 @@ test runs the Python engine alone there and both engines wherever the binding
 is supplied. ``all_engines_backend`` is the ``backend`` argument that runs those
 same engines through ``compile_kernel`` and similar entry points, and
 ``lower_spec_with_all_engines`` lowers an instance spec with them, each engine
-building the kernel with its own builder.
+building the kernel with its own builder (``instance_llvm_from_all_engines``
+does the same through an instance's binding entry point, for an instance with
+no ``rocke.core.backend.lower_*`` entry point).
 
 The helpers above drive each engine directly. ``assert_backend_lane_rejects``
 instead checks one refusal through the public ``lower_kernel_to_llvm``
@@ -59,6 +61,7 @@ the binding is absent.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import sys
 from collections.abc import Callable
@@ -87,6 +90,7 @@ __all__ = [
     "assert_engine_rejects_hip",
     "assert_refused_everywhere",
     "available_engines",
+    "instance_llvm_from_all_engines",
     "lower_hip_with_both_engines",
     "lower_hip_with_engine",
     "lower_spec_with_all_engines",
@@ -147,6 +151,37 @@ def lower_spec_with_all_engines(
     if "cpp" in available_engines():
         return lower_spec(spec, arch=arch, backend="both").llvm_text
     return lower_kernel_to_llvm(build_kernel(spec, arch=arch), arch=arch)
+
+
+def instance_llvm_from_all_engines(
+    spec: object,
+    arch: str,
+    *,
+    build_kernel: Callable[..., KernelDef],
+    binding: str,
+) -> str:
+    """The LLVM IR of the instance ``spec`` describes, for ``arch``: the Python
+    builder's kernel (``build_kernel(spec, arch=arch)``) lowered by the Python
+    engine and, with the ``rocke_engine`` binding, the C++ builder's, through
+    the binding's ``binding`` entry point (``<family>_lower_llvm``) fed the
+    spec's fields that are not None; the two texts must be the same byte for
+    byte.
+
+    For an instance with no ``rocke.core.backend.lower_*`` entry point
+    (:func:`lower_spec_with_all_engines` covers those).
+    """
+    python_ir = _python_llvm(build_kernel(spec, arch=arch), arch, None)
+    if "cpp" in available_engines():
+        fields = {
+            name: value
+            for name, value in dataclasses.asdict(spec).items()
+            if value is not None
+        }
+        native_ir = getattr(_require_native_engine(), binding)(fields, arch=arch)
+        assert (
+            native_ir == python_ir
+        ), f"the C++ builder emitted different LLVM IR for {binding} on {arch}"
+    return python_ir
 
 
 def _require_native_engine() -> ModuleType:

@@ -165,22 +165,29 @@ def dequant_i4_byte_to_fp8_pair(
     packed_byte: Value,
     *,
     inv_scale: Value,
+    arch: str,
 ) -> Tuple[Value, Value]:
-    """Full i4 -> fp8e4m3 dequant for one packed byte.
+    """Full i4 -> fp8e4m3 dequant for one packed byte, in ``arch``'s fp8
+    encoding.
 
     Pipeline (per element)::
 
     i32 = sext(sign_extract(byte, 4-bit field))
     f32 = sitofp(i32)
-    fp8 = cvt_f32_to_fp8(clamp(f32 * inv_scale, -448, 448))
+    fp8 = quantize_scalar_f32(f32, inv_scale, "fp8e4m3", arch)
+          # clamp to arch's fp8 bound, NaN kept, convert
 
     Returns ``(low_fp8, high_fp8)``. Composes the dequant + quant
-    pipeline via :func:`rocke.helpers.quantize_scalar_f32` so the
-    clamp constants stay aligned with the rest of the FP8 quant family.
+    pipeline via :func:`rocke.helpers.quantize_scalar_f32`, which owns the
+    clamp bound of ``arch``'s encoding (``fp8_max``).
     """
     low_f32, high_f32 = unpack_i4_byte_to_pair_f32(b, packed_byte)
-    low_fp8 = quantize_scalar_f32(b, low_f32, inv_scale=inv_scale, qdtype="fp8e4m3")
-    high_fp8 = quantize_scalar_f32(b, high_f32, inv_scale=inv_scale, qdtype="fp8e4m3")
+    low_fp8 = quantize_scalar_f32(
+        b, low_f32, inv_scale=inv_scale, qdtype="fp8e4m3", arch=arch
+    )
+    high_fp8 = quantize_scalar_f32(
+        b, high_f32, inv_scale=inv_scale, qdtype="fp8e4m3", arch=arch
+    )
     return low_fp8, high_fp8
 
 
@@ -189,11 +196,16 @@ def dequant_i4_byte_to_bf8_pair(
     packed_byte: Value,
     *,
     inv_scale: Value,
+    arch: str,
 ) -> Tuple[Value, Value]:
     """bf8e5m2 sibling of :func:`dequant_i4_byte_to_fp8_pair`."""
     low_f32, high_f32 = unpack_i4_byte_to_pair_f32(b, packed_byte)
-    low_bf8 = quantize_scalar_f32(b, low_f32, inv_scale=inv_scale, qdtype="bf8e5m2")
-    high_bf8 = quantize_scalar_f32(b, high_f32, inv_scale=inv_scale, qdtype="bf8e5m2")
+    low_bf8 = quantize_scalar_f32(
+        b, low_f32, inv_scale=inv_scale, qdtype="bf8e5m2", arch=arch
+    )
+    high_bf8 = quantize_scalar_f32(
+        b, high_f32, inv_scale=inv_scale, qdtype="bf8e5m2", arch=arch
+    )
     return low_bf8, high_bf8
 
 

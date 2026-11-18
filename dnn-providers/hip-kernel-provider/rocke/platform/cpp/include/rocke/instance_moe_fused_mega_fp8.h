@@ -89,8 +89,6 @@ extern "C" {
 
 /* GROUP_K: 128-wide contraction scale group (= 4 fp8_16x16x32 atoms). */
 #define ROCKE_MOE_FP8_GROUP_K 128
-/* FP8_MAX: quant_max_abs("fp8e4m3") == 448.0. */
-#define ROCKE_MOE_FP8_FP8_MAX 448.0
 /* AMAX_FLOOR: pyisa dynamic-quant amax floor. */
 #define ROCKE_MOE_FP8_AMAX_FLOOR 1e-6
 /* DTLA_CHUNK: 16-byte direct-to-LDS payload cap (global_load_lds_dwordx4). */

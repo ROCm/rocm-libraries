@@ -5,7 +5,9 @@
 These pin the three ways an unbuildable fp8 mega spec must fail at build time
 instead of inside comgr or at kernel load: an MFMA atom the arch's MMA catalog
 does not list, a wave32 arch, and a tiling whose total LDS overruns the per-WG
-budget. On-device numeric verification lives under ``examples/gfx950``.
+budget; and that the hidden activation is requantized to the largest value of
+the target's e4m3 encoding. On-device numeric verification lives under
+``examples/gfx950``.
 """
 
 from __future__ import annotations
@@ -141,6 +143,36 @@ class TestMoeFusedMegaFp8LdsBudget(unittest.TestCase):
         self.assertIn(str(total), msg)
         self.assertIn(str(cap), msg)
         self.assertIn("Hidden_smem", msg)
+
+
+class TestMoeFusedMegaFp8HiddenRequantBound(unittest.TestCase):
+    def test_requantizes_to_the_largest_value_of_the_target_encoding(self):
+        """The block scale is ``amax / bound``, so the block's largest value
+        converts to the bound: 240 for gfx942's e4m3 FNUZ (448 would convert to
+        NaN there; the conversion does not saturate), 448 for gfx950's OCP
+        e4m3. Both engines' builders emit the same IR."""
+        from rocke.core.lower_llvm import llvm_f32_literal
+        from rocke.instances.common.moe_fused_mega_fp8 import (
+            build_moe_fused_mega_gemm_fp8,
+        )
+        from rocke.tests.engines import instance_llvm_from_all_engines
+
+        def reciprocal_of(bound):
+            return f"= fdiv float {llvm_f32_literal(1.0)}, {llvm_f32_literal(bound)}\n"
+
+        for arch, spec, bound, other in (
+            ("gfx942", _spec(gate_up_k=32, down_k=32), 240.0, 448.0),
+            ("gfx950", _spec(), 448.0, 240.0),
+        ):
+            with self.subTest(arch=arch):
+                text = instance_llvm_from_all_engines(
+                    spec,
+                    arch,
+                    build_kernel=build_moe_fused_mega_gemm_fp8,
+                    binding="moe_fused_mega_fp8_lower_llvm",
+                )
+                self.assertEqual(text.count(reciprocal_of(bound)), 1)
+                self.assertNotIn(reciprocal_of(other), text)
 
 
 if __name__ == "__main__":

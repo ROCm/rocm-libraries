@@ -562,7 +562,8 @@ qy[m, n] = quantise(y[m, n], inv_scale=1/yscale[m])
 ```
 
 `out_dtype in {i8, fp8e4m3, bf8e5m2}` -- the only difference between
-the three is the `quant_max` clamp (`127` / `448` / `57344`) and the
+the three is the `quant_max` clamp (`127`, or the largest value of the
+target's fp8 / bf8 encoding: `240` / `448` / `57344`) and the
 trailing cast (`cvt_f32_to_i8_sat` / `cvt_f32_to_fp8` /
 `cvt_f32_to_bf8`). Two-pass row kernel: pass 1 streams `x`, computes
 the amax over `y = x * smscale`; pass 2 re-loads `smscale` and emits
@@ -680,9 +681,11 @@ Quantisation-specific failure modes :
 - `eps` clamp on `amax` is missing: an all-zero row produces `+inf`
  for `1/yscale`, and the `cvt_f32_to_<q>` of the scaled zero
  (NaN) is NaN: the fp8 / bf8 conversions do not saturate.
-- `quant_max` constant divergence vs CK Tile (`127.0f` for i8,
- `448.0f` for fp8e4m3, `57344.0f` for bf8e5m2). Use
- `helpers.quant.quant_max_abs(qdtype)` to stay aligned.
+- `quant_max` constant divergence from the target's encoding (`127.0f`
+ for i8; for fp8e4m3 `240.0f` on gfx942 (FNUZ) and `448.0f` on OCP
+ targets; `57344.0f` for bf8e5m2). A bound above the encoding's largest
+ value turns the largest outputs into NaN. Use
+ `helpers.quant.quant_max_abs(qdtype, arch=arch)` to stay aligned.
 - Integer round mode: i8 quant uses `llvm.rint.f32` (round-to-
  nearest-even). Truncation (`fptosi`) differs at `.5` boundaries.
 

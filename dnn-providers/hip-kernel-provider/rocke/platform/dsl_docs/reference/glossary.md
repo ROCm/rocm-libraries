@@ -50,7 +50,7 @@ AMDGPU wave64 cross-lane permute via LDS. Lane `l` reads `data[(addr[l] >> 2) & 
 
 ## FP8
 
-8-bit floating-point storage. `FP8E4M3`: 4 exp / 3 mantissa, max abs 448. `BF8E5M2`: 5 exp / 2 mantissa, max abs ~57344.
+8-bit floating-point storage. `FP8E4M3`: 4 exp / 3 mantissa, max abs 448 (OCP) or 240 (the FNUZ encoding of gfx942). `BF8E5M2`: 5 exp / 2 mantissa, max abs ~57344.
 
 ## GEMM
 

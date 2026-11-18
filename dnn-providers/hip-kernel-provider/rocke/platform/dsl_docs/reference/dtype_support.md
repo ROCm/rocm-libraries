@@ -467,8 +467,12 @@ bucket the ticket calls out):
 | stochastic rounding (any quant) | not implemented ("v2 follow-on") | [M] |
 
 Rounding/saturation that **is** present: round-to-nearest-even + saturating
-clamp for all `f32→{i8,fp8e4m3,bf8e5m2}` (`quant.py:141-204`, `ir.py:1128-1139`);
-clamp magnitudes `i8=127`, `fp8e4m3=448`, `bf8e5m2=57344` (`quant.py:66-70`).
+clamp for all `f32→{i8,fp8e4m3,bf8e5m2}` in `quantize_scalar_f32`
+([quant.py](../../python/rocke/helpers/quant.py)); the clamp magnitude is
+`quant_max_abs(qdtype, arch=...)`: `i8=127`, and for fp8 / bf8 the largest
+value of the target's encoding (`fp8e4m3` 240 on gfx942's FNUZ, 448 on OCP;
+`bf8e5m2` 57344). The fp8 / bf8 conversions themselves do not saturate, and
+the helper keeps NaN as NaN.
 
 ---
 

@@ -11,7 +11,8 @@ MoE per-expert path with fp8 e4m3 operands and per-128-block f32 scales:
         dequant fold (group-accumulator pattern, scale applied POST-MFMA)
       -> SiLU(gate_dq) * up_dq in f32
       -> DYNAMIC-QUANTIZE the f32 Hidden to fp8 (per-128-block-along-inter,
-         per-row amax/448 scale), stage into a PERSISTENT LDS Hidden_smem,
+         scale amax / the largest value of the target's fp8 encoding), stage
+         into a PERSISTENT LDS Hidden_smem,
          and stash the per-block dynamic scales in an LDS scratch.
       -> GEMM2 (down) -- fp8 Hidden . fp8 W_down -> f32 acc, dequant by
          (hidden_dyn_scale * down_scale) -> weighted atomic reduce into Y.
@@ -291,8 +292,6 @@ def _emit_mfma_down(
 
 # Group block along the contraction axis (= 4 fp8_16x16x32 atoms).
 GROUP_K = 128
-# fp8e4m3 saturating clamp magnitude.
-FP8_MAX = quant_max_abs("fp8e4m3")  # 448.0
 # pyisa dynamic-quant amax floor.
 AMAX_FLOOR = 1e-6
 
@@ -1813,7 +1812,10 @@ def build_moe_fused_mega_gemm_fp8(
 
     c_neg_log2e = b.const_f32(-1.4426950408889634)
     one_f32 = b.const_f32(1.0)
-    c_fp8_max = b.const_f32(FP8_MAX)
+    # The hidden activation is requantized to the largest value of the fp8
+    # encoding the target converts to (240 for gfx942's FNUZ, 448 for OCP): the
+    # conversion does not saturate, so a block's largest values must land on it.
+    c_fp8_max = b.const_f32(quant_max_abs("fp8e4m3", arch=arch))
     c_floor = b.const_f32(AMAX_FLOOR)
 
     c_group_k = b.const_i32(GROUP_K)
@@ -1954,7 +1956,7 @@ def build_moe_fused_mega_gemm_fp8(
                     0,
                 )
                 amax = b.fmax(amax, pw)
-            scale = b.fmul(amax, b.rcp(c_fp8_max))  # amax / 448
+            scale = b.fmul(amax, b.rcp(c_fp8_max))  # amax / fp8 max
             row_bc = b.scf_for_iter(c0, c_block_m, b.const_i32(1), [], iv_name="rb")
             with row_bc as rr:
                 b.smem_store_vN(scale_view.base, [rr, blk], scale, 1)

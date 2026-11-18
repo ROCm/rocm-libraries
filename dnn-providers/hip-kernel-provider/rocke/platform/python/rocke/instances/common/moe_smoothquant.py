@@ -220,6 +220,12 @@ def is_valid_spec(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Tuple[bool,
             f"v_cvt_pk_{{fp8,bf8}}_f32 conversion; {arch} (family "
             f"{target.family!r}) has no fp8/bf8 pack op -- use out_dtype='i8'"
         )
+    # The fp8 / bf8 bound is that of the target's encoding; a target with no
+    # known encoding cannot be quantized to.
+    try:
+        quant_max_abs(spec.out_dtype, arch=arch)
+    except ValueError as error:
+        return False, str(error)
     if spec.topk < 1:
         return False, f"topk must be >= 1 (got {spec.topk})"
     if spec.experts < 1:
@@ -271,8 +277,8 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
     only cross-lane operation is :func:`block_lds_reduce` (an LDS tree
     over all ``block_size`` lanes, no wave shuffle), so the kernel is
     wave-size agnostic and correct on wave64 (gfx950) and wave32
-    (gfx1151). The default ``"gfx950"`` keeps the wave64 build
-    byte-identical.
+    (gfx1151). For fp8 / bf8 output ``arch`` also picks the bound of its
+    encoding (:func:`quant_max_abs`).
     """
     ok, why = is_valid_spec(spec, arch)
     if not ok:
@@ -280,7 +286,7 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
 
     io_ty = io_ir_type(spec.dtype)
     q_ty = quant_ir_type(spec.out_dtype)
-    qmax = quant_max_abs(spec.out_dtype)
+    qmax = quant_max_abs(spec.out_dtype, arch=arch)
 
     BS, VEC, N = spec.block_size, spec.vec, spec.n_per_block
     topk = spec.topk
@@ -414,7 +420,7 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
     # build a QY tile distribution identical to the X distribution,
     # populate a :class:`StaticDistributedTensor` of dtype ``q_ty`` with
     # the already-scaled f32 chunk values, and let :func:`store_tile`
-    # emit the saturating cvt + ``vec_pack`` + one coalesced
+    # emit the cvt + ``vec_pack`` + one coalesced
     # ``global_store_vN`` per access -- same QY bytes, no hand-rolled
     # ``byte_off`` math.
     chunks = spec.elems_per_thread // VEC
@@ -444,7 +450,11 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])
                 q = quantize_scalar_f32(
-                    b, y_f32, inv_scale=inv_yscale, qdtype=spec.out_dtype
+                    b,
+                    y_f32,
+                    inv_scale=inv_yscale,
+                    qdtype=spec.out_dtype,
+                    arch=arch,
                 )
                 col = b.add(n_off, b.const_i32(i))
                 qy_tile.store_scalar(b, b.const_i32(0), col, value=q)

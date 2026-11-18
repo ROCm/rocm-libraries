@@ -205,7 +205,7 @@ typedef struct rocke_moe_fp8_build_ctx
     rocke_value_t* c0; /* const_i32(0)                              */
     rocke_value_t* c_neg_log2e; /* const_f32(-1.4426950408889634)            */
     rocke_value_t* one_f32; /* const_f32(1.0)                            */
-    rocke_value_t* c_fp8_max; /* const_f32(FP8_MAX)                        */
+    rocke_value_t* c_fp8_max; /* const_f32(the target's fp8e4m3 max)     */
     rocke_value_t* c_floor; /* const_f32(AMAX_FLOOR)                     */
     rocke_value_t* c_group_k; /* const_i32(GROUP_K)                        */
     rocke_value_t* c_threads; /* const_i32(block_size)                     */

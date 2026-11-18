@@ -1890,7 +1890,7 @@ class _Lowerer:
             if ity == "f64":
                 return _fp64_hex(val)
             if ity == "f32":
-                return _fp32_hex(val)
+                return llvm_f32_literal(val)
             if ity == "f16":
                 return _fp16_hex(val)
             return str(int(val))
@@ -3421,7 +3421,7 @@ class _Lowerer:
 
     def _op_math_rcp(self, op: Op) -> None:
         (v,) = op.operands
-        one = _fp32_hex(1.0) if v.type.name == "f32" else "1.000000e+00"
+        one = llvm_f32_literal(1.0) if v.type.name == "f32" else "1.000000e+00"
         self._current().emit(
             f"  {op.result.name} = fdiv {_llvm_type(v.type)} {one}, {self._operand(v)}"
         )
@@ -7785,7 +7785,9 @@ def _fp64_hex(x: float) -> str:
     return f"0x{bits:016X}"
 
 
-def _fp32_hex(x: float) -> str:
+def llvm_f32_literal(x: float) -> str:
+    """How this lowering spells an f32 constant operand ``x`` in LLVM IR text:
+    the hex bits of ``x`` rounded to f32 and widened to a double."""
     import struct
 
     # LLVM textual IR spells `float` hex constants as a 64-bit hex encoding of

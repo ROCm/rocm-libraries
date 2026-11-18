@@ -179,7 +179,7 @@ ceil_div, align_up # host integer math (no IR)
 non_default_fields, salted_kernel_name # spec-keyed kernel names
 
 # Quantization (helpers/quant.py)
-QDType, QUANT_MAX_ABS
+QDType
 quantize_scalar_f32, dequantize_scalar_to_f32
 quant_ir_type, quant_max_abs, ir_to_qdtype
 

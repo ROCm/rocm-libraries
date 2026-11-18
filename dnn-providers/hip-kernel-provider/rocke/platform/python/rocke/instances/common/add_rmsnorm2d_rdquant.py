@@ -140,6 +140,12 @@ def is_valid_spec(
             f"v_cvt_pk_{{fp8,bf8}}_f32 conversion; {arch} (family "
             f"{target.family!r}) has no fp8/bf8 pack op -- use out_dtype='i8'"
         )
+    # The fp8 / bf8 bound is that of the target's encoding; a target with no
+    # known encoding cannot be quantized to.
+    try:
+        quant_max_abs(spec.out_dtype, arch=arch)
+    except ValueError as error:
+        return False, str(error)
 
     ok, why = validate_io(
         IOSpecRule(
@@ -194,8 +200,9 @@ def build_add_rmsnorm2d_rdquant(
     (:func:`rocke.helpers.reduction.block_lds_reduce_pair`), which halves over
     ``block_size`` and barriers between steps with no wave64-only
     cross-lane op, so the same IR is correct on the gfx1151 wave32
-    target. ``arch`` is therefore only threaded into
-    :func:`is_valid_spec` (LDS / threads-per-block budgeting).
+    target. ``arch`` is threaded into :func:`is_valid_spec` (LDS /
+    threads-per-block budgeting) and, for fp8 / bf8 output, picks the
+    bound of its encoding (:func:`quant_max_abs`).
     """
     ok, why = is_valid_spec(spec, arch)
     if not ok:
@@ -203,7 +210,7 @@ def build_add_rmsnorm2d_rdquant(
 
     io_ty = io_ir_type(spec.dtype)
     q_ty = quant_ir_type(spec.out_dtype)
-    qmax = quant_max_abs(spec.out_dtype)
+    qmax = quant_max_abs(spec.out_dtype, arch=arch)
 
     BS, VEC, N = spec.block_size, spec.vec, spec.n_per_block
 
@@ -387,7 +394,11 @@ def build_add_rmsnorm2d_rdquant(
                 xg_f32 = cached_xg[k * VEC + i]
                 y_f32 = b.fmul(xg_f32, inv_rms)
                 q = quantize_scalar_f32(
-                    b, y_f32, inv_scale=inv_yscale, qdtype=spec.out_dtype
+                    b,
+                    y_f32,
+                    inv_scale=inv_yscale,
+                    qdtype=spec.out_dtype,
+                    arch=arch,
                 )
                 col = b.add(n_off, b.const_i32(i))
                 qy_tile.store_scalar(b, b.const_i32(0), col, value=q)
