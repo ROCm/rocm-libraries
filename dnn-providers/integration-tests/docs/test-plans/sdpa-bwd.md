@@ -1,8 +1,8 @@
 # SDPA Backward Test Plan
 
 > **Status: draft for review (ALMIOPEN-2894).** This plan has not been reviewed yet. It
-> follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (#13937, merged 2026-10-30). The RFC's methodology guide and
-> test-plans index do not exist yet, so this plan links the RFC's sections directly. The generator
+> follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (#13937, merged 2026-10-30).
+> It links the RFC's sections directly; the [test-plans index](README.md) lists the plans. The generator
 > is the source of truth for counts and budgets: `generate_sdpa_bwd_bundles.py --bundle-dir
 > dnn-providers/integration-tests/integration-test-bundles --dry-run --report`
 > declares 5,081 cases, 4,964 written (quick 57, PR 1,204, nightly 945, full 2,758; 4,456 of them from the Hugging Face census, §3.6) and 117 gated. The engine defects DEF-01 to DEF-08
