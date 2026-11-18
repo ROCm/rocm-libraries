@@ -95,6 +95,42 @@ struct K3ReduceArgs
     int quads; ///< tile 3: quads a block (16, 32 or 64; 4 threads each); unused otherwise
 };
 
+/// The width fold (a width stride s dividing the filter width, groups 1): ConvWrwFoldX writes
+/// channels-first x as x'[n][j C + c][d][h][u] = x[n][c][d][h][u s + j] (channels-last x is
+/// that layout already), the config runs the stride-1 problem over x' (C s channels, width L / s,
+/// filter width fw, padding ceil(p / s)), and ConvWrwReduceFold writes its taps back to dw:
+/// channel j C + c, folded tap tau -> dw tap (tau - pre) s + j + pad (taps outside the filter
+/// dropped).
+struct K3FoldArgs
+{
+    const void* x;
+    void* xf;
+    long long rows; ///< n x c x d x h: the rows of x
+    long long planes; ///< d x h
+    int c; ///< x's channels
+    int s; ///< the fold (the width stride)
+    int u; ///< folded width (L / s)
+    int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
+};
+
+/// ConvWrwReduceFold: the quad reduce of the folded problem's partials (`r`, its geometry: c the
+/// folded channels, taps the folded taps) in the deep reduce's order, written to the graph's dw.
+struct K3ReduceFoldArgs
+{
+    K3ReduceArgs r;
+    long long wk; ///< dw strides: output channel, input channel, tap (t r s flattened)
+    long long wc;
+    long long wtap;
+    int c; ///< the graph's input channels (folded channel j C + c)
+    int s; ///< the fold
+    int fw; ///< folded filter width
+    int pre; ///< folded width padding, ceil(pad / s)
+    int pad; ///< the graph's width padding
+    int filterW; ///< the graph's filter width
+    int outer; ///< filter depth x height (taps outside the width)
+    int flip; ///< true convolution: dw taps reflected
+};
+
 /// Three-bf16 (an fp32 graph, a config of math 1: the TF32 engine's): ConvWrwSplit writes
 /// x and dy, both packed, as 3N bf16 images each, xs = [x hi | x hi | x lo] and ys = [dy hi |
 /// dy lo | dy hi], so the bf16 kernel's sum over 3N images is x hi dy hi + x hi dy lo + x lo dy

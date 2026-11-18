@@ -4457,6 +4457,110 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
         o[(c + j) * a.wc] = K1Elem<T>::store(sum[j]);
 }
 
+/// The width fold's staging (ConvWrwFoldX, channels-first x): a thread per (row of x, folded
+/// position u) reads x's s elements u s .. u s + s - 1 and writes element j to folded channel
+/// j C + c of the same row, so consecutive threads write consecutive positions of each of the s
+/// folded rows. A bitwise copy.
+template <class T>
+__device__ inline void k3FoldX(const K3FoldArgs& a)
+{
+    const long long total = a.rows * a.u;
+    const long long stride = static_cast<long long>(gridDim.x) * blockDim.x;
+    const T* x = static_cast<const T*>(a.x);
+    T* xf = static_cast<T*>(a.xf);
+    const long long rowLen = static_cast<long long>(a.u) * a.s;
+    const long long chanRows = static_cast<long long>(a.c) * a.planes; // rows of one image
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+        i += stride)
+    {
+        const long long row = i / a.u;
+        const int u = static_cast<int>(i - row * a.u);
+        const long long n = row / chanRows;
+        const long long rest = row - n * chanRows; // c planes + dh
+        const T* src = x + row * rowLen + static_cast<long long>(u) * a.s;
+        // Folded row of phase j: image n, channel j C + c, the same plane: rest + j C planes.
+        T* dst = xf + (n * a.s * chanRows + rest) * a.u + u;
+        for(int j = 0; j < a.s; ++j)
+            dst[static_cast<long long>(j) * chanRows * a.u] = src[j];
+    }
+}
+
+/// The width fold's reduce (ConvWrwReduceFold): k3ReduceDeep's sum of the folded partials
+/// (`a.r`: c the folded channels, taps the folded taps, `quads` a block), each folded (channel
+/// j C + c, tap) element written to dw tap (tau - pre) s + j + pad of the graph's filter, and
+/// dropped outside it. Every dw element is one folded element.
+template <class T>
+__device__ inline void k3ReduceFold(const K3ReduceFoldArgs& f)
+{
+    typedef float f4 __attribute__((ext_vector_type(4)));
+    constexpr int DEPTH = 16;
+    __shared__ f4 part[3][K3_REDUCE_DEEP_MAX_QUADS];
+    const K3ReduceArgs& a = f.r;
+    T* dw = static_cast<T*>(a.dw);
+    const int nq = a.quads;
+    const int cq = (a.cg + 3) / 4;
+    const long long quads = a.elems / a.cg * cq;
+    const bool vec = (a.cg % 4) == 0;
+    const int lane = static_cast<int>(threadIdx.x) % nq, grp = static_cast<int>(threadIdx.x) / nq;
+    const long long i = static_cast<long long>(blockIdx.x) * nq + lane;
+    const bool live = i < quads;
+    const int c = live ? static_cast<int>(i % cq) * 4 : 0;
+    const long long r1 = live ? i / cq : 0;
+    const float* src = a.partial + r1 * a.cg + c;
+    f4 sum = {0.0f, 0.0f, 0.0f, 0.0f};
+    if(live)
+    {
+        if(vec)
+        {
+            int sp = grp;
+            for(; sp + 4 * (DEPTH - 1) < a.splits; sp += 4 * DEPTH)
+            {
+                f4 v[DEPTH];
+#pragma unroll
+                for(int j = 0; j < DEPTH; ++j)
+                    v[j] = k3PartialLoad<true>(
+                        reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
+#pragma unroll
+                for(int j = 0; j < DEPTH; ++j)
+                    sum += v[j];
+            }
+            for(; sp < a.splits; sp += 4)
+                sum += k3PartialLoad<true>(reinterpret_cast<const f4*>(src + sp * a.partialElems));
+        }
+        else
+        {
+            for(int sp = grp; sp < a.splits; sp += 4)
+                for(int j = 0; j < 4 && c + j < a.cg; ++j)
+                    sum[j] += src[sp * a.partialElems + j];
+        }
+    }
+    if(grp > 0)
+        part[grp - 1][lane] = sum;
+    k1LdsBarrier();
+    if(grp != 0 || !live)
+        return;
+    sum += part[0][lane];
+    sum += part[1][lane];
+    sum += part[2][lane];
+    // r1 over [tap][k] (groups 1): the folded tap (outer, tau) and the output channel.
+    const int k = static_cast<int>(r1 % a.kg);
+    const int tap = static_cast<int>(r1 / a.kg);
+    const int tau = tap % f.fw;
+    const int outer = tap / f.fw;
+    for(int e = 0; e < 4 && c + e < a.cg; ++e)
+    {
+        const int cf = c + e;
+        const int j = cf / f.c;
+        const int t = (tau - f.pre) * f.s + j + f.pad;
+        if(t < 0 || t >= f.filterW)
+            continue;
+        const long long flat = static_cast<long long>(outer) * f.filterW + t;
+        const long long wt = f.flip ? static_cast<long long>(f.outer) * f.filterW - 1 - flat : flat;
+        dw[k * f.wk + static_cast<long long>(cf - j * f.c) * f.wc + wt * f.wtap]
+            = K1Elem<T>::store(sum[e]);
+    }
+}
+
 /// The quad reduce for many splits (ConvWrwReduceDeep): the same association as k3Reduce (four
 /// split groups, group j adding splits j, j + 4, ... in order, then the groups in order), so dw
 /// is bitwise the same. A block is `a.quads` quads (16, 32 or 64) by the 4 groups, so a small dw

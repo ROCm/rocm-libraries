@@ -378,6 +378,13 @@ std::vector<DeviceCase> deviceCases()
         {"OneD1x16Stride8", conv(32, 64, {203}, {16}, {4}, {4}, {8}, {1})},
         {"ThreeD2x2x2Stride2",
          conv(8, 16, {6, 8, 10}, {2, 2, 2}, {0, 0, 0}, {0, 0, 0}, {2, 2, 2}, {1, 1, 1})},
+        // Width strides dividing the filter width over widths they divide: also served as the
+        // width fold's stride-1 problem (HiFi-GAN's 1x16 stride 8, padding 4; patch-like 2x2
+        // stride 2 channels-last).
+        {"OneD1x16Stride8Fold", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1})},
+        {"OneD1x16Stride8FoldNhwc", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1}, true)},
+        {"Fold2x2Stride2Nhwc",
+         conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
         {"Deeplab3x3Dilation36",
          conv(16, 16, {76, 76}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, false, 1, 1)},
         {"Wide1x11Dilation3", conv(16, 16, {3, 40}, {1, 11}, {0, 15}, {0, 15}, {1, 1}, {1, 3})},
@@ -742,9 +749,29 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
                     sum += group[2];
                     sum += group[3];
                     const TO want = static_cast<TO>(sum);
-                    // dw index: (g kg + k, c, taps in row-major order over dims 2..).
-                    const int64_t wtap = r.flip != 0 ? taps - 1 - tap : tap;
-                    int64_t offset = (g * kg + k) * dwStrides[0] + c * dwStrides[1];
+                    // dw index: (g kg + k, c, taps in row-major order over dims 2..). The width
+                    // fold's folded (channel j C + c, tap (outer, tau)) is the graph's channel c
+                    // and width tap (tau - pre) s + j + pad, absent outside the filter.
+                    int64_t dwc = c;
+                    int64_t dwtapIndex = tap;
+                    bool flip = r.flip != 0;
+                    int64_t dwTaps = taps;
+                    if(launch.fold)
+                    {
+                        const auto& f = launch.reduceFold;
+                        const int64_t j = c / f.c;
+                        const int64_t t = (tap % f.fw - f.pre) * f.s + j + f.pad;
+                        if(t < 0 || t >= f.filterW)
+                        {
+                            continue;
+                        }
+                        dwc = c - j * f.c;
+                        dwtapIndex = tap / f.fw * f.filterW + t;
+                        flip = f.flip != 0;
+                        dwTaps = static_cast<int64_t>(f.outer) * f.filterW;
+                    }
+                    const int64_t wtap = flip ? dwTaps - 1 - dwtapIndex : dwtapIndex;
+                    int64_t offset = (g * kg + k) * dwStrides[0] + dwc * dwStrides[1];
                     int64_t rest = wtap;
                     for(size_t axis = dwDims.size() - 1; axis >= 2; --axis)
                     {
@@ -777,6 +804,10 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
     else if(r.tile == 3)
     {
         reduce = "deep";
+    }
+    else if(r.tile == 4)
+    {
+        reduce = "fold";
     }
     EXPECT_EQ(mismatches, 0) << "of " << count << " dw elements (reduce " << reduce << ")";
 }
@@ -1124,6 +1155,85 @@ TEST(TestGpuConvWrwDeepReduce, BFloat16)
     SKIP_IF_NO_DEVICES();
     runDeepReduce<BFloat16>();
 }
+
+/// The width fold (widthFoldOf): up to four admitted configs per case whose launch runs the
+/// folded stride-1 problem (staging channels-first x, the fold reduce writing dw), against the
+/// CPU reference and, bit for bit, the fixed-order sum of the folded partials. True convolution
+/// reflects the graph's taps.
+template <typename T>
+void runFold(const DeviceCase& deviceCase)
+{
+    auto shape = deviceCase.shape;
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto device = currentDeviceProperties();
+    const GraphFixture fixture(buildGraph(spec), device);
+    const auto bound = matchesGraph(PACK, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    ASSERT_TRUE(conv_wrw::widthFoldOf(*problem).has_value());
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    for(const auto& kernel : catalog())
+    {
+        if(kernels.size() >= 4 || !matchesKernel(PACK, fixture.context(), kernel, *bound)
+           || kernel.getIntMetadata("math") != 0)
+        {
+            continue;
+        }
+        const auto launch = conv_wrw::wrwLaunchFor(*problem, configOf(kernel), device);
+        if(launch.has_value() && launch->fold)
+        {
+            EXPECT_EQ(launch->reduce.tile, 4);
+            EXPECT_EQ(launch->foldStage, problem->channelsFirst);
+            kernels.push_back(kernel);
+        }
+    }
+    if(kernels.empty())
+    {
+        GTEST_SKIP() << "no config serves the fold here on " << device.gcnArchName;
+    }
+    runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
+}
+
+std::vector<DeviceCase> foldCases()
+{
+    auto convolution = conv(16, 24, {64}, {4}, {1}, {1}, {2}, {1});
+    convolution.mode = ConvMode::CONVOLUTION;
+    return {{"OneD1x16Stride8", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1})},
+            {"OneD1x16Stride8Nhwc", conv(32, 64, {256}, {16}, {4}, {4}, {8}, {1}, true)},
+            {"TwoD2x2Stride2", conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1})},
+            {"TwoD2x2Stride2Nhwc",
+             conv(16, 32, {12, 16}, {2, 2}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
+            {"OneD1x4Stride2Convolution", convolution}};
+}
+
+class TestGpuConvWrwFold : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvWrwFold, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFold<float>(GetParam());
+}
+
+TEST_P(TestGpuConvWrwFold, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFold<Half>(GetParam());
+}
+
+TEST_P(TestGpuConvWrwFold, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFold<BFloat16>(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWrwFold,
+                         ::testing::ValuesIn(foldCases()),
+                         [](const auto& info) { return info.param.name; });
 
 TEST(TestGpuConvWrwWideTiles, HalfPartialChannelTiles)
 {

@@ -2500,6 +2500,141 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(flipped->reduce.flip, 1);
 }
 
+/// HiFi-GAN's transposed-conv class as a wrw graph: 1-D, filter 16, stride 8, padding 4.
+ConvShape foldShape(bool channelsLast = false)
+{
+    auto shape = baseShape();
+    shape.input = {256};
+    shape.filter = {16};
+    shape.prePadding = shape.postPadding = {4};
+    shape.stride = {8};
+    shape.dilation = {1};
+    shape.channelsLast = channelsLast;
+    return shape;
+}
+
+/// A unit-stride ring config of the folded class (filter width 3, stride 1).
+ConfigFields foldFields(int64_t layout = 0)
+{
+    ConfigFields f;
+    f.fr = 1;
+    f.s = 3;
+    f.layout = layout;
+    return f;
+}
+
+TEST(TestConvWrwFold, ViewIsTheStrideOneProblemOverFoldedChannels)
+{
+    const auto problem = parse(specOf(foldShape()));
+    ASSERT_TRUE(problem.has_value());
+    const auto view = conv_wrw::widthFoldOf(*problem);
+    ASSERT_TRUE(view.has_value());
+    const auto& v = view->base.args;
+    // 24 channels by 8 phases; 256 / 8 positions; ceil(12 / 8) + ceil(4 / 8) = 3 taps, padding 1.
+    EXPECT_EQ(v.c, 24 * 8);
+    EXPECT_EQ(v.inSpatial[2], 32);
+    EXPECT_EQ(v.outSpatial[2], problem->base.args.outSpatial[2]);
+    EXPECT_EQ(v.filter[2], 3);
+    EXPECT_EQ(v.stride[2], 1);
+    EXPECT_EQ(v.prePadding[2], 1);
+    EXPECT_EQ(view->taps, 3);
+    EXPECT_TRUE(view->folded);
+    // Channels-first x is staged packed N (C s) D H U.
+    EXPECT_EQ(v.xStrides[4], 1);
+    EXPECT_EQ(v.xStrides[1], 32);
+    EXPECT_EQ(v.xStrides[0], 24 * 8 * 32);
+    // Channels-last x is the folded layout already: s C elements a folded position.
+    const auto nhwc = conv_wrw::widthFoldOf(*parse(specOf(foldShape(true))));
+    ASSERT_TRUE(nhwc.has_value());
+    EXPECT_EQ(nhwc->base.args.xStrides[1], 1);
+    EXPECT_EQ(nhwc->base.args.xStrides[4], 24 * 8);
+    // A filter equal to the stride, unpadded (patch-like): one folded tap.
+    auto patch = baseShape();
+    patch.input = {12, 16};
+    patch.filter = {2, 2};
+    patch.prePadding = patch.postPadding = {0, 0};
+    patch.stride = {2, 2};
+    const auto p2 = conv_wrw::widthFoldOf(*parse(specOf(patch)));
+    ASSERT_TRUE(p2.has_value());
+    EXPECT_EQ(p2->base.args.filter[2], 1);
+    EXPECT_EQ(p2->base.args.prePadding[2], 0);
+    EXPECT_EQ(p2->base.args.stride[1], 2); // the height keeps its stride
+}
+
+TEST(TestConvWrwFold, DeclinesEveryFieldOutsideTheFold)
+{
+    const std::vector<std::pair<std::string, std::function<void(ConvShape&)>>> refusals{
+        {"unit stride", [](ConvShape& s) { s.stride = {1}; }},
+        {"stride not dividing the filter", [](ConvShape& s) { s.filter = {12}; }},
+        {"width not a whole number of strides", [](ConvShape& s) { s.input = {252}; }},
+        {"dilated width", [](ConvShape& s) { s.dilation = {2}; }},
+        {"groups", [](ConvShape& s) { s.groups = 2; }},
+    };
+    ASSERT_TRUE(parse(specOf(foldShape())).has_value());
+    for(const auto& [name, mutate] : refusals)
+    {
+        SCOPED_TRACE(name);
+        auto shape = foldShape();
+        mutate(shape);
+        const auto problem = parse(specOf(shape));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_FALSE(conv_wrw::widthFoldOf(*problem).has_value());
+    }
+}
+
+TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
+{
+    const auto launch = launchOf(foldFields(), foldShape());
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_TRUE(launch->fold);
+    EXPECT_TRUE(launch->foldStage);
+    EXPECT_FALSE(launch->dwStore);
+    EXPECT_EQ(launch->reduce.tile, 4);
+    EXPECT_EQ(launch->reduce.cg, 24 * 8);
+    EXPECT_EQ(launch->reduce.taps, 3);
+    EXPECT_EQ(launch->reduceBlock, 4u * static_cast<unsigned int>(launch->reduce.quads));
+    const auto& f = launch->reduceFold;
+    EXPECT_EQ(f.c, 24);
+    EXPECT_EQ(f.s, 8);
+    EXPECT_EQ(f.fw, 3);
+    EXPECT_EQ(f.pre, 1);
+    EXPECT_EQ(f.pad, 4);
+    EXPECT_EQ(f.filterW, 16);
+    EXPECT_EQ(f.outer, 1);
+    EXPECT_EQ(f.wk, 24 * 16); // K C S
+    EXPECT_EQ(f.wc, 16);
+    EXPECT_EQ(f.wtap, 1);
+    // The staged x after the partials: 2 images x 24 channels x 256 halves.
+    EXPECT_GE(launch->foldOffset,
+              static_cast<size_t>(launch->reduce.splits) * launch->reduce.partialElems * 4);
+    EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + 2 * 24 * 256 * 2);
+    EXPECT_EQ(launch->foldArgs.rows, 2 * 24);
+    EXPECT_EQ(launch->foldArgs.u, 32);
+    // Channels-last: no staging.
+    const auto nhwc = launchOf(foldFields(1), foldShape(true));
+    ASSERT_TRUE(nhwc.has_value());
+    EXPECT_TRUE(nhwc->fold);
+    EXPECT_FALSE(nhwc->foldStage);
+    // A unit-stride config of another class does not serve it, and a foldable graph's own class
+    // (filter 16 stride 8) runs unfolded.
+    auto other = foldFields();
+    other.s = 5;
+    EXPECT_FALSE(launchOf(other, foldShape()).has_value());
+    auto own = foldFields();
+    own.s = 16;
+    own.sw = 8;
+    own.vec = 8;
+    const auto unfolded = launchOf(own, foldShape());
+    if(unfolded.has_value())
+    {
+        EXPECT_FALSE(unfolded->fold);
+    }
+    // Not foldable (width 252): the unit-stride config declines as before.
+    auto ragged = foldShape();
+    ragged.input = {252};
+    EXPECT_FALSE(launchOf(foldFields(), ragged).has_value());
+}
+
 TEST(TestConvWrwLaunch, DeepReduceBlocksGiveEveryUnitTwo)
 {
     // 64 quads a block while that leaves every unit two blocks, halved down to 16.

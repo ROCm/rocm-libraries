@@ -185,7 +185,25 @@ struct WrwProblem
     /// Elements one image of x / of dy spans through its strides (the packed image when packed).
     int64_t xSpan = 0;
     int64_t ySpan = 0;
+    /// The problem is a width fold's view (widthFoldOf): its dw is written by the fold reduce,
+    /// never by the kernel itself. noFold: not to be folded (three-bf16's split operands).
+    bool folded = false;
+    bool noFold = false;
 };
+
+/**
+ * @brief The width fold of @p problem: the same backward-weights convolution as a stride-1 one,
+ *        or nullopt where it does not apply.
+ *
+ * A width stride s > 1 dividing the filter width S, at unit width dilation, one group, a width
+ * L that s divides, packed x and dy (either layout), images within the 32-bit buffer range.
+ * Position u s + j of channel c is folded channel j C + c at position u: the view has C s input
+ * channels, width L / s, filter width ceil((S - p) / s) + ceil(p / s) at stride 1 and padding
+ * ceil(p / s) (p the width padding); depth and height are unchanged. Channels-last x is already
+ * that layout (its strides are rewritten); channels-first x is staged (ConvWrwFoldX). dw tap t is
+ * the folded tap (t + ceil(p / s) s - p) / s of folded channel ((t + ceil(p / s) s - p) % s) C + c.
+ */
+std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem);
 
 /// Whether specialized key @p key (WrwConfig::spec) serves @p problem on @p gcnArchName: its
 /// atom runs there and takes the graph's element type (G and D, and layout 2, on gfx950 only),
@@ -254,6 +272,16 @@ struct WrwLaunch
     size_t splitYOffset = 0;
     size_t splitBytes = 0;
     K3SplitArgs splitArgs{};
+    /// The width fold (widthFoldOf): the config ran the folded problem; ConvWrwReduceFold
+    /// (reduceFold, reduceGrid x reduceBlock) writes dw. Channels-first x is staged first by
+    /// ConvWrwFoldX (foldStage: foldArgs, foldGrid blocks) at foldOffset of the workspace, which
+    /// the kernel then reads as x.
+    bool fold = false;
+    bool foldStage = false;
+    unsigned int foldGrid = 0;
+    size_t foldOffset = 0;
+    K3FoldArgs foldArgs{};
+    K3ReduceFoldArgs reduceFold{};
 };
 
 /// The workspace the splits' fp32 partials may take at most; splits are reduced to fit.

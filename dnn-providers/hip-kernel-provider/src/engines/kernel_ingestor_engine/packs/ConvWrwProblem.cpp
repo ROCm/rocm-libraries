@@ -739,6 +739,63 @@ DirectPlan directPlanFor(int64_t tiles,
     return best;
 }
 
+std::optional<WrwProblem> widthFoldOf(const WrwProblem& problem)
+{
+    const auto& a = problem.base.args;
+    const int64_t s = a.stride[2];
+    const int64_t width = a.inSpatial[2];
+    const int64_t filterW = a.filter[2];
+    const int64_t pad = a.prePadding[2];
+    if(problem.noFold || problem.folded || s < 2 || filterW % s != 0 || a.dilation[2] != 1
+       || a.groups != 1 || width % s != 0 || pad < 0 || problem.largeImage
+       || !(problem.channelsFirst || problem.channelsLast))
+    {
+        return std::nullopt;
+    }
+    const int64_t u = width / s;
+    const int64_t pre = divUp(pad, s);
+    const int64_t fw = divUp(filterW - pad, s) + pre;
+    const auto channels = pack_features::checkedMultiply(a.c, s);
+    // The folded output width is dy's: u + pre + post - fw + 1 with a padding past the end of at
+    // least 0 (every dy position's window starts inside the folded row's reach).
+    const int64_t post = a.outSpatial[2] - u - pre + fw - 1;
+    if(!channels.has_value() || *channels > INT_LIMIT || u < 1 || fw < 1 || post < 0)
+    {
+        return std::nullopt;
+    }
+    WrwProblem view = problem;
+    auto& v = view.base.args;
+    v.c = *channels;
+    v.inSpatial[2] = u;
+    v.filter[2] = fw;
+    v.stride[2] = 1;
+    v.prePadding[2] = pre;
+    v.dilation[2] = 1;
+    const int64_t planes = a.inSpatial[0] * a.inSpatial[1];
+    if(problem.channelsFirst)
+    {
+        // The staged x': packed N (C s) D H U.
+        v.xStrides[4] = 1;
+        v.xStrides[3] = u;
+        v.xStrides[2] = a.inSpatial[1] * u;
+        v.xStrides[1] = planes * u;
+        v.xStrides[0] = *channels * planes * u;
+    }
+    else
+    {
+        // Channels-last x in place: position u s + j of channel c is channel j C + c of
+        // position u, so only the width stride changes (s C elements a folded position).
+        v.xStrides[1] = 1;
+        v.xStrides[4] = *channels;
+    }
+    // The folded filter (K T R fw by C s); its partials are reduced into dw by the fold reduce.
+    view.taps = a.filter[0] * a.filter[1] * fw;
+    view.channelsFirst = problem.channelsFirst;
+    view.channelsLast = problem.channelsLast;
+    view.folded = true;
+    return view;
+}
+
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
@@ -759,6 +816,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             return std::nullopt;
         }
         WrwProblem split = problem;
+        split.noFold = true;
         split.base.dataType = data_objects::DataType::BFLOAT16;
         split.elementBytes = 2;
         split.base.args.n = problem.base.args.n * 3;
@@ -790,6 +848,80 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         launch->splitGrid = static_cast<unsigned int>(
             std::min<int64_t>(divUp(std::max(*xElems, *yElems), 256), int64_t{1} << 16));
         launch->workspaceBytes += static_cast<size_t>(splitBytes);
+        return launch;
+    }
+
+    // The width fold: a specialized config of unit width stride serves a strided width whose
+    // stride divides the filter width as the folded stride-1 problem (widthFoldOf).
+    if(config.loop != LOOP_GENERIC && config.sw == 1 && problem.base.args.stride[2] > 1)
+    {
+        const auto folded = widthFoldOf(problem);
+        if(!folded.has_value())
+        {
+            return std::nullopt;
+        }
+        auto launch = wrwLaunchFor(*folded, config, device);
+        const int64_t units = device_units::dispatchUnits(device);
+        if(!launch.has_value() || launch->dwStore || units < 1)
+        {
+            return std::nullopt;
+        }
+        const auto& a = problem.base.args;
+        const auto& f = folded->base.args;
+        const int64_t s = a.stride[2];
+        auto& r = launch->reduce;
+        const int64_t quads = r.elems / r.cg * divUp(int64_t{r.cg}, int64_t{4});
+        const int64_t perBlock = deepReduceQuads(quads, units);
+        if(divUp(quads, perBlock) > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        r.tile = 4;
+        r.quads = static_cast<int>(perBlock);
+        launch->reduceGrid = static_cast<unsigned int>(divUp(quads, perBlock));
+        launch->reduceBlock = static_cast<unsigned int>(4 * perBlock);
+        auto& rf = launch->reduceFold;
+        rf.r = r;
+        // dw packed K C T R S or K T R S C, the graph's taps.
+        const int64_t taps = problem.taps;
+        rf.wk = a.c * taps;
+        rf.wc = problem.filterChannelsLast ? 1 : taps;
+        rf.wtap = problem.filterChannelsLast ? a.c : 1;
+        rf.c = static_cast<int>(a.c);
+        rf.s = static_cast<int>(s);
+        rf.fw = static_cast<int>(f.filter[2]);
+        rf.pre = static_cast<int>(f.prePadding[2]);
+        rf.pad = static_cast<int>(a.prePadding[2]);
+        rf.filterW = static_cast<int>(a.filter[2]);
+        rf.outer = static_cast<int>(a.filter[0] * a.filter[1]);
+        rf.flip = a.flipFilter != 0 ? 1 : 0;
+        launch->fold = true;
+        if(problem.channelsFirst)
+        {
+            const auto rows
+                = pack_features::checkedProduct({a.n, a.c, a.inSpatial[0], a.inSpatial[1]});
+            if(!rows.has_value())
+            {
+                return std::nullopt;
+            }
+            const auto xBytes = pack_features::checkedProduct(
+                {*rows, a.inSpatial[2], int64_t{problem.elementBytes}});
+            if(!xBytes.has_value())
+            {
+                return std::nullopt;
+            }
+            launch->foldStage = true;
+            launch->foldOffset = (launch->workspaceBytes + 255) / 256 * 256;
+            launch->workspaceBytes = launch->foldOffset + static_cast<size_t>(*xBytes);
+            auto& fa = launch->foldArgs;
+            fa.rows = *rows;
+            fa.planes = a.inSpatial[0] * a.inSpatial[1];
+            fa.c = static_cast<int>(a.c);
+            fa.s = static_cast<int>(s);
+            fa.u = static_cast<int>(f.inSpatial[2]);
+            launch->foldGrid = static_cast<unsigned int>(
+                std::min<int64_t>(divUp(*rows * f.inSpatial[2], 256), int64_t{1} << 16));
+        }
         return launch;
     }
 
@@ -1336,8 +1468,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     launch.kernelType = info->kernelType;
     // One split into dw of contiguous channels (K T R S C, or one tap), on a config compiled
     // with the direct store: the kernel writes dw in its element type and no reduce runs.
-    const bool dwStore
-        = config.dws == 1 && splits == 1 && (problem.filterChannelsLast || problem.taps == 1);
+    const bool dwStore = config.dws == 1 && splits == 1 && !problem.folded
+                         && (problem.filterChannelsLast || problem.taps == 1);
     launch.dwStore = dwStore;
     launch.workspaceBytes = dwStore ? 0 : static_cast<size_t>(*workspace);
     auto& k3 = launch.args;
