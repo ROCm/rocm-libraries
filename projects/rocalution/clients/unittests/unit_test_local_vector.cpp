@@ -1322,9 +1322,25 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
     });
 }
 
-// The destructor frees only the current backend object, so this leaks the other one. The
-// test checks that the destruction itself is safe. It runs in a child that ends with _Exit,
-// so that the leak does not reach LeakSanitizer in an ASAN build.
+namespace
+{
+    template <typename T>
+    void destroy_after_async_moves(const std::vector<T>& a)
+    {
+        auto to_accelerator = make_local_vector(Backend::Host, a);
+        to_accelerator->MoveToAcceleratorAsync();
+        rocalution::_rocalution_sync();
+        to_accelerator.reset();
+
+        auto to_host = make_local_vector(Backend::Accelerator, a);
+        to_host->MoveToHostAsync();
+        rocalution::_rocalution_sync();
+        to_host.reset();
+    }
+}
+
+// The destructor leaks the other backend object (see the next test), so the destruction
+// runs in a child that ends with _Exit, where the leak does not reach LeakSanitizer
 TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_sync)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -1334,19 +1350,29 @@ TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_s
         const std::vector<T> a = x<T>();
         EXPECT_EXIT(
             {
-                auto to_accelerator = make_local_vector(Backend::Host, a);
-                to_accelerator->MoveToAcceleratorAsync();
-                rocalution::_rocalution_sync();
-                to_accelerator.reset();
-
-                auto to_host = make_local_vector(Backend::Accelerator, a);
-                to_host->MoveToHostAsync();
-                rocalution::_rocalution_sync();
-                to_host.reset();
+                death_test_watchdog();
+                destroy_after_async_moves(a);
                 std::_Exit(0);
             },
             testing::ExitedWithCode(0),
             "");
+    });
+}
+
+// Only LeakSanitizer shows the leak, at the exit of the child
+TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_frees_both_objects)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+#ifndef __SANITIZE_ADDRESS__
+    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees both backend objects";
+#endif
+    KNOWN_BUG("~LocalVector frees only the current backend object, so a vector destroyed after "
+              "an async move without Sync() leaks the other one");
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        expect_in_child([&] { destroy_after_async_moves(a); }, 120);
     });
 }
 
