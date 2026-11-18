@@ -256,7 +256,7 @@ RppStatus hip_exec_gamma_correction_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
 
     globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     globalThreads_y = dstDescPtr->h;
-    globalThreads_z = handle.GetBatchSize();
+    globalThreads_z = dstDescPtr->n;
 
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         hipLaunchKernelGGL(
