@@ -196,7 +196,7 @@ def validateBlockDequantCombination(state, printRejectionReason):
     if state["GlobalSplitU"] not in (1, -1) and state["GlobalSplitU"] <= 0 and not isPersistent(state):
         reject(state, printRejectionReason, "UseScaleAB=Block requires GlobalSplitU >= 1 or -1")
         return False
-    if state["GlobalSplitU"] != 1 and state["GlobalSplitUAlgorithm"] not in (
+    if state["GlobalSplitU"] != 1 and not isPersistent(state) and state["GlobalSplitUAlgorithm"] not in (
             "MultipleBuffer", "MultipleBufferSingleKernel"):
         reject(state, printRejectionReason,
                "UseScaleAB=Block split-K requires a MultipleBuffer GlobalSplitUAlgorithm")

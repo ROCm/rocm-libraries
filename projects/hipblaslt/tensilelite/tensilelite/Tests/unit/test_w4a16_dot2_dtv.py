@@ -320,3 +320,14 @@ def test_gsu1_decode_kernel_has_no_split_k_scale_code(toolchain):
     src = _emit_solution(toolchain, _solution(toolchain))[1]
     assert "block scale: contiguous split-K" not in src
     assert "scaleA: skip groups before the split" not in src
+
+
+@pytest.mark.parametrize("zeroPoint", [False, True])
+def test_persistent_data_parallel_decode_kernel_is_valid(toolchain, zeroPoint):
+    """Persistent data parallel walks whole tiles: no split K, so the block-dequant
+    split-K checks do not apply and the scale pointers start at K = 0."""
+    sol = _solution(toolchain, zeroPoint=zeroPoint, TileProcessingStrategy="DataParallel",
+                    WorkAssignment="StaticGrid", GlobalSplitU=0)
+    assert sol.get("Valid") is True
+    src = _emit_solution(toolchain, sol)[1]
+    assert "scaleA: skip groups before the split" not in src
