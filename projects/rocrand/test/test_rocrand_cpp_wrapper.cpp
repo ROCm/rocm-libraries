@@ -693,7 +693,7 @@ TYPED_TEST(OperatorTests, test_generator_operator)
 
     // Device sample through engine_t::operator()
     result_t* d_out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(result_t) * size));
+    HIP_CHECK(hipMallocHelper(&d_out, sizeof(result_t) * size));
 
     engine_t engine;
     engine(d_out, size);
