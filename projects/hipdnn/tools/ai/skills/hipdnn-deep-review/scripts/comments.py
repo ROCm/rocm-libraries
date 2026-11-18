@@ -174,9 +174,13 @@ def cmd_draft(a):
                     )
                 )
             else:
+                # A General item is one path:line anchor and its one-line claim (RUNBOOK
+                # *Synthesize*); cap the fix pointer too, so a verbose Fix field (however it
+                # got that way) cannot turn a one-line item into an essay.
+                general_fix = f" Fix: {ledger.cap(fix)}" if fix else ""
                 general.append(
                     f"- {anchor or fid} ({fid}, {tier}; not in a changed hunk){note}: {claim}"
-                    + fix_text
+                    + general_fix
                 )
         else:
             groups.setdefault((tier, row["Kind"]), []).append(

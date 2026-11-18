@@ -444,7 +444,7 @@ def cmd_verdicts(a):
         )
         row["Tier"] = f"{reported} -> {final['Tier']}"
         if final["Verdict"] == "PARTIAL":
-            row["Claim"] = collapse(final["Claim"])
+            row["Claim"] = cap(final["Claim"])
         updated += 1
     save_ledger(a.evidence, tables)
     print(f"verdicts: {updated} rows updated")
