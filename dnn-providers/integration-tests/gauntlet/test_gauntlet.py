@@ -655,9 +655,9 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "ResampleFwd/Default",
         "SdpaBackward/Default",
         "SdpaBackward/FlydslBwdSplit",
-        "SdpaBackward/FlydslBwdSplitLong",
         "SdpaBackward/FlydslBwdSplitBias",
         "SdpaBackward/FlydslBwdSplitDropout",
+        "SdpaBackward/FlydslBwdSplitLong",
         "SdpaBackward/FlydslBwdSplitPadded",
         "SdpaBackward/FlydslBwdSplitPaddedDropout",
         "SdpaBackward/FlydslBwdSplitRagged",
@@ -8989,3 +8989,20 @@ def test_the_expectation_report_prints_each_violation(run, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "expectations: 0 met, 6 violated" in out
     assert "violated s" in out and "expected declined: accepted where a decline" in out
+
+
+def test_flydsl_sdpa_bwd_spaces_are_the_generators_output():
+    # bug caught: a FlyDSL SDPA backward space edited by hand, or a generator change shipped without
+    # regenerating: the next regeneration silently undoes the edit, or the space drifts from its source
+    gen = _load_by_path(
+        "flydsl_sdpa_bwd_spaces", HERE / "generators" / "flydsl_sdpa_bwd_spaces.py"
+    )
+    for name, generated in gen.generate().items():
+        shipped = json.loads(
+            (
+                space_lib.DEFAULT_SPACES_DIR / f"SdpaBackward.{name}.space.json"
+            ).read_text(encoding="utf8")
+        )
+        assert (
+            generated == shipped
+        ), f"{name}: regenerate with generators/flydsl_sdpa_bwd_spaces.py"
