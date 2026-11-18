@@ -4,6 +4,10 @@ Low-level Python bindings for the hipBLASLt GEMM API, built with [nanobind](http
 
 The bindings are a development and testing tool for hipBLASLt and its consumers, not a ROCm deliverable. They're opt-in and source-build only: you build them from a rocm-libraries checkout against an installed ROCm, and hipBLASLt's own build never builds or installs them.
 
+## Enums
+
+`hipblaslt._core` binds every public enum as a Python `IntEnum`, with the C prefix dropped: `HIPBLASLT_EPILOGUE_RELU` is `Epilogue.RELU`, `HIP_R_16F` is `DataType.R_16F`, and `hipblaslt_ext::GemmType::HIPBLASLT_GEMM` is `GemmType.GEMM`. Values that exist only with an opt-in build feature (`HIPBLASLT_HAS_...`) are bound only when the hipBLASLt you build against turns that feature on. The few values left out on purpose, sentinels and values the header marks "Not supported yet", are listed with a reason in `hipblaslt/_coverage.py`.
+
 ## Building
 
 You need CMake 3.25 or later and Ninja, plus a ROCm install with hipBLASLt's development files.

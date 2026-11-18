@@ -133,3 +133,4 @@ and which run nowhere yet — see [`TESTING.md`](TESTING.md) (TensileLite specif
 - Building only the host library (`-DHIPBLASLT_ENABLE_DEVICE=OFF` or preset `hipblaslt`, or `invoke build -t`) is fast and fine for compile checks, but the resulting library cannot run matmul without a separately built/installed device library.
 - After editing YAML under `clients/tests/data/`, you must rebuild the `hipblaslt-test` (or `hipblaslt-test-data`) target to regenerate `hipblaslt_gtest.data`.
 - A full device-lib build is slow. Use `invoke build -f 'gfx942/Equality/*'` (or similar `--logic-filter`) to scope it to a single arch/family while iterating.
+- Adding a value to a public enum (`hipblaslt.h`, `hipblaslt-ext.hpp`, `hipblas-common.h`) trips the `hipblaslt-python-enum-sync` pre-commit hook: bind it in `python/src/enums.cpp` or allow-list it in `python/hipblaslt/_coverage.py`. See "Python bindings enum sync" in `TESTING.md`.

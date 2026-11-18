@@ -337,6 +337,31 @@ repos:
         files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|check_plugin_reentry|test_check_plugin_reentry|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
         pass_filenames: false
 
+      # hipBLASLt's Python bindings must bind every enum value in the public headers
+      # (or allow-list it with a reason). This flags a new value on the PR that adds it,
+      # with nothing built. CI's sparse checkout may lack projects/hipblaslt when only
+      # hipblas-common.h changed, so the script is read from git when it isn't on disk.
+      - id: hipblaslt-python-enum-sync
+        name: hipBLASLt Python bindings bind every public enum value
+        entry: >-
+          python -c "import os, subprocess, sys;
+          s = 'projects/hipblaslt/python/scripts/check_enum_sync.py';
+          src = open(s).read() if os.path.isfile(s) else subprocess.check_output(['git', 'show', 'HEAD:' + s], text=True);
+          sys.argv = [s];
+          exec(compile(src, s, 'exec'), {'__name__': '__main__', '__file__': os.path.abspath(s)})"
+        language: python
+        files: ^projects/(hipblaslt/library/include/hipblaslt/(hipblaslt\.h|hipblaslt-ext\.hpp)|hipblas-common/library/include/hipblas-common/hipblas-common\.h|hipblaslt/python/(src/enums\.cpp|hipblaslt/_coverage\.py|scripts/check_enum_sync\.py))$
+        pass_filenames: false
+
+      # Runs in pre-commit, which provides pytest, rather than in a component CI lane.
+      - id: hipblaslt-python-enum-sync-tests
+        name: hipBLASLt Python bindings enum-sync self-tests
+        entry: python -m pytest projects/hipblaslt/python/scripts/test_check_enum_sync.py -q -p no:cacheprovider
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^projects/hipblaslt/python/(scripts/(check_enum_sync|test_check_enum_sync)\.py|hipblaslt/_coverage\.py)$
+        pass_filenames: false
+
       - id: kpack-pin-sync
         name: rocm_kpack pin is consistent (hipDNN)
         # The pin is the kpack-ref output of .github/actions/ci-env/action.yml.
