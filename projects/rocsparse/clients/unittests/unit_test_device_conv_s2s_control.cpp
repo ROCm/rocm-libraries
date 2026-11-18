@@ -627,34 +627,39 @@ namespace
         }
     }
 
-    void call_stage(rocsparse_handle                 handle,
-                    rocsparse_spmat_descr            source,
-                    rocsparse_spmat_descr            target,
-                    rocsparse_sparse_to_sparse_stage stage,
-                    bool                             buffer_only,
-                    rocsparse_status&                status)
+    // Size of the buffer passed to an execution call that is expected to fail. It is
+    // not queried first, since the query rejects the same descriptors.
+    constexpr size_t k_dummy_buffer_bytes = 256;
+
+    // One call to either public entry point on a fresh permissive descriptor: the
+    // buffer size query, or the conversion itself with a dummy buffer.
+    rocsparse_status call_stage(rocsparse_handle                 handle,
+                                rocsparse_spmat_descr            source,
+                                rocsparse_spmat_descr            target,
+                                rocsparse_sparse_to_sparse_stage stage,
+                                bool                             query)
     {
-        S2sDescr descr;
-        status = rocsparse_create_sparse_to_sparse_descr(&descr, source, target, alg);
+        S2sDescr         descr;
+        rocsparse_status status
+            = rocsparse_create_sparse_to_sparse_descr(&descr, source, target, alg);
         if(status != st_ok)
         {
-            return;
+            return status;
         }
         status = rocsparse_sparse_to_sparse_permissive(descr);
         if(status != st_ok)
         {
-            return;
+            return status;
         }
-        size_t bytes = 0;
-        status
-            = rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage, &bytes);
-        if(buffer_only || status != st_ok)
+        if(query)
         {
-            return;
+            size_t bytes = 0;
+            return rocsparse_sparse_to_sparse_buffer_size(
+                handle, descr, source, target, stage, &bytes);
         }
-        Bytes scratch(bytes);
-        status = rocsparse_sparse_to_sparse(
-            handle, descr, source, target, stage, bytes, scratch.get());
+        Bytes scratch(k_dummy_buffer_bytes);
+        return rocsparse_sparse_to_sparse(
+            handle, descr, source, target, stage, k_dummy_buffer_bytes, scratch.get());
     }
 
     void expect_rejected(rocsparse_handle      handle,
@@ -664,13 +669,13 @@ namespace
                          const std::string&    label)
     {
         const auto check
-            = [&](rocsparse_sparse_to_sparse_stage stage, bool buffer_only, const char* name) {
+            = [&](rocsparse_sparse_to_sparse_stage stage, bool query, const char* name) {
                   fill_bytes(written.a, k_sentinel);
                   fill_bytes(written.b, k_sentinel);
                   fill_bytes(written.c, k_sentinel);
-                  rocsparse_status status = st_ok;
-                  call_stage(handle, source, target, stage, buffer_only, status);
-                  EXPECT_EQ(status, st_ni) << label << " " << name;
+                  EXPECT_EQ(call_stage(handle, source, target, stage, query), st_ni)
+                      << label << " " << name;
+                  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << label << " " << name;
                   expect_untouched(written, label + " " + name);
               };
         check(stage_a, true, "buffer_size analysis");
