@@ -226,9 +226,10 @@ void MatmulParams::setBatchInfo(
 
     if(cBatch > 1)
     {
-        // The layout takes its batch count from the matmul output tensor and its offset and
-        // strides from the final output, so the two must agree on the batch dimensions and
-        // the flattened batch stride.
+        // The layout takes its batch count from the matmul output tensor and its batch offset
+        // from the final output, so the two must agree on the batch dimensions. The final
+        // output's batch stride may differ from the matmul output's (a padded output); its
+        // batch axes must still nest on one stride.
         const auto finalDims = tFinal.dims();
         PLUGIN_THROW_IF_TRUE(finalDims.size() != cDims.size()
                                  || !std::equal(cDims.begin(), cDims.end() - 2, finalDims.begin()),
@@ -236,10 +237,6 @@ void MatmulParams::setBatchInfo(
                              "Matmul: final output batch dimensions must equal the matmul output "
                              "batch dimensions");
         const int64_t finalBatchStride = flattenedBatchStride(tFinal);
-        PLUGIN_THROW_IF_TRUE(finalBatchStride != flattenedBatchStride(tC),
-                             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                             "Matmul: final output batch stride must equal the matmul output "
-                             "batch stride");
 
         _matrixLayoutA.setBatchCount(cBatch);
         _matrixLayoutB.setBatchCount(cBatch);

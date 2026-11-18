@@ -565,6 +565,40 @@ TEST(TestMatmulParams, CLayoutBatchOffsetIgnoresSingletonBatchAxis)
     EXPECT_EQ(stridedBatchOffset(params->c()), 20);
 }
 
+// A padded final output keeps its own batch stride: C's offset comes from the final output,
+// not from the packed virtual matmul output.
+TEST(TestMatmulParams, CLayoutBatchOffsetTakesFinalOutputStrideWhenPadded)
+{
+    auto fused = createValidMatmulBiasActivGraph(
+        {2, 4, 8},
+        {32, 8, 1},
+        {2, 8, 5},
+        {40, 5, 1},
+        {2, 4, 5},
+        {20, 5, 1},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+    auto builder = mutateGraph(fused, [](auto& g) {
+        for(auto& tensor : g.tensors)
+        {
+            if(tensor->name == "C")
+            {
+                tensor->strides = {27, 5, 1};
+            }
+        }
+    });
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    std::optional<MatmulParams> params;
+    ASSERT_NO_THROW(params.emplace(*matmulAttrs, nullptr, activAttrs, graph.getTensorMap()));
+    EXPECT_EQ(stridedBatchOffset(params->c()), 27);
+}
+
 TEST(TestMatmulParams, ALayoutBatchOffsetIgnoresSingletonBatchAxis)
 {
     auto builder = createValidMatmulGraph(

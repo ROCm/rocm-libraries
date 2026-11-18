@@ -87,6 +87,74 @@ std::vector<float> rounded(const std::vector<float>& values, DataType type)
     return decode(encode(values, type), type);
 }
 
+// `matrixDims` with the batch dimensions in front.
+std::vector<int64_t> batched(const std::vector<int64_t>& batchDims, std::vector<int64_t> matrixDims)
+{
+    matrixDims.insert(matrixDims.begin(), batchDims.begin(), batchDims.end());
+    return matrixDims;
+}
+
+// Row-major packed strides of `dims`.
+std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(size_t i = dims.size() - 1; i-- > 0;)
+    {
+        strides[i] = strides[i + 1] * dims[i + 1];
+    }
+    return strides;
+}
+
+// The explicit strides, or the packed ones when none are given.
+std::vector<int64_t> stridesOrPacked(const std::vector<int64_t>& strides,
+                                     const std::vector<int64_t>& dims)
+{
+    return strides.empty() ? packedStrides(dims) : strides;
+}
+
+// Element offset of every element of a tensor with these dims and strides, in logical
+// row-major order.
+std::vector<size_t> elementOffsets(const std::vector<int64_t>& dims,
+                                   const std::vector<int64_t>& strides)
+{
+    size_t count = 1;
+    for(const auto dim : dims)
+    {
+        count *= static_cast<size_t>(dim);
+    }
+    std::vector<size_t> offsets(count);
+    for(size_t linear = 0; linear < count; ++linear)
+    {
+        size_t rest = linear;
+        size_t offset = 0;
+        for(size_t d = dims.size(); d-- > 0;)
+        {
+            const auto extent = static_cast<size_t>(dims[d]);
+            offset += (rest % extent) * static_cast<size_t>(strides[d]);
+            rest /= extent;
+        }
+        offsets[linear] = offset;
+    }
+    return offsets;
+}
+
+// Number of elements a tensor with these offsets spans.
+size_t spanOf(const std::vector<size_t>& offsets)
+{
+    return *std::max_element(offsets.begin(), offsets.end()) + 1;
+}
+
+// Lays the logical values out at `offsets`; every element they do not reach holds GUARD_VALUE.
+std::vector<float> scatter(const std::vector<float>& values, const std::vector<size_t>& offsets)
+{
+    std::vector<float> laidOut(spanOf(offsets), GUARD_VALUE);
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        laidOut[offsets[i]] = values[i];
+    }
+    return laidOut;
+}
+
 // One matmul, optionally followed by a bias ADD and a RELU_FWD, described by the dtype of every
 // tensor, the strides of A, B and the matmul output, and the ReLU clip bounds.
 struct MatmulCase
@@ -94,6 +162,9 @@ struct MatmulCase
     int64_t m = 8;
     int64_t k = 16;
     int64_t n = 12;
+    // Leading batch dimensions shared by A, B and the outputs; empty is a plain 2-D matmul.
+    // Every strides vector below then spans the batch dimensions too.
+    std::vector<int64_t> batchDims;
     DataType ioType = DataType::FLOAT;
     DataType intermediateType = DataType::FLOAT;
     // Strides of the A and B operands; empty means row-major.
@@ -101,6 +172,9 @@ struct MatmulCase
     std::vector<int64_t> bStrides;
     // Strides of the matmul output; empty lets the frontend infer them.
     std::vector<int64_t> cStrides;
+    // Strides of the final output when it is not the matmul output; empty means `cStrides`
+    // when set and packed otherwise.
+    std::vector<int64_t> finalStrides;
     // Data type of the matmul output when a bias or activation follows.
     DataType matmulOutType = DataType::FLOAT;
     bool withBias = false;
@@ -144,30 +218,30 @@ protected:
             .set_intermediate_data_type(c.intermediateType)
             .set_compute_data_type(DataType::FLOAT);
 
-        const std::vector<int64_t> aDims = {c.m, c.k};
-        const std::vector<int64_t> bDims = {c.k, c.n};
-        const std::vector<int64_t> aStrides
-            = c.aStrides.empty() ? std::vector<int64_t>{c.k, 1} : c.aStrides;
-        const std::vector<int64_t> bStrides
-            = c.bStrides.empty() ? std::vector<int64_t>{c.n, 1} : c.bStrides;
+        const auto aDims = batched(c.batchDims, {c.m, c.k});
+        const auto bDims = batched(c.batchDims, {c.k, c.n});
+        const auto outDims = batched(c.batchDims, {c.m, c.n});
         auto a = std::make_shared<TensorAttributes>(
-            makeTensorAttributes("a", c.ioType, aDims, aStrides).set_uid(UID_A));
+            makeTensorAttributes("a", c.ioType, aDims, stridesOrPacked(c.aStrides, aDims))
+                .set_uid(UID_A));
         auto b = std::make_shared<TensorAttributes>(
-            makeTensorAttributes("b", c.ioType, bDims, bStrides).set_uid(UID_B));
+            makeTensorAttributes("b", c.ioType, bDims, stridesOrPacked(c.bStrides, bDims))
+                .set_uid(UID_B));
 
         auto out = graph.matmul(a, b, MatmulAttributes());
         const bool fused = c.withBias || c.withRelu;
         out->set_data_type(fused ? c.matmulOutType : c.finalType);
         if(!c.cStrides.empty())
         {
-            out->set_dim({c.m, c.n}).set_stride(c.cStrides);
+            out->set_dim(outDims).set_stride(c.cStrides);
         }
 
         if(c.withBias)
         {
-            const std::vector<int64_t> biasDims = {1, c.n};
+            std::vector<int64_t> biasDims(outDims.size(), 1);
+            biasDims.back() = c.n;
             auto bias = std::make_shared<TensorAttributes>(
-                makeTensorAttributes("bias", DataType::FLOAT, biasDims, {c.n, 1})
+                makeTensorAttributes("bias", DataType::FLOAT, biasDims, packedStrides(biasDims))
                     .set_uid(UID_BIAS));
             PointwiseAttributes biasAttrs;
             biasAttrs.set_mode(PointwiseMode::ADD);
@@ -188,6 +262,10 @@ protected:
             }
             out = graph.pointwise(out, reluAttrs);
             out->set_data_type(c.finalType);
+        }
+        if(!c.finalStrides.empty())
+        {
+            out->set_dim(outDims).set_stride(c.finalStrides);
         }
         out->set_output(true).set_uid(UID_C);
 
@@ -231,7 +309,8 @@ protected:
     }
 
     // Builds, executes and compares against a CPU reference computed from the rounded inputs.
-    // The output buffer carries guard elements past its extent that must stay untouched.
+    // Every output element outside the output tensor's own elements (the guard elements past its
+    // extent and any padding between batches) must keep its guard value.
     void expectMatchesReference(const MatmulCase& c, float tolerance) const
     {
         Graph graph;
@@ -242,44 +321,59 @@ protected:
         const auto k = static_cast<size_t>(c.k);
         const auto n = static_cast<size_t>(c.n);
 
-        const auto a = rounded(randomUniform(m * k, 11U), c.ioType);
-        const auto b = rounded(randomUniform(k * n, 22U), c.ioType);
+        const auto aDims = batched(c.batchDims, {c.m, c.k});
+        const auto bDims = batched(c.batchDims, {c.k, c.n});
+        const auto outDims = batched(c.batchDims, {c.m, c.n});
+        const auto aOffsets = elementOffsets(aDims, stridesOrPacked(c.aStrides, aDims));
+        const auto bOffsets = elementOffsets(bDims, stridesOrPacked(c.bStrides, bDims));
+        const auto outStrides
+            = !c.finalStrides.empty() ? c.finalStrides : stridesOrPacked(c.cStrides, outDims);
+        const auto outOffsets = elementOffsets(outDims, outStrides);
+        size_t batch = 1;
+        for(const auto dim : c.batchDims)
+        {
+            batch *= static_cast<size_t>(dim);
+        }
+
+        // A and B in logical row-major order; the device copies lay them out by their strides.
+        const auto a = rounded(randomUniform(batch * m * k, 11U), c.ioType);
+        const auto b = rounded(randomUniform(batch * k * n, 22U), c.ioType);
         const auto bias = rounded(randomUniform(n, 33U), DataType::FLOAT);
 
-        std::vector<float> reference(m * n);
-        for(size_t i = 0; i < m; ++i)
+        std::vector<float> reference(batch * m * n);
+        for(size_t bi = 0; bi < batch; ++bi)
         {
-            for(size_t j = 0; j < n; ++j)
+            for(size_t i = 0; i < m; ++i)
             {
-                float acc = 0.0f;
-                for(size_t p = 0; p < k; ++p)
+                for(size_t j = 0; j < n; ++j)
                 {
-                    acc += a[i * k + p] * b[p * n + j];
+                    float acc = 0.0f;
+                    for(size_t p = 0; p < k; ++p)
+                    {
+                        acc += a[(bi * m + i) * k + p] * b[(bi * k + p) * n + j];
+                    }
+                    if(c.withBias)
+                    {
+                        acc += bias[j];
+                    }
+                    if(c.withRelu)
+                    {
+                        acc = c.reluUpperClip.has_value()
+                                  ? std::min(std::max(acc, c.reluLowerClip.value_or(0.0f)),
+                                             *c.reluUpperClip)
+                                  : std::max(acc, 0.0f);
+                    }
+                    reference[(bi * m + i) * n + j] = acc;
                 }
-                if(c.withBias)
-                {
-                    acc += bias[j];
-                }
-                if(c.withRelu)
-                {
-                    acc = c.reluUpperClip.has_value()
-                              ? std::min(std::max(acc, c.reluLowerClip.value_or(0.0f)),
-                                         *c.reluUpperClip)
-                              : std::max(acc, 0.0f);
-                }
-                reference[i * n + j] = acc;
             }
         }
 
         // Output extent in elements, honoring the output strides.
-        const std::vector<int64_t> outStrides
-            = c.cStrides.empty() ? std::vector<int64_t>{c.n, 1} : c.cStrides;
-        const size_t extent = (m - 1) * static_cast<size_t>(outStrides[0])
-                              + (n - 1) * static_cast<size_t>(outStrides[1]) + 1;
+        const size_t extent = spanOf(outOffsets);
         const size_t outBytes = (extent + GUARD_ELEMENTS) * elementSize(c.finalType);
 
-        const auto aBytes = encode(a, c.ioType);
-        const auto bBytes = encode(b, c.ioType);
+        const auto aBytes = encode(scatter(a, aOffsets), c.ioType);
+        const auto bBytes = encode(scatter(b, bOffsets), c.ioType);
         const auto biasBytes = encode(bias, DataType::FLOAT);
         const std::vector<float> outInit(extent + GUARD_ELEMENTS, GUARD_VALUE);
         const auto outInitBytes = encode(outInit, c.finalType);
@@ -319,21 +413,23 @@ protected:
                   hipSuccess);
         const auto result = decode(outBytesHost, c.finalType);
 
-        for(size_t i = 0; i < m; ++i)
+        std::vector<bool> isOutputElement(result.size(), false);
+        for(size_t linear = 0; linear < reference.size(); ++linear)
         {
-            for(size_t j = 0; j < n; ++j)
-            {
-                const float expected = reference[i * n + j];
-                const float got = result[i * static_cast<size_t>(outStrides[0])
-                                         + j * static_cast<size_t>(outStrides[1])];
-                ASSERT_LE(std::fabs(got - expected), tolerance + tolerance * std::fabs(expected))
-                    << "mismatch at (" << i << "," << j << "): got " << got << ", expected "
-                    << expected;
-            }
+            const float expected = reference[linear];
+            const float got = result[outOffsets[linear]];
+            isOutputElement[outOffsets[linear]] = true;
+            ASSERT_LE(std::fabs(got - expected), tolerance + tolerance * std::fabs(expected))
+                << "mismatch at (" << linear / (m * n) << "," << (linear / n) % m << ","
+                << linear % n << "): got " << got << ", expected " << expected;
         }
-        for(size_t g = extent; g < extent + GUARD_ELEMENTS; ++g)
+        for(size_t g = 0; g < result.size(); ++g)
         {
-            ASSERT_EQ(result[g], GUARD_VALUE) << "write past the output extent at element " << g;
+            if(!isOutputElement[g])
+            {
+                ASSERT_EQ(result[g], GUARD_VALUE)
+                    << "write outside the output tensor's elements at element " << g;
+            }
         }
     }
 
@@ -476,5 +572,54 @@ TEST_F(IntegrationGpuMatmulApplicability, ClampedReluFusedOutputMatchesReference
     c.withRelu = true;
     c.reluLowerClip = -0.25f;
     c.reluUpperClip = 0.5f;
+    expectMatchesReference(c, FP32_TOLERANCE);
+}
+
+// A batch axis of extent one never advances, so a fused final output [2,1,4,5] with strides
+// [20,5,5,1] has batch stride 20 whatever the singleton axis carries.
+// Fails if the singleton axis stride (5) is taken as the C and D batch stride.
+TEST_F(IntegrationGpuMatmulApplicability, FusedFinalWithSingletonBatchAxisMatchesReference)
+{
+    MatmulCase c;
+    c.m = 4;
+    c.k = 8;
+    c.n = 5;
+    c.batchDims = {2, 1};
+    c.cStrides = {20, 20, 5, 1};
+    c.finalStrides = {20, 5, 5, 1};
+    c.withRelu = true;
+    expectMatchesReference(c, FP32_TOLERANCE);
+}
+
+// A [4,1,4,8] with strides [32,7,8,1]: the stride of the singleton axis (7) is not the batch
+// stride (32).
+// Fails if the A batch offset is read from the singleton axis.
+TEST_F(IntegrationGpuMatmulApplicability, SingletonBatchAxisStrideOnAMatchesReference)
+{
+    MatmulCase c;
+    c.m = 4;
+    c.k = 8;
+    c.n = 5;
+    c.batchDims = {4, 1};
+    c.aStrides = {32, 7, 8, 1};
+    c.cStrides = {20, 20, 5, 1};
+    expectMatchesReference(c, FP32_TOLERANCE);
+}
+
+// A fused final output [2,4,5] with strides [27,5,1] is padded between batches while the
+// virtual matmul output is packed: D must be written at batch stride 27, and the seven padding
+// elements between the batches must stay untouched.
+// Fails if D is written at the matmul output's batch stride (20), which overwrites the padding
+// and misplaces the second batch.
+TEST_F(IntegrationGpuMatmulApplicability, FusedFinalWithPaddedBatchStrideMatchesReference)
+{
+    MatmulCase c;
+    c.m = 4;
+    c.k = 8;
+    c.n = 5;
+    c.batchDims = {2};
+    c.cStrides = {20, 5, 1};
+    c.finalStrides = {27, 5, 1};
+    c.withRelu = true;
     expectMatchesReference(c, FP32_TOLERANCE);
 }
