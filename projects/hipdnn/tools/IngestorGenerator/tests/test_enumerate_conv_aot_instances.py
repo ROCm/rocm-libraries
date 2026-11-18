@@ -24,6 +24,10 @@ import launch_surface  # noqa: E402
 _REPO = launch_surface.find_repo_root(_TOOLS)
 _ROCKE = _REPO / "dnn-providers" / "hip-kernel-provider" / "rocke"
 _CONFIGS = Path(__file__).resolve().parent.parent / "configs"
+#: Every architecture with a forward engine, and its committed lists.
+_ARCHES = ("gfx950", "gfx942")
+#: An architecture with no forward engine.
+_NO_ENGINE_ARCH = "gfx90a"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -98,25 +102,48 @@ def _label(identity):
 
 @pytest.fixture(scope="module")
 def catalog():
-    """The committed catalog's identities: every one rocKE's forward dispatcher
-    lists."""
+    """The committed gfx950 catalog's identities: every one rocKE's gfx950 forward
+    dispatcher lists."""
     return tool.read_dispatcher_instances(_ROCKE)
+
+
+def _packaged(identities, arch):
+    """``identities`` minus ``arch``'s committed :data:`tool.EXCLUDES`: what the pack
+    actually ships, the same filtering :func:`tool.main` applies."""
+    excludes = tool.read_excludes(Path(tool.EXCLUDES.format(arch=arch)))
+    return [i for i in identities if tool.identity_label(i) not in excludes]
 
 
 @pytest.fixture(scope="module")
 def packaged_catalog(catalog):
-    """``catalog`` minus the committed :data:`tool.EXCLUDES`: what the pack actually
-    ships, the same filtering :func:`tool.main` applies."""
-    excludes = tool.read_excludes(tool.EXCLUDES)
-    return [i for i in catalog if tool.identity_label(i) not in excludes]
+    """``catalog`` as the gfx950 pack ships it (:func:`_packaged`)."""
+    return _packaged(catalog, "gfx950")
+
+
+@pytest.fixture(scope="module", params=_ARCHES)
+def arch_catalog(request):
+    """``(arch, identities)``: every identity rocKE's forward dispatcher of each
+    architecture lists."""
+    return request.param, tool.read_dispatcher_instances(_ROCKE, request.param)
+
+
+def _by_dtype(identities):
+    by_dtype = collections.defaultdict(list)
+    for identity in identities:
+        by_dtype[identity["dtype_a"]].append(identity)
+    return by_dtype
+
+
+def _without_dtype(identity):
+    return tuple(
+        sorted((k, v) for k, v in identity.items() if not k.startswith("dtype_"))
+    )
 
 
 def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(packaged_catalog):
     """89 implicit-GEMM and 144 direct kernels per dtype, and the two dtypes list the
     same kernels."""
-    by_dtype = collections.defaultdict(list)
-    for identity in packaged_catalog:
-        by_dtype[identity["dtype_a"]].append(identity)
+    by_dtype = _by_dtype(packaged_catalog)
     assert sorted(by_dtype) == sorted(tool.DTYPES)
     for identities in by_dtype.values():
         families = collections.Counter(
@@ -124,35 +151,66 @@ def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(packaged_catal
         )
         assert families == {True: 89, False: 144}
 
-    def without_dtype(identity):
-        return tuple(
-            sorted((k, v) for k, v in identity.items() if not k.startswith("dtype_"))
-        )
-
-    assert sorted(map(without_dtype, by_dtype["fp16"])) == sorted(
-        map(without_dtype, by_dtype["bf16"])
+    assert sorted(map(_without_dtype, by_dtype["fp16"])) == sorted(
+        map(_without_dtype, by_dtype["bf16"])
     )
 
 
-def test_every_catalog_entry_is_a_forward_sweep_identity(catalog, monkeypatch):
-    """Each entry is a gfx950 forward identity of rocKE's implicit-GEMM AOT grid or of
-    its direct grid."""
+def test_the_gfx942_catalog_lists_553_kernels_per_dtype_the_same_in_both():
+    """372 implicit-GEMM kernels (30 of them group-merged) and 181 direct ones per
+    dtype, no split-C, no windowed depthwise and no grouped-halo kernel, and the two
+    dtypes list the same kernels."""
+    by_dtype = _by_dtype(
+        _packaged(tool.read_dispatcher_instances(_ROCKE, "gfx942"), "gfx942")
+    )
+    assert sorted(by_dtype) == sorted(tool.DTYPES)
+    for identities in by_dtype.values():
+        assert {i["arch"] for i in identities} == {"gfx942"}
+        kinds = collections.Counter(
+            (i["algorithm"], i.get("group_merge", 1) > 1) for i in identities
+        )
+        assert kinds == {
+            ("implicit_gemm", False): 342,
+            ("implicit_gemm", True): 30,
+            ("direct_nongrouped", False): 98,
+            ("direct_depthwise_tiled", False): 64,
+            ("direct_grouped", False): 11,
+            ("direct_depthwise", False): 4,
+            ("direct_depthwise_spatial", False): 3,
+            ("direct_depthwise_col", False): 1,
+        }
+        merged = collections.Counter(
+            i["group_merge"] for i in identities if i.get("group_merge", 1) > 1
+        )
+        assert merged == {4: 7, 16: 11, 32: 12}
+    assert sorted(map(_without_dtype, by_dtype["fp16"])) == sorted(
+        map(_without_dtype, by_dtype["bf16"])
+    )
+
+
+def test_every_catalog_entry_is_a_forward_sweep_identity(arch_catalog, monkeypatch):
+    """Each entry is a forward identity of its architecture's implicit-GEMM AOT grid
+    or of its direct grid."""
+    arch, catalog = arch_catalog
     flavor = catalog[0]["llvm_flavor"]
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     jobs = min(16, os.cpu_count() or 1)
     for dtype in tool.DTYPES:
-        swept = tool.sweep_hashes(dtype, jobs)
+        swept = tool.sweep_hashes(dtype, jobs, arch)
         listed = [i for i in catalog if i["dtype_a"] == dtype]
         assert all(tool.stable_hash(i) in swept for i in listed), dtype
 
 
-def test_every_catalog_entry_converts(catalog):
-    """The packaged launch runs every listed kernel: the converter refuses none."""
+def test_every_catalog_entry_converts(arch_catalog):
+    """The packaged launch runs every listed kernel: the converter refuses none, and
+    each converts to an instance of its architecture's engine."""
     import make_conv_aot_config
 
+    arch, catalog = arch_catalog
     assert tool.validate(catalog, min(16, os.cpu_count() or 1)) == []
     for identity in catalog:
         spec, _ = make_conv_aot_config.instance_spec(identity)
+        assert spec.ARCH == arch
         assert spec.is_direct == (identity["algorithm"] != "implicit_gemm")
 
 
@@ -222,22 +280,25 @@ def test_written_instances_are_one_compact_entry_per_line(tmp_path, synthetic_gr
     ]
 
 
-def _fake_main(tmp_path, monkeypatch, identities, swept=None):
-    """Run main() over a label file of ``identities``, every one of them a sweep
-    identity unless ``swept`` says otherwise. Returns main()'s status and the written
-    lists, by dtype."""
+def _fake_main(tmp_path, monkeypatch, identities, swept=None, arch=tool.ARCH):
+    """Run main() for ``arch`` over a label file of ``identities``, every one of them a
+    sweep identity unless ``swept`` says otherwise, under their LLVM flavor. Returns
+    main()'s status and the written lists, by dtype."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     labels = tmp_path / "labels.txt"
     labels.write_text("".join(f"{_label(i)}\n" for i in identities))
     hashes = {tool.stable_hash(i) for i in identities} if swept is None else swept
-    monkeypatch.setattr(tool, "sweep_hashes", lambda dtype, jobs: hashes)
+    monkeypatch.setattr(tool, "sweep_hashes", lambda dtype, jobs, arch: hashes)
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", identities[0]["llvm_flavor"])
     out = tmp_path / "lists"
-    argv = ["--rocke-root", str(_ROCKE), "--labels", str(labels)]
+    argv = ["--rocke-root", str(_ROCKE), "--arch", arch, "--labels", str(labels)]
     status = tool.main(argv + ["--output-dir", str(out), "--jobs", "1"])
     if not out.exists():
         return status, None
     return status, {
-        dtype: json.loads((out / tool.INSTANCE_LIST.format(dtype=dtype)).read_text())
+        dtype: json.loads(
+            (out / tool.INSTANCE_LIST.format(arch=arch, dtype=dtype)).read_text()
+        )
         for dtype in tool.DTYPES
     }
 
@@ -315,6 +376,57 @@ def test_main_refuses_a_dtype_the_catalog_does_not_package(
     assert "fp32" in capsys.readouterr().err
 
 
+def test_main_refuses_a_kernel_of_another_architecture(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    """A gfx950 kernel in the gfx942 engine's catalog is an error, named as such
+    rather than as a sweep or converter refusal."""
+    status, written = _fake_main(
+        tmp_path, monkeypatch, synthetic_grid[:2], arch="gfx942"
+    )
+    assert status == 1 and written is None
+    assert "is a gfx950 identity, not one of the gfx942 engine" in (
+        capsys.readouterr().err
+    )
+
+
+def test_main_writes_the_lists_of_the_architecture_it_is_given(
+    tmp_path, monkeypatch, synthetic_grid
+):
+    # gfx942's 32x32 MFMA atom is 32x32x8 (gfx950's is 32x32x16).
+    gfx942 = [
+        dict(i, arch="gfx942", warp_tile_k=8) for i in _both_dtypes(synthetic_grid[:4])
+    ]
+    status, written = _fake_main(tmp_path, monkeypatch, gfx942, arch="gfx942")
+    assert status == 0
+    for dtype, entries in written.items():
+        assert {(e["arch"], e["dtype_a"]) for e in entries} == {("gfx942", dtype)}
+        assert len(entries) == 4
+
+
+def test_main_refuses_an_architecture_without_a_forward_engine(tmp_path, capsys):
+    argv = ["--rocke-root", str(_ROCKE), "--arch", _NO_ENGINE_ARCH]
+    with pytest.raises(SystemExit):
+        tool.main(argv + ["--output-dir", str(tmp_path / "lists")])
+    assert f"invalid choice: {_NO_ENGINE_ARCH!r}" in capsys.readouterr().err
+    assert not (tmp_path / "lists").exists()
+
+
+def test_main_names_the_llvm_flavor_the_catalog_needs(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    """Under another LLVM flavor every catalog entry would read as "not a sweep
+    identity"; the run names the flavor instead, and writes nothing."""
+    labels = tmp_path / "labels.txt"
+    labels.write_text(f"{_label(synthetic_grid[0])}\n")
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
+    out = tmp_path / "lists"
+    argv = ["--rocke-root", str(_ROCKE), "--labels", str(labels)]
+    assert tool.main(argv + ["--output-dir", str(out), "--jobs", "1"]) == 1
+    assert "rerun with ROCKE_LLVM_FLAVOR=llvm22" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def test_main_refuses_a_stale_exclude_label(tmp_path, capsys):
     """An exclude naming a kernel the dispatcher no longer lists is an error, not a
     silently-ignored no-op: it would otherwise let a since-removed kernel's reason go
@@ -371,12 +483,15 @@ def test_main_applies_a_real_exclude_to_the_dispatcher_source(
     would still write the excluded instance and fail here."""
     identities = synthetic_grid[:3]
     dropped_label = _label(identities[0])
-    monkeypatch.setattr(tool, "read_dispatcher_instances", lambda root: identities)
+    monkeypatch.setattr(
+        tool, "read_dispatcher_instances", lambda root, arch: identities
+    )
     monkeypatch.setattr(
         tool,
         "sweep_hashes",
-        lambda dtype, jobs: {tool.stable_hash(i) for i in identities},
+        lambda dtype, jobs, arch: {tool.stable_hash(i) for i in identities},
     )
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", identities[0]["llvm_flavor"])
     excludes = tmp_path / "excludes.json"
     excludes.write_text(json.dumps([{"label": dropped_label, "reason": "a known bug"}]))
     out = tmp_path / "lists"
@@ -392,19 +507,24 @@ def test_main_applies_a_real_exclude_to_the_dispatcher_source(
     ]
     status = tool.main(argv)
     assert status == 0
-    written = json.loads((out / tool.INSTANCE_LIST.format(dtype="fp16")).read_text())
+    written = json.loads(
+        (out / tool.INSTANCE_LIST.format(arch="gfx950", dtype="fp16")).read_text()
+    )
     written_labels = {tool.identity_label(i) for i in written}
     assert dropped_label not in written_labels
     assert len(written) == len(identities) - 1
     assert f"excluded {dropped_label}" in capsys.readouterr().err
 
 
-def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path, monkeypatch):
-    """The shipped catalog's lists are the tool's output for the committed labels and
-    the rocKE tree beside them: a change to either has to regenerate the lists (and
-    the bundle make_conv_aot_config.py builds from them)."""
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_committed_instance_lists_are_what_the_tool_enumerates(
+    tmp_path, monkeypatch, arch
+):
+    """Each shipped catalog's lists are the tool's output for the rocKE tree beside
+    them: a change to rocKE's list has to regenerate the lists (and the bundle
+    make_conv_aot_config.py builds from them)."""
     committed = {
-        dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch=arch, dtype=dtype)
         for dtype in tool.DTYPES
     }
     with committed["fp16"].open() as handle:
@@ -413,8 +533,8 @@ def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path, monkeyp
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     out = tmp_path / "lists"
     jobs = str(min(16, os.cpu_count() or 1))
-    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", jobs]
-    assert tool.main(argv) == 0
+    argv = ["--rocke-root", str(_ROCKE), "--arch", arch, "--output-dir", str(out)]
+    assert tool.main(argv + ["--jobs", jobs]) == 0
     for dtype, path in committed.items():
-        written = out / tool.INSTANCE_LIST.format(dtype=dtype)
+        written = out / tool.INSTANCE_LIST.format(arch=arch, dtype=dtype)
         assert written.read_bytes() == path.read_bytes(), dtype

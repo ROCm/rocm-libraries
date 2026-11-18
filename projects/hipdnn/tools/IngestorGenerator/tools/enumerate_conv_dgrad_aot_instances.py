@@ -98,27 +98,9 @@ def family(identity: dict) -> str:
     return "direct"
 
 
-def check_flavor(identities: list) -> int:
-    """0 when this process lowers the LLVM flavor the catalog's identities are named
-    for; otherwise an error naming ``ROCKE_LLVM_FLAVOR``, as
-    ``benchmark_grouped_conv._check_flavor`` does.
-
-    ``sweep_hashes`` lowers with this process's flavor (``kernel_sweep.enumerate_jobs``
-    asks ``current_llvm_flavor()``, same as the identities below); on a mismatch every
-    catalog entry comes back "not a sweep identity" instead of naming the real cause.
-    """
-    from kernels.conv.kernel_identity import current_llvm_flavor
-
-    wanted = sorted({i["llvm_flavor"] for i in identities})
-    have = current_llvm_flavor()
-    if wanted and have not in wanted:
-        print(
-            f"the catalog's instances are named for LLVM flavor {'/'.join(wanted)}, "
-            f"this process lowers {have}: rerun with ROCKE_LLVM_FLAVOR={wanted[0]}",
-            file=sys.stderr,
-        )
-        return 1
-    return 0
+#: 0 when this process lowers the LLVM flavor the catalog is named for, else an
+#: error naming ``ROCKE_LLVM_FLAVOR``. Shared with the forward tool.
+check_flavor = _common.check_flavor
 
 
 def sweep_hashes(dtype: str, jobs: int, arch: str = ARCH) -> set:

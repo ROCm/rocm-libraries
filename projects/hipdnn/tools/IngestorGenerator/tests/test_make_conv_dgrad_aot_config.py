@@ -44,6 +44,7 @@ _PROVIDER = (
 )
 _FWD_DIRS = (
     _PROVIDER / "descriptors/rocKE/gfx950_conv_fwd_aot",
+    _PROVIDER / "descriptors/rocKE/gfx942_conv_fwd_aot",
     _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed",
 )
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000

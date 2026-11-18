@@ -67,6 +67,30 @@ def read_rocke_catalog(direction: str, arch: str = ARCH) -> list:
     return [i.to_dict() for i in load_instance_list(path).identities]
 
 
+def check_flavor(identities: list) -> int:
+    """0 when this process lowers the LLVM flavor the catalog's identities are named
+    for; otherwise an error naming ``ROCKE_LLVM_FLAVOR``, as
+    ``benchmark_grouped_conv._check_flavor`` does.
+
+    A tool's ``sweep_hashes`` lowers with this process's flavor
+    (``kernel_sweep.enumerate_jobs`` asks ``current_llvm_flavor()``); on a mismatch
+    every catalog entry comes back "not a sweep identity" instead of naming the real
+    cause.
+    """
+    from kernels.conv.kernel_identity import current_llvm_flavor
+
+    wanted = sorted({i["llvm_flavor"] for i in identities})
+    have = current_llvm_flavor()
+    if wanted and have not in wanted:
+        print(
+            f"the catalog's instances are named for LLVM flavor {'/'.join(wanted)}, "
+            f"this process lowers {have}: rerun with ROCKE_LLVM_FLAVOR={wanted[0]}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def read_excludes(path: Path) -> dict:
     """``label -> reason`` of a known-bug exclusion list (a JSON list of
     ``{"label": ..., "reason": ...}``); ``{}`` when ``path`` does not exist."""

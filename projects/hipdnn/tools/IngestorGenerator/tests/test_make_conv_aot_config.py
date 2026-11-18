@@ -55,6 +55,14 @@ _BUNDLES = {
     ),
     "seed": (_SEED_ENGINE, _SEED_DIR, [_INSTANCES], "dtype"),
 }
+#: The architecture of each bundle's engine.
+_BUNDLE_ARCH = {"product": "gfx950", "seed": "gfx950"}
+#: The committed instance lists of the gfx942 engine, whose bundle is not
+#: installed yet.
+_GFX942_LISTS = [
+    _CONFIGS / f"gfx942_conv_fwd_aot_{dtype}.instances.json"
+    for dtype in ("bf16", "fp16")
+]
 #: Worker processes that convert a catalog.
 _JOBS = min(32, os.cpu_count() or 1)
 
@@ -147,7 +155,8 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
         assert shard == tool.shard_name(spec, sharding)
         expected = {name: getattr(spec, name) for name in tool.spec_order(spec)}
         assert kernel["metadata"] == expected
-        assert kernel["id"] == tool.kernel_uuid(spec.instance_id, engine)
+        assert kernel["id"] == tool.kernel_uuid(spec.instance_id, engine, spec.ARCH)
+        builder = f"build_{spec.ARCH}_conv_fwd_aot"
         if spec.is_split_c:
             # Two launches over the one spec: the conv pass and rocKE's fold.
             assert "kernel_source" not in kernel
@@ -155,12 +164,12 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
                 name: (launch["builder"], launch["spec"])
                 for name, launch in kernel["sources"].items()
             } == {
-                "conv": ("build_gfx950_conv_fwd_aot", expected),
-                "reduce": ("build_gfx950_conv_fwd_aot_split_reduce", expected),
+                "conv": (builder, expected),
+                "reduce": (f"{builder}_split_reduce", expected),
             }
             continue
         assert kernel["kernel_source"]["spec"] == expected
-        assert kernel["kernel_source"]["builder"] == "build_gfx950_conv_fwd_aot"
+        assert kernel["kernel_source"]["builder"] == builder
 
 
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
@@ -202,19 +211,21 @@ def test_committed_instance_lists_and_census_are_below_the_hosting_size_limit():
         _REPO / "dnn-providers/hip-kernel-provider/src/tests/engines"
         "/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotPacks.cpp"
     )
-    for path in _BUNDLES["product"][2] + [census]:
+    for path in _BUNDLES["product"][2] + _GFX942_LISTS + [census]:
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
 
 
 def test_every_bundle_runs_the_shipped_engines_native_code():
-    for engine, folder, _, _ in _BUNDLES.values():
+    for name, (engine, folder, _, _) in _BUNDLES.items():
+        # The product engine of the bundle's architecture: its own code, or the
+        # code a second engine over its catalog borrows.
+        native = tool.product_native_namespace(_BUNDLE_ARCH[name])
         ued = json.loads((folder / f"{tool.engine_slug(engine)}.ued.json").read_text())
         assert ued["name"] == engine
-        assert ued["graph_match"] == {
-            "native": "hipkernel.gfx950_conv_fwd_aot.graph_match"
-        }
+        assert ued["graph_match"] == {"native": f"{native}.graph_match"}
         udd = json.loads((folder / f"{tool.engine_slug(engine)}.udd.json").read_text())
-        assert udd["dispatch_symbol"] == "hipkernel.gfx950_conv_fwd_aot.dispatch"
+        assert udd["dispatch_symbol"] == f"{native}.dispatch"
+    assert tool.product_native_namespace("gfx950") == "hipkernel.gfx950_conv_fwd_aot"
 
 
 def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):
@@ -327,7 +338,7 @@ def test_generated_config_expands_to_one_kernel_per_instance(tmp_path, seed_spec
     ("change", "reason"),
     [
         ({"direction": "wgrad"}, "forward implicit-GEMM"),
-        ({"arch": "gfx942"}, "forward implicit-GEMM"),
+        ({"arch": "gfx90a"}, "no packaged forward engine on 'gfx90a'"),
         ({"algorithm": "direct_grouped"}, "forward implicit-GEMM"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"split_k": 2}, "split_k"),
@@ -542,7 +553,7 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
 @pytest.mark.parametrize(
     ("algorithm", "change", "reason"),
     [
-        ("direct_depthwise", {"arch": "gfx942"}, "gfx950"),
+        ("direct_depthwise", {"arch": "gfx90a"}, "no packaged forward engine"),
         (
             "direct_depthwise",
             {"algorithm": "direct_depthwise_dgrad"},
@@ -600,8 +611,13 @@ def test_direct_instances_are_variants_stating_their_own_fields(
             # The split-C instances: one variant, two launches, a dispatch of its own.
             (split,) = pack["variants"]
             assert pack["dispatch"] == tool.SPLIT_C_DISPATCH
-            assert pack["kernel_defaults"]["launches"] == tool.SPLIT_C_LAUNCHES
-            assert split["name"] == tool._SPLIT_C_VARIANT_NAME
+            assert pack["kernel_defaults"]["launches"] == {
+                "conv": {},
+                "reduce": {"builder": "build_gfx950_conv_fwd_aot_split_reduce"},
+            }
+            assert split["name"] == (
+                "gfx950_conv_fwd_aot_nongroupedsplit_{dtype}_{instance_id}"
+            )
             assert split["spec_order"] == list(
                 tool.DIRECT_SPEC_ORDER
                 + tool.DIRECT_VARIANT_FIELDS["nongrouped"]
@@ -614,7 +630,7 @@ def test_direct_instances_are_variants_stating_their_own_fields(
         assert not any("kernel_family" in shape for shape in implicit["shapes"])
         variants = {}
         for variant in direct:
-            if variant["name"] == tool._MERGED_VARIANT_NAME:
+            if variant["name"] == "gfx950_conv_fwd_aot_merged_{dtype}_{instance_id}":
                 # Group-merged implicit GEMM: its merge degree, no direct field.
                 assert variant["spec_order"] == list(tool.MERGED_SPEC_ORDER)
                 assert all(shape["group_merge"] > 1 for shape in variant["shapes"])
