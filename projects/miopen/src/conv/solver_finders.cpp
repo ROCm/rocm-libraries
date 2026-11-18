@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <numeric>
 #include <thread>
@@ -775,6 +776,37 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
     return true;
 }
 
+namespace {
+
+constexpr std::int64_t FloorDiv(std::int64_t a, std::int64_t b)
+{
+    return a / b - ((a % b != 0 && a < 0) ? 1 : 0);
+}
+
+/// Number of (output position, filter tap) pairs along one spatial dimension for which the tap
+/// reads inside the input, that is 0 <= stride * o - pad + dil * t < in. The naive kernels skip
+/// the other taps (see fwd_filter_range and bwd_filter_range in naive_conv.hpp), so these pairs
+/// are the only ones that cost anything.
+std::int64_t CountValidTaps(int out, int filter, int in, int pad, int stride, int dil)
+{
+    if(out <= 0 || filter <= 0 || in <= 0 || stride <= 0 || dil <= 0)
+        return 0;
+    std::int64_t pairs = 0;
+    for(int t = 0; t < filter; ++t)
+    {
+        // stride * o must lie in [lo, hi].
+        const std::int64_t lo = static_cast<std::int64_t>(pad) - static_cast<std::int64_t>(dil) * t;
+        const std::int64_t hi = lo + in - 1;
+        const std::int64_t o_lo = std::max<std::int64_t>(0, -FloorDiv(-lo, stride));
+        const std::int64_t o_hi = std::min<std::int64_t>(out - 1, FloorDiv(hi, stride));
+        if(o_hi >= o_lo)
+            pairs += o_hi - o_lo + 1;
+    }
+    return pairs;
+}
+
+} // namespace
+
 float NaiveTimeFloorMs(const Handle& handle, const ProblemDescription& problem)
 {
     if(!env::value(MIOPEN_NAIVE_TIMEOUT))
@@ -787,13 +819,32 @@ float NaiveTimeFloorMs(const Handle& handle, const ProblemDescription& problem)
     // fp32 FMA lanes per hardware CU per clock, counting RDNA dual issue.
     constexpr double FmaLanesPerCu = 128.0;
 
-    const double out_pos = static_cast<double>(Interp::GetBatchN(problem)) *
-                           Interp::GetOutputChannelK(problem) * Interp::GetOutputDepthDo(problem) *
-                           Interp::GetOutputHeightHo(problem) * Interp::GetOutputWidthWo(problem);
-    const double reduction = static_cast<double>(Interp::GetInputChannelC(problem)) /
-                             Interp::GetGroupCountG(problem) * Interp::GetFilterDepthZ(problem) *
-                             Interp::GetFilterHeightY(problem) * Interp::GetFilterWidthX(problem);
-    const double flops = 2.0 * out_pos * reduction;
+    // The naive kernels do one multiply-accumulate per valid (output position, tap) pair and
+    // nothing for taps that read padding. The pairs along z, y and x are independent, so the
+    // number of valid multiply-accumulates per (n, k, c in group) is the product of the three
+    // per-dimension counts. It is the same for forward, backward data and backward weights.
+    const double valid_taps =
+        static_cast<double>(CountValidTaps(Interp::GetOutputDepthDo(problem),
+                                           Interp::GetFilterDepthZ(problem),
+                                           Interp::GetInputDepthDi(problem),
+                                           Interp::GetInputLeftPadD(problem),
+                                           Interp::GetAdjustedConvolutionStrideD(problem),
+                                           Interp::GetAdjustedConvolutionDilationD(problem))) *
+        static_cast<double>(CountValidTaps(Interp::GetOutputHeightHo(problem),
+                                           Interp::GetFilterHeightY(problem),
+                                           Interp::GetInputHeightHi(problem),
+                                           Interp::GetInputLeftPadH(problem),
+                                           Interp::GetAdjustedConvolutionStrideH(problem),
+                                           Interp::GetAdjustedConvolutionDilationH(problem))) *
+        static_cast<double>(CountValidTaps(Interp::GetOutputWidthWo(problem),
+                                           Interp::GetFilterWidthX(problem),
+                                           Interp::GetInputWidthWi(problem),
+                                           Interp::GetInputLeftPadW(problem),
+                                           Interp::GetAdjustedConvolutionStrideW(problem),
+                                           Interp::GetAdjustedConvolutionDilationW(problem)));
+    const double flops = 2.0 * static_cast<double>(Interp::GetBatchN(problem)) *
+                         Interp::GetOutputChannelK(problem) * Interp::GetInputChannelC(problem) /
+                         Interp::GetGroupCountG(problem) * valid_taps;
 
     double peak_flops = 0.0;
     try

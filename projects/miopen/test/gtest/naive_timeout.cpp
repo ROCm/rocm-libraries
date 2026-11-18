@@ -37,6 +37,11 @@
 // Each GPU test uses ScopedFindDb to disable miopen::debug::testing_find_db_enabled
 // so TryLoad always calls the regenerator (FindCore / EvaluateInvokers).
 
+#include <algorithm>
+#include <sstream>
+#include <string>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 #include <miopen/miopen.h>
@@ -320,6 +325,80 @@ TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
     }
 }
 
+namespace {
+
+struct FloorCase
+{
+    const char* name;
+    std::size_t n, c, k, h, w, y, x;
+    int pad, stride, dilation, groups;
+    bool fp16_nhwc;
+};
+
+// Padding-dominated shapes come first: a filter far larger than the input, where most taps read
+// padding that the naive kernels skip. The first of them is a 1x1 input with a 7x7 filter and
+// padding 3, the shape for which the floor used to exceed the naive kernel's run time.
+const FloorCase floor_cases[] = {
+    {"1x1 input, 7x7 filter, pad 3, fp16 NHWC", 256, 256, 256, 1, 1, 7, 7, 3, 1, 1, 1, true},
+    {"1x1 input, 11x11 filter, pad 5", 256, 128, 128, 1, 1, 11, 11, 5, 1, 1, 1, false},
+    {"2x2 input, 7x7 filter, pad 3", 128, 256, 256, 2, 2, 7, 7, 3, 1, 1, 1, false},
+    {"7x7 input, dilation 4, 3x3 filter, pad 4", 64, 256, 256, 7, 7, 3, 3, 4, 1, 4, 1, false},
+    {"stride 2, 5x5 filter, pad 2, 4 groups", 16, 64, 128, 15, 15, 5, 5, 2, 2, 1, 4, false},
+    {"3x3 filter, pad 1", 8, 128, 128, 28, 28, 3, 3, 1, 1, 1, 1, false},
+    {"1x1 filter, stride 2", 8, 128, 256, 56, 56, 1, 1, 0, 2, 1, 1, false},
+};
+
+miopen::conv::ProblemDescription MakeFloorProblem(const FloorCase& fc,
+                                                  miopen::conv::Direction direction)
+{
+    const auto type   = fc.fp16_nhwc ? miopenHalf : miopenFloat;
+    const auto layout = fc.fp16_nhwc ? miopenTensorNHWC : miopenTensorNCHW;
+    const miopen::TensorDescriptor x{
+        type, layout, std::vector<std::size_t>{fc.n, fc.c, fc.h, fc.w}};
+    const miopen::TensorDescriptor w{
+        type, layout, std::vector<std::size_t>{fc.k, fc.c / fc.groups, fc.y, fc.x}};
+    const miopen::ConvolutionDescriptor conv{2,
+                                             miopenConvolution,
+                                             miopenPaddingDefault,
+                                             {fc.pad, fc.pad},
+                                             {fc.stride, fc.stride},
+                                             {fc.dilation, fc.dilation},
+                                             {0, 0},
+                                             fc.groups};
+    const auto y =
+        conv.GetForwardOutputTensorWithLayout(x, w, fc.fp16_nhwc ? "NHWC" : "NCHW", type);
+    // The tensors of a backward problem are given in the order dy, w, dx.
+    if(direction == miopen::conv::Direction::Forward)
+        return {x, w, y, conv, direction};
+    return {y, w, x, conv, direction};
+}
+
+float FloorMs(const FloorCase& fc, miopen::conv::Direction direction)
+{
+    return miopen::conv::NaiveTimeFloorMs(get_handle(), MakeFloorProblem(fc, direction));
+}
+
+// Number of (output position, filter tap) pairs along one dimension whose tap reads inside the
+// input, counted one by one.
+std::size_t TapsInInput(int out, int filter, int in, int pad, int stride, int dilation)
+{
+    std::size_t taps = 0;
+    for(int o = 0; o < out; ++o)
+        for(int t = 0; t < filter; ++t)
+        {
+            const int pos = stride * o - pad + dilation * t;
+            taps += (pos >= 0 && pos < in) ? 1 : 0;
+        }
+    return taps;
+}
+
+int OutSize(int in, int filter, int pad, int stride, int dilation)
+{
+    return (in + 2 * pad - dilation * (filter - 1) - 1) / stride + 1;
+}
+
+} // namespace
+
 // The bound EvaluateInvokers() uses to skip a naive solver before launching it must be positive
 // and must grow with the amount of work in the problem.
 TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorScalesWithWork)
@@ -341,6 +420,55 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorScalesWithWork)
     const float large = floor_ms(16);
     ASSERT_GT(small, 0.0f);
     EXPECT_NEAR(large / small, 2.0f, 1e-3f);
+}
+
+// The naive kernels do nothing for a filter tap that reads padding, so a floor that counted such
+// taps could exceed the kernel's run time and drop a naive solver that would have won. The floor
+// is the floor of the same problem with a 1x1 filter times the number of taps that read inside
+// the input, which the test counts one by one.
+TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorCountsOnlyTapsInInput)
+{
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+
+    for(const auto& fc : floor_cases)
+    {
+        SCOPED_TRACE(fc.name);
+        const int ho    = OutSize(fc.h, fc.y, fc.pad, fc.stride, fc.dilation);
+        const int wo    = OutSize(fc.w, fc.x, fc.pad, fc.stride, fc.dilation);
+        const auto taps = TapsInInput(ho, fc.y, fc.h, fc.pad, fc.stride, fc.dilation) *
+                          TapsInInput(wo, fc.x, fc.w, fc.pad, fc.stride, fc.dilation);
+
+        // One multiply-accumulate per output pixel: a 1x1 filter on a 1x1 image.
+        FloorCase unit = fc;
+        unit.h = unit.w = unit.y = unit.x = 1;
+        unit.pad                          = 0;
+        unit.stride = unit.dilation = 1;
+        const float unit_floor      = FloorMs(unit, miopen::conv::Direction::Forward);
+        ASSERT_GT(unit_floor, 0.0f);
+
+        const float got      = FloorMs(fc, miopen::conv::Direction::Forward);
+        const float expected = unit_floor * static_cast<float>(taps);
+        EXPECT_NEAR(got / expected, 1.0f, 1e-4f) << "taps in input " << taps << ", all taps "
+                                                 << static_cast<std::size_t>(ho) * wo * fc.y * fc.x;
+    }
+}
+
+// Forward, backward data and backward weights of one convolution do the same work in the naive
+// kernels, so they get the same floor.
+TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorIsTheSameInEveryDirection)
+{
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+
+    for(const auto& fc : floor_cases)
+    {
+        SCOPED_TRACE(fc.name);
+        const float fwd = FloorMs(fc, miopen::conv::Direction::Forward);
+        const float bwd = FloorMs(fc, miopen::conv::Direction::BackwardData);
+        const float wrw = FloorMs(fc, miopen::conv::Direction::BackwardWeights);
+        ASSERT_GT(fwd, 0.0f);
+        EXPECT_EQ(bwd, fwd) << "backward data";
+        EXPECT_EQ(wrw, fwd) << "backward weights";
+    }
 }
 
 // CPU-only: verify that MIOPEN_NAIVE_TIMEOUT can be set and read back via the debug
