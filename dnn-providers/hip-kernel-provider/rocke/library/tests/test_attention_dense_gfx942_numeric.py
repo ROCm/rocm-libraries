@@ -2567,5 +2567,220 @@ def test_cfvst_kdb_vpf_pipeline_reuses_runtime_shape_binary():
             _DENSE_LAUNCHER_CACHE[keys[0]] = old_entry
 
 
+# --------------------------------------------------------------------------- #
+# QK lookahead (qk_lookahead) and the xcd_local persistent decode
+# --------------------------------------------------------------------------- #
+# (batch, S, Hkv): one query block (S 256), several with unmasked tiles, and
+# work counts below and far above the 304 persistent CTAs (many grid-stride
+# rounds). Hq 32: xcd_local's layout.
+_QKLA_SHAPES = [
+    (1, 256, 8),
+    (1, 1024, 8),
+    (1, 2048, 16),
+    (2, 1536, 16),
+    (16, 1024, 8),
+    (16, 512, 16),
+]
+
+
+def _qkla_request(batch, sq, hkv, spec_id, skv=None):
+    from dispatch.attention import AttentionRequest
+
+    return AttentionRequest(
+        batch=batch,
+        nhead_q=32,
+        nhead_k=hkv,
+        seqlen_q=sq,
+        seqlen_k=sq if skv is None else skv,
+        hdim_q=128,
+        hdim_v=128,
+        arch="gfx942",
+        mask_type=1,
+        dtype="bf16",
+        spec_id=spec_id,
+    )
+
+
+# The QK-lookahead pipeline as a gfx942_dense knob pin: the flag, its prerequisites
+# and the xcd_local decode it runs on.
+_QKLA_KNOBS = dict(
+    qk_lookahead=True,
+    block_m=256,
+    lds_num_buffers=2,
+    v_reg_prefetch=True,
+    causal_diag_split=True,
+    lds_row_pad=0,
+    persist_decode="xcd_local",
+)
+
+
+def _qkla_spec(batch, sq, hkv, skv=None):
+    """The QK-lookahead spec, through dispatch: ``_QKLA_KNOBS`` pinned on
+    ``gfx942_dense``."""
+    from dispatch.attention import tuning_spec_with_knobs
+
+    spec = tuning_spec_with_knobs(
+        _qkla_request(batch, sq, hkv, "gfx942_dense", skv),
+        "gfx942_dense",
+        _QKLA_KNOBS,
+    ).kernel_spec
+    assert spec.qk_lookahead
+    return spec
+
+
+def _run_bf16(spec, batch, sq, hkv, *, skv=None, scale=None, seed=0):
+    """Run ``spec`` on random bf16 inputs; the output starts as NaN so a tile the
+    kernel never writes fails the comparison."""
+    import torch
+
+    tdt = torch.bfloat16
+    skv = sq if skv is None else skv
+    torch.manual_seed(seed)
+    q = torch.randn(batch, sq, 32, 128, device="cuda", dtype=tdt)
+    k = torch.randn(batch, skv, hkv, 128, device="cuda", dtype=tdt)
+    v = torch.randn(batch, skv, hkv, 128, device="cuda", dtype=tdt)
+    out = torch.full_like(q, float("nan"))
+    scale = 1.0 / math.sqrt(128) if scale is None else scale
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+    return q, k, v, out, scale
+
+
+def _assert_close_to_sdpa(
+    spec, batch, sq, hkv, label, *, skv=None, scale=None, tol=1e-2, seed=0
+):
+    """``spec`` against fp32 SDPA with the top-left causal mask (Skv may differ
+    from Sq)."""
+    import torch
+
+    skv = sq if skv is None else skv
+    q, k, v, out, scale = _run_bf16(
+        spec, batch, sq, hkv, skv=skv, scale=scale, seed=seed
+    )
+    qi = torch.arange(sq, device="cuda")[:, None]
+    ki = torch.arange(skv, device="cuda")[None, :]
+    ref = _sdpa_reference(q, k, v, scale, causal=False, attn_mask=ki <= qi)
+    assert torch.isfinite(out).all(), f"{label}: unwritten (NaN) output"
+    max_abs = (ref - out.float()).abs().max().item()
+    torch.testing.assert_close(
+        out.float(),
+        ref,
+        atol=tol,
+        rtol=tol,
+        msg=lambda m: (
+            f"{label} b{batch} Sq{sq} Skv{skv} Hkv{hkv} ({spec.kernel_name()}): "
+            f"max_abs={max_abs:.3e}\n{m}"
+        ),
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("batch,sq,hkv", _QKLA_SHAPES)
+def test_qk_lookahead_xcd_local_numeric_vs_fp32_sdpa(batch, sq, hkv):
+    """The QK-lookahead spec (on xcd_local, the only decode it runs on) against
+    fp32 SDPA."""
+    spec = _qkla_spec(batch, sq, hkv)
+    assert spec.persist_decode == "xcd_local"
+    _assert_close_to_sdpa(spec, batch, sq, hkv, "qk_lookahead/xcd_local")
+
+
+# Free knobs the qk_lookahead gate accepts and that change its IR.
+_QKLA_FREE_KNOBS = [
+    pytest.param({"use_exp2_fast": False}, id="plain_exp2"),
+    pytest.param({"pv_loop_order": "k_major"}, id="kmajor"),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("knobs", _QKLA_FREE_KNOBS)
+@pytest.mark.parametrize("batch,sq,hkv", [(1, 1024, 8), (16, 1024, 8)])
+def test_qk_lookahead_free_knobs_numeric_vs_fp32_sdpa(batch, sq, hkv, knobs):
+    """Every knob the qk_lookahead gate leaves free and that changes its IR is
+    checked against fp32 SDPA."""
+    spec = dataclasses.replace(_qkla_spec(batch, sq, hkv), **knobs)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, f"gate no longer accepts a row it used to open: {why}"
+    _assert_close_to_sdpa(spec, batch, sq, hkv, f"qk_lookahead {knobs}")
+
+
+def test_qk_lookahead_shapes_cover_multiple_grid_stride_rounds():
+    """Anti-vacuity: at least one numeric shape gives each of the 304 CTAs more
+    than two work items with a ragged last round, so the hand-off between items
+    on one CTA runs."""
+    np_ = 304
+    works = [-(-sq // 256) * 32 * batch for batch, sq, _ in _QKLA_SHAPES]
+    assert any(w > 2 * np_ and w % np_ for w in works), works
+
+
+# (Sq, Skv) with Skv != Sq, top-left causal. Skv 64 and 192 give an odd number of
+# K tiles, so the last tile lands in the other K/V slot.
+_QKLA_CROSS_LENGTHS = [(256, 64), (256, 192), (512, 192), (512, 1024), (1024, 512)]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sq,skv", _QKLA_CROSS_LENGTHS)
+def test_qk_lookahead_cross_length_numeric_vs_fp32_sdpa(sq, skv):
+    spec = _qkla_spec(4, sq, 8, skv)
+    assert spec.seqlen_q == sq and spec.seqlen_kv == skv
+    _assert_close_to_sdpa(spec, 4, sq, 8, "qk_lookahead cross-length", skv=skv)
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("scale", [0.5, 1.0])
+def test_qk_lookahead_non_default_scale(scale):
+    """Softmax scales well above 1/sqrt(D); the tolerance follows
+    test_dense_non_default_scale's bf16 bound."""
+    spec = _qkla_spec(16, 1024, 8)
+    _assert_close_to_sdpa(
+        spec, 16, 1024, 8, f"qk_lookahead scale={scale}", scale=scale, tol=4e-2
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_qk_lookahead_reuses_runtime_shape_binary():
+    """One qk_lookahead launcher serves different B/S/Hkv with distinct inputs."""
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    shape_rows = [(1, 512, 8), (2, 1024, 16)]
+    specs = [_qkla_spec(batch, sq, hkv) for batch, sq, hkv in shape_rows]
+    assert all(s.runtime_shape for s in specs)
+    keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
+    assert keys[0] == keys[1], "same runtime-shape kernel must have one cache key"
+    old_entry = _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+    try:
+        launchers = []
+        for i, (spec, (batch, sq, hkv)) in enumerate(zip(specs, shape_rows)):
+            _assert_close_to_sdpa(
+                spec, batch, sq, hkv, "qk_lookahead reuse", seed=61 + i
+            )
+            launchers.append(_launcher_for(spec))
+        assert launchers[0] is not None
+        assert launchers[0] is launchers[1], "qk_lookahead recompiled across shapes"
+    finally:
+        _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+        if old_entry is not None:
+            _DENSE_LAUNCHER_CACHE[keys[0]] = old_entry
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("batch,sq,hkv", [(1, 2048, 8), (16, 1024, 16)])
+def test_xcd_local_default_body_numeric_vs_fp32_sdpa(batch, sq, hkv):
+    """xcd_local is a plain persist_decode value, so it also runs the default
+    body (no qk_lookahead)."""
+    spec = dataclasses.replace(
+        _spec("bf16", 128, 32, hkv, True, batch=batch, sq=sq),
+        persist_decode="xcd_local",
+    )
+    assert not spec.qk_lookahead and spec.num_persistent == 304
+    _assert_close_to_sdpa(spec, batch, sq, hkv, "xcd_local/default body")
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

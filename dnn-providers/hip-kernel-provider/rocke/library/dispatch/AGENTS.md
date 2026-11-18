@@ -44,6 +44,7 @@ params). Correctness rests entirely on the key.
 | 3 | `attention_gfx942_dense_persist_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's D128 persistent grid: 304 CTAs, an explicit (never `auto`) `persist_decode`, one KV segment; the other knobs swept (`spec_id=gfx942_dense_persist_aot`, opt-in) |
 | 3 | `attention_gfx942_dense_btminor_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `bt_hkv_minor` grid, one KV segment; default spec only (`spec_id=gfx942_dense_btminor_aot`, opt-in) |
 | 3 | `attention_gfx942_dense_hqswz_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `hq_minor_swz` grid, one KV segment; default spec only (`spec_id=gfx942_dense_hqswz_aot`, opt-in) |
+| 3 | `attention_gfx942_dense_qkla` | gfx942 | `gfx942_dense.py` | the tuned default spec with the QK-lookahead pipeline (`qk_lookahead`) and its prerequisites on, on the `xcd_local` persistent decode where that decode serves the shape; default spec only (`spec_id=gfx942_dense_qkla`, opt-in, registered last) |
 | 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
 | 3 | `attention_gfx950_dense_qbminor` | gfx950 | `gfx950_dense.py` | dense grid body at the `qb_minor` order the hipDNN ingestor launches (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_qbminor`, opt-in) |
 | 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
@@ -97,8 +98,9 @@ an invalid point. This is deliberately separate from the heuristic production
 builders.
 
 Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx942_dense`, `attention_gfx942_dense_qbminor` and the three
-`attention_gfx942_dense_*_aot` candidates, the four `attention_gfx950_dense_*` candidates, and
+`attention_gfx942_dense`, `attention_gfx942_dense_qbminor`, the three
+`attention_gfx942_dense_*_aot` candidates and `attention_gfx942_dense_qkla`,
+the four `attention_gfx950_dense_*` candidates, and
 `attention_gfx1250_wmma`, plus every priority-30 unified tuning candidate.
 Registering a kernel makes it reachable; making it an
 arch's default is a separate decision that wants benchmark evidence, so none
@@ -202,8 +204,12 @@ spec. The gfx942 dense knobs include the K and V row pads, the D64 K group
 pad, conflict-free V store (`use_cfvst`) and its swizzle, K LDS buffering
 (`lds_num_buffers`), V register prefetch (`v_reg_prefetch`), the persistent
 and non-persistent block orders, exp2, `iglp` / `iglp_mode`, the PV fence
-mask, `pv_priority`, `pv_loop_order`, the bf16 O store width, and
-`causal_diag_split`. LDS-saving and prerequisite axes lead as enablers so
+mask, `pv_priority`, `pv_loop_order`, the bf16 O store width,
+`causal_diag_split`, and `qk_lookahead`. The `persist_decode` axis takes its
+values from the gfx942 spec's own registry
+(`Gfx942AttentionDenseSpec.persist_decode_registry()`), which adds the
+gfx942-only `xcd_local` decode to the shared ones. LDS-saving and
+prerequisite axes lead as enablers so
 an otherwise invalid configuration can become valid before later knobs
 are considered. Only `lazy_rescale` is untunable on gfx942, because the
 kernel body does not read it.
@@ -229,14 +235,28 @@ default or make the opt-in dense candidate an automatic dispatch winner.
 Bare `tuning_id` replay searches production points only; replay a
 full-space-only combination with its recorded knob dictionary.
 
-**Tuning-id migration for `gfx942_dense`.** Adding the defaulted
-`v_reg_prefetch` field changes the defaults fingerprint in `config_key`, so
-every `gfx942_dense` `tuning_id` recorded before it is rekeyed: replaying one
-raises `PinRefused` instead of rebuilding a different kernel. No such id is
-stored in this tree. A downstream tuning store must drop its old
-`gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped: the
-defaults fingerprint already separates the old and new ids, and
-`lds_num_buffers` was untunable on gfx942 before, so no stored id names it.
+`qk_lookahead=True` is the software-pipelined tile body (QK of the next tile
+under the current tile's softmax, one barrier per tile). It needs BF16 D128
+top-left causal on the persistent grid with `block_m=256`, `block_n=64`,
+`lds_num_buffers=2`, `v_reg_prefetch=True`, `causal_diag_split=True` and
+`lds_row_pad=0`, and refuses windows, sinks, LSE, paging, KV segments, iglp
+and the PV priority/fence knobs (`NOT_YET_IMPLEMENTED:` in the kernel's
+validator). Setting it does not turn those prerequisites on: like the triple
+combination above, it is more than the one prerequisite a production point
+pairs, so on `gfx942_dense` it is reachable through an explicit knob pin
+(all six fields) or the full tuning space. `gfx942_dense_qkla` is the same
+configuration as a candidate of its own, so every sweep over the registered
+candidates includes it.
+
+**Tuning-id migration for `gfx942_dense`.** Adding a defaulted field
+(`v_reg_prefetch`, then `qk_lookahead`) changes the defaults fingerprint in
+`config_key`, so every `gfx942_dense` `tuning_id` recorded before it is
+rekeyed: replaying one raises `PinRefused` instead of rebuilding a different
+kernel. No such id is stored in this tree. A downstream tuning store must drop
+its old `gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped:
+the defaults fingerprint already separates the old and new ids, and no stored
+id can name a knob that was untunable (`lds_num_buffers`) or did not exist
+(`qk_lookahead`) when it was recorded.
 
 **Tuning-id migration for gfx950 2D fp8 K and the zero-width KQ pad.** Two
 gfx950 2D changes touch stored ids; no such id is stored in this tree.
