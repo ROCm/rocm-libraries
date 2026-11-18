@@ -863,6 +863,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const int64_t kg = a.k / a.groups;
     const int64_t cg = a.c / a.groups;
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
+    // Flattened positions (flat 1): every output position, and the whole x and dy spans.
+    const int64_t positions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    const int64_t xTensor = (a.n - 1) * a.xStrides[0] + problem.xSpan;
+    const int64_t yTensor = (a.n - 1) * a.yStrides[0] + problem.ySpan;
 
     // Loop and layout.
     if(config.loop < LOOP_ROWS || config.loop > LOOP_GENERIC)
@@ -1173,9 +1177,6 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // Flattened positions (flat 1): the generic loop without a shared window or block-based
     // buffers, where an output row is shorter than a step (row chunks would run part empty);
     // x and dy each one buffer, and the positions within 32 bits.
-    const int64_t positions = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
-    const int64_t xTensor = (a.n - 1) * a.xStrides[0] + problem.xSpan;
-    const int64_t yTensor = (a.n - 1) * a.yStrides[0] + problem.ySpan;
     if(config.flat != 0
        && (config.flat != 1 || !generic || config.dw != 0 || config.pb != 0
            || a.outSpatial[2] >= config.bq || positions > INT_LIMIT - config.bq
