@@ -70,8 +70,11 @@ INTS = [
     "un",
     "cf",
     "dil",
+    "line",
 ]
-ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0, dil=1)
+ROWS0 = dict(
+    rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0, dil=1, line=0
+)
 STRINGS = ["direction", "dtype", "kind", "atom", "archs"]
 F33, F55, F77, F17, F71, F333, F555 = (
     (1, 3, 3),
@@ -159,12 +162,15 @@ def RW(
     split=0,
     cf=0,
     dil=1,
+    line=0,
 ):
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
     (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images. cf 1
     (16-bit): packed channels-first activations read and written in place; cf 2 is the
     dword-DMA form (even input widths) on any MFMA part. dil (2-D): the filter dilation it serves.
+    line 1 (1 x S filters on one-row images): a tile is wp pw segments of 16 wq columns of the row,
+    staged as one halo line.
     """
     return dict(
         kind="rows",
@@ -199,6 +205,7 @@ def RW(
         un=un,
         cf=cf,
         dil=dil,
+        line=line,
     )
 
 
@@ -621,6 +628,41 @@ add(
 # 2-D 3x3 shapes, fwd and bwd. Its 16-bit rows (0.80-1.08x, ping-pong never best) and every
 # 3x3x3 rows tile lost there.
 add("FLOAT", ["gfx942"], [RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, epi=0)])
+# Line tiles: 1 x S filters on one-row images (1-D audio convolutions, HiFi-GAN's 3/7/11-tap
+# residual stacks at dilation 1, 3 and 5). A wave owns 8 segments of 16 columns of the row, so each
+# weight fragment serves 8 segments and the staged line serves every tap; channels-first (16-bit,
+# in place) and channels-last.
+LINE_GEOMETRIES = [(s, d) for s in (3, 7, 11) for d in (1, 3, 5)]
+for s_, d in LINE_GEOMETRIES:
+    f = (1, 1, s_)
+    L = dict(dil=d, line=1)
+    for dt in ("HALF", "BFLOAT16"):
+        e = x16(dt)
+        add(
+            dt,
+            ["gfx950"],
+            [
+                RW(f"mfma16x32_{e}", f, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1, **L),
+                RW(f"mfma16x32_{e}", f, 8, 2, 2, 2, 2, 32, 8, epi=0, cf=1, **L),
+                RW(f"mfma16x32_{e}", f, 8, 2, 2, 2, 2, 32, 8, **L),
+                RW(f"mfma16x32_{e}", f, 8, 4, 1, 2, 2, 32, 8, **L),
+            ],
+        )
+        add(
+            dt,
+            ["gfx90a", "gfx942"],
+            [
+                RW(f"mfma16_{e}", f, 8, 4, 2, 2, 2, 16, 8, epi=0, cf=1, **L),
+                RW(f"mfma16_{e}", f, 8, 2, 2, 2, 2, 16, 8, **L),
+                RW(f"mfma16_{e}", f, 8, 4, 2, 2, 2, 16, 8, **L),
+            ],
+        )
+    add("FLOAT", ["gfx950"], [RW("mfma16_f32", f, 8, 2, 2, 2, 2, 16, 4, epi=0, **L)])
+    add(
+        "FLOAT",
+        ["gfx90a", "gfx942"],
+        [RW("mfma16_f32", f, 8, 2, 2, 2, 2, 8, 4, epi=0, **L)],
+    )
 # Dilated 3x3 fp32 (dilation 2 and 4): the 16-bit dilated tiles at half the chunk.
 for d in (2, 4):
     add(
@@ -831,13 +873,12 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             if c["rows"]:
                 # ConvDirectRows.h's two halo stages; the pack gates the same (rowsLdsBytes).
                 eb = 4 if c["atom"] == "mfma16_f32" else 2
-                hh = c["wp"] * c["pw"] + (c["r"] - 1) * c["dil"]
+                hh = 1 if c["line"] else c["wp"] * c["pw"] + (c["r"] - 1) * c["dil"]
+                cols = c["wq"] * 16 * (c["wp"] * c["pw"] if c["line"] else 1)
                 reach = (c["s"] - 1) * c["dil"]
-                lds = (
-                    2 * hh * c["un"] * (c["wq"] * 16 // c["un"] + reach) * c["bc"] * eb
-                )
+                lds = 2 * hh * c["un"] * (cols // c["un"] + reach) * c["bc"] * eb
                 if c["cf"]:
-                    runs = (7 + c["wq"] * 16 + reach + 7) // 8
+                    runs = (7 + cols + reach + 7) // 8
                     lds = lds // 2 + hh * c["bc"] * runs * 16
                 limit = 160 * 1024 if archs <= {"gfx950"} else 64 * 1024
                 assert lds <= limit, (c, archs, lds)
@@ -849,6 +890,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     + (".split" if c["split"] else "")
                     + {0: "", 1: ".cf", 2: ".cfd"}[c["cf"]]
                     + (f".d{c['dil']}" if c["dil"] > 1 else "")
+                    + (".line" if c["line"] else "")
                 )
             else:
                 name = (

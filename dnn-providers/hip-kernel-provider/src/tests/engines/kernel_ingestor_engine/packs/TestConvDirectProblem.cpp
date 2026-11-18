@@ -190,6 +190,43 @@ TEST(TestConvDirectForm, BackwardDataSwapsChannelsAndPadsByFilterMinusOneMinusPr
     EXPECT_EQ(problem->stagingBytes, size_t{0});
 }
 
+TEST(TestConvDirectForm, OneRowImagesTakeLineFiltersAndTheirDilation)
+{
+    // 2-D of one row, 1 x 11 at dilation 5 (the height dilation spans no taps).
+    auto row = baseShape();
+    row.input = {1, 64};
+    row.filter = {1, 11};
+    row.dilation = {1, 5};
+    row.prePadding = row.postPadding = {0, 25};
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto problem = parse(specFor(row, direction));
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_TRUE(problem->oneRow);
+        EXPECT_EQ(problem->dilation, 5);
+        EXPECT_EQ(problem->spatialRank, 2);
+        EXPECT_EQ(problem->args.hi, 1);
+        EXPECT_EQ(problem->args.ph, 0);
+        EXPECT_EQ(problem->args.pw, 25);
+    }
+    // 1-D: a one-row image of rank 1.
+    auto line = baseShape();
+    line.input = {40};
+    line.filter = {7};
+    line.dilation = {3};
+    line.prePadding = line.postPadding = {9};
+    const auto oneD = parse(specFor(line, ConvDirection::FORWARD));
+    ASSERT_TRUE(oneD.has_value());
+    EXPECT_TRUE(oneD->oneRow);
+    EXPECT_EQ(oneD->spatialRank, 1);
+    EXPECT_EQ(oneD->dilation, 3);
+    EXPECT_EQ(oneD->args.wo, 40);
+    // A 3 x 3 image is not one row.
+    const auto square = parse(specFor(baseShape(), ConvDirection::FORWARD));
+    ASSERT_TRUE(square.has_value());
+    EXPECT_FALSE(square->oneRow);
+}
+
 TEST(TestConvDirectForm, DilationIsKeptAndBackwardDataPadsByTheDilatedReach)
 {
     auto shape = baseShape();
@@ -287,13 +324,21 @@ std::vector<RefusalCase> refusalCases()
          }},
         // The direct envelope: 2-D or 3-D, groups 1, stride 1, dilation 1 (or one 2-D dilation of
         // both filter axes), an instantiated filter.
-        {"OneD",
+        {"OneDFilterNotALineWidth",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
-             shape.input = {7};
-             shape.filter = {3};
-             shape.prePadding = shape.postPadding = {1};
+             shape.input = {11};
+             shape.filter = {9};
+             shape.prePadding = shape.postPadding = {4};
              shape.stride = shape.dilation = {1};
+             reshape(s, shape);
+         }},
+        {"LineWidthOnTwoRows",
+         [](ConvGraphSpec& s) {
+             auto shape = baseShape();
+             shape.input = {2, 9};
+             shape.filter = {1, 11};
+             shape.prePadding = shape.postPadding = {0, 5};
              reshape(s, shape);
          }},
         {"Grouped",
@@ -487,6 +532,7 @@ struct ConfigFields
     int64_t tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
     int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0, cf = 0;
     int64_t dil = 1;
+    int64_t line = 0;
 };
 
 /// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
@@ -568,7 +614,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"epi", f.epi},
                        {"un", f.un},
                        {"cf", f.cf},
-                       {"dil", f.dil}};
+                       {"dil", f.dil},
+                       {"line", f.line}};
     return kernel;
 }
 
@@ -940,6 +987,92 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineHaloStagesPastTheDeviceLds)
     EXPECT_TRUE(admits(big, "gfx950"));
     big.bc = 128;
     EXPECT_FALSE(admits(big, "gfx950"));
+}
+
+TEST(TestConvDirectKernelMatch, LineConfigsServeOneRowImages)
+{
+    auto row = baseShape();
+    row.input = {1, 64};
+    row.filter = {1, 11};
+    row.dilation = {1, 5};
+    row.prePadding = row.postPadding = {0, 25};
+    // 2 x 2 x 2 waves of 8 segments x 16 columns: a 512-column tile of the row.
+    auto line = rowsFields();
+    line.r = 1;
+    line.s = 11;
+    line.bc = 32;
+    line.dil = 5;
+    line.line = 1;
+    EXPECT_TRUE(admits(line, "gfx950", row));
+    // One staged line of 512 + (11 - 1) x 5 pixels, two stages.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(line, "HALF"))),
+              2 * 562 * 32 * 2);
+    auto cf = line;
+    cf.cf = 1;
+    cf.epi = 0;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(cf, "HALF"))),
+              32 * ((7 + 562 + 7) / 8) * 16 + 562 * 32 * 2);
+    // The tile is the row's 512 columns: one tile per 512 output columns.
+    auto wide = row;
+    wide.input = {1, 1100};
+    wide.dataType = DataType::HALF;
+    const auto plan = planOf(wide, line, "HALF", 64);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.th, 1);
+    EXPECT_EQ(plan->args.tw, 512);
+    EXPECT_EQ(plan->args.tilesW, 3);
+    EXPECT_EQ(plan->args.tilesH, 1);
+    // Not on a two-row image, nor at another dilation or width.
+    auto twoRows = row;
+    twoRows.input = {2, 64};
+    auto f17 = line;
+    f17.s = 7;
+    f17.dil = 1;
+    auto rows17 = twoRows;
+    rows17.filter = {1, 7};
+    rows17.dilation = {1, 1};
+    rows17.prePadding = rows17.postPadding = {0, 3};
+    EXPECT_FALSE(admits(f17, "gfx950", rows17));
+    auto d3 = line;
+    d3.dil = 3;
+    EXPECT_FALSE(admits(d3, "gfx950", row));
+    // 1-D graphs: line configs only.
+    auto oneD = baseShape();
+    oneD.input = {64};
+    oneD.filter = {7};
+    oneD.prePadding = oneD.postPadding = {3};
+    oneD.stride = oneD.dilation = {1};
+    EXPECT_TRUE(admits(f17, "gfx950", oneD));
+    auto plain17 = rowsFields();
+    plain17.r = 1;
+    plain17.s = 7;
+    plain17.bc = 32;
+    EXPECT_FALSE(admits(plain17, "gfx950", oneD)) << "a 2-D rows config on a 1-D graph";
+    // Line tiles are 2-D rows of 1 x S filters, one image per column group, no ping-pong or split.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> malformed{
+        {"line 2", [](ConfigFields& f) { f.line = 2; }},
+        {"r 3", [](ConfigFields& f) { f.r = 3; }},
+        {"un 2", [](ConfigFields& f) { f.un = 2; }},
+        {"pp 1",
+         [](ConfigFields& f) {
+             f.pp = 1;
+             f.epi = 0;
+         }},
+        {"split", [](ConfigFields& f) { f.split = 1; }},
+    };
+    for(const auto& [name, mutate] : malformed)
+    {
+        auto f = line;
+        mutate(f);
+        EXPECT_FALSE(admits(f, "gfx950", row)) << name;
+    }
+    ConfigFields mma;
+    mma.atom = "mfma16x32_f16";
+    mma.archs = "gfx950";
+    mma.r = 1;
+    mma.s = 7;
+    mma.line = 1;
+    EXPECT_FALSE(admits(mma, "gfx950", rows17)) << "line on a halo-tile config";
 }
 
 TEST(TestConvDirectKernelMatch, DilatedRowsConfigsServeTheirOwnDilation)

@@ -361,7 +361,8 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
     default:
         return std::nullopt;
     }
-    if(base->spatialRank != 2 && base->spatialRank != 3)
+    // 2-D and 3-D; a 1-D convolution is a one-row 2-D one, which only line configs serve.
+    if(base->spatialRank < 1 || base->spatialRank > 3)
     {
         return std::nullopt;
     }
@@ -376,17 +377,38 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
             return std::nullopt;
         }
     }
-    // Dilation: 1 on every axis, or (2-D) one dilation of both filter axes.
-    const long long dilation = a.dilation[SPATIAL - 1];
-    if(dilation < 1 || dilation > INT_LIMIT
-       || (dilation != 1
-           && (base->spatialRank != 2 || a.dilation[0] != 1 || a.dilation[1] != dilation)))
+    // Dilation: one value on every axis the filter spans (an axis of filter extent 1 has no
+    // taps to space), 1 in 3-D.
+    long long dilation = 1;
+    for(int axis = 0; axis < SPATIAL; ++axis)
+    {
+        if(a.dilation[axis] < 1 || a.dilation[axis] > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        if(a.filter[axis] > 1 && a.dilation[axis] != 1)
+        {
+            if(dilation != 1 && dilation != a.dilation[axis])
+            {
+                return std::nullopt;
+            }
+            dilation = a.dilation[axis];
+        }
+    }
+    for(int axis = 0; axis < SPATIAL; ++axis)
+    {
+        if(a.filter[axis] > 1 && a.dilation[axis] != dilation)
+        {
+            return std::nullopt;
+        }
+    }
+    if(dilation != 1 && base->spatialRank == 3)
     {
         return std::nullopt;
     }
     for(int axis = 0; axis < SPATIAL; ++axis)
     {
-        if(a.stride[axis] != 1 || (a.dilation[axis] != 1 && a.dilation[axis] != dilation))
+        if(a.stride[axis] != 1)
         {
             return std::nullopt;
         }
@@ -399,11 +421,19 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
             }
         }
     }
+    // One-row images (1-D, or 2-D of one row) with a 1 x S filter: the line configs' shape.
+    const bool oneRow = a.inSpatial[0] == 1 && a.inSpatial[1] == 1 && a.outSpatial[1] == 1
+                        && a.filter[0] == 1 && a.filter[1] == 1;
     const bool knownFilter
-        = std::any_of(FILTERS.begin(), FILTERS.end(), [&](const std::array<int, 3>& f) {
-              return f[0] == a.filter[0] && f[1] == a.filter[1] && f[2] == a.filter[2];
-          });
-    if(!knownFilter)
+        = std::any_of(FILTERS.begin(),
+                      FILTERS.end(),
+                      [&](const std::array<int, 3>& f) {
+                          return f[0] == a.filter[0] && f[1] == a.filter[1] && f[2] == a.filter[2];
+                      })
+          || (oneRow && std::any_of(LINE_FILTERS.begin(), LINE_FILTERS.end(), [&](int s) {
+                  return s == a.filter[2];
+              }));
+    if(!knownFilter || (base->spatialRank == 1 && !oneRow))
     {
         return std::nullopt;
     }
@@ -420,6 +450,8 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
     }
     problem.flip = a.flipFilter != 0 ? 1 : 0;
     problem.dilation = static_cast<int>(dilation);
+    problem.oneRow = oneRow;
+    problem.spatialRank = static_cast<int>(base->spatialRank);
 
     const bool forward = direction == ConvDirection::FORWARD;
     // The forward form: backward data convolves dy (k channels, output extents) into dx.
@@ -504,7 +536,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 30> ints{
+    const std::array<std::pair<const char*, int*>, 31> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -514,7 +546,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
          {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
-         {"un", &config.un},     {"cf", &config.cf},       {"dil", &config.dil}}};
+         {"un", &config.un},     {"cf", &config.cf},       {"dil", &config.dil},
+         {"line", &config.line}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -528,8 +561,12 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    // Dilation is a 2-D rows knob (one image per MFMA column group).
-    if(config.dil < 1 || (config.dil != 1 && (!config.rows || config.kd != 1 || config.un != 1)))
+    // Dilation is a 2-D rows knob (one image per MFMA column group); so are line tiles, of 1 x S
+    // filters, without ping-pong or split.
+    if(config.dil < 1 || (config.dil != 1 && (!config.rows || config.kd != 1 || config.un != 1))
+       || (config.line != 0
+           && (config.line != 1 || !config.rows || config.kd != 1 || config.r != 1 || config.un != 1
+               || config.pp != 0 || config.split != 0)))
     {
         return std::nullopt;
     }
@@ -564,9 +601,14 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     }
     config.math = math == 1;
     const bool known
-        = std::any_of(FILTERS.begin(), FILTERS.end(), [&](const std::array<int, 3>& f) {
-              return f[0] == config.kd && f[1] == config.r && f[2] == config.s;
-          });
+        = std::any_of(FILTERS.begin(),
+                      FILTERS.end(),
+                      [&](const std::array<int, 3>& f) {
+                          return f[0] == config.kd && f[1] == config.r && f[2] == config.s;
+                      })
+          || (config.line != 0 && std::any_of(LINE_FILTERS.begin(), LINE_FILTERS.end(), [&](int s) {
+                  return s == config.s;
+              }));
     if(!known || config.bc < 1 || config.vec < 1 || config.bc % config.vec != 0
        || (config.ring != 0 && config.ring != 1) || (config.bl != 0 && config.bl != 1)
        || (config.split != 0 && config.split != 1) || (config.pipe != 0 && config.pipe != 1))
@@ -633,20 +675,26 @@ int64_t rowsLdsBytes(const Config& config)
     }
     // The operand is the atom's element (three-bf16 runs on bf16 atoms).
     const int64_t operandBytes = conv_igemm::atomElement(config.atom) == "f32" ? 4 : 2;
-    const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw
-                             + static_cast<int64_t>(config.r - 1) * config.dil;
+    // A line config stages one halo line of its wp pw segments of 16 wq columns.
+    const int64_t haloRows = config.line != 0
+                                 ? 1
+                                 : static_cast<int64_t>(config.wp) * config.pw
+                                       + static_cast<int64_t>(config.r - 1) * config.dil;
+    const int64_t tileColumns
+        = static_cast<int64_t>(config.wq) * 16
+          * (config.line != 0 ? static_cast<int64_t>(config.wp) * config.pw : 1);
     const int64_t haloReach = static_cast<int64_t>(config.s - 1) * config.dil;
     if(config.cf != 0)
     {
         // Raw stage: per halo row bc channel rows of the 8-column runs covering the halo from
         // its 8-aligned start; plus one channels-last stage.
-        const int64_t runs = (7 + config.wq * 16 + haloReach + 7) / 8;
+        const int64_t runs = (7 + tileColumns + haloReach + 7) / 8;
         return haloRows * config.bc * runs * 16
-               + haloRows * (config.wq * 16 + haloReach) * config.bc * operandBytes;
+               + haloRows * (tileColumns + haloReach) * config.bc * operandBytes;
     }
     // un images' halo rows side by side, (16 wq / un + (s - 1) dil) pixels each.
     const int64_t haloColumns
-        = static_cast<int64_t>(config.un) * (config.wq * 16 / config.un + haloReach);
+        = static_cast<int64_t>(config.un) * (tileColumns / config.un + haloReach);
     return 2 * haloRows * haloColumns * config.bc * operandBytes;
 }
 
@@ -690,9 +738,11 @@ std::optional<Plan>
         // Fixed tile of one output plane; each block walks tiles, one block per compute unit at
         // most. A 2-D config (kd 1) takes 2-D problems; a 3-D one walks every output plane.
         Tile t;
-        // Batch unfold (un > 1): a tile is 16 wq / un columns of un consecutive images.
-        t.th = config.wp * config.pw;
-        t.tw = config.wq * 16 / config.un;
+        // Batch unfold (un > 1): a tile is 16 wq / un columns of un consecutive images. A line
+        // tile is wp pw segments of 16 wq columns of the one row, end to end.
+        t.th = config.line != 0 ? 1 : config.wp * config.pw;
+        t.tw = config.line != 0 ? config.wp * config.pw * config.wq * 16
+                                : config.wq * 16 / config.un;
         t.ds = 1;
         t.tilesW = static_cast<int>(divUp(a.wo, t.tw));
         t.tilesH = static_cast<int>(divUp(a.ho, t.th));
@@ -730,8 +780,10 @@ std::optional<Plan>
         const long long tileChannels = kBlocked < ROWS_LARGE_TILE_CHANNELS
                                            ? std::min<long long>(config.blockColumns(), kBlocked)
                                            : config.blockColumns();
-        const long long tilePixelChannels
-            = static_cast<long long>(t.th) * config.wq * 16 * tileChannels;
+        const long long tilePixels = config.line != 0
+                                         ? static_cast<long long>(t.tw)
+                                         : static_cast<long long>(t.th) * config.wq * 16;
+        const long long tilePixelChannels = tilePixels * tileChannels;
         if(config.split == 0 && !config.math && config.cf == 0
            && config.atom.rfind("mfma16x32_", 0) == 0
            && tilePixelChannels < ROWS_LARGE_TILE_PIXELS * refChannels
@@ -988,6 +1040,11 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
+    // Line configs take one-row images, and only they take 1-D graphs.
+    if((config->line != 0 && !problem->oneRow) || (config->line == 0 && problem->spatialRank == 1))
+    {
+        return std::nullopt;
+    }
     // The atom takes the graph's element type; three-bf16 (the CONV_DIRECT_*_TF32 engines' configs)
     // runs fp32 graphs on bf16 atoms.
     const auto element = conv_igemm::atomElement(config->atom);
@@ -1207,6 +1264,10 @@ public:
             if(config.dil != 1)
             {
                 options.add("CONV_DIRECT_DIL", std::to_string(config.dil));
+            }
+            if(config.line != 0)
+            {
+                options.add("CONV_DIRECT_LINE", std::string("1"));
             }
             if(config.cf == 2)
             {

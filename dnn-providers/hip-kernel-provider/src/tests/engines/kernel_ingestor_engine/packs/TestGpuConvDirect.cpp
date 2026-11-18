@@ -623,9 +623,9 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
-/// Dilated 3x3 graphs (the 2-D rows configs' `dil`) and narrow-channel graphs (the 32- and
-/// 64-wide rows tiles), on the MFMA parts that ship the rows kernels. Elsewhere dilated graphs
-/// have no config and are skipped.
+/// Dilated 3x3 graphs (the 2-D rows configs' `dil`), narrow-channel graphs (the 32- and 64-wide
+/// rows tiles) and one-row images under 1 x S filters (the line configs), on the MFMA parts that
+/// ship the rows kernels. Elsewhere the dilated and one-row graphs have no config and are skipped.
 class TestGpuConvDirectRowsShapes
     : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
 {
@@ -713,6 +713,27 @@ std::vector<DeviceCase> rowsShapeCases()
     auto narrowMany = dense(32, 64, {48, 64}, {3, 3}, {1, 1}, false);
     narrowMany.n = 6;
     cases.push_back({"Nchw3x3NarrowManyTiles", narrowMany});
+    // One-row images under 1 x S filters (the line configs): 2-D of one row and 1-D, dilated and
+    // not, widths of whole 16-byte runs (channels-first in place) and not, asymmetric pads,
+    // convolution mode, and more tiles than a device runs at once.
+    auto rowDilated = dense(32, 40, {1, 200}, {1, 11}, {0, 25}, false);
+    rowDilated.dilation = {1, 5};
+    cases.push_back({"Nchw1x11Dil5Row", rowDilated});
+    auto rowNhwc = dense(24, 48, {1, 131}, {1, 7}, {0, 9}, true);
+    rowNhwc.dilation = {1, 3};
+    cases.push_back({"Nhwc1x7Dil3Row", rowNhwc});
+    cases.push_back({"Nchw1x3RowAsymmetric",
+                     padded(dense(64, 64, {1, 96}, {1, 3}, {0, 1}, false), {0, 2}, {0, 0})});
+    cases.push_back({"Ncl11", dense(32, 32, {160}, {11}, {5}, false)});
+    auto nclDilated = dense(40, 24, {136}, {3}, {5}, true);
+    nclDilated.dilation = {5};
+    cases.push_back({"Nlc3Dil5", nclDilated});
+    auto rowConvolution = dense(16, 32, {1, 64}, {1, 7}, {0, 3}, false);
+    rowConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nchw1x7RowConvolutionMode", rowConvolution});
+    auto rowMany = dense(40, 24, {1, 2048}, {1, 7}, {0, 3}, false);
+    rowMany.n = 4;
+    cases.push_back({"Nchw1x7RowManyTiles", rowMany});
     return cases;
 }
 
@@ -728,6 +749,36 @@ INSTANTIATE_TEST_SUITE_P(,
                          });
 
 // ---- Host-only: the shipped catalog ----
+
+TEST(TestConvDirectCatalog, LineConfigsServeEveryGeometryAndDtypeOnTheRowsArchitectures)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const int width : {3, 7, 11})
+        {
+            for(const int dilation : {1, 3, 5})
+            {
+                for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+                {
+                    for(const char* arch : {"gfx90a", "gfx942", "gfx950"})
+                    {
+                        const auto& kernels = catalog(direction);
+                        const bool served
+                            = std::any_of(kernels.begin(), kernels.end(), [&](const auto& k) {
+                                  const auto config = conv_direct::configOf(k);
+                                  return config.has_value() && config->line == 1
+                                         && config->s == width && config->dil == dilation
+                                         && k.getStringMetadata("dtype") == dtype
+                                         && conv_direct::configRunsOn(*config, arch);
+                              });
+                        EXPECT_TRUE(served) << "1 x " << width << " dilation " << dilation << " "
+                                            << dtype << " " << arch;
+                    }
+                }
+            }
+        }
+    }
+}
 
 TEST(TestConvDirectCatalog, DilatedConfigsServeEveryDtypeOnTheRowsArchitectures)
 {

@@ -377,7 +377,8 @@ template <class T,
           class TO = T,
           int UN = 1,
           int SPLIT = 0,
-          int DIL = 1>
+          int DIL = 1,
+          int LINE = 0>
 __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64;
@@ -389,10 +390,17 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
     static_assert(UN >= 1 && DIM % UN == 0, "batch unfold");
     // DIL > 1: filter taps DIL pixels apart; the halo spans (R - 1) DIL rows and (S - 1) DIL
     // columns past the tile, and filter row r of output row p reads halo row p + r DIL.
-    constexpr int QI = DIM / UN, BQI = WQ * QI, HWI = BQI + (S - 1) * DIL;
+    // LINE 1 (one-row images, 1 x S filters): a tile is BP consecutive segments of BQI output
+    // columns of the row, and the halo is one staged line of BP BQI + (S - 1) DIL pixels from
+    // which segment p reads at column offset p BQI; output row p of the 2-D tile is segment p.
+    static_assert(LINE == 0 || (R == 1 && UN == 1 && PP == 0 && SPLIT == 0), "line tiles");
+    constexpr int QI = DIM / UN, BQI = WQ * QI;
     constexpr int BP = WP * PW, BN = WK * FN * DIM;
+    constexpr int HWI = (LINE ? BP * BQI : BQI) + (S - 1) * DIL;
     constexpr int NW = WP * WQ * WK;
-    constexpr int HH = BP + (R - 1) * DIL, HW = UN * HWI;
+    constexpr int HH = LINE ? 1 : BP + (R - 1) * DIL, HW = UN * HWI;
+    // Output row p of the tile: row oh0 + p ROWH, columns from ow0 + p ROWQ.
+    constexpr int ROWH = LINE ? 0 : 1, ROWQ = LINE ? BQI : 0;
     constexpr int GE = 16 / static_cast<int>(sizeof(T)); // elements per granule
     constexpr int G = BC / GE; // granules per pixel per chunk
     constexpr int ROWG = HW * G;
@@ -487,7 +495,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
         const int tp = t % a.tilesH;
         c.img = t / a.tilesH * UN;
         c.oh0 = tp * BP;
-        c.ow0 = tq * BQI;
+        c.ow0 = tq * (LINE ? BP * BQI : BQI);
         return c;
     };
     const long long imgElems = static_cast<long long>(a.hi) * a.wi * a.c;
@@ -784,8 +792,9 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
                 for(int rr = 0; rr < NR; ++rr)
                     xin[rr] = __builtin_bit_cast(
                         Frag,
-                        *reinterpret_cast<const RawF*>(
-                            base + (wp * PW + K2rRowSet<PW, R, DIL>::row(rr)) * ROWG * GE));
+                        *reinterpret_cast<const RawF*>(base
+                                                       + (wp * PW + K2rRowSet<PW, R, DIL>::row(rr))
+                                                             * (LINE ? BQI * G : ROWG) * GE));
             }
             if constexpr(q == NQ - 1)
                 __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
@@ -868,10 +877,11 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
 #pragma unroll
         for(int p = 0; p < PW; ++p)
         {
-            const int oh = tc.oh0 + wp * PW + p;
-            if(oh >= a.ho || ow >= a.wo || (UN > 1 && img >= a.n))
+            const int oh = tc.oh0 + (wp * PW + p) * ROWH;
+            const int owp = ow + (wp * PW + p) * ROWQ;
+            if(oh >= a.ho || owp >= a.wo || (UN > 1 && img >= a.n))
                 continue;
-            TS* yp = y + ((static_cast<long long>(img) * a.ho + oh) * a.wo + ow) * a.k;
+            TS* yp = y + ((static_cast<long long>(img) * a.ho + oh) * a.wo + owp) * a.k;
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {
@@ -914,7 +924,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
 #pragma unroll
         for(int p = 0; p < PW; ++p)
         {
-            const int oh = tc.oh0 + wp * PW + p;
+            const int oh = tc.oh0 + (wp * PW + p) * ROWH;
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {
@@ -933,7 +943,8 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
                 Raw16 v = slot[xx * GP + (c8 ^ ((xx / XR) & (GP - 1)))];
                 if((xx >> 3) & 1)
                     v = __builtin_shufflevector(v, v, 2, 3, 0, 1);
-                const int ow = UN == 1 ? tc.ow0 + wq * DIM + xx : tc.ow0 + wq * QI + xx % QI;
+                const int ow = (UN == 1 ? tc.ow0 + wq * DIM + xx : tc.ow0 + wq * QI + xx % QI)
+                               + (wp * PW + p) * ROWQ;
                 const int img = UN == 1 ? tc.img : tc.img + xx / QI;
                 const int n = nb + c8 * (16 / static_cast<int>(sizeof(TO)));
                 if(oh < a.ho && ow < a.wo && n < a.k && (UN == 1 || img < a.n))
@@ -1694,7 +1705,8 @@ template <class T,
           int WK,
           int BC,
           class TO = T,
-          int DIL = 1>
+          int DIL = 1,
+          int LINE = 0>
 __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64;
@@ -1702,8 +1714,12 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
     constexpr int KA = Atom::KA, KPL = Atom::KPL;
     constexpr int BP = WP * PW, BQ = WQ * DIM, BN = WK * FN * DIM;
     constexpr int NW = WP * WQ * WK;
-    // DIL > 1: filter taps DIL pixels apart, as k2ConvRows.
-    constexpr int HH = BP + (R - 1) * DIL, HW = BQ + (S - 1) * DIL;
+    // DIL > 1: filter taps DIL pixels apart; LINE 1: one-row images as one halo line, as
+    // k2ConvRows.
+    static_assert(LINE == 0 || R == 1, "line tiles");
+    constexpr int HH = LINE ? 1 : BP + (R - 1) * DIL;
+    constexpr int HW = (LINE ? BP * BQ : BQ) + (S - 1) * DIL;
+    constexpr int ROWH = LINE ? 0 : 1, ROWQ = LINE ? BQ : 0;
     constexpr int GE = 8; // 16-bit elements per granule
     constexpr int G = BC / GE;
     constexpr int ROWG = HW * G;
@@ -1766,7 +1782,7 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
         const int tp = t % a.tilesH;
         c.img = t / a.tilesH;
         c.oh0 = tp * BP;
-        c.ow0 = tq * BQ;
+        c.ow0 = tq * (LINE ? BP * BQ : BQ);
         return c;
     };
     const int xoff = (GE - a.pw % GE) % GE;
@@ -1957,8 +1973,9 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
                 for(int rr = 0; rr < NR; ++rr)
                     xin[rr] = __builtin_bit_cast(
                         Frag,
-                        *reinterpret_cast<const RawF*>(
-                            base + (wp * PW + K2rRowSet<PW, R, DIL>::row(rr)) * ROWG * GE));
+                        *reinterpret_cast<const RawF*>(base
+                                                       + (wp * PW + K2rRowSet<PW, R, DIL>::row(rr))
+                                                             * (LINE ? BQ * G : ROWG) * GE));
             }
             if constexpr(q == NQ - 1)
                 __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
@@ -2015,11 +2032,12 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
 #pragma unroll
         for(int p = 0; p < PW; ++p)
         {
-            const int oh = tc.oh0 + wp * PW + p;
-            if(oh >= a.ho || ow >= a.wo)
+            const int oh = tc.oh0 + (wp * PW + p) * ROWH;
+            const int owp = ow + (wp * PW + p) * ROWQ;
+            if(oh >= a.ho || owp >= a.wo)
                 continue;
             TO* yp = y + static_cast<long long>(tc.img) * a.k * oplane
-                     + static_cast<long long>(oh) * a.wo + ow;
+                     + static_cast<long long>(oh) * a.wo + owp;
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {

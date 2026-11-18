@@ -36,7 +36,8 @@
     "epi",
     "un",
     "cf",
-    "dil"
+    "dil",
+    "line"
   ],
   "behavior_notes": [
     "runtime_compilation"

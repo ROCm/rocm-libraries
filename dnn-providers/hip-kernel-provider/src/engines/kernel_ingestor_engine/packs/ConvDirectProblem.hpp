@@ -42,6 +42,10 @@ inline constexpr std::array<std::array<int, 3>, 7> FILTERS{{
     {5, 5, 5},
 }};
 
+/// The filter widths (1 x S) the line configs serve on one-row images: 1-D graphs and 2-D graphs
+/// of one row (audio convolutions).
+inline constexpr std::array<int, 4> LINE_FILTERS{{3, 5, 7, 11}};
+
 /// A strided copy (or, for packed channels-first activations, a tiled transpose) of one
 /// forward-form activation into (in) or out of (out) the workspace's packed channels-last copy.
 struct Staging
@@ -71,8 +75,12 @@ struct DirectProblem
     /// reflected (true convolution).
     std::array<long long, 5> wStrides = {};
     int flip = 0;
-    /// The dilation of both 2-D filter axes (1 when undilated); a 3-D problem is undilated.
+    /// The dilation of every axis the filter spans (1 when undilated); a 3-D problem is undilated.
     int dilation = 1;
+    /// A one-row image (1-D, or 2-D of one row) under a 1 x S filter: the line configs' shape.
+    bool oneRow = false;
+    /// The graph's spatial rank (1 to 3); 1-D graphs run as one-row 2-D ones on line configs.
+    int spatialRank = 0;
     /// The forward-form input (x, or dy) and output (y, or dx), staged when not channels-last.
     Staging in;
     Staging out;
@@ -84,9 +92,10 @@ struct DirectProblem
  * @brief The convolution @p context's graph describes in @p direction, or nullopt when the
  *        direct kernels do not serve it.
  *
- * Everything parseConvNaiveProblem gates, plus: two or three spatial axes, groups 1, stride 1
- * on every axis, dilation 1 on every axis or (2-D) one dilation of both filter axes, a filter in
- * FILTERS, every extent, channel count and padding
+ * Everything parseConvNaiveProblem gates, plus: two or three spatial axes (or one, as a one-row
+ * 2-D image), groups 1, stride 1 on every axis, one dilation of the axes the filter spans (1 in
+ * 3-D), a filter in FILTERS (or a 1 x S filter of LINE_FILTERS on a one-row image), every
+ * extent, channel count and padding
  * within 32 bits, and one image of the forward-form input within 2^31 bytes (the kernels' 32-bit
  * buffer offsets). Any padding, asymmetric included (the output extent the graph declares is the
  * one computed), both convolution modes, fp32 / fp16 / bf16, and any operand layout (staged to
@@ -122,8 +131,11 @@ struct Config
     /// fetched as it lies and transposed in LDS, the output stored channels-first; no staging.
     int cf = 0;
     /// Filter dilation (2-D rows configs; 1 elsewhere): the config serves exactly this dilation of
-    /// both filter axes.
+    /// the axes its filter spans.
     int dil = 1;
+    /// Line tiles (2-D rows, 1 x S filters): one-row images, a tile wp pw segments of 16 wq
+    /// columns of the row staged as one halo line.
+    int line = 0;
     std::string archs; ///< ship list: comma-separated arch groups, or "any"
 
     /// Output pixels per block (the planner's tile budget) and output channels per block.

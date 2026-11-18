@@ -17,6 +17,8 @@
 //   CONV_DIRECT_CF      1: packed channels-first activations read and written in place (16-bit,
 //                       2-D and 3-D; default 0)
 //   CONV_DIRECT_DIL     filter dilation of the 2-D rows kernels (default 1)
+//   CONV_DIRECT_LINE    1: 2-D rows on one-row images and 1 x S filters, the row as one halo
+//                       line (default 0)
 
 #include "ConvDirectCore.h"
 #ifndef CONV_DIRECT_ROWS
@@ -34,8 +36,14 @@
 #ifndef CONV_DIRECT_DIL
 #define CONV_DIRECT_DIL 1
 #endif
+#ifndef CONV_DIRECT_LINE
+#define CONV_DIRECT_LINE 0
+#endif
 #if CONV_DIRECT_DIL != 1 && !(CONV_DIRECT_ROWS && CONV_DIRECT_KD == 1)
 #error "dilation is served by the 2-D rows kernels only"
+#endif
+#if CONV_DIRECT_LINE != 0 && !(CONV_DIRECT_ROWS && CONV_DIRECT_KD == 1 && CONV_DIRECT_R == 1)
+#error "line tiles are 2-D rows kernels of 1 x S filters"
 #endif
 
 #if CONV_DIRECT_FMA
@@ -86,7 +94,8 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                  CONV_DIRECT_WK,
                  CONV_DIRECT_BC,
                  CONV_DIRECT_TO,
-                 CONV_DIRECT_DIL>(a CONV_EPI_ARG);
+                 CONV_DIRECT_DIL,
+                 CONV_DIRECT_LINE>(a CONV_EPI_ARG);
 #elif CONV_DIRECT_ROWS && CONV_DIRECT_KD > 1
     k2ConvRows3d<CONV_DIRECT_T,
                  CONV_DIRECT_ATOM,
@@ -118,7 +127,8 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                CONV_DIRECT_TO,
                CONV_DIRECT_UN,
                CONV_DIRECT_SPLIT,
-               CONV_DIRECT_DIL>(a CONV_EPI_ARG);
+               CONV_DIRECT_DIL,
+               CONV_DIRECT_LINE>(a CONV_EPI_ARG);
 #else
     k2ConvMma<CONV_DIRECT_T,
               CONV_DIRECT_ATOM,
