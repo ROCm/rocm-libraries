@@ -843,7 +843,9 @@ TEST(TestConvDirectKernelMatch, CrossChunkPrefetchTakesRegisterPathHaloTiles)
     ConfigFields f;
     f.xpf = 1;
     EXPECT_TRUE(admits(f, "gfx942"));
-    EXPECT_TRUE(admits(f, "gfx942", baseShape(), "BFLOAT16"));
+    auto bf16 = f;
+    bf16.atom = "mfma16_bf16";
+    EXPECT_TRUE(admits(bf16, "gfx942", baseShape(), "BFLOAT16"));
     // Each field one at a time: the knob's range, register-path weights, channels-last halo.
     const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
         {"xpf", [](ConfigFields& g) { g.xpf = 2; }},
