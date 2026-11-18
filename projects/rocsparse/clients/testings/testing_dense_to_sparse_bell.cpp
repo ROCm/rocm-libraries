@@ -164,9 +164,8 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
 
     rocsparse_local_dnmat mat_dense(m, n, ld, d_dense_val, ttype, order);
 
-    // The descriptor uses the dense dimensions. Rounding rows and columns up
-    // to a multiple of the block size described a larger matrix than the one
-    // being converted. The block-row count is still ceil(m / block size).
+    // The descriptor dimensions equal the dense dimensions, m x n. The
+    // column-index array is allocated from the block-row count mb.
     rocsparse_local_spmat mat_sparse(
         m, n, rocsparse_direction_row, ell_block_size, 0, nullptr, nullptr, itype, base, ttype);
 
@@ -352,8 +351,9 @@ void testing_dense_to_sparse_bell_extra_687(const Arguments& arg)
 
     rocsparse_local_dnmat mat_dense(m, n, ld, d_dense_val, ttype, order);
 
-    // Block size is 1 here, so the old rounded size equalled m and n. Pass the
-    // dense dimensions explicitly.
+    // The descriptor dimensions equal the dense dimensions, m x n. The
+    // column-index array is allocated from the block-row count mb, plus the
+    // spare block-row below.
     rocsparse_local_spmat mat_sparse(
         m, n, rocsparse_direction_row, ell_block_size, 0, nullptr, nullptr, itype, base, ttype);
 
