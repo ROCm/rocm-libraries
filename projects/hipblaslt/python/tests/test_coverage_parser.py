@@ -3,8 +3,8 @@
 """The header-aware enum parser, on a synthetic header with every awkward case it has to handle.
 
 Without this, a parser that silently drops values would make the coverage checks look perfect.
-The regex it replaced couldn't find hipblasLtMatmulDescAttributes_t at all, because a doc comment
-inside that enum contains a brace-enclosed list.
+One real case: a doc comment inside hipblasLtMatmulDescAttributes_t contains a brace-enclosed list,
+which a simple regex mistakes for the end of the enum.
 """
 
 from hipblaslt._coverage import BoundValue, bound_values, parse_enums
