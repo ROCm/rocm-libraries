@@ -410,13 +410,16 @@ namespace rocsparse
     };
 
     //
-    // Exact widenings of a real value: f16 and bf16 into f32 and f64, and real into complex
-    // with an imaginary part of zero, where every source value is exactly representable (f32
-    // into either complex type, f64 into f64 complex, f16 and bf16 into either complex type).
-    // f64 into f32 complex stays the specialization below, which records the rounding error.
+    // The pairs that use the shared real-widening kernel below: f16 and bf16 into f32, f64,
+    // f32 complex and f64 complex, f32 into either complex type, and f64 into f64 complex.
+    // Complex targets get an imaginary part of zero. Every pair is exact, but not every
+    // exact real widening is here: f32 into f64 keeps its specialization above. This trait
+    // also selects the launch in convert_data_array_compute_core that does not read back a
+    // conversion error, so only the pairs listed here skip it. f64 into f32 complex rounds
+    // and stays the specialization below, which records the rounding error.
     //
     template <typename TARGET, typename SOURCE>
-    static constexpr bool is_exact_real_widening_v
+    static constexpr bool uses_shared_real_widening_kernel_v
         = ((std::is_same<TARGET, float>{} || std::is_same<TARGET, double>{}
             || std::is_same<TARGET, rocsparse_float_complex>{})
            && (std::is_same<SOURCE, _Float16>{} || std::is_same<SOURCE, rocsparse_bfloat16>{}))
@@ -430,7 +433,7 @@ namespace rocsparse
     struct copy_farray_mix_safe_kernel_t<
         TARGET,
         SOURCE,
-        std::enable_if_t<rocsparse::is_exact_real_widening_v<TARGET, SOURCE>>>
+        std::enable_if_t<rocsparse::uses_shared_real_widening_kernel_v<TARGET, SOURCE>>>
     {
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
@@ -692,10 +695,10 @@ namespace rocsparse
             host_error[0] = 0;
             return rocsparse_status_success;
         }
-        else if constexpr(rocsparse::is_exact_real_widening_v<TARGET, SOURCE>)
+        else if constexpr(rocsparse::uses_shared_real_widening_kernel_v<TARGET, SOURCE>)
         {
-            // These kernels never write conversion_error_. Skip the memset,
-            // the readback and the stream sync.
+            // The shared real-widening kernel never writes conversion_error_.
+            // Skip the memset, the readback and the stream sync.
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (kernel_t::template run<BLOCKSIZE>),
                 dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
