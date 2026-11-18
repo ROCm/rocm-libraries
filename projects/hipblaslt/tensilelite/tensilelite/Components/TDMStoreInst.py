@@ -10,8 +10,8 @@ tensor_load_to_lds, bounded the same way.
   =============  =================================================================
   TDMStoreInst   Paths stored through the TDM block
   =============  =================================================================
-  0              none: every block keeps its buffer_store
-  1              EdgeM, EdgeN and NonEdge, so every tile, the OptNLL store included
+  0              off: every block keeps its buffer_store
+  1              on: EdgeM, EdgeN and NonEdge, so every tile, the OptNLL store included
   =============  =================================================================
 
 TDMStoreInst 1 stores every tile through the TDM block, whatever the alignment of its columns, so
@@ -20,12 +20,12 @@ start on a 16-byte boundary the TDM store is slower than buffer_store, so the ch
 enable TDMStoreInst for a kernel at all, not which paths it covers.
 
 A path is a store block of the store-width cascade generateBetaModules builds, one per vector width,
-and the level only picks the blocks that store through the TDM block: no level adds, drops or moves a
+and turning TDMStoreInst on only changes which store each block emits: it adds, drops and moves no
 block, label or branch. With AdaptiveGemm=0 the narrowest masked block is the only one narrower than
 the store vector width, which every M-edge workgroup takes. With AdaptiveGemm=1 an M-edge workgroup
 takes the widest block whose vector width divides SizeI, so the masked block of the store vector
 width also stores the M-edge tiles of a SizeI it divides. At store vector width 1 the narrowest masked
-block is the one of the store vector width, so levels 1 and 2 store that one block through the TDM block.
+block is the one of the store vector width, so EdgeM and EdgeN are that same single block.
 
 The block runs in the phases of GlobalWriteBatchWriter. With beta != 0, _prolog of the first batch
 calls emitTDMStoreSetup and emitTDMStoreLoadC, so the C tile is in LDS before any element reads it,
@@ -143,8 +143,8 @@ def _unevenColumns(kernel):
 def tdmStoreLdsBytes(state):
   """Return the LDS bytes of the D tile the TDM block stages in LDS (0 without TDMStoreInst).
 
-  The reservation follows the level, not the store blocks tdmStoreBlocks picks for the kernel, and covers
-  the columns of every wave, MacroTile1 rounded up to a multiple of the number of waves.
+  The reservation follows the parameter, not the store blocks tdmStoreBlocks picks for the kernel, and
+  covers the columns of every wave, MacroTile1 rounded up to a multiple of the number of waves.
   Reserving too much costs LDS only; reserving too little would stage over live LDS.
   """
   if not state["TDMStoreInst"]:
