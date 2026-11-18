@@ -70,7 +70,6 @@ def gpu_sample(
     directory,
     bin_dir,
     dumps=Path("/sys/class/devcoredump"),
-    debug=Path("/sys/kernel/debug/dri"),
 ):
     directory.mkdir(parents=True, exist_ok=True)
     record: dict[str, object] = {
@@ -114,43 +113,6 @@ def gpu_sample(
             entry["error"] = str(error)
         saved.append(entry)
     record["coredumps"] = saved
-
-    # These read-only driver files can expose process names across PID
-    # namespaces, if debugfs is already visible. Never mount it or use host PIDs
-    # as indices into this container's /proc: those PIDs mean different things.
-    driver_processes: dict[str, object] = {}
-    try:
-        entries = sorted(
-            path
-            for path in debug.iterdir()
-            if path.name.isdigit() and not path.is_symlink()
-        )
-        record["debugfs_entries"] = [path.name for path in entries]
-    except OSError as error:
-        entries = []
-        record["debugfs_error"] = str(error)
-    for device in entries:
-        try:
-            result = subprocess.run(
-                ["cat", str(device / "name"), str(device / "amdgpu_vm_info")],
-                capture_output=True,
-                text=True,
-                timeout=1,
-                check=False,
-            )
-            driver_processes[device.name] = {
-                "returncode": result.returncode,
-                "stderr": result.stderr,
-                "identity": result.stdout.splitlines()[:1],
-                "processes": [
-                    line
-                    for line in result.stdout.splitlines()
-                    if line.startswith("pid:")
-                ],
-            }
-        except (OSError, subprocess.TimeoutExpired) as error:
-            driver_processes[device.name] = {"error": str(error)}
-    record["driver_processes"] = driver_processes
 
     # Keep per-device activity even when AMD-SMI fails. Enumerate PCI devices
     # directly so card/render aliases do not duplicate the same GPU.

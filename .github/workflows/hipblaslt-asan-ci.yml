@@ -283,7 +283,6 @@ jobs:
         --group-add 992
         --group-add 110
         --env-file /etc/podinfo/gha-gpu-isolation-settings
-        ${{ inputs.replay && inputs.replay != 'none' && '--mount type=bind,source=/sys/kernel/debug,target=/sys/kernel/debug,readonly' || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.test_matrix) }}
