@@ -35,7 +35,6 @@ exclude: |
     projects/rocfft/.*|
     projects/rocprim/.*|
     projects/rocsolver/.*|
-    projects/rocsparse/.*|
     projects/rocthrust/.*|
     projects/rocwmma/.*|
     shared/mxdatagenerator/.*|
@@ -96,6 +95,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           # Vendored AOTriton test sources, kept byte-identical to their pin
           # (tools/sdpa_conformance/aotriton/VENDOR.md, sync.py --check).
@@ -107,6 +107,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           ^projects/hipdnn/\.clang-format$|
           ^projects/miopen/\.clang-format$|
@@ -392,6 +393,15 @@ repos:
         files: ^projects/hipsparse/scripts/(test_)?(sync_group_docs|audit_doc_attachment)\.py$
         pass_filenames: false
 
+      # String fixtures, so this runs in pre-commit rather than after an
+      # instrumented coverage build. A failure there would skip the upload.
+      - id: rocsparse-coverage-merge-tests
+        name: rocSPARSE coverage merge self-tests
+        entry: python -m unittest discover -s projects/rocsparse/scripts -p test_merge_coverage_info.py
+        language: python
+        files: ^projects/rocsparse/scripts/(merge_coverage_info|test_merge_coverage_info)\.py$
+        pass_filenames: false
+
       # rocKE layering ratchet: platform's imports of the library packages
       # (kernels, builders, dispatch, benchmarks) may only shrink. It audits
       # the source tree, so the installed rocke_pytest CTest skips it; this
@@ -414,6 +424,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           # MIOpen CMake files have not been audited for cmake-lint compliance yet.
           ^projects/miopen/.*
