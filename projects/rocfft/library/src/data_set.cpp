@@ -738,9 +738,10 @@ std::optional<data_set_t>
     // a set array type must match this data set's side of the transform
     const auto io = other(other_io);
     if(has_array_type()
-       && !(complex_fft                    ? array_type_is_complex(array_type)
-            : is_real_domain(fft_type, io) ? array_type_is_real(array_type)
-                                           : array_type_is_hermitian(array_type)))
+       && !(complex_fft ? array_type_is_complex_but_not_hermitian(array_type)
+            : is_real_domain(fft_type, io)
+                ? (array_type == rocfft_array_type_real)
+                : (array_type == rocfft_array_type_hermitian_interleaved)))
     {
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " found array type "
                                + PrintArrayType(array_type)
