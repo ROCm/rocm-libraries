@@ -2606,7 +2606,8 @@ TEST(TestConvWrwFold, AUnitStrideConfigOfTheFoldedClassServesThroughTheFold)
     EXPECT_EQ(f.wtap, 1);
     // The staged x after the partials: 2 images x 24 channels x 256 halves.
     EXPECT_GE(launch->foldOffset,
-              static_cast<size_t>(launch->reduce.splits) * launch->reduce.partialElems * 4);
+              static_cast<size_t>(launch->reduce.splits)
+                  * static_cast<size_t>(launch->reduce.partialElems) * 4);
     EXPECT_EQ(launch->workspaceBytes, launch->foldOffset + 2 * 24 * 256 * 2);
     EXPECT_EQ(launch->foldArgs.rows, 2 * 24);
     EXPECT_EQ(launch->foldArgs.u, 32);
