@@ -69,6 +69,7 @@ INTS = [
     "epi",
     "un",
     "cf",
+    "xpf",
 ]
 ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0)
 STRINGS = ["direction", "dtype", "kind", "atom", "archs"]
@@ -84,8 +85,10 @@ F33, F55, F77, F17, F71, F333, F555 = (
 FILTERS2D = [F33, F55, F77, F17, F71]
 
 
-def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0, cf=0):
-    """Halo-tile matrix-core kernel; cf 1 (16-bit): packed channels-first activations in place."""
+def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0, cf=0, xpf=0):
+    """Halo-tile matrix-core kernel; cf 1 (16-bit): packed channels-first activations in place.
+    xpf 1 (register-path weights, channels-last): weight fragments prefetched across channel
+    chunks, ring sets skipped by scalar branches, 16-bit halo rows padded by 8 bytes."""
     c = dict(
         kind="mma",
         atom=atom,
@@ -111,6 +114,7 @@ def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0, cf=0):
         **ROWS0,
     )
     c["cf"] = cf
+    c["xpf"] = xpf
     return c
 
 
@@ -138,6 +142,7 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
         threads=256,
         pipe=pipe,
         **ROWS0,
+        xpf=0,
     )
 
 
@@ -180,6 +185,7 @@ def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0,
         epi=epi,
         un=un,
         cf=cf,
+        xpf=0,
     )
 
 
@@ -255,6 +261,26 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 64, 16, 2, 2, 8, ring=0),
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0),
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=1),
+        ],
+    )
+    # gfx942 3x3x3 (large 3-D bf16 volumes, MI300A / MI325X, autotuned, interleaved A/B):
+    # the 128 x 192 tile (8 waves) takes the 512 / 1024-channel layers on 32 x 16 x 16 outputs
+    # (1.08-1.1x); rows tiles take 256 / 512-channel layers on 64 x 32 x 32 outputs on MI325X
+    # (1.2-1.3x); the cross-chunk prefetch (xpf) twins of the halo tiles take the
+    # 512 / 1024-channel layers (1.1-1.13x).
+    add(
+        dt,
+        ["gfx942"],
+        [
+            M(f"mfma16_{e}", F333, 128, 192, 16, 2, 4, 8, ring=0),
+            RW(f"mfma16_{e}", F333, 8, 4, 1, 2, 4, 16, 8),
+            RW(f"mfma16_{e}", F333, 8, 4, 2, 2, 2, 16, 8),
+            M(f"mfma16_{e}", F333, 128, 192, 16, 2, 4, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 64, 16, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=1, xpf=1),
+            M(f"mfma16_{e}", F333, 128, 32, 32, 4, 1, 8, ring=0, xpf=1),
         ],
     )
     # gfx942 (MI325X) rows, dword LDS DMA, 16-channel chunks: the 16 x 16 x 256 tile and the
@@ -549,6 +575,15 @@ add(
         RW("mfma16_f32", F333, 8, 1, 2, 2, 2, 8, 4, epi=0),
     ],
 )
+# The cross-chunk prefetch on the gfx942 fp32 3x3x3 halo tiles.
+add(
+    "FLOAT",
+    ["gfx942"],
+    [
+        M("mfma16_f32", F333, 128, 64, 16, 2, 2, 4, ring=0, xpf=1),
+        M("mfma16_f32", F333, 128, 128, 16, 2, 2, 4, ring=0, xpf=1),
+    ],
+)
 # gfx942 (MI325X) takes the fp32 rows tile alone: 1.05-1.17x over every fp32 halo tile on 9 of 11
 # 2-D 3x3 shapes, fwd and bwd. Its 16-bit rows (0.80-1.08x, ping-pong never best) and every
 # 3x3x3 rows tile lost there.
@@ -781,6 +816,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     f".{c['bm']}x{c['bn']}c{c['bc']}.w{c['wm']}x{c['wn']}.t{c['tm']}x{c['tn']}n{c['nt']}"
                     f".v{c['vec']}.ring{c['ring']}.bl{c['bl']}.split{c['split']}.pipe{c['pipe']}"
                     + (".cf" if c["cf"] else "")
+                    + (".xpf" if c["xpf"] else "")
                 )
             kernels.append(
                 {

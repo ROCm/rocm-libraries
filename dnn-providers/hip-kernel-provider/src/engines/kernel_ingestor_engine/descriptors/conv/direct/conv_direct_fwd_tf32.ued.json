@@ -35,7 +35,8 @@
     "pp",
     "epi",
     "un",
-    "cf"
+    "cf",
+    "xpf"
   ],
   "behavior_notes": [
     "runtime_compilation"

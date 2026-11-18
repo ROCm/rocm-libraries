@@ -419,7 +419,23 @@ struct K2HaloLoad
         {
             const int pix = prow + p * PPP;
             if(pix < hp)
-                *reinterpret_cast<Raw*>(buf + pix * LDC + kv) = r[p];
+            {
+                if constexpr((LDC * sizeof(T)) % 16 == 0)
+                    *reinterpret_cast<Raw*>(buf + pix * LDC + kv) = r[p];
+                else
+                {
+                    // 8-byte row pitch: two 8-byte stores (a row starts 8-byte aligned only).
+                    typedef typename K1Raw<8>::type Half;
+                    static_assert(sizeof(Raw) == 16, "8-byte pitch takes 16-byte units");
+                    Half lo, hi;
+                    lo[0] = r[p][0];
+                    lo[1] = r[p][1];
+                    hi[0] = r[p][2];
+                    hi[1] = r[p][3];
+                    *reinterpret_cast<Half*>(buf + pix * LDC + kv) = lo;
+                    *reinterpret_cast<Half*>(buf + pix * LDC + kv + 8 / sizeof(T)) = hi;
+                }
+            }
         }
     }
     // Channel-major fp32: buf[c * LDH + pix].
@@ -660,6 +676,15 @@ struct K2CursorTaps
     }
 };
 
+/// The largest prefetch depth d <= cap whose ring (d + 1 slots) divides n steps (0 if none).
+constexpr int k2RingDepth(int n, int cap)
+{
+    for(int d = cap; d >= 1; --d)
+        if(n % (d + 1) == 0)
+            return d;
+    return 0;
+}
+
 template <int V>
 struct K2Int
 {
@@ -819,7 +844,8 @@ template <class T,
           int SPLIT = 0,
           int HALO = k2HaloMax(BM, R, S),
           int CF = 0,
-          int CF_RUN = 2>
+          int CF_RUN = 2,
+          int XPF = 0>
 __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -828,7 +854,12 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
     constexpr int KA = Atom::KA;
     constexpr int WTM = BM / WM, WTN = BN / WN;
     constexpr int FM = WTM / DIM, FN = WTN / DIM;
-    constexpr int LDC = BC + 16 / static_cast<int>(sizeof(T));
+    // XPF 1, 16-bit: halo rows padded by 8 bytes (an odd number of dword pairs), so the 8-byte
+    // fragment reads of 16 consecutive pixels cover the 32 banks once.
+    constexpr int LDC = BC
+                        + (XPF != 0 && sizeof(T) == 2 && CF == 0 && VEC * sizeof(T) == 16
+                               ? 4
+                               : 16 / static_cast<int>(sizeof(T)));
     constexpr int STAGE = HALO * LDC;
     typedef
         typename K1If<SPLIT != 0, float, TO>::type TS; // epilogue element: fp32 partials or output
@@ -990,6 +1021,153 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
             }
         }
     };
+    // XPF 1 (chunkX): the weight-fragment ring persists across chunks, and a chunk's last PD
+    // steps load the next chunk's first PD steps, so a chunk starts with its weights in flight
+    // (only the halo waits on the barrier). PD + 1 divides the steps of a chunk, so the next
+    // chunk's step j lands in ring slot j. Ring mode also skips the sets of planes outside the
+    // output as scalar branches (dt is wave-uniform) and reads the A fragments one step ahead.
+    constexpr int NBX = RING ? KD : 1;
+    constexpr int NQX = (BC / KA) * R * S;
+    constexpr int FVX = (sizeof(typename Atom::frag) + 3) / 4;
+    constexpr int PDB
+        = 32 / (NBX * FN * FVX) < 1 ? 1 : (32 / (NBX * FN * FVX) > 8 ? 8 : 32 / (NBX * FN * FVX));
+    constexpr int PDX = k2RingDepth(NQX, PDB);
+    static_assert(XPF == 0 || BL != 0 || PDX >= 1,
+                  "cross-chunk prefetch: a ring size dividing the chunk");
+    Frag bqx[XPF != 0 ? (PDX < 1 ? 1 : PDX) + 1 : 1][NBX][FN];
+    bool pre = false;
+    auto chunkX =
+        [&](int stage, int cc, auto&& pf, auto NBc, auto&& tapOf, auto&& setOf, auto&& nx) {
+            constexpr int NB = decltype(NBc)::value;
+            constexpr int NQ = (BC / KA) * R * S;
+            static_assert(NB == NBX && NQ == NQX, "ring shape");
+            const T* halo = lds + stage * SLOT;
+            int dt[NB];
+#pragma unroll
+            for(int t = 0; t < NB; ++t)
+                dt[t] = tapOf(t);
+            // The next chunk (and its depth taps) whose first steps this chunk's tail prefetches.
+            int tnx = 0, cnx = 0;
+            const bool more = nx(tnx, cnx);
+            int dtn[NB];
+#pragma unroll
+            for(int t = 0; t < NB; ++t)
+                dtn[t] = RING ? t : tnx;
+            auto loadBAt = [&](int ccx, const int(&dtx)[NB], int q, Frag(&bf)[NB][FN]) {
+                const int kk = q / (R * S), rs = q % (R * S);
+#if K2_MMA_WBUF
+                const unsigned wq = static_cast<unsigned>(
+                    ((cb + ccx) * (BC / KA) + kk) * a.kpad * KA + rs * tapStride);
+#pragma unroll
+                for(int t = 0; t < NB; ++t)
+                {
+                    const unsigned so
+                        = (wq
+                           + static_cast<unsigned>((dtx[t] < 0 ? 0 : dtx[t]) * R * S * tapStride))
+                          * static_cast<unsigned>(sizeof(T));
+#pragma unroll
+                    for(int j = 0; j < FN; ++j)
+                        bf[t][j] = k2FragLoadS<Frag>(wRsrc, bByte[j], static_cast<int>(so));
+                }
+#else
+                const T* wq = wf + ((cb + ccx) * (BC / KA) + kk) * a.kpad * KA + rs * tapStride;
+#pragma unroll
+                for(int t = 0; t < NB; ++t)
+                {
+                    const T* wt = wq + (dtx[t] < 0 ? 0 : dtx[t]) * R * S * tapStride;
+#pragma unroll
+                    for(int j = 0; j < FN; ++j)
+                        bf[t][j] = *reinterpret_cast<const Frag*>(wt + bCol[j]);
+                }
+#endif
+            };
+            auto loadB = [&](int q, Frag(&bf)[NB][FN]) {
+                if(q < NQ)
+                    loadBAt(cc, dt, q, bf);
+                else if(more)
+                    loadBAt(cnx, dtn, q - NQ, bf);
+            };
+            // Weight fragments PD steps ahead, in a ring indexed by compile-time step numbers. PD from
+            // a ~16-VGPR budget: deep for fp32 (one VGPR per fragment), one step for big fragments.
+            constexpr int PD = PDX;
+            auto& bq = bqx;
+            if(!pre)
+            {
+#pragma unroll
+                for(int q = 0; q < PD && q < NQ; ++q)
+                    loadB(q, bq[q]);
+            }
+            pf();
+            pre = more;
+            if constexpr(NB > 1)
+            {
+                // EXPERIMENT (ring): the sets' skips as scalar branches (dt is wave-uniform) and the
+                // A fragments one step ahead in registers, so a skip does not split the step.
+                bool live[NB];
+#pragma unroll
+                for(int t = 0; t < NB; ++t)
+                    live[t] = __builtin_amdgcn_readfirstlane(dt[t]) >= 0;
+                auto loadA = [&](int q, Frag(&af)[FM]) {
+                    const int kk = (q / (R * S)) * KA, r = (q % (R * S)) / S, s = q % S;
+#pragma unroll
+                    for(int i = 0; i < FM; ++i)
+                        af[i] = k1Frag<Atom>(halo + aOff[i] + r * rowStep + s * LDC + kk);
+                };
+                bool all = true;
+#pragma unroll
+                for(int t = 0; t < NB; ++t)
+                    all = all && live[t];
+                auto steps = [&](auto ALL) {
+                    Frag afb[2][FM];
+                    loadA(0, afb[0]);
+#pragma unroll
+                    for(int q = 0; q < NQ; ++q)
+                    {
+                        loadB(q + PD, bq[(q + PD) % (PD + 1)]);
+                        if(q + 1 < NQ)
+                            loadA(q + 1, afb[(q + 1) % 2]);
+#pragma unroll
+                        for(int t = 0; t < NB; ++t)
+                        {
+                            if(!decltype(ALL)::value && !live[t])
+                                continue;
+                            auto& ac = acc[setOf(t)];
+#pragma unroll
+                            for(int i = 0; i < FM; ++i)
+#pragma unroll
+                                for(int j = 0; j < FN; ++j)
+                                    ac[i][j] = Atom::mma(
+                                        afb[q % 2][i], bq[q % (PD + 1)][t][j], ac[i][j]);
+                        }
+                    }
+                };
+                (void)all;
+                steps(K2Int<0>{});
+                return;
+            }
+#pragma unroll
+            for(int q = 0; q < NQ; ++q)
+            {
+                loadB(q + PD, bq[(q + PD) % (PD + 1)]);
+                const int kk = (q / (R * S)) * KA, r = (q % (R * S)) / S, s = q % S;
+                Frag af[FM];
+#pragma unroll
+                for(int i = 0; i < FM; ++i)
+                    af[i] = k1Frag<Atom>(halo + aOff[i] + r * rowStep + s * LDC + kk);
+#pragma unroll
+                for(int t = 0; t < NB; ++t)
+                {
+                    if(dt[t] < 0)
+                        continue;
+                    auto& ac = acc[setOf(t)];
+#pragma unroll
+                    for(int i = 0; i < FM; ++i)
+#pragma unroll
+                        for(int j = 0; j < FN; ++j)
+                            ac[i][j] = Atom::mma(af[i], bq[q % (PD + 1)][t][j], ac[i][j]);
+                }
+            }
+        };
     // BL: weight tiles through LDS. Per thread LOADS vectors of VB elements per tile.
     constexpr int VB = 16 / static_cast<int>(sizeof(T));
     constexpr int LOADS = BL ? (BN * BC) / (VB * THREADS) : 1;
@@ -1133,13 +1311,23 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         }
         else
         {
-            chunk(
-                stage,
-                cc,
-                pf,
-                K2Int<KD>{},
-                [&](int t) { return jj - t >= 0 && jj - t < b.dsEff ? t : -1; },
-                [&](int t) { return (u - t + KD) % KD; });
+            if constexpr(XPF != 0)
+                chunkX(
+                    stage,
+                    cc,
+                    pf,
+                    K2Int<KD>{},
+                    [&](int t) { return jj - t >= 0 && jj - t < b.dsEff ? t : -1; },
+                    [&](int t) { return (u - t + KD) % KD; },
+                    nx);
+            else
+                chunk(
+                    stage,
+                    cc,
+                    pf,
+                    K2Int<KD>{},
+                    [&](int t) { return jj - t >= 0 && jj - t < b.dsEff ? t : -1; },
+                    [&](int t) { return (u - t + KD) % KD; });
         }
     };
     auto tap = [&](int stage, int cc, int t0, auto&& pf, auto&& nx) {
@@ -1150,7 +1338,11 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         }
         else
         {
-            chunk(stage, cc, pf, K2Int<1>{}, [&](int) { return t0; }, [&](int) { return 0; });
+            if constexpr(XPF != 0)
+                chunkX(
+                    stage, cc, pf, K2Int<1>{}, [&](int) { return t0; }, [&](int) { return 0; }, nx);
+            else
+                chunk(stage, cc, pf, K2Int<1>{}, [&](int) { return t0; }, [&](int) { return 0; });
         }
     };
 

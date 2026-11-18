@@ -493,7 +493,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 29> ints{
+    const std::array<std::pair<const char*, int*>, 30> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -503,7 +503,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
          {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
-         {"un", &config.un},     {"cf", &config.cf}}};
+         {"un", &config.un},     {"cf", &config.cf},       {"xpf", &config.xpf}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -544,6 +544,13 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                     || math != 0 || conv_igemm::atomElement(config.atom) == "f32")))
     {
         // Channels-first halo tiles: 16-bit matrix-core, register-path weights, no split.
+        return std::nullopt;
+    }
+    // The cross-chunk prefetch: halo tiles with register-path weights, channels-last.
+    if(config.xpf != 0
+       && (config.xpf != 1 || config.rows || config.atom == "fma" || config.bl != 0
+           || config.cf != 0))
+    {
         return std::nullopt;
     }
     config.math = math == 1;
@@ -1195,6 +1202,11 @@ public:
             if(config.cf != 0)
             {
                 options.add("CONV_DIRECT_CF", std::to_string(config.cf));
+            }
+            // Defined only when set, so every other config compiles as before.
+            if(config.xpf != 0)
+            {
+                options.add("CONV_DIRECT_XPF", std::to_string(config.xpf));
             }
         }
 
