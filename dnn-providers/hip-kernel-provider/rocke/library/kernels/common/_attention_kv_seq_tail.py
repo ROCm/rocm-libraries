@@ -77,7 +77,13 @@ def block_table_max_idx(
     bt_stride: Value,
 ) -> Value:
     """The end of the sequence's own block-table entries (``seq_base`` + ceil(``seq_len`` /
-    ``block_size``)), and of the table; wave-uniform."""
+    ``block_size``)), and of the table; wave-uniform.
+
+    Contract: ``seq_len`` <= max_seqlen_k and every row holds at least
+    ceil(max_seqlen_k / ``block_size``) entries (``validate_tuning_attention_tensors`` checks
+    the width from shapes), so the end never reaches the next row. The page ids those entries
+    hold are the caller's to keep inside the cache.
+    """
     seq_end = b.add(
         seq_base,
         b.div(b.add(seq_len, b.const_i32(block_size - 1)), b.const_i32(block_size)),

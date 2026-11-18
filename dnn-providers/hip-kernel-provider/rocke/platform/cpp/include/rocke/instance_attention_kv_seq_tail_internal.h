@@ -70,7 +70,10 @@ static inline rocke_value_t* rocke_kv_last_row_in_sequence(rocke_ir_builder_t* b
 }
 
 /* block_table_max_idx: the end of the sequence's own block-table entries (seq_base +
- * ceil(seq_len / block_size)), and of the table; wave-uniform. */
+ * ceil(seq_len / block_size)), and of the table; wave-uniform. Contract: seq_len <=
+ * max_seqlen_k and every row holds at least ceil(max_seqlen_k / block_size) entries
+ * (validate_tuning_attention_tensors checks the width from shapes), so the end never reaches
+ * the next row; the page ids are the caller's to keep inside the cache. */
 static inline rocke_value_t* rocke_kv_block_table_max_idx(rocke_ir_builder_t* b,
                                                           rocke_value_t* seq_base,
                                                           rocke_value_t* seq_len,
