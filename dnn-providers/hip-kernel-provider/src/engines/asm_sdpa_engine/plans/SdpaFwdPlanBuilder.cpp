@@ -366,6 +366,50 @@ bool SdpaFwdPlanBuilder::acceptsLaunchBlock(const fmha_v3_fwdConfig& config) con
     return true;
 }
 
+// False when the node sets an attribute none of the forward kernels read.
+static bool
+    servesOptionalAttributes(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    // Dropout operands the kernels never read: a graph that carries one asks for dropout
+    // or its debug output, which these kernels do not produce. seed and offset are inert
+    // at dropout_probability 0, and a non-zero probability is declined below.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
+                               "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(), "rng_dump tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.block_mask_tensor_uid(), "block_mask tensor not supported");
+    // The plan writes only the output and the optional stats tensor, never max or sum_exp.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_tensor_uid() || attrs.sum_exp_tensor_uid(),
+                               "max and sum_exp output tensors not supported");
+    // max_seq_len_kv sizes a paged K/V cache, which is not honored.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_seq_len_kv().has_value(), "max_seq_len_kv not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
+                                   && attrs.dropout_probability().value() != 0.f,
+                               "dropout_probability must be unset or zero (Actual value: "
+                                   + std::to_string(attrs.dropout_probability().value()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
+                               "attn_mask tensor not supported");
+
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(),
+                               "page_table_k tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
+                               "page_table_v tensor not supported");
+    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
+    // The plan writes a stats tensor only when generate_stats asks for one.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.stats_tensor_uid().has_value() && !hasStatsOutput(attrs),
+                               "stats_tensor_uid is set but generate_stats is not");
+
+    return true;
+}
+
 bool SdpaFwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -379,6 +423,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // rather than risk a mismatch (RFC 0008 §4.6).
     HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
                                "Graph has override shapes enabled");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(opGraph.getTensorMap()),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
     HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(opGraph.getTensorMap()),
         "All tensors must be aligned to a multiple of 16 bytes");
@@ -409,22 +456,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "Compute data type must be FLOAT");
 
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
-                                   && attrs.dropout_probability().value() != 0.f,
-                               "dropout_probability must be unset or zero (Actual value: "
-                                   + std::to_string(attrs.dropout_probability().value()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
-                               "attn_mask tensor not supported");
-
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(),
-                               "page_table_k tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
-                               "page_table_v tensor not supported");
-    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
-
+    if(!servesOptionalAttributes(attrs))
+    {
+        return false;
+    }
     // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
     // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
     if(attrs.scale_tensor_uid().has_value())
@@ -504,6 +539,15 @@ bool SdpaFwdPlanBuilder::isApplicable(
         !wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
 
+    // The kernel derives the GQA ratio as Hq / Hkv and indexes K, V and O with Q's batch,
+    // so the four tensors must agree on every extent they share.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !plan_utils::hasConsistentFwdShapes(*qTensor, *kTensor, *vTensor, *oTensor),
+        "Q, K, V and O dimensions are inconsistent: every dimension must be positive, "
+        "K and V must share batch, head count and sequence length, the batch must match Q, "
+        "K's head size must match Q's, Hq must be a multiple of Hkv, and O must be "
+        "[B, Hq, Sq, Dv]");
+
     if(batchMode == BatchMode::GROUP
        && !hasAiterCompatibleRaggedAddressing(tensorMap, *qTensor, *kTensor, *vTensor, *oTensor))
     {
@@ -563,12 +607,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    + EnumNameDataType(qTensor->data_type())
                                    + ", k tensor: " + EnumNameDataType(kTensor->data_type())
                                    + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
-
-    HIP_KERNEL_RETURN_FALSE_IF(
-        kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
-        "k tensor and v tensor must shared the same head count (Actual value: k = "
-            + std::to_string(kTensor->dims()->Get(1))
-            + " v = " + std::to_string(vTensor->dims()->Get(1)) + ")");
 
     auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
