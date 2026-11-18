@@ -18,7 +18,7 @@ def _format_range(rng, start_elements=2, end_elements=2):
     return f"[{start}, ..., {end}]"
 
 @lru_cache(maxsize=1)
-def load_tensile_metadata() -> Dict[str, ParamMeta]:
+def load_tensilelite_metadata() -> Dict[str, ParamMeta]:
     """Pull defaults and valid ranges from the tensilelite package's validParameters
     and defaultBenchmarkCommonParameters.  Returns Dict[str, ParamMeta].
     Loaded lazily and cached for reuse across callers."""
