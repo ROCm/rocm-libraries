@@ -620,22 +620,28 @@ namespace hipblaslt_ext::experimental
         // change the result (every slice is written at its own place in D), so the slices go
         // where most of their bytes are local: a framework that places the halves of a shared
         // matrix on the other devices than expected still gets local accesses.
+        // Only when the partitions are on different devices (DPX): on one device (SPX, meant for
+        // checking results only) every order is equally local, so nothing is sampled and
+        // partition i computes slice i.
         std::vector<size_t> slice(parts);
         for(size_t i = 0; i < parts; i++)
             slice[i] = i;
-        std::vector<std::vector<double>> localBytes(parts, std::vector<double>(parts, 0.0));
-        for(size_t i = 0; i < parts; i++)
-            for(size_t j = 0; j < parts; j++)
-                for(auto const& mat : split)
-                    localBytes[i][j] += localFraction(mat, i, offset[j], size[j], s.devices[i])
-                                        * double(size[j]) * double(mat.other) * double(mat.bytes);
-        auto localTotal = [&](std::vector<size_t> const& map) {
-            double sum = 0;
-            for(size_t i = 0; i < parts; i++)
-                sum += localBytes[i][map[i]];
-            return sum;
-        };
+        const bool distinct = std::set<int>(s.devices.begin(), s.devices.end()).size() == parts;
+        if(distinct)
         {
+            std::vector<std::vector<double>> localBytes(parts, std::vector<double>(parts, 0.0));
+            for(size_t i = 0; i < parts; i++)
+                for(size_t j = 0; j < parts; j++)
+                    for(auto const& mat : split)
+                        localBytes[i][j] += localFraction(mat, i, offset[j], size[j], s.devices[i])
+                                            * double(size[j]) * double(mat.other)
+                                            * double(mat.bytes);
+            auto localTotal = [&](std::vector<size_t> const& map) {
+                double sum = 0;
+                for(size_t i = 0; i < parts; i++)
+                    sum += localBytes[i][map[i]];
+                return sum;
+            };
             // Greedy: each partition in turn takes the free slice with the most local bytes. It
             // replaces the plain order only when it is strictly better (for 2 partitions this
             // compares both orders).
@@ -650,14 +656,11 @@ namespace hipblaslt_ext::experimental
                 greedy[i]   = best;
                 taken[best] = true;
             }
-            // Only when the partitions are on different devices: on one device every order is
-            // equally local, and sampling must not reorder the slices.
-            const bool distinct = std::set<int>(s.devices.begin(), s.devices.end()).size() == parts;
-            if(distinct && localTotal(greedy) > localTotal(slice))
+            if(localTotal(greedy) > localTotal(slice))
                 slice = greedy;
         }
         // A hint when a split matrix still mostly lives on another device than its partition.
-        if(hints)
+        if(hints && distinct)
         for(size_t i = 0; i < parts; i++)
             for(auto const& mat : split)
             {

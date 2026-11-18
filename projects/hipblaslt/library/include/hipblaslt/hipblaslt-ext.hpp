@@ -1140,12 +1140,14 @@ namespace hipblaslt_ext
          *  Handle, stream, workspace, pointer and event number ``i`` all belong to partition
          * ``i``. Each handle must be created with its partition's device current, and each stream
          * must belong to the same device as its handle. In SPX mode, where every partition is on
-         * the same device, the streams share that device and the result is still correct; the
-         * partitions are then just run one after another or concurrently on one device, with no
-         * speed benefit.
+         * the same device, the streams share that device and the result is still correct, but
+         * SPX is only meant for checking results without a DPX GPU, not for speed: the
+         * partitions just run one after another or concurrently on one device.
          *
          *  Calls follow the order of Gemm: setProblem, algoGetHeuristic (or #isAlgoSupported),
-         * #initialize, then #run. Call setProblem again to change a pointer.
+         * #initialize, then #run. Call setProblem again when a pointer or the shape changes, not
+         * on every launch: it queries where the memory is (``hipPointerGetAttributes``) to
+         * decide which partition computes which slice.
          *
          *  The current implementation supports plain GEMM: no epilogue, no scale or aux inputs, and no MX
          * types. Device user arguments are declared but not supported yet.
@@ -1238,7 +1240,7 @@ namespace hipblaslt_ext
             * PartitionedGemm::getSlice).
             *
             *  With ``HIPBLASLT_LOG_MASK=4`` setProblem logs where the partitions are: all on one
-            * device (SPX mode, correct but no speed benefit), the partitions of one GPU (DPX or
+            * device (SPX mode, correct but only for checking results, not for speed), the partitions of one GPU (DPX or
             * another partition mode, found from the PCI function of the devices), or different GPUs.
             *
             *  With ``storePeerD`` every partition also stores its slice into the D of the other
