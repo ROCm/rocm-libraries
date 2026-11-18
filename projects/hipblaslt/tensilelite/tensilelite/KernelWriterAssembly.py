@@ -96,6 +96,7 @@ from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgp
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from rocisa.instruction import VDualOp
+from rocisa.instruction import SSleep
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from .Common.DataType import DataType
@@ -234,6 +235,24 @@ class KernelWriterAssembly(KernelWriter):
       code = ""
       errcode = -2
     return (errcode, code)
+
+  def workGroupPhaseStagger(self, kernel):
+    """WorkGroupPhaseStagger: workgroups with bit WorkGroupPhaseStaggerBit of their first id set sleep
+    WorkGroupPhaseStagger * 64 cycles before anything else (see ValidParameters)."""
+    module = Module("workGroupPhaseStagger")
+    units = kernel["WorkGroupPhaseStagger"]
+    if not units:
+      return module
+    skip = Label("WorkGroupPhaseStaggerEnd", "")
+    module.add(SBitcmp1B32(src0=sgpr("WorkGroup0"), src1=kernel["WorkGroupPhaseStaggerBit"],
+                           comment="workgroup phase stagger: this workgroup shares a WGP with id - 2^bit?"))
+    module.add(SCBranchSCC0(labelName=skip.getLabelName(), comment="no: start now"))
+    while units > 0:
+      step = min(units, 127)
+      module.add(SSleep(step, "start %u cycles later" % (64 * step)))
+      units -= step
+    module.add(skip)
+    return module
 
   def getSgprOccupancy(self, sgprs):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
@@ -2871,6 +2890,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if self.states.numSgprPreload == 0 or self.states.archCaps["SgprPreloadPad"]:
         commonArgs = Module("load arguments")
+        commonArgs.add(self.workGroupPhaseStagger(kernel))
         commonArgs.addComment1("Load num of Gemms")
         commonArgs.add(self.argLoader.loadKernArg(sgprNumsOfGemm, "KernArgAddress", 0, dword=1))
         # Load combined internal arguments

@@ -3,7 +3,7 @@
 """
 Unit tests for the WorkGroupPhaseStagger parameters (the workgroups whose WorkGroup0 has bit
 WorkGroupPhaseStaggerBit set sleep WorkGroupPhaseStagger x 64 cycles before their first
-instruction): 0, the default, must leave every kernel name as it was.
+instruction): 0, the default, must emit nothing and leave every kernel name as it was.
 """
 
 from copy import deepcopy
@@ -14,6 +14,13 @@ from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
 pytestmark = pytest.mark.unit
+
+try:
+    from rocisa import rocIsa
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly as _KWA
+    _KWA_AVAILABLE = True
+except Exception:
+    _KWA_AVAILABLE = False
 
 
 def _minimal_kernel(**overrides):
@@ -55,3 +62,30 @@ def test_delay_and_bit_name_the_kernel():
     staggered = getKernelNameMin(_minimal_kernel(WorkGroupPhaseStagger=80), False)
     other_bit = getKernelNameMin(_minimal_kernel(WorkGroupPhaseStagger=80, WorkGroupPhaseStaggerBit=2), False)
     assert len({base, staggered, other_bit}) == 3
+
+
+@pytest.fixture
+def _gfx1150_isa():
+    if not _KWA_AVAILABLE:
+        pytest.skip("rocisa / KernelWriterAssembly not importable")
+    rocIsa.getInstance().setKernel((11, 5, 0), 32)
+
+
+def _emit(units, bit=3):
+    return str(_KWA.workGroupPhaseStagger(None, {"WorkGroupPhaseStagger": units, "WorkGroupPhaseStaggerBit": bit}))
+
+
+def test_no_delay_emits_nothing(_gfx1150_isa):
+    assert _emit(0).strip() == ""
+
+
+def test_delay_tests_the_bit_and_sleeps_in_s_sleep_steps(_gfx1150_isa):
+    """200 x 64 cycles: s_sleep takes at most 127, so 127 + 73, skipped when the bit is clear."""
+    lines = [l.split("//")[0].strip() for l in _emit(200, bit=3).splitlines() if l.strip()]
+    assert lines == [
+        "s_bitcmp1_b32 s[sgprWorkGroup0], 3",
+        "s_cbranch_scc0 label_WorkGroupPhaseStaggerEnd",
+        "s_sleep 127",
+        "s_sleep 73",
+        "label_WorkGroupPhaseStaggerEnd:",
+    ]
