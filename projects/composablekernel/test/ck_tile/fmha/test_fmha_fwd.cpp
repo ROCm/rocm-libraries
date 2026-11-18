@@ -2976,6 +2976,69 @@ TEST_P(SplitKvSinkDoubleCount, DataTypeConfig)
     CHECK_SPLITKV_RESULT(result);
 }
 
+// A sliding window whose left edge falls inside the sink tiles (sink longer than one
+// kN0 tile) must still see every sink column: the split-aware tile range has to start
+// at column 0 there, as the single-split one does. Paged and non-paged.
+class SplitKvSinkWindowOverlap
+    : public TestWithParam<std::tuple<std::tuple<int, int>, int, std::string, int>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSinkWindowOverlap);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKvSinkWindowOverlap,
+                         Combine(SplitKVHDimValues,
+                                 Values(2, 3),                         // num_splits
+                                 Values("t:256,0,128", "t:384,0,200"), // sink > kN0
+                                 Values(0, 128)));                     // page_block_size
+
+TEST_P(SplitKvSinkWindowOverlap, DataTypeConfig)
+{
+    auto [hdims, num_splits, mask_str, page_block_size] = GetParam();
+    auto [hdim_q, hdim_v]                               = hdims;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        2,  // batch
+        4,  // nhead
+        -1, // nhead_k
+        {2048},
+        {2048},
+        hdim_q,
+        hdim_v,
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff
+        {},   // kv_eff
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        def_is_v_rowmajor,
+        false, // lse
+        page_block_size,
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale_str,
+        true, // is_rotary_interleaved
+        num_splits,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation, without which this checks nothing
+        0, // init_sink
+        0, // pack_gqa
+        stream_config);
+    CHECK_SPLITKV_RESULT(result);
+}
+
 // Both split-KV pipelines seed m at an i_split > 0 lookback; the nwarp one had
 // the wrong expression there. It is selected only when seqlen_q fits a single
 // 16-row tile, so nothing else in this file reaches it. Codegen emits it for

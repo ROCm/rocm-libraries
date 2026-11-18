@@ -458,8 +458,13 @@ struct SimplifiedGenericAttentionMask
         const index_t split_start       = x_per_split * i_split;                            // 128
         const index_t split_end         = ck_tile::min(x_total, split_start + x_per_split); // 256
         const index_t sink_seq_end      = sink > 0 ? ((sink + width - 1) / width) * width : 0;
-        const index_t start             = ck_tile::max(origin_start, split_start);
-        const index_t end               = ck_tile::min(origin_end, split_end);
+        // A window that starts inside the sink tiles is one range from column 0, as in
+        // the single-split overload; otherwise the sink columns before it are never
+        // visited. An empty range stays empty so the caller's no-work path owns the sink.
+        if(sink > 0 && origin_start < sink_seq_end && origin_start < origin_end)
+            origin_start = 0;
+        const index_t start = ck_tile::max(origin_start, split_start);
+        const index_t end   = ck_tile::min(origin_end, split_end);
         const bool is_first_intersecting_split =
             (split_start <= origin_start && split_end >= origin_start);
         const bool sink_in_range = (sink_seq_end <= start);
