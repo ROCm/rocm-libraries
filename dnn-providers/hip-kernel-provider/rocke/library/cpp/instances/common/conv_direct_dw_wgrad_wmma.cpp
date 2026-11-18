@@ -284,19 +284,8 @@ extern "C" bool
         return false;
     if(rocke_direct_dw_wgrad_wmma_reason(spec, reason, reason_cap))
         return false;
-    if(target->wave_size != 32)
-    {
-        rocke_spec_set_reasonf(
-            reason, reason_cap, "wave32 kernel (got %s, wave%d)", arch, target->wave_size);
+    if(!rocke_dwg::wgrad_wmma_wave_shape_ok(target, arch, problem_is_bf16(p), reason, reason_cap))
         return false;
-    }
-    const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
-    if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, ROCKE_FWD_WMMA_K))
-    {
-        rocke_spec_set_reasonf(reason, reason_cap, "missing wmma 16x16x32 %s on %s", ab, arch);
-        return false;
-    }
     const int threads = rocke_direct_dw_wgrad_wmma_threads_per_block(spec);
     if(threads > rocke_archtarget_max_threads_per_block(target))
     {
@@ -304,13 +293,9 @@ extern "C" bool
             reason, reason_cap, "%d threads > hardware cap on %s", threads, arch);
         return false;
     }
-    const long lds = rocke_direct_dw_wgrad_wmma_lds_bytes(spec);
-    if(lds > target->lds_capacity_bytes)
-    {
-        rocke_spec_set_reasonf(
-            reason, reason_cap, "LDS %ld B > %d on %s", lds, target->lds_capacity_bytes, arch);
+    if(rocke_dwg::wgrad_wmma_lds_over(
+           rocke_direct_dw_wgrad_wmma_lds_bytes(spec), target, arch, reason, reason_cap))
         return false;
-    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }

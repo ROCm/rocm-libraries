@@ -56,7 +56,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
-from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
+from kernels.common.conv_fwd_wmma_gate import wmma_ab_dtype, wmma_fwd_op
 
 _WAVE = 32
 _TILE = 16  # WMMA M = N
@@ -175,6 +175,20 @@ class DirectWgradWmmaSpec:
         return self.stages * self.rows * (per_stage + dummies) * 2
 
 
+def wgrad_wmma_wave_shape_reason(target, arch: str, dtype: str) -> str | None:
+    """Why ``target`` (the ArchTarget of ``arch``) lacks what every WMMA wgrad
+    kernel needs (None when it has it): wave32 and the WMMA 16x16x32 shape of
+    ``dtype``. The depthwise kernel stops here; it needs no TDM."""
+    if target.wave_size != _WAVE:
+        return f"wave32 kernel (got {arch}, wave{target.wave_size})"
+    ab = wmma_ab_dtype(dtype)
+    if not target.mma.has_shape(
+        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=_KSTEP
+    ):
+        return f"missing wmma 16x16x32 {ab} on {arch}"
+    return None
+
+
 def wgrad_wmma_arch_reason(arch: str, dtype: str):
     """Why the dense and grouped WMMA wgrad kernels cannot run on ``arch``
     (None when they can), from its ArchTarget capabilities: wave32, the WMMA
@@ -188,13 +202,9 @@ def wgrad_wmma_arch_reason(arch: str, dtype: str):
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return str(e), None
-    if target.wave_size != _WAVE:
-        return f"wave32 kernel (got {arch}, wave{target.wave_size})", target
-    ab = "bf16" if dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=_KSTEP
-    ):
-        return f"missing wmma 16x16x32 {ab} on {arch}", target
+    why = wgrad_wmma_wave_shape_reason(target, arch, dtype)
+    if why is not None:
+        return why, target
     if not target.memory.has_tdm:
         return f"no TDM (nor ds_load_tr16_b128) on {arch}", target
     return None, target

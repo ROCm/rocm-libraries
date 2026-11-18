@@ -66,6 +66,10 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     pad_w_reason,
 )
+from kernels.common.conv_direct_wgrad_wmma import (
+    wgrad_wmma_lds_reason,
+    wgrad_wmma_wave_shape_reason,
+)
 from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op, wmma_fwd_tensor_bytes_reason
 
 DW_WGRAD_WMMA_CH = 8  # channels per wave (the 8-wide K group of a lane half)
@@ -227,17 +231,14 @@ def is_valid_dw_wgrad_wmma_spec(
     why = dw_wgrad_wmma_reason(spec)
     if why:
         return False, why
-    if target.wave_size != 32:
-        return False, f"wave32 kernel (got {arch}, wave{target.wave_size})"
-    ab = "bf16" if spec.problem.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return False, f"missing wmma 16x16x32 {ab} on {arch}"
+    why = wgrad_wmma_wave_shape_reason(target, arch, spec.problem.dtype)
+    if why is not None:
+        return False, why
     if spec.threads_per_block > target.max_threads_per_block:
         return False, f"{spec.threads_per_block} threads > hardware cap on {arch}"
-    if spec.lds_bytes > target.lds_capacity_bytes:
-        return False, f"LDS {spec.lds_bytes} B > {target.lds_capacity_bytes} on {arch}"
+    why = wgrad_wmma_lds_reason(spec.lds_bytes, target, arch)
+    if why is not None:
+        return False, why
     return True, "ok"
 
 
