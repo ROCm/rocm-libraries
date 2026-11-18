@@ -1027,3 +1027,130 @@ TEST_F(ExtraSpgemm, alias_c_d_without_d)
             oCD.p.host(), cC.host(), vC.host(), want, rocsparse_direction_row, 0);
     }
 }
+
+// The arrays of D passed as C through a second descriptor with the other index
+// base. A row pointer cannot be in both bases, so every stage rejects the call
+// and leaves D as it is, although the patterns match. Without beta, or with an
+// empty D, D does not take part and the call is accepted.
+TEST_F(ExtraSpgemm, alias_c_d_base_mismatch)
+{
+    const rocsparse_index_base Z = rocsparse_index_base_zero, O = rocsparse_index_base_one;
+    const rocsparse_index_base bases[][2] = {{Z, O}, {O, Z}};
+    for(int64_t bd : {1, 2})
+        for(const auto& b : bases)
+        {
+            const int64_t       bb = bd * bd;
+            std::vector<double> blk(static_cast<size_t>(bb), 0.0);
+            for(int64_t r = 0; r < bd; ++r)
+                blk[static_cast<size_t>(r * bd + r)] = 1.0;
+            auto vals = [&](int64_t nnzb) {
+                std::vector<double> v;
+                for(int64_t p = 0; p < nnzb; ++p)
+                    v.insert(v.end(), blk.begin(), blk.end());
+                return v;
+            };
+            const Bsr  A   = bsr_of(2, 3, bd, {0, 2, 2}, {0, 1}, vals(2));
+            const Bsr  B   = bsr_of(3, 4, bd, {0, 2, 3, 3}, {0, 2, 0}, vals(3));
+            const Bsr  D   = bsr_of(2, 4, bd, {0, 3, 4}, {0, 1, 2, 3}, vals(4));
+            const bool bsr = bd > 1;
+            SCOPED_TRACE(std::string(bsr ? "bsr" : "csr") + " bases=" + std::to_string(int(b[0]))
+                         + std::to_string(int(b[1])));
+
+            Operand<float, int32_t, int32_t> oA, oB, oD, oE;
+            ASSERT_NO_FATAL_FAILURE(oA.create(A, bsr, rocsparse_direction_row, Z));
+            ASSERT_NO_FATAL_FAILURE(oB.create(B, bsr, rocsparse_direction_row, Z));
+            ASSERT_NO_FATAL_FAILURE(oD.create(D, bsr, rocsparse_direction_row, b[1]));
+            ASSERT_NO_FATAL_FAILURE(
+                oE.create(empty_bsr(2, 4, bd), bsr, rocsparse_direction_row, b[1]));
+
+            // C over the arrays of M, in the base of C.
+            auto alias = [&](SpmatH& C, const Operand<float, int32_t, int32_t>& M) {
+                if(bsr)
+                    ASSERT_EQ(rocsparse_create_bsr_descr(&C.p,
+                                                         M.h.mb,
+                                                         M.h.nb,
+                                                         M.h.nnzb(),
+                                                         rocsparse_direction_row,
+                                                         bd,
+                                                         M.p.ptr,
+                                                         M.c.ptr,
+                                                         M.v.ptr,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_indextype_i32,
+                                                         b[0],
+                                                         rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                else
+                    ASSERT_EQ(rocsparse_create_csr_descr(&C.p,
+                                                         M.h.mb,
+                                                         M.h.nb,
+                                                         M.h.nnzb(),
+                                                         M.p.ptr,
+                                                         M.c.ptr,
+                                                         M.v.ptr,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_indextype_i32,
+                                                         b[0],
+                                                         rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+            };
+            SpmatH C, CE;
+            ASSERT_NO_FATAL_FAILURE(alias(C, oD));
+            ASSERT_NO_FATAL_FAILURE(alias(CE, oE));
+
+            const float alpha = 1.0f, beta = 1.0f;
+            auto        call = [&](const void*                 be,
+                            rocsparse_const_spmat_descr Dd,
+                            rocsparse_spmat_descr       Cd,
+                            rocsparse_spgemm_stage      stage,
+                            size_t*                     bs,
+                            void*                       tmp) {
+                return spgemm_call<float>(
+                    handle, &alpha, oA.d.p, oB.d.p, be, Dd, Cd, stage, bs, tmp);
+            };
+
+            // The buffer of the documented alias, so that a missing check cannot overrun it.
+            size_t bsz = 0;
+            ASSERT_EQ(
+                call(&beta, oD.d.p, oD.d.p, rocsparse_spgemm_stage_buffer_size, &bsz, nullptr),
+                rocsparse_status_success);
+            DevBuf<char> buffer(bsz);
+            ASSERT_TRUE(buffer.ptr);
+
+            const std::vector<int32_t> ptr = oD.p.host(), col = oD.c.host();
+            const std::vector<float>   val = oD.v.host();
+
+            std::vector<rocsparse_spgemm_stage> stages = {rocsparse_spgemm_stage_buffer_size,
+                                                          rocsparse_spgemm_stage_nnz,
+                                                          rocsparse_spgemm_stage_compute};
+            if(!bsr)
+            {
+                stages.push_back(rocsparse_spgemm_stage_symbolic);
+                stages.push_back(rocsparse_spgemm_stage_numeric);
+            }
+            for(rocsparse_spgemm_stage s : stages)
+            {
+                size_t bs = bsz;
+                EXPECT_EQ(call(&beta,
+                               oD.d.p,
+                               C.p,
+                               s,
+                               &bs,
+                               s == rocsparse_spgemm_stage_buffer_size ? nullptr : buffer.ptr),
+                          rocsparse_status_invalid_value)
+                    << "stage " << int(s);
+            }
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_EQ(oD.p.host(), ptr) << "row pointer of D";
+            EXPECT_EQ(oD.c.host(), col) << "column indices of D";
+            EXPECT_EQ(oD.v.host(), val) << "values of D";
+
+            size_t bs = 0;
+            EXPECT_EQ(call(nullptr, oD.d.p, C.p, rocsparse_spgemm_stage_buffer_size, &bs, nullptr),
+                      rocsparse_status_success)
+                << "beta null";
+            EXPECT_EQ(call(&beta, oE.d.p, CE.p, rocsparse_spgemm_stage_buffer_size, &bs, nullptr),
+                      rocsparse_status_success)
+                << "D empty";
+        }
+}
