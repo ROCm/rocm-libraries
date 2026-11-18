@@ -1,0 +1,206 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# hipBLASLt's opt-in Python bindings (projects/hipblaslt/python/), following Review A's lane
+# plan (Decision 9, AIHPBLAS-5274):
+#   - Linux CPU and Linux gfx942 GPU, on every PR that changes the bindings or the public headers;
+#   - gfx950, with the ci:run-gfx950 label;
+#   - Windows CPU, non-blocking and never a required check;
+#   - Windows GPU (gfx1151), only when the lanes themselves change or on a manual run.
+# Every lane installs the TheRock nightly pinned below (Decision 11) into a fresh venv,
+# builds the bindings against it, and runs their tests with
+# projects/hipblaslt/python/scripts/ci_lane.sh.
+name: "Component CI: hipBLASLt Python bindings"
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+      windows_runner:
+        type: string
+        required: true
+      all_lanes:
+        description: "Also run the opt-in gfx950 and Windows GPU lanes"
+        type: string
+        default: "false"
+
+permissions:
+  contents: read
+
+env:
+  # The one place the bindings' ROCm is pinned. Bump it deliberately, and switch to
+  # --latest-release once TheRock#9530 is fixed (Review A, Decision 11).
+  HIPBLASLT_PY_ROCM_VERSION: "10.3.0a20261116"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      gfx950: ${{ steps.plan.outputs.gfx950 }}
+      windows_gpu: ${{ steps.plan.outputs.windows_gpu }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ALL_LANES: ${{ inputs.all_lanes }}
+        run: |
+          set -euo pipefail
+          labels=""
+          # Read the labels now, not from the event, so a re-run after adding one sees it.
+          if [ -n "${PR}" ]; then
+            labels="$(gh api "repos/${REPO}/issues/${PR}/labels" --jq '.[].name')"
+          fi
+          gfx950=false
+          if [ "${ALL_LANES}" = "true" ] || grep -qx 'ci:run-gfx950' <<<"${labels}"; then
+            gfx950=true
+          fi
+          echo "gfx950=${gfx950}" >> "${GITHUB_OUTPUT}"
+          echo "windows_gpu=${ALL_LANES}" >> "${GITHUB_OUTPUT}"
+          echo "gfx950=${gfx950} windows_gpu=${ALL_LANES}"
+
+  linux-cpu:
+    name: Linux CPU
+    needs: plan
+    runs-on: ${{ inputs.linux_runner }}
+    timeout-minutes: 60
+    container:
+      image: ${{ inputs.docker_image }}
+    steps:
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/hipblaslt/python
+      - name: Build and test
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh
+
+  linux-gfx942:
+    name: Linux gfx942
+    needs: plan
+    runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    env:
+      HIPBLASLT_PY_DEVICE: gfx942
+      HIPBLASLT_PY_REQUIRE_GPU: "1"
+    steps:
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/hipblaslt/python
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++ python3-dev python3-venv
+      - name: Build and test
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh
+
+  linux-gfx950:
+    name: Linux gfx950 (ci:run-gfx950)
+    needs: plan
+    if: ${{ needs.plan.outputs.gfx950 == 'true' }}
+    runs-on: linux-gfx950-1gpu-ccs-ossci-rocm
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    env:
+      HIPBLASLT_PY_DEVICE: gfx950
+      HIPBLASLT_PY_REQUIRE_GPU: "1"
+    steps:
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/hipblaslt/python
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++ python3-dev python3-venv
+      - name: Build and test
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh
+
+  windows-cpu:
+    name: Windows CPU (non-blocking)
+    needs: plan
+    runs-on: ${{ inputs.windows_runner }}
+    timeout-minutes: 60
+    # Informational only: no decision may make Windows harder later, but this lane is never
+    # a required check.
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON: python
+    steps:
+      - name: Configure git long paths
+        run: git config --global core.longpaths true
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/hipblaslt/python
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - name: Build and test
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh
+
+  windows-gpu:
+    name: Windows gfx1151 (opt-in)
+    needs: plan
+    if: ${{ needs.plan.outputs.windows_gpu == 'true' }}
+    runs-on: windows-gfx1151-gpu-rocm
+    timeout-minutes: 60
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON: python
+      HIPBLASLT_PY_DEVICE: gfx1151
+      HIPBLASLT_PY_REQUIRE_GPU: "1"
+    steps:
+      - name: Configure git long paths
+        run: git config --global core.longpaths true
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/hipblaslt/python
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - name: Build and test
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh
