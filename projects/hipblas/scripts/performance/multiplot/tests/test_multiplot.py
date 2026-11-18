@@ -25,6 +25,7 @@ Host-only tests for the multiplot scripts (no GPU needed):
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,54 @@ def test_level1_theo_max_covers_the_level1_sweep(prefix):
     factors = benchmark.L1_theo_max(1.0)
     for func in ('axpy', 'dot', 'scal', 'nrm2', 'iamax'):
         assert prefix + func in factors
+
+
+HIPBLAS_DIR = os.path.abspath(os.path.join(MULTIPLOT_DIR, '..', '..', '..'))
+SIZE_ARGS = ('M', 'N', 'K', 'KL', 'KU')
+
+
+def _sweep_files():
+    for level in ('blas1', 'blas2', 'blas3'):
+        for sub in ('', 'large'):
+            d = os.path.join(MULTIPLOT_DIR, level, sub)
+            if os.path.isdir(d):
+                for f in sorted(os.listdir(d)):
+                    if f.endswith('.yaml'):
+                        yield os.path.join(level, sub, f)
+
+
+def _argument_names():
+    common = yaml.safe_load(open(os.path.join(HIPBLAS_DIR, 'clients', 'include', 'hipblas_common.yaml')))
+    return {list(entry)[0] for entry in common['Arguments']}
+
+
+@pytest.mark.parametrize('sweep', list(_sweep_files()))
+def test_sweep_sets_the_size_arguments_its_test_reads(sweep):
+    # hipblas_gentest.py ignores unknown keys, so a misspelled or missing size argument makes every
+    # case quick-return and the CSV comes out empty
+    text = open(os.path.join(MULTIPLOT_DIR, sweep)).read()
+    text = re.sub(r'^include:.*$', '', text, flags=re.MULTILINE)
+    # aliases defined in the included hipblas_common.yaml (precision lists) are not needed here
+    local = set(re.findall(r'&(\w+)', text))
+    text = re.sub(r'\*(\w+)', lambda m: m.group(0) if m.group(1) in local else 'external', text)
+    data = yaml.safe_load(text)
+    known = _argument_names()
+    for test in data['Tests']:
+        sizes = test.get('matrix_size') or [{}]
+        keys = set(test) | {k for size in sizes for k in size}
+        for key in keys:
+            clash = [name for name in known if name.lower() == str(key).lower() and name != key]
+            assert not clash, f"{sweep}: '{key}' should be '{clash[0]}'"
+        func = test['function']
+        hpp = [os.path.join(HIPBLAS_DIR, 'clients', 'include', lvl, f'testing_{func}.hpp')
+               for lvl in ('blas1', 'blas2', 'blas3')]
+        hpp = [h for h in hpp if os.path.isfile(h)]
+        if not hpp:
+            continue
+        reads = set(re.findall(r'\barg\.(' + '|'.join(SIZE_ARGS) + r')\b', open(hpp[0]).read()))
+        for size in sizes:
+            missing = reads - set(size) - set(test)
+            assert not missing, f"{sweep}: testing_{func}.hpp reads arg.{sorted(missing)} but the sweep does not set it"
 
 
 # ---------- plot.py end to end on the checked-in gfx90a results ----------
