@@ -684,7 +684,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // VGPR-MSB bank word in effect, on the tracker InsertVgprMsbPass emits by;
     // stepped on issue, reset per region. pickFreeBest prefers a free candidate
-    // it serves.
+    // that needs no new setter.
     VgprMsbTracker msbTracker_;
 
     // Region ds_read totals: the relief paces against cumulative progress, so it needs the
@@ -1496,11 +1496,11 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         if (wait > 0 && (!allowHiddenStall || !(hiddenInWindow || hiddenBeforeFirstWmma))) continue;
         const int elapse = nodeElapseKey(n);
         // MSB bank affinity: a tiebreak BELOW the free/hazard tier and ABOVE elapse
-        // — prefer a candidate the word in force serves, to avoid an s_set_vgpr_msb
-        // switch. Inert while no word is known (nothing is served), so unchanged
-        // behavior until a real tie.
+        // — prefer a candidate that needs no new s_set_vgpr_msb: the word in force
+        // serves it, or the last setter can take its banks. Inert while no word is
+        // known (nothing is served), so unchanged behavior until a real tie.
         const int aff =
-            (n->msbRequirement.needed() && msbTracker_.satisfies(n->msbRequirement)) ? 1 : 0;
+            (n->msbRequirement.needed() && !msbTracker_.needsSetter(n->msbRequirement)) ? 1 : 0;
         // Producer first: the earlier its need-by window, the sooner it goes.
         const int needBy = n->id < needByWindow_.size() ? needByWindow_[n->id] : INT_MAX;
         // A filler whose s_wait_alu a later slot would drop ranks last (fillerYieldsSlot); then
@@ -3100,8 +3100,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // WMMA region still needs them, and a WMMA-free region defers a gated ds_load to its end.
     clock_ = 0;
     // Per-region: MSB state is not carried across a region boundary (side-effect
-    // cut).
-    msbTracker_.reset();
+    // cut). Under the pass's policy, so a candidate is preferred exactly when
+    // InsertVgprMsbPass would emit nothing before it.
+    msbTracker_ = VgprMsbTracker(vgprMsbPolicyOf(getPassContext().getAsmCapsConfig()));
     // Clear per-region node ptr; it dangles into the previous region's freed
     // DAGNodeList.
     resetActiveWindow();

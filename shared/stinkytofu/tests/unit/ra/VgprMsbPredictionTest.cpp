@@ -14,10 +14,14 @@
 #include <vector>
 
 #include "AllocationTestUtils.hpp"
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
+#include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
+#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
 #include "stinkytofu/transforms/asm/ra/VgprMsbPrediction.hpp"
 
@@ -40,6 +44,60 @@ StinkyInstruction* wmma(BasicBlock* bb, int dst, int a, int b, int c) {
     inst->addSrcReg(StinkyRegister("v", b, 8));
     inst->addSrcReg(StinkyRegister("v", c, 8));
     return inst;
+}
+
+/// v[dst:dst+3] = ds_load_b128(v[addr]): src0 and dst only.
+StinkyInstruction* dsLoad(BasicBlock* bb, int dst, int addr) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_load_b128, kRaTestArch));
+    inst->addDestReg(StinkyRegister("v", dst, 4));
+    inst->addSrcReg(StinkyRegister("v", addr, 1));
+    return inst;
+}
+
+/// A WMMA, which fills every slot; a ds_load whose two slots the WMMA's word
+/// already holds; and the WMMA again. Three switches under the exact rule, one
+/// when the slots the ds_load does not use are don't-care.
+void wmmaLoadWmma(BasicBlock* bb) {
+    wmma(bb, /*dst=*/256, /*a=*/0, /*b=*/512, /*c=*/256);
+    dsLoad(bb, /*dst=*/264, /*addr=*/40);
+    wmma(bb, /*dst=*/256, /*a=*/0, /*b=*/512, /*c=*/256);
+}
+
+/// The epilogue's shape: an instruction that leaves slots unread, here a
+/// ds_load reading only src0 and dst, then one needing those slots in other
+/// banks, a WMMA with B in bank 2 and C in bank 1. Two switches under the exact
+/// rule, and two if the load's setter only kept the slots it did not set; one
+/// when that setter takes the WMMA's banks.
+void loadThenWmma(BasicBlock* bb) {
+    dsLoad(bb, /*dst=*/264, /*addr=*/40);
+    wmma(bb, /*dst=*/256, /*a=*/0, /*b=*/512, /*c=*/256);
+}
+
+/// The s_set_vgpr_msb InsertVgprMsbPass emits into one block built by \p build,
+/// under \p policy.
+size_t switchesThePassEmits(void (*build)(BasicBlock*), VgprMsbPolicy policy) {
+    Function function("kernel");
+    setFunctionArch(function, kRaTestArch);
+    BasicBlock* only = function.createBasicBlock("only");
+    build(only);
+    PassContext passCtx;
+    GemmTileConfig tile;
+    tile.arch = {12, 5, 0};
+    passCtx.setGemmTileConfig(tile);
+    AsmCapsConfig caps;
+    caps.vgprMsbMode = VgprMsbMode::Msb16;
+    caps.vgprMsbUnusedSlotsDontCare = policy == VgprMsbPolicy::UnusedSlotsDontCare;
+    passCtx.setAsmCapsConfig(caps);
+    AnalysisManager am;
+    registerAllAnalyses(am);
+    createInsertVgprMsbPass()->run(function, passCtx, am);
+    size_t switches = 0;
+    for (const IRBase& ir : *only) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) ++switches;
+    }
+    return switches;
 }
 
 /// \p from, with every unit of source operand \p operand of \p inst moved to
@@ -83,10 +141,11 @@ class VgprMsbPredictionTest : public ::testing::Test {
     }
 
     /// The prediction for the function's one loop, headed by "loop".
-    std::optional<uint32_t> predicted(const AllocationResult& colouring) {
+    std::optional<uint32_t> predicted(const AllocationResult& colouring,
+                                      VgprMsbPolicy policy = VgprMsbPolicy::ExactWord) {
         const std::vector<Loop> loops = detectLoops(*func);
         const std::vector<LoopVgprMsbSwitches> found =
-            predictLoopVgprMsbSwitches(*func, colouring, loops, kEncodableVgprs);
+            predictLoopVgprMsbSwitches(*func, colouring, loops, kEncodableVgprs, policy);
         if (found.size() != 1) {
             ADD_FAILURE() << "expected one loop, found " << found.size();
             return std::nullopt;
@@ -178,6 +237,33 @@ TEST_F(VgprMsbPredictionTest, AnOperandPastTheFileLeavesTheLoopUnpredicted) {
     const AllocationResult producer = createLegacyColoring(*func);
     EXPECT_EQ(predicted(producer), 1u);
     EXPECT_EQ(predicted(withSourceAt(producer, *only, /*operand=*/1, /*base=*/1024)), std::nullopt);
+}
+
+TEST_F(VgprMsbPredictionTest, UnusedSlotsDontCareThePredictionStillFollowsThePass) {
+    // The report counts by the pass's own policy, so the two agree under either.
+    selfLoop();
+    wmmaLoadWmma(loop);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const AllocationResult producer = createLegacyColoring(*func);
+    EXPECT_EQ(predicted(producer), 3u);
+    EXPECT_EQ(switchesThePassEmits(wmmaLoadWmma, VgprMsbPolicy::ExactWord), 3u);
+    EXPECT_EQ(predicted(producer, VgprMsbPolicy::UnusedSlotsDontCare), 1u);
+    EXPECT_EQ(switchesThePassEmits(wmmaLoadWmma, VgprMsbPolicy::UnusedSlotsDontCare), 1u);
+}
+
+TEST_F(VgprMsbPredictionTest, UnusedSlotsDontCareARewrittenSetterCostsNothing) {
+    // The pass rewrites the load's setter for the WMMA rather than emitting a
+    // second, and the report counts only the setters emitted.
+    selfLoop();
+    loadThenWmma(loop);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const AllocationResult producer = createLegacyColoring(*func);
+    EXPECT_EQ(predicted(producer), 2u);
+    EXPECT_EQ(switchesThePassEmits(loadThenWmma, VgprMsbPolicy::ExactWord), 2u);
+    EXPECT_EQ(predicted(producer, VgprMsbPolicy::UnusedSlotsDontCare), 1u);
+    EXPECT_EQ(switchesThePassEmits(loadThenWmma, VgprMsbPolicy::UnusedSlotsDontCare), 1u);
 }
 
 TEST_F(VgprMsbPredictionTest, BlocksOutsideTheLoopAreNotCounted) {

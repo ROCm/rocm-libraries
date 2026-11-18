@@ -243,7 +243,7 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
                          const AllocationConstraints& constraints, const AllocationScope& scope,
                          const AllocationRules& rules, const AsmTargetRegisters& target,
                          const UnbankableChoice& unbankable, const char* allocator,
-                         const std::vector<Loop>& loops, VgprMsbMode msbMode,
+                         const std::vector<Loop>& loops, const AsmCapsConfig& caps,
                          const MatrixNote& matrix, const PlanOutcome& plan) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
@@ -274,12 +274,14 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     // otherwise shows only in the final asm. Only on a target that selects banks
     // this way, so every other report stays byte-identical, and only loops that
     // pay something, since a straight-line block is counted once per kernel.
-    if (msbMode != VgprMsbMode::None && !loops.empty()) {
+    // Counted by the pass's own policy, so ignoring unused slots shows here too.
+    if (caps.vgprMsbMode != VgprMsbMode::None && !loops.empty()) {
         const uint32_t vgprs = target.indexCount(RegType::V);
+        const VgprMsbPolicy policy = vgprMsbPolicyOf(caps);
         const std::vector<LoopVgprMsbSwitches> before =
-            predictLoopVgprMsbSwitches(function, producer, loops, vgprs);
+            predictLoopVgprMsbSwitches(function, producer, loops, vgprs, policy);
         const std::vector<LoopVgprMsbSwitches> after =
-            predictLoopVgprMsbSwitches(function, coloured, loops, vgprs);
+            predictLoopVgprMsbSwitches(function, coloured, loops, vgprs, policy);
         std::string entries;
         for (size_t index = 0; index < loops.size(); ++index) {
             const std::optional<uint32_t>& was = before[index].switches;
@@ -764,7 +766,7 @@ Expected<AllocationResult> colourWith(const RuleRun& run, RegisterAllocator& all
                 choice.allocateRefusal = withoutFunctionName(function, refusals.front());
             *report = shadowReport(function, *allocated, facts.intervals, run.constraints, scope,
                                    run.rules, facts.target, choice, allocator.name(), facts.loops,
-                                   options.caps.vgprMsbMode, matrix, plan);
+                                   options.caps, matrix, plan);
         }
         if (options.applyToOperands) {
             if (std::optional<std::string> problem =

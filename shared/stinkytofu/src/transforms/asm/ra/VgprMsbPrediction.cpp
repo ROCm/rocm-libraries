@@ -17,7 +17,8 @@ namespace stinkytofu {
 std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(const Function& function,
                                                             const AllocationResult& colouring,
                                                             const std::vector<Loop>& loops,
-                                                            uint32_t vgprIndexCount) {
+                                                            uint32_t vgprIndexCount,
+                                                            VgprMsbPolicy policy) {
     std::vector<LoopVgprMsbSwitches> predicted(loops.size());
     std::unordered_map<const BasicBlock*, std::vector<size_t>> loopsOf;
     for (size_t index = 0; index < loops.size(); ++index) {
@@ -34,7 +35,7 @@ std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(const Function& func
         const auto owners = loopsOf.find(&bb);
         if (owners == loopsOf.end()) continue;
 
-        VgprMsbTracker tracker;
+        VgprMsbTracker tracker(policy);
         for (const IRBase& ir : bb) {
             const auto* inst = dyn_cast<StinkyInstruction>(&ir);
             if (inst == nullptr) continue;
@@ -45,6 +46,10 @@ std::vector<LoopVgprMsbSwitches> predictLoopVgprMsbSwitches(const Function& func
             if (isPseudoInst(inst)) continue;
             if (isCall(*inst)) {
                 tracker.reset();
+                continue;
+            }
+            if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
+                tracker.observeSetter(vgprMsbSetterWord(*inst));
                 continue;
             }
 

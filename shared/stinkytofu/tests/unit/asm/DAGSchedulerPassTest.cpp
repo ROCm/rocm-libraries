@@ -2280,6 +2280,118 @@ TEST_F(DAGSchedulerPassTest, MsbAffinity_SameBankPreferredAmongEqualPriority) {
            "inserted between them";
 }
 
+// With unused slots don't-care, the affinity follows the pass: a candidate is
+// preferred when the word in force agrees on the slots it uses, whatever it
+// holds in the others.
+TEST_F(DAGSchedulerPassTest, MsbAffinity_UnusedSlotsDontCarePrefersACandidateTheWordServes) {
+    // The anchor reads src2 from bank 1, so the word in force is src2 = 1. The
+    // all-bank-0 add (larger id) needs 0 in src0, src1 and dst, which that word
+    // holds; its exact word, 0 everywhere, does not match. The other add (smaller
+    // id) writes bank 1, which no word in force serves, and the anchor read dst.
+    const auto order = [&](bool unusedSlotsDontCare) {
+        SetUp();
+        BasicBlock* body = bb;
+        body->addSuccessor(body);
+        AsmIRBuilder builder(*body, arch);
+        StinkyInstruction* anchor = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+        anchor->addDestReg(StinkyRegister("v", 10, 1));
+        anchor->addSrcReg(StinkyRegister("v", 11, 1));
+        anchor->addSrcReg(StinkyRegister("v", 12, 1));
+        anchor->addSrcReg(StinkyRegister("v", 300, 1));
+        StinkyInstruction* other = createVAddInBlock(body, arch, /*dst=*/260, /*src0=*/21,
+                                                     /*src1=*/22);
+        StinkyInstruction* served = createVAddInBlock(body, arch, /*dst=*/20, /*src0=*/23,
+                                                      /*src1=*/24);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        AsmCapsConfig caps;
+        caps.vgprMsbMode = VgprMsbMode::Msb16;
+        caps.vgprMsbUnusedSlotsDontCare = unusedSlotsDontCare;
+        ctx.setAsmCapsConfig(caps);
+        pass->run(*func, ctx, am);
+
+        int servedPos = -1, otherPos = -1, idx = 0;
+        for (const IRBase& ir : *body) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (inst == served) servedPos = idx;
+            if (inst == other) otherPos = idx;
+            idx++;
+        }
+        return std::make_pair(servedPos, otherPos);
+    };
+
+    const auto [exactServed, exactOther] = order(/*unusedSlotsDontCare=*/false);
+    ASSERT_GE(exactServed, 0);
+    ASSERT_GE(exactOther, 0);
+    EXPECT_LT(exactOther, exactServed) << "under the exact rule neither is served, so id order";
+
+    const auto [dontCareServed, dontCareOther] = order(/*unusedSlotsDontCare=*/true);
+    ASSERT_GE(dontCareServed, 0);
+    ASSERT_GE(dontCareOther, 0);
+    EXPECT_LT(dontCareServed, dontCareOther)
+        << "the add whose used slots the word in force holds goes first";
+}
+
+// A candidate the word in force does not serve still needs no new setter when
+// the last one can take its banks, and the affinity prefers it for that.
+TEST_F(DAGSchedulerPassTest, MsbAffinity_UnusedSlotsDontCarePrefersACandidateTheSetterCanTake) {
+    // The anchor takes src2 from an SGPR, so its setter holds 0 in src0, src1
+    // and dst, and nothing has read src2. The later fma needs src2 in bank 1,
+    // which that setter can take. The earlier one writes bank 1, and the anchor
+    // read dst, so it needs a setter of its own. All three are fmas, so only the
+    // bank tiebreak tells them apart.
+    const auto order = [&](bool unusedSlotsDontCare) {
+        SetUp();
+        BasicBlock* body = bb;
+        body->addSuccessor(body);
+        AsmIRBuilder builder(*body, arch);
+        const auto fma = [&](int dst, int src0, int src1, const StinkyRegister& src2) {
+            StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+            inst->addDestReg(StinkyRegister("v", dst, 1));
+            inst->addSrcReg(StinkyRegister("v", src0, 1));
+            inst->addSrcReg(StinkyRegister("v", src1, 1));
+            inst->addSrcReg(src2);
+            return inst;
+        };
+        fma(/*dst=*/10, /*src0=*/11, /*src1=*/12, StinkyRegister("s", 5, 1));
+        StinkyInstruction* other =
+            fma(/*dst=*/260, /*src0=*/23, /*src1=*/24, StinkyRegister("v", 25, 1));
+        StinkyInstruction* rewritable =
+            fma(/*dst=*/20, /*src0=*/21, /*src1=*/22, StinkyRegister("v", 300, 1));
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        AsmCapsConfig caps;
+        caps.vgprMsbMode = VgprMsbMode::Msb16;
+        caps.vgprMsbUnusedSlotsDontCare = unusedSlotsDontCare;
+        ctx.setAsmCapsConfig(caps);
+        pass->run(*func, ctx, am);
+
+        int rewritablePos = -1, otherPos = -1, idx = 0;
+        for (const IRBase& ir : *body) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (inst == rewritable) rewritablePos = idx;
+            if (inst == other) otherPos = idx;
+            idx++;
+        }
+        return std::make_pair(rewritablePos, otherPos);
+    };
+
+    const auto [exactRewritable, exactOther] = order(/*unusedSlotsDontCare=*/false);
+    ASSERT_GE(exactRewritable, 0);
+    ASSERT_GE(exactOther, 0);
+    EXPECT_LT(exactOther, exactRewritable) << "under the exact rule neither is served, so id order";
+
+    const auto [dontCareRewritable, dontCareOther] = order(/*unusedSlotsDontCare=*/true);
+    ASSERT_GE(dontCareRewritable, 0);
+    ASSERT_GE(dontCareOther, 0);
+    EXPECT_LT(dontCareRewritable, dontCareOther)
+        << "the fma whose banks the anchor's setter can take goes first";
+}
+
 // --- Cluster-barrier SCC rule (see applyClusterBarrierSccRule) ---
 //
 // InsertClusterBarrierPass later plants an SCC-clobbering handshake at or

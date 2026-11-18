@@ -7,8 +7,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <memory>
+#include <random>
 #include <utility>
+#include <vector>
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -116,6 +119,223 @@ TEST(VgprMsbTrackerTest, UnderExactWordOnlyTheWordInForceSatisfies) {
     EXPECT_FALSE(tracker.satisfies({inSlot(0, decodeVgprMsbForSlot(kWordA, 0)), slotBits(0)}));
     tracker.label();
     EXPECT_FALSE(tracker.satisfies(needs(kWordA))) << "a label forgets the word";
+}
+
+namespace {
+
+/// A WMMA's word: A in bank 0, B in bank 2, C and D in bank 1. Every slot.
+const VgprMsbRequirement kWmma{inSlot(1, 2) + inSlot(2, 1) + inSlot(3, 1), kVgprMsbFullMask};
+
+/// A ds_load writing bank 1 from an address in bank 0: src0 and dst only.
+const VgprMsbRequirement kLoad{inSlot(3, 1), slotBits(0) + slotBits(3)};
+
+}  // namespace
+
+TEST(VgprMsbTrackerTest, UnusedSlotsDontCareAWordServesWhatAgreesOnTheSlotsUsed) {
+    VgprMsbTracker tracker(VgprMsbPolicy::UnusedSlotsDontCare);
+    EXPECT_TRUE(tracker.step(kWmma).emit);
+    // The load's src0 and dst are what the WMMA's word holds there; src1 and
+    // src2 are not the load's business.
+    EXPECT_TRUE(tracker.satisfies(kLoad));
+    const VgprMsbStep load = tracker.step(kLoad);
+    EXPECT_FALSE(load.emit);
+    EXPECT_FALSE(load.rewrite);
+    EXPECT_FALSE(tracker.step(kWmma).emit) << "the word in force is still the WMMA's";
+
+    // Under the exact rule the same window switches at every instruction.
+    VgprMsbTracker exact;
+    EXPECT_TRUE(exact.step(kWmma).emit);
+    EXPECT_TRUE(exact.step(kLoad).emit);
+    EXPECT_TRUE(exact.step(kWmma).emit);
+}
+
+TEST(VgprMsbTrackerTest, UnusedSlotsDontCareASetterNothingHasReadTakesTheNewBanks) {
+    VgprMsbTracker tracker(VgprMsbPolicy::UnusedSlotsDontCare);
+    const VgprMsbStep first = tracker.step(kLoad);
+    EXPECT_TRUE(first.emit);
+    EXPECT_EQ(first.word, kLoad.word) << "with no word known the unused slots are 0";
+
+    // The WMMA needs src1 and src2 in banks 2 and 1, which the load did not
+    // read: the load's setter takes them rather than a second one following.
+    EXPECT_FALSE(tracker.satisfies(kWmma));
+    EXPECT_FALSE(tracker.needsSetter(kWmma));
+    const VgprMsbStep wmma = tracker.step(kWmma);
+    EXPECT_FALSE(wmma.emit);
+    EXPECT_TRUE(wmma.rewrite);
+    EXPECT_EQ(wmma.word, kWmma.word);
+    EXPECT_TRUE(tracker.satisfies(kLoad)) << "the rewritten word still serves the load";
+
+    // Every slot has now been read, so a change of address bank needs a setter,
+    // whose Msb16 high byte is the rewritten word.
+    const VgprMsbRequirement load{inSlot(0, 1) + inSlot(3, 1), slotBits(0) + slotBits(3)};
+    EXPECT_TRUE(tracker.needsSetter(load));
+    const VgprMsbStep next = tracker.step(load);
+    EXPECT_TRUE(next.emit);
+    EXPECT_FALSE(next.rewrite);
+    EXPECT_EQ(next.word, kWmma.word + inSlot(0, 1)) << "a setter keeps the slots it does not set";
+    EXPECT_EQ(next.previousWord, kWmma.word);
+}
+
+TEST(VgprMsbTrackerTest, UnusedSlotsDontCareASlotReadSinceTheSetterNeedsANewOne) {
+    VgprMsbTracker tracker(VgprMsbPolicy::UnusedSlotsDontCare);
+    // dst in bank 1, src0 and src1 in bank 0; then the same with src1 in bank 1.
+    const int used = slotBits(0) + slotBits(1) + slotBits(3);
+    const VgprMsbRequirement first{inSlot(3, 1), used};
+    const VgprMsbRequirement second{inSlot(3, 1) + inSlot(1, 1), used};
+    EXPECT_TRUE(tracker.step(first).emit);
+    // The first read src1 in bank 0, so changing it under that setter would
+    // move the first's operand.
+    EXPECT_TRUE(tracker.needsSetter(second));
+    const VgprMsbStep step = tracker.step(second);
+    EXPECT_TRUE(step.emit);
+    EXPECT_EQ(step.word, second.word);
+    EXPECT_EQ(step.previousWord, first.word);
+}
+
+TEST(VgprMsbTrackerTest, UnusedSlotsDontCareRewritesOnlyItsOwnSetterInTheSameStretch) {
+    for (int boundary = 0; boundary < 3; ++boundary) {
+        SCOPED_TRACE(boundary);
+        VgprMsbTracker tracker(VgprMsbPolicy::UnusedSlotsDontCare);
+        tracker.step(kLoad);
+        if (boundary == 0) tracker.label();
+        if (boundary == 1) tracker.reset();
+        // A setter already in the stream, with the same word as the one above.
+        if (boundary == 2) tracker.observeSetter(kLoad.word);
+        // Nothing has read src1 or src2, but the setter that would change is
+        // gone, or not this tracker's.
+        EXPECT_TRUE(tracker.needsSetter(kWmma));
+        const VgprMsbStep step = tracker.step(kWmma);
+        EXPECT_TRUE(step.emit);
+        EXPECT_FALSE(step.rewrite);
+        EXPECT_EQ(step.firstAfterLabel, boundary == 0);
+        if (boundary == 2) {
+            EXPECT_EQ(step.previousWord, kLoad.word);
+            EXPECT_EQ(step.word, kWmma.word);
+        } else {
+            EXPECT_FALSE(step.previousWord.has_value());
+        }
+    }
+}
+
+TEST(VgprMsbTrackerTest, AnObservedSetterServesWhatItsWordServes) {
+    VgprMsbTracker tracker(VgprMsbPolicy::UnusedSlotsDontCare);
+    tracker.observeSetter(kWmma.word);
+    EXPECT_TRUE(tracker.satisfies(kLoad));
+    EXPECT_FALSE(tracker.step(kLoad).emit);
+    // A setter whose word is not a literal leaves nothing known.
+    tracker.observeSetter(-1);
+    EXPECT_FALSE(tracker.satisfies(kLoad));
+    EXPECT_TRUE(tracker.step(kLoad).emit);
+
+    VgprMsbTracker exact;
+    exact.observeSetter(kWordA);
+    EXPECT_TRUE(exact.satisfies(needs(kWordA)));
+}
+
+TEST(VgprMsbTrackerTest, UnusedSlotsDontCareAFullMaskIsComparedExactly) {
+    // An instruction with a slotless VGPR field depends on every slot: after a
+    // setter whose slots have all been read, it needs its own word.
+    VgprMsbTracker tracker(VgprMsbPolicy::UnusedSlotsDontCare);
+    tracker.step(kWmma);
+    const VgprMsbRequirement scaled{inSlot(3, 1), kVgprMsbFullMask};
+    EXPECT_FALSE(tracker.satisfies(scaled));
+    const VgprMsbStep step = tracker.step(scaled);
+    EXPECT_TRUE(step.emit);
+    EXPECT_EQ(step.word, scaled.word);
+}
+
+TEST(VgprMsbTrackerTest, ThePolicyComesFromTheCapabilities) {
+    AsmCapsConfig caps;
+    EXPECT_EQ(vgprMsbPolicyOf(caps), VgprMsbPolicy::ExactWord);
+    caps.vgprMsbUnusedSlotsDontCare = true;
+    EXPECT_EQ(vgprMsbPolicyOf(caps), VgprMsbPolicy::UnusedSlotsDontCare);
+}
+
+namespace {
+
+/// A random requirement: each slot used with a random bank, or not; now and
+/// then a slotless field, which makes every slot count; now and then nothing.
+VgprMsbRequirement randomRequirement(std::mt19937& rng) {
+    std::uniform_int_distribution<int> percent(0, 99);
+    std::uniform_int_distribution<int> bank(0, 3);
+    if (percent(rng) < 10) return kNoWord;
+    int word = 0;
+    int mask = 0;
+    for (int slot = 0; slot < 4; ++slot) {
+        if (percent(rng) < 50) continue;
+        word += inSlot(slot, bank(rng));
+        mask += slotBits(slot);
+    }
+    if (mask == 0) return kNoWord;
+    return {word, percent(rng) < 10 ? kVgprMsbFullMask : mask};
+}
+
+/// The fewest setters that serve \p sequence in order, counted directly: cut
+/// it into the longest stretches in which every slot one of them uses is the
+/// same bank wherever it is used. A stretch of a stretch qualifies too, so
+/// taking each as long as it goes is as few as there can be.
+int fewestSetters(const std::vector<VgprMsbRequirement>& sequence) {
+    int setters = 0;
+    bool open = false;
+    uint32_t fixedMask = 0;
+    uint32_t fixedWord = 0;
+    for (const VgprMsbRequirement& required : sequence) {
+        if (!required.needed()) continue;
+        const uint32_t mask = static_cast<uint32_t>(required.mask);
+        const uint32_t word = static_cast<uint32_t>(required.word) & mask;
+        if (open && ((fixedWord ^ word) & mask & fixedMask) == 0) {
+            fixedWord = (fixedWord & ~mask) | word;
+            fixedMask |= mask;
+            continue;
+        }
+        ++setters;
+        open = true;
+        fixedMask = mask;
+        fixedWord = word;
+    }
+    return setters;
+}
+
+}  // namespace
+
+TEST(VgprMsbTrackerTest, UnusedSlotsDontCareEmitsTheFewestSettersTheOrderAllows) {
+    std::uniform_int_distribution<int> length(1, 40);
+    for (int round = 0; round < 2000; ++round) {
+        // One seed per round, so a failing round can be replayed alone.
+        std::mt19937 rng(static_cast<std::mt19937::result_type>(round));
+        std::vector<VgprMsbRequirement> sequence(static_cast<size_t>(length(rng)));
+        for (VgprMsbRequirement& required : sequence) required = randomRequirement(rng);
+
+        VgprMsbTracker dontCare(VgprMsbPolicy::UnusedSlotsDontCare);
+        VgprMsbTracker exact;
+        int dontCareSetters = 0;
+        int exactSetters = 0;
+        // The word the last setter now writes, and everything it has to serve.
+        int setterWord = -1;
+        std::vector<VgprMsbRequirement> sinceSetter;
+        for (const VgprMsbRequirement& required : sequence) {
+            if (exact.step(required).emit) ++exactSetters;
+
+            const bool needsSetter = dontCare.needsSetter(required);
+            const VgprMsbStep step = dontCare.step(required);
+            EXPECT_EQ(step.emit, needsSetter) << "round " << round;
+            EXPECT_FALSE(step.emit && step.rewrite) << "round " << round;
+            if (step.emit) {
+                ++dontCareSetters;
+                setterWord = step.word;
+                sinceSetter.clear();
+            } else if (step.rewrite) {
+                setterWord = step.word;
+            }
+            if (!required.needed()) continue;
+            sinceSetter.push_back(required);
+            for (const VgprMsbRequirement& served : sinceSetter)
+                ASSERT_EQ(vgprMsbChangedFields(setterWord, served), 0U) << "round " << round;
+        }
+
+        EXPECT_EQ(dontCareSetters, fewestSetters(sequence)) << "round " << round;
+        EXPECT_LE(dontCareSetters, exactSetters) << "round " << round;
+    }
 }
 
 namespace {
