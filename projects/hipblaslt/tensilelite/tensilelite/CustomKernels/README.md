@@ -152,7 +152,9 @@ kernels keep `-1`, which the host treats as 1. The gfx1151 and gfx1150 W4A16
 kernels declare the workgroups per WGP that the resources of their `.s` allow
 on that architecture (VGPR file of the SIMD, LDS pool, waves per SIMD; gfx1150
 has a smaller VGPR file than gfx1151, so the same kernel has a lower occupancy
-there), and every logic entry of a kernel must declare the same value.
+there). The decode kernels are one-wave workgroups: a WGP holds four SIMDs'
+worth of them, and what caps them at 32 is the LDS they request. Every logic
+entry of a kernel must declare the same value.
 
 ## Adding a new external kernel
 
