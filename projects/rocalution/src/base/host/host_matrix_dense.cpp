@@ -594,6 +594,18 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    void HostMatrixDENSE<ValueType>::LUAnalyse(void)
+    {
+        // do nothing
+    }
+
+    template <typename ValueType>
+    void HostMatrixDENSE<ValueType>::LUAnalyseClear(void)
+    {
+        // do nothing
+    }
+
+    template <typename ValueType>
     bool HostMatrixDENSE<ValueType>::LUSolve(const BaseVector<ValueType>& in,
                                              BaseVector<ValueType>*       out) const
     {
