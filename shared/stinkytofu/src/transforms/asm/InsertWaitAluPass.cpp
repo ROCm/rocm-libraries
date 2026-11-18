@@ -1344,6 +1344,10 @@ class WaitcntBrackets {
     bool formLatched() const {
         return xdlIncSeen;
     }
+    // Point a copied state at another context with the same options (seeding a tracker).
+    void rebindContext(const WaitAluContext* c) {
+        ctx = c;
+    }
 
    private:
     static unsigned vaPipeSum(const std::array<unsigned, NUM_VA_PIPE>& a) {
@@ -1782,8 +1786,24 @@ class InsertWaitAluPassImpl : public Pass {
             insertCalleeEntryDrain(func);
         }
 
-        const auto& bbIndex = AM.getResult<BBIndexAnalysis>(func);
-        const auto& rpo = bbIndex.rpo;
+        analyzeEntryStates(func, AM);
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
+
+        // Phase 2: emit s_wait_alu using converged state. Caller->callee bracket
+        // drains are emitted here, in the isCall branch of runOnBasicBlock.
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 2: emit s_wait_alu instructions\n");
+        for (auto* bb : rpo) runOnBasicBlock(*bb, /*emit=*/true);
+
+        // Phase 3: enable mode2 at entry label (never disabled thereafter).
+        // Entry-only: mode2 is kernel-global, callees must not re-enable it.
+        if (!isCallee) insertSchedModeLifecycle(func);
+
+        blockEntryState.clear();
+    }
+
+    // Phase 1: the fixed point of every BB's entry state on the current IR; nothing is emitted.
+    void analyzeEntryStates(Function& func, AnalysisManager& AM) {
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 1: fixed-point analysis (" << rpo.size()
                              << " BBs in RPO)\n");
@@ -1817,25 +1837,26 @@ class InsertWaitAluPassImpl : public Pass {
             PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 1 converged after " << visits
                                  << " BB visits\n");
         }
-
-        // Phase 2: emit s_wait_alu using converged state. Caller->callee bracket
-        // drains are emitted here, in the isCall branch of runOnBasicBlock.
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 2: emit s_wait_alu instructions\n");
-        for (auto* bb : rpo) runOnBasicBlock(*bb, /*emit=*/true);
-
-        // Phase 3: enable mode2 at entry label (never disabled thereafter).
-        // Entry-only: mode2 is kernel-global, callees must not re-enable it.
-        if (!isCallee) insertSchedModeLifecycle(func);
-
-        blockEntryState.clear();
     }
 
+   public:
     // Per-arch setup shared by every function run. Idempotent.
     void setupArch(PassContext& passCtx) {
         archId = setupWaitAluContext(ctx_, keyer, passCtx);
     }
 
-   public:
+    // Phase 1 alone, for a scheduler that seeds its tracker with the pass's view: the entry
+    // states move to `out`, bound to `ctx` (same options as this pass's).
+    void takeEntryStates(Function& func, AnalysisManager& AM, const WaitAluContext* ctx,
+                         std::unordered_map<const BasicBlock*, WaitcntBrackets>& out) {
+        if (!func.empty()) analyzeEntryStates(func, AM);
+        for (auto& [bb, state] : blockEntryState) {
+            state.rebindContext(ctx);
+            out.emplace(bb, std::move(state));
+        }
+        blockEntryState.clear();
+    }
+
     // Entry and callees both get full analysis; callees also get the entry drain.
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         setupArch(passCtx);
@@ -1902,6 +1923,36 @@ struct WaitAluTracker::Impl {
 
 WaitAluTracker::WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts)
     : impl_(std::make_unique<Impl>(passCtx, opts)) {}
+
+struct WaitAluEntryStates::Impl {
+    WaitAluContext ctx;
+    VGPRHalfKeyer keyer;
+    std::unordered_map<const BasicBlock*, WaitcntBrackets> entry;
+};
+WaitAluEntryStates::WaitAluEntryStates() = default;
+WaitAluEntryStates::~WaitAluEntryStates() = default;
+
+std::unique_ptr<WaitAluEntryStates> computeWaitAluEntryStates(Function& func, PassContext& passCtx,
+                                                              InsertWaitAluOptions opts,
+                                                              AnalysisManager& AM) {
+    auto states = std::make_unique<WaitAluEntryStates>();
+    states->impl_ = std::make_unique<WaitAluEntryStates::Impl>();
+    states->impl_->ctx.opts = opts;
+    setupWaitAluContext(states->impl_->ctx, states->impl_->keyer, passCtx);
+    InsertWaitAluPassImpl pass(opts);
+    pass.setupArch(passCtx);
+    pass.takeEntryStates(func, AM, &states->impl_->ctx, states->impl_->entry);
+    return states;
+}
+
+WaitAluTracker::WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts,
+                               const WaitAluEntryStates& states, const BasicBlock& bb)
+    : impl_(std::make_unique<Impl>(passCtx, opts)) {
+    auto it = states.impl_->entry.find(&bb);
+    if (it == states.impl_->entry.end()) return;
+    impl_->sb = it->second;
+    impl_->sb.rebindContext(&impl_->ctx);
+}
 
 WaitAluTracker::~WaitAluTracker() = default;
 

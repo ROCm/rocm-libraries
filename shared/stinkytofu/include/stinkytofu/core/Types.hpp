@@ -179,6 +179,10 @@ struct PassFeatureConfig {
         /// also released through the VALU axis (ready VALUs fill its tail), and the ds pacer picks
         /// a free ds_load before one that waits. Needs waitAluScoreboard.
         bool releaseOnEitherAxis = false;
+        /// Mirrors ModuleOptions::TrackerSeedFromFixpoint. Each basic block's tracker starts from
+        /// InsertWaitAlu's Phase-1 entry state of the function's current IR instead of empty, so
+        /// the loop top sees what the back edge carries. Needs waitAluScoreboard.
+        bool trackerSeedFromFixpoint = false;
         /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
         /// this many WMMA windows before the tensor_load it precedes, staggered over its
         /// group; below 8 marks a single-stage loop (whole group at the load's window,

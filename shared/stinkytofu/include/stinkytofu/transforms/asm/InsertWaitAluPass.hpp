@@ -28,6 +28,9 @@
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+class AnalysisManager;
+class BasicBlock;
+class Function;
 class Pass;
 class ModulePass;
 class PassContext;
@@ -78,9 +81,24 @@ enum class WaitAluHideOp { Wmma, Lds, Tex, Flat, Valu };
 /// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
 /// pass's own walk; it starts from an empty state, where the pass seeds a BB from its
 /// predecessors.
+/// InsertWaitAlu's Phase-1 entry states of a function on its current IR (the IR is not changed):
+/// what the pass will see at each basic block's entry, for seeding a WaitAluTracker there.
+class STINKYTOFU_EXPORT WaitAluEntryStates {
+   public:
+    WaitAluEntryStates();
+    ~WaitAluEntryStates();
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+STINKYTOFU_EXPORT std::unique_ptr<WaitAluEntryStates> computeWaitAluEntryStates(
+    Function& func, PassContext& passCtx, InsertWaitAluOptions opts, AnalysisManager& AM);
+
 class STINKYTOFU_EXPORT WaitAluTracker {
    public:
     WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts);
+    /// A tracker starting from `states`' entry state of `bb` (empty when `bb` has none).
+    WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts,
+                   const WaitAluEntryStates& states, const BasicBlock& bb);
     ~WaitAluTracker();
     WaitAluTracker(const WaitAluTracker&) = delete;
     WaitAluTracker& operator=(const WaitAluTracker&) = delete;

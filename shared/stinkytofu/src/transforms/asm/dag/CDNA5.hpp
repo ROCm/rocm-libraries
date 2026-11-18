@@ -3090,11 +3090,15 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     }
     blockPrefetchLead_ =
         stage.effectiveLead(feats.prefetchLeadWmmas, feats.prefetchLeadMinStageWmmas);
-    waitAlu_ =
-        feats.waitAluScoreboard || feats.waitAluHoldStrictCount >= 0
-            ? std::make_unique<WaitAluTracker>(
-                  getPassContext(), gfx1250InsertWaitAluOptions(feats.enableESM2TrackValuVsrc))
-            : nullptr;
+    waitAlu_ = nullptr;
+    if (feats.waitAluScoreboard || feats.waitAluHoldStrictCount >= 0) {
+        const InsertWaitAluOptions opts = gfx1250InsertWaitAluOptions(feats.enableESM2TrackValuVsrc);
+        // dagFeatures.trackerSeedFromFixpoint: start from the pass's entry state of this BB.
+        const BasicBlock* bb = regionStart != regionEnd ? regionStart->getParent() : nullptr;
+        waitAlu_ = feats.trackerSeedFromFixpoint && waitAluSeeds() != nullptr && bb != nullptr
+                       ? std::make_unique<WaitAluTracker>(getPassContext(), opts, *waitAluSeeds(), *bb)
+                       : std::make_unique<WaitAluTracker>(getPassContext(), opts);
+    }
 
     // PipeOps lanes are per-BB (not per-region — they persist across side-effect cuts).
     for (auto& gate : pipeOpGates_) gate.clear();

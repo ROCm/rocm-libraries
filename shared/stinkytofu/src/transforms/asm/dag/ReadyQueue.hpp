@@ -34,6 +34,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 
 namespace stinkytofu {
 namespace dag {
@@ -259,6 +260,15 @@ class ReadyQueue {
         loop_ = loop;
     }
 
+    // InsertWaitAlu's entry states to seed a per-BB scoreboard from; null = start empty.
+    void setWaitAluSeeds(const WaitAluEntryStates* seeds) {
+        waitAluSeeds_ = seeds;
+    }
+
+    const WaitAluEntryStates* waitAluSeeds() const {
+        return waitAluSeeds_;
+    }
+
     const Loop* getLoop() const {
         return loop_;
     }
@@ -266,6 +276,7 @@ class ReadyQueue {
    private:
     const PassContext& passCtx_;
     const Loop* loop_ = nullptr;
+    const WaitAluEntryStates* waitAluSeeds_ = nullptr;
     ScheduleAnalysisCache* analysisCache_ = nullptr;
 };
 

@@ -1060,6 +1060,17 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         // Written by all BBs in onFinishBB, read only by loop body BBs in onInit.
         ScheduleAnalysisCache analysisCache;
 
+        // dagFeatures.trackerSeedFromFixpoint: InsertWaitAlu's entry states on the IR as it is
+        // now, before any block is scheduled; each block's tracker starts from its own.
+        std::unique_ptr<WaitAluEntryStates> waitAluSeeds;
+        {
+            const auto& feats = passCtx.getPassFeatureConfig().dagFeatures;
+            if (feats.trackerSeedFromFixpoint &&
+                (feats.waitAluScoreboard || feats.waitAluHoldStrictCount >= 0))
+                waitAluSeeds = computeWaitAluEntryStates(
+                    func, passCtx, gfx1250InsertWaitAluOptions(feats.enableESM2TrackValuVsrc), AM);
+        }
+
         // Per-loop ReadyQueue: shared across loop body BBs for loop-specific
         // scheduling state (wmmaNodeCounters, evenly-split config).
         std::map<const Loop*, std::unique_ptr<ReadyQueue>> loopQueues;
@@ -1098,10 +1109,12 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                     rq->setLoopContext(loop);
                 }
                 rq->setAnalysisCache(&analysisCache);
+                rq->setWaitAluSeeds(waitAluSeeds.get());
                 scheduleBlock(bb, *rq);
             } else {
                 auto rq = chooseReadyQueue(passCtx);
                 rq->setAnalysisCache(&analysisCache);
+                rq->setWaitAluSeeds(waitAluSeeds.get());
                 scheduleBlock(bb, *rq);
             }
         }
