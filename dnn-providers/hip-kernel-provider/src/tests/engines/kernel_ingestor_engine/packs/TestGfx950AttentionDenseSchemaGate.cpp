@@ -160,7 +160,7 @@ d::GraphT eightByteAlignedGraph()
 Version stamp(d::GraphT& g, bool ragged, bool nonDefaultAlignment)
 {
     const auto& floor = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
-        false, false, ragged, nonDefaultAlignment, false);
+        false, false, ragged, nonDefaultAlignment, false, false);
     g.min_required_engine_api_version
         = std::make_unique<d::EngineApiVersion>(hipdnn_plugin_sdk::toEngineApiVersion(floor));
     return floor;
