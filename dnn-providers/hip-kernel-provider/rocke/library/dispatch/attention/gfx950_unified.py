@@ -25,7 +25,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
@@ -90,6 +90,11 @@ def _variants():
 
 GFX950_TUNING_VARIANTS = tuple(_variants())
 
+# The gfx950 D256 candidate's algorithm (see _make_gfx950_d256_candidate),
+# named so a caller outside this package (the SDPA gate) does not have to
+# reconstruct the literal.
+D256_GFX950_ALGORITHM = "d256_gfx950"
+
 
 def _make_gfx950_d256_candidate() -> KernelCandidate:
     """Fast gfx950 bf16 head_size-256 prefill kernel — 32x32 transposed stack
@@ -119,7 +124,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -136,7 +141,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         from kernels.common.attention_unified import _d256_gfx950_spec_overrides
 
         return AttentionSpec(
@@ -156,7 +161,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="d256_gfx950",
+        algorithm=D256_GFX950_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,

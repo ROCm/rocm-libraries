@@ -757,7 +757,7 @@ _STREAMK_CONFIG = os.path.join(
 _XCNT_DRAIN_MARKER = "drain xnacks before volatile VMEM"
 
 
-def _emit_streamk_srcs(stepping):
+def _emit_streamk_srcs(stepping, *, caps_from_map=False):
     """Emit the gfx1250 StreamK config's kernels, optionally under a v0 stepping.
 
     Mirrors ``config_harness.emit_kernels_from_config`` but sets
@@ -779,13 +779,15 @@ def _emit_streamk_srcs(stepping):
     )
 
     assembler, iim = cfgh._toolchain_for(GFX1250)
+    iim = copy_isa_info_map(iim)
+    if caps_from_map:
+        applyArchCapOverrides(iim, [stepping or GFX1250])
     if not iim[ISA_GFX1250].asmCaps["SupportedISA"]:
         pytest.skip("amdclang++ in this environment does not support gfx1250")
 
     srcs = []
     with cfgh._isolated_globals_with_isa(iim):
-        if stepping:
-            globalParameters["StinkyTofuArchName"] = stepping
+        globalParameters["StinkyTofuArchName"] = "" if caps_from_map else (stepping or "")
         sols = cfgh._solutions_from_config_unguarded(
             _STREAMK_CONFIG, assembler, iim, limit_solutions=8
         )
@@ -808,8 +810,12 @@ def test_gfx1250_strict_streamk_keeps_the_xcnt_drain(gfx1250_cxx):
     drain. Emitting the *same* StreamK kernel under v1 vs v0 and counting the
     drain marker isolates exactly the drain: v1 must keep it (the ``> 0`` check
     guards against a vacuous pass) and v0 must keep every one too."""
-    v1_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in _emit_streamk_srcs(stepping=None))
+    v1_srcs = _emit_streamk_srcs(stepping=None)
+    v1_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in v1_srcs)
     v0_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in _emit_streamk_srcs(stepping=GFX1250_STRICT))
+    # A strict build must not leave its MTypeNC or other target overrides in
+    # the backend cache and change a later ordinary build in this process.
+    assert _emit_streamk_srcs(stepping=None) == v1_srcs
     assert v1_drains > 0, (
         "gfx1250 (gfx1250) StreamK should emit the XNACK-replay drain; without it "
         "the gfx1250-strict assertion below would pass vacuously"
@@ -1682,7 +1688,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     monkeypatch.setattr(
         RunModule,
         "_buildGroupsSeparately",
-        lambda groups, _jobs: captured.__setitem__("groups", groups),
+        lambda groups, _jobs, argv=None: captured.__setitem__("groups", groups),
     )
 
     try:
@@ -2560,7 +2566,7 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
     """The argv and environment of every child _buildGroupsSeparately starts.
 
     ``requestedJobs`` is the parsed ``CpuThreads``; -1 is its default, meaning
-    "every CPU".
+    "the whole pool budget".
     """
     from tensilelite.create_library import run as Run
 
@@ -2577,11 +2583,13 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
         spawned.append((cmd, env))
         return _Proc()
 
-    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + argv)
+    # The dispatcher's command line, so a child built from sys.argv instead of
+    # the argv handed in would carry the command name.
+    monkeypatch.setattr(Run.sys, "argv", ["tensilelite", "create-library"] + argv)
     monkeypatch.setattr(Run.subprocess, "Popen", _popen)
     # Pinned so the job split is the machine-independent part of the arithmetic.
     monkeypatch.setattr(Run, "_cpuCount", lambda: 128)
-    Run._buildGroupsSeparately(groups, requestedJobs)
+    Run._buildGroupsSeparately(groups, requestedJobs, argv)
     return spawned
 
 
@@ -2613,6 +2621,50 @@ def test_everything_the_caller_asked_for_survives_into_the_children(monkeypatch)
             "/build/Tensile",
             "HIP",
         ]
+
+
+@pytest.mark.parametrize("argument_source", ["list", "tuple", "sys.argv"])
+def test_entry_point_forwards_arguments_into_group_builds(monkeypatch, tmp_path, argument_source):
+    """In-process calls must not hand children the benchmark's command line."""
+    from unittest.mock import MagicMock
+    from tensilelite.create_library import run as Run
+
+    argv = [
+        "--architecture=gfx1250;gfx1250-strict",
+        "--jobs=8",
+        "--disable-asm-comments",
+        str(tmp_path / "logic"),
+        str(tmp_path / "out"),
+        "HIP",
+    ]
+    original = list(argv)
+    if argument_source == "sys.argv":
+        monkeypatch.setattr(sys, "argv", ["TensileCreateLibrary", *argv])
+        explicit = None
+    else:
+        monkeypatch.setattr(sys, "argv", ["Tensile", "/host/config.yaml", "/host/out"])
+        explicit = tuple(argv) if argument_source == "tuple" else argv
+
+    spawned = []
+
+    def popen(cmd, env=None):
+        spawned.append(cmd)
+        return MagicMock(wait=lambda: 0, poll=lambda: 0)
+
+    monkeypatch.setattr(Run.subprocess, "Popen", popen)
+    monkeypatch.setattr(Run, "validateToolchain", lambda *args: ("cxx", None, "bundler", None))
+    monkeypatch.setattr(Run, "setVerbosity", lambda value: None)
+    monkeypatch.setattr(Run, "_cpuCount", lambda: 128)
+
+    Run.main(explicit)
+
+    assert spawned == [
+        [sys.executable, "-m", "tensilelite.create_library", "--disable-asm-comments",
+         str(tmp_path / "logic"), str(tmp_path / "out"), "HIP",
+         f"--architecture={arch}", "--jobs=4"]
+        for arch in (GFX1250, GFX1250_STRICT)
+    ]
+    assert argv == original
 
 
 def test_the_requested_parallelism_is_split_across_the_groups(monkeypatch):
@@ -2703,13 +2755,12 @@ def test_a_failed_group_is_not_swallowed(monkeypatch):
             return self._rc
 
     returnCodes = iter([0, 1])
-    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + PARENT_ARGV)
     monkeypatch.setattr(
         Run.subprocess, "Popen", lambda cmd, env=None: _Proc(next(returnCodes))
     )
 
     with pytest.raises(SystemExit):
-        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1)
+        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1, PARENT_ARGV)
 
 
 def test_the_attached_form_of_the_jobs_flag_is_replaced_too(monkeypatch):
@@ -2742,10 +2793,44 @@ def test_windows_caps_the_thread_count_it_shares_out(monkeypatch):
     handles, which CPUThreadCount already respects."""
     from tensilelite.create_library import run as Run
 
+    # Standalone: no pytest-xdist workers or pod request shrinking the budget.
+    monkeypatch.delenv("PYTEST_XDIST_WORKER_COUNT", raising=False)
+    monkeypatch.delenv("KUBE_CPU_REQUEST", raising=False)
     monkeypatch.setattr(Run.os, "name", "nt")
     monkeypatch.setattr(Run.os, "cpu_count", lambda: 128)
 
     assert Run._cpuCount() == 61
+
+
+@pytest.mark.parametrize(
+    "affinity, workers, kube, budget",
+    [
+        (64, None, None, 64),  # standalone: every CPU, as before
+        (25, "4", None, 12),  # one of 4 pytest-xdist workers on 25 CPUs
+        (192, None, "25", 25),  # a pod that sees the whole node but requested 25
+    ],
+)
+def test_the_groups_share_the_pool_budget_of_one_process(
+    monkeypatch, affinity, workers, kube, budget
+):
+    """The groups build in place of this one process, so together they get what
+    CPUThreadCount would give it: under pytest-xdist or a pod's CPU request that
+    is less than the machine, and counting the machine would oversubscribe it."""
+    from tensilelite.create_library import run as Run
+
+    Parallel = importlib.import_module("tensilelite.Common.Parallel")
+    monkeypatch.setattr(Parallel.os, "sched_getaffinity", lambda pid: set(range(affinity)))
+    monkeypatch.setattr(Parallel, "lokyCpuCount", lambda: affinity)
+    for name, value in (("PYTEST_XDIST_WORKER_COUNT", workers), ("KUBE_CPU_REQUEST", kube)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+
+    assert Run._cpuCount() == budget
+    groups = [[GFX1250], [GFX1250_STRICT]]
+    assert Run._jobsPerGroup(-1, groups) == [budget // 2] * 2
+    assert Run._jobsPerGroup(100, groups) == [budget // 2] * 2
 
 
 def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
@@ -2774,13 +2859,62 @@ def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
             raise nxt
         return nxt
 
-    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + PARENT_ARGV)
     monkeypatch.setattr(Run.subprocess, "Popen", _popen)
 
     with pytest.raises(OSError):
-        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1)
+        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1, PARENT_ARGV)
 
     assert len(terminated) == 1
+
+
+def test_a_dispatched_build_hands_its_children_only_its_own_arguments(
+    monkeypatch, tmp_path
+):
+    """``tensilelite create-library`` and ``python -m tensilelite create-library``
+    leave the command name in sys.argv. A request for two architectures that share
+    an ISA (gfx1250 and gfx1250-strict) splits into one child per group, and a
+    child handed that name would take it for its LogicPath and shift every
+    positional after it."""
+    from types import SimpleNamespace
+
+    from tensilelite import cli
+
+    Run = importlib.import_module("tensilelite.create_library.run")
+    outputPath = str(tmp_path / "out")
+    argv = [f"--architecture={GFX1250};{GFX1250_STRICT}", "/src/library", outputPath, "HIP"]
+    spawned = []
+
+    class _Proc:
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    def _popen(cmd, env=None):
+        spawned.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(Run.sys, "argv", ["tensilelite", "create-library"] + argv)
+    monkeypatch.delenv(Run._GROUP_BUILD_ENV, raising=False)
+    monkeypatch.setattr(Run, "setVerbosity", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        Run,
+        "validateToolchain",
+        lambda *a: ("/fake/hipcc", None, "/fake/bundler", None),
+    )
+    # Replaced on the module rather than patched on subprocess itself: a
+    # failing assertion here reaches the report hook in Tests/conftest.py, which
+    # runs a real subprocess of its own.
+    monkeypatch.setattr(Run, "subprocess", SimpleNamespace(Popen=_popen))
+
+    assert cli.main(["create-library"] + argv) == 0
+
+    assert len(spawned) == 2
+    for cmd in spawned:
+        assert cmd[1:3] == ["-m", "tensilelite.create_library"]
+        assert "create-library" not in cmd
+        assert cmd[3:6] == ["/src/library", outputPath, "HIP"]
 
 
 def test_the_architecture_flag_is_replaced_whatever_its_spelling(monkeypatch):
@@ -3299,8 +3433,8 @@ def test_the_two_steppings_do_not_share_a_cache_entry(tmp_path, monkeypatch):
     inc.mkdir()
     (inc / "Kernels.h").write_text("")
 
-    compiler = MagicMock()
-    compiler.default_args = []
+    compiler = MagicMock(path=Path("amdclang++"))
+    compiler.default_args = [compiler.path]
 
     keys = {
         HKC._computeCacheKey(tmp_path / "Kernels.cpp", inc, [arch], compiler)
@@ -3785,7 +3919,7 @@ class _SharedCacheIsa:
     """A backend that hands back its live cap dicts, as the StinkyTofu adaptor does."""
 
     def __init__(self):
-        self.archCaps = {"EnableXnackReplay": True, CAP_MULTICAST: True}
+        self.archCaps = {"EnableXnackReplay": True, CAP_MULTICAST: True, "MTypeNC": False}
         self.asmCaps = {"SupportedISA": True, CAP_FP4_32X16: True}
         self.regCaps = {}
         self.asmBugs = {}
@@ -3820,17 +3954,20 @@ def test_the_capability_map_does_not_alias_the_backend_cache(monkeypatch):
     assert iim[ISA_GFX1250].asmCaps is not backend.asmCaps
 
 
-def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch):
+@pytest.mark.parametrize("target", ["gfx1250:xnack-", "gfx1250-strict:xnack-"])
+def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch, target):
     backend = _withSharedCacheBackend(monkeypatch)
     from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 
     first = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
-    applyArchCapOverrides(first, ["gfx1250:xnack-"])
+    applyArchCapOverrides(first, [target])
     assert first[ISA_GFX1250].archCaps["EnableXnackReplay"] is False
+    assert first[ISA_GFX1250].archCaps["MTypeNC"] is ("strict" in target)
 
     # A second build in the same process must see the probed values again.
     second = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
     assert second[ISA_GFX1250].archCaps["EnableXnackReplay"] is True
+    assert second[ISA_GFX1250].archCaps["MTypeNC"] is False
     assert second[ISA_GFX1250].archCaps[CAP_MULTICAST] is True
     assert second[ISA_GFX1250].asmCaps[CAP_FP4_32X16] is True
 
@@ -4140,3 +4277,55 @@ def test_config_allows_two_entries_with_the_same_effective_capabilities():
     assert archNamesFromConfig(
         "gfx942:xnack+;gfx942:xnack+[cu=64]", isa942, ["gfx942"]
     ) == ["gfx942:xnack+[cu=64]"]
+
+
+@pytest.mark.parametrize("caps_from_map", [False, True], ids=["writer-target", "solution-caps"])
+@pytest.mark.parametrize("target,mtype_nc", [
+    ("gfx1250", False),
+    ("gfx1250:xnack-", False),
+    ("gfx1250-strict", True),
+    ("gfx1250-strict:xnack-:sramecc+[cu=64]", True),
+])
+def test_streamk_fences_follow_target_memory_types(gfx1250_cxx, target, mtype_nc, caps_from_map):
+    """Exercise both channels that carry a shared-ISA target into the real writer."""
+    srcs = _emit_streamk_srcs(target, caps_from_map=caps_from_map)
+    assert srcs
+    for src in srcs:
+        invalidations = re.findall(r"global_inv scope:(SCOPE_\w+)", src)
+        assert len(invalidations) >= 2  # polling and successful-acquire sites remain
+        assert set(invalidations) == {"SCOPE_DEV" if mtype_nc else "SCOPE_SE"}
+        assert ("global_wb scope:SCOPE_DEV" in src) is mtype_nc
+        # Flags stay device-scoped VMEM operations; changing cache invalidation
+        # scope must not select the SMEM flag policy or narrow the memory accesses.
+        assert re.search(r"buffer_load\w* .*scope:SCOPE_DEV.*get flag", src)
+        assert re.search(r"buffer_store\w* .*scope:SCOPE_DEV.*flag", src)
+        assert _XCNT_DRAIN_MARKER in src
+        producer = src[:src.index("// store all data before setting flag")]
+        assert re.search(r"s_wait_loadcnt 0.*s_wait_storecnt 0.*s_barrier_signal -1.*s_barrier_wait -1\s*$",
+                         producer, re.DOTALL)
+        assert src.count("// wait for data store") == 3
+        assert src.count("// acquire: wait for global_inv") == len(invalidations)
+
+
+@pytest.mark.parametrize("mtype_nc", [None, True, False], ids=["missing", "nc", "coherent"])
+def test_streamk_fence_policy_keeps_completion_waits(gfx1250_cxx, mtype_nc):
+    from types import SimpleNamespace
+    import rocisa
+    from tensilelite.Components.StreamK import StreamKMemoryOrderingDevScopeFences
+
+    caps = {} if mtype_nc is None else {"MTypeNC": mtype_nc}
+    writer = SimpleNamespace(states=SimpleNamespace(archCaps=caps))
+    rocisa.rocIsa.getInstance().init(ISA_GFX1250, str(gfx1250_cxx), False)
+    rocisa.rocIsa.getInstance().setKernel(ISA_GFX1250, 32)
+    ordering = StreamKMemoryOrderingDevScopeFences()
+    release = str(ordering.releaseFence(writer))
+    acquire = str(ordering.acquireFence(writer))
+    instructions = [line.split("//")[0].strip() for line in release.splitlines() if line.strip()]
+    if mtype_nc is False:
+        assert instructions == ["s_wait_loadcnt 0", "s_wait_storecnt 0"]
+        assert "global_inv scope:SCOPE_SE" in acquire
+    else:
+        assert instructions == ["s_wait_loadcnt 0", "s_wait_storecnt 0",
+                                "global_wb scope:SCOPE_DEV", "s_wait_loadcnt 0", "s_wait_storecnt 0"]
+        assert "global_inv scope:SCOPE_DEV" in acquire
+    assert acquire.index("global_inv") < acquire.index("s_wait_loadcnt 0")

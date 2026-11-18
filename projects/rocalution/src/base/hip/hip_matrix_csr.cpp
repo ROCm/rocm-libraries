@@ -3927,6 +3927,22 @@ namespace rocalution
         {
             if(mis[ai] == 0)
             {
+                // A nonsymmetric pattern can couple ai to a node of the set that is not
+                // coupled to ai, and then ai cannot join the set
+                for(PtrType aj = h_row_offset[ai]; aj < h_row_offset[ai + 1]; ++aj)
+                {
+                    if(ai != h_col[aj] && mis[h_col[aj]] == 1)
+                    {
+                        mis[ai] = -1;
+                        break;
+                    }
+                }
+
+                if(mis[ai] == -1)
+                {
+                    continue;
+                }
+
                 // set the node
                 mis[ai] = 1;
                 ++size;
@@ -4757,13 +4773,10 @@ namespace rocalution
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::Transpose(void)
     {
-        if(this->nnz_ > 0)
-        {
-            HIPAcceleratorMatrixCSR<ValueType> tmp(this->local_backend_);
+        HIPAcceleratorMatrixCSR<ValueType> tmp(this->local_backend_);
 
-            tmp.CopyFrom(*this);
-            tmp.Transpose(this);
-        }
+        tmp.CopyFrom(*this);
+        tmp.Transpose(this);
 
         return true;
     }
@@ -4778,11 +4791,11 @@ namespace rocalution
 
         assert(cast_T != NULL);
 
+        cast_T->Clear();
+        cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
+
         if(this->nnz_ > 0)
         {
-            cast_T->Clear();
-            cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
-
             size_t buffer_size;
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());

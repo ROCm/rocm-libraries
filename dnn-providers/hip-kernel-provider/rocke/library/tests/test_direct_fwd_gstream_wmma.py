@@ -151,14 +151,14 @@ class TestFwdGstreamSpec(unittest.TestCase):
         Python's over the AOT grid and a set of rejected specs."""
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
             probe_problem,
         )
         from kernels.conv.direct_variants import make_direct_spec
-        from rocke.core.backend import conv_direct_fwd_gstream_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_fwd_gstream_wmma_spec_to_dict
 
         variant = "direct_fwd_gstream_wmma"
         specs = []

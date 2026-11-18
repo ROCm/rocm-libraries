@@ -43,6 +43,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaHeadPad.hpp"
 
 /**
  * @file FlydslSdpaCdnaNative.cpp
@@ -120,22 +121,31 @@ namespace
 
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning pointer
 /// to it.
-const FlydslSdpaCdnaDispatchHandler& flydslSdpaCdnaDispatchHandler()
+/// A graph whose head dim is not a multiple of 8 runs on padded copies (FlydslSdpaHeadPad.hpp);
+/// every other graph reaches the engine's own handler unchanged.
+const flydsl_sdpa::HeadPadDispatchHandler& flydslSdpaCdnaDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(flydslSdpaCdnaKpackModuleCache());
-    static const FlydslSdpaCdnaDispatchHandler s_dispatchHandler(
+    static const FlydslSdpaCdnaDispatchHandler s_engineHandler(
         s_kernelCompiler, s_kpackLoader, CdnaFamily::GENERIC);
+    static const flydsl_sdpa::HeadPadDispatchHandler s_dispatchHandler(s_engineHandler,
+                                                                       s_kpackLoader);
     return s_dispatchHandler;
 }
+
+/// The engine's matchers and score, padding a head dim off 8 (FlydslSdpaHeadPad.hpp).
+using CdnaHeadPad = flydsl_sdpa::HeadPadMatchers<&flydsl_sdpa_cdna::flydslSdpaCdnaGraphMatches,
+                                                 &flydslSdpaCdnaKernelMatches,
+                                                 &flydslSdpaCdnaScore>;
 
 } // namespace
 
 void registerFlydslSdpaCdnaSymbols(SymbolScope<Handle>& scope)
 {
-    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &flydsl_sdpa_cdna::flydslSdpaCdnaGraphMatches);
-    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &flydslSdpaCdnaKernelMatches);
-    scope.add(std::string(SCORE_SYMBOL), &flydslSdpaCdnaScore);
+    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &CdnaHeadPad::graphMatches);
+    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &CdnaHeadPad::kernelMatches);
+    scope.add(std::string(SCORE_SYMBOL), &CdnaHeadPad::score);
     scope.add(std::string(DISPATCH_SYMBOL), &flydslSdpaCdnaDispatchHandler());
 }
 
