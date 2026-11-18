@@ -624,11 +624,14 @@ TEST(TestMxGraphConstraints, AcceptsPackedOperandsWithScalesInEitherOrder)
     }
 }
 
-// hipBLASLt writes an MX GEMM's C as a packed row-major matrix whatever its leading
-// dimension (#14290), so a padded or column-major C is declined.
+// The plan hands C to hipBLASLt as a row-major matrix, so a column-major C is declined,
+// and hipBLASLt ignores an MX GEMM's leading dimensions (#14290), so is a padded one.
 TEST(TestMxGraphConstraints, DeclinesOutputThatIsNotPackedRowMajor)
 {
-    for(const auto& cStrides : {std::vector<int64_t>{48, 1}, std::vector<int64_t>{1, 32}})
+    const std::vector<std::pair<std::vector<int64_t>, std::string>> cases{
+        {{48, 1}, "[#14290] MX matmul: output C has a padded leading dimension"},
+        {{1, 32}, "output C must be a row-major"}};
+    for(const auto& [cStrides, reason] : cases)
     {
         auto fb = createValidMxMatmulGraph({32, 128},
                                            {128, 1},
@@ -657,9 +660,7 @@ TEST(TestMxGraphConstraints, DeclinesOutputThatIsNotPackedRowMajor)
         }
         catch(const HipdnnPluginException& e)
         {
-            EXPECT_NE(std::string(e.what()).find("output C must be a packed row-major"),
-                      std::string::npos)
-                << e.what();
+            EXPECT_NE(std::string(e.what()).find(reason), std::string::npos) << e.what();
         }
     }
 }

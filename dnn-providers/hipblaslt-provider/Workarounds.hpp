@@ -55,14 +55,33 @@
 // does not match the scales the plan prepares, and feeds natural scales to a gfx1250
 // NoSwizzle kernel.
 // ----------------------------------------------------------------------------
+// ROCm/rocm-libraries#14290 — hipBLASLt ignores the leading dimensions of an MX
+// GEMM: it reads A and B and writes C as packed matrices, so a padded one silently
+// gives wrong results.
+//
+// REJECT_IF_WORKAROUND_ISSUE_14290(tensor, name) throws HipdnnPluginException
+// (BAD_PARAM) when the row- or column-major matrix `tensor` has padded rows or
+// columns. The MX builder applies it to A, B and C after checking that each is a
+// row- or column-major matrix.
+//
+// To remove after the fix: `git grep WORKAROUND_ISSUE_14290` finds the macro and its
+// three call sites. Padded A and B are then still declined in the plan by
+// packedMxOrder (makeScaleOperand, HipblasltMxMatmulPlan.cpp), which also gives
+// each operand's order; take the order from the contiguous axis there instead. The
+// padded A, B and C cases of IsApplicableRejectsNonPackedTensors,
+// IsApplicableRejectsNonPackedTensorsNt and DeclinesOutputThatIsNotPackedRowMajor
+// then become accepted cases.
+// ----------------------------------------------------------------------------
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipblasltUtils.hpp"
 
 #include <exception>
+#include <string>
 
 #ifdef _WIN32
 #define REJECT_IF_WORKAROUND_ISSUE_9962(handle)                                                    \
@@ -110,6 +129,27 @@
                 "[#10811] MX matmul not applicable: FP8 OCP A (column-major) with " \
                 "FP6 B returns incorrect results");                                 \
             return false;                                                           \
+        }                                                                           \
+    } while(0)
+
+#define REJECT_IF_WORKAROUND_ISSUE_14290(tensor, name)                              \
+    do                                                                              \
+    {                                                                               \
+        const auto& dims14290 = (tensor).dims();                                    \
+        const auto& strides14290 = (tensor).strides();                              \
+        const auto rank14290 = dims14290.size();                                    \
+        const int64_t outer14290 = dims14290[rank14290 - 2];                        \
+        const int64_t inner14290 = dims14290[rank14290 - 1];                        \
+        const bool packed14290                                                      \
+            = strides14290[rank14290 - 1] == 1                                      \
+                  ? (outer14290 == 1 || strides14290[rank14290 - 2] == inner14290)  \
+                  : (inner14290 == 1 || strides14290[rank14290 - 1] == outer14290); \
+        if(!packed14290)                                                            \
+        {                                                                           \
+            throw ::hipdnn_plugin_sdk::HipdnnPluginException(                       \
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,                                     \
+                std::string("[#14290] MX matmul: ") + (name)                        \
+                    + " has a padded leading dimension, which hipBLASLt ignores");  \
         }                                                                           \
     } while(0)
 

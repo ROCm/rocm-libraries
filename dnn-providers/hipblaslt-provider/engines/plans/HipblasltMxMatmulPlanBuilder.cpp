@@ -311,6 +311,16 @@ void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
     checkScaleShape(tXB, tScaleB, 2, "B");
 }
 
+// A matrix whose two innermost axes have one contiguous axis (leading batch dims
+// are ignored); its rows or columns may be padded.
+bool isRowOrColumnMajor(const TensorWrapper& tensor)
+{
+    const auto& dims = tensor.dims();
+    const auto& strides = tensor.strides();
+    return dims.size() >= 2 && strides.size() == dims.size()
+           && (strides.back() == 1 || strides[strides.size() - 2] == 1);
+}
+
 // hipBLASLt's own restrictions for the VEC32_UE8M0 scale mode.
 void checkHipblasltConstraints(
     const BlockScaleDequantizeAttributes& deqAttrA,
@@ -350,28 +360,26 @@ void checkHipblasltConstraints(
     checkNoBatch(dimsB, "B");
     checkNoBatch(dimsC, "C");
 
-    // Layout: each MX operand and each scale must be a packed row- or column-major
-    // matrix (rocRoller ignores leading dimensions, so padded rows would be read
-    // as packed). Scale order may differ from its operand's order; the plan then
-    // transposes it on device.
+    // Layout: each MX operand must be a row- or column-major matrix and each scale a
+    // packed one. Scale order may differ from its operand's order; the plan then
+    // transposes it on device. The plan hands C to hipBLASLt as a row-major [M, N]
+    // matrix.
     const auto tScaleA
         = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.scale_tensor_uid());
     const auto tScaleB
         = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.scale_tensor_uid());
-    const auto orderA = packedMxOrder(tXA, 1);
-    const auto orderB = packedMxOrder(tXB, 2);
-    if(!orderA.has_value())
+    if(!isRowOrColumnMajor(tXA))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: A (MX) must be a packed row-major (K-contiguous) or column-major "
+            "MX matmul: A (MX) must be a row-major (K-contiguous) or column-major "
             "(M-contiguous) matrix");
     }
-    if(!orderB.has_value())
+    if(!isRowOrColumnMajor(tXB))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: B (MX) must be a packed column-major (K-contiguous) or row-major "
+            "MX matmul: B (MX) must be a column-major (K-contiguous) or row-major "
             "(N-contiguous) matrix");
     }
     if(!packedMxOrder(tScaleA, 1).has_value())
@@ -386,21 +394,15 @@ void checkHipblasltConstraints(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "MX matmul: B scale must be a packed row- or column-major [K/32, N] matrix");
     }
-
-    // The plan hands C to hipBLASLt as a packed row-major [M, N] matrix, and hipBLASLt
-    // ignores the leading dimensions of an MX GEMM (#14290), so a padded or
-    // column-major C would be written as packed row-major.
-    const auto& stridesC = tC.strides();
-    const bool cPackedRowMajor = dimsC.size() >= 2 && stridesC.size() == dimsC.size()
-                                 && stridesC[dimsC.size() - 1] == 1
-                                 && (dimsC[dimsC.size() - 2] == 1
-                                     || stridesC[dimsC.size() - 2] == dimsC[dimsC.size() - 1]);
-    if(!cPackedRowMajor)
+    if(!isRowOrColumnMajor(tC) || tC.strides().back() != 1)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: output C must be a packed row-major [M, N] matrix");
+            "MX matmul: output C must be a row-major [M, N] matrix");
     }
+    REJECT_IF_WORKAROUND_ISSUE_14290(tXA, "A");
+    REJECT_IF_WORKAROUND_ISSUE_14290(tXB, "B");
+    REJECT_IF_WORKAROUND_ISSUE_14290(tC, "output C");
 
     // Alignment: m % 16 == 0, n % 16 == 0, K % 128 == 0.
     // Logical matmul dims: A[M, K], B[K, N].
