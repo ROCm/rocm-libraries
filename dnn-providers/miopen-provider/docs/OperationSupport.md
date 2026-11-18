@@ -22,7 +22,7 @@ The following table lists all operations currently supported in hipDNN:
 | Convolution Forward | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
 | Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3,6</sup>, Deterministic<sup>5</sup> |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
-| Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
+| Pointwise Activation (standalone) | FP16, FP32 | Rank 1-4, any dimension order | Single-node graph<sup>7</sup> |
 | Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
 
 ¹ See Batchnorm Operations note below
@@ -55,6 +55,15 @@ The following table lists all operations currently supported in hipDNN:
     - clipped ReLU: relu_upper_clip set
     - CLAMP: relu_lower_clip and relu_upper_clip set
 - relu_lower_clip_slope must be unset or 0 (leaky ReLU is not supported when fused)
+#### Bias, output and tensor requirements
+- Bias dims, after left-padding with 1 to the convolution output rank, are `[1, K, 1, ...]` where K is the output channel count
+- Bias rank may not exceed the convolution output rank
+- Bias channel stride is 1 when K > 1
+- Final output tensor
+    - Data type: the input data type
+    - Dims: the convolution output dims
+    - Packed in the input's layout; strides of unit dimensions are included in the comparison
+- Pass-by-value tensors are not supported
 
 ## Operation Notes
 
@@ -62,7 +71,7 @@ The following table lists all operations currently supported in hipDNN:
 > **Batchnorm Operations:** Currently, only spatial batchnorm mode is supported. Spatial mode computes statistics over the batch (N) and spatial dimensions (H, W, or D, H, W) for each channel.
 
 > [!NOTE]
-> **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
+> **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks. Pass-by-value tensors are not supported.
 
 > [!NOTE]
 > **Fused Operations:**
@@ -78,7 +87,7 @@ The following table lists all operations currently supported in hipDNN:
 > **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
 
 > [!NOTE]
-> **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+> **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh. Tensors have rank 1-4. `x` and `y` have identical dims and are both packed with the same layout, in any dimension order; strides of unit dimensions are ignored. A padded, sliced, broadcast or otherwise non-packed tensor is declined because of [MIOpen issue 16024](https://github.com/ROCm/rocm-libraries/issues/16024).
 
 > [!NOTE]
 > **ReLU parameters:** An unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no
@@ -97,7 +106,7 @@ The following table lists all operations currently supported in hipDNN:
 > **Sparse Support:** All operations currently work with dense tensors only.
 
 > [!NOTE]
-> **Batchnorm Training Running Statistics:** Batchnorm training supports updating running statistics using separate read and write buffers. The previous running statistics (`prev_running_mean`, `prev_running_variance`) are read-only inputs, while the next running statistics (`next_running_mean`, `next_running_variance`) are write-only outputs. The exponential moving average is computed as: `next_running = (1 - momentum) * prev_running + momentum * batch_statistic`.
+> **Batchnorm Training Running Statistics:** Batchnorm training supports updating running statistics using separate read and write buffers. The previous running statistics (`prev_running_mean`, `prev_running_variance`) are read-only inputs, while the next running statistics (`next_running_mean`, `next_running_variance`) are write-only outputs. The exponential moving average is computed as: `next_running = (1 - momentum) * prev_running + momentum * batch_statistic`. The five running-statistics operands (prev/next running mean, prev/next running variance, momentum) must be given together, and saved mean and inv_variance must be given together or not at all; any other combination is declined. Training with running statistics or a fused activation also requires the saved mean / inv_variance pair; this is a limitation of this provider's plan, not of MIOpen, and is tracked as a follow-up. A saved mean and inv_variance that are both virtual are treated as not requested, unless running statistics are present; exactly one virtual is declined, and with running statistics or a fused activation the pair must be non-virtual. Only epsilon and momentum may be pass-by-value; every other batchnorm tensor is read from or written to a device buffer, and a pass-by-value tensor in such a role is declined. Momentum is a pass-by-value scalar and is not type-validated by the provider. The consumed saved and running statistics tensors must be FLOAT with shape `[1, C, 1, ...]`, validated against the batchnorm channel layout. In a single-node batchnorm graph (inference, training or backward) every consumed tensor, including the running statistics, must be non-virtual; a virtual tensor is declined.
 
 ## Deterministic Engine Support
 
