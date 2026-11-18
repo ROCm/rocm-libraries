@@ -1165,10 +1165,20 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // (Block-based generic buffers: the per-step windows.)
     int64_t xImage = a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
     int64_t yImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
-    if(generic)
+    if(generic && config.pb == 1)
     {
-        xImage = config.pb == 1 ? xWindow : config.flat != 0 ? xTensor : problem.xSpan;
-        yImage = config.pb == 1 ? yWindow : config.flat != 0 ? yTensor : problem.ySpan;
+        xImage = xWindow;
+        yImage = yWindow;
+    }
+    else if(generic && config.flat != 0)
+    {
+        xImage = xTensor;
+        yImage = yTensor;
+    }
+    else if(generic)
+    {
+        xImage = problem.xSpan;
+        yImage = problem.ySpan;
     }
     if(!generic && cf && (xImage < config.vec || yImage < config.vec))
     {
