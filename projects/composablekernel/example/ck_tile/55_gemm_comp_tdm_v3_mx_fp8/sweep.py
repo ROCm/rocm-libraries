@@ -190,13 +190,29 @@ def hip_index_map():
     return {g: hip_of_bdf[b] for g, b in bdf_of.items() if b in hip_of_bdf}
 
 
-def busy_sample(gmap):
-    """HIP indices with a process on them right now (one amd-smi process sample)."""
+def busy_sample(gmap, own_pid=None, detail=None):
+    """HIP indices where another process is computing right now (one amd-smi process sample).
+
+    A process counts only with cu_occupancy > 0: one that merely holds memory does not slow
+    our kernels. Columns are found by header name. detail (a list) collects the culprits."""
+    lines = _amdsmi(["process", "--csv"]).splitlines()
+    if not lines:
+        return set()
+    head = [h.strip() for h in lines[0].split(",")]
+    col = {h: i for i, h in enumerate(head)}
     busy = set()
-    for line in _amdsmi(["process", "--csv"]).splitlines()[1:]:
-        f = line.split(",")
-        if len(f) >= 3 and f[2].strip().isdigit() and f[0].strip() in gmap:
-            busy.add(gmap[f[0].strip()])
+    for line in lines[1:]:
+        f = [x.strip() for x in line.split(",")]
+        if len(f) < len(head) or not f[col["pid"]].isdigit() or f[col["gpu"]] not in gmap:
+            continue
+        if own_pid is not None and int(f[col["pid"]]) == own_pid:
+            continue
+        occ = f[col["cu_occupancy"]] if "cu_occupancy" in col else "1"
+        if not occ.isdigit() or int(occ) > 0:
+            busy.add(gmap[f[col["gpu"]]])
+            if detail is not None:
+                detail.append(f"HIP {gmap[f[col['gpu']]]} pid {f[col['pid']]} "
+                              f"{f[col['name']].split('/')[-1] if 'name' in col else '?'} cu_occ {occ}")
     return busy
 
 
@@ -242,6 +258,7 @@ def main():
     ap.add_argument("--free-samples", type=int, default=6, help="--gpu auto: amd-smi samples")
     ap.add_argument("--free-interval", type=float, default=10.0, help="--gpu auto: seconds between")
     ap.add_argument("--allow-single", action="store_true", help="--gpu auto: fall back to one partition")
+    ap.add_argument("--no-pair-check", action="store_true", help="--gpu auto: do not tag busy batches")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--runner", default="", help='launch prefix, e.g. "gpu-guard run --"')
@@ -307,11 +324,14 @@ def main():
                 for p in order:
                     time.sleep(1.0)
                     tainted = False
-                    if pair:
+                    if pair and not o.no_pair_check:
+                        why = []
                         try:
-                            tainted = bool(busy_sample(gmap) & set(pair))
+                            tainted = bool(busy_sample(gmap, os.getpid(), why) & set(pair))
                         except RuntimeError:
-                            tainted = True
+                            tainted, why = True, ["amd-smi failed"]
+                        if tainted:
+                            log("  pair busy: " + "; ".join(w for w in why if any(f"HIP {i} " in w for i in pair) or w == "amd-smi failed"))
                     rc, txt = run([str(p["exe"])] + arm_args(p["arm"], shape, cfg) + timing, env, o.runner)
                     m = re.search(r'"median_tflops":([0-9.]+)', txt)
                     tf = float(m.group(1)) if (m and rc == 0) else None
