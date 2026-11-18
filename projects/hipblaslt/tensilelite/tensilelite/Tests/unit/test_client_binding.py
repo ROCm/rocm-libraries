@@ -533,12 +533,13 @@ def test_missing_source_revision_warns_and_allows_pairing(
 ):
     queries = _fake_client(monkeypatch, revision=client)
     with pytest.warns(binding.ClientBindingWarning, match="could not be verified") as warning:
-        binding.validate_client(
+        identity = binding.validate_client(
             _client(tmp_path), _installation(tmp_path, revision=package, editable=editable)
         )
     assert "same source" in str(warning[0].message)
     assert queries == ["--source-revision", "--build-rocm"]
 
+    assert identity == binding.ClientIdentity(client, "7.2.4 base")
 
 @pytest.mark.parametrize("editable", [False, True])
 @pytest.mark.parametrize("package, client", [(None, "invalid"), ("invalid", "none")])
