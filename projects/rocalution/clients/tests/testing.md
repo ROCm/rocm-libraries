@@ -303,11 +303,14 @@ a review of each suite confirms that the unit tests cover all of its checks, on 
 in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
 the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
 `local_matrix_multicoloring`, `local_matrix_itsolve`, `local_matrix_solve`, `local_stencil_bad_args`,
-`local_vector` and `local_vector_amax_ties` suites have been deleted on that basis. The Jenkins test
-command runs both unit-test binaries after `rocalution-test`, so the Jenkins lanes still run these
-checks. A clients-only build (`install.sh --clients-only`) doesn't build the unit tests, and the
-`rtest.xml` sets run only `rocalution-test`, so clients-only builds and `rtest.xml` runs no longer
-run these checks. The solver, preconditioner and AMG suites stay as the integration layer.
+`local_vector_bad_args`, `local_vector_test` and `local_vector/parameterized_local_vector_test`
+suites have been deleted on that basis. The Jenkins test command runs both unit-test binaries after
+`rocalution-test`, so the Jenkins lanes still run these checks. A clients-only build (`install.sh
+--clients-only`) doesn't build the unit tests, and the `rtest.xml` sets run only
+`rocalution-test`, so clients-only builds and `rtest.xml` runs no longer run these checks.
+`local_vector_amax_ties` is kept for that reason: it runs in every category and every `rtest.xml`
+set, including the emulation sets. The solver, preconditioner and AMG suites stay as the
+integration layer.
 
 ---
 

@@ -1321,8 +1321,9 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
     });
 }
 
-// After the device synchronization and before Sync(), the entries can be read
-// through the host copy. Sync() then frees the copy that the vector leaves.
+// After the device synchronization and before Sync(), reads through operator[] give the
+// entries, and Sync() then leaves the vector on the target backend. Some of these calls
+// copy synchronously, so a missing device synchronization need not fail here.
 TEST(local_vector_moves, entries_are_readable_after_an_async_move_and_a_device_sync)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -1364,6 +1365,48 @@ TEST(local_vector_moves, entries_are_readable_after_an_async_move_and_a_device_s
             EXPECT_EQ(entries_of(*v), a);
             v->Sync();
             expect_location(v, Backend::Host);
+        }
+    });
+}
+
+TEST(local_vector_moves, without_an_accelerator_async_calls_keep_the_entries_readable)
+{
+    DescriptorGuard guard;
+    rocalution::_get_backend_descriptor()->accelerator = false;
+
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        for(const std::string call : {"MoveToHostAsync", "MoveToAcceleratorAsync"})
+        {
+            SCOPED_TRACE(call);
+            auto v = make_local_vector(Backend::Host, a);
+            if(call == "MoveToHostAsync")
+            {
+                v->MoveToAccelerator();
+                v->MoveToHostAsync();
+            }
+            else
+            {
+                v->MoveToAcceleratorAsync();
+            }
+            rocalution::_rocalution_sync();
+            EXPECT_EQ(entries_of(*v), a);
+            v->Sync();
+            EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+            EXPECT_EQ(values_of(*v), a);
+        }
+        {
+            SCOPED_TRACE("CopyFromAsync");
+            auto src = make_local_vector(Backend::Host, a);
+            auto v   = std::make_unique<LocalVector<T>>();
+            v->CopyFromAsync(*src);
+            rocalution::_rocalution_sync();
+            EXPECT_EQ(entries_of(*v), a);
+            v->Sync();
+            EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+            EXPECT_EQ(values_of(*v), a);
         }
     });
 }
@@ -1417,6 +1460,8 @@ TEST(local_vector_preconditions, null_pointer_arguments_end_the_program)
         T*             null = nullptr;
         EXPECT_ASSERT_DEATH(e.SetDataPtr(nullptr, "v", 3),
                             "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*[^*]ptr != NULL");
+        EXPECT_ASSERT_DEATH(e.SetDataPtr(&null, "v", 3),
+                            "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*\\*ptr != NULL");
         std::vector<T> data(3, T(1));
         T*             ptr = data.data();
         EXPECT_ASSERT_DEATH(e.LeaveDataPtr(&ptr),
