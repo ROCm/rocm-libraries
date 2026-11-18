@@ -148,10 +148,17 @@ claiming anything; a smoke set under-samples the variance.
 
 ## Running efficiently
 
+The goal is the best performance the space can give, not the fastest search. Use
+the items below to run more configs in the same wall time, not to shrink the space.
 In the gfx950 GEMM trial, compilation took roughly nine tenths of the search wall
 time and timing about one tenth, so the levers that matter are about compile
 cost, not the number of timed launches:
 
+- **Do not trim the space to save time.** Remove a config only when it is
+  structurally unable to run: it fails `is_valid_spec` or the launch contract, or
+  its accumulator tile cannot fit the register file or LDS. Never remove a lever
+  because it looks unlikely to win; the strategy already spends little on a lever
+  that does not pay, and a lever that lost on one base can win on the next.
 - **One process, one runtime, many configs.** Load the inputs, the oracle rows
   and the runtime once and keep them across every evaluation, seed and strategy.
   A fresh process per config, or the fresh-process attempts that `sweep_bench`
@@ -160,33 +167,51 @@ cost, not the number of timed launches:
   the recipe) so seeds, strategies and the final confirmation reuse artifacts.
   Keep only a few loaded modules alive and unload the rest.
 - **Compile in parallel, measure on one thread.** The engine runs backend calls on
-  one worker thread, which is right for GPU state. Parallelize the build: where
-  the family has a bulk builder (`rocke.sweep.build_all_instances(specs,
-  parallel=N)` for the universal GEMM) build the candidate set first, then let
-  the search measure only. Run independent searches (one per shape class or
-  kernel) on separate devices instead of sharing one.
-- **Keep configs that cannot win out of the space.** Put register-file and LDS
-  fits, divisibility, launch contracts and `is_valid_spec` in `is_valid`, so a
-  spilling or unlaunchable config never compiles; set `compile_timeout` and
-  `measure_timeout` for the long tail.
-- **Size the budget deliberately.** A search of tens to a few hundred
-  evaluations is the usual range. Use a few repetitions of a handful of launches
-  per config at search time (the `Fidelity` default is `reps=20`; lower it), and
-  spend the interleaved confirmation rounds only on the finalists.
-- **Do not enumerate a large space.** Use `exhaustive` only when the space is no
-  larger than the budget; otherwise warm start and search.
+  one worker thread, which is right for GPU state. Give the backend a
+  `precompile` hook backed by `ProcessCompilePool` and run with `batch=16` or
+  more, so each round offers many fresh compiles at once:
+
+  ```python
+  pool = ProcessCompilePool(compile_worker, workers=16)  # worker(config) -> picklable payload
+
+  def compile_(config, key):                             # exactly (config, key): the evaluator sniffs this
+      r = pool.take(key)                                 # None: not prebuilt, compile inline
+      if r is not None and not r.ok:
+          return CompileOutcome(False, detail=r.detail)
+      payload = compile_worker(config) if r is None else r.payload
+      return CompileOutcome(True, artifact=load(payload))   # load on the evaluator's thread
+
+  backend = CallableBackend(compile_, check_, measure_, precompile=pool.precompile)
+  result = tune(space, backend, batch=16, ...)
+  ```
+
+  The workers are spawned processes with no GPU state, so build the code object
+  there and load it in the evaluator's process. Choose `workers` no larger than
+  the CPU cores you were allocated. In a gfx950 GEMM search the compile phase
+  ran about four times faster with 32 workers and the whole search about two and
+  a half times faster; the gain grows with the per-config compile cost. A larger
+  `batch` changes the search path a little (a climb asks for several neighbours at
+  once), so compare strategies and seeds at the same `batch`.
+- **Spend the budget where it finds gains.** A larger budget costs less than a
+  missed lever. Cut repetitions, not configs: the `Fidelity` default is `reps=20`;
+  a few repetitions of a handful of launches per config is enough at search time,
+  with the interleaved confirmation rounds spent on the finalists.
+- **Do not enumerate a space that is too large; search it.** Use `exhaustive` only
+  when the space is no larger than the budget; otherwise warm start and search.
 - **Resume instead of restarting.** `checkpoint=` and `resume=` continue a split
   run, and `cache_path=` reuses recorded measurements for a repeated search.
 - **Time on an idle device.** A shared or busy GPU raises both the noise and the
   number of rounds a paired confirmation needs.
 - **Price the compile before you search.** Cost per config varies by orders of
-  magnitude with the backend: in-process LLVM/comgr builds are cheap, candidates
-  built through `hipcc` cost seconds each and can time out, and a few paths are
-  far slower. Time a ten-config sample first and set the budget from the wall time
-  you can spend. Screen on the cheap backend and confirm on the one that ships.
-- **Random search is a short control, not a strategy to run to budget.** It costs
-  the most per evaluation (cold, structurally distant configs) and usually trails
-  a warm-started climb. Give it a small budget or skip it.
+  magnitude with the backend and the load on the node: in-process LLVM/comgr
+  builds are cheap, candidates built through `hipcc` cost seconds each and can
+  time out, and a few paths are far slower. Time a ten-config sample first. Screen
+  on the cheap backend and confirm on the one that ships.
+- **Run a cold random search as a control, not as the main strategy.** It costs the
+  most per evaluation (cold, structurally distant configs) and usually trails a
+  warm-started climb, but it sometimes finds a basin the climb does not (it beat
+  hill climbing on one GEMM shape), so keep a modest random run next to the
+  warm-started strategies.
 - **Search the variant axis in the first round.** When geometry or backend
   variants are separate candidates, warm-start each from its default and compare
   them up front; deepen only the best. After the first confirmed winner, ablate it
