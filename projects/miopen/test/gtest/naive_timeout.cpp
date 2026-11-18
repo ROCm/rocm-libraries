@@ -177,9 +177,9 @@ bool LogShowsNaiveEvaluation(const std::string& log)
     return false;
 }
 
-// A naive kernel was looked up or built before the first solver evaluation. The precompile step
-// does that for every solver in the list, so this tells whether naive was in it. Needs the Info2
-// log level, which logs the kernel lookups.
+// A naive kernel file was named before the first solver evaluation. The precompile step logs every
+// kernel it builds at the Info2 level, whatever the kernel cache, so this tells whether naive was
+// in it.
 bool LogShowsNaiveKernelBeforeFirstEvaluation(const std::string& log)
 {
     std::istringstream lines{log};
@@ -401,7 +401,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimedOutWhenBoundSkipDisabled)
 
 // The precompile step builds the kernels of every solver in the list in parallel before the
 // evaluation starts. Naive stays out of it while the bound can still skip it. These two tests read
-// the kernel lookups in the Info2 log. A new handle keeps earlier tests from hiding those lookups
+// the precompiled kernels in the Info2 log. A new handle keeps earlier tests from hiding them
 // through the handle's program cache, even when tests run in a different order.
 TEST(GPU_NaiveTimeout_FP32, NaiveNotPrecompiledWhenBoundCanSkipIt)
 {

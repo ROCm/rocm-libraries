@@ -79,6 +79,7 @@ void PrecompileSolutions(const Handle& h,
         {
             if(h.HasProgram(kernel.kernel_file, kernel.comp_options))
                 continue;
+            MIOPEN_LOG_I2("Precompile " << kernel.kernel_file);
             kernels.push_back(kernel);
         }
     }
