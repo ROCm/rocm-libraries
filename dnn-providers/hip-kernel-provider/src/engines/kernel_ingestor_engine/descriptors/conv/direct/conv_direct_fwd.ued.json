@@ -35,7 +35,8 @@
     "pp",
     "epi",
     "un",
-    "cf"
+    "cf",
+    "dil"
   ],
   "behavior_notes": [
     "runtime_compilation"
