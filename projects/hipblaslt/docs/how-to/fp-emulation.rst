@@ -139,8 +139,8 @@ The strategy decides whether an enabled emulation path is taken:
 How the ``performant`` strategy predicts depends on the GPU:
 
 * On GPUs with performance values measured on that GPU (the MI350X, MI355X,
-  Radeon PRO W7800, and Radeon RX 9070 XT), a performance model compares the
-  predicted emulated and native times.
+  Radeon PRO W7800, Radeon 8060S, and Radeon RX 9070 XT), a performance model
+  compares the predicted emulated and native times.
 * On other supported Radeon GPUs, hipBLASLt emulates an FP64 GEMM when its
   arithmetic intensity, ``2 * m * n * k / (8 * (m * k + k * n + m * n))``
   flops per byte, is at least a threshold for the GPU's target, and runs

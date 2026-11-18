@@ -13,7 +13,7 @@ accurate as — and sometimes more accurate than — the native path.
 - **Supported hardware:** AMD Instinct MI350X and MI355X (gfx950), and AMD
   Radeon GPUs with RDNA 3 (gfx1100–gfx1102), RDNA 3.5 (gfx1150–gfx1152) and
   RDNA 4 (gfx1200, gfx1201) targets. Tested on the Radeon Pro W7800
-  (gfx1100) and the Radeon RX 9070 XT (gfx1201).
+  (gfx1100), the Radeon 8060S (gfx1151), and the Radeon RX 9070 XT (gfx1201).
 - **Supported types:** FP64 (`HIP_R_64F`) and FP32 (`HIP_R_32F`).
 - **Restrictions:** non-batched (`batch_count = 1`) only; default epilogue only.
 
@@ -135,7 +135,10 @@ steps:
 2. **Measure on the target device:**
    - `BW`: achievable HBM bandwidth in bytes/s, from a large streaming copy.
    - `F64`, `F32`: peak native DGEMM and SGEMM throughput in flop/s, from
-     large square `hipblaslt-bench` runs.
+     large square `hipblaslt-bench` runs. Check that the size is
+     representative: on the Radeon 8060S, native SGEMM at 8192³ runs far below
+     its rate at 4096³, and a row measured there made the model emulate FP32
+     GEMMs that are faster natively.
    - `I8`: peak INT8 GEMM throughput in op/s (INT8 inputs, INT32 output,
      `TN` layout, matching what the emulation path calls).
    - Overheads in seconds:
