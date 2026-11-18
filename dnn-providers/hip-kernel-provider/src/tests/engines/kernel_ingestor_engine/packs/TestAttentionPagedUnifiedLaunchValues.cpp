@@ -324,7 +324,9 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnIntegerOutsideWhatTheKernel
         {&dense, "num_seqs", int64_t{2147483648}},
         {&dense, "num_query_heads", 0},
         {&dense, "num_kv_heads", 0},
+        // The kernel keeps key k iff d - k < window, so 0 or below keeps none.
         {&dense, "sliding_window", 0},
+        {&dense, "sliding_window", -1},
         {&dense, "sliding_window", int64_t{0x40000000}},
         {&dense, "q_uniform_len", 0}, // a dense Q has at least one row per sequence
         {&dense, "q_uniform_len", -3},

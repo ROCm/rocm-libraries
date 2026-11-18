@@ -549,7 +549,9 @@ class UnifiedAttention2DTiledSpec:
     # layout adds the Q/O/KV strides, a dense or ragged Q and a real paged KV
     # cache as appended kernel arguments (see ``_RTL_PARAMS``), so one compiled
     # object serves them all. ``sliding_window`` must be 0 (the window mask is
-    # always compiled, with the kernarg as its size) and every CTA walks the
+    # always compiled, with the kernarg as its size: ``d - k < window`` keeps key
+    # k, so a kernarg of 0 or below keeps none, and "no window" is a window wider
+    # than any sequence, which the caller passes) and every CTA walks the
     # q-block grid with a grid-stride loop. K pages through
     # ``block_tables_ptr`` and V through ``block_tables_v_ptr`` (the same
     # pointer, or a second table with the same row stride). The KV block term is

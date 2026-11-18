@@ -92,6 +92,9 @@ _REJECTED = [
     (dict(block_m_per_warp=32), "block_m_per_warp"),
     (dict(tile_size=24), "tile_size"),
     (dict(tile_size=64), "tile_size"),
+    # Zero and negative tiles never reach the divisibility arithmetic.
+    (dict(tile_size=0), "tile_size"),
+    (dict(tile_size=-16), "tile_size"),
     (dict(num_query_heads=5, num_kv_heads=2), "divisible"),
     (dict(emit_lse=True), "emit_lse"),
 ]
@@ -101,6 +104,14 @@ _REJECTED = [
 def test_incompatible_spec_rejected(overrides, needle):
     with pytest.raises(ValueError, match=needle):
         UnifiedAttention2DTiledSpec(**_rtl_spec(**overrides))
+
+
+@pytest.mark.parametrize("value", ["false", "", 1, 0, None])
+def test_runtime_layout_must_be_a_bool(value):
+    """A truthy non-bool would build the runtime_layout ABI for a caller that thinks it
+    asked for the fixed layout, so the flag is checked, never coerced."""
+    with pytest.raises(ValueError, match="runtime_layout must be a bool"):
+        UnifiedAttention2DTiledSpec(**_rtl_spec(runtime_layout=value))
 
 
 @pytest.mark.parametrize("overrides,needle", _REJECTED)

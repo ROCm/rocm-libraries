@@ -528,7 +528,12 @@ class UnifiedAttention2DTiledSpec:
     # rows (the first seq_lens_q rows of its block), and the q-block grid
     # is walked with a grid-stride loop. The window mask is always on, with the
     # ``sliding_window`` kernarg as its size, so the spec's ``sliding_window``
-    # must be 0. Only the default narrow 16x16x16 path is supported; see
+    # must be 0. The kernarg is a plain size: ``d - k < window`` keeps key k, so
+    # a window of 0 or below keeps none and every row stores zeros. "No window"
+    # is a window wider than any sequence (the engine passes 0x3FFFFFFF), never 0
+    # or -1; the caller owns that (AttentionPagedUnifiedNative.cpp builds it, and
+    # a saved plan holding 0 or a negative window is refused at load). Only the
+    # default narrow 16x16x16 path is supported; see
     # ``_runtime_layout_reject_reason``. ``tile_size`` may divide ``block_size``
     # here (sub-block tiles), which the fixed-layout path does not allow.
     # Default False -> every existing kernel is byte-identical.
@@ -1177,8 +1182,12 @@ _RTL_INCOMPATIBLE_FLAGS = (
     "emit_lse",
 )
 
-# Buffer voffset used for masked K/V lanes: beyond any ``kv_block_span_bytes``
-# (an i32 kernarg), so the buffer range check returns 0 without a memory access.
+# Buffer voffset used for masked K/V lanes. A page's buffer resource holds
+# ``kv_block_span_bytes`` bytes, so a voffset at or past that returns 0 without a
+# memory access. The caller keeps ``kv_block_span_bytes`` below
+# ``0x7FFF0000`` (MAX_BLOCK_SPAN_BYTES in AttentionPagedUnifiedNative.cpp, which
+# declines a graph with a larger block and refuses a saved plan holding one), so
+# this voffset is always past the span, with the widest (16-byte) load to spare.
 _RTL_KV_OOB_VOFF = 0x7FFFFFF0
 
 # The kernargs appended in runtime_layout mode are RUNTIME_LAYOUT_EXTRA_ARGS
@@ -1186,7 +1195,12 @@ _RTL_KV_OOB_VOFF = 0x7FFFFFF0
 
 
 def _runtime_layout_reject_reason(spec: "UnifiedAttention2DTiledSpec") -> Optional[str]:
-    """Why ``spec`` is not a valid runtime_layout spec (None when valid/unused)."""
+    """Why ``spec`` is not a valid runtime_layout spec (None when valid/unused).
+
+    This spec has no ``use_additive_bias``, ``causal_top_left`` or ``right_bound``
+    field (the gfx942 kernel is always bottom-right causal with no right bound),
+    so, unlike the gfx950 spec, there is nothing of those to refuse.
+    """
     if not spec.runtime_layout:
         return None
     bad = [name for name in _RTL_INCOMPATIBLE_FLAGS if getattr(spec, name)]

@@ -705,6 +705,8 @@ def test_runtime_layout_catalog_supported_and_named():
         (dict(use_v_double_buffer=True), "use_v_double_buffer"),
         (dict(use_qblock_reverse=True), "use_qblock_reverse"),
         (dict(tile_size=64), "tile_size"),
+        (dict(tile_size=0), "tile_size"),
+        (dict(tile_size=-16), "tile_size"),
         # Refused before the async-DMA divisibility check divides by it.
         (dict(num_warps=0), r"runtime_layout requires num_warps in \{1, 2, 4, 8\}"),
     ],
@@ -722,6 +724,21 @@ def test_runtime_layout_incompatible_spec_rejected(overrides, needle):
         dataclasses.replace(spec, **overrides)
 
 
+@pytest.mark.parametrize("value", ["false", "", 1, 0, None])
+def test_runtime_layout_must_be_a_bool(value):
+    """A truthy non-bool would build the runtime_layout ABI for a caller that thinks it
+    asked for the fixed layout, so the flag is checked, never coerced."""
+    import dataclasses
+
+    from kernels.gfx950.attention_tiled_2d import runtime_layout_catalog_spec
+
+    spec = runtime_layout_catalog_spec(
+        dtype="bf16", head_size=128, block_size=32, num_queries_per_kv=4
+    )
+    with pytest.raises(ValueError, match="runtime_layout must be a bool"):
+        dataclasses.replace(spec, runtime_layout=value)
+
+
 @pytest.mark.parametrize(
     "overrides,needle",
     [
@@ -731,6 +748,8 @@ def test_runtime_layout_incompatible_spec_rejected(overrides, needle):
         (dict(use_v_double_buffer=True), "use_v_double_buffer"),
         (dict(use_qblock_reverse=True), "use_qblock_reverse"),
         (dict(tile_size=64), "tile_size"),
+        (dict(tile_size=0), "tile_size"),
+        (dict(tile_size=-16), "tile_size"),
         (dict(num_warps=0), r"runtime_layout requires num_warps in \{1, 2, 4, 8\}"),
     ],
 )
