@@ -94,6 +94,16 @@ def _mi_wave_group(mi: Sequence[int]) -> Tuple[int, int]:
     return miwg0, waves // miwg0
 
 
+def _interleavable(wave_group: Tuple[int, int]) -> bool:
+    """Whether ``LDSSegmentInterleave=1`` supports this MIWaveGroup.
+
+    "LDSSegmentInterleave=1 requested but not applicable: MIWaveGroup
+    unsupported" (segment_interleave.py): only [2,2] and the asymmetric groups,
+    with exactly one dimension equal to 1, can interleave.
+    """
+    return wave_group == (2, 2) or (wave_group[0] == 1) != (wave_group[1] == 1)
+
+
 def _mis(mi_groups: GroupDimension) -> List[Sequence[int]]:
     """The 9-element MatrixInstruction of every group that carries one."""
     out = []
@@ -154,13 +164,9 @@ class _GFX1250GeometryNarrowing:
         restrict("HalfPLR", half_plr_usable, [0])
 
         # Rule C -- "LDSSegmentInterleave=1 requested but not applicable:
-        # MIWaveGroup unsupported" (segment_interleave.py): only [2,2] and the
-        # asymmetric groups, with exactly one dimension equal to 1, can
-        # interleave. Same "any group" policy.
-        def interleavable(wg):
-            return wg == (2, 2) or (wg[0] == 1) != (wg[1] == 1)
-
-        can_interleave = any(interleavable(_mi_wave_group(mi)) for mi in mis)
+        # MIWaveGroup unsupported" (see _interleavable). Same "any group"
+        # policy; _GFX1250SegmentInterleaveLayout narrows it per MI later.
+        can_interleave = any(_interleavable(_mi_wave_group(mi)) for mi in mis)
         restrict("LDSSegmentInterleave", lambda v: v != 1 or can_interleave, [0])
 
         return fork_params, mi_groups
@@ -254,6 +260,98 @@ class _GFX1250TDMFuseOneWave:
             values = one_wave if _mi_num_waves(entry) == 1 else list(fp.values)
             coupled.append({**entry, "TDMFuse": self._make_param("TDMFuse", values)})
         del fork_params["TDMFuse"]
+        return fork_params, coupled
+
+
+def _can_interleave(entry: Dict[str, ForkParameter]) -> bool:
+    """Whether an MI group entry can build ``LDSSegmentInterleave=1``.
+
+    Needs an interleavable MIWaveGroup (:func:`_interleavable`) and
+    LocalSplitU 1 (``WorkGroup[2]``): segment_interleave.py answers "not
+    applicable: LocalSplitU>1" otherwise. An MI this cannot read counts as
+    interleavable, like Rule C.
+    """
+    wg = getattr(entry.get("WorkGroup"), "values", None)
+    if isinstance(wg, list) and len(wg) == 3 and wg[2] > 1:
+        return False
+    mi = getattr(entry.get("MatrixInstruction"), "values", None)
+    return not mi or len(mi) != 9 or _interleavable(_mi_wave_group(mi))
+
+
+class _GFX1250SegmentInterleaveLayout:
+    """Couple LDSSegmentInterleave and TDMFuse per MI group.
+
+    TensileLite builds the paired LDS layout of an interleaved kernel only
+    when ``paired_buffer_reason`` (segment_interleave.py) finds nothing
+    against it, and ``TDMFuse > 0`` is one of its reasons. Without pairing a
+    non-persistent ``LDSSegmentInterleave=1`` kernel is rejected
+    ("requires paired LDS placement") and a persistent one falls back to the
+    unpaired interleave, which is not the layout LDSSegmentInterleave=1 is
+    meant to search. A flat LDSSegmentInterleave [0, 1] next to the
+    profile's TDMFuse [1] would therefore offer 1 only in that form.
+
+    So when the flat parameter offers 1 next to other values, it moves into
+    the MI groups together with TDMFuse, one entry per value so every group
+    value stays single-valued, which is how Tensile reads group values:
+
+      * every MI gets an entry per other LDSSegmentInterleave value (0) and
+        per TDMFuse value: TDMFuse 0, the layout the 1 entries use, and every
+        TDMFuse value the MI already had (the profile's 1, which keeps
+        TemporalHintA/B independent; see ``GFX1250GAParams.tdm_fuse``). A
+        one-wave MI keeps only TDMFuse 0, as _GFX1250TDMFuseOneWave decided;
+      * an MI that can interleave (:func:`_can_interleave`) also gets one
+        entry with ``LDSSegmentInterleave=1`` and ``TDMFuse=0``. MIs that
+        cannot interleave get no such entry.
+
+    TDMFuse is read from the MI group when _GFX1250TDMFuseOneWave has
+    already moved it there, otherwise from the flat parameter, which is then
+    dropped. Without any TDMFuse the 0 entries carry none. The step does
+    nothing when the flat LDSSegmentInterleave is missing, inactive, or does
+    not offer 1 next to another value (for instance after Rule C narrowed it
+    to [0] because no MI can interleave).
+    """
+
+    @mark_post_process
+    def couple_lds_segment_interleave(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        fp = fork_params.get("LDSSegmentInterleave")
+        if fp is None or not fp.active or not isinstance(fp.values, list) or 1 not in fp.values:
+            return fork_params, mi_groups
+        others = [v for v in fp.values if v != 1]
+        if not others:
+            return fork_params, mi_groups
+        tdm = fork_params.get("TDMFuse")
+        flat_tdm = tdm if tdm is not None and tdm.active and isinstance(tdm.values, list) else None
+        coupled = []
+        for entry in mi_groups:
+            own = entry.get("TDMFuse")
+            source = own if own is not None else flat_tdm
+            if source is None:
+                tdm_values = [None]
+            else:
+                values = source.values if isinstance(source.values, list) else [source.values]
+                tdm_values = [0] + [v for v in values if v != 0]
+                if _mi_num_waves(entry) == 1:
+                    tdm_values = [0]
+            for lsi in others:
+                for tdm_value in tdm_values:
+                    e = {**entry, "LDSSegmentInterleave": self._make_param("LDSSegmentInterleave", [lsi])}
+                    if tdm_value is not None:
+                        e["TDMFuse"] = self._make_param("TDMFuse", [tdm_value])
+                    coupled.append(e)
+            if _can_interleave(entry):
+                coupled.append({
+                    **entry,
+                    "LDSSegmentInterleave": self._make_param("LDSSegmentInterleave", [1]),
+                    "TDMFuse": self._make_param("TDMFuse", [0]),
+                })
+        del fork_params["LDSSegmentInterleave"]
+        if flat_tdm is not None:
+            del fork_params["TDMFuse"]
         return fork_params, coupled
 
 
@@ -419,17 +517,23 @@ class _GFX1250ClusterDimCoupling:
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
-# it runs last, on the final, de-duplicated MI groups, and
-# _GFX1250SourceSwapSplit just before it, so the coupling ranks every
-# (MI, SourceSwap) entry on the tile it builds and each per-shape copy inherits
-# its entry's SourceSwap; _GFX1250TDMFuseOneWave runs before the split, so every
-# copy also inherits its group's TDMFuse. The steps therefore run as:
-# _GFX1250WaveTileFilter, _GFX1250GeometryNarrowing, _GFX1250DropMIGroupGSU,
-# _GFX1250TDMFuseOneWave, _GFX1250SourceSwapSplit, _GFX1250ClusterDimCoupling.
+# it runs last, on the final, de-duplicated MI groups. Before it, in run order:
+# _GFX1250TDMFuseOneWave; _GFX1250SegmentInterleaveLayout, which reads the
+# TDMFuse the one-wave step left on each group and so must follow it, and runs
+# after the narrowing so Rule C has already dropped an LDSSegmentInterleave=1
+# that no MI can build; and _GFX1250SourceSwapSplit, which repeats every
+# (MI, LDSSegmentInterleave, TDMFuse) entry once per SourceSwap value right
+# before the coupling, so the coupling ranks each entry on the tile it builds.
+# Each per-shape copy inherits its entry's SourceSwap, LDSSegmentInterleave and
+# TDMFuse. The steps therefore run as: _GFX1250WaveTileFilter,
+# _GFX1250GeometryNarrowing, _GFX1250DropMIGroupGSU, _GFX1250TDMFuseOneWave,
+# _GFX1250SegmentInterleaveLayout, _GFX1250SourceSwapSplit,
+# _GFX1250ClusterDimCoupling.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
     _GFX1250SourceSwapSplit,
+    _GFX1250SegmentInterleaveLayout,
     _GFX1250TDMFuseOneWave,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,

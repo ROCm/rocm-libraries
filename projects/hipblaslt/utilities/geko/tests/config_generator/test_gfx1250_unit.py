@@ -438,10 +438,25 @@ def test_couple_cluster_dim_square_mi_ignores_source_swap() -> None:
 
 
 def _shapes_by_mi_and_swap(groups: list) -> dict:
-    out: dict = {}
+    """ClusterDim shapes per (MI, SourceSwap).
+
+    The other group fields (LDSSegmentInterleave / TDMFuse) split an entry into
+    variants; every variant of one (MI, SourceSwap) must get the same shapes.
+    """
+    variants: dict = {}
     for e in groups:
         key = (tuple(e["MatrixInstruction"].values), e["SourceSwap"].values[0])
-        out.setdefault(key, []).append(e["ClusterDim"].values[0])
+        rest = tuple(
+            (k, repr(fp.values))
+            for k, fp in e.items()
+            if k not in ("MatrixInstruction", "SourceSwap", "ClusterDim")
+        )
+        variants.setdefault(key, {}).setdefault(rest, []).append(e["ClusterDim"].values[0])
+    out: dict = {}
+    for key, per_variant in variants.items():
+        shapes = list(per_variant.values())
+        assert all(s == shapes[0] for s in shapes)
+        out[key] = shapes[0]
     return out
 
 
@@ -569,7 +584,9 @@ def test_source_swap_split_gives_every_mi_both_values() -> None:
 def test_ga_post_processor_runs_source_swap_split_before_cluster_dim() -> None:
     pp = _ga_pp()
     order = pp._post_process_methods
-    assert order.index("drop_mi_group_gsu") < order.index("split_source_swap")
+    assert order.index("drop_mi_group_gsu") < order.index("keep_one_wave_tdm_fuse_zero")
+    assert order.index("keep_one_wave_tdm_fuse_zero") < order.index("couple_lds_segment_interleave")
+    assert order.index("couple_lds_segment_interleave") < order.index("split_source_swap")
     assert order.index("split_source_swap") < order.index("couple_cluster_dim")
     fork = {"SourceSwap": _ss([False, True]), "ClusterDim": _cd([[1, 1], [2, 2]])}
     groups = [_mi_entry(_MI_SQUARE), _mi_entry([32, 16, 128, 1, 1, 4, 8, 2, 2])]
@@ -666,6 +683,208 @@ def test_tdm_fuse_one_wave_survives_cluster_dim_coupling(monkeypatch: pytest.Mon
     assert "TDMFuse" not in f2
     assert {tuple(e["TDMFuse"].values) for e in g2 if e["MatrixInstruction"].values[7:] == [1, 1]} == {(0,)}
     assert {tuple(e["TDMFuse"].values) for e in g2 if e["MatrixInstruction"].values[7:] == [2, 2]} == {(1,)}
+
+
+# ---------------------------------------------------------------------------
+# LDSSegmentInterleave: profile values + _GFX1250SegmentInterleaveLayout
+# ---------------------------------------------------------------------------
+
+
+_LSI_SIZE = (4096, 3072, 1, 65536)
+_LSI_CTX = SizeContext(M=4096, N=3072, B=1, K=65536)
+# MIWaveGroup [2, 2]: can interleave.
+_MI_32X16 = [32, 16, 128, 1, 1, 8, 4, 2, 2]
+# MIWaveGroup [2, 4]: neither [2, 2] nor asymmetric, so it cannot interleave.
+_MI_NO_INTERLEAVE = [16, 16, 128, 1, 1, 4, 4, 2, 4]
+# One wave: TDMFuse 0 only, and MIWaveGroup [1, 1] cannot interleave.
+_MI_ONE_WAVE = [16, 16, 128, 1, 1, 8, 8, 1, 1]
+
+
+def _lsi(values: list, active: bool = True) -> ForkParameter:
+    return ForkParameter(name="LDSSegmentInterleave", values=values, active=active)
+
+
+def _tdm(values: list, active: bool = True) -> ForkParameter:
+    return ForkParameter(name="TDMFuse", values=values, active=active)
+
+
+def _lsi_tdm(entry: dict) -> tuple:
+    tdm = entry["TDMFuse"].values[0] if "TDMFuse" in entry else None
+    return entry["LDSSegmentInterleave"].values[0], tdm
+
+
+def _lsi_tdm_by_mi(groups: list) -> dict:
+    """The (LDSSegmentInterleave, TDMFuse) pairs of every MI, in entry order."""
+    out: dict = {}
+    for e in groups:
+        pair = _lsi_tdm(e)
+        pairs = out.setdefault(tuple(e["MatrixInstruction"].values), [])
+        if pair not in pairs:
+            pairs.append(pair)
+    return out
+
+
+def _single_valued(groups: list) -> bool:
+    return all(
+        isinstance(fp.values, list) and len(fp.values) == 1
+        for e in groups for name, fp in e.items() if name != "MatrixInstruction"
+    )
+
+
+@pytest.mark.parametrize("combo", _GA_COMBOS)
+def test_gfx1250_ga_profile_offers_lds_segment_interleave_with_b_rotate_0(combo: dict) -> None:
+    profile = g1250_opt.GFX1250GAParams(_cfg(**combo))
+    ctx = SizeContext(M=128, N=128, B=1, K=128)
+    assert profile.lds_segment_interleave(ctx).values == [0, 1]
+    assert profile.lds_segment_b_rotate(ctx).values == [0]
+
+
+@pytest.mark.parametrize("streamk", [False, True])
+def test_gfx1250_heuristic_profile_keeps_lds_segment_interleave_0(streamk: bool) -> None:
+    profile = g1250_opt.GFX1250Params(_cfg(dt="F4", streamk=streamk, mx=True))
+    params, _ = profile.generate_for_size(_LSI_SIZE)
+    assert params["LDSSegmentInterleave"].values == [0]
+
+
+def test_interleavable_matches_tensile_mi_wave_groups() -> None:
+    ok = g1250_pp._interleavable
+    assert ok((2, 2)) and ok((1, 4)) and ok((4, 1)) and ok((1, 2))
+    assert not ok((1, 1)) and not ok((2, 4)) and not ok((4, 4))
+    assert g1250_pp._mi_wave_group(_MI_32X16) == (2, 2)
+    assert g1250_pp._mi_wave_group(_MI_NO_INTERLEAVE) == (2, 4)
+    assert g1250_pp._mi_wave_group(_MI_ONE_WAVE) == (1, 1)
+
+
+def test_can_interleave_needs_wave_group_and_local_split_u_1() -> None:
+    def lsu(n: int) -> dict:
+        return {**_mi_entry(_MI_32X16), "WorkGroup": ForkParameter(name="WorkGroup", values=[32, 4, n])}
+
+    assert g1250_pp._can_interleave(_mi_entry(_MI_32X16))
+    assert g1250_pp._can_interleave(lsu(1))
+    assert not g1250_pp._can_interleave(lsu(2))
+    assert not g1250_pp._can_interleave(_mi_entry(_MI_NO_INTERLEAVE))
+    assert not g1250_pp._can_interleave(_mi_entry(_MI_ONE_WAVE))
+    # Unreadable MIs are not narrowed.
+    assert g1250_pp._can_interleave(_mi_entry([1, 2, 3]))
+
+
+def test_segment_interleave_layout_couples_tdm_fuse_per_mi() -> None:
+    pp = _ga_pp()
+    fork = {"LDSSegmentInterleave": _lsi([0, 1]), "TDMFuse": _tdm([1])}
+    groups = [_mi_entry(_MI_32X16), _mi_entry(_MI_NO_INTERLEAVE)]
+    f2, coupled = pp.couple_lds_segment_interleave(fork, groups, _LSI_CTX)
+    assert "LDSSegmentInterleave" not in f2 and "TDMFuse" not in f2
+    assert [(e["MatrixInstruction"].values, _lsi_tdm(e)) for e in coupled] == [
+        (_MI_32X16, (0, 0)),
+        (_MI_32X16, (0, 1)),
+        (_MI_32X16, (1, 0)),
+        (_MI_NO_INTERLEAVE, (0, 0)),
+        (_MI_NO_INTERLEAVE, (0, 1)),
+    ]
+    assert _single_valued(coupled)
+
+
+def test_segment_interleave_layout_skips_local_split_u_above_1() -> None:
+    entry = {**_mi_entry(_MI_32X16), "WorkGroup": ForkParameter(name="WorkGroup", values=[32, 4, 2])}
+    _, coupled = _ga_pp().couple_lds_segment_interleave(
+        {"LDSSegmentInterleave": _lsi([0, 1]), "TDMFuse": _tdm([1])}, [entry], _LSI_CTX
+    )
+    assert [_lsi_tdm(e) for e in coupled] == [(0, 0), (0, 1)]
+
+
+def test_segment_interleave_layout_keeps_one_wave_mi_at_tdm_fuse_0() -> None:
+    """After _GFX1250TDMFuseOneWave the groups carry their own TDMFuse; one-wave MIs
+    keep only 0, every other MI gets 0 next to the value it had."""
+    pp = _ga_pp()
+    fork = {"LDSSegmentInterleave": _lsi([0, 1]), "TDMFuse": _tdm([1])}
+    groups = [_mi_entry(_MI_ONE_WAVE), _mi_entry(_MI_32X16)]
+    f1, groups = pp.keep_one_wave_tdm_fuse_zero(fork, groups, _LSI_CTX)
+    assert "TDMFuse" not in f1
+    f2, coupled = pp.couple_lds_segment_interleave(f1, groups, _LSI_CTX)
+    assert f2 == {}
+    assert _lsi_tdm_by_mi(coupled) == {
+        tuple(_MI_ONE_WAVE): [(0, 0)],
+        tuple(_MI_32X16): [(0, 0), (0, 1), (1, 0)],
+    }
+    assert _single_valued(coupled)
+
+
+def test_segment_interleave_layout_splits_multi_valued_tdm_fuse() -> None:
+    pp = _ga_pp()
+    fork = {"LDSSegmentInterleave": _lsi([0, 1]), "TDMFuse": _tdm([0, 1, 2])}
+    _, coupled = pp.couple_lds_segment_interleave(fork, [_mi_entry(_MI_32X16)], _LSI_CTX)
+    assert [_lsi_tdm(e) for e in coupled] == [(0, 0), (0, 1), (0, 2), (1, 0)]
+    assert _single_valued(coupled)
+
+
+def test_segment_interleave_layout_without_tdm_fuse() -> None:
+    """No TDMFuse to couple (absent or inactive): the 0 entries carry none, the 1
+    entries still get TDMFuse 0, and an inactive flat TDMFuse is left in place."""
+    pp = _ga_pp()
+    for fork in ({}, {"TDMFuse": _tdm([1], active=False)}):
+        fork["LDSSegmentInterleave"] = _lsi([0, 1])
+        f2, coupled = pp.couple_lds_segment_interleave(fork, [_mi_entry(_MI_32X16)], _LSI_CTX)
+        assert "LDSSegmentInterleave" not in f2
+        assert ("TDMFuse" in f2) == ("TDMFuse" in fork)
+        assert [_lsi_tdm(e) for e in coupled] == [(0, None), (1, 0)]
+
+
+@pytest.mark.parametrize(
+    "lsi",
+    [None, _lsi([0]), _lsi([1]), _lsi([0, 1], active=False)],
+    ids=["missing", "only-0", "only-1", "inactive"],
+)
+def test_segment_interleave_layout_noop(lsi) -> None:
+    pp = _ga_pp()
+    fork = {"TDMFuse": _tdm([1])}
+    if lsi is not None:
+        fork["LDSSegmentInterleave"] = lsi
+    groups = [_mi_entry(_MI_32X16)]
+    f2, g2 = pp.couple_lds_segment_interleave(fork, groups, _LSI_CTX)
+    assert g2 is groups
+    assert f2["TDMFuse"].values == [1]
+
+
+def test_segment_interleave_layout_noop_when_no_mi_can_interleave() -> None:
+    """Rule C narrows the flat parameter to [0] first, so nothing is coupled."""
+    pp = _ga_pp()
+    fork = {"LDSSegmentInterleave": _lsi([0, 1]), "TDMFuse": _tdm([1])}
+    groups = [_mi_entry(_MI_NO_INTERLEAVE)]
+    f2, g2 = pp.apply(fork, groups, _LSI_SIZE)
+    assert f2["LDSSegmentInterleave"].values == [0] and f2["TDMFuse"].values == [1]
+    assert all("LDSSegmentInterleave" not in e and "TDMFuse" not in e for e in g2)
+
+
+@pytest.mark.parametrize("streamk", [False, True])
+def test_ga_pipeline_couples_lds_segment_interleave_and_tdm_fuse(streamk: bool) -> None:
+    """Profile output through the full GA post-processor, as the generator runs it."""
+    cfg = _cfg(arch="gfx1250_96cu", dt="F4", streamk=streamk, mx=True)
+    params, _ = g1250_opt.GFX1250GAParams(cfg).generate_for_size(_LSI_SIZE)
+    assert params["LDSSegmentInterleave"].values == [0, 1]
+    assert params["TDMFuse"].values == [1]
+    assert len(params["ClusterDim"].values) > 1
+    groups = [_mi_entry(_MI_32X16), _mi_entry(_MI_NO_INTERLEAVE), _mi_entry(_MI_ONE_WAVE)]
+    f2, coupled = g1250_pp.GFX1250GAPostProcessor(cfg).apply(params, groups, _LSI_SIZE)
+    assert not {"LDSSegmentInterleave", "TDMFuse", "ClusterDim"} & set(f2)
+    assert _lsi_tdm_by_mi(coupled) == {
+        tuple(_MI_32X16): [(0, 0), (0, 1), (1, 0)],
+        tuple(_MI_NO_INTERLEAVE): [(0, 0), (0, 1)],
+        tuple(_MI_ONE_WAVE): [(0, 0)],
+    }
+    assert all("ClusterDim" in e for e in coupled)
+    assert _single_valued(coupled)
+    # Every (LDSSegmentInterleave, TDMFuse) entry of an MI gets the same ClusterDim shapes.
+    for mi in (_MI_32X16, _MI_NO_INTERLEAVE):
+        shapes: dict = {}
+        for e in coupled:
+            if e["MatrixInstruction"].values == mi:
+                key = (_lsi_tdm(e), e["SourceSwap"].values[0])
+                shapes.setdefault(key, []).append(e["ClusterDim"].values[0])
+        per_swap: dict = {}
+        for (pair, swap), s in shapes.items():
+            per_swap.setdefault(swap, []).append(s)
+        for lists in per_swap.values():
+            assert len(lists) >= 2 and all(s == lists[0] and s for s in lists)
 
 
 # ---------------------------------------------------------------------------

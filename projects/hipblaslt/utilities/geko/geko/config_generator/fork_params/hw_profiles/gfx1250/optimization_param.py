@@ -565,7 +565,10 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         builds its own kernel.
 
         TDMFuse 1-3 need more than one wave; ``_GFX1250TDMFuseOneWave`` in
-        post_processor.py keeps one-wave MIs at TDMFuse=0.
+        post_processor.py keeps one-wave MIs at TDMFuse=0. TDMFuse>0 also rules
+        out the paired LDS layout, so ``_GFX1250SegmentInterleaveLayout`` gives
+        LDSSegmentInterleave=1 entries TDMFuse=0 and offers the
+        LDSSegmentInterleave=0 entries both TDMFuse 0 and 1.
         """
         return self._make_param("TDMFuse", [1])
 
@@ -967,11 +970,23 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> ForkParameter:
-        # MI455X latest reco: pin to 1 (paired with BRotate=1).
-        # ---
-        # AIHPBLAS-5252: since LDSSegmentBRotate is forced to 0, 
-        # LDSSegmentInterleave should be set to 0 as well to generate valid kernels.
-        return self._make_param("LDSSegmentInterleave", [0])
+        """[0, 1]; independent of LDSSegmentBRotate, which stays pinned to 0.
+
+        AIHPBLAS-5252 is about LDSSegmentBRotate=1 only, which Tensile rejects
+        on StreamK. LDSSegmentInterleave=1 with LDSSegmentBRotate=0 builds on
+        StreamK as well, and TensileLite builds the paired LDS layouts for
+        StreamK / persistent kernels too.
+
+        The paired layout needs TDMFuse=0, while this profile pins TDMFuse to 1
+        so TemporalHintA/B apply independently (see ``tdm_fuse``). Rather than
+        give up either, ``_GFX1250SegmentInterleaveLayout`` in post_processor.py
+        couples the two per MI group: each MI that can interleave gets an
+        LDSSegmentInterleave=1 entry with TDMFuse=0, and every MI keeps
+        LDSSegmentInterleave=0 entries with TDMFuse 0 and 1, so TDMFuse=1's
+        independent temporal hints stay in the search for 0. MIs whose
+        MIWaveGroup or LocalSplitU cannot interleave stay at 0.
+        """
+        return self._make_param("LDSSegmentInterleave", [0, 1])
 
     @param
     def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
