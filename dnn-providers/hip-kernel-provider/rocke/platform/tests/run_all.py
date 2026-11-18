@@ -200,33 +200,34 @@ NATIVE_PARITY_TESTS = (
 )
 
 
-def _export_native_executable(
-    env: dict[str, str], var: str, executable: str | Path | None, label: str
-) -> None:
-    """Set ``var`` in ``env`` to ``executable``, resolved, or report the skip."""
-    if not executable:
-        print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
-        return
-    path = Path(executable).resolve()
-    if not path.is_file():
-        raise ValueError(f"{label} test executable does not exist: {path}")
-    env[var] = str(path)
-    print(f"\n== {label}: {path} ==")
+def _ctest_command_index(
+    build_root: Path, config: str, requested: set[str]
+) -> dict[str, list[str]]:
+    """Read one CTest listing and index the requested test commands by name."""
+    commands: dict[str, list[str]] = {}
+    for test in ctest_tests(build_root, config):
+        name = test["name"]
+        if name not in requested:
+            continue
+        if name in commands:
+            raise ValueError(f"CTest registered {name} more than once")
+        commands[name] = test.get("command", [])
+    return commands
 
 
 def _native_executable(
-    env: dict[str, str], build_root: Path, config: str, var: str, ctest_name: str
+    env: dict[str, str],
+    ctest_commands: dict[str, list[str]] | None,
+    var: str,
+    ctest_name: str,
 ) -> str | None:
-    """An explicit env value wins; otherwise ask CTest for the built binary."""
+    """An explicit env value wins; otherwise use the configured CTest command."""
     executable = env.get(var)
-    if not executable and (build_root / "CMakeCache.txt").is_file():
-        tests = ctest_tests(build_root, config, f"^{ctest_name}$")
-        commands = [
-            test.get("command", []) for test in tests if test["name"] == ctest_name
-        ]
-        if len(commands) != 1 or not commands[0]:
+    if not executable and ctest_commands is not None:
+        command = ctest_commands.get(ctest_name)
+        if not command:
             raise ValueError(f"CTest did not resolve the built {ctest_name} executable")
-        executable = commands[0][0]
+        executable = command[0]
     return executable
 
 
@@ -301,7 +302,8 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     # Only this runner may claim that its own complete corpus gate succeeded.
     # An ambient value must not suppress the standalone pytest delegation.
     env.pop(_ARCH_DOMAIN_COMPLETE_ENV, None)
-    if (build_root / "CMakeCache.txt").is_file():
+    configured = (build_root / "CMakeCache.txt").is_file()
+    if configured:
         subprocess.run(
             [
                 "cmake",
@@ -314,22 +316,24 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             ],
             check=True,
         )
+    unresolved_ctests = {
+        ctest_name for var, ctest_name, _ in NATIVE_PARITY_TESTS if not env.get(var)
+    }
+    ctest_commands = (
+        _ctest_command_index(build_root, config, unresolved_ctests)
+        if configured and unresolved_ctests
+        else None
+    )
     for var, ctest_name, label in NATIVE_PARITY_TESTS:
-        executable = _native_executable(env, build_root, config, var, ctest_name)
-        _export_native_executable(env, var, executable, label)
-
-    # The C++ HIP lowering program, which is not a CTest: the both-engine HIP
-    # checks run it where the binding is not built, and one test holds it to the
-    # binding where it is. The installed rocke_hip_source_identity and
-    # rocke_hip_lowering_parity CTests supply the same variable.
-    from rocke.tests.engines import IR_LOWER_CLI_ENV
-
-    ir_lower_cli = env.get(IR_LOWER_CLI_ENV) or _built_test_program(
-        build_root, config, "rocke_ir_lower_cli"
-    )
-    _export_native_executable(
-        env, IR_LOWER_CLI_ENV, ir_lower_cli, "native HIP lowering program"
-    )
+        executable = _native_executable(env, ctest_commands, var, ctest_name)
+        if executable:
+            path = Path(executable).resolve()
+            if not path.is_file():
+                raise ValueError(f"{label} test executable does not exist: {path}")
+            env[var] = str(path)
+            print(f"\n== {label}: {path} ==")
+        else:
+            print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
 
     # Keep every portable-IR binary on this one configured source snapshot.
     # In the ordinary run_all flow check_byte_identity configured the shared

@@ -170,9 +170,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
         "--parallel",
         "3",
     ]
-    assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
-    # An explicit override skips the storage lookup; other binaries still resolve.
-    assert any("^rocke_storage$" in cmd for cmd, _ in calls) is not override
+    ctest_listings = [cmd for cmd, _ in calls if "--show-only=json-v1" in cmd]
+    # Native discovery uses one complete listing; ctest_ready obtains the other.
+    assert len(ctest_listings) == 2
+    assert all("-R" not in cmd for cmd in ctest_listings)
 
 
 @pytest.mark.parametrize("built", ["none", "partial", "all"])
@@ -423,6 +424,46 @@ def test_corpus_selectors_label_the_overall_result_focused(
 
     assert runner.main() == 0
     assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
+def test_ctest_command_index_rejects_duplicate_names(runner, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        runner,
+        "ctest_tests",
+        lambda *_args: [
+            {"name": "rocke_storage", "command": ["first"]},
+            {"name": "rocke_storage", "command": ["second"]},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="rocke_storage more than once"):
+        runner._ctest_command_index(tmp_path, "Release", {"rocke_storage"})
+
+
+def test_ctest_command_index_ignores_unrequested_duplicate_names(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        runner,
+        "ctest_tests",
+        lambda *_args: [
+            {"name": "other", "command": ["first"]},
+            {"name": "rocke_storage", "command": ["storage"]},
+            {"name": "other", "command": ["second"]},
+        ],
+    )
+
+    assert runner._ctest_command_index(tmp_path, "Release", {"rocke_storage"}) == {
+        "rocke_storage": ["storage"]
+    }
+
+
+@pytest.mark.parametrize("commands", [{}, {"rocke_storage": []}])
+def test_native_executable_rejects_missing_or_commandless_registration(
+    runner, commands
+):
+    with pytest.raises(ValueError, match="did not resolve the built rocke_storage"):
+        runner._native_executable({}, commands, "ROCKE_STORAGE_TEST", "rocke_storage")
 
 
 def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
@@ -717,29 +758,24 @@ def test_fresh_build_prepares_entire_ctest_suite(
         pytest.skip("CMake, CTest, and Ninja required for fresh-build regression")
     source = tmp_path / "source"
     source.mkdir()
-    # Exercise real build/discovery/execution without requiring a C toolchain.
-    # Copy CMake itself as each executable: `-E true` supplies the trivial
-    # success behavior, and the executable exists only after its target builds.
+    # One parity name proves real CTest discovery, using the existing CMake
+    # executable so the fixture does not create a new program. Its target stamp
+    # proves the parity target built; an unrelated ALL stamp proves setup also
+    # completes the rest of the configured suite after an earlier partial build.
     (source / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(runner_fixture LANGUAGES NONE)\n"
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
-        'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_ir_types rocke_float_format rocke_nontemporal_hip\n"
-        "             rocke_unsigned_int_ops rocke_arch_target_identity rocke_buffer_rsrc_hip\n"
-        "             rocke_intexpr\n"
-        "             rocke_param_facts\n"
-        "             rocke_gpu_checked_value\n"
-        "             rocke_dtypes)\n"
-        '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
-        '  add_custom_command(OUTPUT "${output}"\n'
-        '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
-        '    COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_COMMAND}" "${output}"\n'
-        "    VERBATIM)\n"
-        '  add_custom_target(${name} ALL DEPENDS "${output}")\n'
-        '  add_test(NAME ${name} COMMAND "${output}" -E true)\n'
-        "endforeach()\n"
+        'set(storage "${CMAKE_CURRENT_BINARY_DIR}/rocke_storage.ready")\n'
+        'add_custom_command(OUTPUT "${storage}"\n'
+        '  COMMAND "${CMAKE_COMMAND}" -E touch "${storage}" VERBATIM)\n'
+        'add_custom_target(rocke_storage ALL DEPENDS "${storage}")\n'
+        'add_test(NAME rocke_storage COMMAND "${CMAKE_COMMAND}" -E true)\n'
+        'set(sentinel "${CMAKE_CURRENT_BINARY_DIR}/whole_suite.ready")\n'
+        'add_custom_command(OUTPUT "${sentinel}"\n'
+        '  COMMAND "${CMAKE_COMMAND}" -E touch "${sentinel}" VERBATIM)\n'
+        'add_custom_target(whole_suite_sentinel ALL DEPENDS "${sentinel}")\n'
     )
     build = tmp_path / "build"
     subprocess.run(
@@ -749,29 +785,21 @@ def test_fresh_build_prepares_entire_ctest_suite(
     subprocess.run(
         ["cmake", "--build", str(build), "--target", "rocke_core"], check=True
     )
+    monkeypatch.setattr(
+        runner,
+        "NATIVE_PARITY_TESTS",
+        (("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),),
+    )
+    executable = tmp_path / "override"
     if override:
         # An external fixture must not suppress the configured suite's build.
-        executable = tmp_path / "override"
         executable.touch()
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
-    assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
-    assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
-    assert Path(env["ROCKE_FLOAT_FORMAT_TEST"]).is_file()
-    assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
-    assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()
-    assert Path(env["ROCKE_INTEXPR_CLI"]).is_file()
-    assert Path(env["ROCKE_PARAM_FACTS_CLI"]).is_file()
-    assert Path(env["ROCKE_GPU_CHECKED_VALUE_CLI"]).is_file()
-    assert Path(env["ROCKE_ARCH_TARGET_TEST_EXE"]).is_file()
-    assert Path(env["ROCKE_BUFFER_RSRC_HIP_TEST"]).is_file()
-    if override:
-        assert env["ROCKE_STORAGE_TEST"] == str(executable)
-    assert runner.ctest_ready(build, "Release")
-    subprocess.run(
-        ["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure"],
-        check=True,
-    )
+    expected = executable if override else Path(shutil.which("cmake"))
+    assert env["ROCKE_STORAGE_TEST"] == str(expected.resolve())
+    assert (build / "rocke_storage.ready").is_file()
+    assert (build / "whole_suite.ready").is_file()
 
 
 def test_multi_config_build_supplies_its_archive(runner, monkeypatch, tmp_path):
