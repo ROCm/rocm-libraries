@@ -191,7 +191,7 @@ namespace
         float               alpha       = 1.0f;
         bool                diag_blocks = true;
         // When positive, maxGridSize[0] of the solve. 1 is smaller than every grid
-        // of these sizes, so the host launches the wide kernels.
+        // of these sizes, so each block of the solve walks a chunk of row groups.
         int max_grid_x = 0;
     };
 
@@ -368,11 +368,12 @@ namespace
         }
     }
 
-    // A grid of one block is smaller than the narrow launch of 8 block rows on
-    // either wavefront size, so the host picks the wide kernels for every case:
-    // the general ones on wave32, and on wave64 the shared ones with BSRDIM 8,
-    // 16 and 32 and the general one above 32.
-    TEST_F(L2DeviceBsrsv, clamped_grid_wide_kernels)
+    // A grid of one block is smaller than the launch of 8 block rows on either
+    // wavefront size. Every offset fits in rocsparse_int, so the host keeps the
+    // narrow kernels, and the one block walks all the row groups: the general
+    // kernels on wave32, and on wave64 the shared ones with BSRDIM 8, 16 and 32
+    // and the general one above 32.
+    TEST_F(L2DeviceBsrsv, clamped_grid_narrow_kernels)
     {
         sweep_dims<float>({2, 8, 9, 16, 17, 32, 33, 40}, 8, 1);
         sweep_dims<double>({3, 20}, 8, 1);

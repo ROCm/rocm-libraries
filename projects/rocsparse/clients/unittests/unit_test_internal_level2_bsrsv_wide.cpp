@@ -30,15 +30,15 @@
 // of 1, and hold 37 in the triangle the solve must not read. With alpha = -2
 // and a varying x, the diagonal division, the in-block elimination, alpha and
 // the diagonal type all change the result, which a host solve in double
-// checks. L2DeviceBsrsv.clamped_grid_wide_kernels runs the wider sweep of
-// unit_test_device_level2_bsrsv.cpp through the wide kernels.
+// checks.
 //
 // Direct launches pass an undersized grid, which is the case the host creates
-// when get_grid_size_x clamps, and they instantiate (i32, i32), (i64, i32)
-// and (i64, i64). The public rocsparse_sbsrsv_solve tests shrink
-// maxGridSize[0] so the host is the one that picks the wide kernel, including
-// the transposed gather. The transposed analysis and gather at the 64-bit
-// widths run through bsrsv_solve_core.
+// when get_grid_size_x clamps, so they cover the chunk walk of the wide
+// kernels. They instantiate (i32, i32), (i64, i32) and (i64, i64). The public
+// rocsparse_sbsrsv_solve tests shrink maxGridSize[0]. Their offsets fit in
+// rocsparse_int, so the host keeps the narrow kernels and the tests cover the
+// chunk walk of those, including the transposed gather. The transposed
+// analysis and gather at the 64-bit widths run through bsrsv_solve_core.
 
 #include "unit_test_utils.hpp"
 
@@ -1271,24 +1271,23 @@ TEST_F(internal_level2_bsrsv_wide, needs_wide_predicate_boundaries)
 {
     const int64_t i32max = std::numeric_limits<int32_t>::max();
 
-    // Exact grid and small sizes stay narrow.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 4));
-    // Grid one short of the virtual blocks is wide.
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(8, 2, 4, 3));
+    // Small sizes stay narrow. The launch grid does not decide: the narrow
+    // kernels walk a clamped grid in chunks.
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(8, 2));
     // Empty problems never need the wide path.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(0, 2, 0, 0));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(0, 2));
 
     // mb at and past INT32_MAX.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(i32max, 1, i32max, i32max));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(i32max + 1, 1, i32max + 1, i32max + 1));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(i32max, 1));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(i32max + 1, 1));
 
     // mb * block_dim at and past INT32_MAX (1048576 * 2047 fits, 1048576 * 2048 does not).
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1048576, 2047, 1048576, 1048576));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1048576, 2048, 1048576, 1048576));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1048576, 2047));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1048576, 2048));
 
     // block_dim * block_dim alone: 46340^2 fits, 46341^2 does not.
-    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1, 46340, 1, 1));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1, 46341, 1, 1));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1, 46340));
+    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1, 46341));
 }
 
 TEST_F(internal_level2_bsrsv_wide, public_lower_narrow_and_clamped)

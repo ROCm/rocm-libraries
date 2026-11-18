@@ -32,33 +32,27 @@
 #include <limits>
 
 // 64-bit bsrsv solve kernels. The host launches these when the matrix index
-// types are not rocsparse_int, when row * block_dim does not fit in
-// rocsparse_int, or when the launch grid is clamped. Each thread block walks
-// a contiguous chunk of the row-map slots, so a clamped grid still covers
-// every block row and the done-flag spins stay in topological order.
+// types are not rocsparse_int or when an offset of the solve does not fit in
+// rocsparse_int. Each thread block walks a contiguous chunk of the row-map
+// slots, so a clamped grid still covers every block row and the done-flag
+// spins stay in topological order.
 //
 // The narrow kernels in bsrsv_device.h keep their rocsparse_int signatures.
-// Their 32/32 instantiation is the legacy launch.
+// Their 32/32 instantiation is the legacy launch, and they walk a clamped
+// grid the same way, so a clamped grid alone does not need these kernels.
 
 namespace rocsparse
 {
     // True when the wide kernels run instead of the narrow (rocsparse_int)
-    // ones: the grid does not cover every virtual block, mb itself does not fit
-    // in rocsparse_int, a vector offset row * block_dim does not fit, or the
-    // in-block offset bi * block_dim does not fit. The block value offset
-    // block_dim * block_dim * j is formed in int64_t by BSR_IND on both paths,
-    // so nnzb does not decide.
-    __host__ __forceinline__ bool
-        bsrsv_solve_needs_wide(int64_t mb, int64_t block_dim, int64_t num_blocks, int64_t grid_x)
+    // ones: mb itself does not fit in rocsparse_int, a vector offset
+    // row * block_dim does not fit, or the in-block offset bi * block_dim does
+    // not fit. The block value offset block_dim * block_dim * j is formed in
+    // int64_t by BSR_IND on both paths, so nnzb does not decide.
+    __host__ __forceinline__ bool bsrsv_solve_needs_wide(int64_t mb, int64_t block_dim)
     {
-        if(mb <= 0 || block_dim <= 0 || num_blocks <= 0)
+        if(mb <= 0 || block_dim <= 0)
         {
             return false;
-        }
-
-        if(grid_x < num_blocks)
-        {
-            return true;
         }
 
         const int64_t narrow_max = static_cast<int64_t>(std::numeric_limits<rocsparse_int>::max());

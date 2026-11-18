@@ -106,20 +106,19 @@ namespace rocsparse
     }                                                                  \
     }
 
-    // Grid in 64 bit, then the narrow kernel when the legacy 32-bit launch is
-    // still exact and the wide kernel otherwise. bsrsv_legacy_indices is a
+    // Grid in 64 bit, then the narrow kernel when every offset of the solve
+    // fits in rocsparse_int and the wide kernel otherwise. Both walk a clamped
+    // grid in chunks, so the grid does not decide. bsrsv_legacy_indices is a
     // constexpr bool in the caller, so the narrow kernel is only instantiated
     // for rocsparse_int indices.
-#define LAUNCH_BSRSV_PREPARE(bsize, wfsize)                                                       \
-    const int64_t bsrsv_num_blocks = rocsparse::ceil_div(                                         \
-        static_cast<int64_t>(mb) * static_cast<int64_t>(wfsize), static_cast<int64_t>(bsize));    \
-    const uint32_t bsrsv_grid                                                                     \
-        = rocsparse::get_grid_size_x(handle, bsrsv_num_blocks, static_cast<int64_t>(bsize));      \
-    const bool bsrsv_wide = !bsrsv_legacy_indices                                                 \
-                            || rocsparse::bsrsv_solve_needs_wide(static_cast<int64_t>(mb),        \
-                                                                 static_cast<int64_t>(block_dim), \
-                                                                 bsrsv_num_blocks,                \
-                                                                 static_cast<int64_t>(bsrsv_grid))
+#define LAUNCH_BSRSV_PREPARE(bsize, wfsize)                                                    \
+    const int64_t bsrsv_num_blocks = rocsparse::ceil_div(                                      \
+        static_cast<int64_t>(mb) * static_cast<int64_t>(wfsize), static_cast<int64_t>(bsize)); \
+    const uint32_t bsrsv_grid                                                                  \
+        = rocsparse::get_grid_size_x(handle, bsrsv_num_blocks, static_cast<int64_t>(bsize));   \
+    const bool bsrsv_wide = !bsrsv_legacy_indices                                              \
+                            || rocsparse::bsrsv_solve_needs_wide(static_cast<int64_t>(mb),     \
+                                                                 static_cast<int64_t>(block_dim))
 
 #define LAUNCH_BSRSV_LOWER_SHARED(bsize, wfsize, dim, arch)                       \
     do                                                                            \
