@@ -166,6 +166,14 @@ def countProblemsInConfig(configPath):
     return count
 
 
+def _parseConfigLine(line: str) -> tuple[str, str]:
+    """Read an INI assignment using the client's comment and whitespace rules."""
+    key, separator, value = line.partition('#')[0].partition('=')
+    if not separator:
+        return '', ''
+    return key.strip(), value.strip()
+
+
 def createPerGpuConfig(originalConfigPath, gpuIdx, problemStartIdx, numProblems, tempDir):
     """Create a modified config file for a specific GPU."""
     baseName = os.path.basename(originalConfigPath)
@@ -177,11 +185,12 @@ def createPerGpuConfig(originalConfigPath, gpuIdx, problemStartIdx, numProblems,
 
     with open(newConfigPath, 'w') as outFile:
         for line in lines:
+            key, _ = _parseConfigLine(line)
             # Replace device-idx
-            if line.strip().startswith('device-idx='):
+            if key == 'device-idx':
                 outFile.write(f"device-idx={gpuIdx}\n")
             # Replace results-file
-            elif line.strip().startswith('results-file='):
+            elif key == 'results-file':
                 outFile.write(f"results-file={newResultsPath}\n")
             else:
                 outFile.write(line)
@@ -311,9 +320,7 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
         noResultsFile = False
         with open(configPath, 'r') as f:
             for line in f:
-                key, _, value = line.partition('#')[0].partition('=')
-                key = key.strip()
-                value = value.strip()
+                key, value = _parseConfigLine(line)
                 if key == 'results-file' and originalResultsPath is None:
                     originalResultsPath = value
                 elif key == 'no-results-file':
