@@ -86,11 +86,12 @@ typedef enum class _hipblaslt_bias_source
     d = 3,
 } hipblaslt_bias_source;
 
-// Directions hipblaslt-bench checks D for uniformity in, one bit each.
+// The direction hipblaslt-bench checks D for uniformity in.
 typedef enum class _hipblaslt_uniform_check
 {
-    none = 0,
-    row  = 1,
+    none   = 0,
+    row    = 1,
+    column = 2,
 } hipblaslt_uniform_check;
 
 inline hipDataType scaleDataType(hipblaslt_scaling_format s)
@@ -332,6 +333,9 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
     case hipblaslt_uniform_check::row:
         os << "row";
         break;
+    case hipblaslt_uniform_check::column:
+        os << "column";
+        break;
     }
     return os;
 }
@@ -438,9 +442,10 @@ inline const hipblaslt_bias_source string_to_hipblaslt_bias_source(const std::st
 // -1 for an unknown string, since none is 0.
 inline hipblaslt_uniform_check string_to_hipblaslt_uniform_check(const std::string& value)
 {
-    return value == "none"  ? hipblaslt_uniform_check::none
-           : value == "row" ? hipblaslt_uniform_check::row
-                            : static_cast<hipblaslt_uniform_check>(-1);
+    return value == "none"     ? hipblaslt_uniform_check::none
+           : value == "row"    ? hipblaslt_uniform_check::row
+           : value == "column" ? hipblaslt_uniform_check::column
+                               : static_cast<hipblaslt_uniform_check>(-1);
 }
 
 // Convert hipblaslt_activation_type to string

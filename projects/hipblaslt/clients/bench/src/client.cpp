@@ -514,14 +514,18 @@ try
 
         ("uniform_check",
          value<std::string>(&uniform_check)->default_value("none"),
-         "none or row. row makes the inputs uniform along M (every row of op(A), C, E, and the "
-         "bias and scale vectors along M, equal to row 0) and checks after timing that every row "
-         "of D is bitwise equal to row 0. Adds the row_uniform (pass, FAIL or skip), "
-         "row_uniform_bad_cols and row_uniform_first_row result columns. A failure is reported "
-         "on stderr and does not stop the run. With uniform summation order on, it counts as a "
-         "failed check for --verify_strict. Inputs that sum exactly in any order (rand_int, "
-         "integer_exact, integer types, ...) get a warning, since a pass shows little. Also a "
-         "YAML key.")
+         "none, row or column. row makes the inputs uniform along M (every row of op(A), "
+         "C, E, and the bias and scale vectors along M, equal to row 0) and checks after timing "
+         "that every row of D is bitwise equal to row 0, adding the row_uniform (pass, FAIL or "
+         "skip), row_uniform_bad_cols and row_uniform_first_row result columns. column does the "
+         "same along N (every column of op(B), C, E and the scaleB vector equal to column 0; "
+         "every column of D equal to column 0) and adds col_uniform, col_uniform_bad_rows and "
+         "col_uniform_first_col; a row-major PyTorch X@W reaches hipBLASLt as W^T X^T, so equal "
+         "rows of X are equal columns of op(B) and its output rows are columns of D. Check row "
+         "and column in separate runs. A failure is reported on stderr and does not stop the "
+         "run. With uniform summation order on, it counts as a failed check for --verify_strict. "
+         "Inputs that sum exactly in any order (rand_int, integer_exact, integer types, ...) get "
+         "a warning, since a pass shows little. Also a YAML key.")
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),

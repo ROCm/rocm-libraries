@@ -81,6 +81,7 @@ Datatypes:
       attr:
         none: 0
         row: 1
+        column: 2
   - hipblaslt_scaling_format:
       bases: [ c_int ]
       attr:

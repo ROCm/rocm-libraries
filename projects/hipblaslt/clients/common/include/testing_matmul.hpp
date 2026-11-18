@@ -3147,42 +3147,68 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
-    // uniform_check: ucSkip says why the check cannot run, and then every solution reports skip.
-    // A reason found here also leaves the inputs as generated.
+    // uniform_check: ucRows and ucCols say whether the row or column direction runs. A requested
+    // direction that cannot run says why on stderr and its solutions report skip; a reason found
+    // here also leaves its inputs as generated.
+    const bool  ucRowOn = arg.uniform_check == hipblaslt_uniform_check::row;
+    const bool  ucColOn = arg.uniform_check == hipblaslt_uniform_check::column;
+    bool        ucRows = ucRowOn, ucCols = ucColOn;
     std::string ucSkip;
-    auto        skipUniformCheck = [&](std::string why) {
-        ucSkip = std::move(why);
-        hipblaslt_cerr << "uniform_check not done: " << ucSkip << std::endl;
+    auto        skipUniformCheck = [&](bool& on, const char* direction, const std::string& why) {
+        on     = false;
+        ucSkip = why;
+        hipblaslt_cerr << "uniform_check " << direction << " not done: " << why << std::endl;
     };
-    if(arg.uniform_check != hipblaslt_uniform_check::none)
+    auto subByte = [](hipDataType t) {
+        const int v = static_cast<int>(t);
+        return v == HIP_R_4F_E2M1 || v == HIP_R_6F_E2M3 || v == HIP_R_6F_E3M2 || t == HIP_R_4I
+               || t == HIP_R_4U;
+    };
+    const char* cEqualD = arg.c_equal_d && (arg.beta != 0 || arg.betai != 0)
+                              ? "c_equal_d with a nonzero beta: each launch reads the D the "
+                                "previous launch wrote"
+                              : nullptr;
+    if(ucRows)
     {
-        const int tiA = static_cast<int>(TiA);
         if(std::all_of(M.begin(), M.end(), [](int64_t m) { return m <= 1; }))
-            skipUniformCheck("M is 1: D has a single row, so no row is compared");
+            skipUniformCheck(ucRows, "row", "M is 1: D has a single row, so no row is compared");
         else if(arg.partitions > 1)
-            skipUniformCheck("--partitions: each partition runs its own GEMM on its slice of D");
-        else if(arg.c_equal_d && (arg.beta != 0 || arg.betai != 0))
-            skipUniformCheck("c_equal_d with a nonzero beta: each launch reads the D the previous "
-                             "launch wrote");
+            skipUniformCheck(ucRows,
+                             "row",
+                             "--partitions: each partition runs its own GEMM on its slice of D");
+        else if(cEqualD)
+            skipUniformCheck(ucRows, "row", cEqualD);
         else if(isW4A16Scaling(arg.scaleA))
-            skipUniformCheck("w4a16 group scales");
+            skipUniformCheck(ucRows, "row", "w4a16 group scales");
         else if(isBlockScaling(arg.scaleA))
         {
             if(transA != HIPBLAS_OP_T)
-                skipUniformCheck("MX A requires transA=T");
+                skipUniformCheck(ucRows, "row", "MX A requires transA=T");
             else if(mx_use_rocroller
                     || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                skipUniformCheck("MX A with padded or preswizzled scales");
-            for(int i = 0; i < gemm_count && ucSkip.empty(); i++)
+                skipUniformCheck(ucRows, "row", "MX A with padded or preswizzled scales");
+            for(int i = 0; i < gemm_count && ucRows; i++)
                 if(lda[i] != A_row[i] || K[i] % 128 != 0)
-                    skipUniformCheck("MX A requires lda equal to K and K a multiple of 128");
+                    skipUniformCheck(
+                        ucRows, "row", "MX A requires lda equal to K and K a multiple of 128");
         }
-        else if(tiA == HIP_R_4F_E2M1 || tiA == HIP_R_6F_E2M3 || tiA == HIP_R_6F_E3M2
-                || TiA == HIP_R_4I || TiA == HIP_R_4U)
-            skipUniformCheck("sub-byte A without MX scales");
+        else if(subByte(TiA))
+            skipUniformCheck(ucRows, "row", "sub-byte A without MX scales");
     }
-    bool ucInputs = arg.uniform_check != hipblaslt_uniform_check::none && ucSkip.empty();
-    if(ucInputs)
+    if(ucCols)
+    {
+        if(arg.partitions > 1)
+            skipUniformCheck(ucCols,
+                             "column",
+                             "--partitions: each partition runs its own GEMM on its slice of D");
+        else if(cEqualD)
+            skipUniformCheck(ucCols, "column", cEqualD);
+        else if(isBlockScaling(arg.scaleB))
+            skipUniformCheck(ucCols, "column", "block-scaled B");
+        else if(subByte(TiB))
+            skipUniformCheck(ucCols, "column", "sub-byte B without block scales");
+    }
+    if(ucRows || ucCols)
     {
         // Every summation order gives the same D for these inputs.
         const auto init    = arg.initialization;
@@ -4133,12 +4159,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       mxSeedIndex(/*isMatrixA=*/true, b, stride_a[i]));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
-            if(ucInputs && scaleLayoutA != MXScaleLayout::None)
-            {
-                skipUniformCheck("MX A with swizzled scales");
-                ucInputs = false;
-            }
-            if(ucInputs)
+            if(ucRows && scaleLayoutA != MXScaleLayout::None)
+                skipUniformCheck(ucRows, "row", "MX A with swizzled scales");
+            if(ucRows)
             {
                 // Logical row m of op(A) is stored column m: K packed elements and K / blockSize
                 // natural-order scales, both contiguous since lda == K.
@@ -4348,9 +4371,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   stride_c[i],
                                   num_batches[i]);
 
-            // uniform_check: every logical row of op(A) and every row of C equal row 0. On
-            // the null stream, after the device initialization and before the copies below.
-            if(ucInputs)
+            // uniform_check: for the row direction, every logical row of op(A) and every row of
+            // C equal row 0; for the column direction, every logical column of op(B) and every
+            // column of C equal column 0. On the null stream, after the device initialization
+            // and before the copies below.
+            if(ucRows)
             {
                 if(!isBlockScaling(arg.scaleA))
                 {
@@ -4369,6 +4394,31 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           hipStreamDefault));
                 }
                 CHECK_HIP_ERROR(uniform_check_fill_rows_device(dC[i].buf(),
+                                                               realDataTypeSize(To),
+                                                               M[i],
+                                                               N[i],
+                                                               ldc[i],
+                                                               stride_c[i],
+                                                               num_batches[i],
+                                                               hipStreamDefault));
+            }
+            if(ucCols)
+            {
+                const int64_t ldB = do_swizzle_b ? B_row[i] : ldb[i];
+                const int64_t sB
+                    = (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i] : stride_b[i];
+                // Logical column n of op(B) is stored column n for transB=N and row n for T.
+                auto fillB = transB == HIPBLAS_OP_N ? uniform_check_fill_cols_device
+                                                    : uniform_check_fill_rows_device;
+                CHECK_HIP_ERROR(fillB(dB[i].buf(),
+                                      realDataTypeSize(TiB),
+                                      B_row[i],
+                                      B_col[i],
+                                      ldB,
+                                      sB,
+                                      num_batches[i],
+                                      hipStreamDefault));
+                CHECK_HIP_ERROR(uniform_check_fill_cols_device(dC[i].buf(),
                                                                realDataTypeSize(To),
                                                                M[i],
                                                                N[i],
@@ -4544,8 +4594,16 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.gradient && arg.use_e)
             {
                 hipblaslt_init(hE[i].buf(), M[i], N[i], lde[i], Taux, stride_e[i], num_batches[i]);
-                if(ucInputs)
+                if(ucRows)
                     uniform_check_fill_rows_host(hE[i].buf(),
+                                                 realDataTypeSize(Taux),
+                                                 M[i],
+                                                 N[i],
+                                                 lde[i],
+                                                 stride_e[i],
+                                                 num_batches[i]);
+                if(ucCols)
+                    uniform_check_fill_cols_host(hE[i].buf(),
                                                  realDataTypeSize(Taux),
                                                  M[i],
                                                  N[i],
@@ -4563,7 +4621,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
                 // A forward bias is along M whatever bias_source says; a gradient bias is an
                 // output.
-                if(ucInputs && !arg.gradient)
+                if(ucRows && !arg.gradient)
                     uniform_check_fill_constant_host(
                         hBias[i].buf(), realDataTypeSize(Tbias), size_bias[i]);
             }
@@ -4580,7 +4638,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else
                     hipblaslt_init(
                         hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
-                if(ucInputs)
+                if(ucRows)
                     uniform_check_fill_constant_host(
                         hScaleA[i].buf(), realDataTypeSize(Talpha), size_scaleAVec[i]);
             }
@@ -4597,6 +4655,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else
                     hipblaslt_init(
                         hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
+                if(ucCols)
+                    uniform_check_fill_constant_host(
+                        hScaleB[i].buf(), realDataTypeSize(Talpha), size_scaleBVec[i]);
             }
 
             if(arg.scaleC)
@@ -4632,7 +4693,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleAlpha_vector)
             {
                 hipblaslt_init(hScaleAlphaVec[i].buf(), M[i], 1, M[i], Talpha);
-                if(ucInputs)
+                if(ucRows)
                     uniform_check_fill_constant_host(
                         hScaleAlphaVec[i].buf(), realDataTypeSize(Talpha), M[i]);
             }
@@ -4999,7 +5060,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       1,
                                       -1,
                                       batchCount);
-                if(ucInputs)
+                if(ucRows)
                 {
                     auto fillA = transA == HIPBLAS_OP_N ? uniform_check_fill_rows_device
                                                         : uniform_check_fill_cols_device;
@@ -5012,6 +5073,27 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           1,
                                           hipStreamDefault));
                     CHECK_HIP_ERROR(uniform_check_fill_rows_device(dC[batchCount].buf(),
+                                                                   realDataTypeSize(To),
+                                                                   M[i],
+                                                                   N[i],
+                                                                   ldc[i],
+                                                                   0,
+                                                                   1,
+                                                                   hipStreamDefault));
+                }
+                if(ucCols)
+                {
+                    auto fillB = transB == HIPBLAS_OP_N ? uniform_check_fill_cols_device
+                                                        : uniform_check_fill_rows_device;
+                    CHECK_HIP_ERROR(fillB(dB[batchCount].buf(),
+                                          realDataTypeSize(TiB),
+                                          B_row[i],
+                                          B_col[i],
+                                          do_swizzle_b ? B_row[i] : ldb[i],
+                                          0,
+                                          1,
+                                          hipStreamDefault));
+                    CHECK_HIP_ERROR(uniform_check_fill_cols_device(dC[batchCount].buf(),
                                                                    realDataTypeSize(To),
                                                                    M[i],
                                                                    N[i],
@@ -7077,7 +7159,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         // uniform_check is skipped), so C, which is D, is not read. With c_equal_d and a value
         // check, the later C restore replaces this fill and the value check catches unwritten
         // elements.
-        else if(ucInputs)
+        else if(ucRows || ucCols)
         {
             const size_t elem = realDataTypeSize(To);
             if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -7153,16 +7235,20 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         return filled;
     };
-    // uniform_check: checks on the device that the D of rotation block 0 is uniform in each
-    // checked direction, and reports a failure on stderr without stopping the run. With uniform
-    // summation order on, a failure counts toward --verify_strict.
+    // uniform_check: checks on the device that the D of rotation block 0 is uniform in the running
+    // direction, and reports a failure on stderr without stopping the run. With uniform summation
+    // order on, a failure counts toward --verify_strict.
     std::unique_ptr<HipDeviceBuffer> dUniformResult, dUniformFlags;
-    if(ucInputs)
+    if(ucRows || ucCols)
     {
-        size_t flagsBytes = uniform_check_flags_bytes(N[0], 1);
-        if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-            for(int i = 0; i < gemm_count; i++)
-                flagsBytes = std::max(flagsBytes, uniform_check_flags_bytes(N[i], num_batches[i]));
+        // Flags for every (batch, line) pair of the largest D checked in one call; a
+        // pointer-array call checks one batch.
+        const bool pointerArray = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        size_t     flagsBytes   = 0;
+        for(int i = 0; i < (pointerArray ? 1 : gemm_count); i++)
+            flagsBytes = std::max(
+                flagsBytes,
+                uniform_check_flags_bytes(ucCols ? M[i] : N[i], pointerArray ? 1 : num_batches[i]));
         dUniformResult
             = std::make_unique<HipDeviceBuffer>(HIP_R_8I, sizeof(UniformCheckDeviceResult));
         dUniformFlags = std::make_unique<HipDeviceBuffer>(HIP_R_8I, flagsBytes);
@@ -7172,89 +7258,83 @@ void testing_matmul_with_bias(const Arguments& arg,
     // How many solutions the uniform check ran on; a case that checked none skips at the end.
     size_t  ucChecked = 0;
     int32_t ucUso     = 0;
-    if(ucInputs)
+    if(ucRows || ucCols)
         CHECK_HIPBLASLT_ERROR(hipblasLtGetUniformSummationOrder(handle, &ucUso));
     // void, since CHECK_HIP_ERROR returns from it under gtest.
-    auto checkUniform = [&](size_t sol, UniformCheckResult& row) {
-        if(arg.uniform_check == hipblaslt_uniform_check::none)
+    auto checkUniform = [&](size_t sol, UniformCheckResult& result) {
+        if(ucRowOn != ucRows || ucColOn != ucCols)
+            result.status = UniformCheckResult::Status::skip;
+        if(!ucRows && !ucCols)
             return;
-        if(!ucInputs)
-        {
-            row.status = UniformCheckResult::Status::skip;
-            return;
-        }
         ++ucChecked;
-        // Runs check, a uniform_check_*_device function, over every D; lines names what it
-        // counts.
-        auto checkDirection = [&](auto check, const char* lines, UniformCheckDeviceResult& h) {
-            auto*        dResult = dUniformResult->as<UniformCheckDeviceResult>();
-            void*        flags   = dUniformFlags->buf();
-            const size_t elem    = realDataTypeSize(To);
-            // One GEMM of a group at a time, so the first difference names its GEMM.
-            const int groups     = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 1 : gemm_count;
-            int       failedGemm = -1;
-            for(int i = 0; i < groups; i++)
-            {
-                CHECK_HIP_ERROR(uniform_check_reset_device(dResult, stream));
-                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-                    for(int b = 0; b < arg.batch_count; b++)
-                        CHECK_HIP_ERROR(check((*dDp)[b].buf(),
-                                              elem,
-                                              M[0],
-                                              N[0],
-                                              ldd[0],
-                                              0,
-                                              1,
-                                              flags,
-                                              dResult,
-                                              stream));
-                else
-                    CHECK_HIP_ERROR(check((*dDp)[i].buf(),
-                                          elem,
-                                          M[i],
-                                          N[i],
-                                          ldd[i],
-                                          stride_d[i],
-                                          num_batches[i],
-                                          flags,
-                                          dResult,
-                                          stream));
-                UniformCheckDeviceResult g;
-                CHECK_HIP_ERROR(
-                    hipMemcpyAsync(&g, dResult, sizeof(g), hipMemcpyDeviceToHost, stream));
-                CHECK_HIP_ERROR(hipStreamSynchronize(stream));
-                if(g.bad && failedGemm < 0)
-                {
-                    failedGemm = i;
-                    h.first    = g.first;
-                }
-                h.bad += g.bad;
-            }
-            if(h.bad)
-            {
-                std::ostringstream msg;
-                msg << "uniform_check failed for "
-                    << solution_description(
-                           handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
-                    << ": " << h.bad << " " << lines << " of D are not uniform;"
-                    << " the first difference is";
-                if(gemm_count > 1)
-                    msg << " in GEMM " << failedGemm;
-                msg << " at row " << h.first_row() << ", column " << h.first_col();
-#ifdef GOOGLE_TEST
-                ADD_FAILURE() << msg.str();
-#else
-                hipblaslt_cerr << msg.str() << std::endl;
-#endif
-                if(ucUso)
-                    hipblaslt_bench_options::verification_failures()++;
-            }
-        };
+        auto*        dResult = dUniformResult->as<UniformCheckDeviceResult>();
+        void*        flags   = dUniformFlags->buf();
+        const size_t elem    = realDataTypeSize(To);
+        // One GEMM of a group at a time, so the first difference names its GEMM.
+        const int groups     = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 1 : gemm_count;
+        int       failedGemm = -1;
         UniformCheckDeviceResult h{};
-        checkDirection(uniform_check_rows_device, "columns", h);
-        row = {h.bad ? UniformCheckResult::Status::fail : UniformCheckResult::Status::pass,
-               int64_t(h.bad),
-               h.first_row()};
+        for(int i = 0; i < groups; i++)
+        {
+            CHECK_HIP_ERROR(uniform_check_reset_device(dResult, stream));
+            if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                for(int b = 0; b < arg.batch_count; b++)
+                    CHECK_HIP_ERROR(uniform_check_device((*dDp)[b].buf(),
+                                                         elem,
+                                                         M[0],
+                                                         N[0],
+                                                         ldd[0],
+                                                         0,
+                                                         1,
+                                                         ucCols,
+                                                         flags,
+                                                         dResult,
+                                                         stream));
+            else
+                CHECK_HIP_ERROR(uniform_check_device((*dDp)[i].buf(),
+                                                     elem,
+                                                     M[i],
+                                                     N[i],
+                                                     ldd[i],
+                                                     stride_d[i],
+                                                     num_batches[i],
+                                                     ucCols,
+                                                     flags,
+                                                     dResult,
+                                                     stream));
+            UniformCheckDeviceResult g;
+            CHECK_HIP_ERROR(hipMemcpyAsync(&g, dResult, sizeof(g), hipMemcpyDeviceToHost, stream));
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+            if(g.bad && failedGemm < 0)
+            {
+                failedGemm = i;
+                h.first    = g.first;
+            }
+            h.bad += g.bad;
+        }
+        result = {h.bad ? UniformCheckResult::Status::fail : UniformCheckResult::Status::pass,
+                  int64_t(h.bad),
+                  h.first_pos()};
+        if(h.bad)
+        {
+            std::ostringstream msg;
+            msg << "uniform_check " << (ucCols ? "column" : "row") << " failed for "
+                << solution_description(
+                       handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
+                << ": " << h.bad << (ucCols ? " rows" : " columns")
+                << " of D are not uniform; the first difference is";
+            if(gemm_count > 1)
+                msg << " in GEMM " << failedGemm;
+            msg << " at " << (ucCols ? "column " : "row ") << h.first_pos()
+                << (ucCols ? ", row " : ", column ") << h.first_line();
+#ifdef GOOGLE_TEST
+            ADD_FAILURE() << msg.str();
+#else
+            hipblaslt_cerr << msg.str() << std::endl;
+#endif
+            if(ucUso)
+                hipblaslt_bench_options::verification_failures()++;
+        }
     };
     if(!arg.timing)
     {
@@ -7575,8 +7655,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(iter == 0)
             {
-                UniformCheckResult rowUniform;
-                checkUniform(sol, rowUniform);
+                UniformCheckResult uniform;
+                checkUniform(sol, uniform);
             }
             if(arg.fast_check)
             {
@@ -7821,7 +7901,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             double      max_ulp = 0.0;
             double      avg_ulp = 0.0;
 
-            UniformCheckResult row_uniform;
+            UniformCheckResult uniform;
         };
         std::vector<CandidateReport> reports(heuristicResult.size());
         int number_cold_calls
@@ -8203,8 +8283,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 first_launch_failed
                     = hipblaslt_bench_options::verification_failures() > failures_before;
             }
-            UniformCheckResult rowUniform;
-            checkUniform(sol, rowUniform);
+            UniformCheckResult uniform;
+            checkUniform(sol, uniform);
             if(post_iters > 0 && relaunch)
                 verifyRelaunches(sol, first_launch_failed);
             else if(post_iters > 0)
@@ -8296,7 +8376,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_max_ulp,
                     hipblaslt_avg_ulp,
                     timing,
-                    rowUniform);
+                    uniform);
             }
 
             reports[sol] = {flops,
@@ -8307,7 +8387,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hipblaslt_rtol,
                             hipblaslt_max_ulp,
                             hipblaslt_avg_ulp,
-                            rowUniform};
+                            uniform};
         };
 
         // Every path reports its candidates through these.
@@ -8652,7 +8732,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best.max_ulp,
                 best.avg_ulp,
                 search.best_timing,
-                best.row_uniform);
+                best.uniform);
         }
     }
 
