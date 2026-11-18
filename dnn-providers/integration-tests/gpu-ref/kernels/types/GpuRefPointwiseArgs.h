@@ -27,6 +27,10 @@ enum PointwiseOps
     POINTWISE_BINARY_OP_SIGMOID_BWD = 12,
     POINTWISE_BINARY_OP_TANH_BWD = 13,
     POINTWISE_BINARY_OP_RELU_BWD = 14,
+    POINTWISE_BINARY_OP_MAX = 15,
+    POINTWISE_BINARY_OP_MIN = 16,
+    POINTWISE_BINARY_OP_CMP_GT = 17,
+    POINTWISE_TERNARY_OP_BINARY_SELECT = 18,
 };
 
 // Maximum number of dimensions the kernels support
@@ -79,4 +83,27 @@ struct PointwiseBinaryArgs
     float lowerClip;
     float upperClip;
     float lowerSlope;
+};
+
+// Only BINARY_SELECT is ternary: output = mask ? input0 : input1
+struct PointwiseTernaryArgs
+{
+    // IO tensors
+    const void* input0;
+    const void* input1;
+    const void* mask;
+    void* output;
+
+    // Number of elements in output buffer
+    long long size;
+
+    // Broadcasting metadata, max 5 dimensions supported
+    int nDim;
+    // NOLINTBEGIN(modernize-avoid-c-arrays)
+    long long outputDims[5];
+    long long input0Strides[5];
+    long long input1Strides[5];
+    long long maskStrides[5];
+    long long outputStrides[5];
+    // NOLINTEND(modernize-avoid-c-arrays)
 };

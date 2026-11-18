@@ -159,6 +159,15 @@ void GpuReferencePointwise::launchBinary(
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
         opCode = detail::POINTWISE_BINARY_OP_RELU_BWD;
         break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP:
+        opCode = POINTWISE_BINARY_OP_MAX;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MIN_OP:
+        opCode = POINTWISE_BINARY_OP_MIN;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT:
+        opCode = POINTWISE_BINARY_OP_CMP_GT;
+        break;
     default:
         throw std::invalid_argument("Unsupported binary pointwise operation: "
                                     + std::to_string(static_cast<int>(operation)));
@@ -192,6 +201,67 @@ void GpuReferencePointwise::launchBinary(
     args.lowerClip = lowerClip;
     args.lowerSlope = lowerSlope;
     args.upperClip = upperClip;
+
+    detail::launchKernel1d(kernel.function(), numBlocks, BLOCK_SIZE, &args, sizeof(args));
+}
+
+void GpuReferencePointwise::launchTernary(
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+    const void* input0Ptr,
+    const std::vector<int64_t>& input0Dims,
+    const std::vector<int64_t>& input0Strides,
+    const void* input1Ptr,
+    const std::vector<int64_t>& input1Dims,
+    const std::vector<int64_t>& input1Strides,
+    const void* maskPtr,
+    const std::vector<int64_t>& maskDims,
+    const std::vector<int64_t>& maskStrides,
+    void* outputPtr,
+    const std::vector<int64_t>& outputDims,
+    const std::vector<int64_t>& outputStrides,
+    std::vector<std::string>& defines)
+{
+    int opCode;
+    switch(operation)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::BINARY_SELECT:
+        opCode = POINTWISE_TERNARY_OP_BINARY_SELECT;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported ternary pointwise operation: "
+                                    + std::to_string(static_cast<int>(operation)));
+    }
+    defines.emplace_back(std::string("-DOP=") + std::to_string(opCode));
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    const auto& kernel
+        = compiler.getOrCompile("GpuRefPointwiseTernary.cpp", defines, "PointwiseTernaryRef");
+
+    // Use output dims to calculate launch grid dimensions due to broadcasting rules
+    const int64_t numElements
+        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
+    int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
+    numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
+
+    auto broadCast0Strides = makeBroadcastStrides(input0Dims, input0Strides, outputDims);
+    auto broadCast1Strides = makeBroadcastStrides(input1Dims, input1Strides, outputDims);
+    auto broadCastMaskStrides = makeBroadcastStrides(maskDims, maskStrides, outputDims);
+
+    PointwiseTernaryArgs args{};
+    args.input0 = input0Ptr;
+    args.input1 = input1Ptr;
+    args.mask = maskPtr;
+    args.output = outputPtr;
+    args.size = numElements;
+    args.nDim = static_cast<int>(outputDims.size());
+    std::memcpy(args.outputDims, outputDims.data(), outputDims.size() * sizeof(int64_t));
+    std::memcpy(
+        args.input0Strides, broadCast0Strides.data(), broadCast0Strides.size() * sizeof(int64_t));
+    std::memcpy(
+        args.input1Strides, broadCast1Strides.data(), broadCast1Strides.size() * sizeof(int64_t));
+    std::memcpy(args.maskStrides,
+                broadCastMaskStrides.data(),
+                broadCastMaskStrides.size() * sizeof(int64_t));
+    std::memcpy(args.outputStrides, outputStrides.data(), outputStrides.size() * sizeof(int64_t));
 
     detail::launchKernel1d(kernel.function(), numBlocks, BLOCK_SIZE, &args, sizeof(args));
 }
