@@ -198,23 +198,40 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         void*  buffer = nullptr;
         // The same-type CSR conversion below can fail for f16 and bf16. Free the
         // buffer and the algorithm descriptor on every exit after they exist.
+        // Each release resets the variable it frees, so the destructor does not
+        // free it a second time after a later error or on success.
         // The intermediate matrix stays on descr_->m_intermediate.
         struct stage_cleanup
         {
             void*&                            buffer;
             rocsparse_sparse_to_sparse_descr& descr;
-            ~stage_cleanup()
+
+            hipError_t release_buffer()
             {
+                hipError_t status = hipSuccess;
                 if(buffer != nullptr)
                 {
-                    rocsparse_hipFree(buffer);
+                    status = rocsparse_hipFree(buffer);
                     buffer = nullptr;
                 }
+                return status;
+            }
+
+            rocsparse_status release_descr()
+            {
+                rocsparse_status status = rocsparse_status_success;
                 if(descr != nullptr)
                 {
-                    rocsparse_destroy_sparse_to_sparse_descr(descr);
-                    descr = nullptr;
+                    status = rocsparse_destroy_sparse_to_sparse_descr(descr);
+                    descr  = nullptr;
                 }
+                return status;
+            }
+
+            ~stage_cleanup()
+            {
+                WARNING_IF_HIP_ERROR(release_buffer());
+                WARNING_IF_ROCSPARSE_ERROR(release_descr());
             }
         } cleanup{buffer, intermediate_descr};
 
@@ -247,11 +264,7 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                                        buffer_size,
                                        buffer));
 
-        {
-            const hipError_t free_error = rocsparse_hipFree(buffer);
-            buffer                      = nullptr;
-            RETURN_IF_HIP_ERROR(free_error);
-        }
+        RETURN_IF_HIP_ERROR(cleanup.release_buffer());
 
         //
         // Here we know unknown size of intermediate if any.
@@ -318,17 +331,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         //
         // Free the buffer.
         //
-        {
-            const hipError_t free_error = rocsparse_hipFree(buffer);
-            buffer                      = nullptr;
-            RETURN_IF_HIP_ERROR(free_error);
-        }
-        {
-            const rocsparse_status destroy_status
-                = rocsparse_destroy_sparse_to_sparse_descr(intermediate_descr);
-            intermediate_descr = nullptr;
-            RETURN_IF_ROCSPARSE_ERROR(destroy_status);
-        }
+        RETURN_IF_HIP_ERROR(cleanup.release_buffer());
+        RETURN_IF_ROCSPARSE_ERROR(cleanup.release_descr());
 
         //
         // Request the buffer size of the conversion from the csr format to the target.
