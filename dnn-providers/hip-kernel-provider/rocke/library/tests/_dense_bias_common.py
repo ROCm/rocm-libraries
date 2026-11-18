@@ -6,10 +6,12 @@
 The numeric lanes (torch: ``test_attention_dense_bias_<arch>_numeric.py``; torch-free:
 ``..._gpu.py``) check one kernel family against the same float64 oracle, with the same
 inputs, bias shapes, band names and tolerances; this module holds them so a second arch
-adds only its launch code. numpy only: no torch, no GPU, no kernel import, so the CPU
-lane can import it too (``test_attention_dense_bias_gfx942.py`` checks the oracle's
-sink handling here, on the host, before a GPU test relies on it). The two device-buffer
-helpers import ``rocke.runtime`` when called, not here.
+adds only its launch code. numpy only: no torch, no GPU, no kernel module at import, so
+the CPU lane can import it too (``test_attention_dense_bias_gfx942.py`` checks the
+oracle's sink handling here, on the host, before a GPU test relies on it). The two
+device-buffer helpers import ``rocke.runtime`` when called, not here; the
+kernel-constants check at the end imports ``pytest`` and the shared bias helper when
+called, and reads the source of the kernel module it is given.
 
 Layout: dense inputs are ``q [B, Sq, Hq, D]`` and ``k``/``v [B, Skv, Hkv, D]``, the
 kernels' own; the oracle returns ``O [B, Sq, Hq, D]`` and ``LSE [B, Hq, Sq]``.
@@ -19,6 +21,8 @@ its spec factory, its launch code and, for the torch lanes, the torch-side input
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 
@@ -289,3 +293,85 @@ def check_window_row_classes(out, lse, ref, ref_lse, *, sinks, dtype):
     with np.errstate(invalid="ignore"):  # -inf - -inf, in the rows `finite` leaves out
         diff = np.abs(got - want)
     assert diff[finite].max() < tol
+
+
+# --------------------------------------------------------------------------- #
+# The bias constants of a dense kernel
+# --------------------------------------------------------------------------- #
+
+# The floor and the live-row threshold live once, in the shared bias helper; each
+# kernel keeps its own mask sentinel, aliases the shared values and checks their order
+# against that sentinel when it is imported. A kernel's test file calls
+# ``assert_kernel_bias_constants`` with its module; the shared check itself is tested
+# once, in ``test_attention_dense_bias_gfx950.py``.
+
+
+def _bias_constants_block(module, class_name):
+    """``module``'s mask-sentinel / bias-constant block as source text: from its
+    ``_MASK_SENTINEL`` to the spec class ``class_name`` that follows it."""
+    src = Path(module.__file__).read_text(encoding="utf-8")
+    start = src.index("_MASK_SENTINEL = ")
+    marker = f"@dataclass(frozen=True)\nclass {class_name}"
+    end = src.find(marker, start)
+    assert end != -1, f"{module.__name__}: {marker!r} must follow _MASK_SENTINEL"
+    return src[start:end]
+
+
+def _exec_bias_constants_block(block, log2e):
+    """Run ``block`` as the module runs it at import, with ``LOG2E`` and the shared bias
+    constants and check in scope; returns its namespace, and raises what the block's own
+    ``check_bias_constants`` call raises."""
+    import kernels.common._attention_additive_bias as shared
+
+    ns = {
+        "LOG2E": log2e,
+        "BIAS_FLOOR": shared.BIAS_FLOOR,
+        "BIAS_LIVE_ROW_MIN": shared.BIAS_LIVE_ROW_MIN,
+        "check_bias_constants": shared.check_bias_constants,
+    }
+    exec(compile(block, "<constants>", "exec"), ns)
+    return ns
+
+
+def assert_kernel_bias_constants(module, class_name):
+    """Assert that the dense kernel module ``module`` keeps the order
+    ``_MASK_SENTINEL < threshold < floor * log2e``: a masked score cannot read as live,
+    and a floored bias (finfo.min padding) cannot read as dead. Fails when its
+    ``_BIAS_FLOOR`` / ``_BIAS_LIVE_ROW_MIN`` are not the shared values, when its
+    constants block (the source from ``_MASK_SENTINEL`` to the spec class
+    ``class_name``) does not reproduce the module's values or stops calling
+    ``check_bias_constants`` with its own sentinel, or when that block does not raise
+    once its sentinel is moved above the threshold. The module raises, not asserts:
+    ``python -O`` would strip an assert."""
+    import re
+
+    import pytest
+
+    import kernels.common._attention_additive_bias as shared
+
+    # This module is not assert-rewritten (it is not a test file), so each assert
+    # carries its values.
+    got = (module._BIAS_FLOOR, module._BIAS_LIVE_ROW_MIN)
+    want = (shared.BIAS_FLOOR, shared.BIAS_LIVE_ROW_MIN)
+    assert got == want, f"{module.__name__} aliases {got}, the shared values are {want}"
+    sentinel, floor_score = module._MASK_SENTINEL, module._BIAS_FLOOR * module.LOG2E
+    assert (
+        sentinel < module._BIAS_LIVE_ROW_MIN < floor_score
+    ), f"{module.__name__}: {sentinel} < {module._BIAS_LIVE_ROW_MIN} < {floor_score}"
+    block = _bias_constants_block(module, class_name)
+    assert (
+        "check_bias_constants(_MASK_SENTINEL, LOG2E)" in block
+    ), "the block does not call check_bias_constants(_MASK_SENTINEL, LOG2E)"
+    ns = _exec_bias_constants_block(block, module.LOG2E)
+    block_values = (ns["_MASK_SENTINEL"], ns["_BIAS_FLOOR"], ns["_BIAS_LIVE_ROW_MIN"])
+    module_values = (sentinel, module._BIAS_FLOOR, module._BIAS_LIVE_ROW_MIN)
+    assert block_values == module_values, (
+        f"{module.__name__}: the constants block gives {block_values}, "
+        f"the module has {module_values}"
+    )
+    # The same block with the sentinel moved above the threshold: the call must raise.
+    line = re.compile(r"^_MASK_SENTINEL = .*$", re.M)
+    assert line.search(block), "the block has no `_MASK_SENTINEL = ...` line"
+    broken = line.sub(f"_MASK_SENTINEL = {module._BIAS_LIVE_ROW_MIN / 2!r}", block)
+    with pytest.raises(ValueError, match="bias constants must satisfy"):
+        _exec_bias_constants_block(broken, module.LOG2E)

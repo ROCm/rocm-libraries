@@ -16,9 +16,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from _dense_bias_common import assert_kernel_bias_constants
 from kernels.common._attention_additive_bias import additive_bias_strides
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx950.attention_dense import (
+    LOG2E,
     Gfx950AttentionDenseSpec,
     attention_dense_signature,
     build_attention_dense,
@@ -135,6 +137,69 @@ def test_the_aligned_body_reads_the_bias_four_keys_per_element_aligned_load(mode
         for offsets in groups.values():
             assert offsets == list(range(0, 8 * per_tile, 8))
     assert _BIAS_X4_LOAD.findall(llvm(replace(spec, use_additive_bias=False))) == []
+
+
+# One masked bias load of the ragged body: the element index is clamped to 0 where the
+# lane is out of range, and the loaded value is replaced by 0.0 under the same
+# condition.
+_MASKED_BIAS_LOAD = re.compile(
+    r"%(?P<idx>[\w.]+) = select i1 %(?P<c>[\w.]+), i32 %[\w.]+, i32 0\n"
+    r"\s*%(?P<gep>[\w.]+) = getelementptr inbounds float, ptr addrspace\(1\) "
+    r"%additive_bias_ptr, i32 %(?P=idx)\n"
+    r"\s*%(?P<ld>[\w.]+) = load float, ptr addrspace\(1\) %(?P=gep), align 4\n"
+    r"\s*%[\w.]+ = select i1 %(?P=c), float %(?P=ld), float 0x0000000000000000\n"
+)
+# A scalar bias load's address: a float GEP straight off the bias kernarg (the vector
+# form goes through the byte GEP of ``_BIAS_TILE_PTR``).
+_BIAS_SCALAR_GEP = re.compile(
+    r"getelementptr inbounds float, ptr addrspace\(1\) %additive_bias_ptr"
+)
+
+# The ragged modes whose bias loads are counted: the plain one, and one at a second
+# head size and dtype with LSE.
+_RAGGED_MODES = {
+    "ragged": _MODES["ragged"],
+    "ragged_d64_fp16_lse": {
+        **_MODES["ragged"],
+        "head_size": 64,
+        "dtype": "fp16",
+        "emit_lse": True,
+    },
+}
+
+
+def _assert_every_bias_load_is_masked(spec):
+    """Every scalar load off the bias pointer in ``spec``'s lowered (ragged) kernel is
+    ``select(c, index, 0)``, a load, ``select(c, value, 0.0)`` with one condition ``c``
+    per load, and ``c`` is ``row < seqlen_q and key < seqlen_kv``: a lane past the last
+    query row or key of a partial tile reads element 0 (always in range) and adds
+    nothing. The body has no vector bias load."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    assert spec.ragged
+    ll = _lower_kernel_to_llvm_python(
+        build_attention_dense(spec, arch="gfx950"), arch="gfx950", llvm_flavor="llvm22"
+    )
+    loads = _BIAS_SCALAR_GEP.findall(ll)
+    masked = list(_MASKED_BIAS_LOAD.finditer(ll))
+    assert loads and len(masked) == len(loads)
+    assert _BIAS_X4_LOAD.findall(ll) == []
+    # A mask that kept only one bound, or loosened one, has the load shape above too.
+    defs = dict(re.findall(r"%(\S+) = (.+)\n", ll))
+    bounds = {f"icmp slt i32 %v, {spec.seqlen_q}", f"icmp slt i32 %v, {spec.seqlen_kv}"}
+    for m in masked:
+        cond = defs.get(m["c"], "<not an instruction>")
+        both = re.fullmatch(r"and i1 %([\w.]+), %([\w.]+)", cond)
+        assert both, f"%{m['c']} = {cond}"
+        assert {re.sub(r"%[\w.]+", "%v", defs[x]) for x in both.groups()} == bounds
+
+
+@pytest.mark.parametrize("mode", list(_RAGGED_MODES))
+def test_the_ragged_body_masks_every_bias_load(mode):
+    """A lane past the last query row or key of a partial tile must not read the bias
+    out of range; see ``_assert_every_bias_load_is_masked``. The body has no unmasked
+    or vector bias load."""
+    _assert_every_bias_load_is_masked(_bias(_RAGGED_MODES[mode]))
 
 
 def _ll_float(x):
@@ -270,70 +335,64 @@ def test_bias_is_refused_with_fp8_kv():
         replace(_BASE, kv_storage_dtype="fp8e4m3", use_additive_bias=True)
 
 
-def _constants_block():
-    """The kernel module's bias-constant block (the mask sentinel through the live-row
-    threshold and its order check), as source text."""
+def test_the_bias_constants_keep_their_order():
+    """This kernel's floor and live-row threshold are the shared ones, ordered against
+    its own sentinel when the module is imported, and the lowered kernel uses the
+    sentinel and the threshold. A drifted alias, a sentinel above the threshold or a
+    kernel without those two constants in its IR fails here (see
+    ``assert_kernel_bias_constants``)."""
     import kernels.gfx950.attention_dense as dense
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-    src = open(dense.__file__).read()
-    start = src.index("_MASK_SENTINEL = ")
-    return src[start : src.index("@dataclass(frozen=True)\nclass Gfx950", start)]
+    assert_kernel_bias_constants(dense, "Gfx950")
+    ll = _lower_kernel_to_llvm_python(
+        build_attention_dense(_bias({}), arch="gfx950"),
+        arch="gfx950",
+        llvm_flavor="llvm22",
+    )
+    assert _ll_float(dense._MASK_SENTINEL) in ll
+    assert _ll_float(dense._BIAS_LIVE_ROW_MIN) in ll
 
 
-def _exec_constants(block):
-    """Run the constants block with the shared module's current values, so a test can
-    perturb the shared constants (``monkeypatch``) or the block's own text."""
+@pytest.mark.parametrize(
+    "constant, value",
+    [
+        ("sentinel", -(2.0**97)),
+        ("sentinel", -(2.0**98)),
+        ("BIAS_LIVE_ROW_MIN", -(2.0**97)),
+        ("BIAS_LIVE_ROW_MIN", -(2.0**97) * LOG2E),
+        ("BIAS_FLOOR", -(2.0**99)),
+        ("BIAS_FLOOR", -(2.0**98) * 0.8),
+    ],
+    ids=[
+        "sentinel_above_threshold",
+        "sentinel_at_threshold",
+        "threshold_above_floor_score",
+        "threshold_at_floor_score",
+        "floor_score_far_below_threshold",
+        "floor_score_below_threshold_only_after_log2e",
+    ],
+)
+def test_the_shared_bias_constants_check_refuses_any_constant_out_of_order(
+    constant, value, monkeypatch
+):
+    """``check_bias_constants``, once for both dense kernels, raises (not asserts:
+    ``python -O`` would strip it) when the sentinel is not below the live-row threshold
+    or the threshold is not below the floor's score (``BIAS_FLOOR * log2e``); each case
+    breaks one constant of the shipped, in-order set."""
     import kernels.common._attention_additive_bias as shared
-    from kernels.gfx950.attention_dense import LOG2E
-
-    ns = {
-        "LOG2E": LOG2E,
-        "BIAS_FLOOR": shared.BIAS_FLOOR,
-        "BIAS_LIVE_ROW_MIN": shared.BIAS_LIVE_ROW_MIN,
-        "check_bias_constants": shared.check_bias_constants,
-    }
-    exec(compile(block, "<constants>", "exec"), ns)
-    return ns
-
-
-def test_the_bias_constants_keep_their_order(monkeypatch):
-    """The mask sentinel is below the live-row threshold, which is below the floor's
-    score: a masked score cannot read as live, and a floored bias (finfo.min padding)
-    cannot read as dead. The floor and the threshold live once, in the shared bias
-    helper; this kernel checks them against its own sentinel at import, and the module
-    raises (not asserts: ``python -O`` would strip it) when the order breaks."""
-    import kernels.common._attention_additive_bias as shared
-    import kernels.gfx950.attention_dense as dense
+    from kernels.gfx950.attention_dense import _MASK_SENTINEL
 
     assert shared.BIAS_FLOOR == -(2.0**97) and shared.BIAS_LIVE_ROW_MIN == -(2.0**98)
-    assert (dense._BIAS_FLOOR, dense._BIAS_LIVE_ROW_MIN) == (
-        shared.BIAS_FLOOR,
-        shared.BIAS_LIVE_ROW_MIN,
-    )
-    assert (
-        dense._MASK_SENTINEL
-        < dense._BIAS_LIVE_ROW_MIN
-        < dense._BIAS_FLOOR * dense.LOG2E
-    )
-    block = _constants_block()
-    assert "check_bias_constants(_MASK_SENTINEL, LOG2E)" in block
-    assert _exec_constants(block)["_BIAS_LIVE_ROW_MIN"] == dense._BIAS_LIVE_ROW_MIN
-    # A sentinel above the threshold, in this kernel's own block.
-    assert "_MASK_SENTINEL = -(2.0**99)" in block
+    # The shipped values are in order.
+    shared.check_bias_constants(_MASK_SENTINEL, LOG2E)
+    sentinel = _MASK_SENTINEL
+    if constant == "sentinel":
+        sentinel = value
+    else:
+        monkeypatch.setattr(shared, constant, value)
     with pytest.raises(ValueError, match="bias constants must satisfy"):
-        _exec_constants(
-            block.replace("_MASK_SENTINEL = -(2.0**99)", "_MASK_SENTINEL = -(2.0**97)")
-        )
-    for name, value in (
-        # The threshold above the floor's score.
-        ("BIAS_LIVE_ROW_MIN", -(2.0**97)),
-        # A floor below the threshold's score would let a floored key read as masked.
-        ("BIAS_FLOOR", -(2.0**99)),
-    ):
-        with monkeypatch.context() as patch:
-            patch.setattr(shared, name, value)
-            with pytest.raises(ValueError, match="bias constants must satisfy"):
-                _exec_constants(block)
+        shared.check_bias_constants(sentinel, LOG2E)
 
 
 def test_a_bias_request_for_fp8_kv_is_refused_by_the_grid_candidate():
@@ -358,6 +417,42 @@ def test_a_bias_request_for_paged_kv_is_refused_by_the_grid_candidate():
     attention_tuning_spec(_request(), "gfx950_dense_grid")
     with pytest.raises(PinRefused, match=r"not supported with paged K/V"):
         attention_tuning_spec(_request(**paged), "gfx950_dense_grid")
+
+
+@pytest.mark.parametrize(
+    "spec_kw, request_kw, message",
+    [
+        (
+            {"seqlen_q": 500},
+            {"seqlen_q": 500},
+            r"seqlen_q must be a multiple of block_m",
+        ),
+        (
+            {"seqlen_kv": 700},
+            {"seqlen_k": 700},
+            r"seqlen_kv must be a multiple of block_n",
+        ),
+    ],
+    ids=["q", "kv"],
+)
+def test_a_partial_tile_is_served_by_a_ragged_bias_spec_only(
+    spec_kw, request_kw, message
+):
+    """The aligned body adds the bias with no mask, so it is only right on whole tiles:
+    a spec that is not ragged yet leaves a partial tile is refused when it is built
+    (the rule is the shared spec's, with or without the bias). The dispatcher sets
+    ``ragged`` for such a request, and the ragged body it gets masks its bias loads."""
+    from dispatch.attention import attention_tuning_spec
+
+    with pytest.raises(ValueError, match=message):
+        replace(_BASE, **spec_kw)
+    with pytest.raises(ValueError, match=message):
+        _bias(spec_kw)
+    spec = attention_tuning_spec(
+        _request(**request_kw), "gfx950_dense_grid"
+    ).kernel_spec
+    assert spec.use_additive_bias
+    _assert_every_bias_load_is_masked(spec)
 
 
 def test_the_kv_segment_knob_is_out_of_scope_with_a_bias():
