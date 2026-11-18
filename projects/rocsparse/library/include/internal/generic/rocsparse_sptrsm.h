@@ -58,7 +58,7 @@ extern "C" {
 *  @param[out]
 *  buffer_size_in_bytes  number of bytes of the buffer.
 *  @param[out]
-*  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error      error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -167,7 +167,7 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  @param[in]
 *  buffer  temporary storage buffer allocated by the user.
 *  @param[out]
-*  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error      error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.

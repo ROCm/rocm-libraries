@@ -83,9 +83,7 @@ extern "C" {
 *  @param[out]
 *  target       sparse matrix \f$C\f$ descriptor.
 *  @param[out]
-*  p_error      error descriptor created if the returned status is not
-*               \ref rocsparse_status_success. A null pointer can be passed if an error
-*               descriptor is not required.
+*  p_error      error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.

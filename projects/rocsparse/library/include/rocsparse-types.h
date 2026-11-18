@@ -89,7 +89,8 @@ typedef struct _rocsparse_handle* rocsparse_handle;
  *  \details
  *  The rocSPARSE error descriptor is a structure holding the information related to an error
  *  that occurred during the execution of a rocSPARSE routine.
- *  It should be destroyed using rocsparse_destroy_error().
+ *  It should be destroyed using rocsparse_destroy_error(). No rocSPARSE routine returns an
+ *  error descriptor yet, and the \p p_error arguments are reserved for future use.
  */
 typedef struct _rocsparse_error* rocsparse_error;
 
