@@ -188,6 +188,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     if("group_valu" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvGroupValuProblem.cpp)
     endif()
+    if("narrow" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNarrowProblem.cpp)
+    endif()
     # A family's engine suites load its catalogs and resolve its native symbols, so they
     # build only when the family is served -- its DVC-stored catalogs were pulled
     # (conv/ConvContent.cmake).
@@ -237,6 +240,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     endif()
     if("group_valu" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvGroupValu.cpp)
+    endif()
+    if("narrow" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvNarrow.cpp)
     endif()
     if(HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE
