@@ -113,7 +113,7 @@ flowed data), never a single `n_waves*64`-tall monolith. A drop-in `Pipeline` st
 
 ### `render_coalescing(report, out, *, dtype_label, lane_group=16, title="", instruction=0)`
 The ADDRESS-SPACE coalescing figure -- fused-vs-scattered made literal. A pure consumer of a
-`CoalescingReport` (`analysis.coalescing.analyze_coalescing(fwd, dims, strides, dtype_bits, direction=,
+`CoalescingReport` (`analysis.coalescing.analyze_coalescing(fwd, dims, strides, dtype_bits, direction=, space=,
 line_bytes=)`, or `coalescing_probe.report_for_transaction(txn, arch=, dims=)` to DERIVE the descriptor
 from a recorded transaction). Fixed conventions (reproduce EXACTLY -- do not re-style per case):
 - **Per-SIMD grids.** The wave is split into `ceil(nlanes / lane_group)` stacked grids, `lane_group=16` (a
@@ -235,8 +235,8 @@ which image) lives in the `/layout-viz` skill, not here.
 6. **SHADE = vectorized transaction time order (the ISA is what we model).** Hue = thread (who); **shade = when**. One
    shade per **vectorized access (transaction)**, `t0` = darkest = every thread's FIRST, lockstep across
    threads; a thread shows `regs/VW` shades (1 contiguous vector → 1 shade; N scalar accesses → N). Derive it
-   from `vector_transactions(map, addr_fn, dtype_bits)` — **WIDTH from the STRIDES** (stride-1 → wider, ≤ b128,
-   quantized to legal widths), NOT the recorded emit `vw` (pre-coalescing, often 1). Key on **THIS hop's own
+   from `vector_transactions(map, addr_fn, dtype_bits, space=)` — **WIDTH from the STRIDES** (stride-1 → wider,
+   ≤ b128, quantized to legal widths; an LDS access aligned to its width, a global one need not be), NOT the recorded emit `vw` (pre-coalescing, often 1). Key on **THIS hop's own
    descriptor** (store map for a store, read map for a read — never the MMA-operand map). Colour ONLY via
    `accent_tint(lane%8, t, nt)` (darkest=first). `objdump` VALIDATES, never sources. ✗ shade from register
    index / from `vw`=1 / from the operand map on a read.

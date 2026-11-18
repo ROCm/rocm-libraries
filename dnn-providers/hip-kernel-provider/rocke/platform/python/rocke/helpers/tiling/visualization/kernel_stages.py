@@ -313,7 +313,7 @@ def flow_load_phase(
         if load_strides is not None
         else _free_contig_addr(load_sel)
     )
-    shade = vector_transactions(load_sel, mem_addr, elem_bytes * 8)[
+    shade = vector_transactions(load_sel, mem_addr, elem_bytes * 8, space="global")[
         0
     ]  # b128-capped, stride-driven
     tile_shade = {
@@ -509,7 +509,9 @@ def _placement_pipeline(
     # ``vw``. LABELS stay on ``flow_mp`` (WHERE each datum flows to), paired to ``acc_mp`` on the same physical
     # (lane,reg) key -- exactly as the LDS panel pairs them. The vreg axis is ordered by MEMORY ADDRESS (the
     # memory<->vreg relationship) so each transaction is a coherent adjacent block, not scattered reg indices.
-    reg_shade = vector_transactions(acc_mp, af, elem_bytes * 8, max_bits=max_bits)[0]
+    reg_shade = vector_transactions(
+        acc_mp, af, elem_bytes * 8, max_bits=max_bits, space="lds"
+    )[0]
     # RE-KEY registers into PHYSICAL (memory-address) order, index p = 0,1,2,... A strided read fills
     # NON-adjacent ENCODING reg indices (a b64 read -> r0,r8,r16,r24), so the encoding index is not the physical
     # vreg order; MEMORY order is. Re-keying to p keeps each transaction a coherent adjacent block AND keeps the

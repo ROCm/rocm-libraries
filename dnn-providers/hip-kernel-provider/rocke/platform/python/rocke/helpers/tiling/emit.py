@@ -34,6 +34,7 @@ from ...core.storage import (
     storage_to_elements,
 )
 from ..mma_io import storage_element_type, storage_vector_type
+from .analysis.vectorization import widest_vector_units
 from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc, storage_slots
@@ -652,23 +653,9 @@ def _contiguous_run(
     other_strides = [
         stride for axis, stride in enumerate(window.tensor.strides) if axis != run_axis
     ]
-    return _widest_vector(length, _unit_bytes(dtype), other_strides)
-
-
-def _widest_vector(
-    run_units: int, unit_bytes: int, other_strides: Sequence[int] = ()
-) -> int:
-    """The widest vector access (16, 8, 4 or 2 storage units of `unit_bytes` each, at most 16
-    bytes: one ``dwordx4``) that divides a run of `run_units` units and every one of
-    `other_strides`, else 1. A longer run takes several such accesses."""
-    for units in (16, 8, 4, 2):
-        if (
-            units * unit_bytes <= 16
-            and run_units % units == 0
-            and all(stride % units == 0 for stride in other_strides)
-        ):
-            return units
-    return 1
+    return widest_vector_units(
+        length, _unit_bytes(dtype) * 8, other_strides=other_strides
+    )
 
 
 def planned_global_access_units(tile_desc: TileDesc, window: TensorWindow) -> int:
@@ -693,7 +680,7 @@ def planned_global_access_units(tile_desc: TileDesc, window: TensorWindow) -> in
         return _widest_word_group(
             elements_to_storage(dtype.name, run[1]), storage_group(dtype.name)[1]
         )
-    return _widest_vector(run[1], _unit_bytes(dtype))
+    return widest_vector_units(run[1], _unit_bytes(dtype) * 8)
 
 
 def _packed_access_units(
