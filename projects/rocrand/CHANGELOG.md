@@ -12,7 +12,7 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
-
+* Fixed test failures in test_rocrand_config_dispatch on gfx906 targets and also SPIR-V builds.
 
 ## rocRAND 5.2.0 for ROCm 10.2.0
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,7 +86,7 @@ TEST(rocrand_config_dispatch_tests, host_matches_device)
     HIP_CHECK(rocrand_impl::host::get_device_arch(stream, host_arch));
 
     int* result_ptr = nullptr;
-    HIP_CHECK(hipMallocHelper(&result_ptr, sizeof(result_ptr)));
+    HIP_CHECK(hipMallocHelper(&result_ptr, sizeof(*result_ptr)));
 
     hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, host_arch, result_ptr);
     HIP_CHECK(hipGetLastError());
@@ -118,9 +118,22 @@ TEST(rocrand_config_dispatch_tests, parse_common_architectures)
     ASSERT_EQ(parse_gcn_arch("g:"), target_arch::unknown);
 
     ASSERT_EQ(parse_gcn_arch("gfx900:sramecc+"), target_arch::gfx900);
+    ASSERT_EQ(parse_gcn_arch("gfx902"), target_arch::gfx902);
+    ASSERT_EQ(parse_gcn_arch("gfx904"), target_arch::gfx904);
     ASSERT_EQ(parse_gcn_arch("gfx906:::"), target_arch::gfx906);
     ASSERT_EQ(parse_gcn_arch("gfx908:"), target_arch::gfx908);
+    ASSERT_EQ(parse_gcn_arch("gfx909"), target_arch::gfx909);
     ASSERT_EQ(parse_gcn_arch("gfx90a:sramecc+:xnack-"), target_arch::gfx90a);
+    ASSERT_EQ(parse_gcn_arch("gfx942:sramecc+:xnack-"), target_arch::gfx942);
+    ASSERT_EQ(parse_gcn_arch("gfx950"), target_arch::gfx950);
+    ASSERT_EQ(parse_gcn_arch("gfx1030"), target_arch::gfx1030);
+    ASSERT_EQ(parse_gcn_arch("gfx1100"), target_arch::gfx1100);
+    ASSERT_EQ(parse_gcn_arch("gfx1101"), target_arch::gfx1101);
+    ASSERT_EQ(parse_gcn_arch("gfx1102"), target_arch::gfx1102);
+    ASSERT_EQ(parse_gcn_arch("gfx1150"), target_arch::gfx1150);
+    ASSERT_EQ(parse_gcn_arch("gfx1170"), target_arch::gfx1170);
+    ASSERT_EQ(parse_gcn_arch("gfx1171"), target_arch::gfx1171);
+    ASSERT_EQ(parse_gcn_arch("gfx1201"), target_arch::gfx1201);
 }
 
 TEST(rocrand_config_dispatch_tests, get_config_on_host_and_device)
@@ -187,13 +200,14 @@ TEST(rocrand_config_dispatch_tests, device_id_from_stream)
     ASSERT_EQ(result, device_id);
 }
 
+// Queries the device-side least common grid size for the compiled architecture.
 template<class ConfigProvider>
 __global__
 void least_common_grid_size_kernel(unsigned int* least_common_grid_size, rocrand_ordering order)
 {
+    constexpr auto arch = rocrand_impl::host::get_device_arch();
     *least_common_grid_size
-        = rocrand_impl::host::get_least_common_grid_size<ConfigProvider,
-                                                         rocrand_impl::host::target_arch{}>(
+        = rocrand_impl::host::get_least_common_grid_size<ConfigProvider, arch>(
             rocrand_impl::host::is_ordering_dynamic(order));
 }
 
@@ -241,34 +255,38 @@ TEST(rocrand_config_dispatch_tests, default_config_provider)
     ASSERT_EQ(least_common_grid_size, h_least_common_grid_size);
 }
 
-template<class ConfigProvider>
+// Retrieves the device-side launch configuration for the dispatched target architecture.
+template<class ConfigProvider, rocrand_impl::host::target_arch Arch>
 __global__
 void config_selector_kernel(unsigned int* output)
 {
     if(threadIdx.x == 0 && blockIdx.x == 0)
     {
-        output[0] = ConfigProvider::template device_config<unsigned short>(true).blocks;
-        output[1] = ConfigProvider::template device_config<unsigned short>(true).threads;
+        output[0] = ConfigProvider::template device_config<unsigned short, Arch>(true).blocks;
+        output[1] = ConfigProvider::template device_config<unsigned short, Arch>(true).threads;
     }
 }
 
 namespace rocrand_impl::host
 {
 
+// Customizes block and thread counts for recognized targets to test dynamic architecture selection.
 template<>
 struct generator_config_selector<dummy_rng_type, unsigned short>
 {
     __host__ __device__
     static constexpr unsigned int get_threads(const target_arch arch)
     {
-        if(arch == target_arch::gfx906)
+        if(arch != target_arch::unknown && arch != target_arch::invalid)
             return 64;
         return generator_config_defaults<dummy_rng_type, unsigned short>::threads;
     }
 
     __host__ __device__
-    static constexpr unsigned int get_blocks(const target_arch /*arch*/)
+    static constexpr unsigned int get_blocks(const target_arch arch)
     {
+        if(arch != target_arch::unknown && arch != target_arch::invalid)
+            return 4;
         return generator_config_defaults<dummy_rng_type, unsigned short>::blocks;
     }
 };
@@ -289,12 +307,38 @@ TEST(rocrand_config_dispatch_tests, config_selection)
     static constexpr rocrand_ordering ordering       = ROCRAND_ORDERING_PSEUDO_DYNAMIC;
     HIP_CHECK(config_provider.host_config<unsigned short>(default_stream, ordering, config));
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(config_selector_kernel<config_provider_t>),
-                       config.blocks,
-                       config.threads,
-                       0,
-                       default_stream,
-                       d_output);
+    rocrand_impl::host::target_arch host_arch;
+    HIP_CHECK(rocrand_impl::host::get_device_arch(default_stream, host_arch));
+
+    bool launched = false;
+    rocrand_impl::host::for_each_arch(
+        [&](auto arch_tag)
+        {
+            if(arch_tag != host_arch)
+            {
+                return;
+            }
+
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(config_selector_kernel<config_provider_t, arch_tag>),
+                config.blocks,
+                config.threads,
+                0,
+                default_stream,
+                d_output);
+            launched = true;
+        });
+    if(!launched)
+    {
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                config_selector_kernel<config_provider_t, rocrand_impl::host::target_arch::unknown>),
+            config.blocks,
+            config.threads,
+            0,
+            default_stream,
+            d_output);
+    }
     HIP_CHECK(hipGetLastError());
 
     std::array<unsigned int, 2> h_output{};
@@ -304,5 +348,13 @@ TEST(rocrand_config_dispatch_tests, config_selection)
 
     ASSERT_EQ(config.blocks, h_output[0]);
     ASSERT_EQ(config.threads, h_output[1]);
+
+    // Confirm architecture-specific overrides were selected over defaults (1 block, 256 threads).
+    if(host_arch != rocrand_impl::host::target_arch::unknown
+       && host_arch != rocrand_impl::host::target_arch::invalid)
+    {
+        ASSERT_EQ(config.blocks, 4);
+        ASSERT_EQ(config.threads, 64);
+    }
 }
 #endif // USE_DEVICE_DISPATCH
