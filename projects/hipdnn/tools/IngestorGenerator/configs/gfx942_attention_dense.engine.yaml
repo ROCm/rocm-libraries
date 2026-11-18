@@ -60,6 +60,14 @@ engine:
   - use_exp2_fast
   - lds_k_group_pad
   heuristic: native
+  # The trained gfx942 kernel ranker (L2), installed by `uhd_gen promote` (other arches keep
+  # native; the L1 is held). What it reads, when to retrain it and how: the bundle README
+  # (descriptors/rocKE/gfx942_attention_dense/README.md, "Models").
+  heuristics:
+    sort_kernel_catalog:
+      gfx942: [18bb432e-d871-4290-9ae8-f5111aaf2ffe]
+  trained_catalog_sha256:
+    gfx942: 380a508ad8566e3be17143aae7cec238e5f796bce2538a11c409a1075b5539e4
 kmd_fields:
 - name: dtype
   type: string
