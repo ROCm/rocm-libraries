@@ -337,7 +337,7 @@ def _kernel(tdmStore):
 
 @pytest.mark.parametrize("level", _LEVELS)
 def test_kernel_name_token_only_when_enabled(level):
-  """TDMStoreInst=0 keeps every existing kernel name; levels 1-3 add the TDMSI1, TDMSI2 or TDMSI3 token, which
+  """TDMStoreInst=0 keeps every existing kernel name; TDMStoreInst=1 adds the TDMSI1 token, which
   stays apart from the TDMS0 or TDMS1 of TDMSplit."""
   off = getKernelNameMin(_kernel(0), False)
   on = getKernelNameMin(_kernel(level), False)
@@ -481,8 +481,8 @@ def test_emitted_paths_of_each_level(gp_gfx1250, gfx1250_iim, assembler, capsys,
     direct = stores[("GSU1", beta)]
     assert sorted(direct["then"], reverse=True) == cascade
     assert sorted(direct["tdm"], reverse=True) == sorted(_blocks(level, vectorWidths=cascade), reverse=True)
-    assert direct["nonEdge"] and direct["nonEdgeTdm"] == (level == 3), (beta, direct)
-    assert bool(direct["nonEdgeBuffer"]) == bool(direct["buffer"]) == (level < 3), (beta, direct)
+    assert direct["nonEdge"] and direct["nonEdgeTdm"] == bool(level), (beta, direct)
+    assert bool(direct["nonEdgeBuffer"]) == bool(direct["buffer"]) == (not level), (beta, direct)
   partials = stores[("MB", "0")]
   assert sorted(partials["then"], reverse=True) == cascade and partials["nonEdge"] and not partials["tdm"]
   assert not partials["nonEdgeTdm"]
@@ -497,22 +497,23 @@ def test_emitted_paths_of_each_level(gp_gfx1250, gfx1250_iim, assembler, capsys,
 
 @pytest.mark.parametrize("dest", ["B", "H"])
 @pytest.mark.parametrize("level", [0] + _LEVELS)
-def test_optnll_store_goes_through_the_tdm_block_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys, level, dest):
-  """The OptNLL store is an unmasked full-tile store of D, a NonEdge path without edge blocks, so level 3
-  stores it through the TDM block whatever the alignment of the columns, and levels 0-2 keep buffer_store."""
+def test_optnll_store_goes_through_the_tdm_block(gp_gfx1250, gfx1250_iim, assembler, capsys, level, dest):
+  """The OptNLL store is an unmasked full-tile store of D, a NonEdge path without edge blocks, so with
+  TDMStoreInst on it goes through the TDM block whatever the alignment of the columns, and with it off
+  it keeps buffer_store."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ProblemType=_dest(dest))
   assert sol.get("Valid"), capsys.readouterr().out
   optNLL = _stores(asm)[("OptNLL_MB", "0")]
   assert optNLL["then"] == [8] and not optNLL["nonEdge"]
-  assert optNLL["tdm"] == ([8] if level == 3 else [])
-  assert bool(optNLL["buffer"]) == (level < 3), optNLL
+  assert optNLL["tdm"] == ([8] if level else [])
+  assert bool(optNLL["buffer"]) == (not level), optNLL
 
 
 @pytest.mark.parametrize("adaptive", [0, 1])
-def test_level_3_is_level_2_plus_the_nonedge_paths(gp_gfx1250, gfx1250_iim, assembler, capsys, adaptive):
-  """No level adds, drops or moves a global-write label or a branch to one, so none checks the alignment of
-  the columns, and a level-3 kernel equals its level-2 twin outside the NonEdge blocks of the direct store
-  and the OptNLL store, which it stores through the TDM block."""
+def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembler, capsys, adaptive):
+  """TDMStoreInst adds, drops or moves no global-write label or branch to one, so it never checks the
+  alignment of the columns, and a kernel with it on equals its level-0 twin outside the blocks it
+  stores through the TDM block."""
   asms = {}
   for level in [0] + _LEVELS:
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, AdaptiveGemm=adaptive)
@@ -520,7 +521,8 @@ def test_level_3_is_level_2_plus_the_nonedge_paths(gp_gfx1250, gfx1250_iim, asse
     asms[level] = asm
   for level, asm in asms.items():
     assert _skeleton(asm) == _skeleton(asms[0]), level
-  assert _outside(asms[3]) == _outside(asms[2])
+  # The differential is now against level 0: everything outside the TDM blocks must be untouched.
+  assert _outside(asms[1]) == _outside(asms[0])
 
 
 @pytest.mark.parametrize("adaptive", [0, 1])
@@ -733,7 +735,7 @@ def test_complex_double_descriptor_uses_8_byte_units(gp_gfx1250, gfx1250_iim, as
 
 
 @pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
-def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys, algorithm, aga):
+def test_dynamic_gsu_with_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, capsys, algorithm, aga):
   """GlobalSplitU=-1 with bias and ScaleAlphaVec, for every algorithm and AdaptiveGemmGSUA: the GSU == 1 branch,
   the OptNLL store and, with MultipleBufferSingleKernel and MbskPrefetchMethod 0, the TDM copy of the reduced tile
   go through the TDM block, beside the buffer_store copy of the reduced tile; the partials and atomics of the
@@ -781,7 +783,7 @@ def test_mbsk_reduced_tile_at_each_level(gp_gfx1250, gfx1250_iim, assembler, cap
     assert (reduced["tdm"], reduced["nonEdgeTdm"], reduced["buffer"]) == (direct["tdm"], direct["nonEdgeTdm"], 0)
     assert copy["then"] == reduced["then"] and copy["nonEdge"] and not copy["tdm"] and not copy["nonEdgeTdm"]
     assert copy["stores"] and not copy["buffer"]
-  assert stores[("OptNLL_MBSK", "0")]["tdm"] == ([8] if level == 3 else [])
+  assert stores[("OptNLL_MBSK", "0")]["tdm"] == ([8] if level else [])
   assert not any(path[0] == "OptNLL_MBSKBuffer" for path in stores)
   assert asm.count("64-bit byte offset from SrdTD") == sum(len(stores[("MBSK", beta)]["tdm"])
                                                           + stores[("MBSK", beta)]["nonEdgeTdm"] for beta in "01")
@@ -916,14 +918,14 @@ def test_srvw_tdm_blocks_skip_the_remap(gp_gfx1250, gfx1250_iim, assembler, caps
     for slot in slots:
       block = _tdmBlock(asm, beta, slot)
       assert not any(tag in block for tag in _REMAP), (beta, slot)
-  if level < 3:
+  if not level:
     assert all(tag in asm for tag in _REMAP[:2])
 
 
 def test_sav_device_scalar_bit_is_along_m(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """UseScaleAlphaVec 5 is the vector along M with the device-scalar bit, which only changes how the vector
-  preload selects alpha, so a level-2 kernel stores through the TDM block as with UseScaleAlphaVec 1."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType={"UseBias": 1, "UseScaleAlphaVec": 5})
+  preload selects alpha, so a TDMStoreInst kernel stores through the TDM block as with UseScaleAlphaVec 1."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, ProblemType={"UseBias": 1, "UseScaleAlphaVec": 5})
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["ProblemType"]["UseScaleAlphaVec"] == 5 and "tensor_store_from_lds " in asm
 
@@ -969,14 +971,14 @@ def test_mt1_not_a_multiple_of_the_waves(gp_gfx1250, gfx1250_iim, assembler, cap
   skips = [line for line in asm.splitlines() if "at or past the column bound" in line]
   assert re.search(r"^\s*tensor_store_from_lds ", asm, re.M) and len(bounds) == len(skips) == blocks
   assert "tensor_dim1 = SizeJ - first column" not in asm
-  if level == 3:
+  if level:
     _, even = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level)
     assert "column bound" not in even and "tensor_dim1 = SizeJ - first column" in even
 
 
 @pytest.mark.parametrize("dest", ["B", "H"])
 def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys, dest):
-  """ScaleC and ScaleD are scalars the kernel loads from its arguments into SGPRs: the TDM block of a level-2
+  """ScaleC and ScaleD are scalars the kernel loads from its arguments into SGPRs: the TDM block of a TDMStoreInst
   kernel multiplies its elements by ScaleD, as the buffer_store path does."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType=_dest(dest, UseScaleCD=True))
   assert sol.get("Valid"), capsys.readouterr().out
@@ -1201,13 +1203,13 @@ def _skeleton(asm):
 
 @pytest.mark.parametrize("vectors", [False, True])
 @pytest.mark.parametrize("adaptive", [0, 1])
-def test_store_vector_width_1_levels_1_and_2_store_the_one_masked_block(gp_gfx1250, gfx1250_iim, assembler, capsys,
+def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_iim, assembler, capsys,
                                                                         adaptive, vectors):
   """At store vector width 1 the store-width cascade has one masked block, the narrowest and the one of the
-  store vector width at once, so levels 1 and 2 store it through the TDM block and emit the same kernel
-  apart from its name. Every level keeps the labels and branches of level 0, which send the M-edge,
-  N-edge-only and corner tiles all to that block, and its NonEdge path keeps buffer_store until level 3
-  stores it through the TDM block too. With bias and ScaleAlphaVec the vectors keep LDS offset 0."""
+  store vector width at once, so TDMStoreInst stores it through the TDM block. It keeps the labels and
+  branches of level 0, which send the M-edge, N-edge-only and corner tiles all to that block, and its
+  NonEdge path goes through the TDM block as well. With bias and ScaleAlphaVec the vectors keep LDS
+  offset 0."""
   kernels = {}
   for level in [0] + _LEVELS:
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=1, AdaptiveGemm=adaptive,
@@ -1215,8 +1217,6 @@ def test_store_vector_width_1_levels_1_and_2_store_the_one_masked_block(gp_gfx12
     assert sol.get("Valid"), capsys.readouterr().out
     assert sol["StoreVectorWidth"] == 1
     kernels[level] = asm
-  unnamed = lambda asm: [re.sub(r"_TDMSI[12](?=_)", "_TDMSI", _code(line)) for line in asm.splitlines()]
-  assert unnamed(kernels[1]) == unnamed(kernels[2])
   for level, asm in kernels.items():
     assert _skeleton(asm) == _skeleton(kernels[0]), level
     stores = _stores(asm)
@@ -1226,7 +1226,7 @@ def test_store_vector_width_1_levels_1_and_2_store_the_one_masked_block(gp_gfx12
       direct = stores[("GSU1", beta)]
       assert direct["then"] == [1] and direct["nonEdge"], (level, beta, direct)
       assert direct["tdm"] == ([1] if level else []), (level, beta, direct)
-      assert direct["nonEdgeTdm"] == (level == 3) and bool(direct["nonEdgeBuffer"]) == (level < 3), (level, beta, direct)
+      assert direct["nonEdgeTdm"] == bool(level) and bool(direct["nonEdgeBuffer"]) == (not level), (level, beta, direct)
       end = lines.index("label_GW_B%s_FD0_VW1_GSU1_NonEdgeEnd:" % beta)
       assert lines[end + 1:end + 3] == ["label_GW_B%s_FD0_VW1_GSU1_%s:" % (beta, part) for part in ("Else", "Then")]
     assert "add lds offset" not in asm
