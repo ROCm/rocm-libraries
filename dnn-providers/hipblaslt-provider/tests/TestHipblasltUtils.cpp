@@ -7,6 +7,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 using namespace hipblaslt_plugin;
 using namespace hipblaslt_utils;
@@ -510,4 +512,59 @@ TEST(TestHipblasltUtils, IsDenseRowMajorDeclinesRankMismatch)
     EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({4, 5}, {5}));
     EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({4}, {5, 1}));
     EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({}, {1}));
+}
+
+// ============================================================================
+// THROW_ON_HIPBLASLT_FAILURE / LOG_ON_HIPBLASLT_FAILURE
+// ============================================================================
+
+TEST(TestHipblasltUtils, ThrowOnHipblasltFailureEvaluatesItsArgumentOnce)
+{
+    int calls = 0;
+    auto failsOnce = [&calls]() {
+        return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
+    };
+
+    try
+    {
+        THROW_ON_HIPBLASLT_FAILURE(failsOnce());
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_NE(e.getMessage().find("HIPBLAS_STATUS_INVALID_VALUE"), std::string::npos)
+            << e.getMessage();
+    }
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(TestHipblasltUtils, ThrowOnHipblasltFailureDoesNotThrowOnSuccess)
+{
+    int calls = 0;
+    auto succeeds = [&calls]() {
+        ++calls;
+        return HIPBLAS_STATUS_SUCCESS;
+    };
+
+    EXPECT_NO_THROW(THROW_ON_HIPBLASLT_FAILURE(succeeds()));
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(TestHipblasltUtils, LogOnHipblasltFailureEvaluatesItsArgumentOnce)
+{
+    hipdnn_plugin_sdk::logging::initializeCallbackLogging(
+        "hipblaslt_plugin_tests", hipdnn_test_sdk::utilities::initializeTestLogRecordingShared());
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    int calls = 0;
+    auto failsOnce = [&calls]() {
+        return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
+    };
+
+    LOG_ON_HIPBLASLT_FAILURE(failsOnce());
+
+    EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "HIPBLAS_STATUS_INVALID_VALUE"))
+        << recorder.getRecordedLogsAsString();
 }

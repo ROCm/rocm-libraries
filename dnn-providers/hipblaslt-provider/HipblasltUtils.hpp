@@ -14,27 +14,31 @@
 #include <string>
 #include <vector>
 
-#define LOG_ON_HIPBLASLT_FAILURE(status)                                              \
-    do                                                                                \
-    {                                                                                 \
-        if((status) != HIPBLAS_STATUS_SUCCESS)                                        \
-        {                                                                             \
-            HIPDNN_PLUGIN_LOG_ERROR(                                                  \
-                "hipBLASLt error occurred: "                                          \
-                << hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString(status)); \
-        }                                                                             \
+// Each macro evaluates its argument exactly once, so a wrapped call is never re-issued and the
+// message names the status of the first call.
+#define LOG_ON_HIPBLASLT_FAILURE(status)                                                         \
+    do                                                                                           \
+    {                                                                                            \
+        const hipblasStatus_t hipblasltMacroStatus = (status);                                   \
+        if(hipblasltMacroStatus != HIPBLAS_STATUS_SUCCESS)                                       \
+        {                                                                                        \
+            HIPDNN_PLUGIN_LOG_ERROR("hipBLASLt error occurred: "                                 \
+                                    << hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString( \
+                                           hipblasltMacroStatus));                               \
+        }                                                                                        \
     } while(0)
 
 #define THROW_ON_HIPBLASLT_FAILURE(status)                                                  \
     do                                                                                      \
     {                                                                                       \
-        if((status) != HIPBLAS_STATUS_SUCCESS)                                              \
+        const hipblasStatus_t hipblasltMacroStatus = (status);                              \
+        if(hipblasltMacroStatus != HIPBLAS_STATUS_SUCCESS)                                  \
         {                                                                                   \
             throw hipdnn_plugin_sdk::HipdnnPluginException(                                 \
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                        \
                 "hipBLASLt error occurred: "                                                \
-                    + std::string(                                                          \
-                        hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString(status))); \
+                    + std::string(hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString( \
+                        hipblasltMacroStatus)));                                            \
         }                                                                                   \
     } while(0)
 

@@ -51,6 +51,13 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
             "Unsupported matrix: only column major and row major matrices are supported");
     }
 
+    // hipBLASLt does not reject every non-positive ld (-1 passes) and reads out of bounds with it.
+    // Only the ld this layout actually uses is checked; the stride of a size-1 dim is ignored.
+    PLUGIN_THROW_IF_TRUE(ld <= 0,
+                         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                         "Leading dimension must be positive, got " + std::to_string(ld)
+                             + ". UID: " + std::to_string(_uid));
+
     THROW_ON_HIPBLASLT_FAILURE(
         hipblasLtMatrixLayoutCreate(&_matrixLayout,
                                     hipblaslt_utils::tensorDataTypeToHipDataType(tensor.dataType()),
