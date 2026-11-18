@@ -22,6 +22,7 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlan.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
@@ -96,6 +97,26 @@ class TestSdpaFwdPlanBuilder : public ::testing::Test
 protected:
     SdpaFwdPlanBuilder _planBuilder;
     Handle _handle;
+};
+
+// Every vendored forward kernel accepts the block it is launched with, so the
+// launch-limit decline is driven by reporting a smaller limit for each kernel.
+class SdpaFwdPlanBuilderWithMaxThreads : public SdpaFwdPlanBuilder
+{
+public:
+    explicit SdpaFwdPlanBuilderWithMaxThreads(unsigned int maxThreads)
+        : _maxThreads(maxThreads)
+    {
+    }
+
+protected:
+    unsigned int maxThreadsPerBlock(const fmha_v3_fwdConfig& /*config*/) const override
+    {
+        return _maxThreads;
+    }
+
+private:
+    unsigned int _maxThreads;
 };
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
@@ -381,6 +402,33 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAlignment)
 
     const GraphTest aligned{createSdpaFwdGraph(), "All tensors 16-byte aligned"};
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, aligned.graphWrapper())) << aligned.message;
+}
+
+// The decline sits exactly at the block each kernel is launched with: hd192x128
+// kernels launch 256 threads and the others 512, in batch and group mode.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesKernelBelowLaunchBlock)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    for(const auto& config : getConfigsForArch(deviceString, cfg_fmha_fwd))
+    {
+        const GraphTest test{configToCompatibleGraph(config), config.co_name};
+        const unsigned int blockDimX = fwdBlockDimX(static_cast<unsigned int>(config.hdim_q),
+                                                    static_cast<unsigned int>(config.hdim_v));
+        EXPECT_TRUE(
+            SdpaFwdPlanBuilderWithMaxThreads(blockDimX).isApplicable(_handle, test.graphWrapper()))
+            << test.message;
+        EXPECT_FALSE(SdpaFwdPlanBuilderWithMaxThreads(blockDimX - 1U)
+                         .isApplicable(_handle, test.graphWrapper()))
+            << test.message;
+    }
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
@@ -2382,6 +2430,41 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsOnEmptyKernelKey)
     Context context;
     EXPECT_THROW(_planBuilder.buildPlan(_handle, gw, dummyCfg, context),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// buildPlan refuses a kernel that cannot take its launch block, before loading
+// it, rather than leaving the failure to hipModuleLaunchKernel in execute.
+TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsForKernelBelowLaunchBlock)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // hd128 kernels are launched with 512 threads.
+    auto builder = createSdpaFwdGraph({4, 8, 256, 128});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                        builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    Context context;
+
+    // A kernel that cannot be loaded also throws HipdnnPluginException, so the
+    // message tells the two apart.
+    try
+    {
+        SdpaFwdPlanBuilderWithMaxThreads(511U).buildPlan(_handle, gw, dummyCfg, context);
+        FAIL() << "buildPlan accepted a kernel limited to 511 threads per block";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("accepts at most 511 threads per block"),
+                  std::string::npos)
+            << e.what();
+    }
 }
 
 // =============================================================================

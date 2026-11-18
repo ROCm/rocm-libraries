@@ -11,8 +11,10 @@ through the decoder on the GPU against an independent reference; the decoder's
 lowered text (it zero-extends the byte, never sign-extends it, so the signed
 int-to-float conversion that follows sees 0..255) in LLVM IR and in HIP; the two engines lowering the
 decoder to the same LLVM IR; and the MX GEMM reading its scale bytes the same
-unsigned way in both engines. The MX GEMM's numerics across the scale range
-are checked in tests/instances/test_mx_gemm_scale_range.py.
+unsigned way in both engines. They also check the scaled-dot helper (its
+refusals and its ldexp form) and the largest code the scaled MFMA takes
+directly. The MX GEMM's numerics across the scale range are checked in
+tests/instances/test_mx_gemm_scale_range.py.
 """
 
 import ctypes
@@ -35,10 +37,9 @@ from rocke.helpers.mx_scale import (
     BF8_E5M2_OCP,
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
-    MxElementFormat,
+    add_mx_scaled_dot,
     decode_mx_scale_e8m0,
-    exact_mx_scale_split,
-    fma_with_mx_scale_pair,
+    largest_safe_mx_scale_code,
 )
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
 
@@ -95,14 +96,7 @@ def _reference_bits(code):
 
 def _mx_gemm_spec():
     return MxGemmSpec(
-        M=16,
-        N=16,
-        K=64,
-        mantissa_dtype="fp8e4m3",
-        group_k=32,
-        block_tile_m=16,
-        block_tile_n=16,
-        per_input_row=True,
+        M=16, N=16, K=64, block_tile_m=32, block_tile_n=128, mantissa_dtype="fp8e4m3"
     )
 
 
@@ -156,103 +150,98 @@ def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines():
 @pytest.mark.parametrize(
     "case, message",
     [
-        ("scalar value", "fma_with_mx_scale_pair expects an f32 vector value, got f32"),
+        ("scalar dot", "add_mx_scaled_dot expects an f32 vector dot, got f32"),
         (
-            "mismatched addend",
-            "fma_with_mx_scale_pair expects the addend type to match the value type "
-            "vec<f32x4>, got vec<f32x2>",
+            "mismatched accumulator",
+            (
+                "add_mx_scaled_dot expects the accumulator type to match the dot type "
+                "vec<f32x4>, got vec<f32x2>"
+            ),
         ),
-        ("i32 scale code", "fma_with_mx_scale_pair expects i8 input, got i32"),
-        ("missing split", "fma_with_mx_scale_pair expects an MxScaleSplit, got None"),
+        (
+            "wrong code count",
+            "add_mx_scaled_dot expects 4 A and 4 B scale bytes, got 3 and 4",
+        ),
+        ("i32 scale code", "add_mx_scaled_dot expects i8 input, got i32"),
     ],
 )
-def test_scale_pair_fma_refuses_wrong_types(case, message):
-    b = IRBuilder("mx_scale_pair_refusal")
-    value = b.vector_splat(b.const_f32(1.0), 4)
-    addend = value
+def test_scaled_dot_refuses_wrong_types(case, message):
+    """The C++ engine's test (test_mx_scale_decode.cpp) checks the same texts."""
+    b = IRBuilder("mx_scaled_dot_refusal")
+    dot = b.vector_splat(b.const_f32(1.0), 4)
+    acc = dot
     codes = b.param("Codes", PtrType(I8, "global"))
-    a_code = b_code = b.global_load_i8(codes, b.const_i32(0))
-    if case == "scalar value":
-        value = b.const_f32(1.0)
-    elif case == "mismatched addend":
-        addend = b.vector_splat(b.const_f32(1.0), 2)
+    code = b.global_load_i8(codes, b.const_i32(0))
+    a_codes, b_codes = [code] * 4, [code] * 4
+    if case == "scalar dot":
+        dot = b.const_f32(1.0)
+    elif case == "mismatched accumulator":
+        acc = b.vector_splat(b.const_f32(1.0), 2)
+    elif case == "wrong code count":
+        a_codes = a_codes[:3]
     elif case == "i32 scale code":
-        b_code = b.const_i32(0)
-    split = exact_mx_scale_split(BF8_E5M2_OCP, BF8_E5M2_OCP, 32)
-    if case == "missing split":
-        split = None
+        b_codes = [b.const_i32(0)] * 4
     with pytest.raises(ValueError, match=re.escape(message)):
-        fma_with_mx_scale_pair(b, value, a_code, b_code, addend, split=split)
+        add_mx_scaled_dot(b, acc, dot, a_codes, b_codes)
 
 
-# (format, the exponent cap its 32-element groups get). The fused factor
-# always takes every f32 power of two, 2^-149..2^127. The cap is 254 minus the
-# top bit of the largest group: 32 * 448^2 < 2^23 for OCP E4M3, 32 * 240^2 <
-# 2^21 for E4M3 FNUZ and 32 * 57344^2 < 2^37 for both E5M2 encodings, so the
-# narrower E4M3 range leaves room for a larger cap.
-_MFMA_FORMAT_CAPS = (
-    (FP8_E4M3_OCP, 232),
-    (BF8_E5M2_OCP, 218),
-    (FP8_E4M3_FNUZ, 234),
-    (BF8_E5M2_FNUZ, 218),
+def test_scaled_dot_scales_with_ldexp_and_selects_nan():
+    """Each element is ``acc + select(nan, NaN, ldexp(dot, ca + cb - 254))``;
+    a byte shared by several elements is read once."""
+    b = IRBuilder("mx_scaled_dot_shape")
+    codes = b.param("Codes", PtrType(I8, "global"))
+    out = b.param("Out", PtrType(F32, "global"))
+    a_code = b.global_load_i8(codes, b.const_i32(0))
+    b_code = b.global_load_i8(codes, b.const_i32(1))
+    dot = b.vector_splat(b.const_f32(3.0), 2)
+    acc = b.vector_splat(b.const_f32(1.0), 2)
+    total = add_mx_scaled_dot(b, acc, dot, [a_code, a_code], [b_code, b_code])
+    b.global_store(out, b.const_i32(0), b.vec_extract(total, 0), align=4)
+    b.ret()
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950", llvm_flavor="llvm20")
+    assert ll.count("zext i8") == 2  # each distinct byte read once
+    assert ll.count("call float @llvm.ldexp.f32.i32(") == 2
+    assert ll.count("float 0x7FF8000000000000") >= 1
+    assert "fmul" not in ll
+
+
+# The largest code each fp8 / bf8 encoding the matrix cores read may take on
+# both sides of the scaled MFMA (64 products per output): 64 * largest^2 is
+# below 2^24 for OCP E4M3, 2^22 for E4M3 FNUZ and 2^38 for both E5M2
+# encodings, and 2c - 254 + that power is at most 127.
+_SAFE_CODES = (
+    (FP8_E4M3_OCP, 178),
+    (BF8_E5M2_OCP, 171),
+    (FP8_E4M3_FNUZ, 179),
+    (BF8_E5M2_FNUZ, 171),
 )
 
 
 @pytest.mark.parametrize(
-    "element_format, cap", _MFMA_FORMAT_CAPS, ids=[f.name for f, _ in _MFMA_FORMAT_CAPS]
+    "element_format, code", _SAFE_CODES, ids=[f.name for f, _ in _SAFE_CODES]
 )
-def test_exact_split_for_the_mfma_formats(element_format, cap):
-    """The split derived for each fp8 / bf8 encoding the matrix cores read,
-    and its largest ``pre``, the cap less the largest ``fused``. The C++
-    engine's test (test_mx_scale_decode.cpp) pins the same values."""
-    split = exact_mx_scale_split(element_format, element_format, 32)
-    assert (split.exponent_cap, split.fused_min, split.fused_max) == (cap, -149, 127)
-    assert split.pre_max == cap - 127
+def test_safe_code_for_the_mfma_formats(element_format, code):
+    """The C++ engine's test (test_mx_scale_decode.cpp) pins the same codes."""
+    assert largest_safe_mx_scale_code(element_format, element_format, 64) == code
 
 
 @pytest.mark.parametrize(
-    "element_format, cap", _MFMA_FORMAT_CAPS, ids=[f.name for f, _ in _MFMA_FORMAT_CAPS]
+    "element_format, code", _SAFE_CODES, ids=[f.name for f, _ in _SAFE_CODES]
 )
-def test_exact_split_cap_is_the_largest_that_keeps_the_pre_scale_exact(
-    element_format, cap
-):
-    """At the cap, the largest group times ``2^pre`` (``pre = cap - 127``) is
-    a finite f32; one step higher it overflows. So the derived cap is the
-    largest one the split can take."""
-    largest_group = np.float32(32 * element_format.largest_value**2)
-    with np.errstate(over="ignore"):
-        at_cap = largest_group * np.float32(2.0 ** (cap - 127))
-        above_cap = largest_group * np.float32(2.0 ** (cap - 126))
-    assert np.isfinite(at_cap) and np.isinf(above_cap)
+def test_safe_code_keeps_the_largest_sum_a_binade_below_overflow(element_format, code):
+    """At the code, the largest sum of 64 scaled products is at most 2^127;
+    one code higher it is not."""
+    largest_sum = 64 * element_format.largest_value**2
+    assert largest_sum * 2.0 ** (2 * code - 254) <= 2.0**127
+    assert largest_sum * 2.0 ** (2 * (code + 1) - 254) > 2.0**127
 
 
-@pytest.mark.parametrize(
-    "element_format, message",
-    [
-        (
-            MxElementFormat("wide", -9, 1.0e30),
-            "exact_mx_scale_split: the dot product of 32 products of wide and wide "
-            "values can reach 2^204, beyond the f32 range",
-        ),
-        (
-            MxElementFormat("fine", -60, 1.0),
-            "exact_mx_scale_split: the dot product of 32 products of fine and fine "
-            "values can be as small as 2^-120; at the smallest scales (ea + eb = -254) "
-            "it needs a factor of 2^-105 before the fma, which would round it",
-        ),
-        (
-            MxElementFormat("spread", -22, 2.0**40),
-            "exact_mx_scale_split: the dot product of 32 products of spread and spread "
-            "values spans 2^-44 to 2^86, too wide to saturate ea + eb at 169 without "
-            "changing a result",
-        ),
-    ],
-    ids=["dot beyond f32", "products too small", "range too wide"],
-)
-def test_exact_split_refuses_formats_without_one(element_format, message):
-    """A format whose bounds admit no exact split is refused, with the reason."""
-    with pytest.raises(ValueError, match=re.escape(message)):
-        exact_mx_scale_split(element_format, element_format, 32)
+def test_safe_code_refuses_a_count_that_is_not_positive():
+    with pytest.raises(
+        ValueError,
+        match=re.escape("largest_safe_mx_scale_code: products must be positive, got 0"),
+    ):
+        largest_safe_mx_scale_code(FP8_E4M3_OCP, FP8_E4M3_OCP, 0)
 
 
 def _skip_unless_comgr_targets(isa: str) -> None:
