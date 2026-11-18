@@ -73,9 +73,22 @@ struct SymbolicOperandFix {
 /// in force where it appears, so a symbol redefined mid-function reads the way
 /// the assembler would. Unresolvable names are left untouched.
 ///
+/// By default, operands with an unresolved placeholder index (bit 31 set) are
+/// treated as virtual registers and skipped: a name cannot contradict an index
+/// that is not yet assigned. When \p resolveUnresolvedSentinel is true, the pass
+/// instead targets *exactly* the all-ones placeholder index (0xFFFFFFFF, i.e.
+/// rocisa regIdx == -1 widened to uint32) and resolves only those, leaving every
+/// other operand -- already-resolved native operands and real virtual registers
+/// (small low-bit index with bit 31 set) -- untouched. This mode exists for the
+/// gfx1250 logical-IR migration: a mixed-tree logical leaf is converted from
+/// rocisa eagerly at build time, before rocisa's convertTextVariablesToRegisters
+/// resolves symbolic SGPR names, so the leaf's named sgpr operands reach the asm
+/// IR with that placeholder and must be resolved here to match the native path.
+///
 /// Returns the number of indices changed, appending a description of each to
 /// \p fixes.
-size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& fixes);
+size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& fixes,
+                               bool resolveUnresolvedSentinel = false);
 
 /// If \p name matches a collected `.set` symbol, set \p outInt32 to the value
 /// narrowed like a 32-bit immediate (unsigned wrap for values outside int32
