@@ -294,12 +294,13 @@ class KernelWriterAssembly(KernelWriter):
     try:
       if isCustom:
         code = self._getCustomKernelSource(kernel)
-        # The occupancy formula in compute_occupancy_from_resources is
-        # gfx9/wave64-specific; only override CUOccupancy for gfx9 custom
-        # kernels.  Non-gfx9 (gfx10/11/12, wave32) custom kernels leave
-        # CUOccupancy at its default (-1) rather than emit a wrong value (Fix #2).
+        # A CUOccupancy the logic file declares for the kernel is kept, on any
+        # arch. Otherwise the occupancy formula in compute_occupancy_from_resources
+        # is gfx9/wave64-specific: only gfx9 custom kernels get it computed, and
+        # other (wave32) custom kernels leave CUOccupancy at its default (-1)
+        # rather than emit a wrong value (Fix #2).
         _isa = kernel.get("ISA", [9, 0, 8])
-        if _isa[0] == 9:
+        if kernel.get("CUOccupancy", -1) <= 0 and _isa[0] == 9:
           # Use live rocisa caps so custom-kernel occupancy matches the codegen path.
           # For custom kernels, setRocIsa() is called (not setKernel()), so
           # self.states.regCaps/archCaps are not initialized — query the singleton directly.
