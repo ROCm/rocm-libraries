@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,10 +34,8 @@
 #ifdef __cplusplus
 #include "hipblas_datatype2string.hpp"
 #include <cstdio>
-#include <functional>
 #include <iostream>
 #include <random>
-#include <thread>
 #include <vector>
 #endif
 
@@ -83,17 +81,17 @@ inline constexpr double hipblas_type_epsilon<float> = std::numeric_limits<float>
 template <>
 inline constexpr double hipblas_type_epsilon<double> = std::numeric_limits<double>::epsilon();
 template <>
-inline constexpr double
-    hipblas_type_epsilon<std::complex<float>> = std::numeric_limits<float>::epsilon();
+inline constexpr double hipblas_type_epsilon<std::complex<float>>
+    = std::numeric_limits<float>::epsilon();
 template <>
-inline constexpr double
-    hipblas_type_epsilon<std::complex<double>> = std::numeric_limits<double>::epsilon();
+inline constexpr double hipblas_type_epsilon<std::complex<double>>
+    = std::numeric_limits<double>::epsilon();
 template <>
-inline constexpr double hipblas_type_epsilon<
-    hipblasHalf> = 0.0009765625; // in fp16 diff between 0x3C00 (1.0) and fp16 0x3C01
+inline constexpr double hipblas_type_epsilon<hipblasHalf>
+    = 0.0009765625; // in fp16 diff between 0x3C00 (1.0) and fp16 0x3C01
 template <>
-inline constexpr double hipblas_type_epsilon<
-    hipblasBfloat16> = 0.0078125; // in bf16 diff between 0x3F80 (1.0) and bf16 0x3F81 in double precision
+inline constexpr double hipblas_type_epsilon<hipblasBfloat16>
+    = 0.0078125; // in bf16 diff between 0x3F80 (1.0) and bf16 0x3F81 in double precision
 
 /* =============================================================================================== */
 /* 64-bit value which will overflow 32-bit integers                                                */
@@ -105,35 +103,100 @@ extern int64_t c_i32_overflow;
 #define LIMITED_VRAM_STRING "skip: VRAM"
 
 /* ============================================================================================ */
-/*! \brief  Random number generator which generates NaN values */
+/*! \brief  Random number generation for the client test data */
 
-using hipblas_rng_t = std::mt19937;
+// Random number engine for the client test data (SplitMix64). Its state is one 64-bit word, so it
+// is cheap to seed; the parallel fills reseed it for every block of elements they write.
+// Satisfies UniformRandomBitGenerator, so it works with the std:: distributions.
+class hipblas_rng_t
+{
+public:
+    using result_type = uint64_t;
 
-extern hipblas_rng_t   hipblas_seed;
-extern std::thread::id hipblas_main_thread_id;
+    explicit hipblas_rng_t(uint64_t seed = 0)
+        : m_state(seed)
+    {
+    }
 
-// The random number generator engine is thread_local so that concurrent
-// initialization (e.g. from an OpenMP parallel region) does not race on shared
-// engine state. glibc rand() and a single shared std::mt19937 are both unsafe
-// under concurrency; on the main thread we use hipblas_seed for reproducibility,
-// other threads are seeded deterministically from their thread id's hash.
+    static constexpr result_type min()
+    {
+        return 0;
+    }
+
+    static constexpr result_type max()
+    {
+        return ~result_type(0);
+    }
+
+    result_type operator()()
+    {
+        uint64_t z = (m_state += 0x9e3779b97f4a7c15ull);
+        z          = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+        z          = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+        return z ^ (z >> 31);
+    }
+
+private:
+    uint64_t m_state;
+};
+
+// The fixed seed every stream starts from
+extern const hipblas_rng_t hipblas_seed;
+
+// Engine used by the random generators below. It is thread_local so that threads never share
+// engine state: glibc rand() and a single shared engine serialize (or race) when an OpenMP
+// parallel fill calls them from many threads.
 extern thread_local hipblas_rng_t hipblas_rng;
 
-// For the main thread, we use hipblas_seed; for other threads, we start with a
-// different seed but deterministically based on the thread id's hash function.
-inline hipblas_rng_t hipblas_get_seed()
-{
-    auto tid = std::this_thread::get_id();
-    return tid == hipblas_main_thread_id ? hipblas_seed
-                                         : hipblas_rng_t(std::hash<std::thread::id>{}(tid));
-}
-
-// Reset the seed (mainly to ensure repeatability of failures in a given suite)
+// Reset the calling thread's stream (mainly to ensure repeatability of failures in a given suite)
 inline void hipblas_seedrand()
 {
-    hipblas_rng = hipblas_get_seed();
+    hipblas_rng = hipblas_seed;
 }
 
+// Seeding for one parallel fill. The fill draws one seed from the calling thread's stream when
+// it starts, and every block of elements is generated from an engine seeded with that seed and
+// the block's position. The values therefore do not depend on which thread writes a block, so a
+// fill produces the same data for any number of OpenMP threads and any schedule. The calling
+// thread also writes blocks, which reseeds its engine, so its stream is restored when the fill
+// ends: the next fill continues from the same point whatever the thread count.
+class hipblas_fill_seed
+{
+public:
+    hipblas_fill_seed()
+        : m_seed(hipblas_rng())
+        , m_saved(hipblas_rng)
+    {
+    }
+
+    ~hipblas_fill_seed()
+    {
+        hipblas_rng = m_saved;
+    }
+
+    hipblas_fill_seed(const hipblas_fill_seed&)            = delete;
+    hipblas_fill_seed& operator=(const hipblas_fill_seed&) = delete;
+
+    // Call in the parallel loop before generating the values of block `block` of batch `batch`
+    void seed_block(uint64_t batch, uint64_t block) const
+    {
+        hipblas_rng = hipblas_rng_t(mix(mix(m_seed ^ batch) ^ block));
+    }
+
+private:
+    static uint64_t mix(uint64_t x)
+    {
+        return hipblas_rng_t(x)();
+    }
+
+    uint64_t      m_seed;
+    hipblas_rng_t m_saved;
+};
+
+// Number of vector elements generated from one block seed
+constexpr int64_t hipblas_fill_block_size = 4096;
+
+/*! \brief  Random number generator which generates NaN values */
 class hipblas_nan_rng
 {
     // Generate random NaN values
@@ -599,10 +662,10 @@ public:
 
     ~hipblasLocalHandle();
 
-    hipblasLocalHandle(const hipblasLocalHandle&) = delete;
-    hipblasLocalHandle(hipblasLocalHandle&&)      = delete;
+    hipblasLocalHandle(const hipblasLocalHandle&)            = delete;
+    hipblasLocalHandle(hipblasLocalHandle&&)                 = delete;
     hipblasLocalHandle& operator=(const hipblasLocalHandle&) = delete;
-    hipblasLocalHandle& operator=(hipblasLocalHandle&&) = delete;
+    hipblasLocalHandle& operator=(hipblasLocalHandle&&)      = delete;
 
     // Allow hipblasLocalHandle to be used anywhere hipblas_handle is expected
     operator hipblasHandle_t&()

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,12 +62,8 @@ void d_vector_set_pad_length(size_t pad)
     g_DVEC_PAD = pad;
 }
 
-hipblas_rng_t   hipblas_seed(69069); // A fixed seed to start at
-std::thread::id hipblas_main_thread_id = std::this_thread::get_id();
-
-// For the main thread, we use hipblas_seed; for other threads, we start with a
-// different seed but deterministically based on the thread id's hash function.
-thread_local hipblas_rng_t hipblas_rng = hipblas_get_seed();
+const hipblas_rng_t        hipblas_seed(69069); // A fixed seed to start at
+thread_local hipblas_rng_t hipblas_rng = hipblas_seed;
 
 int64_t c_i32_overflow = int64_t(std::numeric_limits<int32_t>::max()) + 1; // 2147483648
 
