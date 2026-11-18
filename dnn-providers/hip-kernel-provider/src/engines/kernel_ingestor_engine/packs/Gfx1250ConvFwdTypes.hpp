@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "engines/kernel_ingestor_engine/packs/ConvGeometryCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGeometryCommon.hpp"
 
 /**
  * @file Gfx1250ConvFwdTypes.hpp
@@ -38,14 +38,14 @@ inline const char* toString(DataType dtype)
     return dtype == DataType::BF16 ? "bf16" : "fp16";
 }
 
-/// gfx1250 target limits (arch_specs.json) are the shared gfx950_conv::Target and caps the
+/// gfx1250 target limits (arch_specs.json) are the shared conv_aot::Target and caps the
 /// dgrad port also uses; the WMMA constants below are this family's.
-using gfx950_conv::I32_MAX;
-using gfx950_conv::MAX_DISPATCH_ITEMS;
-using gfx950_conv::MAX_GRID_DIM;
-constexpr int64_t GFX1250_WAVE_SIZE = gfx950_conv::GFX1250.waveSize;
-constexpr int64_t GFX1250_MAX_THREADS_PER_BLOCK = gfx950_conv::MAX_BLOCK_THREADS;
-constexpr int64_t GFX1250_LDS_BYTES = gfx950_conv::GFX1250.ldsCapacityBytes;
+using conv_aot::I32_MAX;
+using conv_aot::MAX_DISPATCH_ITEMS;
+using conv_aot::MAX_GRID_DIM;
+constexpr int64_t GFX1250_WAVE_SIZE = conv_aot::GFX1250.waveSize;
+constexpr int64_t GFX1250_MAX_THREADS_PER_BLOCK = conv_aot::MAX_BLOCK_THREADS;
+constexpr int64_t GFX1250_LDS_BYTES = conv_aot::GFX1250.ldsCapacityBytes;
 constexpr int64_t WMMA_K = 32;
 constexpr int64_t CH_PAD = 8; ///< LDS row skew of a staged tile, in channels (16 bytes).
 constexpr int64_t TDM_MAX_EXTENT = 0xFFFF;

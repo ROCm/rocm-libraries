@@ -10,13 +10,13 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
-#include "engines/kernel_ingestor_engine/packs/ConvGeometryCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGeometryCommon.hpp"
 
-/// @file Gfx950ConvGraphPredicates.hpp
-/// The tensor and attribute checks of the gfx950 conv AOT engines' graph contracts, the
+/// @file ConvAotGraphPredicates.hpp
+/// The tensor and attribute checks of the conv AOT engines' graph contracts, the
 /// same for every direction: which tensors the kernels can address, packed NHWC strides,
 /// 2-D attributes.
-namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_aot
 {
 
 /// A tensor the kernels address: non-virtual, passed by pointer, not ragged, 16-byte
@@ -68,4 +68,4 @@ inline bool hasSpatialRankTwo(const flatbuffers::Vector<int64_t>* values)
     return values != nullptr && values->size() == 2;
 }
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_aot

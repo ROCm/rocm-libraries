@@ -13,20 +13,20 @@
 #include <string_view>
 #include <vector>
 
-#include "engines/kernel_ingestor_engine/packs/ConvGeometryCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGeometryCommon.hpp"
 
-namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot
+namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
 {
 
-using gfx950_conv::bufferRangesDoNotOverlap;
-using gfx950_conv::ceilDiv;
-using gfx950_conv::DIRECT_KERNARG_NAMES;
-using gfx950_conv::DW_DGRAD_MFMA_CH;
-using gfx950_conv::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
-using gfx950_conv::IMPLICIT_GEMM_KERNARG_NAMES;
-using gfx950_conv::LaunchGeometry;
-using gfx950_conv::MagicDivision;
-using gfx950_conv::magicDivision;
+using conv_aot::bufferRangesDoNotOverlap;
+using conv_aot::ceilDiv;
+using conv_aot::DIRECT_KERNARG_NAMES;
+using conv_aot::DW_DGRAD_MFMA_CH;
+using conv_aot::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
+using conv_aot::IMPLICIT_GEMM_KERNARG_NAMES;
+using conv_aot::LaunchGeometry;
+using conv_aot::MagicDivision;
+using conv_aot::magicDivision;
 
 /// Logical NCHW/KCYX dimensions. The kernel stores A as NHWC, B as KYXC, D as NHWK.
 /// C and K are totals across all groups; B holds C / groups channels per filter.
@@ -61,7 +61,7 @@ struct Geometry
 inline bool bufferRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
                                      const std::array<int32_t, 3>& bytes)
 {
-    return gfx950_conv::bufferRangesDoNotOverlap(addresses, {bytes[0], bytes[1], bytes[2]});
+    return conv_aot::bufferRangesDoNotOverlap(addresses, {bytes[0], bytes[1], bytes[2]});
 }
 
 /// The builder's A_bytes/B_bytes/D_bytes arguments and indexing use signed i32.
@@ -1191,4 +1191,4 @@ inline bool
            && blockWaves == DEFAULT_DIRECT_BLOCK_WAVES;
 }
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot
+} // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd

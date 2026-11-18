@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "engines/kernel_ingestor_engine/packs/ConvGeometryCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGeometryCommon.hpp"
 
 /// @file ConvDgradAotGeometry.hpp
 /// The launch contract of the shape-generic backward-data (dgrad) AOT-instance engines,
@@ -32,25 +32,25 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot
 {
 
-// The helpers both gfx950 conv engines share (ConvGeometryCommon.hpp).
-using gfx950_conv::bufferRangesDoNotOverlap;
-using gfx950_conv::ceilDiv;
-using gfx950_conv::DIRECT_KERNARG_NAMES;
-using gfx950_conv::DW_DGRAD_MFMA_CH;
-using gfx950_conv::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
-using gfx950_conv::LaunchGeometry;
-using gfx950_conv::MagicDivision;
-using gfx950_conv::magicDivision;
-using gfx950_conv::wideProduct;
+// The helpers both gfx950 conv engines share (ConvAotGeometryCommon.hpp).
+using conv_aot::bufferRangesDoNotOverlap;
+using conv_aot::ceilDiv;
+using conv_aot::DIRECT_KERNARG_NAMES;
+using conv_aot::DW_DGRAD_MFMA_CH;
+using conv_aot::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
+using conv_aot::LaunchGeometry;
+using conv_aot::MagicDivision;
+using conv_aot::magicDivision;
+using conv_aot::wideProduct;
 
-using gfx950_conv::GFX1250;
-using gfx950_conv::GFX950;
-using gfx950_conv::I32_MAX;
-using gfx950_conv::I32_MIN;
-using gfx950_conv::MAX_BLOCK_THREADS;
-using gfx950_conv::MAX_DISPATCH_ITEMS;
-using gfx950_conv::MAX_GRID_DIM;
-using gfx950_conv::Target;
+using conv_aot::GFX1250;
+using conv_aot::GFX950;
+using conv_aot::I32_MAX;
+using conv_aot::I32_MIN;
+using conv_aot::MAX_BLOCK_THREADS;
+using conv_aot::MAX_DISPATCH_ITEMS;
+using conv_aot::MAX_GRID_DIM;
+using conv_aot::Target;
 
 /// Record and magic-table widths of the implicit-GEMM sub_gemm_buf, in i32
 /// (SUB_GEMM_RECORD_FIELDS, SUB_GEMM_MAGIC_FIELDS in convolution_backward_data.py).

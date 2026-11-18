@@ -40,7 +40,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvFwdAotSelection.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx1250ConvFwdGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGraphPredicates.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
 
 /**
  * @file ConvFwdAotNative.cpp
@@ -61,7 +61,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 using namespace hipdnn_plugin_sdk::ingestor;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-namespace conv = conv_fwd_aot;
+namespace conv = gfx950_conv_fwd;
+namespace sel = conv_fwd_aot;
 namespace gfx1250 = gfx1250_conv_fwd;
 
 namespace
@@ -180,9 +181,9 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-using gfx950_conv::hasPackedNhwcStrides;
-using gfx950_conv::hasSpatialRankTwo;
-using gfx950_conv::isDeviceTensor;
+using conv_aot::hasPackedNhwcStrides;
+using conv_aot::hasSpatialRankTwo;
+using conv_aot::isDeviceTensor;
 
 /// Whether @p output is packed NHWK with @p matched's inferred convolution dimensions.
 /// hipDNN's frontend infers a sole, non-virtual graph output's dims/strides during
@@ -1143,7 +1144,7 @@ double
 /// Which of the instances serving a graph run: the CandidateFilterFn registered under the
 /// kernel matcher's symbol, so it sees every instance aotKernelMatches admitted at once.
 /// Among implicit-GEMM instances it keeps the problem's widest vector widths, or every
-/// serving instance when none bakes them (conv::widestVectorSelection); "serves" is the
+/// serving instance when none bakes them (sel::widestVectorSelection); "serves" is the
 /// capability, this is the policy. rocKE's direct benchmark runs every direct kernel that
 /// serves, so direct instances all stay, and so do group-merged ones.
 /// (conv_fwd_aot_runtime_candidates in convolution_forward.py is the same policy, for both
@@ -1155,7 +1156,7 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
 {
     std::vector<bool> keep(candidates.size(), true);
     std::vector<size_t> implicitGemm;
-    std::vector<conv::AotSelectionKey> keys;
+    std::vector<sel::AotSelectionKey> keys;
     AotPrepared scratch;
     for(size_t i = 0; i < candidates.size(); ++i)
     {
@@ -1192,7 +1193,7 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
     }
     const auto& problem = matched->problem;
     const auto selected
-        = conv::widestVectorSelection(keys, problem.c / problem.groups, problem.k / problem.groups);
+        = sel::widestVectorSelection(keys, problem.c / problem.groups, problem.k / problem.groups);
     for(size_t j = 0; j < implicitGemm.size(); ++j)
     {
         keep[implicitGemm[j]] = selected[j];

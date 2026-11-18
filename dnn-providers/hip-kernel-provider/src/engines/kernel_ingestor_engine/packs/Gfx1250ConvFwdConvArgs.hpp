@@ -76,26 +76,26 @@ struct ConvGeometry
 };
 
 /// The kernarg names of an ABI: the leading pointer/size block, then @p block. The blocks
-/// are the shared gfx950_conv lists (ConvGeometryCommon.hpp), which the gfx950 port
+/// are the shared conv_aot lists (ConvAotGeometryCommon.hpp), which the gfx950 port
 /// matches the same way.
 template <size_t N>
 std::vector<std::string> fwdArgNames(const std::array<std::string_view, N>& block)
 {
-    std::vector<std::string> names(gfx950_conv::FWD_LEADING_KERNARG_NAMES.begin(),
-                                   gfx950_conv::FWD_LEADING_KERNARG_NAMES.end());
+    std::vector<std::string> names(conv_aot::FWD_LEADING_KERNARG_NAMES.begin(),
+                                   conv_aot::FWD_LEADING_KERNARG_NAMES.end());
     names.insert(names.end(), block.begin(), block.end());
     return names;
 }
 
 inline const std::vector<std::string>& implicitFwdArgNames()
 {
-    static const auto s_names = fwdArgNames(gfx950_conv::IMPLICIT_GEMM_KERNARG_NAMES);
+    static const auto s_names = fwdArgNames(conv_aot::IMPLICIT_GEMM_KERNARG_NAMES);
     return s_names;
 }
 
 inline const std::vector<std::string>& directFwdArgNames()
 {
-    static const auto s_names = fwdArgNames(gfx950_conv::DIRECT_KERNARG_NAMES);
+    static const auto s_names = fwdArgNames(conv_aot::DIRECT_KERNARG_NAMES);
     return s_names;
 }
 
@@ -185,7 +185,7 @@ inline Arg convArg(const std::string& name, const ConvGeometry& g, int64_t tileM
             continue;
         }
         // Refused as a plan by ImplicitGemm::refuse before an argument is built.
-        const auto magic = gfx950_conv::magicDivision(m.divisor);
+        const auto magic = conv_aot::magicDivision(m.divisor);
         if(!magic)
         {
             throw std::invalid_argument("magic-division divisor " + std::to_string(m.divisor)

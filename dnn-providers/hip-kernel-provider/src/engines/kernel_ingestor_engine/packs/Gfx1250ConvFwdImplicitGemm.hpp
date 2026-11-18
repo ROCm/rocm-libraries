@@ -146,7 +146,7 @@ inline Refusal refuse(const ImplicitGemmKernel& kernel, const Problem& problem)
     }
     for(const auto divisor : {g.ho(), g.wo(), g.x, g.cpg()})
     {
-        if(!gfx950_conv::magicDivision(divisor))
+        if(!conv_aot::magicDivision(divisor))
         {
             return "a magic-division divisor (Ho, Wo, X, C / groups) is outside [1, 2**31)";
         }
