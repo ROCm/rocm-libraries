@@ -14,11 +14,15 @@ carries the compiler memory barrier (``fence="compiler"``).
 CPU: every barrier op of the backward kernels is fenced and lowers with the
 clobber in both engines. Compile (comgr + llvm-objdump): the LDS bytes read and
 written between consecutive prologue barriers are the same in the ISA as in the
-IR (:func:`lds_barrier_crossings`), and the same kernel with the fences removed
-shows the crossing (the check sees the hazard).
+IR (:func:`lds_barrier_crossings`), and one of those reads moved past its
+barrier in the real disassembly is flagged (the check sees the hazard). The
+move is simulated: LLVM 24 keeps these loads in place even without the
+fences, which stay as the guarantee.
 """
 
 from __future__ import annotations
+
+import dataclasses
 
 import pytest
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
@@ -80,13 +84,6 @@ def _kernel(arch, case):
     if case in MFMA_ONLY and arch not in ("gfx942", "gfx950"):
         pytest.skip("MFMA tile knobs")
     return _emit_main(AttnBwdSpec(**CASES[case]), arch, main_kernel_refusals=False)
-
-
-def _strip_fences(kernel):
-    for op in _walk(kernel.body.ops):
-        if op.name in BARRIERS:
-            op.attrs.pop("fence", None)
-    return kernel
 
 
 def test_the_backward_fence_is_the_compiler_barrier():
@@ -220,9 +217,32 @@ def test_prologue_lds_accesses_stay_between_their_barriers(arch, case):
     assert R.lds_barrier_crossings(ir, isa) == []
 
 
+def _sink_a_read_past_a_prologue_barrier(isa):
+    """``isa`` with one LDS read moved to just after the barrier that retires
+    it: the last read before the last prologue barrier that has reads before
+    it. Every address keeps its slot, so the loops and branch targets stay."""
+    bars = [i for i, x in enumerate(isa) if x.mnemonic == "s_barrier"]
+    bars = bars[: R.prologue_barrier_count(isa)]
+    for k in reversed(range(len(bars))):
+        lo, b = (bars[k - 1] if k else -1), bars[k]
+        reads = [i for i in range(lo + 1, b) if R.isa_lds_bytes(isa[i])[0]]
+        if reads:
+            i = reads[-1]
+            moved = isa[:i] + isa[i + 1 : b + 1] + [isa[i]] + isa[b + 1 :]
+            return [dataclasses.replace(x, addr=y.addr) for x, y in zip(moved, isa)]
+    raise AssertionError("no LDS read before a prologue barrier")
+
+
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_unfenced_select_kernel_shows_the_crossing(arch):
-    """Negative control: without the fences the stage-0 V-fragment loads of
-    the select-guarded (2, 4)-grid d128 kernel leave their barrier interval."""
-    ir, isa = _compile_isa(_strip_fences(_kernel(arch, "select24_d128")), arch)
-    assert R.lds_barrier_crossings(ir, isa)
+def test_checker_flags_a_read_sunk_past_a_barrier_of_the_select_kernel(arch):
+    """Negative control on a real code object: one LDS read of the fenced
+    select-guarded (2, 4)-grid d128 kernel moved past the barrier that retires
+    it, as LLVM 22's machine sinking moved its stage-0 V-fragment loads
+    without the fences, is flagged. The move is made in the disassembly
+    because LLVM 24 no longer sinks those loads, fenced or not, so a
+    fence-stripped compile shows no crossing there."""
+    ir, isa = _compile_isa(_kernel(arch, "select24_d128"), arch)
+    assert R.lds_barrier_crossings(ir, isa) == []
+    sunk = _sink_a_read_past_a_prologue_barrier(isa)
+    assert R.prologue_barrier_count(sunk) == R.prologue_barrier_count(isa)
+    assert R.lds_barrier_crossings(ir, sunk)
