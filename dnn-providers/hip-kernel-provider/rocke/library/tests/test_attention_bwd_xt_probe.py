@@ -67,7 +67,11 @@ from kernels.common._attention_bwd_lds import (
     default_xt_writer,
     xt_conflicts,
 )
-from ._attention_bwd_test_utils import device_arch
+
+if __package__:
+    from ._attention_bwd_test_utils import device_arch
+else:  # run as a script (the rocprofv3 probe child): no parent package
+    from tests._attention_bwd_test_utils import device_arch
 
 THREADS = 256
 REPS = 64
@@ -399,8 +403,9 @@ def test_conflict_counter_matches_predictor_on_device():
             "--run-probe",
             arch,
         ]
+        # cwd: rocprofv3 writes its counter buffers to ./.rocprofv3 even with -d
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=900, check=False
+            cmd, capture_output=True, text=True, timeout=900, check=False, cwd=tmp
         )
         assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-4000:]
         sums = _parse_counter_csv(Path(tmp))
