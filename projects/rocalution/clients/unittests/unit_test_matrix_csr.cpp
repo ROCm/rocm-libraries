@@ -776,6 +776,39 @@ TYPED_TEST(matrix_csr, lu_solve)
         values_of(*out), upper_solve(D, ref.n, lower_solve(D, ref.n, b, true), false), tol<T>());
 }
 
+// Both factors have rows longer than a 64-wide wavefront, as the complete LU factors of
+// a 2D Laplacian have
+TYPED_TEST(matrix_csr, lu_solve_of_factors_with_long_rows)
+{
+    using T              = typename TypeParam::value_type;
+    const int n          = 200;
+    const int half_width = 80;
+
+    Csr<T> ref(n);
+    for(int i = 0; i < n; ++i)
+    {
+        for(int j = std::max(0, i - half_width); j <= std::min(n - 1, i + half_width); ++j)
+        {
+            const T off = static_cast<T>(j < i ? 0.01 : 0.02) / static_cast<T>(std::abs(i - j));
+            ref.add(j, i == j ? static_cast<T>(10) : off);
+        }
+        ref.end_row();
+    }
+    const std::vector<T> b = rhs<T>(n);
+    const std::vector<T> D = dense(ref);
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto in  = make_vector(TypeParam::backend, b);
+    auto out = make_vector(TypeParam::backend, std::vector<T>(n, T(0)));
+
+    A->LUAnalyse();
+    ASSERT_TRUE(A->LUSolve(*in, out.get()));
+    A->LUAnalyseClear();
+
+    expect_near(values_of(*out), upper_solve(D, n, lower_solve(D, n, b, true), false), tol<T>());
+}
+
 // The matrix is the lower triangle L of L L^T, with the diagonal last in each row
 TYPED_TEST(matrix_csr, ll_solve)
 {
@@ -884,6 +917,54 @@ TYPED_TEST(matrix_csr, iterative_triangular_solves)
     }
 }
 
+// The iterative L and U analyses of one matrix are alive together, in either order. A
+// unit diagonal needs a smaller buffer, so a second analysis may have to grow it.
+TYPED_TEST(matrix_csr, iterative_l_and_u_analyses_of_one_matrix_keep_their_solves)
+{
+    using T                  = typename TypeParam::value_type;
+    const int            it  = 100;
+    const Csr<T>         ref = dominant<T>(8);
+    const std::vector<T> b   = rhs<T>(ref.n);
+    const std::vector<T> D   = dense(ref);
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto in = make_vector(TypeParam::backend, b);
+
+    for(bool lower_first : {true, false})
+    {
+        for(bool unit_l : {false, true})
+        {
+            for(bool unit_u : {false, true})
+            {
+                SCOPED_TRACE(std::string(lower_first ? "U after L" : "L after U")
+                             + (unit_l ? ", unit L" : "") + (unit_u ? ", unit U" : ""));
+                if(lower_first)
+                {
+                    A->ItLAnalyse(unit_l);
+                    A->ItUAnalyse(unit_u);
+                }
+                else
+                {
+                    A->ItUAnalyse(unit_u);
+                    A->ItLAnalyse(unit_l);
+                }
+
+                auto x = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+                ASSERT_IN_LOOP(A->ItLSolve(it, 0.0, false, *in, x.get()));
+                expect_near(values_of(*x), lower_solve(D, ref.n, b, unit_l), iterative_tol<T>());
+
+                auto y = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+                ASSERT_IN_LOOP(A->ItUSolve(it, 0.0, false, *in, y.get()));
+                expect_near(values_of(*y), upper_solve(D, ref.n, b, unit_u), iterative_tol<T>());
+
+                A->ItLAnalyseClear();
+                A->ItUAnalyseClear();
+            }
+        }
+    }
+}
+
 // The unit lower solve converges in one iteration, the upper solve needs more
 TYPED_TEST(matrix_csr, iterative_lu_solve_of_an_upper_triangular_matrix)
 {
@@ -935,6 +1016,11 @@ TYPED_TEST(matrix_csr, iterative_ll_solve)
     auto out_inv = make_vector(TypeParam::backend, std::vector<T>(L.n, T(0)));
     ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, *inv, out_inv.get()));
     expect_near(values_of(*out_inv), expected, iterative_tol<T>());
+
+    // out is the initial guess
+    auto from_guess = make_vector(TypeParam::backend, std::vector<T>(L.n, T(3)));
+    ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, from_guess.get()));
+    expect_near(values_of(*from_guess), expected, iterative_tol<T>());
 
     A->ItLLAnalyseClear();
 }
