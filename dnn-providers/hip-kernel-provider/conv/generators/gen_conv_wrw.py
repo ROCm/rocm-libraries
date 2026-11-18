@@ -769,6 +769,9 @@ BREADTH = {
     # 35^2 s2 595 against 862.
     (CDNA32_16, "1x1"): [(CF, (128, 64, 2, 2, 32), (2,))],
     (CDNA32_16, "3x3s2ph"): [(CF, (128, 64, 2, 2, 32), (1,))],
+    # gfx942 (MI325X): a 3x3x3 c1024 k512 layer on small 3-D (small spatial, wide channels)
+    # 756 against 954 us at 4 blocks a unit.
+    (CDNA32_16, "3x3"): [(CL, (64, 64, 2, 2, 32), (4,))],
     # gfx1201 (gfx1101 alike where noted): the same layers 656 against 784 us (gfx1101 2111 against
     # 2204), 750 against 986 (2365 against 2927), 477 against 622 (1676 against 2176), 576 against
     # 700 (3214 against 3894), 1888 against 2461 (6472 against 7702); gfx1201 only: inception c80
