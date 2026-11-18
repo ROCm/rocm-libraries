@@ -2371,7 +2371,7 @@
           "status": "ok"
         }
       },
-      "expected_failures": 0,
+      "expected_failures": {},
       "summary": {
         "attention": 38,
         "attention_d128_swa": 1,
@@ -4772,7 +4772,7 @@
           "status": "ok"
         }
       },
-      "expected_failures": 0,
+      "expected_failures": {},
       "summary": {
         "attention": 38,
         "attention_d128_swa": 1,
@@ -7221,7 +7221,7 @@
           "status": "ok"
         }
       },
-      "expected_failures": 0,
+      "expected_failures": {},
       "summary": {
         "attention": 38,
         "attention_d128_swa": 1,
