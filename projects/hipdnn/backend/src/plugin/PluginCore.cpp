@@ -88,23 +88,6 @@ const std::string& PluginBase::cachedName() const
     return _name;
 }
 
-std::optional<hipdnn_data_sdk::utilities::Version> PluginBase::parsedApiVersion() const
-{
-    const auto rawVersion = apiVersion();
-    try
-    {
-        return hipdnn_data_sdk::utilities::Version{rawVersion};
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_BACKEND_LOG_WARN("Plugin '{}' has malformed API version string '{}': {}",
-                                cachedName(),
-                                std::string(rawVersion),
-                                e.what());
-        return std::nullopt;
-    }
-}
-
 hipdnnPluginType_t PluginBase::type() const
 {
     assert(_initialized);

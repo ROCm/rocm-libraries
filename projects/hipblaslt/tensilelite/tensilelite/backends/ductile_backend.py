@@ -15,12 +15,14 @@ import csv
 import functools
 import os
 import shutil
+import time
 from copy import deepcopy
 
 import rocisa
 
-from ..Common import Path, print1, printExit, printWarning
+from ..Common import Path, print1, printExit, printWarning, BENCHMARK_DATA_DIR
 from ..Common.GlobalParameters import globalParameters
+from ..Common.TimingInstrumentation import record_timing, timing_context
 from ..SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
 from ..KernelWriterAssembly import KernelWriterAssembly
 from .base import OptimizationBackend
@@ -189,6 +191,7 @@ class DuctileBackend(OptimizationBackend):
         Returns:
             None
         """
+        setup_start_ns = time.perf_counter_ns()
         source_path = benchmark_config.get("sourcePath", None)
 
         if cacheValid:
@@ -247,7 +250,9 @@ class DuctileBackend(OptimizationBackend):
         survival = Survival.get(**ductile_config.populate(merged_config, "survival"))
         
         print1(f"# DuctileBackend: Starting GA optimization")
-        
+
+        _last_results_file = [None]
+
         def _evaluate(individuals):
             """Fitness callback for GA - returns multi-dimensional fitness array.
             
@@ -263,14 +268,15 @@ class DuctileBackend(OptimizationBackend):
                 where n_sizes is the number of benchmark problem sizes
             """
             # Ductile path uses Ductile-native generation to preserve per-individual alignment and duplicate handling.
-            converted = _generate_ga_solutions(
-                problem_type,
-                constant_params,
-                individuals,
-                assembler,
-                debug_config,
-                isa_info_map,
-            )
+            with timing_context("python_ductile_generate_solutions"):
+                converted = _generate_ga_solutions(
+                    problem_type,
+                    constant_params,
+                    individuals,
+                    assembler,
+                    debug_config,
+                    isa_info_map,
+                )
             solutions = []
             for idx, solution in enumerate(converted):
                 if solution is not None:
@@ -281,10 +287,12 @@ class DuctileBackend(OptimizationBackend):
             
             # Ductile always clears previous run artifacts before re-benchmarking each population.
             if source_path and os.path.isdir(source_path):
-                shutil.rmtree(source_path)
+                with timing_context("python_ductile_clear_artifacts"):
+                    shutil.rmtree(source_path)
 
             # Benchmark solutions - Ductile forces no cache and no build-only.
             results_filename, returncode = benchmark_runner(solutions, isCached=False, buildOnly=False)
+            _last_results_file[0] = results_filename
 
             if not results_filename or not os.path.isfile(results_filename):
                 printExit(f"BenchmarkProblems: Expected results file does not exist: {results_filename}")
@@ -293,7 +301,8 @@ class DuctileBackend(OptimizationBackend):
             if len(set(expected_cols)) != len(expected_cols):
                 printExit("BenchmarkProblems: Duplicate solution names detected in expected results columns")
 
-            scores = _read_and_validate_scores_csv(results_filename, expected_cols)
+            with timing_context("python_ductile_read_scores"):
+                scores = _read_and_validate_scores_csv(results_filename, expected_cols)
             
             # Extract scores from CSV
             n_sizes = scores.shape[0]
@@ -309,6 +318,29 @@ class DuctileBackend(OptimizationBackend):
             return nGFlops
         
 
+        # Time inside _evaluate (which includes benchmark_runner and so the build and client
+        # timers), and the gaps around it while ga.optimize() runs. The gap before the first
+        # evaluation is the initial population sampling (validity checks in joblib workers); the
+        # gaps between evaluations are the GA's own selection/mating/survival/checkpoint work.
+        evaluate_ns = [0]
+        gap = {"active": False, "last_end": 0, "evals": 0, "sampling_ns": 0, "between_ns": 0}
+        _evaluate_inner = _evaluate
+
+        def _evaluate(individuals):
+            start = time.perf_counter_ns()
+            if gap["active"]:
+                if gap["evals"] == 0:
+                    gap["sampling_ns"] += start - gap["last_end"]
+                else:
+                    gap["between_ns"] += start - gap["last_end"]
+                gap["evals"] += 1
+            try:
+                return _evaluate_inner(individuals)
+            finally:
+                end = time.perf_counter_ns()
+                evaluate_ns[0] += end - start
+                gap["last_end"] = end
+
         root = Path(benchmark_config.get("rootPath", "."))
         cfg_name = benchmark_config["configName"]
         if benchmark_config.get("totalBenchmarkSteps", 1) == 1:
@@ -317,7 +349,21 @@ class DuctileBackend(OptimizationBackend):
             log_file = root / f"cfg-{cfg_name}__step-{benchmark_config.get('benchmarkStepIdx', 0):02d}__optimization.log"
 
         ckpt_path = root / f"step-{benchmark_config.get('benchmarkStepIdx', 0):02d}__ductile.checkpoint"
-        
+
+        # Per-iteration benchmark data saving
+        ga_iters_dir = root / BENCHMARK_DATA_DIR / "GA_iters"
+
+        def _save_iteration_csv(gen):
+            """Copy the benchmark results CSV for this generation to GA_iters."""
+            results_file = _last_results_file[0]
+            if not results_file or not os.path.isfile(results_file):
+                return
+            os.makedirs(ga_iters_dir, exist_ok=True)
+            group_name = Path(results_file).parent.parent.name
+            csv_suffix = "_CSVWinner" if globalParameters.get("CSVExportWinner") else ""
+            iter_name = f"{group_name}{csv_suffix}_iter{gen}.csv"
+            shutil.copy(results_file, ga_iters_dir / iter_name)
+
         # Create GA instance with evaluate callback
         ga = GeneticAlgorithm(
             space,
@@ -336,7 +382,10 @@ class DuctileBackend(OptimizationBackend):
             checkpoint_path=ckpt_path,
             weights=merged_config["weights"],
             weight_beta=merged_config["weight_beta"],
+            auto_pop_size=merged_config.get("auto_pop_size", True),
+            on_generation_end=_save_iteration_csv,
         )
+        record_timing("python_ductile_setup", (time.perf_counter_ns() - setup_start_ns) / 1e6)
 
         if ckpt_path.is_file():
             printWarning(f"DuctileBackend: Found existing checkpoint at {ckpt_path}, resuming optimization from checkpoint")
@@ -346,8 +395,17 @@ class DuctileBackend(OptimizationBackend):
                 printWarning(f"DuctileBackend: Failed to load checkpoint: {e}. Starting fresh optimization.")
                 
         # Run GA optimization - GA internally calls _evaluate and orchestrates the loop
+        gap["last_end"] = time.perf_counter_ns()
+        gap["active"] = True
         best, _ = ga.optimize()
-        
+        gap["active"] = False
+        # Whatever follows the last evaluation (final survival, logging, checkpoint) is also GA work.
+        gap["between_ns"] += time.perf_counter_ns() - gap["last_end"]
+        record_timing("python_ductile_initial_sampling", gap["sampling_ns"] / 1e6)
+        record_timing("python_ductile_ga_between_evaluations", gap["between_ns"] / 1e6)
+
+        verify_start_ns = time.perf_counter_ns()
+        verify_evaluate_before_ns = evaluate_ns[0]
         netv_original = globalParameters.get("NumElementsToValidate", 128)
         try:
             # Temporarily override validation
@@ -376,6 +434,11 @@ class DuctileBackend(OptimizationBackend):
         finally:
             # Always restore original validation setting
             globalParameters["NumElementsToValidate"] = netv_original
+            # Post-optimization verification, minus the evaluations (timed by their own timers).
+            record_timing(
+                "python_ductile_verification",
+                ((time.perf_counter_ns() - verify_start_ns) - (evaluate_ns[0] - verify_evaluate_before_ns)) / 1e6,
+            )
 
     def supports_solution_pool(self) -> bool:
         """DuctileBackend does not support loading solutions from pool files.

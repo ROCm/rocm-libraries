@@ -1,0 +1,38 @@
+# hipDNN gtest-filter test categories.
+#
+# test_categories.yaml labels whole CTest entries by name; it cannot drop a single
+# gtest from a binary. This file is the gtest-schema counterpart (shared/ctest/
+# parse_test_categories.py): each category becomes a CTest suite named
+# <target>_<category>_suite that runs the binary with a --gtest_filter built from
+# test_patterns/exclude. Labels are exactly the ones listed here; tiers do not
+# cascade.
+#
+# It applies to every gtest target that opts in with
+# add_hipdnn_test(... GTEST_CATEGORIES) (cmake/Tests.cmake), so one exclude list
+# serves all of them. A pattern that matches no test in a binary is harmless, but
+# qualify excludes as Suite.Test so they cannot match anything unintended.
+#
+# A target that opts in carries the labels of the categories below on these suites
+# only, so test_categories.yaml must list it under `exclude_tests` for the same
+# categories. Today that is ffm-quick.
+
+test_categories:
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier minus tests that cannot pass on the simulator"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      # Asserts that a stalled start event excludes a 20 ms host delay from the
+      # measured span. FFM does not honour the stall gate: stalled timing reported
+      # 100-112 ms against an expected < 5 ms.
+      - "TestGpuProfilingControlDescriptor.StallGateExcludesHostSubmissionDelay"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 600
+  timeout_multiplier: 1
+  category_timeouts:
+    ffm-quick: 7200       # 2 hours; matches the integration-tests ffm-quick tier

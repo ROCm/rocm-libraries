@@ -24,11 +24,13 @@
 
 from __future__ import print_function
 
+import shutil
+
+import pytest
+
 import Tensile.Common as Common
 
 import os
-
-import pytest
 
 
 @pytest.fixture
@@ -102,12 +104,46 @@ def test_gfxArch():
 
     assert Common.gfxArch('blah gfx900 stuff') == (9,0,0)
 
+def test_isStubGfxTarget():
+    assert Common.isStubGfxTarget("gfx000")
+    assert Common.isStubGfxTarget("gfx000:xnack+")
+    assert Common.isStubGfxTarget("gfx000-xnack-")
+    assert not Common.isStubGfxTarget("gfx90a")
+    assert not Common.isStubGfxTarget("gfx0000")
+    assert not Common.isStubGfxTarget("")
+
+def test_asmCapsProbeIsas():
+    assert Common.asmCapsProbeIsas("") is None
+    assert Common.asmCapsProbeIsas("all") is None
+    assert Common.asmCapsProbeIsas("gfx942;all") is None
+    assert Common.asmCapsProbeIsas("gfx942") == {(0,0,0), (9,4,2)}
+    assert Common.asmCapsProbeIsas("gfx90a:xnack+;gfx1201") == {(0,0,0), (9,0,10), (12,0,1)}
+    assert Common.asmCapsProbeIsas("gfx90a:xnack+_gfx90a:xnack-") == {(0,0,0), (9,0,10)}
+    # gfx90c shares the vega10 logic with gfx900
+    assert Common.asmCapsProbeIsas("gfx90c") == {(0,0,0), (9,0,0), (9,0,12)}
+    assert Common.asmCapsProbeIsas("gfx1250-strict") == {(0,0,0), (12,5,0)}
+    assert Common.asmCapsProbeIsas("gfx000") == {(0,0,0)}
+    assert Common.asmCapsProbeIsas("amdgcnspirv") == {(0,0,0)}
+
+def test_isUnprobedAsmCaps():
+    caps = Common._DisabledAsmCaps(SupportedISA=False)
+    assert Common.isUnprobedAsmCaps(caps)
+    assert caps["HasMFMA"] is False
+    assert not Common.isUnprobedAsmCaps({"SupportedISA": True})
+
 def test_isGfx12():
     assert Common.isGfx12((12, 0, 0))
     assert Common.isGfx12((12, 0, 1))
     assert Common.isGfx12((12, 5, 0))
+    assert not Common.isGfx12((11, 7, 0))
     assert not Common.isGfx12((11, 0, 0))
     assert not Common.isGfx12((13, 0, 0))
+
+def test_isGfx117():
+    assert Common.isGfx117((11, 7, 0))
+    assert Common.isGfx117((11, 7, 1))
+    assert not Common.isGfx117((11, 5, 0))
+    assert not Common.isGfx117((12, 0, 0))
 
 def test_paths():
     workingPathName = os.path.join("working", "path")
@@ -128,3 +164,68 @@ def test_paths():
     assert Common.globalParameters["WorkingPath"] == expectedSet1WorkingPath
     Common.popWorkingPath()
     assert Common.globalParameters["WorkingPath"] == expectedWorkingPath
+
+
+@pytest.mark.parametrize(
+    "exe_depth, version_str, expected_hip_clang",
+    [
+        pytest.param(
+            1,
+            "#define HIP_VERSION_MAJOR 10\n#define HIP_VERSION_MINOR 1\n#define HIP_VERSION_PATCH 0\n",
+            "10.1.0",
+            id="dist_bin_layout",
+        ),
+        pytest.param(
+            3,
+            "#define HIP_VERSION_MAJOR 7\n#define HIP_VERSION_MINOR 2\n#define HIP_VERSION_PATCH 53211\n",
+            "7.2.53211",
+            id="dist_lib_llvm_bin_layout",
+        ),
+    ],
+)
+def test_common_path_fallback_hip_version_h(
+    monkeypatch, tmp_path, exe_depth, version_str, expected_hip_clang
+):
+    """Common.py PATH fallback parses hip_version.h when env vars are absent.
+
+    _getHipVersion() checks ROCM_VERSION, ROCM_PATH, HIP_PATH, and the
+    default /opt/rocm root before falling back to a PATH walk. This test
+    exercises the PATH walk by unsetting all env vars and redirecting the
+    default root to a non-existent path so the prefix loop falls through.
+
+    The walk prefers share/hip/version then include/hip/hip_version.h over
+    .info/version at each ancestor level. Two representative TheRock layouts
+    are exercised: dist/bin/ (1 level up) and dist/lib/llvm/bin/ (3 levels up).
+    """
+    # Build a fake executable nested exe_depth directories under tmp_path.
+    parts = ["sub"] * exe_depth + ["bin"]
+    bin_dir = tmp_path
+    for p in parts:
+        bin_dir = bin_dir / p
+    bin_dir.mkdir(parents=True)
+    exe = bin_dir / "amdclang++"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+
+    # Place hip_version.h at the root of tmp_path (the "dist" level).
+    hip_dir = tmp_path / "include" / "hip"
+    hip_dir.mkdir(parents=True)
+    hip_version_h_path = hip_dir / "hip_version.h"
+    hip_version_h_path.write_text(version_str)
+
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    # Redirect the default /opt/rocm root so the prefix loop falls through
+    # to the PATH walk without reading from the real system installation.
+    monkeypatch.setattr(Common, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")
+    monkeypatch.setattr(shutil, "which", lambda name: str(exe) if name == "amdclang++" else None)
+
+    # assignGlobalParameters does more than version detection; capture the
+    # HipClangVersion set by the version section before the rest fails.
+    try:
+        Common.assignGlobalParameters({})
+    except (ValueError, KeyError):
+        pass  # Expected — subsequent config steps need more parameters.
+
+    assert Common.globalParameters["HipClangVersion"] == expected_hip_clang

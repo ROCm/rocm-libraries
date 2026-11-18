@@ -4,7 +4,7 @@
 ################################################################################
 # R7 ShiftVectorComponents full-sweep characterization config for gfx942.
 #
-# Target: Tensile/Components/ShiftVectorComponents.py
+# Target: tensilelite/Components/ShiftVectorComponents.py
 # Primary target: VALU edge shift.
 # Secondary coverage: MFMA dispatch + PartialThread.
 #

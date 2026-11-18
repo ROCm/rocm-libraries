@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/sparse_attention_emit.c -- C-side emitter for the sparse-attention
- * forward parity harness. Selects one of 6 sampled configs by argv[1] (the config
- * index 0..5), builds either a rocke_jenga_sparse_spec_t (via
+ * forward parity harness. Selects one of 7 sampled configs by argv[1] (the config
+ * index 0..6), builds either a rocke_jenga_sparse_spec_t (via
  * rocke_build_jenga_sparse_attention) or a rocke_vsa_sparse_spec_t (via
  * rocke_build_vsa_sparse_attention) identically to the Python emitter
  * sparse_attention_emit.py, lowers the returned KernelDef via
@@ -103,6 +103,17 @@ static rocke_kernel_def_t* make_kernel(int idx)
         spec.use_wave_ballot_scatter = false;
         return rocke_build_vsa_sparse_attention(NULL, &spec, "gfx950");
     }
+    case 6: /* sparsity blocks of 3 query rows and 48 keys: both block divisions are by 3 */
+    {
+        shape = rocke_fmha_shape_default(64, 8, 8);
+        common = rocke_fmha_common_spec_default(shape);
+        common.dtype = "f16";
+        rocke_jenga_sparse_spec_t spec
+            = rocke_jenga_sparse_spec_default(common, /*seqlen_q*/ 48, /*seqlen_k*/ 144);
+        spec.block_q = 3;
+        spec.block_k = 48;
+        return rocke_build_jenga_sparse_attention(NULL, &spec, "gfx950");
+    }
     default:
         return NULL;
     }
@@ -112,7 +123,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..5> [mode]\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..6> [mode]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

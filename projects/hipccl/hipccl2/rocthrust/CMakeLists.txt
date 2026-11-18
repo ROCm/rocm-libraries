@@ -79,7 +79,6 @@ include(CMakeDependentOption)
 # Disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests" OFF)
-option(CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLE "Build example" OFF)
@@ -92,6 +91,13 @@ cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (e.g., Google Test)" OFF)
 option(LINK_HIP_DEVICE_LIBS "Links against HIP device libraries. Required for device-side acceleration." ON)
+option(ROCTHRUST_ENABLE_COVERAGE "Build rocThrust with code coverage enabled" OFF)
+if(DEFINED BUILD_CODE_COVERAGE)
+    message(DEPRECATION "BUILD_CODE_COVERAGE will be deprecated and will be removed soon; use ROCTHRUST_ENABLE_COVERAGE instead.")
+    set(ROCTHRUST_ENABLE_COVERAGE ${BUILD_CODE_COVERAGE} CACHE BOOL "" FORCE)
+    unset(BUILD_CODE_COVERAGE CACHE)
+    unset(BUILD_CODE_COVERAGE)
+endif()
 
 option(GRAFT_THRUST_ONTO_BINARIES "!!! TODO !!!" OFF)
 
@@ -147,7 +153,7 @@ list(APPEND CMAKE_MODULE_PATH
 )
 
 # Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CODE_COVERAGE)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT ROCTHRUST_ENABLE_COVERAGE)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -186,7 +192,7 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
@@ -309,7 +315,7 @@ if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
-if(CODE_COVERAGE)
+if(ROCTHRUST_ENABLE_COVERAGE)
   # NOTE(hipccl2): switched from `set(CMAKE_CXX_FLAGS ...)` to
   # add_compile_options() for the same reason as the offload-compress flag
   # above - silences ROCMChecks' "set on a target where possible" warning.
@@ -318,8 +324,11 @@ if(CODE_COVERAGE)
   # language) in fetched dependencies, which CMAKE_CXX_FLAGS never did.
   add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-O0>
-    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
-    $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
+    "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+    "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+  )
+  add_link_options(
+    "$<$<LINK_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
   )
 endif()
 

@@ -5,7 +5,7 @@
 matplotlib): the shared backend for the ``/coalescing`` skill, agents, and the visualization renderer.
 
 GENERIC by construction -- a function of a **distribution** (who touches what), the memory tensor's
-**strides** (the real address of each coord, never an assumed row/col-major), the **direction** (load vs store,
+**strides** (the real address of each coord, never an assumed memory order), the **direction** (load vs store,
 which sets the transaction time order), and the **dtype**. It fixes on NO particular descriptor/layout.
 
 It does NOT re-implement vectorization: the b128 cap + the actual vector-run pattern come from

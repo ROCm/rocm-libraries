@@ -37,6 +37,19 @@ constexpr int32_t nMode = 'n';
 
 constexpr uint32_t alignment = 256;
 
+// Runs `cleanup` when it goes out of scope, so an ASSERT_* that returns early cannot leak.
+template <typename F>
+struct ScopeExit
+{
+    F cleanup;
+    ~ScopeExit()
+    {
+        cleanup();
+    }
+};
+template <typename F>
+ScopeExit(F) -> ScopeExit<F>;
+
 // Fixture holding the descriptors shared by every case: a rank-2 {m,n} tensor, a rank-2 {n,m}
 // tensor that only reorders those modes, a rank-1 {n} tensor holding a strict subset of them,
 // and a rank-2 tensor whose extent along the second mode disagrees with the others'.
@@ -165,6 +178,52 @@ TEST_F(ElementwiseModeTest, PermutationWithReorderedModesIsSupported)
     hiptensorDestroyOperationDescriptor(opDesc);
 }
 
+// Permute does not convert types, so an output whose data type differs from the input's has no
+// matching kernel and must be rejected up front.
+TEST_F(ElementwiseModeTest, PermutationWithMismatchedOutputTypeReturnsNotSupported)
+{
+    int64_t                     lengths[2] = {2, 3};
+    hiptensorTensorDescriptor_t bf16Desc{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                  mHandle, &bf16Desc, 2, lengths, nullptr, HIPTENSOR_R_16BF, alignment),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyBf16Desc{[&] { hiptensorDestroyTensorDescriptor(bf16Desc); }};
+
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreatePermutation(mHandle,
+                                         &opDesc,
+                                         bf16Desc,
+                                         mFullModes,
+                                         HIPTENSOR_OP_IDENTITY,
+                                         mFull,
+                                         mFullModes,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyOpDesc{[&] { hiptensorDestroyOperationDescriptor(opDesc); }};
+
+    hiptensorPlanPreference_t pref{};
+    ASSERT_EQ(hiptensorCreatePlanPreference(
+                  mHandle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
+
+    hiptensorPlan_t plan{};
+    ASSERT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
+
+    void* a = nullptr;
+    ASSERT_EQ(hipMalloc(&a, 2 * 3 * sizeof(uint16_t)), hipSuccess);
+    ScopeExit freeA{[&] { EXPECT_EQ(hipFree(a), hipSuccess); }};
+
+    void* b = nullptr;
+    ASSERT_EQ(hipMalloc(&b, 2 * 3 * sizeof(float)), hipSuccess);
+    ScopeExit freeB{[&] { EXPECT_EQ(hipFree(b), hipSuccess); }};
+
+    float alpha = 2.0f;
+    EXPECT_EQ(hiptensorPermute(mHandle, plan, &alpha, a, b, nullptr),
+              HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
 TEST_F(ElementwiseModeTest, BinaryWithSubsetModesIsSupported)
 {
     hiptensorOperationDescriptor_t opDesc{};
@@ -290,4 +349,59 @@ TEST_F(ElementwiseModeTest, TrinaryWithReorderedModesIsSupported)
                                                 HIPTENSOR_COMPUTE_DESC_32F),
               HIPTENSOR_STATUS_SUCCESS);
     hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// D must have the same data type as C: no instance converts types on output, so a mismatch is
+// rejected up front instead of failing later in kernel selection.
+TEST_F(ElementwiseModeTest, TrinaryWithMismatchedOutputTypeReturnsNotSupported)
+{
+    int64_t                     lengths[2] = {2, 3};
+    hiptensorTensorDescriptor_t f16Desc{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                  mHandle, &f16Desc, 2, lengths, nullptr, HIPTENSOR_R_16F, alignment),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyF16Desc{[&] { hiptensorDestroyTensorDescriptor(f16Desc); }};
+
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                &opDesc,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                f16Desc,
+                                                mFullModes,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyOpDesc{[&] { hiptensorDestroyOperationDescriptor(opDesc); }};
+
+    hiptensorPlanPreference_t pref{};
+    ASSERT_EQ(hiptensorCreatePlanPreference(
+                  mHandle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
+
+    hiptensorPlan_t plan{};
+    ASSERT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
+
+    void* abc = nullptr;
+    ASSERT_EQ(hipMalloc(&abc, 2 * 3 * sizeof(float)), hipSuccess);
+    ScopeExit freeAbc{[&] { EXPECT_EQ(hipFree(abc), hipSuccess); }};
+
+    void* d = nullptr;
+    ASSERT_EQ(hipMalloc(&d, 2 * 3 * sizeof(uint16_t)), hipSuccess);
+    ScopeExit freeD{[&] { EXPECT_EQ(hipFree(d), hipSuccess); }};
+
+    float scalar = 1.0f;
+    EXPECT_EQ(hiptensorElementwiseTrinaryExecute(
+                  mHandle, plan, &scalar, abc, &scalar, abc, &scalar, abc, d, nullptr),
+              HIPTENSOR_STATUS_NOT_SUPPORTED);
 }

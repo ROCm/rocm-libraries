@@ -18,6 +18,10 @@
 #include "handle.h"
 #include "utility.hpp"
 
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+
+#include <optional>
+
 using namespace rocRoller;
 
 std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolutionIndex)
@@ -34,6 +38,10 @@ std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolution
 struct RocRollerHandle
 {
     SolutionCache cache;
+
+    // Looked up on the first block-scaled problem, so other workloads never load the
+    // rocRoller architecture library for it.
+    std::optional<bool> hasBlockScaling;
 };
 
 /**
@@ -294,133 +302,6 @@ inline void logExtendedProfile(const RocblasltContractionProblem& prob,
 }
 
 /**
- * @brief Convert hipDataType to a rocRoller::Datatype
- *
- * @param type
- * @return rocRoller::DataType
- */
-rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type)
-{
-    // Older versions of ROCm do not have these types defined,
-    // so they need to be handled specially.
-    if(static_cast<int>(type) == HIP_R_6F_E2M3)
-    {
-        return rocRoller::DataType::FP6;
-    }
-    if(static_cast<int>(type) == HIP_R_6F_E3M2)
-    {
-        return rocRoller::DataType::BF6;
-    }
-    if(static_cast<int>(type) == HIP_R_4F_E2M1)
-    {
-        return rocRoller::DataType::FP4;
-    }
-
-    switch(type)
-    {
-    case HIP_R_16F:
-        return rocRoller::DataType::Half;
-    case HIP_R_32F:
-        return rocRoller::DataType::Float;
-    case HIP_R_16BF:
-        return rocRoller::DataType::BFloat16;
-    case HIP_R_8F_E4M3_FNUZ:
-        return rocRoller::DataType::FP8;
-    case HIP_R_8F_E5M2_FNUZ:
-        return rocRoller::DataType::BF8;
-    case HIP_R_8F_E4M3:
-        return rocRoller::DataType::FP8;
-    case HIP_R_8F_E5M2:
-        return rocRoller::DataType::BF8;
-    default:
-        return rocRoller::DataType::None;
-    }
-}
-
-/**
- * @brief Convert a rocblaslt_compute_type to a rocRoller::DataType
- *
- * @param type
- * @return rocRoller::DataType
- */
-rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_type type)
-{
-    switch(type)
-    {
-    case rocblaslt_compute_f16:
-        return rocRoller::DataType::Half;
-    case rocblaslt_compute_f32:
-    case rocblaslt_compute_f32_fast_xf32:
-    case rocblaslt_compute_f32_fast_f16:
-    case rocblaslt_compute_f32_fast_bf16:
-    case rocblaslt_compute_f32_fast_f8_fnuz:
-    case rocblaslt_compute_f32_fast_bf8_fnuz:
-    case rocblaslt_compute_f32_fast_f8bf8_fnuz:
-    case rocblaslt_compute_f32_fast_bf8f8_fnuz:
-    case rocblaslt_compute_f32_fast_f8:
-    case rocblaslt_compute_f32_fast_bf8:
-    case rocblaslt_compute_f32_fast_f8bf8:
-    case rocblaslt_compute_f32_fast_bf8f8:
-        return rocRoller::DataType::Float;
-    case rocblaslt_compute_f64:
-        return rocRoller::DataType::Double;
-    case rocblaslt_compute_i32:
-        return rocRoller::DataType::Int32;
-    default:
-        return rocRoller::DataType::None;
-    }
-}
-
-rocRoller::DataType getScaleDataType(RocblasltContractionProblem::ScalingFormat s)
-{
-    return rocRoller::DataType::E8M0;
-}
-
-/**
- * @brief Generate a KernelType from a RocblasltContractionProblem
- *
- *
- * @param prob
- * @return kernelType
- */
-KernelType genKernelType(const RocblasltContractionProblem& prob)
-{
-    KernelType kernelType;
-
-    kernelType.typeA    = hipDataType_to_rocRoller_type(prob.a_type);
-    kernelType.typeB    = hipDataType_to_rocRoller_type(prob.b_type);
-    kernelType.typeC    = hipDataType_to_rocRoller_type(prob.c_type);
-    kernelType.typeD    = hipDataType_to_rocRoller_type(prob.d_type);
-    kernelType.typeAcc  = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
-    kernelType.transA   = prob.trans_a == HIPBLAS_OP_T;
-    kernelType.transB   = prob.trans_b == HIPBLAS_OP_T;
-    kernelType.swizzleA = prob.swizzleA;
-    kernelType.swizzleB = prob.swizzleB;
-
-    if(isBlockScaling(prob.scaleAType))
-    {
-        kernelType.scaleTypeA.mode           = rocRoller::Operations::ScaleMode::Separate;
-        kernelType.scaleTypeA.blockRowSize   = blockSize(prob.scaleAType);
-        kernelType.scaleTypeA.blockColSize   = 1;
-        kernelType.scaleTypeA.type           = getScaleDataType(prob.scaleAType);
-        kernelType.scaleTypeA.preSwizzleTile = preSwizzleSizeForScale(prob.scaleAType);
-        kernelType.scaleTypeA.preTile        = preTileSizeForScaleA(prob.scaleAType);
-    }
-
-    if(isBlockScaling(prob.scaleBType))
-    {
-        kernelType.scaleTypeB.mode           = rocRoller::Operations::ScaleMode::Separate;
-        kernelType.scaleTypeB.blockRowSize   = 1;
-        kernelType.scaleTypeB.blockColSize   = blockSize(prob.scaleBType);
-        kernelType.scaleTypeB.type           = getScaleDataType(prob.scaleBType);
-        kernelType.scaleTypeB.preSwizzleTile = preSwizzleSizeForScale(prob.scaleBType);
-        kernelType.scaleTypeB.preTile        = preTileSizeForScaleB(prob.scaleBType);
-    }
-
-    return kernelType;
-}
-
-/**
  * Generate a kernel from a given SolutionIndexParameters value.
  */
 rocblaslt_status
@@ -431,22 +312,66 @@ rocblaslt_status
                                          std::shared_ptr<GemmKernel>& kernel)
 {
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
-    try
+
+    // Kernels whose LDS ops leave diverging waitcnt states at the KLoop labels are rejected by
+    // rocRoller; regenerating them with the LDS queue drained at those labels makes the states
+    // agree. Kernels that build on the first attempt are left untouched.
+    for(bool syncLDSQueue : {false, true})
     {
-        kernel = RocRollerGemmKernel::generate(params);
-        rocroller_handle->cache.addKernel(kernelType, solutionIndexParameter, kernel);
-    }
-    catch(const std::exception& e)
-    {
-        std::stringstream msg;
-        msg << "Error building the following kernel:" << std::endl;
-        msg << params->toString() << std::endl;
-        msg << e.what() << std::endl;
-        log_info(__func__, msg.str());
-        return rocblaslt_status_not_implemented;
+        params->syncLDSQueueAtKLoop = syncLDSQueue;
+        try
+        {
+            kernel = RocRollerGemmKernel::generate(params);
+            rocroller_handle->cache.addKernel(kernelType, solutionIndexParameter, kernel);
+            return rocblaslt_status_success;
+        }
+        catch(const std::exception& e)
+        {
+            std::stringstream msg;
+            msg << "Error building the following kernel:" << std::endl;
+            msg << params->toString() << std::endl;
+            msg << e.what() << std::endl;
+            log_info(__func__, msg.str());
+
+            bool waitcntStateDiverged
+                = std::string(e.what()).find("with a different waitcnt state") != std::string::npos;
+            if(syncLDSQueue || !waitcntStateDiverged)
+                return rocblaslt_status_not_implemented;
+        }
     }
 
-    return rocblaslt_status_success;
+    return rocblaslt_status_not_implemented;
+}
+
+/**
+ * Whether the handle's device has the block scaling that kernelType asks for. Without it
+ * every candidate kernel fails to generate, each after seconds of work.
+ */
+static bool supportsBlockScaling(rocblaslt_handle handle, const KernelType& kernelType)
+{
+    if(!isBlockScaling(kernelType.scaleTypeA.format)
+       && !isBlockScaling(kernelType.scaleTypeB.format))
+        return true;
+
+    auto& hasBlockScaling
+        = static_cast<RocRollerHandle*>(handle->rocroller_handle)->hasBlockScaling;
+    if(!hasBlockScaling)
+    {
+        hasBlockScaling = false;
+        try
+        {
+            auto target     = GPUArchitectureTarget::fromString(handle->properties.gcnArchName,
+                                                            handle->properties.asicRevision);
+            hasBlockScaling = GPUArchitectureLibrary::getInstance()->HasCapability(
+                target, GPUCapability::HasBlockScaling32);
+        }
+        catch(const std::exception& e)
+        {
+            // fromString throws on an architecture rocRoller does not know, such as gfx1100.
+            log_info(__func__, e.what());
+        }
+    }
+    return *hasBlockScaling;
 }
 
 /**
@@ -496,22 +421,29 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
-    if(scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
+    auto scale_type = normalizeOperandType(prob.scale_type);
+    if(scale_type != HIPBLASLT_DATATYPE_INVALID && scale_type != HIP_R_32F)
     {
-        std::cerr << "rocRoller only supports F32 as scale type not " << scale_type << std::endl;
+        // hip2RocRollerType throws on a format rocRoller does not name.
+        std::cerr << "rocRoller only supports F32 as scale type not "
+                  << hipDataType_to_string(scale_type) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
-    if(kernelType.typeAcc != rocRoller::DataType::Float)
+    if(kernelType.typeAcc != HIP_R_32F)
     {
-        std::cerr << "rocRoller only supports F32 accumulation, not " << kernelType.typeAcc
-                  << std::endl;
+        std::cerr << "rocRoller only supports F32 accumulation, not "
+                  << hipDataType_to_string(kernelType.typeAcc) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
-    auto solutionIndexParameters
-        = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);
+    std::vector<SolutionIndexParameters> solutionIndexParameters;
+    if(supportsBlockScaling(handle, kernelType))
+        solutionIndexParameters
+            = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);
+    else
+        log_info(
+            __func__, "no block-scaled rocRoller kernels for ", handle->properties.gcnArchName);
 
     int i = 0;
     for(auto const& solutionIndexParameter : solutionIndexParameters)
@@ -628,15 +560,22 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
                                    const rocblaslt_matmul_algo*       algo,
                                    std::shared_ptr<GemmKernel>&       kernel)
 {
-    int* solutionIndex = (int*)algo->data;
+    if(algo == nullptr)
+        return rocblaslt_status_invalid_pointer;
 
-    if(solutionIndex == 0)
-        return rocblaslt_status_not_implemented;
+    // An algo from the Tensile path holds a Tensile index. Decoding it as a rocRoller index
+    // yields an arbitrary tile whose kernel can take minutes to generate.
+    const int solutionIndex = *reinterpret_cast<const int*>(algo->data);
+    if(!isRocRollerSolutionIndex(solutionIndex))
+    {
+        log_info(__func__, "not a rocRoller solution index: ", solutionIndex);
+        return rocblaslt_status_invalid_value;
+    }
 
     RocRollerHandle* rocroller_handle = static_cast<RocRollerHandle*>(handle->rocroller_handle);
     auto             kernelType       = genKernelType(prob);
 
-    auto solutionIndexParameters = indexToParameters(*solutionIndex);
+    auto solutionIndexParameters = indexToParameters(solutionIndex);
     auto existingKernel          = rocroller_handle->cache.getKernel(
         kernelType, solutionIndexParameters, ProblemDims{prob.m, prob.n, prob.k});
     if(existingKernel)
@@ -647,7 +586,7 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
     else
     {
         auto status = genKernelFromSolutionIndexParameters(
-            rocroller_handle, kernelType, solutionIndexParameters, *solutionIndex, kernel);
+            rocroller_handle, kernelType, solutionIndexParameters, solutionIndex, kernel);
         return status;
     }
 }

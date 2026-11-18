@@ -66,7 +66,7 @@ class segmented_radix_sort_helper
     using count_helper_type
         = radix_digit_count_helper<WarpSize, BlockSize, ItemsPerThread, RadixBits, Descending>;
     using scan_type               = typename ::rocprim::block_scan<unsigned int,
-                                                     radix_size,
+                                                     BlockSize,
                                                      block_scan_algorithm::default_algorithm,
                                                      1,
                                                      1,

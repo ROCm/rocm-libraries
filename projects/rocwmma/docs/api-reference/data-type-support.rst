@@ -62,6 +62,11 @@ Supported data type combinations
 
 rocWMMA mixed precision multiply-accumulate operations support the following data type combinations.
 
+gfx1170 and gfx1171 support 16-by-16 WMMA tiles with FP16/BF16 inputs and
+FP32 or matching 16-bit accumulation, INT8 inputs with INT32 accumulation,
+and all four FP8/BF8 input pairings with FP32 accumulation. Larger K tiles
+compose native K=16 operations.
+
 Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where:
 
 * Input Type = Matrix A / B

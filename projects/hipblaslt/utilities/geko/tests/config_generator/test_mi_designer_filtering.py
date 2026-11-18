@@ -354,7 +354,7 @@ def test_post_processor_removes_depthu_when_in_all_mi_groups(monkeypatch) -> Non
                 values=(16, 16, 128, 1, 1, 1, 1, 1, 1),
                 active=True,
             ),
-            "DepthU": 128,
+            "DepthU": ForkParameter("DepthU", values=[128]),
             "WorkGroupMapping": 0,
         },
         {
@@ -363,7 +363,7 @@ def test_post_processor_removes_depthu_when_in_all_mi_groups(monkeypatch) -> Non
                 values=(32, 32, 64, 1, 1, 1, 1, 1, 1),
                 active=True,
             ),
-            "DepthU": 256,
+            "DepthU": ForkParameter("DepthU", values=[256]),
             "WorkGroupMapping": 1,
         },
         {
@@ -372,7 +372,7 @@ def test_post_processor_removes_depthu_when_in_all_mi_groups(monkeypatch) -> Non
                 values=(16, 16, 128, 1, 1, 1, 1, 1, 1),
                 active=True,
             ),
-            "DepthU": 512,
+            "DepthU": ForkParameter("DepthU", values=[512]),
             "WorkGroupMapping": 0,
         },
     ]

@@ -11,6 +11,7 @@
  * - Policy ID ↔ policy name consistency validation
  */
 
+#include "BuiltInHeuristicPolicies.hpp"
 #include "HipdnnException.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 #include "plugin/HeuristicPluginManager.hpp"
@@ -23,6 +24,8 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
+using hipdnn_backend::test_utilities::builtInPolicyIds;
+using hipdnn_backend::test_utilities::registeredPolicyIds;
 
 class TestHeuristicPluginManager : public ::testing::Test
 {
@@ -133,10 +136,10 @@ TEST_F(TestHeuristicPluginManager, MultipleInstancesAreIndependent)
     manager2.loadPlugins({std::filesystem::temp_directory_path() / "path2"},
                          HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    // Only the always-registered Config + StaticOrdering built-ins remain; no
-    // external plugin loaded from a non-existent path.
-    EXPECT_EQ(manager1.getPlugins().size(), 2u);
-    EXPECT_EQ(manager2.getPlugins().size(), 2u);
+    // Only the always-registered built-ins remain; no external plugin loaded from a
+    // non-existent path.
+    EXPECT_EQ(registeredPolicyIds(manager1), builtInPolicyIds());
+    EXPECT_EQ(registeredPolicyIds(manager2), builtInPolicyIds());
 }
 
 // ========== Edge Cases Tests ==========
@@ -254,7 +257,6 @@ TEST_F(TestHeuristicPluginManager, GetPluginsAfterEmptyLoadReturnsEmpty)
         std::filesystem::temp_directory_path() / uniqueName);
 
     manager.loadPlugins({emptyDir.path()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    // Only the always-registered Config + StaticOrdering built-ins remain; the
-    // empty dir contributed nothing.
-    EXPECT_EQ(manager.getPlugins().size(), 2u);
+    // Only the always-registered built-ins remain; the empty dir contributed nothing.
+    EXPECT_EQ(registeredPolicyIds(manager), builtInPolicyIds());
 }

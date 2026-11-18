@@ -1,0 +1,6 @@
+outs:
+- path: sme3Dc.tar.gz
+  remote: sparse-matrices
+  md5: a95eee14d980a9cfbbaf5df4a3c64713
+  size: 42483568
+  hash: md5

@@ -25,6 +25,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *multiples_of_32_sizes
+    iters: 100
+    cold_iters: 20
 
   - name: hemv_upper_generic_sizes
     category: bench
@@ -36,6 +38,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *generic_sizes
+    iters: 100
+    cold_iters: 20
 
   - name: hemv_lower_multiples_of_32_sizes
     category: bench
@@ -47,6 +51,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *multiples_of_32_sizes
+    iters: 100
+    cold_iters: 20
 
   - name: hemv_lower_generic_sizes
     category: bench
@@ -58,4 +64,6 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *generic_sizes
+    iters: 100
+    cold_iters: 20
 ...

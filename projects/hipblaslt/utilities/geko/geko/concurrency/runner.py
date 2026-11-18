@@ -50,6 +50,10 @@ class Worker(ABC, Generic[ItemT]):
         self.slot_id = slot_id
         self.stop_event = stop_event
         self.output_queue = output_queue
+        # Read by the scheduler when reaping this worker's thread, for the
+        # consecutive-failure abort, without altering the output_queue contract.
+        self.success = False
+        self.had_prior_failure = False
         
     @abstractmethod
     def setup(self) -> None:
@@ -77,6 +81,7 @@ class Worker(ABC, Generic[ItemT]):
                 self.teardown()
             except Exception as e:
                 logger.error(f"Worker encountered an error during teardown with item={self.item}: {e}")
+        self.success = success
         self.output_queue.put((success, self.item))
 
 class Runner(Generic[ItemT]):
@@ -95,6 +100,7 @@ class Runner(Generic[ItemT]):
         n_slots: int = 1,
         estimate_workload_fn: Callable[[ItemT], float] = lambda _item: 0.0,
         job_logger_fn: Callable[[], None] = lambda: None,
+        abort_after_consecutive_failures: int = 0,
     ) -> None:
         """Build a runner for a collection of items.
 
@@ -105,6 +111,10 @@ class Runner(Generic[ItemT]):
             n_slots: Maximum concurrent jobs allowed per device.
             estimate_workload_fn: Callback used to estimate relative job cost.
             job_logger_fn: Optional callback invoked periodically by the scheduler.
+            abort_after_consecutive_failures: Stop scheduling after this many
+                consecutive failed jobs across all devices; 0 disables. Jobs
+                whose worker reports `had_prior_failure=True` (already known-bad
+                from before this run) don't count toward this streak.
         """
         estimate_workload_fn = estimate_workload_fn or (lambda _item: 0.0)
         def _estimate_wkld(item: ItemT) -> tuple[ItemT, float]:
@@ -128,6 +138,7 @@ class Runner(Generic[ItemT]):
         self.devices = devices
         self.n_slots = n_slots
         self.job_logger_fn = job_logger_fn
+        self.abort_after_consecutive_failures = abort_after_consecutive_failures
     
     def __call__(self, workdir: str | Path, silent: bool = False) -> list[ItemT]:
         """Execute all jobs and return the items that completed successfully.
@@ -167,6 +178,10 @@ class Runner(Generic[ItemT]):
             }
 
             active_threads: dict[tuple[int, int], Thread] = {}
+            active_workers: dict[tuple[int, int], Worker] = {}
+            # Consecutive failures across ALL devices. A long unbroken streak points
+            # to an unstable system or a bad install, not to the jobs themselves.
+            consecutive_failures = 0
             assigned_workloads: dict[tuple[int, int], float] = {}
 
             while len(jobs) > 0 or len(active_threads) > 0:
@@ -180,6 +195,30 @@ class Runner(Generic[ItemT]):
                         self.n_slots, device_states[device].free_slots + 1
                     )
                     del active_threads[key]
+
+                    finished_worker = active_workers.pop(key, None)
+                    if finished_worker is not None and finished_worker.success:
+                        consecutive_failures = 0
+                    elif finished_worker is not None and finished_worker.had_prior_failure:
+                        logger.debug(
+                            f"item={finished_worker.item} failed again but had already "
+                            "failed before this run; not counting toward consecutive-failure abort"
+                        )
+                    else:
+                        consecutive_failures += 1
+                        if (
+                            self.abort_after_consecutive_failures
+                            and consecutive_failures >= self.abort_after_consecutive_failures
+                            and not _stop_event.is_set()
+                        ):
+                            logger.error(
+                                f"ABORTING RUN: {consecutive_failures} consecutive jobs "
+                                "failed. This usually means the system is unstable or "
+                                "the installation isn't set up correctly, rather than the "
+                                "jobs themselves being bad. Check the system, then re-run "
+                                "to resume; completed shapes are skipped."
+                            )
+                            _stop_event.set()
 
                 if _stop_event.is_set() and len(active_threads) == 0:
                     break
@@ -207,6 +246,7 @@ class Runner(Generic[ItemT]):
                     )
 
                     worker = self.worker_impl(item, device, slot_id, _stop_event, output_queue)
+                    active_workers[(device, slot_id)] = worker
                     t = Thread(target=worker, args=())
                     t.start()
                     active_threads[(device, slot_id)] = t

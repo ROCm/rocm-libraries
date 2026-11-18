@@ -788,6 +788,7 @@ void test_argminmax2(typename TestFixture::input_type empty_value)
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_extremum));
+            HIP_CHECK(hipFree(d_index));
             HIP_CHECK(hipFree(d_temp_storage));
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(index[0], expected.key));

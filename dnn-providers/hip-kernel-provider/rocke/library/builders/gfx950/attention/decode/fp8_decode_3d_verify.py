@@ -58,7 +58,6 @@ _NQH = 64
 _NKVH = 8
 _NQK = _NQH // _NKVH  # 8
 _BS = 16
-_BLOCK_Q = 16 // _NQK  # = 2 (block_m=16 for num_queries_per_kv<=16)
 
 
 def _ref_decode(q_f32, kc_f32, vc_f32, *, block_tables, seq_lens, scale, sinks_f32):
@@ -117,6 +116,8 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
             num_cus=0,
         )
     )
+    max_blocks = (kv_len + _BS - 1) // _BS
+    num_blocks = max_blocks * num_seqs + 4
     problem = au.UnifiedAttentionProblem(
         total_q=total_q,
         num_seqs=num_seqs,
@@ -132,6 +133,7 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
         use_sinks=use_sinks,
         use_fp8=True,
         num_cus=num_cus,
+        num_kv_blocks=num_blocks,
     )
     label = f"{'sink' if use_sinks else 'flash'}_b{num_seqs}_kv{kv_len}"
     # On a partitioned part the resolved CU count is floored (e.g. to 120), so the
@@ -141,16 +143,16 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
     routed = problem.select_path()
     if routed != "3d":
         return "SKIP", None, None, label, None, f"routes {routed} at num_cus={num_cus}"
-    ok_support, why = au.supports_native_unified_attention_3d_tiled(problem)
+    ok_support, why = au.supports_native_unified_attention_3d_tiled(problem, arch)
     if not ok_support:
         raise SystemExit(f"[{arch}] decode3d UNSUPPORTED: {why}")
 
     # Use the SHIPPED segmentation the launcher picks -- _num_segments applies the
     # gfx950 pre-bump clamp, so select_3d's raw value would over-split vs production.
-    num_segments = au._num_segments(problem)
+    num_segments = au._num_segments(problem, arch)
 
     Spec3D, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(arch)
-    seg_spec = au._tiled_3d_spec_from_problem(problem)
+    seg_spec = au._tiled_3d_spec_from_problem(problem, arch)
     from dataclasses import replace
 
     seg_spec = replace(seg_spec, num_segments=num_segments)
@@ -165,8 +167,6 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
     red_art = compile_kernel(build_red(red_spec, arch=arch), arch=arch)
 
     rng = np.random.default_rng(seed)
-    max_blocks = (kv_len + _BS - 1) // _BS
-    num_blocks = max_blocks * num_seqs + 4
     q_f32 = (rng.standard_normal((total_q, _NQH, _HD)) * 0.3).astype(np.float32)
     kc = (rng.standard_normal((num_blocks, _BS, _NKVH, _HD)) * 0.3).astype(_FP8)
     vc = (rng.standard_normal((num_blocks, _BS, _NKVH, _HD)) * 0.3).astype(_FP8)
@@ -219,7 +219,10 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
     segm_max_d = rt.alloc(4 * segm_ml_n)
     segm_exp_d = rt.alloc(4 * segm_ml_n)
 
-    total_num_q_blocks = total_q // _BLOCK_Q + num_seqs
+    # Grid x follows the shipped spec (all-decode grid -> one CTA per sequence).
+    total_num_q_blocks = au._num_q_blocks(
+        problem, seg_spec.block_q, decode_grid=seg_spec.use_decode_grid
+    )
     seg_grid = (int(total_num_q_blocks), int(_NKVH), int(num_segments))
     seg_waves = int(getattr(seg_spec, "num_waves", 1))
     seg_blk = (wave_size * seg_waves, 1, 1)

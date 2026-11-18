@@ -70,7 +70,9 @@ namespace TensileLite
                                     Base::template Pair<Contraction::AStride>(),
                                     Base::template Pair<Contraction::BStride>(),
                                     Base::template Pair<Contraction::CStride>(),
-                                    Base::template Pair<Contraction::DStride>()});
+                                    Base::template Pair<Contraction::DStride>(),
+                                    Base::template Pair<Contraction::World>(),
+                                    Base::template Pair<Contraction::FusedA2AExtent>()});
             }
         };
 
@@ -153,6 +155,18 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Contraction::DStride, IO>
             : public AutoMappingTraits<Contraction::DStride, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Contraction::World, IO>
+            : public AutoMappingTraits<Contraction::World, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Contraction::FusedA2AExtent, IO>
+            : public AutoMappingTraits<Contraction::FusedA2AExtent, IO>
         {
         };
 

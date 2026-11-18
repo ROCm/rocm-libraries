@@ -3,7 +3,7 @@
 
 // Host-only unit tests for benchmark_collective.hpp: no GPU/HIP calls, pure logic.
 
-#include "benchmark_collective.hpp"
+#include <hipblaslt_benchmark/benchmark_collective.hpp>
 
 #include <gtest/gtest.h>
 

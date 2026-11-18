@@ -64,9 +64,10 @@ faithful description was already being submitted. The injection references no sp
 engine or provider and is architecture-agnostic.
 
 > [!NOTE]
-> **Build dependency:** the injection builds against the frontend bindings from PR
-> [ROCm/rocm-libraries#10600](https://github.com/ROCm/rocm-libraries/pull/10600), which
-> binds the graph surface it uses (`graph.sdpa`/`layernorm`/`rmsnorm`; SDPA
+> **Build dependency:** the injection builds against the frontend bindings in
+> `projects/hipdnn/python/frontend_bindings` (merged in
+> [ROCm/rocm-libraries#10600](https://github.com/ROCm/rocm-libraries/pull/10600)), which
+> bind the graph surface it uses (`graph.sdpa`/`layernorm`/`rmsnorm`; SDPA
 > `set_attn_scale`/`set_causal_mask`/`set_bias`/`set_dropout_probability`; conv
 > `set_pre_padding`/`set_post_padding`; per-tensor `set_data_type`). This is a build-time
 > dependency, not a runtime gate.
@@ -238,15 +239,12 @@ kernels are in its catalog; those come from rocKE today but the engine is source
 so "force the AOT engine" is not "force rocKE").
 
 > [!NOTE]
-> The `AOT_CATALOG_ENGINE` used in the examples below is **not yet on `develop`** — it
-> currently lives in the draft PR
-> [ROCm/rocm-libraries#10556](https://github.com/ROCm/rocm-libraries/pull/10556), which
-> adds the matmul / RMSNorm / SDPA op coverage this layer was built against. That PR's own
-> `README.md` is the authoritative source for its build option and setup (including which
-> flags to pass and which are *not* needed). To exercise that coverage today, build
-> `hip-kernel-provider` from that branch following its README and point
-> `HIPDNN_TORCH_PROVIDER_SO` at the resulting plugin. That PR is also a good worked example
-> of **how additional operation coverage is added to hipDNN** — the same pattern (a new
+> The `AOT_CATALOG_ENGINE` used in the examples below is **not on `develop`**. It was developed in
+> [ROCm/rocm-libraries#10556](https://github.com/ROCm/rocm-libraries/pull/10556), which was
+> **closed without merging**. The examples apply only if you have a `hip-kernel-provider` build
+> that includes that engine, for example the PR's branch (`users/brpepers/aot-catalog-engine`)
+> if it is still available. Follow that branch's `README.md` for its build option and setup,
+> then point `HIPDNN_TORCH_PROVIDER_SO` at the resulting plugin. The same pattern (a new
 > engine / kernel family behind a build option) is how future ops will land and become
 > routable here.
 

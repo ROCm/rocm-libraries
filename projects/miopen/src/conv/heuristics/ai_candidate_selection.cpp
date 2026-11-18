@@ -79,6 +79,9 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
 
     input_params_  = metadata.value("input_params", std::vector<std::string>{});
     output_params_ = metadata.value("output_params", std::vector<std::string>{});
+    // Ordered engineered-feature names (present for models exported with named engineered features;
+    // absent for older models, which keep the fixed positional engineered block).
+    derived_feature_names_ = metadata.value("derived_features", std::vector<std::string>{});
 
     for(size_t i = 0; i < input_params_.size(); ++i)
         input_param_indices_[input_params_[i]] = i;
@@ -587,28 +590,44 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     // Derived feature block (shared with the TunaNet path). Dimensions above are normalized to the
     // forward (driver) convention; the GEMM assignment is selected by the actual direction. The
     // direction feature is encoded as 0=Forward, 1=BackwardData, 2=BackwardWeights.
-    const auto gemm_dir = direction_code == 0.0f   ? common::ConvDirection::Forward
-                          : direction_code == 1.0f ? common::ConvDirection::BackwardData
-                                                   : common::ConvDirection::BackwardWeights;
-    const auto derived =
-        is_3d ? common::EngineeredConvFeatures(N,
-                                               C_in,
-                                               C_out,
-                                               H_in,
-                                               W_in,
-                                               H_out,
-                                               W_out,
-                                               K_h,
-                                               K_w,
-                                               groups,
-                                               num_cu,
-                                               gemm_dir,
-                                               3,
-                                               D_in,
-                                               D_out,
-                                               K_d)
-              : common::EngineeredConvFeatures(
-                    N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    const auto gemm_dir       = direction_code == 0.0f   ? common::ConvDirection::Forward
+                                : direction_code == 1.0f ? common::ConvDirection::BackwardData
+                                                         : common::ConvDirection::BackwardWeights;
+    const auto& derived_names = metadata.derived_feature_names();
+    // A model that lists derived_features uses them (covers the optional divfeat set); one with
+    // none falls back to the default base block, so this always drives the named builder rather
+    // than branching to positional EngineeredConvFeatures.
+    std::vector<std::string> default_names;
+    if(derived_names.empty())
+        default_names = common::DefaultDerivedFeatureNames(is_3d ? 3 : 2);
+    const auto& names = derived_names.empty() ? default_names : derived_names;
+
+    // cpg_in/is_depthwise need the physical input-channel count; use the direction-normalized C_in
+    // (not the raw map value, which is the forward-output channel for backward problems). Only
+    // consulted when a divfeat name is present, so base-only models need no "in_channels" entry.
+    const bool needs_phys_in_channels =
+        std::find(names.begin(), names.end(), "log_cpg_in") != names.end() ||
+        std::find(names.begin(), names.end(), "is_depthwise") != names.end();
+    const auto phys_in_channels = needs_phys_in_channels ? C_in : std::size_t{0};
+    const auto derived          = common::EngineeredConvFeaturesByName(N,
+                                                              C_in,
+                                                              C_out,
+                                                              H_in,
+                                                              W_in,
+                                                              H_out,
+                                                              W_out,
+                                                              K_h,
+                                                              K_w,
+                                                              groups,
+                                                              num_cu,
+                                                              gemm_dir,
+                                                              is_3d ? 3 : 2,
+                                                              D_in,
+                                                              D_out,
+                                                              K_d,
+                                                              phys_in_channels,
+                                                              data_type,
+                                                              names);
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
     const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +
@@ -948,31 +967,71 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates,
     const std::vector<std::string>* candidate_kernel_names) const
 {
+    // EncodeKernelParams gives unsupported candidates an all-NaN raw encoding so that they rank
+    // last. Keep them out of the encoder and give them an all-NaN embedding directly: the encoder
+    // does not reliably propagate NaN (frugally-deep >= 0.21 computes ReLU(NaN) as 0), and after
+    // feature engineering the one-hot block of a sentinel is 0, not NaN.
+    const auto is_sentinel = [](const std::vector<float>& candidate) {
+        return !candidate.empty() && std::all_of(candidate.begin(), candidate.end(), [](float v) {
+            return std::isnan(v);
+        });
+    };
+    std::vector<std::size_t> encoder_rows;
+    encoder_rows.reserve(encoded_candidates.size());
+    for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
+    {
+        if(!is_sentinel(encoded_candidates[i]))
+            encoder_rows.push_back(i);
+    }
+    if(encoder_rows.empty() && !encoded_candidates.empty())
+    {
+        MIOPEN_LOG_W("All candidate kernels are unsupported by the AI model - cannot rank");
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "AI model does not support any of the provided kernel candidates");
+    }
+
+    std::vector<std::vector<float>> encoder_inputs;
+    encoder_inputs.reserve(encoder_rows.size());
     // Engineered kernel-config path for 2D/3D models (see EncodeInputFeatures).
     if(!UsesEngineeredInputFeatures(metadata_))
     {
-        for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
+        for(const auto i : encoder_rows)
+        {
             LogConfigEncoderBlock(i, candidate_kernel_names, encoded_candidates[i]);
-        return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
+            encoder_inputs.push_back(encoded_candidates[i]);
+        }
     }
-
-    // active_params and the output dim are metadata-derived (candidate-independent), so derive them
-    // once here rather than per candidate inside the loop.
-    const auto active_params = ActiveOutputParams(metadata_);
-    const auto expected_output_dim =
-        ComputeKernelConfigPreprocessorOutputDim(metadata_, active_params);
-
-    std::vector<std::vector<float>> engineered_candidates;
-    engineered_candidates.reserve(encoded_candidates.size());
-    for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
+    else
     {
-        const auto& raw_active = encoded_candidates[i];
-        auto engineered        = EngineerKernelConfigFeaturesImpl(
-            raw_active, metadata_, active_params, expected_output_dim);
-        LogConfigEncoderBlock(i, candidate_kernel_names, raw_active, &engineered);
-        engineered_candidates.push_back(std::move(engineered));
+        // active_params and the output dim are metadata-derived (candidate-independent), so derive
+        // them once here rather than per candidate inside the loop.
+        const auto active_params = ActiveOutputParams(metadata_);
+        const auto expected_output_dim =
+            ComputeKernelConfigPreprocessorOutputDim(metadata_, active_params);
+
+        for(const auto i : encoder_rows)
+        {
+            const auto& raw_active = encoded_candidates[i];
+            auto engineered        = EngineerKernelConfigFeaturesImpl(
+                raw_active, metadata_, active_params, expected_output_dim);
+            LogConfigEncoderBlock(i, candidate_kernel_names, raw_active, &engineered);
+            encoder_inputs.push_back(std::move(engineered));
+        }
     }
-    return EncodeKernelConfigsWithFdeep(engineered_candidates, arch_, solver_);
+
+    auto encoded_configs = EncodeKernelConfigsWithFdeep(encoder_inputs, arch_, solver_);
+    if(encoder_rows.size() == encoded_candidates.size())
+        return encoded_configs;
+
+    // Scatter the encoder outputs back to their candidate positions; sentinels stay all-NaN.
+    // A single named return variable keeps NRVO applicable (-Wnrvo is an error in CI).
+    auto embeddings = std::move(encoded_configs);
+    encoded_configs.assign(
+        encoded_candidates.size(),
+        std::vector<float>(embeddings.front().size(), std::numeric_limits<float>::quiet_NaN()));
+    for(std::size_t k = 0; k < encoder_rows.size(); ++k)
+        encoded_configs[encoder_rows[k]] = std::move(embeddings[k]);
+    return encoded_configs;
 }
 
 MIOPEN_INTERNALS_EXPORT

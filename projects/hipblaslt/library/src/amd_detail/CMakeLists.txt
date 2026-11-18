@@ -10,3 +10,14 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext-op.cpp"
 )
+
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    if(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST)
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST)
+    endif()
+    target_sources(hipblaslt
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-local-kernel.cpp"
+    )
+endif()

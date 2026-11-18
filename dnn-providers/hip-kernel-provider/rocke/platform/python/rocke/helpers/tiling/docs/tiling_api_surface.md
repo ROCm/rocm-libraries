@@ -23,8 +23,8 @@ loop-nest order" -- with the *same* dataflow (`load -> mma -> store`) the whole 
 DEFAULT (MMA drives everything)                         FULL OVERRIDE (author pins everything)
 |-----------------------------------------------------------------------------------------|
 TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
-  -> atom = shape, single MMA, layouts,        tiling=Tiling(atom_shape="mfma_f32_16x16x16f16",
-     wave_size, op_id, frag sizes all                             order="KNM"))
+  -> atom = shape, single MMA, layouts,        atom_override="mfma_f32_16x16x16f16",
+     wave_size, op_id, frag sizes all          tiling=Tiling(order="KNM"))
      resolved from traits                       -> pinned intrinsic by name, pinned 4x4x2
                                                    subtile grid + iteration order
 ```
@@ -35,18 +35,20 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 
 | Surface | What it is | Constructed with `b`? | Default source |
 |---|---|---|---|
-| `make_tensor_desc(lengths, strides, dtype)` | ptr-free strided memory descriptor | no (IR-free) | strides = data layout; `lengths` = valid extent (the default clip) |
+| `make_tensor_desc(lengths, strides, dtype)` | ptr-free strided memory descriptor, global or LDS (sec 3) | no (IR-free) | strides = data layout; `lengths` = valid extent (the default clip); axes in the one convention (sec 3) |
 | `make_window(tensor, origin, bounds=None)` | positioned + bounded window | no | `bounds` = clip per axis (overrides the desc lengths); `None` = desc lengths |
+| `check_gemm_shapes(a, b, c=None)` | build-time check that one GEMM's tensors agree on their extents (sec 3) | no (emits no IR) | reads A `(M, K)`, B `(N, K)`, C `(M, N)` positionally, batch axes first |
 | `make_tile_desc(shape=, thread_dist=, thread_tile=, ...)` | author a logical->register layout (quantity-major) | no | for MMA operands use `mma.a/b/c_desc` instead |
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
 | `make_fragment(tile_desc, dtype)` | realized per-lane registers | no (value filled by verbs) | dtype from the operand |
 | `fill_fragment(b, frag, 0)` | element-wise materialize | yes (b-first) | -- |
-| `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c) |
-| `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c) |
-| `TileMma(shape, a,b,c, target, tiling=, style=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits; `style=` picks the operand-layout profile |
+| `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False, packed_runs_aligned=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` = a runtime packed origin/bound is on a word group (§5) |
+| `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False, packed_runs_aligned=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` as for `load_fragment` |
+| `TileMma(shape, a=, b=, c=, d=, target=, tiling=, style=, catalog=, atom_override=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits; `style=` picks the operand-layout profile; `atom_override=` pins an instruction by name (§6) |
 | `Tiling(atom_shape=, order=, mac_prio=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK", mac_prio=0 (setprio off; §5d) |
 | `CanonicalStyle()` / `InterleavedStyle()` | the operand-layout profile (`style=`) | no | default canonical; interleaved = wide free-contiguous loads |
 | `InstrClass` / `derive_sched_group_counts(plan, ...)` | `sched_group_barrier` scheduling — class masks + per-trip counts | no (`InstrClass` int mask; verb IR-free) | scheduling cadence is a perf KNOB, off by default (§5d) |
+| `tensor_transforms`: `make_transform_graph` + kind builders, `emit_accesses` | coordinate graph (loop coordinates -> tensor coordinates), split element address + derived bound checks | graph: no; `emit_accesses`: yes (b-first) | checks derived from ranges vs the tensor's lengths; import from `rocke.helpers.tiling.tensor_transforms` (sec 3b) |
 
 Free `make_*` factories over thin value objects (`TensorDesc`/`TensorWindow` in `descriptors.py`;
 `TileDesc` in `fragments.py`) and one register carrier (`Fragment`); three verbs (`emit.py`); one
@@ -61,7 +63,9 @@ descriptor).
 The smallest complete kernel body. Everything not stated is resolved from the MMA atom.
 
 ```python
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+from rocke.core.ir import F16, F32   # MMA dtypes are IR types
+
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 
 acc = make_fragment(mma.c_desc, F32)          # desc + dtype -- both defaulted by the MMA object
 fill_fragment(b, acc, 0)
@@ -85,51 +89,178 @@ accumulator width. See sec 8 for the full "you didn't have to say it" list.
 
 Built with `make_tensor_desc(lengths, strides, dtype)`; `ptr` binds later at the verb. `lengths`
 are the valid (compute) extent and double as the default clip bound; `strides` are the physical
-layout (a stride-1 axis is the memory-contiguous one).
+layout (a stride-1 axis is the memory-contiguous one). The same description serves global memory
+and LDS: an element's index is `sum(position * stride)` in both (see "LDS buffers" below).
 
 ### Default: lengths = valid extent, strides = the data layout
 ```python
-a_td = make_tensor_desc((M_LEN, K_LEN), strides=(K_LEN, 1), dtype=F16)   # A(M,K) row-major
+a_td = make_tensor_desc((M_LEN, K_LEN), strides=(K_LEN, 1), dtype=F16)   # A (M, K), K-contiguous
 ```
 - `dtype` is the element type of memory; `load_fragment` reads it, `store_fragment` casts to it.
 - `strides` ARE the data layout -- one generic verb serves A/B/C; the operand difference is
   entirely the strides + the layout, never the verb.
 
-### Override: express any data layout via strides (RCR shown)
+### One axis convention
+
+This is the one home of the rule; other docs point here. Every tensor is written in one axis order,
+and nothing in the tiling layer reads what an axis means (there are no axis labels):
+
+- **Batch axes first, the reduction axis last.** A GEMM's K and a reduction's reduced axis sit last.
+- **Memory layout in the strides only.** The axis order never changes with the layout; the stride-1
+  axis is the contiguous one.
+- **A rank-`r` tile covers the tensor's LAST `r` axes.** For a rank-`R` tensor, tile axis `i` is
+  tensor axis `R - r + i`. Each leading axis is positioned by the window origin alone: tile extent 1,
+  address term `origin * stride`, not clipped (its origin is trusted to lie inside its length). A tile
+  whose rank exceeds the tensor's is refused, and so is a window `bounds` entry for a leading axis: with
+  extent 1 a tile is wholly inside or outside it, so there is nothing to clip.
+- **Another axis order goes through `permute`** -- a strides view of the same bytes. Anything more
+  general (merged or split axes, an implicit-GEMM convolution) goes through a transform graph.
+
 ```python
-a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), F16)   # A row-major   (m,k) . (K,1)
-b_td = make_tensor_desc((N_LEN, K_LEN), (1, N_LEN), F16)   # B col-ordered (n,k) . (1,N)
-c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F16)   # C row-major   (m,n) . (N,1)
+a3 = make_tensor_desc((BATCH, M, K), (M * K, K, 1), F16)   # (G, M, K), K-contiguous
+a_win = make_window(a3, (batch, m_base, k))                # the batch axis is positioned by its origin
+a_frag = load_fragment(b, a_ptr, a_win, mma.a_desc, lane)  # rank-2 (M, K) tile over the last two axes
 ```
-A logical view onto a physically-transposed operand is a pure re-label: `a_td.permute([1, 0])`
-(the 2-D swap) reads the same bytes with the axes reordered.
+
+**The GEMM reading.** A `(M, K)`, B `(N, K)`, C `(M, N)`; batched `(G, M, K)`, `(G, N, K)`,
+`(G, M, N)`, batch first. It is the order the tile descriptors already use (`mma.a_desc` `(M, K)`,
+`mma.b_desc` `(N, K)`, `mma.c_desc` `(M, N)`), GEMM "RCR", and conv NHWC / KYXC. CuTe / CUTLASS 3 and
+CK contraction use the same `(N, K)` B; CuTe puts its batch axis last (its `L` mode), rocKE puts it
+first.
+
+**Say K-contiguous, N-contiguous, M-contiguous -- never row- or column-major.** "Row-major" is relative
+to the order a tensor was written in, so for B it names opposite axes depending on whether B was
+written `(K, N)` or `(N, K)`. The contiguous axis is unambiguous in every library. How B translates:
+
+| B in memory | BLAS | Triton TMA | PyTorch | rocWMMA `matrix_b` | CuTe | rocKE |
+|---|---|---|---|---|---|---|
+| K-contiguous (N rows of K; an `nn.Linear` weight) | `transB=N`, `ldb=K` | `shape=[N,K]`, then `b.T` | `W.T`, strides `(1, K)` | `col_major`, `ldm=K` | `(N,K)`, stride `(ldB,_1)` | `make_tensor_desc((N, K), (K, 1), F16)` |
+| N-contiguous (K rows of N) | `transB=T`, `ldb=N` | `shape=[K,N]` | `B`, strides `(N, 1)` | `row_major`, `ldm=N` | `(N,K)`, stride `(_1,ldB)` | `make_tensor_desc((N, K), (1, N), F16)` |
+
+From PyTorch in one line: rocKE's B description is torch's `B.T` view,
+`make_tensor_desc(tuple(B.T.shape), tuple(B.T.stride()), dtype)`.
+
+Anti-example: `make_tensor_desc((K, N), ...)` for a GEMM's B. Read positionally, its "K" is the N
+extent -- refused by `check_gemm_shapes` when the extents differ, caught only by a bit-exact test when
+they do not. Write `(N, K)` and put the memory order in the strides.
+
+### `check_gemm_shapes(a, b, c=None)` -- the tensors of one GEMM agree
+
+A pure build-time check (emits no IR). It reads its tensors positionally as A `(batch..., M, K)`,
+B `(batch..., N, K)` and, when given, C `(batch..., M, N)`: equal ranks of at least 2, one extent per
+batch axis across the tensors, A's K is B's K, A's M is C's M, B's N is C's N. Two extents agree when
+they are equal integers (Python or numpy), or one and the same extent object.
+```python
+check_gemm_shapes(a_td, b_td, c_td)       # once per GEMM, on the logical tensors
+check_gemm_shapes(q_td, k_td)             # c=None: the A / B pair alone (a fused chain's Q*K^T)
+```
+- **When to call it.** Once per GEMM whose A, B and C are tensors, on the logical tensors: on the
+  `(M, N)` C the verbs see (`c_td.permute([1, 0])` where a kernel spells C `(N, M)`), and for a kernel
+  that crosses A and B, on the C before the crossed view. With `c=None` on each A / B tensor pair whose
+  C is never a tensor. Nothing calls it for you (`TileMma` sees no tensors).
+- **Its domain** is GEMMs whose A, B and C are plain-window tensors in that shape family, their batch
+  axes shared one to one. Two GEMMs are outside it and make no call:
+  - one that reaches its operands through a transform graph (an implicit-GEMM convolution): its
+    tensors are the conv's own and the graph defines M, N and K (K = `Y * X * C`), so read positionally
+    the wrong axes would be compared -- a correct conv refused, or passed by coincidence;
+  - one that sums over a batch axis (A `(G, M, K)`, B `(G, N, K)`, C `(M, N)`): C has no `G`, so the
+    rank rule refuses it. Check its A / B pair with `c=None`.
+
+  With no axis labels the check cannot tell such a tensor from a mistake, so respecting the domain is
+  the caller's job. A GEMM with a register operand (`P*V`) has no tensor to check.
+- **What it catches:** a transposed or mis-sized operand whenever the swapped extents differ, and every
+  batch-extent mismatch. **What it cannot:** a square transposed operand (M = N = K) or a forgotten
+  call -- bit-exact tests on integer inputs stay the backstop.
+- Tensors are compared in logical elements. Mixed-width MMA operands hold the same number of logical K
+  elements, so the comparison is right for them; a packed sub-byte tensor is described in elements,
+  never bytes or words. Scale tensors are not A or B and are not passed to it.
+
+### Override: express any data layout via strides
+```python
+a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), F16)   # A (M, K), K-contiguous
+b_td = make_tensor_desc((N_LEN, K_LEN), (1, N_LEN), F16)   # B (N, K), N-contiguous
+c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F16)   # C (M, N), N-contiguous
+```
+`permute` presents the same bytes in another axis order: on the N-contiguous B above,
+`b_td.permute([1, 0])` is its `(K, N)` view with strides `(N_LEN, 1)` -- a view, not the operand order.
 
 ### Override: dtype is whatever the pointer is (no dtype baked into verbs)
 ```python
 a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), BF16)  # bf16 in
 c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F32)   # f32 store (no narrowing cast)
 ```
+The descriptor's dtype is the logical format; the verbs move its storage units and never read the
+pointer's element type. Pass a TF32 tensor as `PtrType(TF32)` (core's convention) and a packed
+sub-byte tensor (fp4, fp6, i4) as `PtrType(I8)`, its bytes packed low bit first; its descriptor is
+still in elements.
 
-### Override: N-D tensors -- axis roles + `at_index` / `squeeze`
+### LDS buffers: a flat allocation, described by its descriptor
 
-An MMA consumes a rank-2 `(free, K)` operand, but a tensor can be rank-N (a batched GEMM is
-`(batch, M, K)`). Declare a per-axis ROLE, then reduce the batch axes to reach rank-2:
+An LDS buffer is a flat (rank-1) allocation. Its layout lives in an ordinary `TensorDesc` -- logical
+axes in the convention order, int lengths, int strides -- and nowhere else. Size the buffer from the
+descriptor with `lds_allocation` and core's typed allocation, and hand both to the same verbs as
+global memory:
 ```python
-a3 = make_tensor_desc((BATCH, M, K), (M*K, K, 1), F16,
-                      ("batch", "free", "contraction"))    # role per axis
-a_win = make_window(a3, (0, m_base, 0)).at_index(0, batch)  # pin batch -> rank-2 (free, K) window
-# TensorDesc.squeeze(axis) drops a length-1 batch axis instead.
+b_lds_td = make_tensor_desc((N, K), (1, N), F16)               # B staged as [K][N], written (N, K)
+element, count = lds_allocation(b_lds_td)                      # (F16, element_span) for f16
+smem = b.smem_alloc(element, [count])                          # flat, typed, sized from the descriptor
+store_fragment(b, smem, make_window(b_lds_td, (n0, k0)), b_frag, lane)
+b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lane)
 ```
-`at_index`/`squeeze` are TYPED: they reduce a `batch` axis only (they refuse the free/contraction
-axis -- that would silently drop matmul terms -- and refuse an un-roled tensor, never a bare `rank==2`
-check). Strides are preserved; the pinned batch offset rides the window so the reduced view still
-addresses the right element. `TensorDesc.assert_mma_operand()` is the boundary gate (rank-2, one free
-+ one contraction, either order -- A is `(M,K)`, B is `(K,N)`); `load_fragment` runs it automatically
-for any roled tensor. Worked example: `kernels/tiling_gemm_batched_demo.py`.
+- **Addressing.** The verbs see an LDS buffer and compute `sum(position * stride)` exactly as for
+  global memory: the lane's base index once, plus a compile-time offset per register run. The vector
+  width follows the same rule as global: a register run on a stride-1 axis is consecutive elements.
+- **`TensorDesc.element_span`** is `1 + sum((length - 1) * stride)`: the elements from the first to the
+  last element the description can address. Static (int lengths and strides); a negative stride is
+  refused. The LDS budget stays a byte count: the span times the element size.
+- **`lds_allocation(td, lds_swizzle)`** is the buffer to allocate, `(element, count)` for
+  `b.smem_alloc(element, [count])`: the dtype's storage element (`rocke.core.storage.storage_dtype`, the
+  rule registers follow too) and the storage elements that hold `lds_element_span(td, lds_swizzle)`
+  elements. That span is `element_span`, except that the built-in `lds_swizzle=True` moves an element
+  of the last axis within its 64-element group, so the last row reaches the end of its group. A
+  `(8, 48)` buffer with strides `(64, 1)` spans 496 elements but needs 512 swizzled. A swizzle callable
+  must keep every position inside the descriptor's lengths.
+- **Padding** is a larger outer stride: a `(rows, cols)` buffer padded by `pad` elements per row is
+  `make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`.
+- **Packed sub-byte tensors** (fp4, fp6, i4) live in a buffer of i32 words (`lds_allocation`),
+  addressed by the same element index converted to words. A swizzle is refused for them.
+- **Vector width.** A wide access claims the alignment of its width, so the verbs pick a width that
+  divides every stride except the stride-1 axis's, leading axes included (in global memory too): a pad
+  or batch stride that is not a multiple of the natural vector narrows the access.
+- **Stages** are a leading axis positioned by the window origin: a `[stage][K][F]` buffer is the
+  rank-3 `make_tensor_desc((stages, F, K), (K * F, 1, F), dtype)`, written and read with an unswapped
+  rank-2 `(F, K)` tile at origin `(stage, f0, k0)`. Derive both operands' stage origins from one stage
+  index.
+- **Checks.** Before emitting, the verbs refuse an LDS buffer that is not rank 1, or that is not at
+  least its `lds_allocation` (the same element type, at least that many elements); the built-in
+  `lds_swizzle=True` needs the stride-1 axis last and every other stride at least the swizzled row
+  (the last length rounded up to 64), so rows cannot overlap (otherwise pad the stride or pass a
+  swizzle callable). LDS accesses are
+  unclipped, so a disagreement is refused rather than masked. Window origins are trusted, as for every
+  LDS access.
+- **The cooperative-load bridge** (`memory.py`, toolbox). `lds_tile_desc(coop_desc, dtype, *, buffers,
+  n_waves, wave_size=64)` returns the full-tile LDS descriptor of a cooperative-load operand in the
+  convention order `(free, K)`: lengths `(buffers * free, K)`, strides `(1, buffers * free)`, buffer `i`
+  starting at free position `i * free`. `lds_store` / `lds_read` take the cooperative and read tiles
+  unswapped, at origins `(free_position, k)`, and check each tile extent against the descriptor's
+  lengths. Its stride-1 axis is axis 0, so a swizzle on it is a swizzle callable.
+- **Why no allocation verb.** `smem_alloc(dtype, [count])` already takes the two values the descriptor
+  gives; a tiling wrapper would be a second home for them.
 
 ### Reserved (post-M1)
-- LDS-space descriptors for staging.
 - per-load `coherency=` (param exists on the verbs; ignored in M1).
+
+---
+
+## 3b. Coordinate graphs -- `tensor_transforms`
+
+When a tensor is not a plain strided view of the loop coordinates (an implicit-GEMM convolution's
+`k -> (y, x, c)` with a halo, an LDS swizzle), describe the mapping as a coordinate graph and let
+`emit_accesses` give each access's split element address and exactly the bound checks that can fail. The
+graph holds no tensor and no bound: the `TensorDesc` above stays the one home of lengths and strides. Import
+it from `rocke.helpers.tiling.tensor_transforms`. The API (units, kinds, rules, every error) is
+[`tensor_transforms_api.md`](tensor_transforms_api.md); worked examples are
+[`tensor_transforms_guide.md`](tensor_transforms_guide.md).
 
 ---
 
@@ -252,6 +383,19 @@ a_frag = load_fragment(b, a_ptr, make_window(a_td, (m, k)), a_desc, lane)   # fr
 ```
 - dtype lives on the `Fragment` (D16); `store_fragment` casts fragment dtype -> desc dtype
   on the honest path only (identity, or f32->{f16,bf16}); anything else fails fast.
+- `dtype` is the logical format; the registers in `value` are held in `frag.storage_type`, derived
+  from it by one rule (`rocke.core.storage.storage_dtype`): the logical vector `vec<dtype x n>` for
+  every arithmetic dtype, `vec<i32 x n>` for tf32 (it has no arithmetic), and whole i32 words
+  `vec<i32 x n*bits/32>` for a packed sub-byte dtype (fp4, fp6, i4; `n * bits` must be a multiple
+  of 32). A logical `vec<tf32 x n>` is refused with the
+  `b.bitcast` to i32 that fixes it. The verbs move storage units: a packed
+  fragment's registers must form runs of whole 32-bit words along the tensor's stride-1 axis, and the
+  window's origin and a clipped window's bound along that axis must be whole word groups (8 elements
+  for 4 bits, 16 for 6 bits); both are refused otherwise. A compile-time origin or bound is checked.
+  A runtime one cannot be, and a misaligned one would be wrong silently (an origin is rounded down to
+  its group, a bound inside a group leaves the rest of the group unmasked), so the verbs refuse it
+  unless the caller passes `packed_runs_aligned=True` to state that it is a multiple of the group.
+  The flag is refused for any other dtype, whose runtime origins and bounds need no statement.
 - `tile_desc`/`dtype` are read-only; `value` is the one writable field (re-bound each K step:
   `accumulator.value = b.mma(...)` for a single-atom tile -- wave shape == atom shape, one
   `b.mma`; a multi-atom tile goes through `TileMma`). The write and read checks are documented on
@@ -308,8 +452,9 @@ buffer-descriptor `num_records` path for wide vectorized tail loads.
 
 - `False` (default) — no swizzle; the natural contiguous vector width is used.
 - `True` — the built-in block-preserving swizzle (`_swizzle_lds_positions`).
-- a **callable policy** `(builder, positions) -> positions` that remaps the LDS index. It declares its
-  granularity via a `vw_elems` attribute (the block width, in elements, it keeps contiguous); the emit
+- a **callable policy** `(builder, positions) -> positions` that remaps the LDS index. `positions` holds one
+  position per tensor axis, leading axes (their window origins) first, so an element gets one address
+  whatever the rank of the tile that reaches it. It declares its granularity via a `vw_elems` attribute (the block width, in elements, it keeps contiguous); the emit
   resolves the access width to `min(vw_elems, natural_run)` and **range-checks it to `[1, natural_run]`**
   (`_swizzle_vw`) — so a policy can only relocate whole blocks of its own granularity, never widen past what
   the layout is contiguous for. Store and read MUST use the same policy (a bijection → bit-exact).
@@ -356,15 +501,32 @@ The demos (`tiling_gemm_{interwave,pipelined,interleaved}_demo.py`) show real, n
 
 ## 6. `TileMma` -- the resolver + subtile driver (where the defaults live)
 
-`TileMma(shape, *, a, b, c, target, tiling=None)`. `shape` is the **wave tile**. Everything
-below is resolved for you and is inspectable. The **intrinsic** SSOT is **`traits/data/mma_traits.json`**
-(atom shapes + dtypes = the hardware truth; resolved automatically, never hand-edit it). Its **canonical**
+`TileMma(shape=None, *, a=None, b=None, c=None, d=None, target, tiling=None, style=None, catalog=None,
+atom_override=None)`. `shape` is the **wave tile**; `a`, `b`, `c` are IR types from `rocke.core.ir` (`F16`,
+`F32`, `FP8E4M3`, ...; a dtype string is refused with `TypeError` naming the constant to pass), and `d` is the
+result dtype, omitted when it equals the accumulator `c`. Without `atom_override`, `shape`, `a`, `b` and `c`
+are required. `atom_override="<op_id>"` pins one catalog instruction by name; `shape` and every dtype are
+then optional (an omitted shape is the instruction's own, an omitted dtype the instruction's, and a dtype
+given must be one it takes). `style=` picks the operand-layout profile and `catalog=` the catalog to resolve
+from (the committed one by default). Everything
+below is resolved for you and is inspectable. The **instruction** catalog is **`traits/data/mma_traits.json`**
+(one row per MMA instruction variant: atom shape + per-operand dtypes; hand-maintained, schema and edit
+procedure in `traits/README.md`; resolved automatically). Its **canonical**
 A/B/C encodings are the **baseline/fallback** layout — a starting place, NOT a requirement: you are free to
 hand-roll valid non-canonical (interleaved / custom) layouts (canonical is never required — `mma_is_machinery.md`).
+Whether the resolved instruction is issued on the target, and with which backend op (`mma.emit_op()`), follows the
+measured backend coverage record; its classes are described in `traits/README.md` "Backend coverage".
+The driver feeds each instruction its A and B operands from the fragments' storage registers (whole
+32-bit words for a packed dtype); a TF32 instruction reads TF32 fragments or F32 fragments, whose low
+mantissa bits it drops (when to convert to TF32 first: `dsl_docs/optimization/arch/gfx942.md` sec 21.1).
+A hand-written `b.mma(mma.emit_op(), ...)` call passes operands of the instruction's operand type
+itself, e.g. `b.bitcast(value, VectorType(TF32, 2))` for TF32 registers held as `i32`.
 
 ### Default: single MMA, everything resolved from traits
 ```python
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+from rocke.core.ir import BF16, F16, F32
+
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 mma.op_id       # 'mfma_f32_16x16x16f16'   (resolved intrinsic)
 mma.atom_shape  # (16, 16, 16)
 mma.subtiles    # (1, 1, 1)                (single atom)
@@ -376,7 +538,7 @@ mma.c_desc      # TileDesc((16,16), c_layout) -- use for the accumulator Fragmen
 
 ### Override: wave macro-tile -- the object owns the subtile grid
 ```python
-mma = TileMma((32, 32, 32), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 32), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)))
 mma.subtiles    # (2, 2, 2)  -> the object walks a 2x2x2 atom grid inside one mma() call
 # author STILL writes one load/mma/store per K-tile; no atom loop.
@@ -384,9 +546,9 @@ mma.subtiles    # (2, 2, 2)  -> the object walks a 2x2x2 atom grid inside one mm
 
 ### Validation is automatic and fail-fast
 ```python
-TileMma((32, 32, 16), a="f16", b="bf16", c="f32", target="gfx90a")   # ValueError: A/B dtypes
-TileMma((13, 16, 16), a="f16", b="f16",  c="f32", target="gfx90a")   # ValueError: no intrinsic
-TileMma((32, 32, 24), a="f16", b="f16",  c="f32", target="gfx90a",
+TileMma((32, 32, 16), a=F16, b=BF16, c=F32, target="gfx90a")   # ValueError: no MMA instruction found
+TileMma((13, 16, 16), a=F16, b=F16,  c=F32, target="gfx90a")   # ValueError: no MMA instruction found
+TileMma((32, 32, 24), a=F16, b=F16,  c=F32, target="gfx90a",
         tiling=Tiling(atom_shape=(16,16,16)))   # ValueError: wave K not a multiple of atom K
 ```
 
@@ -394,29 +556,44 @@ TileMma((32, 32, 24), a="f16", b="f16",  c="f32", target="gfx90a",
 
 ## 7. `Tiling` -- the two knobs (atom selection + iteration order)
 
-### 7a. `atom_shape` -- THREE ways to pick the atom
+### 7a. The atom -- THREE ways to pick it
 
 **Default (None): single MMA -- atom == wave shape.**
 ```python
-TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")   # tiling=None
+from rocke.core.ir import BF16, F16, F32
+
+TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")   # tiling=None
 # -> atom_shape == (16,16,16), subtiles == (1,1,1)
 ```
 
 **Override by SHAPE tuple: target-agnostic.** The atom is resolved for the bound target +
 dtypes -- MFMA on CDNA, WMMA on RDNA -- with no author-side gfx branch.
 ```python
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> mfma_f32_16x16x16f16
 # same author code, different target (verified):
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx12",
+TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx1201",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> wmma_f32_16x16x16_f16_w32_gfx12 (wave 32)
 ```
 
-**Override by NAME string: the escape hatch (target-specific by construction).** Pin the
-exact backend intrinsic; validated (exists / runs on target / dtypes match) fail-fast.
+**Pin one instruction by NAME with `atom_override`: the escape hatch (target-specific by
+construction).** Validated fail-fast: the instruction exists, runs on the target, and takes every
+dtype you pass; each dtype you omit is taken from the instruction. `Tiling(atom_shape=...)` takes
+only an `(M, N, K)` shape; a name there is refused with the `atom_override` call to make.
 ```python
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
-        tiling=Tiling(atom_shape="mfma_f32_16x16x16f16"))   # exact op resolved in the backend
+TileMma((32, 32, 16), target="gfx90a",
+        atom_override="mfma_f32_16x16x16f16")       # a/b/c taken from it: f16, f16, f32
+TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
+        atom_override="mfma_f32_16x16x16f16")       # the dtypes given match it: the same plan
+TileMma((32, 32, 16), a=BF16, c=F16, target="gfx90a",
+        atom_override="mfma_f32_16x16x16f16")       # ValueError: MMA instruction dtype mismatch
+```
+
+A and B may differ wherever the target has such an instruction, by intent or by name:
+```python
+from rocke.core.ir import BF8E5M2, FP8E4M3
+
+TileMma((16, 16, 32), a=FP8E4M3, b=BF8E5M2, c=F32, target="gfx942")   # op_id -> mfma_f32_16x16x32_fp8_bf8
 ```
 
 **Why it matters (the concern this solves):** a bare 32x32 tile with `atom=None` would
@@ -424,7 +601,7 @@ resolve the *native* 32x32 atom (a single MMA), NOT a 2x2 grid of 16x16 atoms. T
 lets you force the small atom either way:
 
 ```python
-TileMma((32, 32, 8), a="f16", b="f16", c="f32", target="gfx90a")     # -> 32x32x8 native, subtiles (1,1,1)
+TileMma((32, 32, 8), a=F16, b=F16, c=F32, target="gfx90a")     # -> 32x32x8 native, subtiles (1,1,1)
 TileMma((32, 32, 16), ..., tiling=Tiling(atom_shape=(16,16,16)))     # -> 16x16 atom, subtiles (2,2,1)
 ```
 
@@ -475,9 +652,9 @@ designed-in seam, not yet implemented.
 | Axis | Default | Override options | Status |
 |---|---|---|---|
 | operand dtype | -- | f16, bf16, f32, f8/bf8 (via desc + `a/b/c=`) | BUILT (f16->f32 proven; casts honest/fail-fast) |
-| data layout | -- | any via `make_tensor_desc(..., strides)` + `.permute([...])` (RCR shown) | BUILT |
+| data layout | -- | any via `make_tensor_desc(..., strides)` + `.permute([...])`, axes in the one convention (sec 3) | BUILT |
 | tile distribution | `mma.a/b/c_desc` | author any via `make_tile_desc(...)` (quantity-major) | BUILT |
-| atom selection | single MMA (`None`) | shape tuple (agnostic) / intrinsic name (pinned) | BUILT |
+| atom selection | single MMA (`None`) | `Tiling(atom_shape=)` shape tuple (agnostic) / `atom_override=` name (pinned) | BUILT |
 | wave tile size | == atom | any integer multiple of atom (M and/or N and/or K) | BUILT |
 | subtile order | `"MNK"` | any of 6 `MNK` permutations | BUILT |
 | target | -- | any gfx via `target=` / `arch=` (agnostic authorship) | BUILT (gfx90a proven; RDNA resolves) |
@@ -486,7 +663,7 @@ designed-in seam, not yet implemented.
 | C transpose | off | `c_transpose=True` on `TileMma` (-> C^T, `c_desc` = (N,M)) | PLANNED (analyzed; Part D) |
 | interleaved layout | `style=` (default `CanonicalStyle`) | `TileMma(..., style=InterleavedStyle())` | BUILT (dense square atoms; see `tiling_interleaving_design.md`) |
 | operand layout | `mma.a/b/c_layout` | `make_tile_desc(...)` / `custom_layout(...)` | BUILT (make_tile_desc) / RESERVED (custom_layout) |
-| memory space | global | LDS view (`space="lds"`) | RESERVED |
+| memory space | global | LDS: a `TensorDesc` over a flat `smem_alloc` buffer, same verbs (sec 3, "LDS buffers") | BUILT |
 | coherency | default | `CACHE_STREAM` / `NON_TEMPORAL` per load | RESERVED (param present) |
 | kind | dense | `sparse(...)` / `scaled(...)` (+index/scale operands) | RESERVED |
 
@@ -498,27 +675,29 @@ The same GEMM, adding exactly one override at a time -- the loop body never chan
 `TileMma` construction. Knobs travel as constructor arguments (`shape`, `tiling=`, `style=`).
 
 ```python
+from rocke.core.ir import F16, F32
+
 # (0) DEFAULT: single 16x16x16 atom, f16->f32, MNK order. Say almost nothing.
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 
 # (1) BIGGER K per tile: 4 K-subtiles, MMA owns the inner K loop.
-mma = TileMma((16, 16, 64), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((16, 16, 64), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)))
 
 # (2) COOPERATIVE M/N: a 2x2 output grid, MMA walks it internally.
-mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)))
 
 # (3) FULL GRID + iteration order: 2x2x2, K outermost.
-mma = TileMma((32, 32, 32), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 32), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16), order="KNM"))
 
 # (4) PIN THE EXACT INTRINSIC by name (target-specific escape hatch).
-mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
-              tiling=Tiling(atom_shape="mfma_f32_16x16x16f16"))
+mma = TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
+              atom_override="mfma_f32_16x16x16f16")
 
 # (5) SWITCH THE OPERAND-LAYOUT PROFILE: wide free-contiguous loads.
-mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)), style=InterleavedStyle())
 ```
 
@@ -531,8 +710,8 @@ see the C-oracle in `TileMmaPlan`). That is the composability claim, made concre
 
 ## 11. Customising -- your own atom, layout, or style
 
-- **Pin the atom** with `Tiling(atom_shape=...)` -- a shape tuple, an intrinsic name (escape hatch),
-  or `None` for a single-MMA wave.
+- **Pin the atom** with `Tiling(atom_shape=...)` -- a shape tuple, or `None` for a single-MMA wave
+  -- or pin the exact instruction by name with `TileMma(atom_override=...)` (escape hatch).
 - **Bring your own operand layout** by holding `mma.plan` and building a `Fragment` from your own
   `TileDesc`; the driver validates it identically to a derived one (`mma_operand_layout_sound` +
   `mma_pair_k_aligned` + the SOA atom-contiguity slice guard). Overrides are OPERANDS only -- the
@@ -564,7 +743,7 @@ and you can always see the one the MMA object produced.
 
 | Knob | Default (MMA-driven) | Manual override |
 |---|---|---|
-| intrinsic | resolved from atom+dtypes+target | `Tiling(atom_shape="mfma_...")` |
+| intrinsic | resolved from atom+dtypes+target | `atom_override="mfma_..."` |
 | atom shape | == wave shape (single MMA) | `Tiling(atom_shape=(16,16,16))` |
 | wave tile | 1 atom | `tile=(32,32,32)` etc. (multiple of atom) |
 | subtile order | `"MNK"` (K innermost) | `order="KNM"` (any permutation) |
@@ -574,5 +753,5 @@ and you can always see the one the MMA object produced.
 | clipping | desc `lengths` (auto zero-pad) | `make_window(tensor, origin, bounds)` |
 | target | -- | `target=`/`arch=` (agnostic) |
 | coherency | default | `coherency=` (reserved) |
-| memory space | global | LDS desc (reserved) |
+| memory space | global | LDS: `TensorDesc` + a flat buffer sized by `lds_allocation(td)` |
 | kind | dense | `sparse`/`scaled` (reserved) |

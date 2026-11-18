@@ -1,0 +1,9 @@
+# gfx942 (AOTriton 0.15b, level-3 v3 backend, release candidate 6859452917ae).
+#
+# test_common_mistakes has its own bounds and does not read this file; its
+# entries are here to document the known errors in the unified format. Both
+# are numerical errors of the AITER backward reached through the v3 backend
+# (the split and fused Triton backends pass both); the failures are
+# deterministic. Values are the ones the test reported.
+modules/flash/tests/test_backward.py::test_common_mistakes[one_signed_values-dtype0] (call)	{"dv_bias": -6.873e-04, "dv_bias_bound": 1.221e-04}
+modules/flash/tests/test_backward.py::test_common_mistakes[sharp_softmax-dtype0] (call)	{"dv_error": 7.023e-04, "dv_floor": 2.587e-04, "limit_x_floor": 2.0}

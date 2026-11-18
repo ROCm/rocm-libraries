@@ -86,6 +86,20 @@ namespace
     template <>
     constexpr auto hipblaslt_compute_type<double> = HIPBLAS_COMPUTE_64F;
 
+    // Compute type honouring the handle's math mode; mirrors the Tensile path's
+    // setF32XdlMathOp(XFloat32). Without it the hipBLASLt backend silently runs
+    // full fp32 while rocblas_get_math_mode still reports xf32.
+    template <typename Ti, typename Tc>
+    hipblasComputeType_t hipblaslt_compute_type_for(rocblas_handle handle)
+    {
+        if constexpr(std::is_same<Ti, float>{} && std::is_same<Tc, float>{})
+        {
+            if(handle && handle->math_mode == rocblas_xf32_xdl_math_op)
+                return HIPBLAS_COMPUTE_32F_FAST_TF32;
+        }
+        return hipblaslt_compute_type<Tc>;
+    }
+
     /**************************************************************************
     * We normally print error messages only once, to avoid excessive logging *
     **************************************************************************/
@@ -251,7 +265,7 @@ namespace
                                  hipblaslt_datatype<Ti>,
                                  hipblaslt_datatype<To>,
                                  hipblaslt_datatype<To>,
-                                 hipblaslt_compute_type<Tc>);
+                                 hipblaslt_compute_type_for<Ti, Tc>(prob.handle));
 
         hipblaslt_ext::GemmProblemType problemType;
         problemType.setOpA((hipblasOperation_t)prob.trans_a);
@@ -260,7 +274,7 @@ namespace
         problemType.setTypeB(hipblaslt_datatype<Ti>);
         problemType.setTypeC(hipblaslt_datatype<To>);
         problemType.setTypeD(hipblaslt_datatype<To>);
-        problemType.setTypeCompute(hipblaslt_compute_type<Tc>);
+        problemType.setTypeCompute(hipblaslt_compute_type_for<Ti, Tc>(prob.handle));
 
         hipblaslt_ext::GemmEpilogue epilogue;
         hipblaslt_ext::GemmInputs   inputs;
@@ -304,7 +318,7 @@ namespace
                                         hipblaslt_datatype<Ti>,
                                         hipblaslt_datatype<To>,
                                         hipblaslt_datatype<To>,
-                                        hipblaslt_compute_type<Tc>);
+                                        hipblaslt_compute_type_for<Ti, Tc>(prob.handle));
 
         try
         {
@@ -315,7 +329,7 @@ namespace
             problemType.setTypeB(hipblaslt_datatype<Ti>);
             problemType.setTypeC(hipblaslt_datatype<To>);
             problemType.setTypeD(hipblaslt_datatype<To>);
-            problemType.setTypeCompute(hipblaslt_compute_type<Tc>);
+            problemType.setTypeCompute(hipblaslt_compute_type_for<Ti, Tc>(prob.handle));
 
             std::vector<int64_t>                     Ms(prob.batch_count);
             std::vector<int64_t>                     Ns(prob.batch_count);
@@ -428,6 +442,19 @@ namespace
     {
         hipblaslt_ext::GemmPreference gemmPref;
         auto                          max_workspace_size = probHandle->get_available_workspace();
+
+        // Avoid size_t underflow, which would let the heuristic ignore the workspace limit
+        if(extra_malloc > max_workspace_size)
+        {
+            if(!solution_query)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(msg << "rocBLAS warning: hipBLASLt algo not supported due to "
+                                        "insufficient workspace.");
+                return rocblas_status_memory_error;
+            }
+            return rocblas_status_invalid_value; // solution queries report success or invalid value
+        }
         gemmPref.setMaxWorkspaceBytes(max_workspace_size - extra_malloc);
 
         std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
@@ -695,7 +722,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             }
         }
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(
-            &matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_scaletype<Ti>));
+            &matmulDesc, hipblaslt_compute_type_for<Ti, Tc>(prob.handle), hipblaslt_scaletype<Ti>));
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
             matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)));
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -1010,16 +1037,17 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
                 for(auto op2 : ops)
                 {
                     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults_temp;
-                    auto fetch = hipblaslt_ext::getAllAlgos(handle,
-                                                            gemmType,
-                                                            op1,
-                                                            op2,
-                                                            hipblaslt_datatype<Ti>,
-                                                            hipblaslt_datatype<Ti>,
-                                                            hipblaslt_datatype<To>,
-                                                            hipblaslt_datatype<To>,
-                                                            hipblaslt_compute_type<Tc>,
-                                                            heuristicResults_temp);
+                    auto fetch = hipblaslt_ext::getAllAlgos(
+                        handle,
+                        gemmType,
+                        op1,
+                        op2,
+                        hipblaslt_datatype<Ti>,
+                        hipblaslt_datatype<Ti>,
+                        hipblaslt_datatype<To>,
+                        hipblaslt_datatype<To>,
+                        hipblaslt_compute_type_for<Ti, Tc>(prob.handle),
+                        heuristicResults_temp);
 
                     heuristicResults.insert(heuristicResults.end(),
                                             heuristicResults_temp.begin(),
@@ -1083,7 +1111,7 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
                                                     hipblaslt_datatype<Ti>,
                                                     hipblaslt_datatype<To>,
                                                     hipblaslt_datatype<To>,
-                                                    hipblaslt_compute_type<Tc>,
+                                                    hipblaslt_compute_type_for<Ti, Tc>(prob.handle),
                                                     heuristicResults);
 
             std::shared_ptr<hipblaslt_ext::GemmInstance> gemm;

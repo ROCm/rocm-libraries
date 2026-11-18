@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,7 +95,7 @@ struct Arguments
     rocblas_stride stride_x;
     rocblas_stride stride_y;
 
-    size_t user_allocated_workspace;
+    size_t user_allocated_workspace; // bytes passed to rocblas_set_workspace, 0 = rocBLAS-managed
 
     // 64bit
 
@@ -156,6 +156,8 @@ struct Arguments
     uint64_t flush_batch_count;
     uint64_t flush_memory_size;
 
+    int use_hipblaslt;
+
     // 16 bit
     uint16_t threads;
     uint16_t streams;
@@ -177,16 +179,14 @@ struct Arguments
     bool pointer_mode_host;
     bool pointer_mode_device;
     bool stochastic_rounding;
-    bool c_noalias_d;
     bool outofplace;
     bool HMM; // xnack+
-    bool graph_test;
+    bool graph_test; // capture into a HIP graph and replay, see TESTING.md
     bool repeatability_check;
     bool alpha_beta_stride;
 
-    int use_hipblaslt;
-
     bool cleanup;
+    bool size_query;
 
     /*************************************************************************
      *                     End Of Arguments                                  *
@@ -253,6 +253,7 @@ struct Arguments
     OPER(math_mode) SEP              \
     OPER(flush_batch_count) SEP      \
     OPER(flush_memory_size) SEP      \
+    OPER(use_hipblaslt) SEP          \
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \
@@ -268,14 +269,13 @@ struct Arguments
     OPER(pointer_mode_host) SEP      \
     OPER(pointer_mode_device) SEP    \
     OPER(stochastic_rounding) SEP    \
-    OPER(c_noalias_d) SEP            \
     OPER(outofplace) SEP             \
     OPER(HMM) SEP                    \
     OPER(graph_test) SEP             \
     OPER(repeatability_check) SEP    \
     OPER(alpha_beta_stride) SEP      \
-    OPER(use_hipblaslt) SEP          \
-    OPER(cleanup)
+    OPER(cleanup) SEP                \
+    OPER(size_query)
     // clang-format on
 
     // Validate input format.

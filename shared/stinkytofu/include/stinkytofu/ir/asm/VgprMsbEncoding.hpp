@@ -22,10 +22,15 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyRegister.hpp"
 
 namespace stinkytofu {
 
@@ -83,41 +88,106 @@ inline int encodeVgprMsbForSlot(int slot, int msb) {
     return (msb & 0x3) << (slot * 2);
 }
 
-/// MSB (which 256-VGPR bank) of a VGPR operand, or -1 for non-VGPR operands.
+/// Registers one bank holds, which is what eight bits of operand index can name.
+constexpr uint32_t kVgprBankSize = 256;
+
+/// MSB (which VGPR bank) of a VGPR operand, or -1 for non-VGPR operands.
 inline int getMsbFromVgpr(const StinkyRegister& reg) {
     if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return -1;
-    return static_cast<int>(reg.reg.idx) / 256;
+    return static_cast<int>(reg.reg.idx) / static_cast<int>(kVgprBankSize);
+}
+
+/// The `reg.offset` a VGPR needs for the emitter to print its byte form: the
+/// operand text is `idx + offset`, so v272 prints `v[272-256]`, which the
+/// assembler reduces to v16 of the selected bank. Derive it, never store it --
+/// a register moved between banks keeps a bias that no longer matches its
+/// index, and `v[16-256]` is not a register.
+inline int getMsbOffsetForVgpr(const StinkyRegister& reg) {
+    const int msb = getMsbFromVgpr(reg);
+    return msb <= 0 ? 0 : msb * -static_cast<int>(kVgprBankSize);
+}
+
+/// Calls \p callback once per register operand of \p inst: the operand, its
+/// index into getDestRegs() or getSrcRegs(), which of the two, and the MSB slot
+/// its encoding field selects. The slot is -1 when the field selects none.
+///
+/// One implementation, because pairing an operand with the wrong field gives it
+/// another field's bank. The instruction then touches a different register and
+/// nothing reports an error. encodeFieldToVgprOffSlot is one function for the
+/// same reason.
+///
+/// A slotless field is reported, not skipped: bank selection ignores it, but
+/// allocation needs it, since that operand reaches only the first kVgprBankSize
+/// registers.
+template <typename Callback>
+inline void forEachVgprOperandField(const StinkyInstruction& inst, Callback&& callback) {
+    static_assert(std::is_invocable_v<Callback, const StinkyRegister&, size_t, bool, int>,
+                  "forEachVgprOperandField callback must be callable as "
+                  "(const StinkyRegister& operand, size_t index, bool isDest, int slot)");
+
+    const HwInstDesc* desc = inst.getHwInstDesc();
+    if (desc == nullptr) return;
+
+    const std::vector<StinkyRegister>& srcRegs = inst.getSrcRegs();
+    const std::vector<StinkyRegister>& destRegs = inst.getDestRegs();
+
+    size_t srcIdx = 0;
+    size_t dstIdx = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        const bool isDest = field.isDest || field.isReadWrite;
+        const std::vector<StinkyRegister>& regs = isDest ? destRegs : srcRegs;
+        size_t& cursor = isDest ? dstIdx : srcIdx;
+        if (cursor >= regs.size()) continue;
+
+        const size_t operandIndex = cursor++;
+        callback(regs[operandIndex], operandIndex, isDest,
+                 encodeFieldToVgprOffSlot(field.encodeField));
+    }
+}
+
+/// Calls \p callback with each VGPR operand of \p inst that its own field cannot
+/// name: the operand, its index, and whether it is a destination.
+///
+/// A field with no MSB slot has no bank selector, so it reaches one bank only.
+/// An index past that still gets the bias above, and the assembler folds it back
+/// into range. The instruction then uses a different register, nothing reports
+/// an error, and the result is wrong.
+///
+/// Here rather than in a pass, because it is a property of the encoding: every
+/// operand reaching the emitter must satisfy it, whatever chose the register.
+template <typename Callback>
+inline void forEachUnencodableVgprOperand(const StinkyInstruction& inst, Callback&& callback) {
+    static_assert(std::is_invocable_v<Callback, const StinkyRegister&, size_t, bool>,
+                  "forEachUnencodableVgprOperand callback must be callable as "
+                  "(const StinkyRegister& operand, size_t index, bool isDest)");
+
+    forEachVgprOperandField(inst,
+                            [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+                                if (slot >= 0) return;
+                                if (reg.dataType != StinkyRegister::Type::Register) return;
+                                if (reg.reg.type != RegType::V) return;
+                                // The whole range, so a tuple straddling the boundary is caught on
+                                // the unit that crosses it rather than passing on its base.
+                                const uint32_t width = reg.reg.num < 1u ? 1u : reg.reg.num;
+                                if (reg.reg.idx + width <= kVgprBankSize) return;
+                                callback(reg, operand, isDest);
+                            });
 }
 
 /// Record the per-slot VGPR banks of \p inst; \p hasVgpr set if any VGPR is seen.
 inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst,
                                 bool& hasVgpr) {
-    const auto& fields = inst->getHwInstDesc()->operandFields;
-    const auto& srcRegs = inst->getSrcRegs();
-    const auto& destRegs = inst->getDestRegs();
-
-    int srcIdx = 0, dstIdx = 0;
-    for (const auto& field : fields) {
-        const StinkyRegister* reg = nullptr;
-        if (field.isDest || field.isReadWrite) {
-            if (dstIdx < static_cast<int>(destRegs.size())) reg = &destRegs[dstIdx++];
-        } else {
-            if (srcIdx < static_cast<int>(srcRegs.size())) reg = &srcRegs[srcIdx++];
-        }
-        if (!reg) continue;
-
-        int slot = encodeFieldToVgprOffSlot(field.encodeField);
-        if (slot < 0) continue;
-
-        int msb = getMsbFromVgpr(*reg);
-        if (msb < 0) continue;
+    forEachVgprOperandField(*inst, [&](const StinkyRegister& reg, size_t, bool, int slot) {
+        if (slot < 0) return;
+        const int msb = getMsbFromVgpr(reg);
+        if (msb < 0) return;
 
         hasVgpr = true;
         if (slot == 3)
             msbDst = msb;
         else
             msbSrc[slot] = msb;
-    }
+    });
 }
 
 /// The s_set_vgpr_msb immediate \p inst needs for its VGPR operands; (setVal, hasVgpr)

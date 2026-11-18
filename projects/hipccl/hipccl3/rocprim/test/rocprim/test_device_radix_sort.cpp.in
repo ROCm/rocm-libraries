@@ -37,23 +37,18 @@
 
 #cmakedefine ROCPRIM_TEST_SUITE_SLICE @ROCPRIM_TEST_SUITE_SLICE@
 #cmakedefine ROCPRIM_TEST_TYPE_SLICE  @ROCPRIM_TEST_TYPE_SLICE@
-#cmakedefine ROCPRIM_TEST_SLICE       @ROCPRIM_TEST_SLICE@
 
 #if   ROCPRIM_TEST_SUITE_SLICE == 0
     TYPED_TEST_P(SUITE, SortKeys                ) { sort_keys<TestFixture>(); }
-    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeys);
+    TYPED_TEST_P(SUITE, SortKeysDoubleBuffer    ) { sort_keys_double_buffer<TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeys, SortKeysDoubleBuffer);
 #elif ROCPRIM_TEST_SUITE_SLICE == 1
     TYPED_TEST_P(SUITE, SortPairs               ) { sort_pairs<TestFixture>(); }
-    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairs);
-#elif ROCPRIM_TEST_SUITE_SLICE == 2
-    TYPED_TEST_P(SUITE, SortKeysDoubleBuffer    ) { sort_keys_double_buffer<TestFixture>(); }
-    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysDoubleBuffer);
-#elif ROCPRIM_TEST_SUITE_SLICE == 3
     TYPED_TEST_P(SUITE, SortPairsDoubleBuffer   ) { sort_pairs_double_buffer<TestFixture>(); }
-    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairsDoubleBuffer);
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairs, SortPairsDoubleBuffer);
 #endif
 
-#if   ROCPRIM_TEST_SLICE == 0
+#if ROCPRIM_TEST_SUITE_SLICE == 0 && ROCPRIM_TEST_TYPE_SLICE == 2
     TEST(SUITE, SortKeysOver4G) { sort_keys_over_4g(); }
     TEST(SUITE, SortKeysOver4GWithGraphs) { sort_keys_over_4g<true>(); }
     TEST(SUITE, SortKeysLargeSizes) { sort_keys_large_sizes(); }
@@ -83,6 +78,7 @@ using __custom__uint64_t2 = common::custom_type<uint64_t, uint64_t, true>;
     INSTANTIATE(params<int8_t,              int8_t>)
     INSTANTIATE(params<uint8_t,             uint8_t>)
     INSTANTIATE(params<rocprim::half,       rocprim::half>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 1
     INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16>)
     INSTANTIATE(params<int,                 __custom_float2>)
     INSTANTIATE(params<test_utils::custom_float_type, int>)
@@ -94,7 +90,6 @@ using __custom__uint64_t2 = common::custom_type<uint64_t, uint64_t, true>;
     INSTANTIATE(params<unsigned short,      int,                                    true,   4, 10>)
     INSTANTIATE(params<unsigned int,        short,                                  false,  3, 22>)
 
-#elif ROCPRIM_TEST_TYPE_SLICE == 1
     INSTANTIATE(params<uint8_t,             int8_t,                                 true,   0, 7>)
     INSTANTIATE(params<uint8_t,             uint8_t,                                true,   4, 10>)
     INSTANTIATE(params<unsigned int,        double,                                 true,   4, 21>)
@@ -103,6 +98,7 @@ using __custom__uint64_t2 = common::custom_type<uint64_t, uint64_t, true>;
     INSTANTIATE(params<unsigned int,        rocprim::bfloat16,                      true,   0, 12>)
     INSTANTIATE(params<unsigned short,      rocprim::bfloat16,                      false,  3, 11>)
     INSTANTIATE(params<unsigned long long,  char,                                   false,  8, 20>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 2
     INSTANTIATE(params<unsigned short,      __custom_double2,   false,  8, 11>)
 
     // some params used by PyTorch's Randperm()
@@ -121,7 +117,7 @@ using __custom__uint64_t2 = common::custom_type<uint64_t, uint64_t, true>;
 
     // test with graphs
     INSTANTIATE(params<int, int, false, 0, sizeof(int) * 8, false, true>)
-#elif ROCPRIM_TEST_TYPE_SLICE == 2
+
     // custom types using a custom decomposer (ascending + descending)
     INSTANTIATE(params<__custom__int2,       int>)
     INSTANTIATE(params<__custom__int2,       int,    true>)

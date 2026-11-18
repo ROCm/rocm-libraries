@@ -3456,6 +3456,3120 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dFp32.Correctness_3"
       }
+    },
+    {
+      "id": "16_3_8_14_14_bfp16_ndhwc",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dBfp16.Correctness/3",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dBfp16.Correctness_3"
+      }
+    },
+    {
+      "id": "16_3_8_14_14_fp16_ncdhw",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp16.Correctness/1",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp16.Correctness_1"
+      }
+    },
+    {
+      "id": "16_3_8_14_14_fp32_ndhwc",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp32.Correctness/3",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp32.Correctness_3"
+      }
+    },
+    {
+      "id": "8_32_2048_bfp16_ncl_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              2048,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16: same case as bundle case 8_32_2048_bfp16_ncl with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16 (derived from 8_32_2048_bfp16_ncl)"
+      }
+    },
+    {
+      "id": "16_128_512_bfp16_ncl_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              512,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16: same case as bundle case 16_128_512_bfp16_ncl with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16 (derived from 16_128_512_bfp16_ncl)"
+      }
+    },
+    {
+      "id": "8_32_2048_bfp16_nlc_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16: same case as bundle case 8_32_2048_bfp16_nlc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16 (derived from 8_32_2048_bfp16_nlc)"
+      }
+    },
+    {
+      "id": "16_128_512_bfp16_nlc_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              1,
+              128
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              1,
+              128
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16: same case as bundle case 16_128_512_bfp16_nlc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastBfp16 (derived from 16_128_512_bfp16_nlc)"
+      }
+    },
+    {
+      "id": "8_32_2048_fp16_ncl_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              2048,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16: same case as bundle case 8_32_2048_fp16_ncl with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16 (derived from 8_32_2048_fp16_ncl)"
+      }
+    },
+    {
+      "id": "16_128_512_fp16_ncl_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              512,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16: same case as bundle case 16_128_512_fp16_ncl with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16 (derived from 16_128_512_fp16_ncl)"
+      }
+    },
+    {
+      "id": "8_32_2048_fp16_nlc_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              32,
+              2048
+            ],
+            "strides": [
+              65536,
+              1,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16: same case as bundle case 8_32_2048_fp16_nlc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16 (derived from 8_32_2048_fp16_nlc)"
+      }
+    },
+    {
+      "id": "16_128_512_fp16_nlc_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              1,
+              128
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              128,
+              512
+            ],
+            "strides": [
+              65536,
+              1,
+              128
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              128,
+              1
+            ],
+            "strides": [
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16: same case as bundle case 16_128_512_fp16_nlc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance1dUpcastFp16 (derived from 16_128_512_fp16_nlc)"
+      }
+    },
+    {
+      "id": "1_16_112_112_bfp16_nchw_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16: same case as bundle case 1_16_112_112_bfp16_nchw with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16 (derived from 1_16_112_112_bfp16_nchw)"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nchw_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16: same case as bundle case 5_256_14_14_bfp16_nchw with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16 (derived from 5_256_14_14_bfp16_nchw)"
+      }
+    },
+    {
+      "id": "1_16_112_112_bfp16_nhwc_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16: same case as bundle case 1_16_112_112_bfp16_nhwc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16 (derived from 1_16_112_112_bfp16_nhwc)"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nhwc_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16: same case as bundle case 5_256_14_14_bfp16_nhwc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastBfp16 (derived from 5_256_14_14_bfp16_nhwc)"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nchw_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16: same case as bundle case 1_16_112_112_fp16_nchw with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16 (derived from 1_16_112_112_fp16_nchw)"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nchw_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16: same case as bundle case 5_256_14_14_fp16_nchw with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16 (derived from 5_256_14_14_fp16_nchw)"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nhwc_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16: same case as bundle case 1_16_112_112_fp16_nhwc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16 (derived from 1_16_112_112_fp16_nhwc)"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nhwc_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16: same case as bundle case 5_256_14_14_fp16_nhwc with the output tensor data type widened to float",
+        "operation": "Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dUpcastFp16 (derived from 5_256_14_14_fp16_nhwc)"
+      }
+    },
+    {
+      "id": "16_3_8_14_14_bfp16_ndhwc_upcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dUpcastBfp16: same case as bundle case 16_3_8_14_14_bfp16_ndhwc with the output tensor data type widened to float",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dUpcastBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dUpcastBfp16 (derived from 16_3_8_14_14_bfp16_ndhwc)"
+      }
+    },
+    {
+      "id": "16_3_8_14_14_fp16_ncdhw_upcast",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dUpcastFp16: same case as bundle case 16_3_8_14_14_fp16_ncdhw with the output tensor data type widened to float",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dUpcastFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dUpcastFp16 (derived from 16_3_8_14_14_fp16_ncdhw)"
+      }
     }
   ]
 }

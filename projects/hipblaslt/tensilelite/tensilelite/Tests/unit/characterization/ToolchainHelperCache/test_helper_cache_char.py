@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Toolchain.HelperKernelCache`` — the pure
+"""Characterization tests for ``tensilelite.Toolchain.HelperKernelCache`` — the pure
 filesystem cache helpers (`_computeCacheKey`/`_checkCache`/`_populateCache`/
 `_evictStale`) and the `HelperKernelCache` restore/store surface (cache
 enabled/disabled, hit/miss), driven over tmp dirs with a fake compiler (no real
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-import Tensile.Toolchain.HelperKernelCache as HKC
-from Tensile.Toolchain.HelperKernelCache import (
+import tensilelite.Toolchain.HelperKernelCache as HKC
+from tensilelite.Toolchain.HelperKernelCache import (
     _computeCacheKey, _checkCache, _populateCache, _evictStale, HelperKernelCache,
     _STATIC_HEADER_FILES,
 )
@@ -27,7 +27,8 @@ pytestmark = pytest.mark.unit
 
 def _fake_compiler():
     ver = types.SimpleNamespace(major=6, minor=2, patch=0)
-    return types.SimpleNamespace(version=ver, rocm_version=ver, default_args=[])
+    path = Path("amdclang++")
+    return types.SimpleNamespace(version=ver, rocm_version=ver, path=path, default_args=[path])
 
 
 def _make_include_dir(d):
@@ -61,7 +62,7 @@ def test_compute_cache_key_asan_differs(tmp_path):
     kern = _make_kernel(tmp_path)
     base = _computeCacheKey(str(kern), str(inc), ["gfx942"], _fake_compiler())
     asan = _fake_compiler()
-    asan.default_args = ["-fsanitize=address"]
+    asan.default_args.append("-fsanitize=address")
     assert _computeCacheKey(str(kern), str(inc), ["gfx942"], asan) != base
 
 

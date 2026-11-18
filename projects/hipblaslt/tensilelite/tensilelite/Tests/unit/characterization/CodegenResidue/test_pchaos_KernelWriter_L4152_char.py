@@ -106,7 +106,7 @@ def test_halfplrb_derivation_pin_in_solution_py():
     Solution.py:2280 must assign state['HalfPLRB'] = bool(halfPLR & 0x02).
     Pin the actual source so any future change is caught here.
     """
-    from Tensile.SolutionStructs.Solution import Solution  # noqa: PLC0415
+    from tensilelite.SolutionStructs.Solution import Solution  # noqa: PLC0415
 
     source = textwrap.dedent(inspect.getsource(Solution.assignDerivedParameters))
     tree = ast.parse(source)

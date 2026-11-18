@@ -1,5 +1,8 @@
 # Coordinate Transform To Physical Address Planning
 
+> The uniform / per-lane / constant address split proposed below (the unbuilt `rocke/coord/` layout) is
+> built in the tiling layer's `tensor_transforms` package: [`tensor_transforms_api.md`](../../python/rocke/helpers/tiling/docs/tensor_transforms_api.md).
+
 This document proposes a planning layer between `rocke.helpers.transforms` and
 `IRBuilder` emission. The goal is to keep CK-style coordinate transforms as the
 semantic source of truth while preventing complex convolution and attention

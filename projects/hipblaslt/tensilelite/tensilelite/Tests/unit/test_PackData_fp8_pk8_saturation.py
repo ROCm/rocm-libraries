@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gpu_test_helpers import init_rocisa  # noqa: E402
 
 import rocisa  # noqa: E402
-from Tensile.Components.PackData import PackData_FLOAT8  # noqa: E402
+from tensilelite.Components.PackData import PackData_FLOAT8  # noqa: E402
 
 pytestmark = pytest.mark.unit
 

@@ -245,7 +245,8 @@ rocsparse_status rocsparse::spmat_csr2bsr_nnz(rocsparse_handle            handle
                                                       target->descr,
                                                       target->row_type,
                                                       target->row_data,
-                                                      bsr_nnz));
+                                                      bsr_nnz,
+                                                      rocsparse_pointer_mode_host));
     return rocsparse_status_success;
 }
 

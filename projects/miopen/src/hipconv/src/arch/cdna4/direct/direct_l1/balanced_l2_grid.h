@@ -284,4 +284,166 @@ private:
     int g_;
 };
 
+// RaggedL2Grid: BalancedL2Grid's K partition, with each XCD's X segment cut by (X, K) pair.
+//
+// BalancedL2Grid runs whole X items on an XCD, x_xcd * per_xcd of its 32 CUs per round, so
+// per_xcd = 3, 5, 6 or 7 leaves 2 or 4 idle. Here a K-slice's (X item, K block) pairs, K
+// fastest, split into xgroups contiguous segments, and an XCD deals its segment to all 32
+// CUs round by round. The X item at a segment or round boundary runs its K blocks on two
+// XCDs or in two rounds. See docs/algorithms/direct/direct-l1-chunked-unfold.md.
+//
+// Decode for (wg, round) on the XCD owning K-slice kslice and pair segment
+// [pair_begin, pair_begin + pair_count):
+//   i            = pair_begin + round * 32 + wg
+//   xl, local_k  = divmod(i, per_xcd)
+//   k            = kslice * per_xcd + local_k
+//   (p, q, n, g) = decode of xl, as in BalancedL2Grid
+// This is a bijection over (k in [0, kparts*per_xcd), xl in [0, x_total)).
+class RaggedL2Grid
+{
+public:
+    // (X item, K block) pairs of one K-slice.
+    __host__ __device__ static int
+    pair_total(int per_xcd, int blocks_p, int blocks_q, int n_blocks, int groups)
+    {
+        return per_xcd * BalancedL2Grid::x_total(blocks_p, blocks_q, n_blocks, groups);
+    }
+
+    // Per-xgroup pair-segment length (ceil; trailing xgroups absorb the remainder).
+    __host__ __device__ static int
+    pair_seg(int per_xcd, int blocks_p, int blocks_q, int n_blocks, int groups, int xgroups)
+    {
+        return divup(pair_total(per_xcd, blocks_p, blocks_q, n_blocks, groups), xgroups);
+    }
+
+    // First pair input-segment `xgroup` owns.
+    __host__ __device__ static int pair_begin(int per_xcd,
+                                              int blocks_p,
+                                              int blocks_q,
+                                              int n_blocks,
+                                              int groups,
+                                              int xgroups,
+                                              int xgroup)
+    {
+        return xgroup * pair_seg(per_xcd, blocks_p, blocks_q, n_blocks, groups, xgroups);
+    }
+
+    // Number of pairs input-segment `xgroup` owns.
+    __host__ __device__ static int pair_count(int per_xcd,
+                                              int blocks_p,
+                                              int blocks_q,
+                                              int n_blocks,
+                                              int groups,
+                                              int xgroups,
+                                              int xgroup)
+    {
+        const int total = pair_total(per_xcd, blocks_p, blocks_q, n_blocks, groups);
+        const int seg   = pair_seg(per_xcd, blocks_p, blocks_q, n_blocks, groups, xgroups);
+        const int rem   = total - xgroup * seg;
+        if(rem <= 0)
+            return 0;
+        return rem < seg ? rem : seg;
+    }
+
+    // Rounds an XCD runs: its pair segment over 32 CUs (ceil).
+    __host__ __device__ static int round_count(int per_xcd,
+                                               int blocks_p,
+                                               int blocks_q,
+                                               int n_blocks,
+                                               int groups,
+                                               int xgroups,
+                                               int xgroup)
+    {
+        return divup(pair_count(per_xcd, blocks_p, blocks_q, n_blocks, groups, xgroups, xgroup),
+                     persistent::NUM_CU_PER_XCD);
+    }
+
+    // Uniform upper bound on rounds (xgroup 0 owns the largest segment).
+    __host__ __device__ static int
+    num_rounds(int per_xcd, int blocks_p, int blocks_q, int n_blocks, int groups, int xgroups)
+    {
+        return round_count(per_xcd, blocks_p, blocks_q, n_blocks, groups, xgroups, 0);
+    }
+
+    // CUs of an XCD holding pair_count pairs that work in round `round`.
+    __host__ __device__ static int busy_cus(int pair_count, int round)
+    {
+        const int rem = pair_count - round * persistent::NUM_CU_PER_XCD;
+        if(rem <= 0)
+            return 0;
+        return rem < persistent::NUM_CU_PER_XCD ? rem : persistent::NUM_CU_PER_XCD;
+    }
+
+    // Exact number of rounds THIS workgroup iterates (every one valid).
+    __host__ __device__ static int num_rounds_for_workgroup(int per_xcd,
+                                                            int blocks_p,
+                                                            int blocks_q,
+                                                            int n_blocks,
+                                                            int groups,
+                                                            int xgroups,
+                                                            int xgroup,
+                                                            int workgroup_id)
+    {
+        const int count =
+            pair_count(per_xcd, blocks_p, blocks_q, n_blocks, groups, xgroups, xgroup);
+        if(workgroup_id >= count)
+            return 0;
+        return divup(count - workgroup_id, persistent::NUM_CU_PER_XCD);
+    }
+
+    // Decode the work item for (workgroup_id, round_idx) on one XCD.
+    //
+    // BalancedL2Grid's signature, so the kernel can take either; round_count is unused.
+    __device__ RaggedL2Grid(int per_xcd,
+                            int kslice,
+                            int blocks_p,
+                            int blocks_q,
+                            int n_blocks,
+                            int pair_begin,
+                            int pair_count,
+                            int /*round_count*/,
+                            MagicDiv magic_per_xcd,
+                            MagicDiv magic_p,
+                            MagicDiv magic_q,
+                            MagicDiv magic_n,
+                            int workgroup_id,
+                            int round_idx)
+    {
+        // readfirstlane keeps the decode in SGPRs, as in BalancedL2Grid.
+        const int wg = __builtin_amdgcn_readfirstlane(workgroup_id);
+        const int pl = __builtin_amdgcn_readfirstlane(round_idx * persistent::NUM_CU_PER_XCD + wg);
+        valid_       = pl < pair_count;
+
+        uint32_t x = 0, k_u = 0;
+        magic_per_xcd.divmod(
+            static_cast<uint32_t>(pair_begin + pl), static_cast<uint32_t>(per_xcd), x, k_u);
+        k_ = kslice * per_xcd + static_cast<int>(k_u);
+
+        uint32_t r1 = 0, p = 0, r2 = 0, qq = 0, gg = 0, nn = 0;
+        magic_p.divmod(x, static_cast<uint32_t>(blocks_p), r1, p);
+        magic_q.divmod(r1, static_cast<uint32_t>(blocks_q), r2, qq);
+        magic_n.divmod(r2, static_cast<uint32_t>(n_blocks), gg, nn);
+
+        p_ = static_cast<int>(p);
+        q_ = static_cast<int>(qq);
+        n_ = static_cast<int>(nn);
+        g_ = static_cast<int>(gg);
+    }
+
+    __device__ bool valid() const { return valid_; }
+    __device__ int k_idx() const { return k_; }
+    __device__ int p_idx() const { return p_; }
+    __device__ int q_idx() const { return q_; }
+    __device__ int n_idx() const { return n_; }
+    __device__ int g_idx() const { return g_; }
+
+private:
+    bool valid_;
+    int k_;
+    int p_;
+    int q_;
+    int n_;
+    int g_;
+};
+
 } // namespace hipconv::cdna4::direct_l1

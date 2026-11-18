@@ -13,7 +13,16 @@ from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, fields as _dataclass_fields
 from functools import lru_cache
-from typing import Any, Iterable, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Tuple
+
+from kernels.common.attention_unified import (
+    _enable_gfx942_3d_wide_kv_load,
+    _kv_cache_policy_3d,
+    _kv_lds_swizzle_3d,
+    _wave_page_id_load_3d,
+)
+
+from rocke.dispatch.tuning import WavesPerEuSpace
 
 from .axes import (
     DEAD_END_KNOBS,
@@ -27,21 +36,23 @@ from .axes import (
     _PRODUCTION_STACKS,
     _TRANSPOSED_ONLY_KNOBS,
     _items,
+    axis_knob_names,
     tuning_axes,
 )
 from .common import (
     ATTENTION_ABI_VERSION,
     AttentionRequest,
     AttentionTuningSpec,
-    _problem,
+    attention_problem,
 )
 from .tuning_specs import (
     ExplicitAttention2DConfig,
     ExplicitAttention3DConfig,
     make_explicit_attention_2d_spec,
     make_explicit_attention_3d_specs,
+    resolve_num_segments,
 )
-from .waves import FULL_WAVES, PRODUCTION_WAVES, WavesPerEuSpace
+from .waves import FULL_WAVES, PRODUCTION_WAVES
 
 TUNING_ALGORITHM = "unified_tuning"
 
@@ -55,6 +66,7 @@ class AttentionGeometryVariant:
     tile_policy: str
     num_warps: int = 1
     block_m_per_warp: int = 16
+    # 3D: a count, or 0 for the split rule's; unused on 2D.
     num_segments: int = 0
     compile_backend: str = "llvm"
 
@@ -67,7 +79,8 @@ class AttentionGeometryVariant:
                 f"{self.block_m_per_warp}_t{tile}_{self.compile_backend}"
             )
         tile = self.tile_policy.replace("x", "xb")
-        return f"{self.codepath}_seg{self.num_segments}_t{tile}"
+        seg = self.num_segments or "auto"
+        return f"{self.codepath}_seg{seg}_t{tile}"
 
     @property
     def candidate_name(self) -> str:
@@ -113,10 +126,34 @@ def _explicit_2d_spec(problem, variant, knobs, wpe):
     return make_explicit_attention_2d_spec(problem, config, arch=variant.arch)
 
 
+# 3D spec fields whose base the explicit builder resolves per problem
+# (``make_explicit_attention_3d_specs``), not the dataclass default. A knob
+# equal to the policy value restates it, and every 3D id records the effective
+# value, so the same knobs name the same kernel on every problem.
+_3D_POLICY_FIELDS: Mapping[str, Callable[..., object]] = {
+    "kv_cache_policy": _kv_cache_policy_3d,
+}
+
+
+def _dispatch_3d_knobs(problem, arch: str) -> dict:
+    """The K/V layout knobs the dispatcher's 3D spec builder turns on for
+    ``problem`` (``_spec_generic_3d``)."""
+    knobs = {
+        "use_kv_lds_swizzle": _kv_lds_swizzle_3d(problem, arch),
+        "use_wave_page_id_load": _wave_page_id_load_3d(problem, arch),
+    }
+    if arch == "gfx942":
+        knobs["use_wide_kv_load"] = _enable_gfx942_3d_wide_kv_load(problem, arch)
+    return {name: True for name, on in knobs.items() if on}
+
+
 def _variant_axes(variant: AttentionGeometryVariant):
     if variant.builder_kind == "gfx942_4warp_gqa":
         return ()  # the 4-warp GQA builder reads no tuning knobs
     return tuning_axes(variant.arch, variant.path)
+
+
+_LSE_OUTPUT_FIELDS = frozenset({"emit_lse", "lse_layout"})
 
 
 @lru_cache(maxsize=None)
@@ -189,8 +226,9 @@ def _sets_dead_end(spec: AttentionTuningSpec) -> bool:
 
 
 # gfx950 2D LDS rules. The tiled 2D validator does not model LDS, so an
-# over-budget spec only fails at codegen, and the KQ pad has cases the kernel
-# silently disables or computes wrongly. These mirror attention_tiled_2d.py.
+# over-budget spec only fails at codegen. These mirror attention_tiled_2d.py;
+# whether the KQ pad is laid out and whether Q is staged in K_lds come from
+# the spec itself.
 _KQ_PAD_KNOBS = ("use_kq_lds_pad", "kq_lds_pad_halves")
 
 
@@ -201,58 +239,21 @@ def _k_schedule_bufs(spec) -> int:
     return depth if depth > 2 else 2
 
 
-def _fp8_mfma_qk(spec) -> bool:
-    return spec.kv_storage_dtype == "fp8e4m3" and bool(spec.use_fp8_mfma_qk)
-
-
-def _kq_pad_slab_rows(spec) -> int:
-    head = int(spec.head_size)
-    return 512 // head if head and 512 % head == 0 else 0
-
-
-def _kq_pad_off_reason(spec) -> Optional[str]:
-    """Why the kernel emits a set KQ pad as no pad at all, or None."""
-    if _fp8_mfma_qk(spec):
-        return "the KQ LDS pad is off under native-FP8 K LDS"
-    slab_rows = _kq_pad_slab_rows(spec)
-    if (
-        not slab_rows
-        or int(spec.tile_size_eff) % slab_rows
-        or int(spec.kq_lds_pad_halves) % 8
-    ):
-        return "the KQ LDS pad needs an aligned slab layout"
-    if _k_schedule_bufs(spec) != 1:
-        return "the KQ LDS pad is only laid out for a single-K schedule"
-    return None
-
-
-def _q_aliases_k(spec) -> bool:
-    """Whether Q is staged in K_lds rather than its own slab."""
-    if spec.use_q_reread or spec.use_q_direct_reg or _fp8_mfma_qk(spec):
-        return False
-    tile, head = int(spec.tile_size_eff), int(spec.head_size)
-    return int(spec.block_m) * head * 2 <= 2 * tile * head * 2
-
-
-def _kq_pad_active(spec) -> bool:
-    return bool(spec.use_kq_lds_pad) and _kq_pad_off_reason(spec) is None
-
-
 def _gfx950_2d_lds_bytes(spec) -> int:
     """The LDS pool the LLVM lowering packs for one gfx950 tiled 2D spec."""
     tile = int(spec.tile_size_eff)
     head = int(spec.head_size)
     block_m = int(spec.block_m)
     kv_fp8 = spec.kv_storage_dtype == "fp8e4m3"
-    fp8_qk = _fp8_mfma_qk(spec)
+    fp8_qk = spec.fp8_k_in_lds
     fp8_pv = kv_fp8 and bool(spec.use_fp8_mfma_pv)
     k_elem_bytes = 1 if fp8_qk else 2
     v_elem_bytes = 1 if fp8_pv else 2
     k_bufs = _k_schedule_bufs(spec)
     v_bufs = 2 if spec.use_v_double_buffer else 1
 
-    if _kq_pad_active(spec):
-        slab_rows = _kq_pad_slab_rows(spec)
+    slab_rows = spec.kq_lds_pad_slab_rows
+    if slab_rows:
         slab_cols = slab_rows * head + int(spec.kq_lds_pad_halves)
         k_bytes = k_bufs * (tile // slab_rows) * slab_cols * k_elem_bytes
     else:
@@ -265,7 +266,9 @@ def _gfx950_2d_lds_bytes(spec) -> int:
         if spec.use_register_pv or transposed
         else block_m * (tile + (16 if fp8_pv else 8)) * v_elem_bytes
     )
-    q_bytes = 0 if spec.use_q_direct_reg or _q_aliases_k(spec) else block_m * head * 2
+    q_bytes = (
+        0 if spec.use_q_direct_reg or spec.q_staged_in_k_lds else block_m * head * 2
+    )
     acc_bytes = block_m * (32 if head <= 64 else head) * 2
     fp8_staging_bytes = 3 * tile * head if fp8_qk else 0
     loop_bytes = k_bytes + v_bytes + p_bytes + q_bytes + fp8_staging_bytes
@@ -277,8 +280,6 @@ def _gfx950_2d_lds_bytes(spec) -> int:
 
 
 def _gfx950_2d_legality(spec) -> Tuple[bool, str]:
-    if _kq_pad_active(spec) and _q_aliases_k(spec):
-        return False, "padded K LDS does not support aliased Q (wrong output)"
     from rocke.core.arch import ArchTarget
 
     capacity = ArchTarget.from_gfx("gfx950").lds_capacity_bytes
@@ -313,10 +314,27 @@ class UnifiedSpace(WavesPerEuSpace):
     def fixed(self, base):
         return _CODEPATH_KNOBS.get((self.arch, self.variant.codepath), {})
 
+    def _rule_segments(self) -> bool:
+        """Whether the variant takes the split rule's segment count."""
+        return self.path == "3d" and self.variant.num_segments == 0
+
+    def known_knobs(self, base):
+        known = axis_knob_names(self.axes(base))
+        # A rule variant's id records the count the rule resolved to.
+        return known | {"num_segments"} if self._rule_segments() else known
+
     def refuse(self, base, knobs):
         wrong = sorted(k for k in KNOWN_WRONG_KNOBS.get(self.arch, ()) if knobs.get(k))
         if wrong:
             return f"{wrong} are known to produce wrong output on {self.arch}"
+        if self._rule_segments() and "num_segments" in knobs:
+            # A recorded count replays only while the rule still resolves to it.
+            want = resolve_num_segments(base, 0, arch=self.arch)
+            if knobs["num_segments"] != want:
+                return (
+                    f"{self.candidate_name} takes the split rule's segment count, "
+                    f"{want} for this problem, not {knobs['num_segments']!r}"
+                )
         return None
 
     def prefilter(self, base, knobs):
@@ -335,15 +353,39 @@ class UnifiedSpace(WavesPerEuSpace):
 
     def defaults(self, base, kernel):
         reduce = kernel.reduce_spec
+        recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
-            "kernel": dict(_declared_defaults(type(kernel.kernel_spec))),
+            # The LSE output fields are outputs the caller selects, not defaults
+            # that knobs are a delta against: keeping them out of the kernel and
+            # the split-KV reduce defaults leaves every config_key, and so every
+            # stored pin, as before the fields existed.
+            "kernel": {
+                name: value
+                for name, value in _declared_defaults(type(kernel.kernel_spec))
+                if name not in recorded and name not in _LSE_OUTPUT_FIELDS
+            },
             "reduce": (
-                None if reduce is None else dict(_declared_defaults(type(reduce)))
+                None
+                if reduce is None
+                else {
+                    name: value
+                    for name, value in _declared_defaults(type(reduce))
+                    if name not in _LSE_OUTPUT_FIELDS
+                }
             ),
         }
 
+    def recorded(self, base):
+        if self.path != "3d":
+            return frozenset()
+        rule = {"num_segments"} if self._rule_segments() else set()
+        return frozenset(_3D_POLICY_FIELDS) | rule
+
     def base_value(self, base, kernel, name):
+        policy = _3D_POLICY_FIELDS.get(name) if self.path == "3d" else None
+        if policy is not None:
+            return policy(base, arch=self.arch)
         return _field_defaults(type(kernel.kernel_spec)).get(name, MISSING)
 
     def _gfx950_2d(self) -> bool:
@@ -353,7 +395,7 @@ class UnifiedSpace(WavesPerEuSpace):
         spec = kernel.kernel_spec
         if not self._gfx950_2d() or not spec.use_kq_lds_pad:
             return {}
-        why = _kq_pad_off_reason(spec)
+        why = spec.kq_lds_pad_off_reason
         return {} if why is None else dict.fromkeys(_KQ_PAD_KNOBS, why)
 
     def validate(self, base, kernel):
@@ -367,7 +409,11 @@ class UnifiedSpace(WavesPerEuSpace):
         return FULL_WAVES
 
     def production(self, base, axes, is_valid):
-        return _production_knob_sets(self.variant)
+        # 3D leads with the dispatcher's knobs for this problem, so a variant's
+        # default spec is the shipped kernel at the variant's geometry.
+        if self.path == "3d":
+            yield _dispatch_3d_knobs(base, self.arch)
+        yield from _production_knob_sets(self.variant)
 
     def is_valid(self, base, knobs):
         if _policy_conflict(self.arch, knobs):
@@ -437,7 +483,7 @@ def iter_tuning_specs(
     """Specs for one geometry at ``level``: ``production`` walks the curated
     stacks (no dead-end knobs); ``full`` walks every kernel knob -- consume it
     through :func:`sample_tuning_specs` unless the space is known to be small."""
-    return unified_space(variant).stream(_problem(req), level)
+    return unified_space(variant).stream(attention_problem(req), level)
 
 
 def sample_tuning_specs(
@@ -448,4 +494,4 @@ def sample_tuning_specs(
 ) -> Iterable[AttentionTuningSpec]:
     """Up to ``n`` distinct random legal specs from the full knob space, dead
     ends included; ``KNOWN_WRONG_KNOBS`` never."""
-    return unified_space(variant).sample(_problem(req), n, seed)
+    return unified_space(variant).sample(attention_problem(req), n, seed)

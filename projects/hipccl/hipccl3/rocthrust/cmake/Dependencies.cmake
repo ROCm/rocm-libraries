@@ -13,6 +13,10 @@
 #        and examples. Until that's not fixed, we have to save/restore them.
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  unset(USER_CACHED_${SHARED_OPTION})
+  if(DEFINED CACHE{${SHARED_OPTION}})
+    get_property(USER_CACHED_${SHARED_OPTION} CACHE ${SHARED_OPTION} PROPERTY VALUE)
+  endif()
   set(${SHARED_OPTION} OFF)
 endforeach()
 
@@ -421,56 +425,7 @@ endif()
 
 # Benchmark dependencies
 if(USER_BUILD_BENCHMARK)
-  set(BENCHMARK_VERSION 1.9.5)
-  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
-    # Google Benchmark (https://github.com/google/benchmark.git)
-    find_package(benchmark ${BENCHMARK_VERSION} QUIET)
-  else()
-    message(STATUS "Force installing Google Benchmark.")
-  endif()
-
-  if(NOT benchmark_FOUND)
-    message(STATUS "Google Benchmark not found or force download Google Benchmark on. Downloading and building Google Benchmark.")
-    if(CMAKE_CONFIGURATION_TYPES)
-      message(FATAL_ERROR "DownloadProject.cmake doesn't support multi-configuration generators.")
-    endif()
-    set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
-    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
-      if(WIN32)
-        get_filename_component(CXX_DIRNAME ${CMAKE_CXX_COMPILER} DIRECTORY)
-        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=${CXX_DIRNAME}/clang++.exe")
-      else()
-        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
-      endif()
-    endif()
-
-    message(STATUS "Google Benchmark not found. Fetching...")
-    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." OFF)
-    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark." OFF)
-    FetchContent_Declare(
-      googlebench
-      GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v${BENCHMARK_VERSION}
-    )
-    set(HAVE_STD_REGEX ON)
-    set(RUN_HAVE_STD_REGEX 1)
-    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
-    FetchContent_MakeAvailable(googlebench)
-    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
-	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
-    # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
-	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
-	  if(TARGET benchmark)  
-	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
-	  endif()  
-	  if(TARGET benchmark_main)  
-	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)	
-	  endif()
-      if(NOT TARGET benchmark::benchmark)
-        add_library(benchmark::benchmark ALIAS benchmark)
-      endif()
-	endif()
-  endif()
+  # NOTE(hipccl3): Google Benchmark is not fetched. The benchmarks use shared/primbench.
 
   # rocRAND (https://github.com/ROCm/rocm-libraries)
   fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH MIN_ROCRAND_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
@@ -494,7 +449,7 @@ if(USER_BUILD_BENCHMARK)
     set(_ROCTHRUST_SAVED_BUILD_TEST "${BUILD_TEST}")
     set(BUILD_BENCHMARK OFF)
     set(BUILD_TEST OFF)
-    
+
     FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
@@ -520,4 +475,7 @@ endif()
 # Restore user global state
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+  if(DEFINED USER_CACHED_${SHARED_OPTION})
+    set_property(CACHE ${SHARED_OPTION} PROPERTY VALUE "${USER_CACHED_${SHARED_OPTION}}")
+  endif()
 endforeach()

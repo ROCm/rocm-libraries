@@ -40,7 +40,7 @@ decision is the MMA Kernel Expert's.
 |---|---|---|
 | **Whole kernel dataflow** (global load → … → C store) | "visualize my kernel pipeline" (+ the build fn) | Workflow A: `record_build` → block diagram → per-flow panels, correctness gates run in code |
 | **Kernel structure** (transactions/ops in order) | "show the block diagram" | a Level-0 node/edge **block diagram** (mem↔reg transactions + ops; K-loop as ×N) |
-| **MMA wave-tile flow** (A × B → derived C) | "MMA flow" / "wave-tile flow" | the **MmaTee** — A (M×K), B (K×N) → C (M×N) + the static distribution |
+| **MMA wave-tile flow** (A × B → derived C) | "MMA flow" / "wave-tile flow" | the **MmaTee** — A drawn M x K, B drawn K x N (a drawing orientation; B's axes are `(N, K)`) → C drawn M x N + the static distribution |
 | **A distribution → registers** | "how does this dist lay a tile into registers?" | a **RegisterFile** (tid×reg) beside a **LogicalTile** (owner `T{l}R{r}`) + text maps |
 | **A register file after a transform** | "what's this after `<transform>`?" | before/after files + tiles, arrow classified (**reposition / reorder / cross_lane**; relabel only on C-reuse) |
 | **LDS → C-shuffle flow** | "LDS through the C-shuffle" | LDS view → wave-read A/B → tee → C-shuffle → final C, each hop named |
@@ -222,7 +222,7 @@ cooperative map; `classify_epilogue(...)` → the branch. Worked example:
 
 ## Tool catalog (load-bearing knobs; full list in `visualization_api_surface.md`)
 
-- **`MmaTee`** — `from_mma(mma, **overrides)` (canonical refs + dtypes from the atom) OR explicit args. ✗
+- **`MmaTee`** — `from_mma(mma, **overrides)` (canonical refs from the atom + per-operand dtypes from the TileMma: its A, B and result dtypes) OR explicit args. ✗
   `from_mma` with no `a_enc`/`b_enc` renders CANONICAL (it sources canonical from the `canonical_layouts` helper,
   NOT `mma.a_layout`) — for interleaved you MUST pass explicit `a_enc`/`b_enc` and VERIFY the encoding is
   `!= canonical_layouts(mma.traits, mma.subtiles)` + sound (`mma.a_layout` is the CONFIGURED style now, NOT a
@@ -280,7 +280,8 @@ cooperative map; `classify_epilogue(...)` → the branch. Worked example:
 - `mma_operand_layout_sound(layout, canon, role=)` → `ok` / `error`. `mma_operand_repair_hint(layout, canon)`
   → `ok` / `warning` (an in-register reorder makes-it-so — name the permutation) / `error` (cross-lane or
   none). `mma_pair_compatible(a, b, a_canon=, b_canon=)` → both sound AND K-dists match; drives the tee
-  banner. `mma_pair_k_aligned(a, b)` → `ok`/`warning`/`error` (pairwise K-match, per atom).
+  banner. `mma_pair_k_aligned(a, b, a_canon=, b_canon=)` → `ok`/`warning`/`error` (pairwise K-match at
+  every instruction K the canonicals hold, in every row and column).
   `classify_transform(src, tgt)` → `reorder` (cheap, dtype-graded) vs `cross_lane` (expensive/deferred).
 - Tee banner red ERROR / orange WARNING = the pair diagnostic — say what's wrong, which rule, cheapest remedy
   (free symmetry [reposition/source-swap] → dword reorder → sub-dword → cross-lane last).
@@ -327,8 +328,10 @@ and is enforced IN CODE — obey it, don't restate it.
    override). Only the MMA tee transposes its own **B & C** wings.
 6. **Logical / thread-tile views show LOGICAL coords by default** (`label_coords="logical"`); owner
    `T{lane}R{reg}` only when the user asks to inspect ownership.
-7. **Logical axes are natural, per tensor: A=M×K, B=K×N, C=M×N.** ✗ never draw B as N×K (B's free N is
-   horizontal).
+7. **Drawing orientation in the tee: A drawn M x K, B drawn K x N, C drawn M x N** (B's free N runs
+   horizontal, so the tee reads as a matrix product). This is a DRAWING orientation only: B's logical axes are
+   `(N, K)` (the one axis convention, `docs/tiling_api_surface.md` sec 3) -- NEVER state the drawing as B's
+   axis order, and NEVER draw B as N x K in the tee.
 8. **Macro register stage = N per-wave 64-lane files SIDE BY SIDE** (`WaveStrip`), ✗ never one `n_waves*64`
    monolith. Always state whether a tile is part of a MACRO tile.
 9. **dpi ≥ 200.** To shrink a big figure, reduce SCOPE (wave scope, fewer stages) — ✗ never lower dpi.

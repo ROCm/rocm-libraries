@@ -353,6 +353,9 @@ def test_config_has_formocast_fields():
     assert hasattr(config, 'gwvw_d')
     assert hasattr(config, 'vector_width_a')
     assert hasattr(config, 'vector_width_b')
+    assert hasattr(config, 'cache_hints_d')
+    assert hasattr(config, 'stream_k')
+    assert hasattr(config, 'index')
     
     # Check Tensile-specific fields
     assert hasattr(tensile, 'depth_u')
@@ -362,9 +365,16 @@ def test_config_has_formocast_fields():
     assert hasattr(tensile, 'direct_to_vgpr_a')
     assert hasattr(tensile, 'direct_to_vgpr_b')
     assert hasattr(tensile, 'wave_num')
+    assert hasattr(tensile, 'wavefront_size')
     assert hasattr(tensile, 'wave_group_m')
     assert hasattr(tensile, 'wave_group_n')
     assert hasattr(tensile, 'prefetch_global_read')
+    assert hasattr(tensile, 'one_lds_buffer')
+    assert hasattr(tensile, 'source_swap')
+    assert hasattr(tensile, 'unroll_major_lds_a')
+    assert hasattr(tensile, 'unroll_major_lds_b')
+    assert hasattr(tensile, 'lds_transpose_read_a')
+    assert hasattr(tensile, 'lds_transpose_read_b')
     
     # Verify has_tensile_params returns True after accessing
     assert config.has_tensile_params()

@@ -241,6 +241,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2gHHdOFGC
   SolutionNameMin: Cijk_Alik_Bjlk_DB_MT16x16x8_MI16x16x4x1_SN_GSU1_MIWT1_1_SS1
   ActivationFuncCall: false
   AssignedDerivedParameters: true
@@ -362,6 +363,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 2
 - SolutionIndex: 1
+  SolutionUID: 0uR2gHHcPCsA
   SolutionNameMin: Cijk_Alik_Bjlk_DB_MT16x16x16_MI16x16x4x1_SN_GSU2_MIWT1_1_SS1
   ActivationFuncCall: false
   AssignedDerivedParameters: true

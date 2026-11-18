@@ -35,10 +35,12 @@ using namespace ck;
 
 using srcDataType =
     typename get_datatype_from_enum<static_cast<DataTypeEnum_t>(CK_PARAM_SRC_DATATYPE)>::type;
-using dstDataType =
-    typename get_datatype_from_enum<static_cast<DataTypeEnum_t>(CK_PARAM_DST_DATATYPE)>::type;
 using compType =
     typename get_datatype_from_enum<static_cast<DataTypeEnum_t>(CK_PARAM_REDUCE_COMPTYPE)>::type;
+
+// the partial results of the blocks are stored in the compute type (not in the type of the input
+// tensor, whose range and precision are too small) and read back by the second pass
+using wsDataType = compType;
 
 constexpr index_t BlockSize = CK_PARAM_BLOCKSIZE; // tunable
 
@@ -282,7 +284,7 @@ extern "C" __global__ void gridwise_generic_reduce_1(int origReduceLen,
 
     using gridwise_2d_reduce = GridwiseReduction_xy_to_x_multiblock<BlockSize,
                                                                     srcDataType,
-                                                                    dstDataType,
+                                                                    wsDataType,
                                                                     compType,
                                                                     decltype(src2dDesc),
                                                                     decltype(dst1dDesc),
@@ -305,6 +307,6 @@ extern "C" __global__ void gridwise_generic_reduce_1(int origReduceLen,
         alpha,
         static_cast<const srcDataType* const __restrict__>(p_src_global),
         beta,
-        static_cast<srcDataType* const __restrict__>(ws_buf1_global),
+        static_cast<wsDataType* const __restrict__>(ws_buf1_global),
         static_cast<int* const __restrict__>(ws_buf2_global));
 };

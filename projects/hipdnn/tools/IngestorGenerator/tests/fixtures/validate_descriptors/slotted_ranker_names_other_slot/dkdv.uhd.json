@@ -1,0 +1,31 @@
+{
+  "version": "1.1",
+  "id": "c2a00000-0000-4000-8000-000000000010",
+  "name": "dkdv selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.fixture.dkdv_score"
+  },
+  "features_signature": [
+    "$kernel.block_m"
+  ],
+  "features_hash": "sha256:81b192ab2f421858",
+  "trained_against": {
+    "ued": {
+      "id": "c2a00000-0000-4000-8000-000000000001",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "c2a00000-0000-4000-8000-000000000003",
+      "revision": "1.0"
+    },
+    "slot": "dq",
+    "umd": [
+      {
+        "id": "c2a00000-0000-4000-8000-000000000005",
+        "revision": "1.0"
+      }
+    ]
+  }
+}

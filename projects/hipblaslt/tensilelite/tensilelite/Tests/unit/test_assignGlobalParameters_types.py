@@ -23,14 +23,14 @@
 
 import pytest
 
-from Tensile.Common.GlobalParameters import (
+from tensilelite.Common.GlobalParameters import (
     assignGlobalParameters,
     globalParameters,
     globalParameterTypeOverrides,
     restoreDefaultGlobalParameters,
     _assertOverrideTableCovers,
 )
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
 
 
 # A minimal isaInfoMap stand-in. assignGlobalParameters uses it to set
@@ -129,7 +129,7 @@ class TestMinimumRequiredVersionSkipped:
         # is a string, this would otherwise be a string-vs-string no-op,
         # but a compatible version string should also pass without
         # surprises.)
-        from Tensile import __version__
+        from tensilelite import __version__
         assignGlobalParameters({"MinimumRequiredVersion": __version__}, EMPTY_ISA_INFO)
 
 

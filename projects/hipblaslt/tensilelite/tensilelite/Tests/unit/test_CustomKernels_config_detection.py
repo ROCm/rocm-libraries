@@ -4,9 +4,9 @@
 
 import pytest
 
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.CustomKernels import isCustomKernelConfig
-from Tensile.SolutionStructs.Naming import getKernelFileBase
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.CustomKernels import isCustomKernelConfig
+from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
 pytestmark = pytest.mark.unit
 

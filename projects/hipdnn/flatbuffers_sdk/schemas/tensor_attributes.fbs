@@ -7,6 +7,7 @@ include "data_types.fbs";
 attribute "cache_ignore";
 attribute "cache_uid";
 attribute "cache_uid_key";
+attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -67,7 +68,10 @@ table TensorAttributes {
     virtual: bool;
     value: TensorValue;
     is_runtime_pass_by_value: bool = false;
-    ragged_offset_tensor_uid: long = null (cache_uid);
+    // Per-batch offsets into a packed (ragged) buffer: the values, not the padded dims,
+    // decide how many elements each batch holds, so every node reading or writing this
+    // tensor does data-dependent work.
+    ragged_offset_tensor_uid: long = null (cache_uid, work_data_dependent);
     alignment: long = 16;
     // Recovers the element offset from a coarser stored ragged offset:
     // element_offset = stored_offset * ragged_offset_multiplier. Default 1 = element units.

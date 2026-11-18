@@ -6,12 +6,13 @@ tiled GEMM/MMA kernel -- or any custom thread/register distribution -- without h
 bound target so authorship stays target-agnostic.
 
 ```python
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling import (
     TileMma, make_tensor_desc, make_window, make_fragment,
     fill_fragment, load_fragment, store_fragment,
 )
 
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")  # IR-free resolve
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")  # IR-free resolve
 acc = make_fragment(mma.c_desc, F32)
 fill_fragment(b, acc, 0)
 for k0 in range(0, K_LEN, 16):
@@ -24,18 +25,25 @@ store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)
 
 ## Documentation
 - `docs/tiling_api_surface.md` -- the how-to-use catalog: every surface, its default (MMA-driven)
-  mode and its manual override, a composability matrix, and runnable examples. **Start here.**
-- `docs/tiling_design_proposal.md` -- the why + architecture + status/decisions.
+  mode and its manual override, a composability matrix, and runnable examples. **Start here.** Its
+  section 3 is the one home of the axis convention and of LDS buffers described by their descriptor.
+- `docs/tiling_api_contract.md` -- the why: the promotion gate, the audience tiers, the rules.
+- `docs/tensor_transforms_api.md` -- the coordinate-graph package: units, kinds, rules and every error.
+- `docs/tensor_transforms_guide.md` -- coordinate graphs by example: halos, K splits, the grouped-query head
+  fold, swizzles, addresses, checks, and CK `pad` in rocke.
 
 ## Package layout
 ```
 encoding.py         WarpDistributionEncoding -- the foundational coordinate-transform type
 register_mapper.py  RegisterMapper / LaneRegister -- pure-int lane x register -> coordinate
-descriptors.py      TensorDesc + TensorWindow (memory model) + make_tensor_desc / make_window
+descriptors.py      TensorDesc + TensorWindow (memory model, global and LDS) + make_tensor_desc /
+                    make_window + check_gemm_shapes
+memory.py           the cooperative global->LDS bridge: cooperative_load_desc, lds_tile_desc, lds_store / lds_read
 fragments.py        TileDesc + Fragment (register model) + make_fragment / fragment_length
 emit.py             b-first IR verbs: load_fragment / store_fragment / fill_fragment + coordinates
 layouts/            make_tile_desc -- quantity-major human-approachable distribution authoring
 mma/                TileMma + Tiling; the A/B/C warp-encoding calculators
+tensor_transforms/  coordinate graphs -> split element addresses + derived bound checks
 traits/             typed MMA traits loader/catalog + committed mma_traits.json
 reflection/         describe() + text forward/inverse layout maps
 kernels/            end-to-end demo kernels (spec -> build -> run), bit-exact on gfx90a
@@ -52,8 +60,8 @@ authoring / reflection) runs anywhere.
 ## Status
 Dense MMA GEMM on gfx90a is BUILT and bit-exact: single-atom and wave-tile subtiling (M/N/K grid +
 `order`), the human-approachable `make_tile_desc` authoring surface, clipping/bounds for ragged
-tiles, and target-agnostic MMA resolution. `c_transpose`, interleaved layouts, sparse, and MX are
-designed-in reserved seams.
+tiles, LDS staging through the tensor descriptor, and target-agnostic MMA resolution. `c_transpose`,
+interleaved layouts, sparse, and MX are designed-in reserved seams.
 
 ## Engineering standards
 - Descriptive names for every argument, variable, and class; no obfuscating short names.

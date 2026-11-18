@@ -23,7 +23,11 @@ offset ``block_id_z * stride_X`` is computed in i32, the caller must keep
 wraps and the kernel touches the wrong batch. Validate a concrete launch with
 :func:`check_batched_offsets_fit_i32` before packing the kernel arguments.
 Tensors larger than that need i64 strides (a coordinated ABI change, not yet
-implemented).
+implemented). With ``direct_to_lds`` the A/B loads are addressed with a
+*byte* offset (the DTL ``voffset`` is ``element_offset * elem_bytes`` in
+i32), so pass ``direct_to_lds=True, elem_bytes=...`` and the A/B strides
+are additionally bounded by ``batch * stride_X * elem_bytes <= 2**31 - 1``
+-- each of A and B smaller than 2 GiB.
 
 The MFMA / LDS body is the same as ``build_universal_gemm`` (which is
 already battle-tested by the GEMM bake-off). This makes batched GEMM
@@ -54,7 +58,7 @@ universal-GEMM body it calls into is not):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Tuple
 
 from ...core.ir import KernelDef
@@ -92,7 +96,10 @@ class BatchedGemmSpec(WarpTileBlockSizeMixin):
         self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        return mono_data_spec(self.dtype)
+        data = mono_data_spec(self.dtype)
+        if data.dtype_a == "fp64":
+            return replace(data, dtype_acc="fp64")
+        return data
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
@@ -118,7 +125,13 @@ _I32_MAX = (1 << 31) - 1
 
 
 def check_batched_offsets_fit_i32(
-    batch: int, stride_a: int, stride_b: int, stride_c: int
+    batch: int,
+    stride_a: int,
+    stride_b: int,
+    stride_c: int,
+    *,
+    direct_to_lds: bool = False,
+    elem_bytes: int = 0,
 ) -> None:
     """Runtime precondition for a batched-GEMM launch.
 
@@ -129,12 +142,24 @@ def check_batched_offsets_fit_i32(
     ``<= 2**31 - 1`` for each of A/B/C. Beyond that the index silently wraps and
     the kernel reads/writes the wrong batch.
 
-    This raises ``ValueError`` when the bound is exceeded (or a stride is
+    With ``direct_to_lds=True`` the A/B global to LDS loads are addressed with
+    a **byte** offset (``voffset = element_offset * elem_bytes``, computed in
+    i32), so A and B must additionally stay below 2 GiB in bytes:
+    ``batch * stride_X * elem_bytes <= 2**31 - 1``. Pass the A/B element size
+    via ``elem_bytes``. C is written by the epilogue with element offsets and
+    keeps the element bound.
+
+    This raises ``ValueError`` when a bound is exceeded (or a stride is
     negative) so callers fail loudly instead of corrupting memory. Tensors that
     exceed the bound need i64 strides -- a coordinated change to the kernel ABI
     (the stride parameters and the offset arithmetic on both engines), not yet
     implemented; this guard is the documented contract until then.
     """
+    if direct_to_lds and elem_bytes <= 0:
+        raise ValueError(
+            "direct_to_lds=True requires elem_bytes: the DTL global offset is "
+            "a byte offset, so the A/B bound depends on the element size"
+        )
     for name, s in (
         ("stride_a", stride_a),
         ("stride_b", stride_b),
@@ -147,6 +172,15 @@ def check_batched_offsets_fit_i32(
                 f"batched GEMM offset overflows i32: batch={batch} * {name}={s} "
                 f"exceeds 2**31-1; i64 strides are required for tensors this large"
             )
+    if direct_to_lds:
+        for name, s in (("stride_a", stride_a), ("stride_b", stride_b)):
+            if batch > 0 and s * elem_bytes > _I32_MAX // batch:
+                raise ValueError(
+                    f"batched GEMM direct_to_lds byte offset overflows i32: "
+                    f"batch={batch} * {name}={s} * elem_bytes={elem_bytes} "
+                    f"exceeds 2**31-1 bytes; with direct_to_lds, A and B must "
+                    f"each be smaller than 2 GiB"
+                )
 
 
 def build_batched_gemm(spec: BatchedGemmSpec, arch: str = "gfx950") -> KernelDef:
@@ -230,7 +264,7 @@ def build_persistent_batched_gemm(
 def batched_gemm_signature(spec: BatchedGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
-    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
+    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16", "fp64") else "f16"
     sig = (
         SignatureBuilder()
         .ptr("A", ptr_dt)

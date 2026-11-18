@@ -23,15 +23,18 @@
 ################################################################################
 
 import collections
+import functools
 import math
 import shutil
 import subprocess
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Union, NamedTuple
 
 from ..Common import ensurePath, print1, print2, printWarning
 from ..Common.GlobalParameters import globalParameters
+from ..Common.Parallel import CPUThreadCount
 from ..Common.Architectures import compilerTargetOf, isaToGfx
 from ..Common.Types import IsaVersion
 from ..CustomKernels import validateCustomKernelMetadata
@@ -84,6 +87,16 @@ def validateCustomKernelMetadataAtBuild(kernels, directory=None):
     return issues
 
 
+def _linkAndBundle(linker, bundler, compress, linkThreads, job):
+    """Links one code object, then bundles it or moves it into place."""
+    objFiles, coFileRaw, coFile, gfx = job
+    linker(objFiles, str(coFileRaw), threads=linkThreads)
+    if compress:
+        bundler.compress(str(coFileRaw), str(coFile), gfx)
+    else:
+        shutil.move(coFileRaw, coFile)
+
+
 def buildAssemblyCodeObjectFiles(
       linker: Linker,
       bundler: Bundler,
@@ -109,8 +122,13 @@ def buildAssemblyCodeObjectFiles(
             of the three can be derived from the ISA the kernels carry.
     """
 
+    def representative(entry):
+      return getattr(entry, "representative", entry)
+
     if globalParameters["ValidateMetadata"]:
-        validateCustomKernelMetadataAtBuild(kernels)
+        validateCustomKernelMetadataAtBuild([
+            alias for entry in kernels for alias in getattr(entry, "aliases", (entry,))
+        ])
 
     extObj = ".o"
     extCo = ".co"
@@ -119,34 +137,52 @@ def buildAssemblyCodeObjectFiles(
     archNames = archNames or {}
     destRoot = Path(destRoot)
     archKernelMap = collections.defaultdict(list)
-    for k in kernels:
-      archKernelMap[tuple(k['ISA'])].append(k)
+    for entry in kernels:
+      archKernelMap[tuple(representative(entry)['ISA'])].append(entry)
 
     coFiles = []
-    for arch, archKernels in archKernelMap.items():
-      if len(archKernels) == 0:
+    jobs = []
+    for arch, archEntries in archKernelMap.items():
+      if len(archEntries) == 0:
         continue
 
       name = archNames.get(arch) or isaToGfx(arch)
       destDir = Path(ensurePath(destRoot / name))
 
-      objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)
-      if len(objectFiles):
-        coFileMap[asmDir / ("TensileLibrary_"+ compilerTargetOf(name) + extCoRaw)] = objectFiles
-      for kernel in archKernels:
-        coName = kernel.get("codeObjectFile", None)
-        if coName:
-          coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
+      for entry in archEntries:
+        kernel = representative(entry)
+        baseName = getattr(entry, "baseName", kernel["BaseName"])
+        objectFile = str(asmDir / (baseName + extObj))
+        aliases = getattr(entry, "aliases", (kernel,))
+        for alias in aliases:
+          if "codeObjectFile" not in alias:
+            destination = asmDir / ("TensileLibrary_" + compilerTargetOf(name, linker.path) + extCoRaw)
+          else:
+            coName = alias.get("codeObjectFile", None)
+            destination = asmDir / (coName + extCoRaw) if coName else None
+          if destination is not None:
+            coFileMap[destination].add(objectFile)
 
       for coFileRaw, objFiles in coFileMap.items():
-        # Canonicalize both the default-list and explicit-set linker input paths.
-        linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
-        if compress:
-          bundler.compress(str(coFileRaw), str(coFile), compilerTargetOf(name))
-        else:
-          shutil.move(coFileRaw, coFile)
+        # Keep link order independent of record and alias ordering.
+        jobs.append((sorted(objFiles), coFileRaw, coFile, compilerTargetOf(name, linker.path)))
         coFiles.append(coFile)
+
+    # Each code object is an independent ld.lld + bundler subprocess pair, so
+    # run them concurrently; threads suffice since the work is in the children.
+    # ld.lld uses every hardware thread by default, so split the CPUs between
+    # the concurrent links instead, and start the largest links first so one
+    # of them doesn't finish last on its own.
+    cpus = CPUThreadCount()
+    workers = max(1, min(cpus, len(jobs)))
+    linkThreads = max(1, cpus // workers)
+    jobs.sort(key=lambda job: len(job[0]), reverse=True)
+
+    linkAndBundle = functools.partial(_linkAndBundle, linker, bundler, compress, linkThreads)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+      for _ in executor.map(linkAndBundle, jobs):
+        pass
 
     return coFiles

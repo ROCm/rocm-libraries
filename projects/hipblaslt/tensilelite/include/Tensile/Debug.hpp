@@ -27,7 +27,6 @@
 #pragma once
 
 #include <cstdlib>
-#include <set>
 #include <string>
 #include <tensilelitehost/export.h>
 
@@ -35,18 +34,16 @@
 #include <roctracer/roctx.h>
 #endif
 
-#include <Tensile/Singleton.hpp>
-
 namespace TensileLite
 {
-    using StringSet = std::set<std::string>;
-
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug
     {
     public:
+        static Debug& Instance();
+
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
         bool printPredicateEvaluationVerbose() const;
@@ -109,8 +106,6 @@ namespace TensileLite
         // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
         int streamK5ForceMode() const;
 
-        bool usePreciseSMTarget() const;
-
         int useExperimentalSelection() const;
 
         std::string getMetric() const;
@@ -130,10 +125,6 @@ namespace TensileLite
         bool gridBasedBatchExp() const;
 
         bool disableStaggerU() const;
-
-        StringSet excludedLibFromGetAll() const;
-
-        void setExcludedLibFromGetAll(StringSet& excludedSet);
 
         __attribute__((always_inline)) inline void markerStart(const char* name) const
         {
@@ -168,8 +159,6 @@ namespace TensileLite
         }
 
     private:
-        friend LazySingleton<Debug>;
-
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;
@@ -186,8 +175,6 @@ namespace TensileLite
         bool        m_disableStaggerU     = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
-        bool        m_usePreciseSMTarget  = false;
-        StringSet   m_excludedFromGetAll;
 
         Debug();
     };

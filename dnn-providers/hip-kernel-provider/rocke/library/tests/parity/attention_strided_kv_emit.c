@@ -1,6 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
- * Mirrors attention_strided_kv_emit.py without changing public spec layouts. */
+ * Mirrors attention_strided_kv_emit.py without changing public spec layouts
+ * (12, 13: strided with swizzled K/V LDS tiles on gfx942, gfx950). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,13 +16,15 @@ int main(int argc, char** argv)
     if(argc < 2)
         return 2;
     const int idx = atoi(argv[1]);
-    if(idx < 0 || idx >= 12)
+    if(idx < 0 || idx >= 14)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
-    const int use942 = idx % 6 < 3;
-    const int ci = idx % 3;
+    const int swizzle = idx >= 12;
+    const int use942 = swizzle ? idx == 12 : idx % 6 < 3;
+    const int ci = swizzle ? 1 : idx % 3;
+    const int strided = idx < 6 || swizzle;
     const char* arch = use942 ? "gfx942" : "gfx950";
     const char* mode = argc > 2 ? argv[2] : "ll";
     const int dims[] = {64, 128, 256};
@@ -39,13 +42,14 @@ int main(int argc, char** argv)
     s.has_softcap = false;
     s.num_segments = 4;
     s.num_seqs = 3;
+    s.use_kv_lds_swizzle = swizzle;
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "strided_kv") != ROCKE_OK)
         return 1;
     rocke_kernel_def_t* k
-        = use942 ? (idx < 6 ? rocke_build_unified_attention_3d_tiled_strided_gfx942(&b, &s, arch)
+        = use942 ? (strided ? rocke_build_unified_attention_3d_tiled_strided_gfx942(&b, &s, arch)
                             : rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch))
-                 : (idx < 6 ? rocke_build_unified_attention_3d_tiled_strided_gfx950(&b, &s, arch)
+                 : (strided ? rocke_build_unified_attention_3d_tiled_strided_gfx950(&b, &s, arch)
                             : rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, arch));
     if(!k || !rocke_ir_builder_ok(&b))
     {

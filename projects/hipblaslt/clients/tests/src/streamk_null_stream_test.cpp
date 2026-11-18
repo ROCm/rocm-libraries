@@ -196,9 +196,14 @@ namespace
                "it was handed stays free for the next stream to take and the two end up sharing "
                "one flag region";
 
+#ifndef CODE_COVERAGE
         // Keep alias coverage on a separate handle: on the broken library an
         // explicit hipStreamLegacy call claims a block and would hide the fact
         // that the preceding nullptr calls failed to claim one.
+        //
+        // Not in coverage builds: the LLVM profile runtime intercepts every
+        // kernel launch and passes the stream to hipStreamGetDevice, which
+        // dereferences the hipStreamLegacy sentinel and segfaults.
         Handle aliases;
         setUp(aliases);
         if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
@@ -211,6 +216,7 @@ namespace
         EXPECT_EQ(withAliases.refusal, HIPBLAS_STATUS_INTERNAL_ERROR);
         EXPECT_EQ(withAliases.served, withNullStream.served)
             << "nullptr and hipStreamLegacy must share one flag block";
+#endif
 
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }

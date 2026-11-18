@@ -24,6 +24,7 @@
 
 #include "hipsparse_bench.hpp"
 #include "hipsparse_bench_cmdlines.hpp"
+#include "utility.hpp"
 
 // Return version.
 std::string hipsparse_get_version()
@@ -37,30 +38,26 @@ std::string hipsparse_get_version()
     status = hipsparseCreate(&handle);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "The creation of the hipsparseHandle_t failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseCreate", status);
     }
 
     status = hipsparseGetVersion(handle, &hipsparse_ver);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetVersion failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseGetVersion", status);
     }
 
     status = hipsparseGetGitRevision(handle, hipsparse_rev);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetGitRevision failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseGetGitRevision", status);
     }
 
     status = hipsparseDestroy(handle);
 
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
-        throw(status);
+        throw_hipsparse_error("hipsparseDestroy", status);
     }
 
     std::ostringstream os;
@@ -78,7 +75,7 @@ void hipsparse_bench::parse(int& argc, char**& argv, hipsparse_arguments_config&
     int i = config.parse(argc, argv, this->desc);
     if(i == -1)
     {
-        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
+        throw_hipsparse_error("hipsparse_bench::parse", HIPSPARSE_STATUS_INTERNAL_ERROR);
     }
     else if(i == -2)
     {

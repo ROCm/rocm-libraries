@@ -51,6 +51,29 @@ python3 data_pipeline.py ck_tile_testrun_2.log \
     --arch gfx950 --capture_hw
 ```
 
+**Alternative: Convert a `gemm_full_benchmark.py` sweep**
+
+The tile_engine GEMM driver (`tile_engine/ops/gemm/gemm_full_benchmark.py`)
+writes one CSV row per measured `(kernel, problem)`. Convert it with the
+hardware constants of the arch it ran on:
+
+```bash
+python3 convert_csv_to_parquet.py \
+    --input sweep_bf16_rcr.csv \
+    --output data/gemm_universal_bf16_rcr_gfx950.parquet \
+    --arch gfx950
+```
+
+Every kernel field, the dtype and the layout come from the kernel name, the
+label is the CSV's `tflops` column, and rows that failed `--verify` are dropped.
+Run the sweep with `--verify` so a numerically wrong (and often fast) kernel
+does not become a training label. `data_pipeline.py sweep.csv -o ...` produces
+the same rows without the `hw_*` columns.
+
+To have a trained model choose which kernels the driver measures, and to score
+its choices against a sweep, see
+[HEURISTIC_BENCHMARKING.md](HEURISTIC_BENCHMARKING.md) (`select_kernels.py`).
+
 ### 2. Train a model
 
 ```bash
@@ -75,10 +98,41 @@ python3 train.py \
 ```
 
 It reads `gemm_universal` data. Rows need non-null `vec_a/b/c`, `arch`,
-`epilogue` and the nine tile, warps-per-block and warp-tile columns. Only
-`data_pipeline.py` fills `vec_a/b/c`; no in-tree tool converts
-`gemm_full_benchmark.py`'s CSV into such a parquet. `search.py` and the C++
-path (`ml_heuristic.hpp`) support only the base engine.
+`epilogue` and the nine tile, warps-per-block and warp-tile columns, which
+`data_pipeline.py` fills; a `gemm_full_benchmark.py` CSV converted as in step 1
+has them. `search.py` and the C++ path (`ml_heuristic.hpp`) support only the
+base engine.
+
+#### Batched GEMM
+
+Batched problems need their own engine (`feature_engine_batched.py`). The
+universal engine's occupancy ignores `batch_count`, which dominates small
+M/N shapes. Cross-validation groups by `layout_M_N_K` and leaves batch out of
+the fold key, so two batches of the same shape are scored separately but are
+not split across folds.
+
+```bash
+python3 convert_csv_to_parquet.py \
+    --input /path/to/results \
+    --output data/batched_gemm_bf16_gfx950.parquet \
+    --arch gfx950 --dtype bf16 --op-type batched_gemm
+
+python3 train.py \
+    --data_dir data/ \
+    --out_dir models/batched_gemm_bf16_gfx950 \
+    --operation batched_gemm --dtype bf16 --arch gfx950 \
+    --targets tflops
+
+python3 evaluate.py \
+    --model_dir models/batched_gemm_bf16_gfx950 \
+    --op batched_gemm --dtype bf16 --oof
+```
+
+`--input` may be one CSV or a directory of `batched_gemm_results.csv` files.
+Copies under a `csv/` directory are skipped, and repeated measurements of the
+same kernel and problem keep the median TFLOPS. Pass `--targets tflops` when
+the CSVs have no bandwidth column. `--oof` scores the out-of-fold predictions
+written by training.
 
 ### 3. Evaluate
 
@@ -155,13 +209,16 @@ Three models are trained per (op, dtype, arch):
 | `data_pipeline.py` | Parse raw benchmark logs into canonical parquet datasets |
 | `feature_engine.py` | 72-feature extraction: problem, kernel, interaction, hardware profile |
 | `feature_engine_vec.py` | Adds six fixed-vector-width features (78 total) |
+| `feature_engine_batched.py` | Batched GEMM: batch occupancy plus vector-width features |
 | `train.py` | Multi-target LGBMRegressor training with GroupKFold CV, IHEM, warm-start |
 | `predict.py` | Predictor class: predict TFLOPS/latency/bandwidth, rank kernels |
 | `evaluate.py` | Full evaluation: global metrics, per-shape/layout/pipeline slices |
 | `search.py` | Surrogate search: discrete DE, random top-K |
+| `select_kernels.py` | Rank the driver's `--list-pairs` candidates, write its top K per problem as a `--pairs` file |
 | `generate_wide_coverage.py` | Generate benchmark data across 706 diverse shapes |
 | `generate_edge_dims.py` | Generate N=1, K=1, and other edge-case shapes |
 | `DATA_GENERATION.md` | Detailed guide for building binaries and generating data |
+| `HEURISTIC_BENCHMARKING.md` | Runbook: benchmark model-chosen kernels with the tile_engine driver, and score them |
 | `plan.md` | Full design plan with architecture, milestones, and rationale |
 
 ## Features Used (72 total)
@@ -301,6 +358,9 @@ Test coverage includes:
 - **[README.md](README.md)**: This file -- quick start, architecture, performance
 - **[DATA_GENERATION.md](DATA_GENERATION.md)**: Complete guide for building tile engine
   binaries, running benchmarks, managing datasets, and troubleshooting
+- **[HEURISTIC_BENCHMARKING.md](HEURISTIC_BENCHMARKING.md)**: Runbook for the
+  tile_engine GEMM driver route: reference sweep, training data, model-chosen
+  kernels, and scoring the choices against the sweep
 - **[LEARNINGS.md](LEARNINGS.md)**: Empirical findings and design decisions (log-transform,
   IHEM results, tiny-M analysis, feature importance, N=1/K=1 edge cases)
 

@@ -526,3 +526,45 @@ TEST_F(TestRMSnormBwdPlanBuilder, GetCustomKnobsReturnsEmptyActivation)
     auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
+
+// ============================================================================
+// isApplicable - graphs the kernels cannot serve
+// ============================================================================
+
+TEST_F(TestRMSnormBwdPlanBuilder, ElementCountAtTheKernelIndexLimit)
+{
+    constexpr int64_t LAST_FITTING = int64_t{UINT32_MAX} - 1;
+    for(const auto [columns, expected] : {std::pair{LAST_FITTING, true},
+                                          std::pair{int64_t{UINT32_MAX}, false},
+                                          std::pair{(int64_t{1} << 32) + 1, false}})
+    {
+        SCOPED_TRACE(columns);
+        auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+            {columns, columns, columns, 1}, {1, 1, 1, columns});
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), expected);
+    }
+}
+
+TEST_F(TestRMSnormBwdPlanBuilder, DeclinesAVirtualKernelBuffer)
+{
+    for(const char* name : {"x", "dy", "dx", "scale", "dscale", "inv_rms"})
+    {
+        SCOPED_TRACE(name);
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(),
+            [name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                for(auto& tensor : graph.tensors)
+                {
+                    if(tensor->name == name)
+                    {
+                        tensor->virtual_ = true;
+                    }
+                }
+            });
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    }
+}

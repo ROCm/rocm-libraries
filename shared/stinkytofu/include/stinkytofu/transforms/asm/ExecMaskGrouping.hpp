@@ -23,12 +23,14 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_set>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
 class BasicBlock;
 class AsmIRBuilder;
+struct StinkyInstruction;
 
 /// Collapse each narrow-exec-write..full-mask-reset span into a single opaque
 /// ExecMaskGroup pseudo-instruction so the DAG scheduler cannot reorder into or
@@ -38,5 +40,19 @@ STINKYTOFU_EXPORT void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& b
 
 /// Inverse of collapseExecMaskedRegions.
 STINKYTOFU_EXPORT void expandExecMaskedGroups(BasicBlock& bb);
+
+/// The instructions a narrow exec mask covers: those between a narrow exec
+/// write and the full-mask reset closing it, excluding the two writes
+/// themselves. Spans nest, and the predicates are the ones
+/// collapseExecMaskedRegions uses, so the two cannot disagree about where a
+/// span is. A *vector* write in that set updates the active lanes and leaves
+/// the rest of its destination as it was, which makes the destination a
+/// read-modify-write at lane granularity.
+///
+/// A narrow write with no reset before the end of its block leaves the mask
+/// narrow on the way out. The rest of that block is reported as covered, its
+/// successors are not, and \p unmatched says so.
+STINKYTOFU_EXPORT std::unordered_set<const StinkyInstruction*> execMaskedInstructions(
+    const BasicBlock& bb, uint32_t wavefrontSize, bool* unmatched = nullptr);
 
 }  // namespace stinkytofu

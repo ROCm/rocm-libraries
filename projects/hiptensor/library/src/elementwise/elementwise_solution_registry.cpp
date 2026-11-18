@@ -34,7 +34,7 @@ namespace hiptensor
     /// Class ElementwiseSolutionRegistry ///
     /////////////////////////////////////////
     std::vector<ElementwiseSolution*>
-        ElementwiseSolutionRegistry::query(std::vector<float> const&                scalarValues,
+        ElementwiseSolutionRegistry::query(std::vector<double> const&               scalarValues,
                                            std::vector<std::size_t> const&          lengths,
                                            std::vector<hiptensorDataType_t> const&  inDataTypes,
                                            std::vector<hiptensorDataType_t> const&  outDataTypes,
@@ -67,7 +67,7 @@ namespace hiptensor
         /// instances have been created.
         bool usePassThroughIfAlphaIsOne
             = (std::all_of(
-                   scalarValues.cbegin(), scalarValues.cend(), [](auto v) { return v == 1.0F; })
+                   scalarValues.cbegin(), scalarValues.cend(), [](auto v) { return v == 1.0; })
                && std::all_of(operators.cbegin(),
                               operators.cend(),
                               [](auto v) { return v == HIPTENSOR_OP_IDENTITY; })

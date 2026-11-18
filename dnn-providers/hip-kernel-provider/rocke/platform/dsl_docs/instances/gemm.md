@@ -19,7 +19,8 @@ Core GEMM family (all under `instances/common/`):
 - `flatmm.py` -- CK Tile `18_flatmm`
 - `batched_contraction.py` -- CK Tile `41_batched_contraction`
 
-(public symbols re-exported from `rocke.instances`)
+(core public symbols re-exported from `rocke.instances`;
+the [gfx1250 NVFP4 API](#gfx1250-nvfp4-gemm) uses `rocke.instances.gfx1250`)
 
 The main implementation is universal GEMM. Batched GEMM is a thin
 wrapper. Grouped GEMM currently dispatches one universal GEMM kernel
@@ -367,17 +368,152 @@ all f32 output); the i4 mantissa variants and the
 helpers (``i4_dequant``, ``mx_scale``, ``preshuffle``) are the
 pieces the v2 body composes.
 
+Each output is scaled with the A scale of its own row and the B scale of its
+own column. A lane of the 16x16 MFMA loads A from one row but holds outputs
+of four rows (``MfmaAtom.lane_to_output``), in general not that one, so it
+loads one A scale per output it holds and one B scale for its column.
+
+## gfx1250 NVFP4 GEMM
+
+[`gfx1250/nvfp4_gemm.py`](../../python/rocke/instances/gfx1250/nvfp4_gemm.py)
+provides a packed-input, RCR GEMM builder. A and B contain low-nibble-first
+E2M1 FP4; each group of 16 values along K has an encoded E4M3 block scale.
+Two runtime FP32 tensor dequantization factors scale the FP32 accumulator
+before BF16 or FP16 output conversion. Both epilogues preserve the FP32
+multiplication boundary with an optimization barrier.
+
+Import the public API from `rocke.instances.gfx1250`:
+
+| Symbol | Contract |
+| --- | --- |
+| `NvFp4GemmSpec` | Frozen spec with `name`, `M`, `N`, `K`, and `dtype_c` (`bf16` by default; `fp16` or its `f16` alias) |
+| `is_valid_nvfp4_gemm_spec` | Returns `(ok, reason)` for the spec and explicit/default `gfx1250` target |
+| `build_nvfp4_gemm` | Builds a `KernelDef`; rejects unsupported specs before IR construction |
+| `nvfp4_gemm_signature` | Returns the pointer, dimension, and runtime tensor-factor argument contract |
+| `nvfp4_gemm_grid` | Returns the launch grid for fixed 16x16 output tiles; `spec.block_size` gives the wave32 block size |
+
+```python
+from rocke.instances.gfx1250 import NvFp4GemmSpec, build_nvfp4_gemm
+
+spec = NvFp4GemmSpec("nvfp4", M=32, N=48, K=256, dtype_c="bf16")
+kernel = build_nvfp4_gemm(spec, arch="gfx1250")
+```
+
+M and N must be positive multiples of 16; K must be a positive multiple of
+128. A and B use contiguous uint8 storage `[M, K/2]` and `[N, K/2]`.
+A-scale storage is uint8 `[M, K/16]`; B-scale storage is uint8 `[K/16, N]`.
+C is row-major BF16 or FP16 `[M, N]`. Kernel symbols carry operation/codegen
+knobs and a specialization suffix for baked addressing and unroll constants;
+M is launch-grid metadata and does not distinguish the generated body.
+Changing this symbol spelling requires regenerating cached named artifacts.
+The ordered kernel ABI is:
+
+```text
+A, B, A_scale, B_scale, C, M, N, K, A_tensor_scale, B_tensor_scale
+```
+
+The last two arguments are FP32 multiplicative dequantization factors.
+Callers holding quantization multipliers must supply their reciprocals.
+The [NVFP4 input contract](../../python/rocke/examples/gfx1250/gemm/NVFP4.md)
+details packing, factor validation, scale-buffer layout, and verifier commands.
+
+The builder selects the shared FP4/E4M3/SCALE16 tensor-scale path.
+It is an untuned standalone builder/example; dispatcher registration and
+production routing are deferred. The complete spec-to-kernel builder is
+Python-only; C++ lowers its serialized IR through LLVM. HIP compilation uses
+Python-generated source only; complete native HIP NVFP4 compilation remains
+outside this API's supported scope. Both HIP lowerers support the isolated
+single-output inline-assembly barrier and reject malformed barrier attributes.
+NVFP4 LLVM emission supports `llvm23` and `llvm24`;
+older emission flavors reject this path. Numerical verification uses bounded
+exact fixtures and establishes neither arbitrary-input accumulation behavior
+nor performance. Quantization, foreign scale-layout conversion, partial tiles,
+and a dynamic K loop remain separate work.
+
 ## MX GEMM `instances/mx_gemm.py::MxGemmSpec` matches CK Tile ``42_mx_gemm``. Uses
 the OCP MX-spec shared-exponent format: each 32-element mantissa
-block carries one 8-bit unbiased E8M0 scale. v1 supports fp8 and bf8
-mantissa with ``group_k=32``; fp4 / fp6 mantissa land with the
-matching unpack helpers as v2.
+block carries one 8-bit biased E8M0 scale (bias 127). It reads fp8 and bf8
+mantissas with ``group_k=32``; fp4 / fp6 mantissas are not supported yet.
 
-The decode chain
-(:func:`rocke.helpers.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.apply_mx_scale`) handles the NaN / zero
-sentinels (E8M0 ``e == 0`` and ``e == 255``) by returning ``0.0``,
-matching the AMDGPU MX MFMA hardware path's denormal flush.
+The scales follow the OCP MX spec: the E8M0 byte is an unsigned
+biased exponent, codes 0..254 mean exactly ``2^(code - 127)`` (code 0
+is the f32 subnormal ``2^-127``) and code 255 means NaN.
+
+Operands: ``A`` is ``(M, K)`` and ``B`` ``(K, N)``, row-major. Both scale
+tensors are K-major: ``AScale`` is ``(K / 32, M)`` and ``BScale``
+``(K / 32, N)``, so one group's codes for consecutive rows (columns) are
+consecutive bytes. ``C`` is ``(M, N)`` f32. ``M`` must be a multiple of 4.
+
+### MX GEMM numerics: within the GEMM tolerance, with IEEE special values
+
+Write ``ea``, ``eb`` for the unbiased exponents of a group's A and B scale
+codes and ``exact`` for the exact result. Every output is within
+
+```
+|C - exact| <= 1e-3 * sum_k |a_k b_k| 2^(ea + eb) + (K / 32) * 2^-126
+```
+
+(the runbook GEMM tolerance, section 1.4, relative to the size of the terms)
+and IEEE special values hold: a NaN scale code or a NaN input element gives
+NaN, also on a block of zeros.
+
+Whether an output is finite depends on the scaled group terms
+``T_g = 2^(ea + eb) * sum_{k in group g} a_k b_k`` and their running sums
+``T_0 + ... + T_g`` in K order, the values an f32 accumulator holds:
+
+* **Finite while they stay in range.** As long as every ``T_g`` and every
+  running sum stays within the f32 range, the output is finite (and within the
+  tolerance), even when single scaled products are far beyond it: the scaling
+  never overflows on its own.
+* **Inf or NaN once one overflows.** Once a term or a running sum is beyond the
+  f32 range, the output may be Inf or NaN, even if later groups bring the exact
+  result back into range (``+Inf`` then ``-Inf`` gives NaN). Any GEMM that
+  accumulates in f32 behaves this way.
+
+The outputs are not bit-exact: the matrix cores sum a group's products with
+their own rounding, which differs between targets.
+
+Why the scaled product is never formed as one float: ``2^(ea + eb)`` spans
+``2^-254..2^254``, far wider than f32. Multiplying two decoded scales overflows
+to Inf (and ``0 * Inf`` to NaN) or flushes to zero even when the output is an
+ordinary f32.
+
+### MX GEMM structure
+
+One wave computes a 32x32 output tile; a workgroup holds
+``block_tile_m / 32 x block_tile_n / 32`` waves side by side. The workgroup
+tile has a default (see ``MxGemmSpec``) and is a tuning knob, chosen per shape
+and target: any pair of multiples of 32 up to the target's workgroup size
+(1024 threads, 16 waves, on gfx942 and gfx950). The waves of one tile row read the
+same A rows, and those of one tile column the same B rows, at about the same
+time, so that they can share those reads in the vector L1 cache.
+Operands come through buffer descriptors: each lane's offsets stay in
+registers for the whole K loop and the K step is a scalar offset. Waves past
+the edge of C do nothing; stores past it are dropped.
+
+How the scales are applied depends on the target:
+
+* **Targets with the E8M0-scaled MFMA (gfx950).** One ``32x32x64`` scaled MFMA
+  per two groups; each lane passes the scale byte of the A row and of the B
+  column (and group) it loads, so every output gets its own row's and column's
+  scales. The instruction scales each product before it sums them, so a large
+  enough code pair could overflow a product whose sum is finite.
+  :func:`rocke.helpers.mx_scale.largest_safe_mx_scale_code` gives the largest
+  code both sides may have before a sum of 64 scaled products can come within
+  a binade of the f32 overflow threshold. Each lane tracks the largest code it
+  passed; if any lane of the wave saw a larger one (the NaN code included), the
+  wave computes its tile again the second way and stores that. Real MX data
+  sits far below the bound, so the second pass is the rare path. A K that is
+  not a multiple of 64 leaves one group, added the second way.
+* **Every target (gfx942 always).** Per group, two ``32x32x16`` fp8 / bf8
+  MFMAs give each output's unscaled dot product, at most
+  ``32 * largest^2`` in magnitude, and
+  :func:`rocke.helpers.mx_scale.add_mx_scaled_dot` adds it as
+  ``ldexp(dot, ea + eb)``: one rounding, correct for every pair of codes
+  (beyond the f32 range it is the infinity or zero of its sign), with the A
+  scale of each output's row and the B scale of its column. A NaN code makes
+  the term NaN. The group is added one iteration late so the scale arithmetic
+  never waits on a load issued in the same group.
 
 ## FP8 / BF8 MFMA atoms `helpers/atoms.py` adds four FP8 / BF8 MFMA atoms paired with the
 existing fp16 catalog:

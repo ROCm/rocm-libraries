@@ -1,0 +1,37 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941,
+    skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
+    skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters: {Architecture: gfx1250, SyncsPerBenchmark: 0, NumElementsToValidate: -1,
+  KernelTime: false, DataInitTypeA: 3, DataInitTypeB: 3, DataInitTypeC: 3, DataInitTypeD: 2,
+  DataInitTypeAlpha: 2, DataInitTypeBeta: 2, CpuThreads: 2,
+  NumWarmups: 1, NumBenchmarks: 1, EnqueuesPerSync: 1}
+
+# Remapped FP32 partials need more readback VGPRs than the final BF16 output.
+BenchmarkProblems:
+  - - {OperationType: GEMM, DataType: b, DestDataType: b, ComputeDataType: s,
+      HighPrecisionAccumulate: true, TransposeA: true, TransposeB: false, UseBeta: true, Batched: true}
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 2, 2]]
+        - DepthU: [64]
+        - TDMInst: [3]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ForceDisableShadowInit: [true]
+        - ScheduleIterAlg: [4]
+        - 1LDSBuffer: [0]
+        - ExpandPointerSwap: [false]
+        - StoreRemapVectorWidth: [4]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+      ForkParameters:
+        # Automatic and fixed splits, plus an unsplit control.
+        - GlobalSplitU: [-1, 1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes: [{Exact: [33, 65, 2, 8192]}]

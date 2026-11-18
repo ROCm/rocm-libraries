@@ -27,6 +27,7 @@
 #define ROCSPARSE_ALLOCATOR_HPP
 
 #include "rocsparse-auxiliary.h"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_random.hpp"
 #include <hip/hip_runtime_api.h>
 #ifdef GOOGLE_TEST
@@ -233,6 +234,15 @@ private:
         return d;
     }
 
+    static void copy_guard(void* dst, const U (&guard)[PAD])
+    {
+        const hipError_t status = hipMemcpy(
+            dst, guard, sizeof(guard), memory_mode::get_hipMemcpyKind(MODE, memory_mode::host));
+        // testing_reproducibility catches the throw below without failing the test.
+        EXPECT_EQ(status, hipSuccess);
+        CHECK_HIP_THROW_ERROR(status);
+    }
+
     static T* install_guards(T* d, size_t size)
     {
         if(d != nullptr)
@@ -243,26 +253,14 @@ private:
                 init_guards(guard, PAD);
 
                 // Copy guard to device memory before allocated memory
-                EXPECT_EQ(hipMemcpy(d,
-                                    guard,
-                                    sizeof(guard),
-                                    memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)),
-                          0);
-                EXPECT_EQ(hipMemcpy(d + PAD,
-                                    guard,
-                                    sizeof(guard),
-                                    memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)),
-                          0);
+                copy_guard(d, guard);
+                copy_guard(d + PAD, guard);
 
                 // Point to allocated block
                 d += 2 * PAD;
 
                 // Copy guard to device memory after allocated memory
-                EXPECT_EQ(hipMemcpy(d + size,
-                                    guard,
-                                    sizeof(guard),
-                                    memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)),
-                          0);
+                copy_guard(d + size, guard);
             }
         }
         return d;
@@ -323,7 +321,30 @@ public:
         }
         }
 #ifdef GOOGLE_TEST
-        return install_guards(d, size);
+        try
+        {
+            return install_guards(d, size);
+        }
+        catch(...)
+        {
+            switch(MODE)
+            {
+            case memory_mode::host:
+                rocsparse_clients_log_hip_error("rocsparse_hipHostFree", rocsparse_hipHostFree(d));
+                break;
+            case memory_mode::device:
+                rocsparse_clients_log_hip_error("rocsparse_hipFree", rocsparse_hipFree(d));
+                break;
+            case memory_mode::managed:
+                rocsparse_clients_log_hip_error("rocsparse_hipFreeManaged",
+                                                rocsparse_hipFreeManaged(d));
+                break;
+            }
+            // Consume the error so that it is not reported by the next hipGetLastError
+            // call, as in report_allocation_failure.
+            static_cast<void>(hipGetLastError());
+            throw;
+        }
 #else
         return d;
 #endif
@@ -411,6 +432,28 @@ public:
                 break;
             }
             }
+        }
+    }
+
+    static void free_noexcept(T* d) noexcept
+    {
+        try
+        {
+            free(d);
+        }
+        catch(const hipError_t& status)
+        {
+            rocsparse_clients_log_hip_error("rocsparse_allocator::free", status);
+
+            // Consume the error so that it is not reported by the next hipGetLastError
+            // call, as in report_allocation_failure.
+            static_cast<void>(hipGetLastError());
+#ifdef GOOGLE_TEST
+            if(::testing::UnitTest::GetInstance()->current_test_info() != nullptr)
+            {
+                ADD_FAILURE() << "rocsparse_allocator::free failed: " << hipGetErrorString(status);
+            }
+#endif
         }
     }
 };

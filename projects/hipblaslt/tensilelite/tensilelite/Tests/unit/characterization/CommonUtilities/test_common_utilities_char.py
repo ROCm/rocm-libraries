@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.Utilities``: the small pure
+"""Characterization tests for ``tensilelite.Common.Utilities``: the small pure
 helpers (verbosity/printing, param search, exe location, version compat, state/
 hash serialization, math) over crafted inputs / tmp dirs."""
 
@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 
@@ -103,7 +103,7 @@ def test_ceil_divide_negative_and_zero(capsys):
 
 
 def test_version_is_compatible():
-    from Tensile import __version__
+    from tensilelite import __version__
     assert U.versionIsCompatible(__version__) is True
     major = int(__version__.split(".")[0])
     assert U.versionIsCompatible(f"{major + 1}.0.0") is False   # major mismatch

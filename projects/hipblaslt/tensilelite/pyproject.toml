@@ -67,42 +67,29 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [project]
-name = "tensile"
-version = "5.0.0"
+name = "tensilelite"
+dynamic = ["version", "dependencies"]
 requires-python = ">=3.10"
 description = "A code generation library for high-performance GEMM and tensor contraction kernels on AMD GPUs."
 license = {text = "MIT"}
-dependencies = [
-    "packaging",
-    "pyyaml",
-    "msgpack",
-    "joblib>=1.4.0",
-    "simplejson",
-    "ujson",
-    "orjson",
-    "yappi",
-    "setuptools",
-    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
-    "cmake",
-    "invoke",
-    "filelock",
-    "numpy",
-    "hip-python",
-]
 
 [project.scripts]
-Tensile = "tensilelite.Tensile:main"
-TensileCreateLibrary = "tensilelite.TensileCreateLibrary:run"
+tensilelite = "tensilelite.cli:main"
+Tensile = "tensilelite.run:main"
+TensileCreateLibrary = "tensilelite.create_library:main"
 TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
 TensileGetPath = "tensilelite:PrintTensileRoot"
-TensileBenchmarkCluster = "tensilelite.TensileBenchmarkCluster:main"
-TensileRetuneLibrary = "tensilelite.TensileRetuneLibrary:main"
+TensileBenchmarkCluster = "tensilelite.benchmark_cluster:main"
+TensileRetuneLibrary = "tensilelite.retune_library:main"
 
+[project.optional-dependencies]
+profile = ["yappi"]
+hip-query = ["hip-python"]
 [dependency-groups]
 dev = [
     "rocisa",
     "pytest>=5.4.1",
-    "pytest-xdist>=1.32.0",
+    "pytest-xdist>=3.2",
     "pytest-cov",
     "syrupy",
     "filelock",
@@ -111,11 +98,33 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# package-data below is the only list of non-Python files in the wheel.
+# MANIFEST.in only adds sdist-only build inputs; it must not add wheel files.
+include-package-data = false
+
 [tool.setuptools.packages.find]
-include = ["tensilelite*", "Tensile"]
+include = ["tensilelite*"]
+exclude = ["tensilelite.Tests*", "tensilelite.Utilities.archive*"]
+
+[tool.setuptools.package-data]
+tensilelite = [
+    "Source/TensileTypes.h",
+    "Source/tensile_bfloat16.h",
+    "Source/tensile_float8_bfloat8.h",
+    "Source/KernelHeader.h",
+    "Source/ReductionTemplate.h",
+    "Source/memory_gfx.h",
+    "CustomKernels/**/*.s",
+    "logic/known_bugs.yaml",
+    "ductile/config/defaults.yaml",
+]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["Tests/unit/source_only/*", "source_only/*"]
 
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
@@ -135,13 +144,12 @@ members = ["rocisa"]
 # See projects/hipblaslt/skills/tensilelite-mutation-rerun/SKILL.md for the
 # optional workflow.
 # mutmut 3.x copies `source_paths` into a `mutants/` dir and runs the selected
-# tests there, so the WHOLE Tensile package is copied (for imports to resolve)
+# tests there, so the WHOLE TensileLite package is copied (for imports to resolve)
 # while `only_mutate` restricts which files are actually mutated to the slice.
 # `also_copy` must include pytest.ini (markers + config) and characterization
 # fixtures. mutmut caches the initial non-Python source copy, so snapshots must
 # be refreshed explicitly for the copied test tree to match the source suite.
 [tool.mutmut]
-
 source_paths = ["tensilelite"]
 only_mutate = [
     "tensilelite/Common/DataType.py",
@@ -150,10 +158,10 @@ only_mutate = [
     "tensilelite/Common/ValidParameters.py",
     "tensilelite/SolutionStructs/Naming.py",
     "tensilelite/SolutionStructs/Utilities.py",
-    "tensilelite/TensileLogic/ValidChipId.py",
-    "tensilelite/TensileLogic/ValidMatrixInstruction.py",
-    "tensilelite/TensileLogic/ValidWorkGroup.py",
-    "tensilelite/TensileLogic/ValidWorkGroupMappingXCC.py",
+    "tensilelite/logic/valid_chip_id.py",
+    "tensilelite/logic/valid_matrix_instruction.py",
+    "tensilelite/logic/valid_work_group.py",
+    "tensilelite/logic/valid_work_group_mapping_xcc.py",
 ]
 do_not_mutate = [
     "tensilelite/Tests/*",

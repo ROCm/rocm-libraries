@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.Architectures``: the pure
+"""Characterization tests for ``tensilelite.Common.Architectures``: the pure
 gfx<->ISA helpers, codename/variant lookups, CLI-arch parsing, and the
 detection helper (subprocess monkeypatched)."""
 
 import pytest
 
-import Tensile.Common.Architectures as A
-from Tensile.Common.Types import IsaVersion
+import tensilelite.Common.Architectures as A
+from tensilelite.Common.Types import IsaVersion
 
 pytestmark = pytest.mark.unit
 

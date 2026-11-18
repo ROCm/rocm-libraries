@@ -52,6 +52,7 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
         value == "bf8_r"                 ? HIP_R_8F_E5M2 :
         value == "e8_r"                  ? HIP_R_8F_UE8M0 :
         value == "e5m3_r"                ? static_cast<hipDataType>(HIP_R_8F_E5M3_EXT) :
+        value == "i4_r"                  ? HIP_R_4I :
         HIPBLASLT_DATATYPE_INVALID;
 }
 

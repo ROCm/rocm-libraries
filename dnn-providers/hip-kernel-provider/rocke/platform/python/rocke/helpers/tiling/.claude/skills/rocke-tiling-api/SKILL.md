@@ -145,8 +145,9 @@ Sweep 2-5 need the GPU. No GPU => stop after step 1, ship a pruned unranked set.
 **Round 1 — REQUIRED, never invented. `AskUserQuestion` takes at most FOUR questions per call, so this is
 TWO calls, not one** — do not re-merge them into an instruction that cannot execute:
 - **1a:** goal (correctness / peak throughput / a target / learning) · algorithm · **ordered tensor
-  descriptors** (`A=(M×K) strides=(sM,sK)`, `B=(K×N) strides=(sK,sN)`, `C=(M×N) strides=(sM,sN)`, + dtype and
-  memory space) · **target arch**.
+  descriptors** in the one axis convention (`A=(M, K) strides=(sM, sK)`, `B=(N, K) strides=(sN, sK)`,
+  `C=(M, N) strides=(sM, sN)`, batch axes first, + dtype and memory space; the convention is
+  `docs/tiling_api_surface.md` sec 3, "One axis convention") · **target arch**.
 - **1b:** kernel name (names the output folder — layout per `docs/kernels/_TEMPLATE.md`) · caller-side
   constraints (grid/launch convention, ABI shape, batch stride, fusion it must absorb, any shared occupancy
   or LDS budget) · **"any values you want pinned?"**. "None" is a fine answer; ask anyway, because a caller
@@ -173,12 +174,11 @@ which is blocking, not advisory.
 > raise as "unsupported target" — that is the two-namespace defect, not a verdict.
 > Read the served-group size from `ArchLDS.HALF`; ✗ never derive it from the wave size.
 
-> **The two registries key on DIFFERENT namespaces and a raw string will match at most one** — measured per
-> target, with the `target_family` non-bridge, in `dsl_docs/architecture/gfx_support_audit.md` → *Known issues*
-> items 6-7. **Resolve ONCE into a target object and query both with that object, never a raw string.** Two
-> consequences to carry: a lookup miss in one namespace is **not** "this target is unsupported", and a
-> **capability flag is never sufficient to emit a primitive** — authority is the row carrying the layout
-> parameters the gate consumes.
+> **The arch registry and the MMA catalog share one target namespace**: the catalog lists real target ids
+> only, each one an arch-registry target (`dsl_docs/architecture/gfx_support_audit.md` → *Known issues*
+> item 6, resolved). A catalog with no row for a shape and dtype on a target is a missing instruction, not a
+> namespace miss. A **capability flag is never sufficient to emit a primitive**, and neither is a catalog
+> row: authority is the backend coverage record, which `TileMmaPlan.emit_op` reads (item 7).
 >
 > **The target you resolve may not be the target the lowering path uses** — there is a live silent default
 > beneath this skill, tracked as AICK-1541 / AICK-1546. Assert the two agree; do not re-derive the finding.
@@ -217,6 +217,15 @@ validated bank model exists · whether host == target. Four of five are free loo
 
 Then CLASSIFY: which stage classes are present + the knob instance per class. **NOVEL** → the architect
 learns it with the user and outputs the **stage table**, which is Emit's input.
+
+**A tensor that is not a plain strided view of the loop coordinates** (an implicit-GEMM convolution input
+with its halo, an LDS swizzle): its coordinate graph is part of the stage table, and Emit authors it with
+`rocke.helpers.tiling.tensor_transforms` (`make_transform_graph`, then `emit_accesses` for each access's split
+address and validity). Coordinates are **positional** (one per graph input, in `inputs(...)` order; a vector's
+`vector_axis` is a graph-input index, never a tile-axis index) and **plain IR values** -- the layer splits them
+and proves their ranges, so write them by the guide's spelling rule. Bound checks are DERIVED, never hand-added;
+lengths stay on the tensor description. How-to: `docs/tensor_transforms_guide.md`; rules and errors:
+`docs/tensor_transforms_api.md`.
 
 ### Emit
 

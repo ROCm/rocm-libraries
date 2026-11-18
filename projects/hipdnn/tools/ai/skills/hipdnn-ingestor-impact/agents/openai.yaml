@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Ingestor Impact"
+  short_description: "Find kernel ingestor changes that break at run time"
+  default_prompt: "Use $hipdnn-ingestor-impact to check whether the given hipDNN change breaks the kernel ingestor at run time: run its scripts, judge each row from the files at the analysed revision, and report the rollup and the device runs that would settle it."

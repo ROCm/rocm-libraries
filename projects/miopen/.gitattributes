@@ -4,3 +4,6 @@
 *.kdb.bz2 filter=lfs diff=lfs merge=lfs -text
 *.ktn.model binary
 src/kernels/lgbm_*.bin binary
+
+# Append-only changelogs: keep both sides on concurrent edits instead of conflicting.
+CHANGELOG.md merge=union

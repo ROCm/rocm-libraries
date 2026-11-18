@@ -104,6 +104,10 @@ void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& io
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for RMSnorm must have the same shape.");
+    validateElementCountFitsUint32(
+        ioDims,
+        "RMSnorm kernels index tensors with 32-bit unsigned arithmetic; the IO tensor has "
+        "too many elements.");
 
     const auto& affineTensorAttr = findTensorAttributes(_tensorMap, affineTensorIds[0]);
     const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
@@ -181,6 +185,9 @@ void RMSnormValidator::checkFwdTensorConfigSupported(
     allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
     allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
 
+    checkEpsilonSupported(rmsNormFwdAttr.epsilon_tensor_uid());
+    validateNoVirtualTensors(allTensors,
+                             "RMSnorm kernel inputs and outputs must not be virtual tensors.");
     checkTensorLayoutsAndDimsSupported(allTensors);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
@@ -212,6 +219,7 @@ void RMSnormValidator::checkFwdActivationTensorConfigSupported(
     allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
     allTensors.insert(allTensors.end(), intermediateTensorIds.begin(), intermediateTensorIds.end());
 
+    checkEpsilonSupported(rmsNormFwdAttr.epsilon_tensor_uid());
     checkTensorLayoutsAndDimsSupported(allTensors);
     checkTensorDataTypesSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds);
@@ -239,6 +247,8 @@ void RMSnormValidator::checkBwdTensorConfigSupported(
     allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
     allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
 
+    validateNoVirtualTensors(allTensors,
+                             "RMSnorm kernel inputs and outputs must not be virtual tensors.");
     checkTensorLayoutsAndDimsSupported(allTensors);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});

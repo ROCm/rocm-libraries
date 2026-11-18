@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 # gfx1250 StreamK + ClusterDim=[2,1] codegen characterization config.
-# Normal StreamK=3 (full tree-reduction). Exercises the enableCluster guard in
-# StreamKTwoTileDPFirst.preLoop. Mirrors Tests/common/streamk/gfx1250/core/
-# sk_mxf4gemm_tdm.yaml with ClusterDim added.
+# Static StreamK with spatial clusters and tree reduction. Exercises the
+# cluster-rank decode and cooperative loads while splitting each spatial
+# block's K range between logical cluster workers.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -71,6 +71,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - TileProcessingStrategy: [StreamK]
         - WorkAssignment: [StaticGrid]
+        - StreamKFixupTreeReduction: [1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

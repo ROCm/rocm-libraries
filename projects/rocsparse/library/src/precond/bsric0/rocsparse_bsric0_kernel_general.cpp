@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsric0_kernel_general.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -39,12 +40,28 @@ namespace rocsparse
                                                     int32_t* __restrict__ block_done,
                                                     const J* __restrict__ block_map,
                                                     J*                   zero_pivot,
-                                                    rocsparse_index_base idx_base)
+                                                    rocsparse_index_base idx_base,
+                                                    int64_t              block_row_idx)
     {
         auto lid = hipThreadIdx_x & (WFSIZE - 1);
         auto wid = hipThreadIdx_x / WFSIZE;
 
-        auto idx = hipBlockIdx_x + wid;
+        //
+        // The block row is supplied by the caller rather than read from
+        // hipBlockIdx_x, so that the kernel wrapper can walk a chunk of block
+        // rows when the row count is past what grid.x can express.
+        //
+        const int64_t idx = block_row_idx + wid;
+
+        //
+        // Do not run out of bounds. The row map has mb entries and nothing else
+        // checked this; bsrilu0_kernel_general and every CSR kernel in the
+        // family do.
+        //
+        if(idx >= mb)
+        {
+            return;
+        }
 
         // Current block row this wavefront is working on
         J block_row = block_map[idx];
@@ -108,8 +125,7 @@ namespace rocsparse
                     J col = block_dim * block_col + k;
 
                     // Load diagonal entry
-                    T diag_val
-                        = bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + k];
+                    T diag_val = bsr_val[BSR_IND_R(local_block_diag, k, k)];
 
                     // Row has numerical zero pivot
                     if(diag_val == static_cast<T>(0))
@@ -130,11 +146,11 @@ namespace rocsparse
                     // Corresponding value
                     if(direction == rocsparse_direction_row)
                     {
-                        val = bsr_val[block_dim * block_dim * j + block_dim * row + k];
+                        val = bsr_val[BSR_IND_R(j, row, k)];
                     }
                     else
                     {
-                        val = bsr_val[block_dim * block_dim * j + block_dim * k + row];
+                        val = bsr_val[BSR_IND_C(j, row, k)];
                     }
 
                     // Local row sum
@@ -179,15 +195,13 @@ namespace rocsparse
                                     T vj = static_cast<T>(0);
                                     if(direction == rocsparse_direction_row)
                                     {
-                                        vp = bsr_val[block_dim * block_dim * p + block_dim * k + q];
-                                        vj = bsr_val[block_dim * block_dim * m + block_dim * row
-                                                     + q];
+                                        vp = bsr_val[BSR_IND_R(p, k, q)];
+                                        vj = bsr_val[BSR_IND_R(m, row, q)];
                                     }
                                     else
                                     {
-                                        vp = bsr_val[block_dim * block_dim * p + block_dim * q + k];
-                                        vj = bsr_val[block_dim * block_dim * m + block_dim * q
-                                                     + row];
+                                        vp = bsr_val[BSR_IND_C(p, k, q)];
+                                        vj = bsr_val[BSR_IND_C(m, row, q)];
                                     }
 
                                     // If a match has been found, do linear combination
@@ -202,11 +216,11 @@ namespace rocsparse
 
                     if(direction == rocsparse_direction_row)
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * row + k] = val;
+                        bsr_val[BSR_IND_R(j, row, k)] = val;
                     }
                     else
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * k + row] = val;
+                        bsr_val[BSR_IND_C(j, row, k)] = val;
                     }
                 }
             }
@@ -214,7 +228,7 @@ namespace rocsparse
             // Handle diagonal block column of block row
             for(J j = 0; j < block_dim; j++)
             {
-                J row_diag = block_dim * block_dim * block_row_diag + block_dim * j + j;
+                int64_t row_diag = BSR_IND_R(block_row_diag, j, j);
 
                 // Check if 'col' row is complete
                 if(j == row)
@@ -254,11 +268,11 @@ namespace rocsparse
                     // Corresponding value
                     if(direction == rocsparse_direction_row)
                     {
-                        val = bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j];
+                        val = bsr_val[BSR_IND_R(block_row_diag, row, j)];
                     }
                     else
                     {
-                        val = bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row];
+                        val = bsr_val[BSR_IND_C(block_row_diag, row, j)];
                     }
 
                     // Local row sum
@@ -272,13 +286,13 @@ namespace rocsparse
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                vk = bsr_val[block_dim * block_dim * k + block_dim * j + q];
-                                vj = bsr_val[block_dim * block_dim * k + block_dim * row + q];
+                                vk = bsr_val[BSR_IND_R(k, j, q)];
+                                vj = bsr_val[BSR_IND_R(k, row, q)];
                             }
                             else
                             {
-                                vk = bsr_val[block_dim * block_dim * k + block_dim * q + j];
-                                vj = bsr_val[block_dim * block_dim * k + block_dim * q + row];
+                                vk = bsr_val[BSR_IND_C(k, j, q)];
+                                vj = bsr_val[BSR_IND_C(k, row, q)];
                             }
 
                             // If a match has been found, do linear combination
@@ -290,17 +304,13 @@ namespace rocsparse
                     {
                         if(direction == rocsparse_direction_row)
                         {
-                            vk = bsr_val[block_dim * block_dim * block_row_diag + block_dim * j
-                                         + q];
-                            vj = bsr_val[block_dim * block_dim * block_row_diag + block_dim * row
-                                         + q];
+                            vk = bsr_val[BSR_IND_R(block_row_diag, j, q)];
+                            vj = bsr_val[BSR_IND_R(block_row_diag, row, q)];
                         }
                         else
                         {
-                            vk = bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
-                                         + j];
-                            vj = bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
-                                         + row];
+                            vk = bsr_val[BSR_IND_C(block_row_diag, j, q)];
+                            vj = bsr_val[BSR_IND_C(block_row_diag, row, q)];
                         }
 
                         // If a match has been found, do linear combination
@@ -312,11 +322,11 @@ namespace rocsparse
 
                     if(direction == rocsparse_direction_row)
                     {
-                        bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j] = val;
+                        bsr_val[BSR_IND_R(block_row_diag, row, j)] = val;
                     }
                     else
                     {
-                        bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row] = val;
+                        bsr_val[BSR_IND_C(block_row_diag, row, j)] = val;
                     }
                 }
 
@@ -336,6 +346,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsric0_kernel_general(rocsparse_direction dir,
                                J                   mb,
+                               int64_t             batch_count,
                                const I* __restrict__ bsr_row_ptr,
                                const J* __restrict__ bsr_col_ind,
                                T*      bsr_val,
@@ -349,19 +360,41 @@ namespace rocsparse
                                int64_t              zero_pivot_stride,
                                rocsparse_index_base idx_base)
     {
-        const auto batch_index = hipBlockIdx_y;
-        rocsparse::bsric0_device_general<SLEEP, BLOCKSIZE, WFSIZE>(
-            dir,
-            mb,
-            bsr_dim,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val + batch_index * bsr_val_stride,
-            bsr_diag_ind,
-            done_array + batch_index * done_array_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            idx_base);
+        //
+        // grid.x is clamped to what the hardware accepts, so this walks a
+        // contiguous chunk of block rows. For every row count that fits on a
+        // device the chunk is exactly one block row and the loop runs once.
+        //
+        // No barrier between iterations, and none is needed: this kernel holds
+        // no shared state, so there is nothing for the next block row to race
+        // against. All the scratch it touches (the done array, the zero-pivot
+        // position) is addressed by the logical block row taken from the map,
+        // never by hipBlockIdx_x, so reusing a block across iterations is safe.
+        //
+        int64_t first_block_row, last_block_row;
+        rocsparse::grid_x_chunk(mb, hipGridDim_x, hipBlockIdx_x, first_block_row, last_block_row);
+
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            for(int64_t block_row_idx = first_block_row; block_row_idx < last_block_row;
+                ++block_row_idx)
+            {
+                rocsparse::bsric0_device_general<SLEEP, BLOCKSIZE, WFSIZE>(
+                    dir,
+                    mb,
+                    bsr_dim,
+                    bsr_row_ptr,
+                    bsr_col_ind,
+                    rocsparse::load_pointer(bsr_val, batch_index, bsr_val_stride),
+                    bsr_diag_ind,
+                    rocsparse::load_pointer(done_array, batch_index, done_array_stride),
+                    map,
+                    rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                    idx_base,
+                    block_row_idx);
+            }
+        }
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename I, typename J>
@@ -375,16 +408,20 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
-        auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
+        // A zero value stride aliases every instance onto the same values.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
+        auto          numeric_exact = bsric0_info->get_singularity_numeric_exact();
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_general<SLEEP, BLOCKSIZE, WFSIZE>),
-            dim3(A->rows, A->batch_count),
+            dim3(rocsparse::get_grid_size_x(handle, A->rows, BLOCKSIZE),
+                 rocsparse::get_grid_size_y(handle, A_batch_count)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             A->block_dir,
             static_cast<J>(A->rows),
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

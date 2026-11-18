@@ -1,0 +1,83 @@
+[
+  {
+    "name": "ld_int_12_4",
+    "op": "logical_divide",
+    "layout_shape": 12,
+    "layout_stride": 1,
+    "tiler": {"int": 4},
+    "result_shape": [4,3],
+    "result_stride": [1,4]
+  },
+  {
+    "name": "ld_perm_8_4x2",
+    "op": "logical_divide",
+    "layout_shape": 8,
+    "layout_stride": 1,
+    "tiler": {"layout": [4, 2]},
+    "result_shape": [4,2],
+    "result_stride": [2,1]
+  },
+  {
+    "name": "ld_tuple_8x6",
+    "op": "logical_divide",
+    "layout_shape": [8,6],
+    "layout_stride": [6,1],
+    "tiler": {"tuple": [2, 3]},
+    "result_shape": [[2,4],[3,2]],
+    "result_stride": [[6,12],[1,3]]
+  },
+  {
+    "name": "ld_layout_16_4",
+    "op": "logical_divide",
+    "layout_shape": 16,
+    "layout_stride": 1,
+    "tiler": {"layout": [4, 1]},
+    "result_shape": [4,4],
+    "result_stride": [1,4]
+  },
+  {
+    "name": "zd_tuple_8x6",
+    "op": "zipped_divide",
+    "layout_shape": [8,6],
+    "layout_stride": [6,1],
+    "tiler": {"tuple": [2, 3]},
+    "result_shape": [[2,3],[4,2]],
+    "result_stride": [[6,1],[12,3]]
+  },
+  {
+    "name": "td_tuple_8x6",
+    "op": "tiled_divide",
+    "layout_shape": [8,6],
+    "layout_stride": [6,1],
+    "tiler": {"tuple": [2, 3]},
+    "result_shape": [[2,3],4,2],
+    "result_stride": [[6,1],12,3]
+  },
+  {
+    "name": "fd_tuple_8x6",
+    "op": "flat_divide",
+    "layout_shape": [8,6],
+    "layout_stride": [6,1],
+    "tiler": {"tuple": [2, 3]},
+    "result_shape": [2,3,4,2],
+    "result_stride": [6,1,12,3]
+  },
+  {
+    "name": "zd_trailing",
+    "op": "zipped_divide",
+    "layout_shape": [4,6,2],
+    "layout_stride": [1,8,48],
+    "tiler": {"tuple": [2, 3]},
+    "result_shape": [[2,3],[2,2,2]],
+    "result_stride": [[1,8],[2,24,48]]
+  },
+  {
+    "name": "ld_coalesce_first",
+    "op": "logical_divide",
+    "layout_shape": [[2,4],3],
+    "layout_stride": [[1,2],8],
+    "tiler": {"int": 4},
+    "result_shape": [4,6],
+    "result_stride": [1,4]
+  }
+]

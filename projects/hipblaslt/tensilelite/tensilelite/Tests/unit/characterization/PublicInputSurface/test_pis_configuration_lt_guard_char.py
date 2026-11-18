@@ -19,7 +19,7 @@ These tests pin ACTUAL observed behavior; they do not assert anything aspiration
 
 import pytest
 
-from Tensile.Configuration import Parameter, CallableParameter
+from tensilelite.Configuration import Parameter, CallableParameter
 
 pytestmark = pytest.mark.unit
 

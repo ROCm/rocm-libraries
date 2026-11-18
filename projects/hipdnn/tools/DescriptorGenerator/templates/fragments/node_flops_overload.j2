@@ -1,0 +1,35 @@
+{% set example = op.tensor_fields[0] if op.tensor_fields else none %}
+// Insert into plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp
+// (namespace hipdnn_plugin_sdk::heuristics::detail), after the last nodeFlops overload.
+//
+// Every NodeAttributes member needs a work-model decision (RFC 0019 section 6.8, logical
+// work, not executed work). Pick one:
+//   - Counted: this overload, the logicalFlops case (logical_flops_case.txt) and the test
+//     entry (work_model_test_case.txt).
+//   - No counting convention: none of those three; add the NO_COUNTING_CONVENTION entry
+//     from logical_flops_case.txt instead. Graphs holding the op then have no graph.flops
+//     and no tflops metric.
+// TestEngineFeatures.EveryNodeTypeHasDeclaredWorkOrNoCountingConvention fails until one
+// of them is in place.
+// See docs/AddingNewOperations.md, "Work Model (FLOPs)".
+{% if op.work_data_dependent_fields %}
+//
+// Work-data-dependent operands: {{ op.work_data_dependent_fields | join(', ') }}.
+// logicalFlops leaves the work unknown whenever one of them is present, so the formula
+// only has to count graphs without them. If a required operand is among them the work
+// is never known: list the op in NO_COUNTING_CONVENTION instead, as MoeGroupedMatmul is.
+{% endif %}
+
+inline std::optional<double>
+    nodeFlops([[maybe_unused]] const Graph& graph,
+              [[maybe_unused]] const {{ op.fbs_namespace }}::{{ op.fbs_table }}& op)
+{
+    // TODO: return the logical FLOPs of one {{ op.name }} node, e.g.
+{% if example %}
+    //   return perElement(tensor(graph, op.{{ example.fbs_field }}()), <FLOPs per element>);
+{% else %}
+    //   return perElement(tensor(graph, op.<tensor>_tensor_uid()), <FLOPs per element>);
+{% endif %}
+    // Until then the node is uncounted.
+    return std::nullopt;
+}

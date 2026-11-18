@@ -38,18 +38,34 @@ protected:
 TEST_F(TestVerifierTally, CountsEachVerifierUnderItsOwnName)
 {
     auto& tally = VerifierTally::get();
-    tally.record("a.json", Verifier::GOLDEN, _out);
-    tally.record("b.json", Verifier::GPU_REFERENCE, _out);
-    tally.record("c.json", Verifier::GPU_REFERENCE, _out);
-    tally.record("d.json", Verifier::CPU_REFERENCE, _out);
-    tally.record("e.json", Verifier::NONE, _out);
+    tally.record("a.json", Verifier::GOLDEN, {}, _out);
+    tally.record("b.json", Verifier::GPU_REFERENCE, {}, _out);
+    tally.record("c.json", Verifier::GPU_REFERENCE, {}, _out);
+    tally.record("d.json", Verifier::CPU_REFERENCE, {}, _out);
+    tally.record("e.json", Verifier::NONE, {}, _out);
+    tally.record("f.json", Verifier::EXPECTED_REJECTION, "ranked_list", _out);
 
     const auto counts = tally.counts();
     EXPECT_EQ(counts.golden, 1u);
     EXPECT_EQ(counts.gpuReference, 2u);
     EXPECT_EQ(counts.cpuReference, 1u);
+    EXPECT_EQ(counts.rejected, 1u);
     EXPECT_EQ(counts.none, 1u);
-    EXPECT_EQ(counts.total(), 5u);
+    EXPECT_EQ(counts.total(), 6u);
+}
+
+// An expected rejection says where the engine refused the bundle on the per-test line,
+// which is the only place a reader of a passing run can see it. Every other verifier
+// keeps its bare form.
+TEST_F(TestVerifierTally, DetailIsPrintedInParenthesesAfterTheVerifier)
+{
+    auto& tally = VerifierTally::get();
+    tally.record("a.json", Verifier::EXPECTED_REJECTION, "plan_build_failed", _out);
+    tally.record("b.json", Verifier::GOLDEN, {}, _out);
+
+    EXPECT_EQ(_out.str(),
+              "[ VERIFIER ] rejected(plan_build_failed): a.json\n"
+              "[ VERIFIER ] golden: b.json\n");
 }
 
 // With --gtest_repeat=N, main() prints gtest's counts for the last iteration. The
@@ -57,12 +73,12 @@ TEST_F(TestVerifierTally, CountsEachVerifierUnderItsOwnName)
 TEST_F(TestVerifierTally, EachIterationStartsFromZero)
 {
     auto& tally = VerifierTally::get();
-    tally.record("a.json", Verifier::GOLDEN, _out);
-    tally.record("b.json", Verifier::GPU_REFERENCE, _out);
+    tally.record("a.json", Verifier::GOLDEN, {}, _out);
+    tally.record("b.json", Verifier::GPU_REFERENCE, {}, _out);
 
     VerifierTallyIterationReset listener;
     listener.OnTestIterationStart(*::testing::UnitTest::GetInstance(), 1);
-    tally.record("b.json", Verifier::GPU_REFERENCE, _out);
+    tally.record("b.json", Verifier::GPU_REFERENCE, {}, _out);
 
     const auto counts = tally.counts();
     EXPECT_EQ(counts.golden, 0u);

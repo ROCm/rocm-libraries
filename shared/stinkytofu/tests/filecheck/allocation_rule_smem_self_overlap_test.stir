@@ -4,7 +4,7 @@
 #
 # A multi-DWORD scalar load can return some DWORDs and XNACK on others. Replay
 # re-reads the address, so a load whose destination covers its own address has
-# nothing left to replay from, and Gfx1250HazardPass asserts when it sees one.
+# nothing left to replay from, and Gfx1250XnackHazardPass asserts when it sees one.
 #
 # This is not hypothetical. s[0:1] is a live-in that dies at the load, and the
 # load's destination is defined there, so half-open ranges let them share a

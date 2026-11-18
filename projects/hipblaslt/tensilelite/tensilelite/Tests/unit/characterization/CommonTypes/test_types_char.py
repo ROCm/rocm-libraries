@@ -23,14 +23,14 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.Types``: the ``IsaInfo``
+"""Characterization tests for ``tensilelite.Common.Types``: the ``IsaInfo``
 dataclass, the ``SemanticVersion``/``IsaVersion`` NamedTuple, the
 ``DebugConfig`` NamedTuple, and ``makeDebugConfig`` (the config-dict -> tuple
 builder with one branch per recognised key)."""
 
 import pytest
 
-from Tensile.Common.Types import (
+from tensilelite.Common.Types import (
     IsaInfo,
     SemanticVersion,
     IsaVersion,

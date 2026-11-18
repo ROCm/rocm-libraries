@@ -12,6 +12,9 @@ kernel must:
   2. reduce the TDM multicast mask to the WGs actually present in the boundary
      cluster ('reduce multicast mask to real WGs in cluster') so the broadcast
      does not wait for the multicast timeout on the missing padded WGs.
+
+The padding config also forks ClusterAIDMapping over -1 and -2, so the
+cluster-to-AID remap is emitted for the -2 kernel only.
 """
 
 import os
@@ -85,6 +88,18 @@ def test_cluster_padding_gfx1250_emits_early_exit_and_reduced_mask():
         assert "reduce multicast mask to real WGs in cluster" in src, (
             f"Kernel {base!r}: multicast mask not reduced for boundary cluster"
         )
+
+    # ClusterAIDMapping forks -1 / -2: only the -2 kernel emits the AID remap, and
+    # it is named apart from the -1 kernel.
+    remapped = [(b, s) for (b, s, _e) in results if "remap clusters onto AIDs" in s]
+    assert len(results) == 2 and len(remapped) == 1, (
+        f"Expected 2 kernels with 1 remapped, got {len(results)} with {len(remapped)} remapped"
+    )
+    assert results[0][0] != results[1][0], "ClusterAIDMapping=-2 shares the -1 kernel name"
+    base, src = remapped[0]
+    for marker in ("MSG_RTN_GET_SE_AID_ID", "grid is whole clusters?", "Nc % 8 == 0?",
+                   "ClusterAIDSplitN", "ClusterAIDSplitM"):
+        assert marker in src, f"Kernel {base!r}: AID remap missing {marker!r}"
 
 
 def test_cluster_padding_npot_mt1_keeps_wg_x_for_mask_shift():

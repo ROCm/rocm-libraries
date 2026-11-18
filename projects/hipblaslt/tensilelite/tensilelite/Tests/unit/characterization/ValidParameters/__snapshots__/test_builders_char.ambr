@@ -1359,6 +1359,7 @@
 # name: test_valid_parameters_key_roster
   list([
     '1LDSBuffer',
+    'A2ASubRounds',
     'ActivationAlt',
     'ActivationFuncCall',
     'ActivationFused',
@@ -1367,6 +1368,7 @@
     'AdaptiveGemmNTAB',
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
+    'AssertAlphaValue',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
     'AssertSizeEqual',
@@ -1379,6 +1381,7 @@
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
+    'ClusterAIDMapping',
     'ClusterDim',
     'ClusterLocalRead',
     'CompactLoopStore',
@@ -1413,8 +1416,10 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentBRotate',
     'LDSSegmentInterleave',
     'LDSTrInst',
+    'LDSTrStoreShuffle',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
     'LdsBlockSizePerPadMXSA',
@@ -1467,8 +1472,11 @@
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
     'PersistentXCCMapping',
+    'PostLoopStoreInNll',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
+    'PrefetchGL2Inc64Bit',
+    'PrefetchGL2SAddr',
     'PrefetchGlobalRead',
     'PrefetchGlobalReadA',
     'PrefetchGlobalReadB',
@@ -1487,6 +1495,7 @@
     'StaggerUMapping',
     'StaggerUStride',
     'StinkyTofuParameters',
+    'StinkyTofuRegisterAllocation',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1558,6 +1567,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'A2ASubRounds': dict({
+      'head': list([
+        1,
+        2,
+        4,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'ActivationAlt': dict({
       'head': list([
         False,
@@ -1612,6 +1630,13 @@
     'AssertAILessThanEqual': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'AssertAlphaValue': dict({
+      'head': list([
+        1,
+      ]),
+      'len': 1,
+      'type': 'list',
     }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
@@ -1680,6 +1705,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ClusterAIDMapping': dict({
+      'head': list([
+        -2,
+        -1,
       ]),
       'len': 2,
       'type': 'list',
@@ -1952,7 +1985,7 @@
           patch=0,
         ),
       ]),
-      'len': 23,
+      'len': 25,
       'type': 'list',
     }),
     'InitCIterWmma': dict({
@@ -1989,6 +2022,14 @@
       'len': 1,
       'type': 'list',
     }),
+    'LDSSegmentBRotate': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'LDSSegmentInterleave': dict({
       'head': list([
         -1,
@@ -2004,6 +2045,15 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'LDSTrStoreShuffle': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'LdsBlockSizePerPadA': dict({
@@ -2155,7 +2205,7 @@
         'NoSwizzle',
         'HostPreSwizzle',
       ]),
-      'len': 4,
+      'len': 5,
       'type': 'list',
     }),
     'MacroTile': dict({
@@ -2466,6 +2516,14 @@
       'len': 8,
       'type': 'list',
     }),
+    'PostLoopStoreInNll': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'PrefetchAcrossPersistent': dict({
       'head': list([
         0,
@@ -2481,6 +2539,22 @@
         2,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'PrefetchGL2Inc64Bit': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'PrefetchGL2SAddr': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'PrefetchGlobalRead': dict({
@@ -2622,6 +2696,10 @@
       'type': 'list',
     }),
     'StinkyTofuParameters': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'StinkyTofuRegisterAllocation': dict({
       'type': 'int',
       'value': -1,
     }),

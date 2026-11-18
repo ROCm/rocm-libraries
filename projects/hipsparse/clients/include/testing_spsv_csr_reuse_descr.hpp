@@ -29,6 +29,9 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
+#include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -65,7 +68,7 @@ void testing_spsv_csr_reuse_descr_bad_arg(const Arguments& argus)
 // Exercises the per-call bufferSize / per-call buffer-allocation pattern for a
 // single (operation, fill mode, diagonal type, algorithm) configuration: set
 // the fill-mode / diagonal-type attributes on the shared sparse-matrix
-// descriptor, query hipsparseSpSV_bufferSize, hipMalloc a fresh externalBuffer
+// descriptor, query hipsparseSpSV_bufferSize, allocate a fresh externalBuffer
 // of that size, create a fresh SpSV descriptor, run hipsparseSpSV_analysis and
 // hipsparseSpSV_solve. When called repeatedly with the same configuration on
 // the same matA, the wrapper must continue to return correct results despite
@@ -119,10 +122,9 @@ static void call_spsv(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    hipsparseLocalDnVec x(m, dx, typeT);
+    hipsparseLocalDnVec y1(m, dy_1, typeT);
+    hipsparseLocalDnVec y2(m, dy_2, typeT);
 
     hipsparseSpSVDescr_t descr;
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
@@ -132,8 +134,8 @@ static void call_spsv(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_bufferSize(
         handle, transA, &alpha, matA, x, y1, typeT, alg, descr, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -179,11 +181,7 @@ static void call_spsv(hipsparseHandle_t&     handle,
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data(), -1.0, atol);
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 }
 
 // Exercises the multi-configuration shared-buffer path: query bufferSize once
@@ -238,9 +236,8 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                 CHECK_HIPSPARSE_ERROR(hipsparseSpMatSetAttribute(
                     matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-                hipsparseDnVecDescr_t x, y;
-                CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-                CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, m, dy, typeT));
+                hipsparseLocalDnVec x(m, dx, typeT);
+                hipsparseLocalDnVec y(m, dy, typeT);
 
                 for(hipsparseSpSVAlg_t alg : algs)
                 {
@@ -254,15 +251,12 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
 
                     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
                 }
-
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
             }
         }
     }
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(buffer_size_max), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Step 2: repeatedly loop over every configuration and run SpSV analysis /
     // solve with the shared buffer, never calling bufferSize again. Verify each
@@ -288,9 +282,8 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         CHECK_HIP_ERROR(
                             hipMemcpy(dy, hy.data(), sizeof(T) * m, hipMemcpyHostToDevice));
 
-                        hipsparseDnVecDescr_t x, y;
-                        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-                        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, m, dy, typeT));
+                        hipsparseLocalDnVec x(m, dx, typeT);
+                        hipsparseLocalDnVec y(m, dy, typeT);
 
                         hipsparseSpSVDescr_t descr;
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
@@ -334,15 +327,11 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         }
 
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
                     }
                 }
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename T>
@@ -361,8 +350,7 @@ void testing_spsv_csr_reuse_descr(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures. The sparse matrix descriptor is created once as a
     // square (m x m) CSR matrix and reused across every configuration below.
@@ -396,9 +384,7 @@ void testing_spsv_csr_reuse_descr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dval, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
     // Create matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     const std::vector<hipsparseOperation_t> ops
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
@@ -461,9 +447,6 @@ void testing_spsv_csr_reuse_descr(Arguments argus)
                                      diags,
                                      algs,
                                      number_of_passes);
-
-    // Destroy matrix
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 

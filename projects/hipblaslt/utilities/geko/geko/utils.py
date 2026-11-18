@@ -94,12 +94,38 @@ def build_tensilelite_client(
             git_dir = Path(path).resolve() / ".git"
 
             with (git_dir / "HEAD").open("r") as head:
-                ref = head.readline().split(" ")[-1].strip()
+                line = head.readline().strip()
 
-            with (git_dir / ref).open("r") as git_hash:
-                return git_hash.readline().strip()
+            # Detached HEAD: the file holds the hash itself, not a ref.
+            if not line.startswith("ref:"):
+                return line
 
-        except FileNotFoundError:
+            ref = line.split(" ")[-1].strip()
+
+            loose = git_dir / ref
+            if loose.is_file():
+                with loose.open("r") as git_hash:
+                    return git_hash.readline().strip()
+
+            # Packed refs: `git gc`/`git clone` moves refs out of .git/refs into
+            # .git/packed-refs, where the loose file no longer exists. Reading
+            # only loose refs made this fall back to today's date, which is then
+            # used as the tensilelite client cache key -- so a same-day hipBLASLt
+            # rebuild silently reused a stale client.
+            packed = git_dir / "packed-refs"
+            if packed.is_file():
+                with packed.open("r") as f:
+                    for entry in f:
+                        entry = entry.strip()
+                        if not entry or entry.startswith(("#", "^")):
+                            continue
+                        sha, _, name = entry.partition(" ")
+                        if name.strip() == ref:
+                            return sha
+
+            raise FileNotFoundError(f"no loose or packed ref for '{ref}'")
+
+        except OSError:
             logger.warning("Error while retrieving repository information, using current date instead of commit hash")
 
         return str(date.today())
@@ -187,3 +213,82 @@ def parse_devices(devices: str | list[int]) -> List[int]:
         raise ValueError(f"Need at least 1 device to run the optimization")
 
     return devices
+
+
+def ensure_tensile_importable(hipblaslt_path: "str | Path") -> str:
+    """Make Tensile *and* rocisa importable in THIS process, and in children.
+
+    ``geko`` imports Tensile lazily from inside functions, and every worker it
+    spawns inherits ``PYTHONPATH``. Both need the same two entries, so resolve
+    them once here rather than relying on whatever the invoking shell happens to
+    export -- that ambient value is what silently bound a run to a stale hipBLASLt
+    clone and produced::
+
+        ImportError: cannot import name 'rocIsa' from 'rocisa' (unknown location)
+
+    The "unknown location" wording is the giveaway: ``<build>/tensilelite/rocisa``
+    is a CMake directory with no ``__init__.py``, so Python binds it as a namespace
+    package that shadows the real extension module nested one level below it.
+
+    Args:
+        hipblaslt_path: Root of the hipBLASLt checkout to bind this run to.
+
+    Returns:
+        The resolved ``PYTHONPATH`` string, also exported to ``os.environ`` so
+        subprocesses inherit it.
+    """
+    resolved = tensile_pythonpath(hipblaslt_path, inherit=False)
+    for entry in reversed(resolved.split(os.pathsep)):
+        if entry and entry not in sys.path:
+            sys.path.insert(0, entry)
+    existing = os.environ.get("PYTHONPATH", "")
+    resolved_parts = set(resolved.split(os.pathsep))
+    parts = [p for p in existing.split(os.pathsep) if p and p not in resolved_parts]
+    os.environ["PYTHONPATH"] = os.pathsep.join([resolved, *parts])
+    return os.environ["PYTHONPATH"]
+
+
+def tensile_pythonpath(hipblaslt_path, inherit: bool = True) -> str:
+    """PYTHONPATH that lets a child process import BOTH Tensile and rocisa.
+
+    Tensile's ``Common.Utilities`` does ``from rocisa import rocIsa`` at import time,
+    so a child given only ``<hipblaslt>/tensilelite`` dies with
+
+        ImportError: cannot import name 'rocIsa' from 'rocisa' (unknown location)
+
+    "unknown location" is the giveaway: Python found a *namespace* package -- some
+    directory literally named ``rocisa`` with no ``__init__.py`` -- instead of the
+    built one. Every hipBLASLt build tree has such a decoy, because the CMake build
+    directory is itself called ``rocisa`` and the real package sits one level deeper:
+
+        build/release/tensilelite/rocisa/            <- CMake artifacts, the decoy
+        build/release/tensilelite/rocisa/rocisa/     <- __init__.py + _rocisa*.so
+
+    So the entry to put on PYTHONPATH is the PARENT of the package, and it must be
+    verified rather than assumed -- an unbuilt tree has the decoy but not the package.
+
+    Args:
+        hipblaslt_path: hipBLASLt checkout root.
+        inherit: Append the caller's existing PYTHONPATH after the resolved
+            entries, so a child still sees a rocisa or geko checkout the caller
+            pointed it at.
+
+    Returns:
+        A ``os.pathsep``-joined PYTHONPATH string.
+    """
+    hip = Path(hipblaslt_path)
+    parts = [str(hip / "tensilelite")]
+
+    for rel in (
+        "build/release/tensilelite/rocisa",
+        "build/tensilelite/rocisa",
+        "build_tmp/tensilelite/rocisa",
+    ):
+        candidate = hip / rel
+        if (candidate / "rocisa" / "__init__.py").is_file():
+            parts.append(str(candidate))
+            break
+
+    if inherit and os.environ.get("PYTHONPATH"):
+        parts.append(os.environ["PYTHONPATH"])
+    return os.pathsep.join(parts)

@@ -787,6 +787,201 @@ protected:
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
+    // ----- DIV, ADD_SQUARE and CMP_* -----
+
+    void testBinaryDivideOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<OutputType> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        Tensor<OutputType> expected({1, 1, 1, 4});
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_4 / TEST_VALUE_2), 0, 0, 0, 0);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_3 / TEST_VALUE_1), 0, 0, 0, 1);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(-TEST_VALUE_2 / TEST_VALUE_4), 0, 0, 0, 2);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_5 / TEST_VALUE_2), 0, 0, 0, 3);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_5);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryAddSquareOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<OutputType> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+        // add_square(x, y) = x + y^2
+        Tensor<OutputType> expected({1, 1, 1, 4});
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_1 + TEST_VALUE_2 * TEST_VALUE_2), 0, 0, 0, 0);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(-TEST_VALUE_2 + TEST_VALUE_1 * TEST_VALUE_1), 0, 0, 0, 1);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(0.0f + TEST_VALUE_3 * TEST_VALUE_3), 0, 0, 0, 2);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_3 + TEST_VALUE_1 * TEST_VALUE_1), 0, 0, 0, 3);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_5);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    // Comparison operations produce a BOOLEAN output
+    void testBinaryCompareLessOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LT, output, input1, input2);
+
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 0)); // 1 < 2
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 1)); // 2 < 2
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 2)); // 3 < 1
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 3)); // -1 < 1
+    }
+
+    void testBinaryCompareEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_EQ, output, input1, input2);
+
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 0)); // 1 == 1
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 1)); // 2 == 3
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 2)); // -3 == -3
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 3)); // 0 == 1
+    }
+
+    // Test case: Broadcasting division [3,4] / [4] → [3,4]
+    void testBroadcast2Dx1DDivide()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N]
+        Tensor<OutputType> output({3, 4}); // Output: [3,4]
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m * 4) + n + 4)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        Tensor<OutputType> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto input1Val = static_cast<float>((m * 4) + n + 4);
+                auto input2Val = static_cast<float>(n + 1);
+                expected.setHostValue(safeTestTypeCast<OutputType>(input1Val / input2Val), m, n);
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 12.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    // Test case: the second input uses channel-last strides
+    void testBinaryDivideStridedSecondInputOperation()
+    {
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2}; // Channel-last for [1,2,2,2]
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<OutputType> expected({1, 2, 2, 2});
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto input1Val = static_cast<float>(((c * 4) + (h * 2) + w + 1) * 2);
+                    auto input2Val = static_cast<float>((c * 4) + (h * 2) + w + 1);
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(input1Val), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(input2Val), 0, c, h, w);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(input1Val / input2Val), 0, c, h, w);
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 16.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
     // ======================= UNARY OPERATIONS =======================
 
     void testReluForwardOperation()
@@ -1689,6 +1884,932 @@ protected:
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
+
+    // ----- Newly implemented unary math, backward and GEN_INDEX operations -----
+
+    void testExpOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::EXP, output, input);
+
+        // Create expected tensor: exp(x), computed from the (quantized) input values
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(std::exp(xCompute)), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testFloorOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 0, 0, 0); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1_5), 0, 0, 0, 1); // -1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 0, 1, 0); // 2.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2_5), 0, 0, 1, 1); // -2.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 0); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 0, 1); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 1, 1, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(PI), 0, 1, 1, 1); // π
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::FLOOR, output, input);
+
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(std::floor(xCompute)), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::FLOOR, PI);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testEluForwardWithAlphaOperation()
+    {
+        constexpr float ALPHA = 0.5f;
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::ELU_FWD,
+            output,
+            input,
+            0.0f,
+            std::numeric_limits<float>::max(),
+            0.0f,
+            1.0f,
+            ALPHA,
+            1.0f);
+
+        // elu(x) = x for x > 0, alpha * (exp(x) - 1) otherwise
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto result = xCompute > ComputeType{0}
+                                      ? xCompute
+                                      : static_cast<ComputeType>(ALPHA) * (std::exp(xCompute) - 1);
+                    expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ELU_FWD, TEST_VALUE_3);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testGeluBackwardOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
+
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::GELU_BWD, output, upstreamGrad, input);
+
+        // dx = dy * (Phi(x) + x * phi(x)), Phi/phi: standard normal CDF/PDF
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto dyCompute
+                        = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
+                    auto cdf = ComputeType{0.5}
+                               * (ComputeType{1} + std::erf(xCompute / std::sqrt(ComputeType{2})));
+                    auto pdf = std::exp(-xCompute * xCompute / ComputeType{2})
+                               / std::sqrt(ComputeType{2} * static_cast<ComputeType>(3.14159265));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(dyCompute * (cdf + xCompute * pdf)),
+                        0,
+                        c,
+                        h,
+                        w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_BWD, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testSwishBackwardWithBetaOperation()
+    {
+        constexpr float BETA = 0.5f;
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        upstreamGrad.fillWithValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2));
+
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::SWISH_BWD,
+            output,
+            upstreamGrad,
+            input,
+            0.0f,
+            std::numeric_limits<float>::max(),
+            0.0f,
+            BETA,
+            1.0f,
+            1.0f);
+
+        // dx = dy * (s + beta * x * s * (1 - s)), s = sigmoid(beta * x)
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    const auto beta = static_cast<ComputeType>(BETA);
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto dyCompute
+                        = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
+                    auto sigmoid = ComputeType{1} / (ComputeType{1} + std::exp(-beta * xCompute));
+                    auto localGradient
+                        = sigmoid + beta * xCompute * sigmoid * (ComputeType{1} - sigmoid);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(dyCompute * localGradient), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_BWD, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    // GEN_INDEX: output(i0, i1, ...) = i_axis
+    void runGenIndexTest(const std::vector<int64_t>& dims,
+                         int64_t axis,
+                         const std::vector<int64_t>& outputStrides)
+    {
+        Tensor<OutputType> output(dims, outputStrides);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::GEN_INDEX, output, axis);
+
+        std::vector<int64_t> coordinates(dims.size(), 0);
+        for(bool done = false; !done;)
+        {
+            EXPECT_EQ(static_cast<int64_t>(static_cast<float>(output.getHostValue(coordinates))),
+                      coordinates[static_cast<size_t>(axis)]);
+
+            // Advance to the next coordinate in row-major order
+            size_t dim = dims.size();
+            done = true;
+            while(dim > 0)
+            {
+                --dim;
+                if(++coordinates[dim] < dims[dim])
+                {
+                    done = false;
+                    break;
+                }
+                coordinates[dim] = 0;
+            }
+        }
+    }
+
+    void testGenIndexChannelAxis()
+    {
+        runGenIndexTest({2, 3, 2, 4}, 1, generateStrides({2, 3, 2, 4}));
+    }
+
+    void testGenIndexLastAxis2D()
+    {
+        runGenIndexTest({2, 4}, 1, generateStrides({2, 4}));
+    }
+
+    // Channel-last strides for logical dims [2,3,2,4]
+    void testGenIndexStridedOutput()
+    {
+        runGenIndexTest({2, 3, 2, 4}, 3, {24, 1, 12, 3});
+    }
+
+    void testLogOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::LOG, output, input);
+
+        // log(x) for positive x
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto result = std::log(xCompute);
+                    expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::LOG, TEST_VALUE_5);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testSoftplusForwardWithBetaOperation()
+    {
+        constexpr float BETA = 2.0f;
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::SOFTPLUS_FWD,
+            output,
+            input,
+            0.0f,
+            std::numeric_limits<float>::max(),
+            0.0f,
+            1.0f,
+            1.0f,
+            BETA);
+
+        // softplus(x) = log(1 + exp(beta * x)) / beta
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto beta = static_cast<ComputeType>(BETA);
+                    auto result = std::log(ComputeType{1} + std::exp(beta * xCompute)) / beta;
+                    expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_FWD, TEST_VALUE_3);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testGeluApproxTanhBackwardOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1);
+
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::GELU_APPROX_TANH_BWD, output, upstreamGrad, input);
+
+        // dx = dy * d/dx gelu_tanh(x)
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto dyCompute
+                        = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
+                    const auto sqrt2OverPi
+                        = std::sqrt(ComputeType{2} / static_cast<ComputeType>(3.14159265));
+                    auto inner
+                        = sqrt2OverPi
+                          * (xCompute
+                             + static_cast<ComputeType>(0.044715) * xCompute * xCompute * xCompute);
+                    auto tanhVal = std::tanh(inner);
+                    auto innerGradient = sqrt2OverPi
+                                         * (ComputeType{1}
+                                            + ComputeType{3} * static_cast<ComputeType>(0.044715)
+                                                  * xCompute * xCompute);
+                    auto localGradient = ComputeType{0.5} * (ComputeType{1} + tanhVal)
+                                         + ComputeType{0.5} * xCompute
+                                               * (ComputeType{1} - tanhVal * tanhVal)
+                                               * innerGradient;
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(dyCompute * localGradient), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_BWD, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testEluBackwardWithAlphaOperation()
+    {
+        constexpr float ALPHA = 0.5f;
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1);
+
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::ELU_BWD,
+            output,
+            upstreamGrad,
+            input,
+            0.0f,
+            std::numeric_limits<float>::max(),
+            0.0f,
+            1.0f,
+            ALPHA,
+            1.0f);
+
+        // dx = dy * (x > 0 ? 1 : alpha * exp(x))
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto dyCompute
+                        = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
+                    auto localGradient = xCompute > ComputeType{0}
+                                             ? ComputeType{1}
+                                             : static_cast<ComputeType>(ALPHA) * std::exp(xCompute);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(dyCompute * localGradient), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ELU_BWD, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testSqrtOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::SQRT, output, input);
+
+        // sqrt(x) for positive x
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto result = std::sqrt(xCompute);
+                    expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::SQRT, TEST_VALUE_5);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testRsqrtOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::RSQRT, output, input);
+
+        // rsqrt(x) = 1 / sqrt(x) for positive x
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto result = ComputeType{1} / std::sqrt(xCompute);
+                    expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::RSQRT, TEST_VALUE_5);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testReciprocalOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::RECIPROCAL, output, input);
+
+        // reciprocal(x) = 1 / x for positive x
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto result = ComputeType{1} / xCompute;
+                    expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::RECIPROCAL, TEST_VALUE_5);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testSinOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::SIN, output, input);
+
+        // Create expected tensor: sin(x), computed from the (quantized) input values
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(std::sin(xCompute)), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::SIN, TEST_VALUE_3);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testTanOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::TAN, output, input);
+
+        // Create expected tensor: tan(x), computed from the (quantized) input values
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(std::tan(xCompute)), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::TAN, 20.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testErfOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::ERF, output, input);
+
+        // Create expected tensor: erf(x), computed from the (quantized) input values
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(std::erf(xCompute)), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ERF, TEST_VALUE_3);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testCeilOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::CEIL, output, input);
+
+        // Create expected tensor: ceil(x), computed from the (quantized) input values
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(std::ceil(xCompute)), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::CEIL, TEST_VALUE_3);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryCompareNotEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_NEQ, output, input1, input2);
+
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 0)); // 1 != 1
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 1)); // 2 != 3
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 2)); // -3 != -3
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 3)); // 0 != 1
+    }
+
+    void testBinaryCompareGreaterEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_GE, output, input1, input2);
+
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 0)); // 1 >= 1
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 1)); // 2 >= 3
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 2)); // -3 >= -3
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 3)); // 0 >= 1
+    }
+
+    void testBinaryCompareLessEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LE, output, input1, input2);
+
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 0)); // 1 <= 1
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 1)); // 2 <= 3
+        EXPECT_TRUE(output.getHostValue(0, 0, 0, 2)); // -3 <= -3
+        EXPECT_FALSE(output.getHostValue(0, 0, 0, 3)); // 0 <= -1
+    }
+
+    void testSoftplusBackwardWithBetaOperation()
+    {
+        constexpr float BETA = 2.0f;
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
+
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0);
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1);
+
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::SOFTPLUS_BWD,
+            output,
+            upstreamGrad,
+            input,
+            0.0f,
+            std::numeric_limits<float>::max(),
+            0.0f,
+            1.0f,
+            1.0f,
+            BETA);
+
+        // dx = dy * sigmoid(beta * x)
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    auto dyCompute
+                        = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
+                    auto localGradient
+                        = ComputeType{1}
+                          / (ComputeType{1} + std::exp(-static_cast<ComputeType>(BETA) * xCompute));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(dyCompute * localGradient), 0, c, h, w);
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_BWD, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    // Test case: the input uses channel-last strides
+    void testExpStridedInputOperation()
+    {
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2}; // Channel-last for [1,2,2,2]
+        Tensor<Input1Type> input({1, 2, 2, 2}, inputStrides);
+        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<OutputType> expected({1, 2, 2, 2});
+
+        float value = -TEST_VALUE_3;
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int h = 0; h < 2; ++h)
+            {
+                for(int w = 0; w < 2; ++w)
+                {
+                    input.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(std::exp(xCompute)), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::EXP, output, input);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
 };
 
 using TestTypes = ::testing::Types<float, half, bfloat16, double, int8_t>;
@@ -1787,6 +2908,51 @@ TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast5D)
     this->testBroadcast5D();
 }
 
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast2Dx1DDivide)
+{
+    this->testBroadcast2Dx1DDivide();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivideStridedSecondInput)
+{
+    this->testBinaryDivideStridedSecondInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
 // Unary operation tests
 TYPED_TEST(CpuReferencePointwiseFixture, UnaryReluForward)
 {
@@ -1878,6 +3044,111 @@ TYPED_TEST(CpuReferencePointwiseFixture, UnaryIdentity)
     this->testIdentityOperation();
 }
 
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryExp)
+{
+    this->testExpOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryFloor)
+{
+    this->testFloorOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryEluForwardWithAlpha)
+{
+    this->testEluForwardWithAlphaOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryGeluBackward)
+{
+    this->testGeluBackwardOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySwishBackwardWithBeta)
+{
+    this->testSwishBackwardWithBetaOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryLog)
+{
+    this->testLogOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySoftplusForwardWithBeta)
+{
+    this->testSoftplusForwardWithBetaOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryGeluApproxTanhBackward)
+{
+    this->testGeluApproxTanhBackwardOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryEluBackwardWithAlpha)
+{
+    this->testEluBackwardWithAlphaOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySqrt)
+{
+    this->testSqrtOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryRsqrt)
+{
+    this->testRsqrtOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryReciprocal)
+{
+    this->testReciprocalOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySin)
+{
+    this->testSinOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryTan)
+{
+    this->testTanOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryErf)
+{
+    this->testErfOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryCeil)
+{
+    this->testCeilOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySoftplusBackwardWithBeta)
+{
+    this->testSoftplusBackwardWithBetaOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryExpStridedInput)
+{
+    this->testExpStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, GenIndexChannelAxis)
+{
+    this->testGenIndexChannelAxis();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, GenIndexLastAxis2D)
+{
+    this->testGenIndexLastAxis2D();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, GenIndexStridedOutput)
+{
+    this->testGenIndexStridedOutput();
+}
+
 // Mixed-type binary test instantiations
 using TestCpuReferencePointwiseBinaryMixed1Bfp16
     = CpuReferencePointwiseFixture<float, half, bfloat16>;
@@ -1962,6 +3233,16 @@ TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeAddOperation)
 TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeDivideOperation)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeCompareLessOperation)
+{
+    this->testBinaryCompareLessOperation();
 }
 
 // Mixed-type unary test instantiations
@@ -2085,6 +3366,16 @@ TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeGeluApproxTanhFor
 TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeSwishForward)
 {
     this->testSwishForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixedFp16, UnaryMixedTypeExp)
+{
+    this->testExpOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeGeluBackward)
+{
+    this->testGeluBackwardOperation();
 }
 
 // --- Regression tests ---
@@ -2253,4 +3544,337 @@ TYPED_TEST(CpuReferencePointwiseNaNFixture, MinNaNSecondOperandReturnsFirst)
 
     EXPECT_FALSE(isnan(output.getHostValue(0, 0, 0, 0)));
     EXPECT_EQ(output.getHostValue(0, 0, 0, 0), input1.getHostValue(0, 0, 0, 0));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, DivideByZeroProducesInfinity)
+{
+    using hipdnn_data_sdk::types::isinf;
+
+    Tensor<TypeParam> input1({1, 1, 1, 2});
+    Tensor<TypeParam> input2({1, 1, 1, 2});
+    Tensor<TypeParam> output({1, 1, 1, 2});
+
+    input1.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_1), 0, 0, 0, 0);
+    input1.setHostValue(safeTestTypeCast<TypeParam>(-TEST_VALUE_1), 0, 0, 0, 1);
+    input2.fillWithValue(safeTestTypeCast<TypeParam>(0.0f));
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::DIV, output, input1, input2);
+
+    EXPECT_TRUE(isinf(output.getHostValue(0, 0, 0, 0)));
+    EXPECT_GT(static_cast<float>(output.getHostValue(0, 0, 0, 0)), 0.0f);
+    EXPECT_TRUE(isinf(output.getHostValue(0, 0, 0, 1)));
+    EXPECT_LT(static_cast<float>(output.getHostValue(0, 0, 0, 1)), 0.0f);
+}
+
+// Every ordered comparison against NaN is false; only NEQ is true (IEEE 754 semantics).
+TYPED_TEST(CpuReferencePointwiseNaNFixture, ComparisonsWithNaNFollowIeeeSemantics)
+{
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<bool> output({1, 1, 1, 1});
+
+    input1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
+    input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_2), 0, 0, 0, 0);
+
+    const auto compare = [&](PointwiseMode mode) {
+        CpuReferencePointwiseImpl<bool, TypeParam, TypeParam>::pointwiseCompute(
+            mode, output, input1, input2);
+        return output.getHostValue(0, 0, 0, 0);
+    };
+
+    EXPECT_FALSE(compare(PointwiseMode::CMP_EQ));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_NEQ));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LT));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_GE));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LE));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_GT));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, ComparisonsWithInfinityFollowIeeeSemantics)
+{
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<bool> output({1, 1, 1, 1});
+
+    input1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0, 0, 0);
+    input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_2), 0, 0, 0, 0);
+
+    const auto compare = [&](PointwiseMode mode) {
+        CpuReferencePointwiseImpl<bool, TypeParam, TypeParam>::pointwiseCompute(
+            mode, output, input1, input2);
+        return output.getHostValue(0, 0, 0, 0);
+    };
+
+    EXPECT_TRUE(compare(PointwiseMode::CMP_GT));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_GE));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_NEQ));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_EQ));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LT));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LE));
+
+    input2.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0, 0, 0);
+    EXPECT_TRUE(compare(PointwiseMode::CMP_EQ));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_LE));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_GT));
+}
+
+// --- Logical operation tests (BOOLEAN in / BOOLEAN out) ---
+
+TEST(TestCpuReferencePointwiseLogical, LogicalAndAndOrOperations)
+{
+    Tensor<bool> input1({1, 1, 1, 4});
+    Tensor<bool> input2({1, 1, 1, 4});
+    Tensor<bool> andOutput({1, 1, 1, 4});
+    Tensor<bool> orOutput({1, 1, 1, 4});
+
+    const std::vector<bool> values1 = {true, true, false, false};
+    const std::vector<bool> values2 = {true, false, true, false};
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        input1.setHostValue(values1[static_cast<size_t>(i)], 0, 0, 0, i);
+        input2.setHostValue(values2[static_cast<size_t>(i)], 0, 0, 0, i);
+    }
+
+    CpuReferencePointwiseImpl<bool, bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_AND, andOutput, input1, input2);
+    CpuReferencePointwiseImpl<bool, bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_OR, orOutput, input1, input2);
+
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        const auto index = static_cast<size_t>(i);
+        EXPECT_EQ(andOutput.getHostValue(0, 0, 0, i), values1[index] && values2[index]);
+        EXPECT_EQ(orOutput.getHostValue(0, 0, 0, i), values1[index] || values2[index]);
+    }
+}
+
+TEST(TestCpuReferencePointwiseLogical, LogicalNotOperation)
+{
+    Tensor<bool> input({1, 1, 1, 2});
+    Tensor<bool> output({1, 1, 1, 2});
+
+    input.setHostValue(true, 0, 0, 0, 0);
+    input.setHostValue(false, 0, 0, 0, 1);
+
+    CpuReferencePointwiseImpl<bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_NOT, output, input);
+
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 0));
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 1));
+}
+
+TEST(TestCpuReferencePointwiseLogical, NumericInputsAreTrueWhenNonZero)
+{
+    Tensor<float> input1({1, 1, 1, 3});
+    Tensor<float> input2({1, 1, 1, 3});
+    Tensor<bool> andOutput({1, 1, 1, 3});
+    Tensor<bool> notOutput({1, 1, 1, 3});
+
+    const std::vector<float> values1 = {0.0f, 2.5f, -1.0f};
+    const std::vector<float> values2 = {1.0f, 0.0f, 3.0f};
+    for(int64_t i = 0; i < 3; ++i)
+    {
+        input1.setHostValue(values1[static_cast<size_t>(i)], 0, 0, 0, i);
+        input2.setHostValue(values2[static_cast<size_t>(i)], 0, 0, 0, i);
+    }
+
+    CpuReferencePointwiseImpl<bool, float, float>::pointwiseCompute(
+        PointwiseMode::LOGICAL_AND, andOutput, input1, input2);
+    CpuReferencePointwiseImpl<bool, float>::pointwiseCompute(
+        PointwiseMode::LOGICAL_NOT, notOutput, input1);
+
+    EXPECT_FALSE(andOutput.getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(andOutput.getHostValue(0, 0, 0, 1));
+    EXPECT_TRUE(andOutput.getHostValue(0, 0, 0, 2));
+    EXPECT_TRUE(notOutput.getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(notOutput.getHostValue(0, 0, 0, 1));
+    EXPECT_FALSE(notOutput.getHostValue(0, 0, 0, 2));
+}
+
+// --- GEN_INDEX error cases ---
+
+TEST(TestCpuReferencePointwiseGenIndex, Int32OutputAndAxisValidation)
+{
+    Tensor<int32_t> output({2, 3, 4});
+
+    CpuReferencePointwiseImpl<int32_t, float>::pointwiseCompute(
+        PointwiseMode::GEN_INDEX, output, int64_t{1});
+    for(int64_t i = 0; i < 2; ++i)
+    {
+        for(int64_t j = 0; j < 3; ++j)
+        {
+            for(int64_t k = 0; k < 4; ++k)
+            {
+                EXPECT_EQ(output.getHostValue(i, j, k), static_cast<int32_t>(j));
+            }
+        }
+    }
+
+    EXPECT_THROW((CpuReferencePointwiseImpl<int32_t, float>::pointwiseCompute(
+                     PointwiseMode::GEN_INDEX, output, int64_t{3})),
+                 std::runtime_error);
+    EXPECT_THROW((CpuReferencePointwiseImpl<int32_t, float>::pointwiseCompute(
+                     PointwiseMode::GEN_INDEX, output, int64_t{-1})),
+                 std::runtime_error);
+    EXPECT_THROW((CpuReferencePointwiseImpl<int32_t, float>::pointwiseCompute(
+                     PointwiseMode::EXP, output, int64_t{1})),
+                 std::runtime_error);
+}
+
+// --- Scalar attribute omitted: ELU/Softplus/Swish default to 1 (hard-coded expected values) ---
+
+TEST(TestCpuReferencePointwiseScalarDefaults, OmittedScalarAttributesDefaultToOne)
+{
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> upstreamGrad({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    upstreamGrad.fillWithValue(2.0f);
+
+    using ForwardImpl = CpuReferencePointwiseImpl<float, float>;
+    using BackwardImpl = CpuReferencePointwiseImpl<float, float, float>;
+
+    input.fillWithValue(-1.0f);
+    ForwardImpl::pointwiseCompute(PointwiseMode::ELU_FWD, output, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), -0.6321205588f, 1e-7f); // exp(-1) - 1
+
+    input.fillWithValue(1.0f);
+    ForwardImpl::pointwiseCompute(PointwiseMode::SOFTPLUS_FWD, output, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.3132616875f, 1e-7f); // log(1 + e)
+
+    input.fillWithValue(-1.0f);
+    BackwardImpl::pointwiseCompute(PointwiseMode::ELU_BWD, output, upstreamGrad, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 0.7357588823f, 1e-7f); // 2 * exp(-1)
+
+    input.fillWithValue(1.0f);
+    BackwardImpl::pointwiseCompute(PointwiseMode::SWISH_BWD, output, upstreamGrad, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.8553410237f, 1e-7f); // 2 * (s + x s (1 - s))
+
+    BackwardImpl::pointwiseCompute(PointwiseMode::SOFTPLUS_BWD, output, upstreamGrad, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.4621171573f, 1e-7f); // 2 * sigmoid(1)
+}
+
+// --- Softplus switches to the linear branch once beta * x exceeds 20 ---
+
+TEST(TestCpuReferencePointwiseSoftplusLinearBranch, MatchesFormulaAroundTheCutoff)
+{
+    // x, beta, expected log(1 + exp(beta * x)) / beta
+    struct Case
+    {
+        float x;
+        float beta;
+        float expected;
+    };
+    const std::vector<Case> cases = {
+        {10.0f, 1.0f, 10.0000453989f}, // beta * x = 10, below the cutoff
+        {20.0f, 1.0f, 20.0000000021f}, // beta * x = 20, at the cutoff
+        {40.0f, 1.0f, 40.0f}, // beta * x = 40, linear branch
+        {1000.0f, 1.0f, 1000.0f}, // beta * x = 1000, exp would overflow double
+        {60.0f, 0.5f, 60.0f}, // beta * x = 30, linear branch with beta != 1
+        {5.0f, 2.0f, 5.0000226994f}, // beta * x = 10, below the cutoff with beta != 1
+    };
+
+    for(const auto& testCase : cases)
+    {
+        Tensor<float> input({1, 1, 1, 1});
+        Tensor<float> output({1, 1, 1, 1});
+        input.fillWithValue(testCase.x);
+
+        CpuReferencePointwiseImpl<float, float>::pointwiseCompute(PointwiseMode::SOFTPLUS_FWD,
+                                                                  output,
+                                                                  input,
+                                                                  0.0f,
+                                                                  std::numeric_limits<float>::max(),
+                                                                  0.0f,
+                                                                  1.0f,
+                                                                  1.0f,
+                                                                  testCase.beta);
+
+        EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), testCase.expected, 1e-7f)
+            << "x=" << testCase.x << ", beta=" << testCase.beta;
+    }
+}
+
+// --- ELU and Softplus must not lose small values to cancellation ---
+
+TEST(TestCpuReferencePointwiseCancellation, EluKeepsTheNegativeBranchNearZero)
+{
+    // exp(x) - 1 rounds to 0 for x = -1e-20, but alpha * expm1(x) = 1e20 * -1e-20 = -1.
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.fillWithValue(-1e-20f);
+
+    CpuReferencePointwiseImpl<float, float>::pointwiseCompute(PointwiseMode::ELU_FWD,
+                                                              output,
+                                                              input,
+                                                              0.0f,
+                                                              std::numeric_limits<float>::max(),
+                                                              0.0f,
+                                                              1.0f,
+                                                              1e20f,
+                                                              1.0f);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), -1.0f, 1e-6f);
+}
+
+TEST(TestCpuReferencePointwiseCancellation, SoftplusKeepsTheNegativeTail)
+{
+    // 1 + exp(-40) rounds to 1, but log1p(exp(-40)) / 1e-16 = 4.2484e-18 / 1e-16 = 0.0424835.
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.fillWithValue(-4e17f);
+
+    CpuReferencePointwiseImpl<float, float>::pointwiseCompute(PointwiseMode::SOFTPLUS_FWD,
+                                                              output,
+                                                              input,
+                                                              0.0f,
+                                                              std::numeric_limits<float>::max(),
+                                                              0.0f,
+                                                              1.0f,
+                                                              1.0f,
+                                                              1e-16f);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 0.0424835f, 1e-7f);
+}
+
+TEST(TestCpuReferencePointwiseCancellation, SoftplusDoesNotUnderflowInFloatCompute)
+{
+    // The float inputs are -1.0500000445e32 and 1.0000000032e-30, so beta * x = -105.0000048. exp
+    // of that stays representable in double (2.5e-46) but not in float, and
+    // log1p(exp(beta * x)) / beta = 2.50655548e-16, computed independently in double from the
+    // float-rounded inputs.
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.fillWithValue(-1.05e32f);
+
+    hipdnn_test_sdk::utilities::ReferencePointwiseBase<
+        hipdnn_test_sdk::utilities::CpuDeviceExecutor<float, float>,
+        float,
+        float>::pointwiseCompute<float, float, float>(PointwiseMode::SOFTPLUS_FWD,
+                                                      output,
+                                                      input,
+                                                      0.0f,
+                                                      std::numeric_limits<float>::max(),
+                                                      0.0f,
+                                                      1.0f,
+                                                      1.0f,
+                                                      1e-30f);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 2.50655548e-16f, 1e-22f);
+}
+
+TEST(TestCpuReferencePointwiseCancellation, GeluBwdKeepsTheNegativeTail)
+{
+    // 1 + erf(x / sqrt(2)) rounds to 0 for x = -9, which loses the CDF term. The expected gradient
+    // dy * (Phi(x) + x * phi(x)) = -913.8937557 was computed independently with erfc in double.
+    Tensor<float> dy({1, 1, 1, 1});
+    Tensor<float> x({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    dy.fillWithValue(1e20f);
+    x.fillWithValue(-9.0f);
+
+    CpuReferencePointwiseImpl<float, float, float>::pointwiseCompute(
+        PointwiseMode::GELU_BWD, output, dy, x);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), -913.8937557f, 1e-2f);
 }

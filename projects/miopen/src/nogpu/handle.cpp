@@ -241,10 +241,13 @@ std::size_t Handle::GetWavefrontWidth() const { return this->impl->warp_size; }
 std::size_t Handle::GetMaxMemoryAllocSize() const
 {
     if(this->impl->max_mem_alloc_size == 0)
-        return floor(0.85 * this->impl->global_mem_size);
+        return floor(UsableMemoryFraction * this->impl->global_mem_size);
     else
         return this->impl->max_mem_alloc_size;
 }
+
+// NOGPU has no live device, so nothing is allocated on it.
+std::size_t Handle::GetAvailableMemory() const { return this->impl->global_mem_size; }
 
 bool Handle::CooperativeLaunchSupported() const { return false; }
 
@@ -255,6 +258,8 @@ const TargetProperties& Handle::GetTargetProperties() const
 
 std::string Handle::GetDeviceNameImpl() const { return this->impl->device_name; }
 std::string Handle::GetDeviceName() const { return this->GetTargetProperties().Name(); }
+
+int Handle::GetDeviceId() const { return -1; }
 
 std::ostream& Handle::Print(std::ostream& os) const
 {

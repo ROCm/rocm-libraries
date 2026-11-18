@@ -25,7 +25,7 @@
 from .Common import assignParameterRequired, assignParameterWithDefault, \
                     defaultProblemType, defaultSolution, \
                     globalParameters, \
-                    isGfx12, \
+                    isGfx12, isGfx117, \
                     tPrint, printExit, printWarning, \
                     validActivationFormats, validConvolutionConfig, \
                     validMFMA, validWMMA, validParameters, validWeightFormats, \
@@ -2407,9 +2407,9 @@ class Solution(collections.abc.Mapping):
       isa = tuple(state["ISA"])
       state['MIInputPerThread'] = state["MatrixInstruction"][0] * state["MatrixInstruction"][2] * state["MatrixInstruction"][3] // state["WavefrontSize"]
       if (not globalParameters["AsmCaps"][isa]['HasMFMA']) and globalParameters["AsmCaps"][isa]['HasWMMA']:
-        # gfx12 WMMA uses the generic MI formula above. Older WMMA paths keep
-        # the historical full-K input packing.
-        if not isGfx12(isa):
+        # gfx117/gfx12 WMMA uses the generic MI formula above. Older WMMA paths
+        # keep the historical full-K input packing.
+        if not (isGfx12(isa) or isGfx117(isa)):
           state['MIInputPerThread'] = state["MatrixInstruction"][2]
 
     else:

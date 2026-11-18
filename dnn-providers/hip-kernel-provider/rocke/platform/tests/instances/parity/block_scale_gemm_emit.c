@@ -83,6 +83,28 @@ static int make_spec(int idx, rocke_block_scale_gemm_spec_t* spec)
         spec->group_n = 1;
         spec->group_k = 160;
         break;
+    /* Configs 6 and 7 share each A and B scale between two rows and two
+     * columns, and have an odd number of K groups (3 and 5), so the kernel
+     * runs both its K-group loops: the one that takes two groups per
+     * iteration, once or twice, and the one that takes the last group. */
+    case 6:
+        spec->M = 32;
+        spec->N = 32;
+        spec->K = 192;
+        spec->mantissa_dtype = "fp8e4m3";
+        spec->group_m = 2;
+        spec->group_n = 2;
+        spec->group_k = 64;
+        break;
+    case 7:
+        spec->M = 48;
+        spec->N = 48;
+        spec->K = 320;
+        spec->mantissa_dtype = "bf8e5m2";
+        spec->group_m = 2;
+        spec->group_n = 2;
+        spec->group_k = 64;
+        break;
     default:
         return -1;
     }

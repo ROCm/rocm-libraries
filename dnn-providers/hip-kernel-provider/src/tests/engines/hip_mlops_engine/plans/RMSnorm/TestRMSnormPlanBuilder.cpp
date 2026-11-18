@@ -13,6 +13,7 @@
 #include "mocks/MockRunnableKernel.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -460,4 +461,122 @@ TEST_F(TestRMSnormPlanBuilder, GetCustomKnobsReturnsEmptyActivation)
 
     auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
+}
+
+// ============================================================================
+// isApplicable - graphs the kernels cannot serve
+// ============================================================================
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+
+// One RMSnorm row of `columns` elements: the kernels' 32-bit INNER_SIZE and element index.
+flatbuffers::FlatBufferBuilder rmsNormRow(int64_t columns, bool fused)
+{
+    const std::vector<int64_t> dims{1, 1, 1, columns};
+    const std::vector<int64_t> strides{columns, columns, columns, 1};
+    return fused ? hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(strides, dims)
+                 : hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims);
+}
+
+TensorAttributesT& tensorNamed(GraphT& graph, const std::string& name)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->name == name)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("No tensor named " + name);
+}
+}
+
+TEST_F(TestRMSnormPlanBuilder, ElementCountAtTheKernelIndexLimit)
+{
+    constexpr int64_t LAST_FITTING = int64_t{UINT32_MAX} - 1;
+    for(const bool fused : {false, true})
+    {
+        SCOPED_TRACE(fused ? "fused activation" : "one node");
+        for(const auto [columns, expected] : {std::pair{LAST_FITTING, true},
+                                              std::pair{int64_t{UINT32_MAX}, false},
+                                              std::pair{(int64_t{1} << 32) + 1, false}})
+        {
+            SCOPED_TRACE(columns);
+            auto builder = rmsNormRow(columns, fused);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                builder.GetBufferPointer(), builder.GetSize());
+            EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), expected);
+        }
+    }
+}
+
+TEST_F(TestRMSnormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
+{
+    // The plan resolves epsilon as a scalar when it is built. The raw backend lets the node name
+    // a uid the graph lacks, or a device tensor that carries no scalar.
+    for(const bool fused : {false, true})
+    {
+        SCOPED_TRACE(fused ? "fused activation" : "one node");
+        const auto base = [fused] {
+            return fused ? hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph()
+                         : hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+        };
+        {
+            auto builder = base();
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                builder.GetBufferPointer(), builder.GetSize());
+            ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+        }
+
+        for(const char* replacement : {"unknown uid", "device tensor"})
+        {
+            SCOPED_TRACE(replacement);
+            auto builder = hipdnn_test_sdk::utilities::mutateGraph(base(), [&](GraphT& graph) {
+                auto* attributes = graph.nodes.at(0)->attributes.AsRMSNormAttributes();
+                attributes->epsilon_tensor_uid = std::string(replacement) == "unknown uid"
+                                                     ? int64_t{9999}
+                                                     : attributes->scale_tensor_uid;
+            });
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                builder.GetBufferPointer(), builder.GetSize());
+            EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+        }
+    }
+}
+
+TEST_F(TestRMSnormPlanBuilder, AcceptsABakedOrRuntimeEpsilon)
+{
+    // A pass-by-value epsilon carries no baked scalar; the plan reads it from the variant pack.
+    for(const bool fused : {false, true})
+    {
+        SCOPED_TRACE(fused ? "fused activation" : "one node");
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            fused ? hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph()
+                  : hipdnn_test_sdk::utilities::createValidRMSNormGraph(),
+            [](GraphT& graph) {
+                auto& epsilon = tensorNamed(graph, "epsilon");
+                epsilon.value.Reset();
+                epsilon.is_runtime_pass_by_value = true;
+            });
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    }
+}
+
+TEST_F(TestRMSnormPlanBuilder, DeclinesAVirtualKernelBuffer)
+{
+    for(const char* name : {"x", "y", "scale"})
+    {
+        SCOPED_TRACE(name);
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            hipdnn_test_sdk::utilities::createValidRMSNormGraph(),
+            [name](GraphT& graph) { tensorNamed(graph, name).virtual_ = true; });
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    }
 }

@@ -64,6 +64,11 @@ std::size_t MockHandle::GetMaxMemoryAllocSize() const
     return std::numeric_limits<std::size_t>::max();
 }
 
+std::size_t MockHandle::GetAvailableMemory() const
+{
+    return std::numeric_limits<std::size_t>::max();
+}
+
 bool MockHandle::CooperativeLaunchSupported() const { return false; }
 
 std::string_view GetBaseDeviceName(std::string_view dev_name)
@@ -94,6 +99,8 @@ Gpu GetGpuType(const std::string& dev_name)
         return Gpu::gfx110X;
     if(miopen::StartsWith(arch, "gfx115"))
         return Gpu::gfx115X;
+    if(miopen::StartsWith(arch, "gfx117"))
+        return Gpu::gfx117X;
     if(miopen::StartsWith(arch, "gfx120"))
         return Gpu::gfx120X;
     if(miopen::StartsWith(arch, "gfx125"))
@@ -143,6 +150,8 @@ const std::multimap<Gpu, DevDescription>& GetAllKnownDevices()
         {Gpu::gfx115X, {"gfx1151", 40, 32}},
         {Gpu::gfx115X, {"gfx1152", 8, 32}},
         {Gpu::gfx115X, {"gfx1153", 2, 32}},
+        {Gpu::gfx117X, {"gfx1170", 16, 32}},
+        {Gpu::gfx117X, {"gfx1171", 16, 32}},
         {Gpu::gfx120X, {"gfx1201", 32, 32}},
         {Gpu::gfx120X, {"gfx1201", 28, 32}},
         {Gpu::gfx125X, {"gfx1250", 32, 32}} // TODO: update when public

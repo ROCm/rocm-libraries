@@ -4,7 +4,7 @@
 ################################################################################
 # Activation-sweep characterization config for gfx942 (Gradient path).
 #
-# Goal: drive the uncovered branches in Tensile/Activation.py (methodology-A
+# Goal: drive the uncovered branches in tensilelite/Activation.py (methodology-A
 # missing ranges 489-617, 639-718, 727-836, 852-936) via the Gradient kernel
 # path which exercises getDGeluModule and getDReluModule with float32
 # ActivationComputeDataType (no SDWA/VOP3P — these are safe to call).

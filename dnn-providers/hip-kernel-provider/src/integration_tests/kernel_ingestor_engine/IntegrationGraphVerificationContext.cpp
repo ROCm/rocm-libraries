@@ -128,7 +128,7 @@ TEST_F(IntegrationGraphVerificationContext, NewGraphCannotBorrowPreviousRegistra
     GraphVerificationContext currentContext(current);
     expectVerificationFailure([&] { verifyGraph(currentContext, 0); });
     // Two initializations per verification call; the cpu parity in initializeBundle holds
-    // only while verifyBuiltGraph seeds the GPU bundle before the CPU one.
+    // only while prepareVerification seeds the GPU bundle before the CPU one.
     EXPECT_EQ(_initializations, 4);
 
     registerValidator(currentContext, currentOutput, 0.0f);

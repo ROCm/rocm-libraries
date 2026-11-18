@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <iostream>
 #include <set>
@@ -54,8 +55,6 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
-
-        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -174,16 +173,18 @@ namespace TensileLite
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
                 // With uniform summation order off, the filter stays
-                // hardwarePredicate && problemPredicate. The extra conjuncts in
+                // hardwarePredicate && problemPredicate, plus device-scalar capability.
+                // The extra conjuncts in
                 // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
                 // real filters, so they stay behind the check.
-                const bool swMatch = problem.getParams().uniformSummationOrder()
+                const bool swMatch = problem.getParams().uniformSummationOrder() != 0
                                          ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
                                                              task,
                                                              hardware,
                                                              *solution,
                                                              problem)
-                                         : (*(solution->problemPredicate))(problem);
+                                         : (*(solution->problemPredicate))(problem)
+                                               && solution->deviceScalarAlphaSupported(problem);
                 const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
@@ -240,14 +241,7 @@ namespace TensileLite
                     }
                 }
             }
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

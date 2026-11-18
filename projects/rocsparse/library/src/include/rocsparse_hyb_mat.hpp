@@ -44,7 +44,11 @@ struct _rocsparse_hyb_mat
     rocsparse_hyb_partition partition = rocsparse_hyb_partition_auto;
 
     // ELL matrix part
-    rocsparse_int  ell_nnz{};
+    // 32-bit copy of ell_nnz (clamped to INT32_MAX), kept at the offset the
+    // struct has always had. External test code reads this layout through a
+    // mirror struct (hipSPARSE testhyb), so the fields up to coo_val must not
+    // move. The library itself uses the 64-bit ell_nnz below.
+    rocsparse_int  ell_nnz_legacy{};
     rocsparse_int  ell_width{};
     rocsparse_int* ell_col_ind{};
     void*          ell_val{};
@@ -56,4 +60,10 @@ struct _rocsparse_hyb_mat
     void*          coo_val{};
 
     rocsparse_datatype data_type_T = rocsparse_datatype_f32_r;
+
+    // ell_nnz holds ell_width * m, which can exceed the range of a 32-bit
+    // integer even for moderately sized matrices (a single dense row pushes
+    // ell_width up). It must be 64-bit to size the ELL allocations safely, and
+    // it is the last member so that the layout above does not change.
+    int64_t ell_nnz{};
 };

@@ -25,7 +25,7 @@
 from collections.abc import Callable
 from typing import Any, Optional
 from test_CustomSchedule import create_base_kernel, update_kernel, ScheduleInfo
-from Tensile.Components.CMSValidator import (
+from tensilelite.Components.CMSValidator import (
     create_unified_timeline, ValidatorPassContext, validate_timeline,
 )
 

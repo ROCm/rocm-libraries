@@ -544,8 +544,7 @@ __device__ __forceinline__ void rpp_hip_interpolate24_bilinear_pkd3(T* srcPtr, u
 
 __device__ __forceinline__ void rpp_hip_interpolate1_nearest_neighbor_load_pln1(uchar* srcPtr,
                                                                                 float* dstPtr) {
-    uint src = *(uint*)srcPtr;
-    *dstPtr = rpp_hip_unpack0(src);
+    *dstPtr = (float)*srcPtr;
 }
 
 // F32 loads for nearest_neighbor interpolation (1 F32 pixel)
@@ -559,8 +558,7 @@ __device__ __forceinline__ void rpp_hip_interpolate1_nearest_neighbor_load_pln1(
 
 __device__ __forceinline__ void rpp_hip_interpolate1_nearest_neighbor_load_pln1(schar* srcPtr,
                                                                                 float* dstPtr) {
-    int src = *(int*)srcPtr;
-    *dstPtr = rpp_hip_unpack0(src);
+    *dstPtr = (float)*srcPtr;
 }
 
 // F16 loads for nearest_neighbor interpolation (1 F16 pixel)
@@ -574,8 +572,7 @@ __device__ __forceinline__ void rpp_hip_interpolate1_nearest_neighbor_load_pln1(
 
 __device__ __forceinline__ void rpp_hip_interpolate3_nearest_neighbor_load_pkd3(uchar* srcPtr,
                                                                                 float3* dstPtr_f3) {
-    uint src = *(uint*)srcPtr;
-    *dstPtr_f3 = make_float3(rpp_hip_unpack0(src), rpp_hip_unpack1(src), rpp_hip_unpack2(src));
+    *dstPtr_f3 = make_float3((float)srcPtr[0], (float)srcPtr[1], (float)srcPtr[2]);
 }
 
 // F32 loads for nearest_neighbor interpolation (3 F32 pixels)
@@ -590,8 +587,7 @@ __device__ __forceinline__ void rpp_hip_interpolate3_nearest_neighbor_load_pkd3(
 
 __device__ __forceinline__ void rpp_hip_interpolate3_nearest_neighbor_load_pkd3(schar* srcPtr,
                                                                                 float3* dstPtr_f3) {
-    int src = *(int*)srcPtr;
-    *dstPtr_f3 = make_float3(rpp_hip_unpack0(src), rpp_hip_unpack1(src), rpp_hip_unpack2(src));
+    *dstPtr_f3 = make_float3((float)srcPtr[0], (float)srcPtr[1], (float)srcPtr[2]);
 }
 
 // F16 loads for nearest_neighbor interpolation (3 F16 pixels)

@@ -69,6 +69,18 @@ count and a carrier width/count. Capacity is checked independently of payload
 size; unused carriers are zero. Carriers may hold integer bits or typed values,
 depending on the instruction ABI.
 
+`register_packing(dtype, count)` builds the dense `FragmentPacking` for `count`
+sub-byte elements in 32-bit registers and refuses a payload that leaves a register
+partly filled. A dtype of 8 or more bits returns `None`: it has an LLVM element
+type, and LLVM packs its vectors into registers itself (a `<4 x half>` occupies
+two registers), so rocke never packs it by hand. A predicate (`i1`) is refused.
+
+`packed_word_range(packing, start, length)` names the registers that hold an
+element range; the range must start and end on a register boundary, so its start
+and length are multiples of 8 elements for 4-bit types and 16 for 6-bit types.
+The C++ engine's twins are `rocke_register_packing` and `rocke_packed_word_range`
+in `cpp/include/rocke/storage.h`, with the same answers and refusal texts.
+
 Host pack/unpack routines process bit patterns only. They do not round, clamp,
 decode floats, or apply scales. Their tests use literal expected bits and
 independent integer arithmetic; numerical tests remain separate.

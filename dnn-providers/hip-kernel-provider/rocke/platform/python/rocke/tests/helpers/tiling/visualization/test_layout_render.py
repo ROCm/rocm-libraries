@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.mma.mma_operation import TileMma
 from rocke.helpers.tiling.visualization import _canvas as cv
 from rocke.helpers.tiling.visualization import layout_render as lr
@@ -19,7 +22,7 @@ from rocke.helpers.tiling import lds_conflict as lc
 
 
 def _mma():
-    return TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+    return TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 
 
 # ---------------------------------------------------------------- primitive-layer invariants
@@ -48,6 +51,7 @@ def test_reg_ticks_pack_and_edge_ticks_anchor():
 
 
 # ---------------------------------------------------------------- view render smoke
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_render_views_writes_all_panels(tmp_path):
     paths = lr.render_views(
         _mma().a_layout,
@@ -62,6 +66,7 @@ def test_render_views_writes_all_panels(tmp_path):
     assert paths and all(os.path.getsize(p) > 0 for p in paths)
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_register_and_logical_components_render(tmp_path):
     mma = _mma()
     rp = lr.RegisterFileComponent(
@@ -73,9 +78,24 @@ def test_register_and_logical_components_render(tmp_path):
     assert os.path.getsize(rp) > 0 and os.path.getsize(lp) > 0
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_mma_tee_renders(tmp_path):
     p = lr.MmaTee.from_mma(_mma()).render(str(tmp_path), name="tee")
     assert os.path.getsize(p) > 0
+
+
+def test_from_mma_labels_and_widths_follow_the_rows_operand_dtypes():
+    # A mixed-format f8f6f4 instruction takes 8-bit A and 4-bit B: the tee labels the inputs with both
+    # IR type names and draws each operand at its own width; C/D is drawn at the result's width.
+    mma = TileMma(
+        target="gfx1250", atom_override="wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1"
+    )
+    tee = lr.MmaTee.from_mma(mma)
+    assert (tee.in_dtype, tee.out_dtype) == ("fp8e4m3/fp4e2m1", "f32")
+    assert (tee.a_dtype_bits, tee.b_dtype_bits, tee.c_dtype_bits) == (8, 4, 32)
+    # Equal A and B dtypes keep the single IR type name (the label used before the per-operand rows).
+    tee = lr.MmaTee.from_mma(_mma())
+    assert (tee.in_dtype, tee.out_dtype) == ("f16", "f32")
 
 
 def test_from_mma_default_renders_canonical_not_the_configured_style():
@@ -90,15 +110,15 @@ def test_from_mma_default_renders_canonical_not_the_configured_style():
     atom = Tiling(atom_shape=(16, 16, 16))
     styled = TileMma(
         (32, 32, 16),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=atom,
         style=InterleavedStyle(),
     )
     canon = TileMma(
-        (32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a", tiling=atom
+        (32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a", tiling=atom
     )  # canonical sibling
     # self-check: the configured a_layout really is NON-canonical, or this test proves nothing.
     assert styled.a_layout != canon.a_desc.layout
@@ -111,6 +131,7 @@ def test_from_mma_default_renders_canonical_not_the_configured_style():
     )  # NOT the configured style
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_logical_view_modes(tmp_path):
     mma = _mma()
     base = dict(dist=mma.a_layout, dims=("M", "K"), row_coord=0, label_coords="logical")
@@ -128,6 +149,7 @@ def test_logical_view_modes(tmp_path):
         assert os.path.getsize(p) > 0
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_render_coalescing_address_space(tmp_path):
     # the ADDRESS-SPACE coalescing view is a PURE consumer of an analysis CoalescingReport (fused + scattered);
     # both a single panel and the two-panel compare must render headless.
@@ -157,6 +179,7 @@ def test_render_coalescing_address_space(tmp_path):
     assert os.path.getsize(p1) > 0 and os.path.getsize(p2) > 0
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_workflow_recipes_render(tmp_path):
     from rocke.helpers.tiling.register_mapper import RegisterMapper
 
@@ -182,6 +205,7 @@ def test_workflow_recipes_render(tmp_path):
     assert all(os.path.getsize(p) > 0 for p in (p1, p2, p3))
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_kloop_operand_strip_traces_end_to_end(tmp_path):
     from rocke.helpers.tiling.register_mapper import RegisterMapper
 
@@ -281,6 +305,7 @@ def test_gate_is_scale_invariant():
         lc.gate({"BC": 1}, {"IDX": 1})
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_pipeline_traces_origin_across_stages(tmp_path):
     from rocke.helpers.tiling.register_mapper import RegisterMapper
 
@@ -332,6 +357,7 @@ def test_pipeline_traces_origin_across_stages(tmp_path):
     assert os.path.getsize(p) > 0
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_lds_bank_view_renders_flow_and_thread(tmp_path):
     from rocke.helpers.tiling.register_mapper import RegisterMapper
 
@@ -360,6 +386,7 @@ def test_lds_conflict_selftest_green():
     assert lc.selftest(lc.GFX90A, verbose=False)
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_ge2_axis_key_rule(tmp_path):
     """The >=2-axis KEY rule: a COMPACT per-thread group whose data spans >1 on >=2 axes (e.g. N0-3 K0-7,
     NOT N0-3 K0) must render unambiguously -- the FIRST such thread is promoted to DETAILED (the key), and a

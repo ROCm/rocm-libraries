@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -264,7 +264,7 @@ void stein_getError(const rocblas_handle handle,
             if(hIfailRes[0][j] != 0)
                 err++;
         }
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         // need to implicitly test eigenvectors due to non-uniqueness of eigenvectors under scaling
 
@@ -280,7 +280,7 @@ void stein_getError(const rocblas_handle handle,
             cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, nn, nn, n, T(1),
                      hZRes[0], ldz, hZRes[0], ldz, T(0), ZZres.data(), nn);
             err = norm_error('F', nn, nn, nn, I.data(), ZZres.data());
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
 
         // for each of the nev eigenvalues w_j, verify that the associated eigenvector is in the
@@ -307,7 +307,7 @@ void stein_getError(const rocblas_handle handle,
         // error is then ||hZ - hZRes|| / ||hZ||
         // using frobenius norm
         err = norm_error('F', n, nn, ldz, hZ[0], hZRes[0]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
     }
     else
     {
@@ -319,7 +319,7 @@ void stein_getError(const rocblas_handle handle,
             if(hIfailRes[0][j] == 0)
                 err++;
         }
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
     }
 }
 
@@ -423,7 +423,7 @@ void testing_stein(Arguments& argus)
     // get arguments
     rocblas_local_handle handle;
     rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int nev = argus.get<rocblas_int>("nev", n < 5 ? n : 5);
+    rocblas_int nev = argus.get<rocblas_int>("nev", std::min(n, 5));
     rocblas_int ldz = argus.get<rocblas_int>("ldz", n);
 
     rocblas_int hot_calls = argus.iters;

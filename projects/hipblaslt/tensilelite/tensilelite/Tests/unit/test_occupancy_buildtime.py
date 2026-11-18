@@ -18,14 +18,14 @@ import pytest
 # explicit declaration the file is silently deselected and reports 0% coverage.
 pytestmark = pytest.mark.unit
 
-from Tensile.OccupancyMeasure import (
+from tensilelite.OccupancyMeasure import (
     compute_occupancy_from_resources,
     compute_occupancy_from_asm_source,
     _arch_caps_for_kernel,
 )
 
 try:
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly as _KWA
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly as _KWA
     _KWA_AVAILABLE = True
 except Exception:
     _KWA_AVAILABLE = False
@@ -201,7 +201,7 @@ class TestComputeOccupancyFromAsmSourceArchCaps:
 
     def test_arch_caps_kwarg_used_when_provided(self):
         """When arch_caps is provided, _arch_caps_for_kernel is NOT called."""
-        from Tensile.OccupancyMeasure import compute_occupancy_from_asm_source
+        from tensilelite.OccupancyMeasure import compute_occupancy_from_asm_source
 
         kernel = {"ISA": [9, 5, 0], "NumThreads": 256}
         asm = self._asm(vgpr=256, sgpr=64, lds=68864)
@@ -219,7 +219,7 @@ class TestComputeOccupancyFromAsmSourceArchCaps:
 
     def test_arch_caps_kwarg_overrides_isa_lookup(self):
         """Mismatched arch_caps changes the result, proving the kwarg is used."""
-        from Tensile.OccupancyMeasure import compute_occupancy_from_asm_source
+        from tensilelite.OccupancyMeasure import compute_occupancy_from_asm_source
 
         # Kernel declared as gfx950 but caps for gfx908 (256 VGPR pool) passed explicitly.
         kernel = {"ISA": [9, 5, 0], "NumThreads": 256}
@@ -234,7 +234,7 @@ class TestComputeOccupancyFromAsmSourceArchCaps:
 
     def test_arch_caps_none_falls_back_to_static_table(self):
         """When arch_caps=None (default), _arch_caps_for_kernel is used."""
-        from Tensile.OccupancyMeasure import compute_occupancy_from_asm_source
+        from tensilelite.OccupancyMeasure import compute_occupancy_from_asm_source
 
         kernel = {"ISA": [9, 4, 2], "NumThreads": 256}
         asm = self._asm(vgpr=256, sgpr=64, lds=65536)
@@ -436,6 +436,7 @@ class _MockMkb:
 
 def _make_max_vgpr_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, sgpr_size=64):
     """Minimal KernelWriterAssembly stub for updateOccupancyFromMaxVgpr tests."""
+    wavefront = 64 if arch_acc_unified else 32
     kw = object.__new__(_KWA)
     kw.states = SimpleNamespace(
         archCaps={
@@ -446,8 +447,14 @@ def _make_max_vgpr_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, s
             # allocates LDS in 1024-byte granules, CDNA in 256-byte ones.
             "LdsGranularity": 256 if arch_acc_unified else 1024,
         },
-        regCaps={"MaxVgpr": 256, "PhysicalMaxSgpr": 800},
-        doubleVgpr=arch_acc_unified,
+        regCaps={"MaxVgpr": 256, "PhysicalMaxVgpr": 512, "PhysicalMaxSgpr": 800},
+        # Same rule as KernelWriter: ArchAccUnifiedRegs or wave32. The gfx11
+        # stand-in is wave32, so it is doubleVgpr too.
+        doubleVgpr=arch_acc_unified or wavefront == 32,
+        # getOccupancy reads version to select the RDNA WGP LDS pool; the
+        # non-unified case above stands in for gfx11.
+        version=(9, 4, 2) if arch_acc_unified else (11, 0, 0),
+        kernel={"WavefrontSize": wavefront},
     )
     kw.vgprPool = _MockPool(vgpr_size)
     kw.agprPool = _MockPool(agpr_size)

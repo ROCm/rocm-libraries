@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -50,8 +51,7 @@ void testing_csrilu02_bad_arg(const Arguments& argus)
     int                    safe_size = 100;
     hipsparseSolvePolicy_t policy    = HIPSPARSE_SOLVE_POLICY_USE_LEVEL;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -187,8 +187,7 @@ void testing_csrilu02(Arguments argus)
     hipsparseSolvePolicy_t policy    = argus.solve_policy;
     std::string            filename  = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -263,8 +262,8 @@ void testing_csrilu02(Arguments argus)
             hipsparseXcsrilu02(handle, m, nnz, descr, dval1, dptr, dcol, info, policy, dbuffer));
 
         int               hposition_1;
-        hipsparseStatus_t pivot_status_1;
-        pivot_status_1 = hipsparseXcsrilu02_zeroPivot(handle, info, &hposition_1);
+        hipsparseStatus_t pivot_status_1 = hipsparseXcsrilu02_zeroPivot(handle, info, &hposition_1);
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_1, hposition_1);
 
         // Pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -276,9 +275,9 @@ void testing_csrilu02(Arguments argus)
             hipsparseXcsrilu02(handle, m, nnz, descr, dval2, dptr, dcol, info, policy, dbuffer));
 
         int               hposition_2;
-        hipsparseStatus_t pivot_status_2;
-        pivot_status_2 = hipsparseXcsrilu02_zeroPivot(handle, info, d_position);
+        hipsparseStatus_t pivot_status_2 = hipsparseXcsrilu02_zeroPivot(handle, info, d_position);
         CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_2, hposition_2);
 
         // Copy output from device to CPU
         std::vector<T> result1(nnz);
@@ -299,17 +298,8 @@ void testing_csrilu02(Arguments argus)
         unit_check_general(1, 1, 1, &position_gold, &hposition_1);
         unit_check_general(1, 1, 1, &position_gold, &hposition_2);
 
-        if(hposition_1 != -1)
+        if(hposition_1 != -1 || hposition_2 != -1)
         {
-            verify_hipsparse_status_zero_pivot(pivot_status_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-            return;
-        }
-
-        if(hposition_2 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(pivot_status_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
             return;
         }
 
@@ -329,6 +319,10 @@ void testing_csrilu02(Arguments argus)
         int number_hot_calls  = argus.iters;
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+
+        // The numeric factorization needs the analysis to have filled `info`.
+        CHECK_HIPSPARSE_ERROR(hipsparseXcsrilu02_analysis(
+            handle, m, nnz, descr, dval1, dptr, dcol, info, policy, dbuffer));
 
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
@@ -354,7 +348,7 @@ void testing_csrilu02(Arguments argus)
             gpu_time_used += (get_time_us() - temp);
         }
 
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        gpu_time_used = gpu_time_used / number_hot_calls;
 
         double gbyte_count = csrilu0_gbyte_count<T>(m, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

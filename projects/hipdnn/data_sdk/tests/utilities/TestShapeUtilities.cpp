@@ -777,6 +777,17 @@ TEST(TestShapeUtils, IsTensorPackedOverlappingStrides)
     EXPECT_FALSE(isTensorPacked(dims, overlappingStrides));
 }
 
+TEST(TestShapeUtils, IsTensorPackedZeroStrideWithMatchingSpan)
+{
+    // count = 4, span = (2-1)*3 + (2-1)*0 + 1 = 4
+    EXPECT_FALSE(isTensorPacked({2, 2}, {3, 0}));
+}
+
+TEST(TestShapeUtils, IsTensorPackedZeroStrideOnUnitExtentAxis)
+{
+    EXPECT_TRUE(isTensorPacked({2, 1, 3}, {3, 0, 1}));
+}
+
 TEST(TestShapeUtils, IsTensorPackedAllOnesShape)
 {
     // Shape with all 1s should be packed

@@ -57,7 +57,7 @@
 # ---
 # name: test_problem_type_predicates
   dict({
-    'count': 29,
+    'count': 30,
     'tags': list([
       'Activation',
       'ActivationComputeType',
@@ -68,13 +68,14 @@
       'BiasSrcWhiteList',
       'DataTypeE',
       'F32XdlMathOp',
-      'FusedGemmA2A',
+      'FusedA2A',
       'GateResidualDataTypeWhiteList',
       'GroupedGemm',
       'HighPrecisionAccumulate',
       'MXBlockA',
       'MXBlockB',
       'OperationIdentifierEqual',
+      'PeerDCheck',
       'Sparse',
       'StridedBatched',
       'SupportDeviceUserArguments',

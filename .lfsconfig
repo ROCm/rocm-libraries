@@ -1,0 +1,2 @@
+[lfs]
+	fetchexclude = projects/hipthreads/examples/sparse-mat-mul/data

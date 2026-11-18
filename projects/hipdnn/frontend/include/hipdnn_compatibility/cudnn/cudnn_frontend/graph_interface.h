@@ -9,11 +9,7 @@
 
 /**
  * @file graph_interface.h
- * @brief cuDNN-shaped graph wrapper for the hipDNN compatibility shim.
- *
- * This header (via the umbrella cudnn_frontend.h) is the supported entry point
- * for the graph API. `detail/graph_wrapper.h` holds the implementation and is
- * not a supported direct include.
+ * @brief cuDNN FE `graph::Graph` for the shim; include via cudnn_frontend.h.
  */
 
 #pragma once

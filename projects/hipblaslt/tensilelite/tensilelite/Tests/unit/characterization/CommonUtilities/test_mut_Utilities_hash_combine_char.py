@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.hash_combine``.
+``tensilelite.Common.Utilities.hash_combine``.
 
 ``hash_combine`` folds an iterable of integers into a single value::
 
@@ -25,7 +25,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 hash_combine = U.hash_combine
 
 pytestmark = pytest.mark.unit

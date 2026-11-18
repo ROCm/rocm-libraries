@@ -30,6 +30,11 @@ Tests:
   function: get_string
   precision: *single_precision
 
+- name: tensile_library_filename
+  category: quick
+  function: tensile_library_filename
+  precision: *single_precision
+
 - name : check_numerics_vector
   category : quick
   function : check_numerics_vector

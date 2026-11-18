@@ -22,9 +22,13 @@
 #
 ################################################################################
 
-from rocisa.enum import DataTypeEnum
-from functools import lru_cache
 import functools
+from functools import lru_cache
+
+from rocisa.enum import DataTypeEnum
+
+from ..Utilities.DataTypes import TYPE_PROPERTIES
+
 
 @lru_cache
 def _is8bitFloat(value):
@@ -50,222 +54,8 @@ class DataType:
     """
 
     properties = [
-        {
-            'enum': DataTypeEnum.Float,
-            'char': 'S',
-            'nameAbbrev': 'f32',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 1,
-            'hip': 'float',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.Double,
-            'char': 'D',
-            'nameAbbrev': 'f64',
-            'miOutTypeNameAbbrev': 'f64',
-            'reg': 2,
-            'hip': 'double',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.ComplexFloat,
-            'char': 'C',
-            'nameAbbrev': 'f32c',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 2,
-            'hip': 'TensileComplexFloat',
-            'isComplex': True,
-        },
-        {
-            'enum': DataTypeEnum.ComplexDouble,
-            'char': 'Z',
-            'nameAbbrev': 'f64c',
-            'miOutTypeNameAbbrev': 'f64',
-            'reg': 4,
-            'hip': 'TensileComplexDouble',
-            'isComplex': True,
-        },
-        {
-            'enum': DataTypeEnum.Half,
-            'char': 'H',
-            'nameAbbrev': 'f16',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.5,
-            'hip': 'tensile_half',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.Int8x4,
-            'char': '4xi8',
-            'nameAbbrev': 'i8',
-            'miOutTypeNameAbbrev': 'i32',
-            'reg': 1,
-            'hip': 'uint32_t',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.Int32,
-            'char': 'I',
-            'nameAbbrev': 'i32',
-            'miOutTypeNameAbbrev': 'NONE', # not supported for MI
-            'reg': 1,
-            'hip': 'int32_t',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.BFloat16,
-            'char': 'B',
-            'nameAbbrev': 'bf16',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.5,
-            'hip': 'tensile_bfloat16',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.Int8,
-            'char': 'I8',
-            'nameAbbrev': 'i8',
-            'miOutTypeNameAbbrev': 'i32',
-            'reg': 0.25,
-            'hip': 'int8_t',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.Int64,
-            'char': 'I64',
-            'nameAbbrev': 'i64',
-            'miOutTypeNameAbbrev': 'NONE', # not supported for MI
-            'reg': 1,
-            'hip': 'int64_t',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.XFloat32,
-            'char': 'X',
-            'nameAbbrev': 'xf32',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 1,
-            'hip': 'ERROR',
-            'isComplex': False,
-        },
-        {   # NANOO E4M3
-            'enum': DataTypeEnum.Float8_fnuz,
-            'char': 'F8N',
-            'nameAbbrev': 'fp8',               # to match v_mfma inst
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'tensile_float8_fnuz',
-            'isComplex': False,
-        },
-        {   # NANOO E5M2
-            'enum': DataTypeEnum.BFloat8_fnuz,
-            'char': 'B8N',
-            'nameAbbrev': 'bf8',               # to match v_mfma inst
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'tensile_bfloat8_fnuz',
-            'isComplex': False,
-        },
-        {   #NANOO
-            'enum': DataTypeEnum.Float8BFloat8_fnuz,
-            'char': 'F8B8N',
-            'nameAbbrev': 'fp8_bf8',               # to match v_mfma
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'ERROR',
-            'isComplex': False,
-        },
-        {   #NANOO
-            'enum': DataTypeEnum.BFloat8Float8_fnuz,
-            'char': 'B8F8N',
-            'nameAbbrev': 'bf8_fp8',               # to match v_mfma
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'ERROR',
-            'isComplex': False,
-        },
-        {   # OCP E4M3
-            'enum': DataTypeEnum.Float8,
-            'char': 'F8',
-            'nameAbbrev': 'fp8',               # to match v_mfma inst
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'tensile_float8',
-            'isComplex': False,
-        },
-        {   # OCP E5M2
-            'enum': DataTypeEnum.BFloat8,
-            'char': 'B8',
-            'nameAbbrev': 'bf8',               # to match v_mfma inst
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'tensile_bfloat8',
-            'isComplex': False,
-        },
-        {   #OCP
-            'enum': DataTypeEnum.Float8BFloat8,
-            'char': 'F8B8',
-            'nameAbbrev': 'fp8_bf8',               # to match v_mfma
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'ERROR',
-            'isComplex': False,
-        },
-        {   #OCP
-            'enum': DataTypeEnum.BFloat8Float8,
-            'char': 'B8F8',
-            'nameAbbrev': 'bf8_fp8',               # to match v_mfma
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'ERROR',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.Float6,
-            'char': 'F6',
-            'nameAbbrev': 'fp6',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.1875,
-            'hip': 'tensile_Float6x16',
-            'isComplex': False
-        },
-        {
-            'enum': DataTypeEnum.BFloat6,
-            'char': 'B6',
-            'nameAbbrev': 'bf6',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.1875,
-            'hip': 'tensile_bFloat6x16',
-            'isComplex': False
-        },
-        {
-            'enum': DataTypeEnum.Float4,
-            'char': 'F4',
-            'nameAbbrev': 'fp4',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.125,
-            'hip': 'tensile_float4x2',
-            'isComplex': False
-        },
-        {
-            'enum': DataTypeEnum.E8,
-            'char': 'E8',
-            'nameAbbrev': 'e8',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'ERROR',
-            'isComplex': False,
-        },
-        {
-            'enum': DataTypeEnum.E5M3,
-            'char': 'E5M3',
-            'nameAbbrev': 'e5m3',
-            'miOutTypeNameAbbrev': 'f32',
-            'reg': 0.25,
-            'hip': 'ERROR',
-            'isComplex': False,
-        },
+        {"enum": getattr(DataTypeEnum, name), **properties._asdict()}
+        for name, properties in TYPE_PROPERTIES.items()
     ]
     lookup = {}
 
@@ -435,6 +225,8 @@ class DataType:
         return self.value == DataTypeEnum.BFloat6.value
     def isFloat4(self):
         return self.value == DataTypeEnum.Float4.value
+    def isInt4(self):
+        return self.value == DataTypeEnum.Int4.value
     def isNone(self):
         return self.value == None
 

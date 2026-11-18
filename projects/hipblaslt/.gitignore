@@ -45,10 +45,13 @@ _static/
 _templates/
 _toc.yml
 Tensile.egg-info
+tensilelite.egg-info
 CMakeCache.txt
 cmake_install.cmake
 *.make
 *.cmake
+# Keep authored CMake modules visible; the build directories above remain ignored.
+!**/cmake/**/*.cmake
 *.o.d
 
 # matrices
