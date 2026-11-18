@@ -22,22 +22,11 @@ def hip_available() -> bool:
     return hipblaslt._core.hip_available()
 
 
-def pytest_collection_modifyitems(config, items):
-    if hipblaslt._core.hip_available():
-        return
-    gpu_items = [item for item in items if "gpu" in item.keywords]
-    if not gpu_items:
+def pytest_runtest_setup(item):
+    if "gpu" not in item.keywords or hipblaslt._core.hip_available():
         return
     if _require_gpu():
-        fail = pytest.mark.usefixtures("_no_device_but_required")
-        for item in gpu_items:
-            item.add_marker(fail)
-    else:
-        skip = pytest.mark.skip(reason="no HIP device visible")
-        for item in gpu_items:
-            item.add_marker(skip)
-
-
-@pytest.fixture
-def _no_device_but_required():
-    pytest.fail("HIPBLASLT_PY_REQUIRE_GPU=1, but no HIP device is visible")
+        pytest.fail(
+            "HIPBLASLT_PY_REQUIRE_GPU=1, but no HIP device is visible", pytrace=False
+        )
+    pytest.skip("no HIP device visible")
