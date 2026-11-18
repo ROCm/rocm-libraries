@@ -1321,6 +1321,33 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
     });
 }
 
+// The destructor frees only the current backend object, so this leaks the other one. The
+// test checks that the destruction itself is safe.
+TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_sync)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        {
+            SCOPED_TRACE("MoveToAcceleratorAsync");
+            auto v = make_local_vector(Backend::Host, a);
+            v->MoveToAcceleratorAsync();
+            rocalution::_rocalution_sync();
+            v.reset();
+        }
+        {
+            SCOPED_TRACE("MoveToHostAsync");
+            auto v = make_local_vector(Backend::Accelerator, a);
+            v->MoveToHostAsync();
+            rocalution::_rocalution_sync();
+            v.reset();
+        }
+        EXPECT_TRUE(logged_check(*make_local_vector(Backend::Accelerator, a)));
+    });
+}
+
 // After the device synchronization and before Sync(), reads through operator[] give the
 // entries, and Sync() then leaves the vector on the target backend. Some of these calls
 // copy synchronously, so a missing device synchronization need not fail here.
