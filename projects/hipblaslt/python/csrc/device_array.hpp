@@ -11,6 +11,9 @@
 namespace hipblaslt_py
 {
 
+    // Bytes per element of a type DeviceArray holds, or 0 for one it doesn't.
+    size_t host_itemsize(hipDataType dtype);
+
     // A block of device memory holding one hipDataType. Every copy checks the host buffer's
     // byte count against it; the dtype checks happen where the host array arrives.
     class DeviceArray

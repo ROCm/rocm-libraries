@@ -22,6 +22,8 @@ from ._dtypes import DTYPE_TO_NUMPY, from_numpy, to_numpy  # noqa: E402
 
 _core.DeviceArray.to_numpy = to_numpy
 
+from ._gemm import gemm  # noqa: E402
+
 __version__ = _core.__version__
 HipblasLtError = _core.HipblasLtError
 HipblasLtLoadError = _loader.HipblasLtLoadError
@@ -34,5 +36,6 @@ __all__ = [
     "HipblasLtLoadWarning",
     "__version__",
     "from_numpy",
+    "gemm",
     "library",
 ]
