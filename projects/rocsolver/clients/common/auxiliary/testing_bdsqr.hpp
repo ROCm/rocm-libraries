@@ -770,7 +770,7 @@ void testing_bdsqr_oob_regression()
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
     std::vector<S> hW(4 * n);
-    cpu_bdsqr(uplo, n, 0, 0, 0, hD[0], hE[0], hV[0], ldv, hU[0], ldu, hC[0], ldc, hW.data(),
+    cpu_bdsqr(uplo, n, nv, nu, nc, hD[0], hE[0], hV[0], ldv, hU[0], ldu, hC[0], ldc, hW.data(),
               hInfo[0]);
 
     EXPECT_EQ(hInfo[0][0], hInfoRes[0][0]);
@@ -859,7 +859,7 @@ void testing_bdsqr_zero_splits_regression()
         CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
         std::vector<S> hW(4 * n);
-        cpu_bdsqr(uplo, n, 0, 0, 0, hD[0], hE[0], hV[0], ldv, hU[0], ldu, hC[0], ldc, hW.data(),
+        cpu_bdsqr(uplo, n, nv, nu, nc, hD[0], hE[0], hV[0], ldv, hU[0], ldu, hC[0], ldc, hW.data(),
                   hInfo[0]);
 
         EXPECT_EQ(hInfo[0][0], hInfoRes[0][0]);
