@@ -33,7 +33,6 @@ namespace rocsparse
                                             bool                      conj_B,
                                             rocsparse_direction       dir,
                                             rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -64,7 +63,6 @@ namespace rocsparse
                                             bool                      conj_B,
                                             rocsparse_direction       dir,
                                             rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -96,7 +94,6 @@ namespace rocsparse
                                               bool                conj_B,
                                               rocsparse_direction dir,
                                               rocsparse_operation trans_A,
-                                              rocsparse_operation trans_B,
                                               J                   mb,
                                               J                   n,
                                               J                   kb,
@@ -128,7 +125,6 @@ namespace rocsparse
                                             bool                      conj_B,
                                             rocsparse_direction       dir,
                                             rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -160,7 +156,6 @@ namespace rocsparse
                                              bool                conj_B,
                                              rocsparse_direction dir,
                                              rocsparse_operation trans_A,
-                                             rocsparse_operation trans_B,
                                              J                   mb,
                                              J                   n,
                                              J                   kb,
@@ -195,7 +190,6 @@ namespace rocsparse
                                                   conj_B,
                                                   dir,
                                                   trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -231,7 +225,6 @@ namespace rocsparse
                                                     conj_B,
                                                     dir,
                                                     trans_A,
-                                                    trans_B,
                                                     mb,
                                                     n,
                                                     kb,
@@ -266,7 +259,6 @@ namespace rocsparse
                                                   conj_B,
                                                   dir,
                                                   trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -301,7 +293,6 @@ namespace rocsparse
                                              bool                conj_B,
                                              rocsparse_direction dir,
                                              rocsparse_operation trans_A,
-                                             rocsparse_operation trans_B,
                                              J                   mb,
                                              J                   n,
                                              J                   kb,
@@ -336,7 +327,6 @@ namespace rocsparse
                                                   conj_B,
                                                   dir,
                                                   trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -372,7 +362,6 @@ namespace rocsparse
                                                     conj_B,
                                                     dir,
                                                     trans_A,
-                                                    trans_B,
                                                     mb,
                                                     n,
                                                     kb,
@@ -407,7 +396,6 @@ namespace rocsparse
                                                   conj_B,
                                                   dir,
                                                   trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -444,7 +432,6 @@ namespace rocsparse
          conj_B,                                   \
          dir,                                      \
          trans_A,                                  \
-         trans_B,                                  \
          mb,                                       \
          n,                                        \
          kb,                                       \
