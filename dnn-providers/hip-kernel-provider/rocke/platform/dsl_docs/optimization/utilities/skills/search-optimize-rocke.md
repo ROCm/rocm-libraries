@@ -65,9 +65,14 @@ space = SearchSpace(
     is_valid=lambda c: spec_is_legal(c),        # geometry + is_valid_spec
 )
 
+artifacts = {}                                  # key -> artifact: compile each config once
+
 def compile_(config, key):                      # -> CompileOutcome
+    if key in artifacts:
+        return CompileOutcome(True, artifact=artifacts[key])
     try:
-        return CompileOutcome(True, artifact=build_and_bind(config))
+        artifacts[key] = build_and_bind(config)
+        return CompileOutcome(True, artifact=artifacts[key])
     except Exception as e:                      # a compile error is a result
         return CompileOutcome(False, detail=f"{type(e).__name__}: {e}")
 
@@ -140,6 +145,40 @@ claiming anything; a smoke set under-samples the variance.
 - Repo and PR text carry relative ratios only, with the numeric-gate statement
   (see `platform/AGENTS.md`, "Public software-performance evidence"). Absolute
   latency and throughput stay in the approved internal record.
+
+## Running efficiently
+
+In the gfx950 GEMM trial, compilation took roughly nine tenths of the search wall
+time and timing about one tenth, so the levers that matter are about compile
+cost, not the number of timed launches:
+
+- **One process, one runtime, many configs.** Load the inputs, the oracle rows
+  and the runtime once and keep them across every evaluation, seed and strategy.
+  A fresh process per config, or the fresh-process attempts that `sweep_bench`
+  uses, belong in the final confirmation only; do not use them to screen.
+- **Compile each config once.** Keep a `key -> artifact` map in the backend (see
+  the recipe) so seeds, strategies and the final confirmation reuse artifacts.
+  Keep only a few loaded modules alive and unload the rest.
+- **Compile in parallel, measure on one thread.** The engine runs backend calls on
+  one worker thread, which is right for GPU state. Parallelize the build: where
+  the family has a bulk builder (`rocke.sweep.build_all_instances(specs,
+  parallel=N)` for the universal GEMM) build the candidate set first, then let
+  the search measure only. Run independent searches (one per shape class or
+  kernel) on separate devices instead of sharing one.
+- **Keep configs that cannot win out of the space.** Put register-file and LDS
+  fits, divisibility, launch contracts and `is_valid_spec` in `is_valid`, so a
+  spilling or unlaunchable config never compiles; set `compile_timeout` and
+  `measure_timeout` for the long tail.
+- **Size the budget deliberately.** A search of tens to a few hundred
+  evaluations is the usual range. Use a few repetitions of a handful of launches
+  per config at search time (the `Fidelity` default is `reps=20`; lower it), and
+  spend the interleaved confirmation rounds only on the finalists.
+- **Do not enumerate a large space.** Use `exhaustive` only when the space is no
+  larger than the budget; otherwise warm start and search.
+- **Resume instead of restarting.** `checkpoint=` and `resume=` continue a split
+  run, and `cache_path=` reuses recorded measurements for a repeated search.
+- **Time on an idle device.** A shared or busy GPU raises both the noise and the
+  number of rounds a paired confirmation needs.
 
 ## Shipping
 

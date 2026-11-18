@@ -38,6 +38,11 @@ For the specific shape you are optimizing:
    against an fp32 reference, then time the survivors against the baseline you
    must beat. The autotuner funnel ([§12 Autotune](#12-autotuning-strategy)) is built for
    exactly this.
+   When the legal product is far larger than a practical sweep (millions of
+   configs), do not enumerate it: search it with the engine, warm-started from
+   the dispatcher pick (see [Search with lookback](#search-with-lookback-when-single-moves-stall)).
+   Exhaustive stays the right choice when the space is no larger than the
+   evaluation budget.
 3. **Only THEN enter the optimization loops below.** If the swept ceiling
    already meets the target you are done — and you have probably found that the
    production heuristic was mis-routing (turn the swept winner into a tuned
