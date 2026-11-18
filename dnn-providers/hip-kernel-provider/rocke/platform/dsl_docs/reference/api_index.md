@@ -186,6 +186,7 @@ SuperTileSwizzleResult
 chiplet_aware_super_tile, chiplet_aware_super_tile_dynamic
 chiplet_transform_chunked, chiplet_transform_chunked_dynamic, chiplet_transform_chunked_runtime
 super_tile_swizzle, super_tile_swizzle_dynamic
+xcd_remap, xcd_remap_plane
 
 # Autotune (helpers/autotune.py)
 Autotuner, AutotuneConfig, AutotuneKey, AutotuneResult
