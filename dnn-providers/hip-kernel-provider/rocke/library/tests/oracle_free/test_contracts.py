@@ -1246,6 +1246,7 @@ _SKIP_CALLS = frozenset({"skip", "skipif", "importorskip", "xfail"})
 _GPU_LANES = (
     ("test_analytical_dense.py", "QUICK_SUBJECT_CASES"),
     ("test_permutation_dense.py", "PERMUTATION_SUBJECT_CASES"),
+    ("test_value_shift_dense.py", "VALUE_SHIFT_SUBJECT_CASES"),
 )
 _GPU_LANE_MODULES = tuple(module for module, _ in _GPU_LANES)
 
@@ -1355,10 +1356,17 @@ package = config["package"]
 importlib.import_module(package + "._analytical")
 importlib.import_module(package + "._permutation")
 importlib.import_module(package + "._permutation_path")
+importlib.import_module(package + "._value_shift")
+importlib.import_module(package + "._value_shift_path")
 subject = importlib.import_module(package + "._dense_subject")
 importlib.import_module(package + ".test_analytical_dense")
 importlib.import_module(package + ".test_permutation_dense")
-for arch, case in (*subject.QUICK_SUBJECT_CASES, *subject.PERMUTATION_SUBJECT_CASES):
+importlib.import_module(package + ".test_value_shift_dense")
+for arch, case in (
+    *subject.QUICK_SUBJECT_CASES,
+    *subject.PERMUTATION_SUBJECT_CASES,
+    *subject.VALUE_SHIFT_SUBJECT_CASES,
+):
     subject.resolve_dense_subject(arch, case)
     importlib.import_module(subject.DENSE_SUBJECTS[arch].runner_module)
 loaded = sorted(name for name in sys.modules if name.split(".")[0] == "torch")
