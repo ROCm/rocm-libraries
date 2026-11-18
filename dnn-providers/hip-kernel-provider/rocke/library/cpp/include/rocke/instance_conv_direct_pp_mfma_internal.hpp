@@ -78,21 +78,26 @@ struct PpCtx
     V lane, wave_k, wave_g, k0, C, K, c0, c2, oob, w_rsrc;
     V w_bufs[2], w_addr[2];
     std::function<V(V, V)> lds_at;
-    /* Lane values a PpWeights computed and the pipeline reuses: l_row,
-     * l_gran, lane_c (dma_geometry), lane_hi, l16 (a_geometry). */
-    std::map<std::string, V> shared;
+    /* Lane values a PpWeights computed and the pipeline reuses instead of
+     * emitting its own (NULL: not computed): l_row, l_gran, lane_c
+     * (dma_geometry; l_row and l_gran go together), l16 (a_geometry). */
+    V l_row = NULL; /* lane // 8 */
+    V l_gran = NULL; /* (lane % 8) ^ l_row */
+    V lane_c = NULL; /* l_gran * 8 */
+    V l16 = NULL; /* lane % 16 */
 };
 
 /* The family half of a ping-pong kernel (PpWeights in the Python builder). */
 struct PpWeights
 {
     virtual ~PpWeights() = default;
-    /* The rank-0 weight DMA geometry; may set shared l_row, l_gran, lane_c. */
+    /* The rank-0 weight DMA geometry; may set l_row, l_gran, lane_c. */
     virtual void dma_geometry(PpCtx& c) = 0;
     /* DMA the weights of tap for the chunk at c_base into buffer buf. */
     virtual void issue(PpCtx& c, int buf, int tap, V c_base) = 0;
-    /* The A read geometry; must set shared lane_hi, may set l16. */
-    virtual void a_geometry(PpCtx& c) = 0;
+    /* The A read geometry; returns lane_hi (lane // 16, NULL on a builder
+     * error), may set l16. */
+    virtual V a_geometry(PpCtx& c) = 0;
     /* A fragment kf of 32-channel half part from buffer buf. */
     virtual V read_a(PpCtx& c, int buf, int kf, int part) = 0;
 };

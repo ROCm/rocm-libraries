@@ -71,9 +71,9 @@ struct FwdWeights : rocke_pp::PpWeights
             wp.lds_off = e.muli(q, 1024);
             w_pieces.push_back(wp);
         }
-        c.shared["l_row"] = l_row;
-        c.shared["l_gran"] = l_gran;
-        c.shared["lane_c"] = w_c;
+        c.l_row = l_row;
+        c.l_gran = l_gran;
+        c.lane_c = w_c;
     }
 
     void issue(rocke_pp::PpCtx& c, int buf, int tap, V c_base) override
@@ -93,7 +93,7 @@ struct FwdWeights : rocke_pp::PpWeights
         }
     }
 
-    void a_geometry(rocke_pp::PpCtx& c) override
+    V a_geometry(rocke_pp::PpCtx& c) override
     {
         /* A (weights): row k = wave_k * WK + kf * 16 + lane % 16, granule
          * part * 4 + lane / 16 at slot granule ^ (k % 8). */
@@ -116,8 +116,8 @@ struct FwdWeights : rocke_pp::PpWeights
                 a_idx[{kf, part}] = e.add(mk, e.muli(slot, rocke_pp::kGran));
             }
         }
-        c.shared["lane_hi"] = lhi;
-        c.shared["l16"] = l16;
+        c.l16 = l16;
+        return lhi;
     }
 
     V read_a(rocke_pp::PpCtx& c, int buf, int kf, int part) override

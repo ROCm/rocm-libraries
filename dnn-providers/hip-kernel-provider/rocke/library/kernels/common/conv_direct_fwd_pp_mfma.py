@@ -101,7 +101,7 @@ class _FwdWeights(PpWeights):
             off = b.add(b.mul(k_glob, taps_c), w_c)
             self.w_pieces.append((off, b.cmp_lt(k_glob, ctx.K), b.mul(q, ci(1024))))
         self.w_c = w_c
-        ctx.shared.update(l_row=l_row, l_gran=l_gran, lane_c=w_c)
+        ctx.l_row, ctx.l_gran, ctx.lane_c = l_row, l_gran, w_c
 
     def issue(self, ctx: PpCtx, buf: int, tap: int, c_base: Value) -> None:
         """DMA the weights of ``tap`` for channels ``c_base ..`` into buffer
@@ -117,7 +117,7 @@ class _FwdWeights(PpWeights):
                 ctx.w_rsrc, ctx.lds_at(ctx.w_addr[buf], lds_off), voff, ctx.c0, 4
             )
 
-    def a_geometry(self, ctx: PpCtx) -> None:
+    def a_geometry(self, ctx: PpCtx) -> Value:
         # A (weights): row k = wave_k * wave_k + kf * 16 + lane % 16, granule
         # part * 4 + lane / 16 -> slot granule ^ (k % 8).
         b, ci = ctx.b, ctx.ci
@@ -133,7 +133,8 @@ class _FwdWeights(PpWeights):
                 self.a_idx[(kf, part)] = b.add(
                     b.mul(k_loc, ci(CK)), b.mul(slot, ci(GRAN))
                 )
-        ctx.shared.update(lane_hi=lhi, l16=l16)
+        ctx.l16 = l16
+        return lhi
 
     def read_a(self, ctx: PpCtx, buf: int, kf: int, part: int) -> Value:
         return ctx.b.smem_load_vN(

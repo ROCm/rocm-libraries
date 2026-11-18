@@ -437,17 +437,17 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
 
     /* ---- rank 1: input DMA geometry ---- */
     V l_row, l_gran;
-    if(ctx.shared.count("l_row"))
+    if(ctx.l_row != NULL && ctx.l_gran != NULL)
     {
-        l_row = ctx.shared["l_row"];
-        l_gran = ctx.shared["l_gran"];
+        l_row = ctx.l_row;
+        l_gran = ctx.l_gran;
     }
     else
     {
         l_row = e.divi(lane, 8);
         l_gran = e.bxor(e.modi(lane, 8), l_row);
     }
-    V lane_c = ctx.shared.count("lane_c") ? ctx.shared["lane_c"] : NULL;
+    V lane_c = ctx.lane_c;
     V ih0 = e.subi(oh0, PAD);
     V iw0 = e.subi(ow0, PAD);
     std::set<std::pair<int, int>> kinds;
@@ -509,13 +509,12 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
     };
 
     /* ---- fragment reads ---- */
-    weights.a_geometry(ctx);
-    if(!rocke_ir_builder_ok(b) || !ctx.shared.count("lane_hi"))
+    V lane_hi = weights.a_geometry(ctx);
+    if(!rocke_ir_builder_ok(b) || lane_hi == NULL)
     {
         return NULL;
     }
-    V lane_hi = ctx.shared["lane_hi"];
-    V l16 = ctx.shared.count("l16") ? ctx.shared["l16"] : e.modi(lane, 16);
+    V l16 = ctx.l16 != NULL ? ctx.l16 : e.modi(lane, 16);
     std::map<std::pair<int, int>, V> b_lane;
     for(int s = 0; s < KW; ++s)
     {

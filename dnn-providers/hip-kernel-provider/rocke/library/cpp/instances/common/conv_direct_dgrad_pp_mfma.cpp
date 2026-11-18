@@ -114,7 +114,7 @@ struct DgradWeights : rocke_pp::PpWeights
         }
     }
 
-    void a_geometry(rocke_pp::PpCtx& c) override
+    V a_geometry(rocke_pp::PpCtx& c) override
     {
         Em& e = c.e;
         const int BK = c.spec.block_k;
@@ -145,7 +145,7 @@ struct DgradWeights : rocke_pp::PpWeights
                 }
             }
         }
-        c.shared["lane_hi"] = tb;
+        return tb;
     }
 
     V read_a(rocke_pp::PpCtx& c, int buf, int kf, int part) override
