@@ -50,6 +50,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <string>
 #include <utility>
 
 // The rocsparse_Xcsxsldu_* entry points are defined (extern "C") in the csxsldu
@@ -1103,29 +1104,44 @@ namespace
     // ------------------------------------------------------------------
 
     // Descriptor creation, then analysis and compute; returns the first status that is not
-    // success (an unsupported conversion may be rejected by any of the calls).
+    // success (an unsupported conversion may be rejected by any of the calls). If
+    // failed_call is set, it receives the name and stage of the call that returned that
+    // status, or an empty string on success.
     rocsparse_status sparse_to_sparse(rocsparse_handle            handle,
                                       rocsparse_const_spmat_descr src,
                                       rocsparse_spmat_descr       dst,
-                                      bool                        permissive = false)
+                                      bool                        permissive  = false,
+                                      std::string*                failed_call = nullptr)
     {
         S2sDescr         s2s;
-        rocsparse_status st = rocsparse_create_sparse_to_sparse_descr(
+        std::string      call = "rocsparse_create_sparse_to_sparse_descr";
+        rocsparse_status st   = rocsparse_create_sparse_to_sparse_descr(
             &s2s, src, dst, rocsparse_sparse_to_sparse_alg_default);
         if(st == st_ok && permissive)
-            st = rocsparse_sparse_to_sparse_permissive(s2s);
+        {
+            call = "rocsparse_sparse_to_sparse_permissive";
+            st   = rocsparse_sparse_to_sparse_permissive(s2s);
+        }
         for(auto stage :
             {rocsparse_sparse_to_sparse_stage_analysis, rocsparse_sparse_to_sparse_stage_compute})
         {
+            const std::string stage_name
+                = stage == rocsparse_sparse_to_sparse_stage_analysis ? "(analysis)" : "(compute)";
             size_t size = 0;
             if(st == st_ok)
-                st = rocsparse_sparse_to_sparse_buffer_size(handle, s2s, src, dst, stage, &size);
+            {
+                call = "rocsparse_sparse_to_sparse_buffer_size" + stage_name;
+                st   = rocsparse_sparse_to_sparse_buffer_size(handle, s2s, src, dst, stage, &size);
+            }
             if(st != st_ok)
                 break;
             DevBuf<char> buffer(size);
-            st = rocsparse_sparse_to_sparse(handle, s2s, src, dst, stage, size, buffer);
+            call = "rocsparse_sparse_to_sparse" + stage_name;
+            st   = rocsparse_sparse_to_sparse(handle, s2s, src, dst, stage, size, buffer);
         }
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        if(failed_call != nullptr)
+            *failed_call = (st == st_ok) ? std::string() : call;
         return st;
     }
 
@@ -1620,7 +1636,10 @@ namespace
     // value type pair is rejected when both value arrays are set, including when
     // nnz is zero. CSR -> CSC, CSC -> CSR and BSR -> CSR only check the data types
     // when both matrices have value arrays, so they still convert a matrix that
-    // has none.
+    // has none. The permissive conversions go through an intermediate CSR matrix
+    // that has no value array when nnz is zero; they check the pair of user value
+    // types in the compute stage: a COO or COO AoS target needs a conversion
+    // between them, a CSC, ELL or BSR target needs the same data type.
     TEST_F(ConvInternal, SparseToSparseMixedDatatypesEmpty)
     {
         Silence                    silence;
@@ -1631,15 +1650,22 @@ namespace
         struct Case
         {
             rocsparse_format sf, tf;
+            bool             permissive;
         };
-        const Case cases[] = {{rocsparse_format_csr, rocsparse_format_csr},
-                              {rocsparse_format_csr, rocsparse_format_coo},
-                              {rocsparse_format_coo, rocsparse_format_csr},
-                              {rocsparse_format_csr, rocsparse_format_coo_aos},
-                              {rocsparse_format_coo_aos, rocsparse_format_csr},
-                              {rocsparse_format_csr, rocsparse_format_csc},
-                              {rocsparse_format_csc, rocsparse_format_csr},
-                              {rocsparse_format_bsr, rocsparse_format_csr}};
+        const auto coo     = rocsparse_format_coo;
+        const auto coo_aos = rocsparse_format_coo_aos;
+        const auto csr     = rocsparse_format_csr;
+        const auto csc     = rocsparse_format_csc;
+        const auto ell     = rocsparse_format_ell;
+        const auto bsr     = rocsparse_format_bsr;
+        const Case cases[] = {
+            {csr, csr, false},     {csr, coo, false},    {coo, csr, false}, {csr, coo_aos, false},
+            {coo_aos, csr, false}, {csr, csc, false},    {csc, csr, false}, {bsr, csr, false},
+            {coo, csc, true},      {coo, ell, true},     {coo, bsr, true},  {coo_aos, csc, true},
+            {coo_aos, ell, true},  {coo_aos, bsr, true}, {csc, coo, true},  {csc, coo_aos, true},
+            {csc, ell, true},      {csc, bsr, true},     {ell, coo, true},  {ell, coo_aos, true},
+            {ell, csc, true},      {ell, bsr, true},     {bsr, coo, true},  {bsr, coo_aos, true},
+            {bsr, csc, true},      {bsr, ell, true}};
         const auto has_ptr = [](rocsparse_format f) {
             return f == rocsparse_format_csr || f == rocsparse_format_csc
                    || f == rocsparse_format_bsr;
@@ -1668,13 +1694,20 @@ namespace
                                      t_idx,
                                      values ? t_val.get() : nullptr),
                           st_ok);
-                if(values)
+                std::string failed_call;
+                // The CSR -> ELL and CSR -> BSR conversions compare the data types even
+                // when the matrices have no value arrays.
+                if(values || c.tf == ell || c.tf == bsr)
                 {
-                    EXPECT_EQ(sparse_to_sparse(handle, source, target),
+                    EXPECT_EQ(sparse_to_sparse(handle, source, target, c.permissive, &failed_call),
                               rocsparse_status_not_implemented);
+                    if(c.permissive)
+                        EXPECT_EQ(failed_call, "rocsparse_sparse_to_sparse(compute)");
                     continue;
                 }
-                EXPECT_EQ(sparse_to_sparse(handle, source, target), st_ok);
+                EXPECT_EQ(sparse_to_sparse(handle, source, target, c.permissive, &failed_call),
+                          st_ok)
+                    << failed_call;
                 if(has_ptr(c.tf))
                     EXPECT_EQ(t_ptr.read(), zeros);
             }

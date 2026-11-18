@@ -138,10 +138,14 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *
 *  A conversion that writes values returns \ref rocsparse_status_not_implemented for an
 *  unsupported data type pair even when the matrix has zero nonzeros, if both value arrays
-*  are set. The CSR to CSC and CSC to CSR conversions compare data types only when both
-*  value arrays are set, and otherwise dispatch on the source data type. BSR to CSR compares
-*  data types only when both value arrays are set and dispatches on the target data type. A
-*  dispatched type that the routine does not implement still returns an error.
+*  are set. This includes the permissive conversions, which check the data types of
+*  \p source and \p target in the \ref rocsparse_sparse_to_sparse_stage_compute stage: a
+*  COO or COO AoS target needs a supported conversion between them, and a CSC, ELL or BSR
+*  target needs the same data type. The CSR to CSC and CSC to CSR conversions compare data
+*  types only when both value arrays are set, and otherwise dispatch on the source data
+*  type. BSR to CSR compares data types only when both value arrays are set and dispatches
+*  on the target data type. A dispatched type that the routine does not implement still
+*  returns an error.
 *
 *  Conversions to a single-precision type round each value (each real and imaginary part) to
 *  nearest. Values that overflow single precision become infinity of the same sign, NaN is

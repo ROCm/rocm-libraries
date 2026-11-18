@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_sparse_to_csr_to_sparse.hpp"
+#include "rocsparse_convert_array.hpp"
 #include "rocsparse_internal_spmat_print.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -385,6 +386,42 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
     //
     case _rocsparse_sparse_to_sparse_descr::stage_compute:
     {
+        //
+        // The intermediate matrix has no value array when it has no nonzeros, and the
+        // conversion into the target then skips its data type check. Check the user value
+        // types here, so the result does not depend on the number of nonzeros.
+        //
+        if(source_->const_val_data != nullptr && target_->val_data != nullptr
+           && source_->data_type != target_->data_type)
+        {
+            switch(target_->format)
+            {
+            case rocsparse_format_coo:
+            case rocsparse_format_coo_aos:
+            {
+                // With zero items, convert_array only checks that the pair is supported.
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle_,
+                                                                   0,
+                                                                   target_->data_type,
+                                                                   target_->val_data,
+                                                                   source_->data_type,
+                                                                   source_->const_val_data));
+                break;
+            }
+            case rocsparse_format_csr:
+            case rocsparse_format_csc:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            case rocsparse_format_bsr:
+            case rocsparse_format_sell:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_not_implemented,
+                    "the conversion into this format requires the same data type");
+            }
+            }
+        }
+
         rocsparse_spmat_descr intermediate = descr_->m_intermediate;
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse_sparse_to_sparse(handle_,
