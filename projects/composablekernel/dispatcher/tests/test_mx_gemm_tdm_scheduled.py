@@ -80,6 +80,28 @@ class TestTuning(unittest.TestCase):
         self.assertNotEqual(reason(2147482336), "k_long")
         self.assertEqual(reason(2147482368), "k_long")
 
+    def test_k_tail_full(self):
+        # A K tail has fewer K steps than a tile: K mod tile_k at most tile_k - 128.
+        tile = {**TILE, "tile_m": 128, "tile_n": 128, "tile_k": 256, "warp_tile_m": 16}
+        t = {"split_b_lds_read": False}
+
+        def reason(K, tile_k=256):
+            return sched.spec_from_tile(
+                {**tile, "tile_k": tile_k},
+                t,
+                a_dtype="fp8",
+                out_dtype="fp16",
+                M=1024,
+                N=1024,
+                K=K,
+            ).validate()
+
+        self.assertEqual(reason(2048 + 160), "k_tail_full")
+        self.assertEqual(reason(2048 + 224), "k_tail_full")
+        self.assertEqual(reason(2048 + 96), "ok")
+        self.assertEqual(reason(2048), "ok")
+        self.assertEqual(reason(1024 + 32, tile_k=128), "k_tail_full")
+
     def test_cpp_spelling(self):
         t = {
             "cluster_dim": [2, 2],

@@ -36,6 +36,7 @@ enum class MxTdmScheduledReason : int
     ScaleSpan,
     KShort,
     KLong,
+    KTailFull,
     SplitBRead,
     Gl2Distance,
     ClusterDim,
@@ -68,6 +69,7 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_code(MxTdmSche
     case MxTdmScheduledReason::ScaleSpan: return "scale_span";
     case MxTdmScheduledReason::KShort: return "k_short";
     case MxTdmScheduledReason::KLong: return "k_long";
+    case MxTdmScheduledReason::KTailFull: return "k_tail_full";
     case MxTdmScheduledReason::SplitBRead: return "split_b_read";
     case MxTdmScheduledReason::Gl2Distance: return "gl2_distance";
     case MxTdmScheduledReason::ClusterDim: return "cluster_dim";
@@ -108,6 +110,9 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
     case MxTdmScheduledReason::KLong:
         return "K plus the K the loads look ahead (max(gl2_prefetch_distance, 2) + 1 tiles) must "
                "fit in i32";
+    case MxTdmScheduledReason::KTailFull:
+        return "K mod tile_k must be at most tile_k - 128: no instance of this tile_k runs a "
+               "longer K tail";
     case MxTdmScheduledReason::SplitBRead:
         return "SplitBLdsRead needs PrefetchLdsRead and an even N wave repeat";
     case MxTdmScheduledReason::Gl2Distance:

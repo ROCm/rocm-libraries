@@ -276,4 +276,22 @@ TEST(MxGemmTdmScheduledHost, KLimit)
     EXPECT_STREQ(Pipe::GetUnsupportedReason(32, 32, 2147482368), k_long);
 }
 
+// An instance's K tail has at most tile_k / 128 - 1 K steps, so no instance runs a K whose
+// remainder mod tile_k is above tile_k - 128.
+TEST(MxGemmTdmScheduledHost, KTailFull)
+{
+    using Policy       = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false>;
+    const auto* full   = ck_tile::mx_tdm_scheduled_reason_message(MxTdmScheduledReason::KTailFull);
+    const auto is_full = [&](const char* why) { return why && std::string(why) == full; };
+    using Tile256 =
+        PipelineOf<ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>, Policy>;
+    EXPECT_TRUE(is_full(Tile256::GetUnsupportedReason(1024, 1024, 2048 + 160)));
+    EXPECT_TRUE(is_full(Tile256::GetUnsupportedReason(1024, 1024, 2048 + 224)));
+    EXPECT_FALSE(is_full(Tile256::GetUnsupportedReason(1024, 1024, 2048 + 96)));
+    EXPECT_EQ(Tile256::GetUnsupportedReason(1024, 1024, 2048), nullptr);
+    using Tile128 =
+        PipelineOf<ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 128, 2, 2, 16>, Policy>;
+    EXPECT_TRUE(is_full(Tile128::GetUnsupportedReason(1024, 1024, 1024 + 32)));
+}
+
 } // namespace

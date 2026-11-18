@@ -76,6 +76,7 @@ REASONS = (
     "scale_span",
     "k_short",
     "k_long",
+    "k_tail_full",
     "split_b_read",
     "gl2_distance",
     "cluster_dim",
@@ -561,6 +562,9 @@ class MxTdmScheduledSpec:
             lookahead = (max(self.gl2_prefetch_distance, 2) + 1) * self.tile_k
             if self.K > I32_SPAN - 1 - lookahead:
                 return "k_long"
+            # An instance's K tail has fewer K steps than a tile (tail_steps < k_steps).
+            if self.K % self.tile_k > self.tile_k - ATOM_K:
+                return "k_tail_full"
         if self.split_b_lds_read and (not self.prefetch_lds_read or rn % 2):
             return "split_b_read"
         if self.gl2_prefetch_distance != 0 and not 2 <= self.gl2_prefetch_distance <= 8:

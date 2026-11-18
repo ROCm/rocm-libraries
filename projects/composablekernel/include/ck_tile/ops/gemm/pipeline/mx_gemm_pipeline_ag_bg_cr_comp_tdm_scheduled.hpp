@@ -307,6 +307,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             reason = R::KShort;
         else if(long_index_t{K} > numeric<index_t>::max() - kKLookahead)
             reason = R::KLong;
+        else if(K % kTileK > kTileK - Policy::kAtomK)
+            reason = R::KTailFull;
         else if(integer_divide_ceil(N, kTileN) % kClusterX ||
                 integer_divide_ceil(M, kTileM) % kClusterY)
             reason = R::ClusterGrid;
