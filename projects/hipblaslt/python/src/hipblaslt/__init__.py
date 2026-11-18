@@ -18,15 +18,21 @@ from . import _core  # noqa: E402 - libhipblaslt must be preloaded first
 
 _loader.check_after_import(library, _core)
 
+from ._dtypes import DTYPE_TO_NUMPY, from_numpy, to_numpy  # noqa: E402
+
+_core.DeviceArray.to_numpy = to_numpy
+
 __version__ = _core.__version__
 HipblasLtError = _core.HipblasLtError
 HipblasLtLoadError = _loader.HipblasLtLoadError
 HipblasLtLoadWarning = _loader.HipblasLtLoadWarning
 
 __all__ = [
+    "DTYPE_TO_NUMPY",
     "HipblasLtError",
     "HipblasLtLoadError",
     "HipblasLtLoadWarning",
     "__version__",
+    "from_numpy",
     "library",
 ]
