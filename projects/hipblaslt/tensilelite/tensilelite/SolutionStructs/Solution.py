@@ -4591,8 +4591,8 @@ class Solution(collections.abc.Mapping):
     # audited configs -- exactly 40 both times. Anything in 29..52 reproduces both
     # bounds, so there is roughly a fifth of a k-tile of margin either side.
     storeOverhead = 40
-    # A NonEdge store through the TDM block holds one more VGPR, the staged tile's base. Every
-    # non-zero TDMStoreInst takes the NonEdge path since the levels collapsed to 0/1.
+    # A NonEdge store through the TDM block holds one more VGPR, the staged tile's base, and
+    # TDMStoreInst on takes the NonEdge path.
     if state.get("TDMStoreInst", 0):
       storeOverhead += 1
     slack = (isaInfoMap[isa].regCaps["MaxVgpr"] - valuC
