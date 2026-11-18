@@ -369,6 +369,19 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
     return predict_workgroup_mapping_cdna5(
         problem, hardware, config, grid_m, grid_n, splitting_factor);
 
+  // A TensileLite kernel without StreamK launches with its own mapping, as
+  // ContractionSolution::calculateAutoWGM picks it: the fixed WorkGroupMapping, or
+  // ceil(sqrt(N_CU / NUM_XCD)) for WGM 0.  Only a StreamK auto mapping is re-picked per problem.
+  if (config.has_tensile_params() && config.stream_k == 0) {
+    const size_t num_xcd = std::max<size_t>(hardware.NUM_XCD, 1);
+    const int xcc        = tparams(config).workgroup_mapping_xcc;
+    const int wgm        = (config.workgroup_mapping != 0)
+                               ? config.workgroup_mapping
+                               : static_cast<int>(std::ceil(
+                                     std::sqrt(static_cast<double>(hardware.N_CU / num_xcd))));
+    return {0, 0, (xcc == -1) ? num_xcd : static_cast<size_t>(std::max(xcc, 0)), wgm};
+  }
+
   // Extract parameters
   const size_t batch = problem.batch;
 

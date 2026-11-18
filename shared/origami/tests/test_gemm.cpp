@@ -27,6 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cmath>
 #include <limits>
 #include "common.hpp"
 
@@ -3366,4 +3367,68 @@ TEST_CASE("GEMM: gfx1250 ranking prices the WGM the host launches", "[gemm][gfx1
     }
   }
   REQUIRE(discriminates);
+}
+
+// ---------------------------------------------------------------------------------------
+// A TensileLite kernel without StreamK launches with its own WorkGroupMapping
+// (ContractionSolution::calculateAutoWGM); only a StreamK auto mapping is picked per problem.
+// ---------------------------------------------------------------------------------------
+namespace {
+// bf16 TN MT128x112x32 as shipped for gfx1151.
+origami::config_t fixed_wgm_config(int wgm, int wgm_xcc, int stream_k) {
+  origami::config_t c;
+  c.mt                = {128, 112, 32};
+  c.mi                = {16, 16, 16};
+  c.occupancy         = 2;
+  c.workgroup_mapping = wgm;
+  c.stream_k          = stream_k;
+  c.grvw_a            = 8;
+  c.grvw_b            = 4;
+  origami::tensile_params_t t;
+  t.wavefront_size        = 32;
+  t.wave_group_m          = 4;
+  t.wave_group_n          = 1;
+  t.prefetch_global_read  = 2;
+  t.prefetch_local_read   = 0;
+  t.workgroup_mapping_xcc = wgm_xcc;
+  t.source_swap           = true;
+  c.backend               = t;
+  return c;
+}
+}  // namespace
+
+TEST_CASE("GEMM: a kernel without StreamK is modeled with its own workgroup mapping",
+          "[gemm][wgm]") {
+  using arch_t       = origami::hardware_t::architecture_t;
+  const auto problem = make_problem(16384, 779, 5376);  // 128 x 7 tiles of 128 x 112
+
+  // One L2 domain.
+  const auto gfx1151 = origami::hardware_t::get_hardware_for_arch(
+      arch_t::gfx1151, 40, 65536, 512 * 1024, 2 << 20, 2100000);
+  REQUIRE(gfx1151.NUM_XCD == 1);
+  auto mapping = [&](const origami::hardware_t& hw, int wgm, int wgm_xcc, int stream_k) {
+    return origami::gemm::context_t(problem, hw, fixed_wgm_config(wgm, wgm_xcc, stream_k)).wgm;
+  };
+  REQUIRE(mapping(gfx1151, 8, 1, 0).wgm == 8);
+  REQUIRE(mapping(gfx1151, -4, 1, 0).wgm == -4);
+  REQUIRE(mapping(gfx1151, 0, 1, 0).wgm == 7);  // ceil(sqrt(40 / 1))
+  REQUIRE(mapping(gfx1151, 8, 1, 0).wgmxcc == 1);
+  // A StreamK mapping is still predicted per problem.
+  REQUIRE(mapping(gfx1151, 8, 1, 5).wgm == mapping(gfx1151, 1, 1, 5).wgm);
+
+  // With WGM 8 seven workgroups share each A tile instead of none.
+  const auto c = fixed_wgm_config(8, 1, 0);
+  origami::gemm::context_t ctx(problem, gfx1151, c);
+  const auto rates = origami::gemm::estimate_cache_hit_rates(problem, gfx1151, c, ctx);
+  REQUIRE(std::get<0>(rates) > 0.8);  // H_mem_l2_A
+  REQUIRE(std::get<2>(rates) > 0.8);  // H_mem_mall_A
+
+  // Several L2 domains: WGMXCC -1 launches with one group per XCD.
+  const auto gfx942 = make_hardware(942);
+  REQUIRE(gfx942.NUM_XCD > 1);
+  REQUIRE(mapping(gfx942, 6, -1, 0).wgm == 6);
+  REQUIRE(mapping(gfx942, 6, -1, 0).wgmxcc == gfx942.NUM_XCD);
+  REQUIRE(mapping(gfx942, 6, 1, 0).wgmxcc == 1);
+  REQUIRE(mapping(gfx942, 0, -1, 0).wgm ==
+          static_cast<int>(std::ceil(std::sqrt(static_cast<double>(gfx942.N_CU / gfx942.NUM_XCD)))));
 }
