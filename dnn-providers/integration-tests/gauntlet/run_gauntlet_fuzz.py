@@ -2373,7 +2373,9 @@ class Fuzz:
         env_set = {
             k: v
             for k, v in sorted(os.environ.items())
-            if k.startswith("HIPDNN_") and not k.startswith("HIPDNN_FUZZ_")
+            if k.startswith("HIPDNN_")
+            and not k.startswith("HIPDNN_FUZZ_")
+            and k != "HIPDNN_TEST_DUMP_DIR"
         }
         env_unset = [] if HOST_FILL_ENV in env_set else [HOST_FILL_ENV]
         return env_set, env_unset
@@ -3064,6 +3066,12 @@ def build_parser():
         help="bundles, logs, reports, failures, summary",
     )
     p.add_argument(
+        "--dump-dir",
+        help="write every compared case's tensors (inputs, engine and reference outputs, the node) to"
+        " DIR/<test name>/ for offline grading (sets HIPDNN_TEST_DUMP_DIR for the binary; several MB a"
+        " case, so delete it after; see tools/sdpa_bwd_aotriton_check.py)",
+    )
+    p.add_argument(
         "--spaces-dir",
         default=str(space_lib.DEFAULT_SPACES_DIR),
         help="directory of *.space.json",
@@ -3403,6 +3411,9 @@ def select_spaces(args):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.dump_dir:
+        # The binary inherits it: the bundle harness dumps each comparison there (running-tests.md).
+        os.environ["HIPDNN_TEST_DUMP_DIR"] = str(Path(args.dump_dir).resolve())
     try:
         if args.coverage_of is not None:
             report = coverage_of(
