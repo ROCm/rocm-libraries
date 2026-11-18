@@ -557,7 +557,6 @@ target_compile_options(rocsparse-unit-test-device PRIVATE
 target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0>
