@@ -5,7 +5,7 @@
 
 """Characterization tests for the ROCm-coupled package boundary."""
 
-from importlib.metadata import version
+from _tensilelite_client_binding import current_installation
 import re
 
 import pytest
@@ -21,7 +21,7 @@ _LABEL = r"(g[0-9a-f]{40}(\.dirty)?|(dev)?rocm[0-9a-z.]+)"
 
 
 def test_distribution_version():
-    assert tensilelite.__version__ == version("tensilelite")
+    assert tensilelite.__version__ == current_installation().version
 
 
 def test_generator_version_is_independent():
