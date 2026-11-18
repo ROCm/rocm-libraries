@@ -73,6 +73,8 @@ hardware_t::hardware_t(architecture_t arch,
           lds_capacity,
           rf_capacity,
           num_xcds,
+          // TB/s -> bytes per compute-clock cycle; memory_clock * mem_clock_ratio stands in for
+          // the compute clock, and mem3 carries the remaining clock ratio in its constant.
           1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
           1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
           1e9 * constants.mem3_perf_ratio / (memory_clock_ghz * 1e6),

@@ -124,15 +124,29 @@ class ORIGAMI_EXPORT hardware_t {
   /**
    * @brief Architecture-specific constants for memory and compute characteristics.
    *
+   * hardware_t turns the mem*_perf_ratio constants into bytes per compute-clock cycle:
+   *   mem1 (L2)   = C1 / compute_clock
+   *   mem2 (MALL) = C2 / (memory_clock * mem_clock_ratio)
+   *   mem3 (DRAM) = C3 / memory_clock
+   * get_hardware_for_device() is what hipBLASLt uses at runtime and takes both clocks from
+   * HIP (hipDeviceProp_t::clockRate / memoryClockRate).  get_hardware_for_arch() has no
+   * device and derives the memory clock as compute_clock / mem_clock_ratio, so it only
+   * models the same machine if mem_clock_ratio is the compute/memory clock ratio the device
+   * reports.
+   *
+   * With that ratio, C1 and C2 are bandwidths in TB/s and C3 is a bandwidth in TB/s scaled
+   * by memory clock / compute clock (see gfx1250, gfx1151).  Where the ratio was not checked,
+   * the constants are effective values that fit the model through the device path, not
+   * necessarily the physical bandwidths.
    */
   struct architecture_constants {
-    double mem1_perf_ratio;
-    double mem2_perf_ratio;
-    double mem3_perf_ratio;
+    double mem1_perf_ratio;  ///< L2 bandwidth (C1 above)
+    double mem2_perf_ratio;  ///< MALL bandwidth (C2 above)
+    double mem3_perf_ratio;  ///< DRAM/HBM bandwidth (C3 above)
     size_t parallel_mi_cu;  ///< Number of parallel matrix instructions per compute unit
     std::tuple<double, double, double>
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
-    double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
+    double mem_clock_ratio;          ///< Compute clock / memory clock as reported by HIP
     size_t simds_per_cu;   ///< SIMD units per Compute Unit (CDNA: 4 SIMD16, RDNA3/4: 2 SIMD32)
     size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
     constexpr architecture_constants(double mem1_perf_ratio,
@@ -140,7 +154,7 @@ class ORIGAMI_EXPORT hardware_t {
                                      double mem3_perf_ratio,
                                      size_t parallel_mi_cu,
                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
-                                     double mem_clock_ratio,  // Obtained through microbenchmarking
+                                     double mem_clock_ratio,
                                      size_t simds_per_cu,
                                      size_t l1_capacity)
         : mem1_perf_ratio(mem1_perf_ratio)
@@ -290,6 +304,8 @@ class ORIGAMI_EXPORT hardware_t {
   static constexpr architecture_constants get_arch_constants(
       architecture_t arch,
       std::optional<int> pci_chip_id = std::nullopt) noexcept {
+    // mem_clock_ratio is max. SCLK / max. MCLK as HIP reports them (printed by hipblaslt-bench).
+    // Only gfx1151 and gfx1250 are set that way; the 1.5 entries have not been checked.
     switch (arch) {
       case architecture_t::gfx90a:
         return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 4, 16 * 1024};
@@ -317,8 +333,9 @@ class ORIGAMI_EXPORT hardware_t {
         // AMD Strix Point iGPU
         return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1151:
-        // AMD Strix Halo iGPU
-        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};
+        // AMD Strix Halo iGPU: HIP reports 2900 / 1000 MHz.  DRAM streams 0.215 TB/s; the
+        // constant is scaled by memory / compute clock.
+        return {2.47, 1.21875121875121875122 * 0.93, 0.215 * 1.0 / 2.9, 2, std::make_tuple(0, 0.22, 0), 2.9 / 1.0, 2, 32 * 1024};
       case architecture_t::gfx1152:
         // AMD Radeon 840M iGPU
         return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5, 2, 32 * 1024};
@@ -808,9 +825,10 @@ class ORIGAMI_EXPORT hardware_t {
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
   size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
 
-  double mem1_perf_ratio;  ///< L1/shared memory performance ratio (microbenchmarked)
-  double mem2_perf_ratio;  ///< L2 cache performance ratio (microbenchmarked)
-  double mem3_perf_ratio;  ///< MALL/HBM performance ratio (microbenchmarked)
+  // Bandwidths in bytes per compute-clock cycle (see architecture_constants).
+  double mem1_perf_ratio;  ///< L2
+  double mem2_perf_ratio;  ///< MALL
+  double mem3_perf_ratio;  ///< DRAM/HBM
 
   size_t L2_capacity;   ///< Capacity of one L2 cache (one XCD's on CDNA, one AID's on gfx1250) in bytes
   size_t l1_capacity;   ///< Capacity of L1 data cache per CU in bytes (shared across all SIMDs in a CU)
