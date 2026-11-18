@@ -773,6 +773,7 @@ RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
         return RPP_ERROR_INVALID_DST_LAYOUT;
     if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
     if (borderType != RpptImageBorderType::REPLICATE) return RPP_ERROR_NOT_IMPLEMENTED;
+    if ((srcDescPtr->c != 1) && (srcDescPtr->c != 3)) return RPP_ERROR_INVALID_SRC_CHANNELS;
     // Both standard deviations divide in an exponent, so each must be strictly positive. The
     // tensors are host-readable on both backends: HOST memory for HOST, pinned memory for HIP.
     for (Rpp32u i = 0; i < srcDescPtr->n; i++)
