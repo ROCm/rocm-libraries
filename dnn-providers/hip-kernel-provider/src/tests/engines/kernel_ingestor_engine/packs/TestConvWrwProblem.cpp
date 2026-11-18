@@ -2864,6 +2864,65 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
 }
 
+TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesNarrowGroupsToTheVectorEngines)
+{
+    // groups x (c / groups, k / groups): fewer than 16 input and fewer than 16 output channels
+    // a group declines (depthwise, ResNeXt-class); a group as wide as 16 on either side admits.
+    const auto grouped = [](int64_t groups, int64_t cg, int64_t kg, bool channelsLast) {
+        auto shape = baseShape();
+        shape.groups = groups;
+        shape.c = groups * cg;
+        shape.k = groups * kg;
+        shape.channelsLast = channelsLast;
+        return shape;
+    };
+    auto wmma11 = genericClFields();
+    wmma11.atom = "wmma11_f16";
+    wmma11.atomId = conv_wrw::atomIdOf("wmma11_f16");
+    wmma11.bk = 64;
+    wmma11.bc = 64;
+    wmma11.wk = 4;
+    wmma11.wc = 2;
+    // Channels-first elements on gfx942, channel vectors on gfx1101.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 16, 16, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(4, 15, 15, false)));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 15, 16, false)));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(4, 16, 15, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(64, 1, 1, false)));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", grouped(32, 1, 2, false)));
+    EXPECT_TRUE(admits(wmma11, "gfx1101", grouped(2, 16, 16, true)));
+    EXPECT_FALSE(admits(wmma11, "gfx1101", grouped(2, 8, 8, true)));
+    // One group is not narrow, however few its channels.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", grouped(1, 8, 8, false)));
+    // The FMA form too (fp32 on RDNA), past its own few-channel gate.
+    auto fp32 = [&](int64_t groups, int64_t cg, int64_t kg) {
+        auto shape = grouped(groups, cg, kg, false);
+        shape.dataType = DataType::FLOAT;
+        return shape;
+    };
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1201", fp32(2, 16, 16)));
+    EXPECT_FALSE(admits(genericFmaFields(), "gfx1201", fp32(2, 8, 8)));
+}
+
+TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesStemsAndNarrowRowsToBlas)
+{
+    // Fewer than 8 input channels a group (stems) decline, on the matrix atoms as in the FMA
+    // form.
+    auto stem = baseShape();
+    stem.c = 7;
+    EXPECT_FALSE(admits(genericFields(), "gfx942", stem));
+    stem.c = 8;
+    EXPECT_TRUE(admits(genericFields(), "gfx942", stem));
+    // Output rows of fewer than 4 positions decline: 3x3 unpadded on 5 columns gives 3, on 6
+    // gives 4.
+    auto narrow = baseShape();
+    narrow.prePadding = narrow.postPadding = {0, 0};
+    narrow.input = {10, 5};
+    EXPECT_FALSE(admits(genericFields(), "gfx942", narrow));
+    narrow.input = {10, 6};
+    EXPECT_TRUE(admits(genericFields(), "gfx942", narrow));
+}
+
 TEST(TestConvWrwLaunch, TheGenericWindowGroupsWidthTapsPerFilterRow)
 {
     // 3x3 at 2 taps a block: per filter row ceil(3 / 2) groups, 3 rows (the gathers: 5).

@@ -307,8 +307,8 @@ struct DeviceCase
     bool noGfx906 = false;
     /// Served only where a few configs ship (block-based buffers): skipped where none does.
     bool someArchs = false;
-    /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
-    /// and gfx12: skipped on gfx906 and gfx11.
+    /// Served by the generic loop alone, which ships on every matrix atom (gfx908 to gfx950,
+    /// gfx11 and gfx12): skipped on gfx906.
     bool genericOnly = false;
     /// x's element strides (the generic loop's strided operands); empty: packed. The default
     /// initializer lets the cases' aggregate initializations omit it without
@@ -983,8 +983,7 @@ void runCase(const DeviceCase& deviceCase,
     if(ran == 0
        && (!expectServed(device.gcnArchName, shape.dataType)
            || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
-           || deviceCase.someArchs
-           || (deviceCase.genericOnly && (gfx906 || base.rfind("gfx11", 0) == 0))))
+           || deviceCase.someArchs || (deviceCase.genericOnly && gfx906)))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }

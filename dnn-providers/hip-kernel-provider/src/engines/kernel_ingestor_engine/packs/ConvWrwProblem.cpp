@@ -45,8 +45,14 @@ constexpr int64_t CHUNK_MARGIN = 512;
 /// The generic loop declines filters of at most this many taps dilated at least this far.
 constexpr int64_t GENERIC_SPARSE_MAX_TAPS = 9;
 constexpr int64_t GENERIC_SPARSE_MIN_DILATION = 6;
-/// The generic FMA form declines fewer input channels a group, or this width stride and past.
-constexpr int64_t GENERIC_FMA_MIN_CHANNELS = 8;
+/// The generic loop declines grouped layers whose groups have fewer input and fewer output
+/// channels than this (depthwise, ResNeXt-class narrow groups).
+constexpr int64_t GENERIC_MIN_GROUP_CHANNELS = 16;
+/// The generic loop declines fewer input channels a group (stems), and output rows narrower
+/// than this many positions.
+constexpr int64_t GENERIC_MIN_CHANNELS = 8;
+constexpr int64_t GENERIC_MIN_OUTPUT_WIDTH = 4;
+/// The generic FMA form declines this width stride and past.
 constexpr int64_t GENERIC_FMA_MAX_STRIDE = 4;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
@@ -1016,10 +1022,26 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         {
             return std::nullopt;
         }
-        // The FMA form leaves stems (few input channels a group: the channel tile mostly
-        // empty) and patchify-class width strides (no reuse between a chunk's taps) to BLAS,
-        // which won both on gfx1201 (AlexNet 11x11 s4 c3, ViT 4x4 s4 c3, wav2vec k10 s5).
-        if(genericFma && (cg < GENERIC_FMA_MIN_CHANNELS || a.stride[2] >= GENERIC_FMA_MAX_STRIDE))
+        // Narrow groups (depthwise, ResNeXt-class): a group's GEMM fills a sliver of the block's
+        // channel tile and every group rereads each tap's gather. On gfx1101 it ran 14-20x
+        // behind CONV_GROUP_WRW at 4 channels a group and 30-5000x behind the vector-ALU engines
+        // on depthwise layers (CONV_DEPTHWISE_VALU_WRW, CONV_GROUP_VALU_WRW serve both).
+        if(a.groups > 1 && cg < GENERIC_MIN_GROUP_CHANNELS && kg < GENERIC_MIN_GROUP_CHANNELS)
+        {
+            return std::nullopt;
+        }
+        // Stems (few input channels a group: the channel tile mostly empty) and output rows of a
+        // few positions (a step's chunk mostly empty) go to BLAS. Measured against it: ViT,
+        // ConvNeXt and R(2+1)D stems (3 channels) 2.5-30x behind on gfx1101, 4.2-7.9x on
+        // gfx1201 (FMA form); Inception's 5x5 over a 5x5 map (one position a row) 5-25x behind
+        // on gfx1101.
+        if(cg < GENERIC_MIN_CHANNELS || a.outSpatial[2] < GENERIC_MIN_OUTPUT_WIDTH)
+        {
+            return std::nullopt;
+        }
+        // The FMA form also leaves patchify-class width strides (no reuse between a chunk's
+        // taps) to BLAS, which won on gfx1201 (AlexNet 11x11 s4, wav2vec k10 s5).
+        if(genericFma && a.stride[2] >= GENERIC_FMA_MAX_STRIDE)
         {
             return std::nullopt;
         }
