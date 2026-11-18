@@ -454,7 +454,9 @@ def test_rounding_radius_is_half_the_gap_away_from_zero(dtype: str) -> None:
     assert np.array_equal(radius[:-1], 0.5 * np.diff(values))
     # The largest finite value has no finite neighbour above; its binade's gap.
     assert radius[-1] == radius[-2]
-    assert np.array_equal(rounding_radius(magnitudes | np.uint16(0x8000), dtype), radius)
+    assert np.array_equal(
+        rounding_radius(magnitudes | np.uint16(0x8000), dtype), radius
+    )
     fraction_bits = _FORMAT[dtype][0]
     assert radius[0] == 2.0 ** (_MIN_EXPONENT[dtype] - fraction_bits - 1)
     one = encode_bits(np.array([1.0], dtype=np.float32), dtype)
@@ -483,9 +485,9 @@ def test_store_allowance_covers_both_store_forms(dtype: str) -> None:
     generator = np.random.default_rng(20261115)
     count = 1 << 18
     exponents = generator.integers(-30, 3, size=count)
-    accumulator = np.ldexp(
-        generator.uniform(-1.0, 1.0, size=count), exponents
-    ).astype(np.float32)
+    accumulator = np.ldexp(generator.uniform(-1.0, 1.0, size=count), exponents).astype(
+        np.float32
+    )
     reciprocal = generator.uniform(2.0**-9, 1.0, size=count).astype(np.float32)
     exact = accumulator.astype(np.float64) * reciprocal.astype(np.float64)
 
@@ -658,9 +660,7 @@ def test_contract_refuses_a_column_it_cannot_resolve() -> None:
     far above the shift: no residual could show a missing shift there."""
     case = ValueShiftCase(1, 8, 8, 2, 2, 4, "bf16")
     base = encode_bits(np.full(case.key_shape, 512.0, dtype=np.float32), "bf16")
-    follow_up = shifted_value_bits(
-        base, np.array([64.0, -64.0, 64.0, -64.0]), "bf16"
-    )
+    follow_up = shifted_value_bits(base, np.array([64.0, -64.0, 64.0, -64.0]), "bf16")
     with pytest.raises(ValueError, match="is not below the shift it must resolve"):
         value_shift_contract(
             case,
@@ -875,7 +875,9 @@ def _exact_store_allowance(bits: int, dtype: str) -> Fraction:
     if above is None:
         above = 2 * magnitude - _exact_value(magnitude_bits - 1, dtype)
     radius = (above - magnitude) / 2
-    return radius + _FP32_UNIT * (magnitude + radius) / (1 - _FP32_UNIT) + _FP32_UNDERFLOW
+    return (
+        radius + _FP32_UNIT * (magnitude + radius) / (1 - _FP32_UNIT) + _FP32_UNDERFLOW
+    )
 
 
 _SPEC_CASES = (
@@ -895,7 +897,9 @@ def _spec_outputs(
     base = _store(base_values.astype(np.float32), case.dtype)
     noise = generator.uniform(-3.0, 3.0, size=case.output_shape)
     follow_values = (
-        decode_bits(base, case.dtype) + contract.shift + noise * contract.apriori_tolerance
+        decode_bits(base, case.dtype)
+        + contract.shift
+        + noise * contract.apriori_tolerance
     )
     follow_up = _store(follow_values.astype(np.float32), case.dtype)
     follow_up[0, 1, 1, 3] = _NAN_BITS[case.dtype]
@@ -1074,7 +1078,9 @@ def test_output_scale_is_one_rounding_of_the_exact_product(dtype: str) -> None:
         assert np.all(error <= rounding_radius(scaled, dtype))
         # Nearest: no other value of the dtype is closer to the exact product.
         for step in (-1, 1):
-            other = decode_bits((scaled.astype(np.int32) + step).astype(np.uint16), dtype)
+            other = decode_bits(
+                (scaled.astype(np.int32) + step).astype(np.uint16), dtype
+            )
             assert np.all(error <= np.abs(other - exact))
 
     invalid = np.array([_NAN_BITS[dtype], _INFINITY_BITS[dtype], 0], dtype=np.uint16)
@@ -1319,7 +1325,10 @@ def test_modeled_output_scale_is_rejected_above_its_threshold(
             scale_output_bits(follow_up, eta, case.dtype),
         )
         rejected.append(bool(scaled.violations))
-        assert rejected[-1] or eta <= threshold, (eta, format_value_shift_result(scaled))
+        assert rejected[-1] or eta <= threshold, (
+            eta,
+            format_value_shift_result(scaled),
+        )
     certain = [eta for eta in OUTPUT_SCALE_SWEEP if eta > threshold]
     assert len(certain) >= 3 and all(rejected[: len(certain)])
 
@@ -1728,9 +1737,7 @@ def _from_accumulator(pattern: str, replacement: str) -> Callable[[str], str]:
             "V reaches llvm.maxnum.f32",
         ),
         (
-            _from_accumulator(
-                r"(= fsub float )%fmul\d+(, %fmax\d+\n)", r"\1{v}\2"
-            ),
+            _from_accumulator(r"(= fsub float )%fmul\d+(, %fmax\d+\n)", r"\1{v}\2"),
             "V reaches fsub",
         ),
         (
@@ -1738,9 +1745,7 @@ def _from_accumulator(pattern: str, replacement: str) -> Callable[[str], str]:
             "V reaches fadd",
         ),
         (
-            _from_accumulator(
-                r"(= fptrunc float )%exp2f\d+( to half\n)", r"\1{v}\2"
-            ),
+            _from_accumulator(r"(= fptrunc float )%exp2f\d+( to half\n)", r"\1{v}\2"),
             "V reaches a cast that is not the output store",
         ),
         (
@@ -1845,9 +1850,7 @@ def test_key_tile_count_is_read_from_the_lowered_kernel(
     escaped = _from_accumulator(r"(= fadd float %fmul\d+, )%fadd\d+\n", r"\1{v}\n")
     if case.dtype == "fp16":
         with pytest.raises(AssertionError, match="V reaches fadd"):
-            verified_key_tiles(
-                escaped(ir), case.dtype, seqlen_k=case.seqlen_k, **shape
-            )
+            verified_key_tiles(escaped(ir), case.dtype, seqlen_k=case.seqlen_k, **shape)
 
 
 @pytest.mark.parametrize("llvm_flavor", LLVM_FLAVORS)

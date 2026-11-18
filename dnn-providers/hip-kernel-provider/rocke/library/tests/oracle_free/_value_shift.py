@@ -578,7 +578,9 @@ def value_shift_contract(
         if raw.shape != case.key_shape:
             raise ValueError(f"{name} shape {raw.shape} != {case.key_shape}")
     shift = shift_vector(case.head_dim)
-    applied_values = shift if applied is None else _require_shift(applied, case.head_dim)
+    applied_values = (
+        shift if applied is None else _require_shift(applied, case.head_dim)
+    )
 
     source = decode_bits(base, case.dtype)
     target = decode_bits(follow_up, case.dtype)
@@ -903,6 +905,7 @@ def format_value_shift_result(result: ValueShiftResult) -> str:
 def format_head_diagnostics(result: ValueShiftResult) -> str:
     """Render the largest residual over its tolerance per ``(batch, query head)``."""
     return "\n".join(
-        f"  b{batch}: " + " ".join(f"h{head}={value:.3g}" for head, value in enumerate(row))
+        f"  b{batch}: "
+        + " ".join(f"h{head}={value:.3g}" for head, value in enumerate(row))
         for batch, row in enumerate(result.head_max_ratio)
     )

@@ -746,9 +746,7 @@ def trace_value_cone(ir: str, dtype: str) -> tuple[list, Counter]:
         if item.opcode == _EXP2
         and {user.opcode for user in users(item.name)} == {"fmul"}
     }
-    reciprocals = {
-        item.name for item in instructions.values() if item.opcode == "fdiv"
-    }
+    reciprocals = {item.name for item in instructions.values() if item.opcode == "fdiv"}
     cast_type = _CAST_TYPE[dtype]
     atom = _MFMA_ATOM[dtype]
     for name in sorted(tainted - resources):
@@ -768,7 +766,9 @@ def trace_value_cone(ir: str, dtype: str) -> tuple[list, Counter]:
             if item.text.startswith("phi <16 x float>"):
                 counts["accumulator_phi"] += 1
             else:
-                violations.append(f"V reaches a phi that is not the accumulator: {item.text}")
+                violations.append(
+                    f"V reaches a phi that is not the accumulator: {item.text}"
+                )
         elif item.opcode == atom:
             if positions in ([0], [0, 2]):
                 counts["value_atoms"] += 1
