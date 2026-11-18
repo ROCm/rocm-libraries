@@ -1000,7 +1000,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   CUCount: null
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1254,7 +1254,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   CUCount: null
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1504,6 +1504,7 @@ Solutions:
   WorkGroupMapping: 4
 - SolutionIndex: 2
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
+  CUOccupancy: 4
   BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -1515,7 +1516,7 @@ Solutions:
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1769,7 +1770,7 @@ Solutions:
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
-  CUOccupancy: -1
+  CUOccupancy: 1
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2020,6 +2021,7 @@ Solutions:
   1LDSBuffer: 1
 - SolutionIndex: 5
   CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_UnsignedBias8_gfx1151
+  CUOccupancy: 9
   BaseName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_U1_A4_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -2028,6 +2030,7 @@ Solutions:
   ConvertAfterDS: false
 - SolutionIndex: 6
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_UnsignedBias8_gfx1151
+  CUOccupancy: 4
   BaseName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -2036,6 +2039,7 @@ Solutions:
   ConvertAfterDS: false
 - SolutionIndex: 7
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_N4_UnsignedBias8_gfx1151
+  CUOccupancy: 4
   BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_N4_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_N4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -2044,6 +2048,7 @@ Solutions:
   ConvertAfterDS: false
 - SolutionIndex: 8
   CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_N4_UnsignedBias8_gfx1151
+  CUOccupancy: 9
   BaseName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_N4_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_U1_A4_Symmetric_N4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -2052,6 +2057,7 @@ Solutions:
   ConvertAfterDS: false
 - SolutionIndex: 9
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_N4_UnsignedBias8_gfx1151
+  CUOccupancy: 4
   BaseName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_N4_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_Symmetric_N4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -2074,7 +2080,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -2567,7 +2573,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -3060,7 +3066,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 1
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -3553,7 +3559,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 3
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -4046,7 +4052,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -4539,7 +4545,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -5032,7 +5038,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -5525,7 +5531,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
-  CUOccupancy: -1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterDim:
   - 1
@@ -6004,6 +6010,7 @@ Solutions:
     isMixMode: false
 - SolutionIndex: 18
   CustomKernelName: RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
+  CUOccupancy: 8
   BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
