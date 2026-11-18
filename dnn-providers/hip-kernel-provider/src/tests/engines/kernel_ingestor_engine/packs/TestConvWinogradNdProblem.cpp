@@ -56,7 +56,8 @@ TEST(TestConvWinogradNdProblem, DilatedResiduesAndSpatialChunksPartitionOutputs)
                 {
                     const auto q = rem % a.axisTiles[j];
                     rem /= a.axisTiles[j];
-                    origin[j] = q % a.residues[j] + 2 * a.dilation[j] * (q / a.residues[j]);
+                    origin[static_cast<size_t>(j)]
+                        = q % a.residues[j] + 2 * a.dilation[j] * (q / a.residues[j]);
                 }
                 for(int h = 0; h < 2; ++h)
                 {

@@ -1032,6 +1032,7 @@ TEST(TestConvWinogradCatalog, ApplicableCompiledContractsHaveDistinctIntegerKnob
                     if(matchesKernel(pack, fixture.context(), kernel, *bound))
                     {
                         std::vector<int64_t> key;
+                        key.reserve(KNOBS.size());
                         for(const auto* knob : KNOBS)
                         {
                             key.push_back(kernel.getIntMetadata(knob));
