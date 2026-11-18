@@ -263,12 +263,12 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertIn("a_dtype and b_dtype must be in", validate(_spec(a_dtype="bf6")))
 
     def test_fp6_validates_its_atom_tile_k_and_bytes(self):
-        """FP6 takes the 16x16 atom and tile_k 128/256/384/512 (512 only
-        below 256x256: LDS), packs four K values in three bytes, and is the
-        only type with contiguous reads. 256x256x256 and 256x256x384 are
-        valid at two large problems with the 4x4 cluster."""
+        """FP6 takes the 16x16 atom and tile_k 128/256/384/512/1024 (512 only
+        below 256x256, 1024 only on smaller tiles: LDS), packs four K values in
+        three bytes, and is the only type with contiguous reads. 256x256x256
+        and 256x256x384 are valid at two large problems with the 4x4 cluster."""
         self.assertEqual(
-            len(list(_valid_geometries("16x16", a_dtype="fp6", b_dtype="fp6"))), 133
+            len(list(_valid_geometries("16x16", a_dtype="fp6", b_dtype="fp6"))), 146
         )
         spec = _spec6()
         self.assertEqual((spec.step_bytes, spec.packed_k), (96, 1536))
@@ -288,6 +288,12 @@ class MxGemmSpecTest(unittest.TestCase):
             with self.subTest(tile_k=tile_k):
                 self.assertIsNone(validate(_spec6(tile_m=128, tile_k=tile_k)))
         self.assertIn("LDS", validate(_spec6(tile_k=512)) or "")
+        # K tile 1024: 768 B rows, which fit with a narrow tile.
+        narrow = {"tile_n": 16, "tile_k": 1024, "wave_group": (4, 1), **_DIRECT}
+        self.assertIsNone(validate(_spec6(tile_m=128, cluster_dim=(1, 1, 1), **narrow)))
+        self.assertIn(
+            "LDS", validate(_spec6(tile_m=256, cluster_dim=(1, 1, 1), **narrow)) or ""
+        )
         for shape, (tm, tn, tk) in itertools.product(_MAF_MED, _FP6_TILES):
             for k_reads in K_READS:
                 fields = {"tile_m": tm, "tile_n": tn, "tile_k": tk, "k_reads": k_reads}
@@ -297,7 +303,7 @@ class MxGemmSpecTest(unittest.TestCase):
                     )
         bad = {
             "32x16": ({"mma": "32x16"}, "mma must be one of"),
-            "tile_k 1024": ({"tile_k": 1024}, "tile_k must be in"),
+            "tile_k 768": ({"tile_k": 768}, "tile_k must be in"),
             "k_reads": ({"k_reads": "strided"}, "k_reads must be one of"),
         }
         for label, (extra, reason) in bad.items():
@@ -3788,6 +3794,69 @@ class MxGemmDeviceTest(unittest.TestCase):
                     ),
                 )
                 for tiled in tiled_set
+            ]
+            # FP6 K tile 1024 (768 B rows): the N 16 tile direct (contiguous and
+            # chunked) and with read-ahead, a K tail on N 64, 64x64 half-B late.
+            + [
+                _spec6(*problem, tile_k=1024, **fields)
+                for problem, fields in (
+                    (
+                        (1024, 64, 4096),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 16,
+                            "wave_group": (4, 1),
+                            "k_reads": "contiguous",
+                            "cluster_dim": (1, 2, 1),
+                            **_DIRECT,
+                        },
+                    ),
+                    (
+                        (1024, 64, 4096),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 16,
+                            "wave_group": (4, 1),
+                            "cluster_dim": (1, 4, 1),
+                            **_DIRECT,
+                        },
+                    ),
+                    (
+                        (1024, 64, 4096),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 16,
+                            "wave_group": (4, 1),
+                            "local_prefetch": 1,
+                            "half_plr": "none",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (1, 2, 1),
+                        },
+                    ),
+                    (
+                        (1024, 128, 4096 + 384),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 64,
+                            "wave_group": (4, 1),
+                            "k_reads": "contiguous",
+                            "cluster_dim": (1, 1, 1),
+                            **_DIRECT,
+                        },
+                    ),
+                    (
+                        (512, 512, 4096),
+                        {
+                            "tile_m": 64,
+                            "tile_n": 64,
+                            "half_b_order": "late",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                )
             ]
             + [
                 _spec8(half_b_order="late", wmma_reuse="b", tiled_operands="ab"),
