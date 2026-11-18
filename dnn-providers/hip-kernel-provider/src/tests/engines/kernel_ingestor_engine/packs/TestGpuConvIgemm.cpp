@@ -1732,7 +1732,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputProblemsStageNoInput)
         problem.y.needed = problem.y.transpose = true;
         problem.y.bytes = 300;
         const auto direct
-            = conv_igemm::withoutInputStaging(conv_igemm::withoutOutputStaging(problem));
+            = conv_igemm::withoutInputStaging(conv_igemm::withoutActivationStaging(problem, false));
         EXPECT_FALSE(direct.x.needed);
         EXPECT_FALSE(direct.y.needed);
         EXPECT_TRUE(direct.w.needed);
