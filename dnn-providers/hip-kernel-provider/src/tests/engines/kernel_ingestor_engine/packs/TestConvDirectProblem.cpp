@@ -1012,16 +1012,6 @@ TEST(TestConvDirectKernelMatch, LineConfigsServeOneRowImages)
     cf.epi = 0;
     EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(cf, "HALF"))),
               32 * ((7 + 562 + 7) / 8) * 16 + 562 * 32 * 2);
-    // The tile is the row's 512 columns: one tile per 512 output columns.
-    auto wide = row;
-    wide.input = {1, 1100};
-    wide.dataType = DataType::HALF;
-    const auto plan = planOf(wide, line, "HALF", 64);
-    ASSERT_TRUE(plan.has_value());
-    EXPECT_EQ(plan->args.th, 1);
-    EXPECT_EQ(plan->args.tw, 512);
-    EXPECT_EQ(plan->args.tilesW, 3);
-    EXPECT_EQ(plan->args.tilesH, 1);
     // Not on a two-row image, nor at another dilation or width.
     auto twoRows = row;
     twoRows.input = {2, 64};
@@ -1490,6 +1480,31 @@ TEST(TestConvDirectPlan, SmallGfx950RowsTilesDeclineManyRoundGrids)
     auto gfx9 = rowsGfx9Fields();
     gfx9.wq = 1;
     EXPECT_TRUE(planOf(shape, gfx9, "HALF", 32).has_value());
+}
+
+TEST(TestConvDirectPlan, LineTilesAreSegmentsOfTheRowEndToEnd)
+{
+    auto wide = baseShape();
+    wide.input = {1, 1100};
+    wide.filter = {1, 11};
+    wide.dilation = {1, 5};
+    wide.prePadding = wide.postPadding = {0, 25};
+    wide.dataType = DataType::HALF;
+    auto line = rowsFields();
+    line.r = 1;
+    line.s = 11;
+    line.bc = 32;
+    line.dil = 5;
+    line.line = 1;
+    // 2 x 8 segments of 32 columns: 512 columns of the row a tile, three tiles for 1100.
+    const auto plan = planOf(wide, line, "HALF", 64);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->args.th, 1);
+    EXPECT_EQ(plan->args.tw, 512);
+    EXPECT_EQ(plan->args.tilesW, 3);
+    EXPECT_EQ(plan->args.tilesH, 1);
+    // A line tile is the reference tile's 512 pixels: many rounds do not decline it.
+    EXPECT_TRUE(planOf(wide, line, "HALF", 1).has_value());
 }
 
 TEST(TestConvDirectPlan, SmallGfx950RowsTilesCompareTheChannelsTheyCompute)
