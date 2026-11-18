@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Windows DLL-directory selection (Review A, Decision 5), tested as a pure function.
+"""Windows DLL-directory selection, tested as a pure function.
 
 No real directories and no os.add_dll_directory, so it runs on Linux too, like rocISA's
 test_dll_dirs.py.
@@ -23,7 +23,7 @@ def test_library_dir_first_then_wheel_runtime_then_hip_dirs():
 
 
 def test_override_gets_its_own_hip_runtime_dir():
-    # Spike 3: an override's HIP runtime isn't next to libhipblaslt.dll, and it isn't the one
+    # An override's HIP runtime isn't next to libhipblaslt.dll, and it isn't the one
     # rocm_sdk reports for the active environment.
     lib = _J("old", "_rocm_sdk_libraries", "bin", "libhipblaslt.dll")
     dirs = windows_dll_dirs(lib, {}, [_J("new", "_rocm_sdk_core", "bin")], "")

@@ -36,7 +36,7 @@ namespace
     }
 
     // hipblasLtGetVersion and hipblasLtGetGitRevision need a handle, and hipblasLtCreate exits
-    // the process when there's no device (ROCM-33629), so this returns None without one.
+    // the process when there's no device, so this returns None without one.
     std::optional<std::pair<int, std::string>> loaded_library_version()
     {
         if(!hip_available())

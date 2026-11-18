@@ -26,7 +26,7 @@ wheel.packages = ["hipblaslt"]
 build-dir = "build/{wheel_tag}"
 
 # The package version is hipBLASLt's own version, read from the hipblaslt-version.h of the
-# hipBLASLt the bindings are built against (Review A, Decision 1). CMakeLists.txt checks that
+# hipBLASLt the bindings are built against. CMakeLists.txt checks that
 # find_package(hipblaslt) found the same version.
 [[tool.dynamic-metadata]]
 provider = { path = "skbuild_plugins", module = "hipblaslt_version_provider" }

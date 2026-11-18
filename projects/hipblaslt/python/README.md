@@ -4,8 +4,6 @@ Low-level Python bindings for the hipBLASLt GEMM API, built with [nanobind](http
 
 The bindings are a development and testing tool for hipBLASLt and its consumers, not a ROCm deliverable. They're opt-in and source-build only: you build them from a rocm-libraries checkout against an installed ROCm, and hipBLASLt's own build never builds or installs them.
 
-This package is under construction ([AIHPBLAS-5268](https://amd-hub.atlassian.net/browse/AIHPBLAS-5268)). Today it imports, finds the right `libhipblaslt`, and turns hipBLASLt errors into Python exceptions. The API arrives in later PRs.
-
 ## Building
 
 You need CMake 3.25 or later and Ninja, plus a ROCm install with hipBLASLt's development files.
